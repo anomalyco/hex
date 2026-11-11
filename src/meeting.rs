@@ -37,6 +37,9 @@ mod os;
 #[cfg(target_os = "windows")]
 #[path = "meeting/windows.rs"]
 mod os;
+/// Linux's Trash, for capture retention too: distros ship no `trash` command.
+#[cfg(target_os = "linux")]
+pub(crate) use os::move_to_trash;
 pub(crate) use os::reveal;
 #[cfg(target_os = "macos")]
 pub(crate) use os::{
@@ -52,14 +55,18 @@ pub(crate) mod finished_events;
 pub(crate) mod generator;
 #[cfg(target_os = "macos")]
 pub(crate) mod import;
+#[cfg(any(target_os = "windows", test))]
+mod loopback_route;
 pub(crate) mod mcp;
 mod notes;
+mod notes_file;
 pub mod query;
 mod retention;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod runtime;
 pub(crate) mod sweep;
 mod transcript;
+mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -75,6 +82,7 @@ pub use notes::{summarize, summarize_file};
 pub use retention::audio_expired;
 pub use retention::{expire, expire_audio, expired, retention_for};
 pub use transcript::TranscriptReader;
+pub use warning::TrackWarning;
 
 /// What the recorder knows about a meeting when it starts.
 #[derive(Clone, Debug, Default)]
@@ -126,6 +134,9 @@ pub enum RecordingUpdate {
     Retitled { title: String },
     /// The live chapters so far (Labs).
     Chapters(Vec<Chapter>),
+    /// The microphone's captured audio became digitally silent, or its
+    /// audio returned.
+    SourceWarning { warning: Option<TrackWarning> },
     /// Capture stopped; final transcription is running.
     Transcribing,
 }
@@ -207,6 +218,19 @@ pub struct MeetingManifest {
     /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
+    /// The notes file beside the transcript while Labs › Separate notes file
+    /// wrote one, tracked so renames, Trash, and retention follow it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_export_path: Option<PathBuf>,
+    /// SHA-256 of the notes file as Hex last wrote it. A later notes
+    /// regeneration rewrites it only while it still matches, and expiry moves
+    /// it only then, so a copy the user edited stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_export_sha256: Option<String>,
+    /// The tracked notes file was deleted outside Hex. Hex forgets its path
+    /// and never writes another notes file for this meeting.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notes_export_removed: bool,
     /// When the meeting's WAV tracks moved to the Trash (Labs › Expire
     /// meeting audio separately); the transcript, notes, and Markdown stay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -278,6 +302,11 @@ pub struct TrackManifest {
     /// recording, filled with silence so the track stays on the timeline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gaps: Vec<TrackGap>,
+    /// A problem with this track that the user should know about. For the
+    /// microphone, `digital_silence` means the stream was digitally silent
+    /// at some point during the recording, even if its audio returned later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<TrackWarning>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -470,6 +499,9 @@ pub fn record(
         chapters_refined: false,
         retention_applies: true,
         export_sha256: None,
+        notes_export_path: None,
+        notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };
@@ -506,12 +538,16 @@ pub fn record(
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.
+        let microphone_warnings = warning::TrackWarnings::new(updates.clone());
         let microphone_capture = capture::SourceSupervisor::microphone(
             sink(MeetingSource::Microphone, &microphone_drops),
             start.application.clone(),
+            microphone_warnings.clone(),
         );
-        let system_capture =
-            capture::SourceSupervisor::system(sink(MeetingSource::System, &system_drops));
+        let system_capture = capture::SourceSupervisor::system(
+            sink(MeetingSource::System, &system_drops),
+            start.application.clone(),
+        );
         manifest.status = MeetingStatus::Recording;
         if let Err(error) = write_manifest(&meeting_dir, &manifest) {
             drop(system_capture);
@@ -538,6 +574,9 @@ pub fn record(
             if let Some(chapters) = live_chapters.as_ref().and_then(|live| live.take()) {
                 record_chapters(&meeting_dir, manifest, chapters, updates.as_ref());
             }
+            // Written as soon as the microphone is warned about, so a crash
+            // while recording still says it was digitally silent.
+            warning::persist_warning(&meeting_dir, manifest, &microphone_warnings);
         };
         while !shutdown.load(Ordering::Relaxed) && !writer.is_finished() {
             take_updates(&mut manifest);
@@ -563,6 +602,7 @@ pub fn record(
         stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
         manifest.system = stats.system;
         manifest.microphone = stats.microphone;
+        manifest.microphone.warning = microphone_warnings.persisted();
         if crate::desktop::process_exit::quitting() && has_recorded_audio(&manifest) {
             // Final transcription would outlast quitting's drain.
             drop(rolling.finish());
@@ -915,6 +955,7 @@ fn transcribe(
         &crate::app_settings::meeting_output_folder(),
         manifest,
         &transcript,
+        crate::labs::meeting_notes_file(),
     ) {
         Ok(path) => {
             tracing::info!(path = %path.display(), "published meeting transcript");
@@ -1154,6 +1195,21 @@ impl RevealTarget {
     }
 }
 
+/// Explorer's argument that selects `path`: `/select,"C:\…\file.md"`.
+///
+/// The path is quoted on its own because Explorer reads the switch only while
+/// the comma is outside the quotes. `Command` would quote the whole argument
+/// once a folder name has a space, which Explorer ignores. Its bytes are kept
+/// as they are: the path is already absolute by the time the Windows caller
+/// passes it, so `GetFullPathNameW` has normalized any forward slashes.
+#[cfg(any(windows, test))]
+fn explorer_select(path: &Path) -> std::ffi::OsString {
+    let mut select = std::ffi::OsString::from("/select,\"");
+    select.push(path.as_os_str());
+    select.push("\"");
+    select
+}
+
 /// Moves a finished meeting to the Trash: its exported Markdown first, then
 /// its recording folder. Refuses while it records, transcribes, or writes
 /// notes. A missing Markdown file is skipped.
@@ -1173,6 +1229,9 @@ fn trash_meeting(
         return Err(eyre!("Wait for the notes to finish before deleting"));
     }
     if let Some(path) = exported_markdown(&manifest) {
+        move_to_trash(&path)?;
+    }
+    if let Some(path) = notes_file::tracked(&manifest) {
         move_to_trash(&path)?;
     }
     move_to_trash(directory)
@@ -1225,7 +1284,8 @@ fn rename_meeting_with(
     set_title_source(&mut manifest, TitleSource::User);
     let next = display_title(&manifest);
     let mut markdown_error = None;
-    let mut heading_updated = previous != next;
+    let title_changed = previous != next;
+    let mut heading_updated = title_changed;
     if heading_updated
         && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())
         && let Err(error) =
@@ -1237,9 +1297,13 @@ fn rename_meeting_with(
     }
     // The notes writer applies its own title and renames the file; leaving
     // the name alone here keeps it from racing that in-place rewrite. A
-    // failed heading update keeps the old name too, as notes do.
+    // failed heading update keeps the old name too, as notes do. The notes
+    // file follows the title independently, since it is Hex's own copy.
     if heading_updated && !notes_in_progress(&manifest.id) {
         export_name::rename_to_title(&mut manifest, &next, descriptive_filenames);
+    }
+    if title_changed && !notes_in_progress(&manifest.id) {
+        notes_file::refresh(&mut manifest);
     }
     write_manifest(directory, &manifest)?;
     match markdown_error {

@@ -199,22 +199,42 @@ pub(crate) fn ember(p: Paint) -> Color {
     rune_theme_opencode::ember(p.k.dark, 9)
 }
 
+/// How [`keyboard_lit`] lights the deck. Every amount is `0..=1`.
+pub(crate) struct Lighting<'a> {
+    /// How far the deck has arrived.
+    pub(crate) enter: f32,
+    /// How bright every key that isn't lit is, as the eye sees it.
+    pub(crate) level: f32,
+    /// How far each key is pressed.
+    pub(crate) depth: &'a dyn Fn(&str) -> f32,
+    /// How warmly each key is lit.
+    pub(crate) glow: &'a dyn Fn(&str) -> f32,
+    /// How red each key flashes.
+    pub(crate) flash: &'a dyn Fn(&str) -> f32,
+    /// How far each unlit key, by its `[x, y, w, h]` on the deck, is taken
+    /// out entirely, such as behind the HUD.
+    pub(crate) hollow: &'a dyn Fn([f32; 4]) -> f32,
+}
+
 /// Renders the crisp 2D 14.5u Apple Magic Keyboard `El`.
-pub(crate) fn keyboard_lit(
-    p: Paint,
-    key: &str,
-    enter_u: f32,
-    dim: f32,
-    depth: impl Fn(&str) -> f32,
-    glow: impl Fn(&str) -> f32,
-) -> El {
+pub(crate) fn keyboard_lit(p: Paint, key: &str, light: Lighting<'_>) -> El {
     let k = p.k;
     let c = &k.c;
     let m = KeyMaterial::new(k);
     let bg = c.bg_deep;
     let warm = ember(p);
-    let dim = dim.clamp(0.0, 1.0);
-    let enter = enter_u.clamp(0.0, 1.0);
+    let level = light.level.clamp(0.0, 1.0);
+    let enter = light.enter.clamp(0.0, 1.0);
+    // Colours mix in linear light, so a level as the eye sees it needs a
+    // curve: toward a dark ground less ink, toward a light one more.
+    let seen = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        if k.dark {
+            v * v
+        } else {
+            1.0 - (1.0 - v) * (1.0 - v)
+        }
+    };
 
     let deck_fill = if k.dark {
         c.layer_01.mix(c.layer_02, 0.55)
@@ -236,7 +256,13 @@ pub(crate) fn keyboard_lit(
     } else {
         c.white.mix(c.bg_base, 0.06)
     };
-    let cap_pressed = if k.dark { c.bg_deep } else { c.layer_01 };
+    // A pressed key lights up rather than sinking into the dark, so it reads
+    // in peripheral vision.
+    let cap_pressed = if k.dark {
+        c.surface_raised.mix(c.border_strong, 0.55)
+    } else {
+        c.layer_02.mix(c.border_base, 0.6)
+    };
     let cap_rim = if k.dark {
         c.border_weak.mix(c.white, 0.05)
     } else {
@@ -256,18 +282,25 @@ pub(crate) fn keyboard_lit(
             let local = ((enter * 1.32 - diag * 0.32) / 1.0).clamp(0.0, 1.0);
             local * local * (3.0 - 2.0 * local)
         };
-        let down = depth(slot.id).clamp(0.0, 1.0);
-        let lit = glow(slot.id).clamp(0.0, 1.0);
+        let down = (light.depth)(slot.id).clamp(0.0, 1.0);
+        let lit = (light.glow)(slot.id).clamp(0.0, 1.0);
+        let red = (light.flash)(slot.id).clamp(0.0, 1.0);
 
-        let vis = (dim + (1.0 - dim) * lit).clamp(0.0, 1.0) * rise;
+        let base = level * (1.0 - (light.hollow)(slot.rect).clamp(0.0, 1.0));
+        let vis = seen((base + (1.0 - base) * lit).max(red)) * rise;
         let lit_cap = warm.mix(c.white, if k.dark { 0.30 } else { 0.42 });
         let fill_raw = cap_base
-            .mix(cap_pressed, down * 0.55)
-            .mix(lit_cap, lit * if k.dark { 0.72 } else { 0.62 });
+            .mix(cap_pressed, down)
+            .mix(lit_cap, lit * if k.dark { 0.72 } else { 0.62 })
+            .mix(c.bg_deep.mix(c.danger.fg, 0.30), red);
         let fill = bg.mix(fill_raw, vis);
-        let border = bg.mix(cap_rim.mix(lit_cap, lit * 0.82), vis);
+        let rim = cap_rim
+            .mix(c.border_strong, down)
+            .mix(lit_cap, lit * 0.82)
+            .mix(c.danger.fg, red);
+        let border = bg.mix(rim, vis);
 
-        let press_dy = 1.15 * down + (1.0 - rise) * 1.5;
+        let press_dy = 2.2 * down + (1.0 - rise) * 1.5;
         let radius = if slot.id == "up" || slot.id == "down" {
             3.5
         } else {
@@ -302,6 +335,16 @@ pub(crate) fn keyboard_lit(
             })
             .offset_motion(Anim::INSTANT);
 
+        if red > 0.02 {
+            cap_el = cap_el.box_shadow(Shadow {
+                x: 0.0,
+                y: 0.0,
+                blur: 10.0,
+                spread: 0.0,
+                color: c.danger.fg.alpha(0.35 * red * rise),
+                inset: false,
+            });
+        }
         if lit > 0.02 {
             cap_el = cap_el.box_shadow(Shadow {
                 x: 0.0,
@@ -320,7 +363,11 @@ pub(crate) fn keyboard_lit(
                 m.ink
             };
             let lit_ink = if k.dark { c.bg_deep } else { c.text_strong };
-            let ink = bg.mix(base_ink.mix(lit_ink, lit * 0.88), vis);
+            let ink = base_ink
+                .mix(c.text_strong, down)
+                .mix(lit_ink, lit * 0.88)
+                .mix(c.danger.fg, red);
+            let ink = bg.mix(ink, vis);
 
             let left_word = matches!(slot.id, "tab" | "caps" | "shift" | "fn");
             let right_word = matches!(slot.id, "delete" | "return" | "shift-right");
@@ -360,7 +407,7 @@ pub(crate) fn keyboard_lit(
         key_els.push(cap_el);
     }
 
-    let deck_vis = (0.42 + 0.58 * dim) * enter;
+    let deck_vis = (0.12 + 0.88 * seen(level)) * enter;
     el().key(key)
         .size(DECK_W, DECK_H)
         .radius(12.0)

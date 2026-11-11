@@ -1149,6 +1149,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
     let Sampler {
         target: sampler_target,
         video_output_path,
+        movie_quality,
         excluded_window_ids,
         own_windows_recorded,
         started_at,
@@ -1179,7 +1180,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         .zip(video_output_path)
         .and_then(|(content, path)| {
             let exclude = exclusions(content, &initial_excluded, !last_shown);
-            start_recording(content, &sampler_target, path, exclude)
+            start_recording(content, &sampler_target, path, exclude, movie_quality)
         });
     crate::log::start_metric("sck_ready_ms", started_at);
     let shot_edge = if recording.is_some() {
@@ -1406,22 +1407,40 @@ fn recording_long_edge(mode: CaptureMode) -> u32 {
     }
 }
 
+/// The movie's size and encoder: compact H.264 for agents, or every pixel as HEVC.
+fn recording_plan(
+    source: capture_core::Source,
+    mode: CaptureMode,
+    quality: super::MovieQuality,
+) -> capture_core::SourcePlan {
+    match quality {
+        super::MovieQuality::Compact => capture_core::SourcePlan {
+            source,
+            long_edge: Some(recording_long_edge(mode)),
+            encoder: capture_core::Encoder::System,
+        },
+        super::MovieQuality::Full => capture_core::SourcePlan {
+            source,
+            long_edge: None,
+            encoder: capture_core::Encoder::Hevc,
+        },
+    }
+}
+
 /// Starts recording `target` into `path` (`recording.mp4` in its bundle).
 fn start_recording(
     content: &SCShareableContent,
     target: &TargetInfo,
     path: PathBuf,
     exclude: capture_core::Exclusions,
+    quality: super::MovieQuality,
 ) -> Option<(capture_core::Recording, PathBuf)> {
     let source = recording_source(content, target)?;
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
         return None;
     };
     let plan = capture_core::Plan {
-        sources: vec![capture_core::SourcePlan {
-            source,
-            long_edge: Some(recording_long_edge(target.mode)),
-        }],
+        sources: vec![recording_plan(source, target.mode, quality)],
         cursor: capture_core::CursorDrawing::Baked,
         audio: capture_core::AudioPlan::default(),
         input: capture_core::Input::None,
@@ -2061,6 +2080,22 @@ mod tests {
         assert_eq!(recording_long_edge(CaptureMode::Display), 2560);
         assert_eq!(recording_long_edge(CaptureMode::Window), 1280);
         assert_eq!(recording_long_edge(CaptureMode::Region), 1280);
+    }
+
+    #[test]
+    fn a_full_quality_movie_keeps_every_pixel_as_hevc() {
+        use super::super::MovieQuality;
+        let source = capture_core::Source::Display(1);
+        let compact = recording_plan(source, CaptureMode::Region, MovieQuality::Compact);
+        assert_eq!(
+            (compact.long_edge, compact.encoder),
+            (Some(1280), capture_core::Encoder::System)
+        );
+        let full = recording_plan(source, CaptureMode::Region, MovieQuality::Full);
+        assert_eq!(
+            (full.long_edge, full.encoder),
+            (None, capture_core::Encoder::Hevc)
+        );
     }
 
     /// A paste never goes to the host, even with its Settings window in front: it goes to the

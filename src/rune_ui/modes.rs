@@ -23,7 +23,7 @@ use super::controls::{
 };
 use super::lists::{LIST_COLUMN_PL, list_row, remove_button, source_list};
 use super::models::{self, Target};
-use super::{Menu, Ui};
+use super::{Menu, Ui, speech_model};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
 use crate::desktop::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
@@ -711,7 +711,7 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let selection = ui.modes.selected;
     let current = mode(&ui.settings, selection);
     let mut content = page("mode-detail-content");
-    content = content.child(basics(ui, p, selection, current));
+    content = content.child(basics(ui, p, selection, current, layer));
     content = content.child(corrections(ui, p));
     content = content.child(processing(ui, p, selection, current, layer));
     content = content.child(transformations(ui, p, current, layer));
@@ -752,19 +752,25 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .child(super::scroll_body(p.k, "mode-detail-scroll", content))
 }
 
-fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> El {
+fn basics(
+    ui: &Ui,
+    p: Paint,
+    selection: Selection,
+    current: &DictationMode,
+    layer: &mut Vec<El>,
+) -> El {
     if selection == Selection::Default {
-        return card(
+        let mut rows = vec![setting_row(
             p,
-            "basics-card",
-            vec![setting_row(
-                p,
-                "global",
-                tr("Global"),
-                Some(tr("Used unless a more specific mode matches.")),
-                el().key("none"),
-            )],
-        );
+            "global",
+            tr("Global"),
+            Some(tr("Used unless a more specific mode matches.")),
+            el().key("none"),
+        )];
+        if let Some(speech) = speech_row(ui, p, selection, current, layer) {
+            rows.push(speech);
+        }
+        return card(p, "basics-card", rows);
     }
     let name = TextInput::new(&ui.modes.editor.name)
         .placeholder(tr("Mode name"))
@@ -835,6 +841,9 @@ fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> E
             chips,
         ),
     ];
+    if let Some(speech) = speech_row(ui, p, selection, current, layer) {
+        rows.push(speech);
+    }
     if let Some(error) = &ui.modes.application_error {
         rows.push(note("application-error", error, p.danger()));
     }
@@ -842,6 +851,48 @@ fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> E
         rows.push(application_picker(ui, p, current));
     }
     card(p, "basics-card", rows)
+}
+
+/// The selected mode's speech model and language, while Labs › Switch model
+/// with app is on; None leaves the Modes pane exactly as it was.
+fn speech_row(
+    ui: &Ui,
+    p: Paint,
+    selection: Selection,
+    current: &DictationMode,
+    layer: &mut Vec<El>,
+) -> Option<El> {
+    if !speech_model::enabled(ui) {
+        return None;
+    }
+    let suffix = match selection {
+        Selection::Default => "global".to_string(),
+        Selection::Custom(index) => index.to_string(),
+    };
+    let key = format!("mode-speech-{suffix}");
+    let model_key = format!("mode-speech-model-{suffix}");
+    let language_key = format!("mode-speech-language-{suffix}");
+    Some(speech_model::setting(
+        ui,
+        p,
+        speech_model::SpeechRow {
+            key: &key,
+            model_key: &model_key,
+            language_key: &language_key,
+            title: tr("Speech model"),
+            description: None,
+            choice: current.speech.clone(),
+            model_menu: Menu::ModeSpeechModel(selection),
+            language_menu: Menu::ModeSpeechLanguage(selection),
+        },
+        // A new choice starts on the model's last-used language, or the
+        // saved one when that model has no recent choice.
+        |_, fallback| fallback.to_owned(),
+        move |ui, choice| {
+            update_mode(ui, |mode| mode.speech = choice);
+        },
+        layer,
+    ))
 }
 
 fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {

@@ -54,7 +54,12 @@ impl AppSettings {
     /// Launch stays available even when the data folder itself cannot be
     /// resolved. Invalid settings are recovered by `load_from` in place.
     pub(crate) fn load_for_launch() -> LaunchLoad {
-        match path().and_then(|path| Self::load_checked_from(&path)) {
+        Self::load_for_launch_at(path())
+    }
+
+    /// `load_for_launch` from `path`, so a test can use its own folder.
+    fn load_for_launch_at(path: Result<PathBuf>) -> LaunchLoad {
+        let launch = match path.and_then(|path| Self::load_checked_from(&path)) {
             Ok((settings, issue)) => {
                 let note = match issue {
                     Some(LoadIssue::Unparseable(reason)) => {
@@ -73,7 +78,10 @@ impl AppSettings {
                     ))),
                 }
             }
-        }
+        };
+        // Launch has no other load that publishes, so the saved runtime state (or the defaults) goes live here, before any listener or worker starts.
+        launch.settings.apply_runtime();
+        launch
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Self> {
@@ -154,6 +162,12 @@ impl AppSettings {
         #[cfg(target_os = "linux")]
         settings.repair_section_key();
         settings.normalize_double_tap_settings();
+        settings.repair_extra_dictation_shortcuts();
+        // After every repair that can put Annotate back on its default
+        // shortcut, which a saved record shortcut may now share: a mouse
+        // button with Labs › Mouse shortcuts off, or a bare left click.
+        #[cfg(hex_capture)]
+        settings.clear_record_shortcut_sharing_capture();
         settings.migrate_legacy_replacements();
         settings.normalize_mode_application_names();
         settings.migrate_disabled_transcription_model();
@@ -166,6 +180,19 @@ impl AppSettings {
             .keyboard_model_switching
             .mappings
             .retain(|_, choice| choice.validate().is_ok());
+        // A mode's speech choice that no longer validates is forgotten; the
+        // mode itself and its applications stay.
+        for mode in std::iter::once(&mut settings.dictation_processing.default_mode)
+            .chain(settings.dictation_processing.modes.iter_mut())
+        {
+            if mode
+                .speech
+                .as_ref()
+                .is_some_and(|choice| choice.validate().is_err())
+            {
+                mode.speech = None;
+            }
+        }
         // A saved import that can't run stays saved (`validate_saved`).
         if let Err(error) = crate::transcription::models::validate_saved(&settings.transcription) {
             warn("transcription", &error.to_string());

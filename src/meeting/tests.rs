@@ -172,6 +172,9 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        notes_export_path: None,
+        notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };
@@ -220,6 +223,9 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        notes_export_path: None,
+        notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };
@@ -339,6 +345,42 @@ fn finished_meeting(name: &str, title: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
+fn a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none() {
+    let mut manifest: MeetingManifest = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "id": "1760000000000-1",
+        "title": "Old meeting",
+        "status": "complete",
+        "created_at_ms": 1_760_000_000_000_u64,
+        "ended_at_ms": 1_760_000_060_000_u64,
+        "duration_ms": 60_000,
+        "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
+        "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
+        "error": null,
+    }))
+    .unwrap();
+    assert_eq!(manifest.microphone.warning, None);
+    assert!(
+        serde_json::to_value(&manifest).unwrap()["microphone"]
+            .get("warning")
+            .is_none(),
+        "an unset warning is not written"
+    );
+
+    manifest.microphone.warning = Some(TrackWarning::DigitalSilence);
+    let stored = serde_json::to_value(&manifest).unwrap();
+    assert_eq!(
+        stored["microphone"]["warning"],
+        serde_json::json!("digital_silence")
+    );
+    let parsed: MeetingManifest = serde_json::from_value(stored).unwrap();
+    assert_eq!(
+        parsed.microphone.warning,
+        Some(TrackWarning::DigitalSilence)
+    );
+}
+
+#[test]
 fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     let (base, directory) = finished_meeting("rename", "Meeting — 2:18 PM");
     let export = read_manifest(&directory).unwrap().export_path.unwrap();
@@ -400,6 +442,38 @@ fn a_rename_follows_the_title_when_descriptive_file_names_are_on() {
         fs::read_to_string(&path)
             .unwrap()
             .starts_with("# Arcade sync\n")
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_rename_without_descriptive_names_still_retitles_the_notes_file() {
+    let (base, directory) = finished_meeting("rename-notes", "Old title");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    let notes = base.join("2026-10-15 1418 Design sync.notes.md");
+    fs::write(&notes, "# Old title\n").unwrap();
+    manifest.notes = Some(MeetingNotes {
+        title: "Design sync".into(),
+        summary: "They agreed to ship on Friday.".into(),
+        ..MeetingNotes::default()
+    });
+    manifest.notes_export_path = Some(notes.clone());
+    manifest.notes_export_sha256 = file_sha256(&notes);
+    write_manifest(&directory, &manifest).unwrap();
+
+    let renamed = rename_meeting_with(&directory, "Arcade planning", false).unwrap();
+
+    assert_eq!(renamed.export_path, Some(export.clone()));
+    let written = fs::read_to_string(&notes).unwrap();
+    assert!(written.starts_with("# Arcade planning\n"));
+    assert!(written.contains(
+        "- **Transcript:** [2026-10-15 1418 Meeting.md](\
+                              2026-10-15%201418%20Meeting.md)"
+    ));
+    assert_eq!(
+        read_manifest(&directory).unwrap().notes_export_sha256,
+        Some(text_sha256(written.as_bytes()))
     );
     fs::remove_dir_all(base).unwrap();
 }
@@ -515,6 +589,27 @@ fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording(
 }
 
 #[test]
+fn deleting_trashes_a_tracked_notes_file_after_the_transcript() {
+    let (base, directory) = finished_meeting("trash-notes", "Design sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    let notes = base.join("2026-10-15 1418 Design sync.notes.md");
+    fs::write(&notes, "# Design sync\n").unwrap();
+    manifest.notes_export_path = Some(notes.clone());
+    manifest.notes_export_sha256 = file_sha256(&notes);
+    write_manifest(&directory, &manifest).unwrap();
+
+    let mut trashed = Vec::new();
+    trash_meeting(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(trashed, [export, notes, directory]);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
     let (base, directory) = finished_meeting("reveal", "Design sync");
     let manifest = read_manifest(&directory).unwrap();
@@ -529,6 +624,26 @@ fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
         RevealTarget::Folder(directory.clone())
     );
     fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn explorer_selects_the_meeting_file_with_the_switch_outside_the_quotes() {
+    assert_eq!(
+        explorer_select(Path::new(
+            r"C:\Users\dax\Documents\Hex Meetings\Design sync.md"
+        ))
+        .as_os_str(),
+        std::ffi::OsStr::new(r#"/select,"C:\Users\dax\Documents\Hex Meetings\Design sync.md""#)
+    );
+    assert_eq!(
+        explorer_select(Path::new(
+            r"C:\Users\dax\Documents\Hex Meetings\Design sync, notes.md"
+        ))
+        .as_os_str(),
+        std::ffi::OsStr::new(
+            r#"/select,"C:\Users\dax\Documents\Hex Meetings\Design sync, notes.md""#
+        )
+    );
 }
 
 #[test]
@@ -766,6 +881,9 @@ fn retention_manifest(
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        notes_export_path: None,
+        notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     }
@@ -916,6 +1034,49 @@ fn expiry_leaves_a_markdown_copy_the_user_edited() {
     })
     .unwrap();
     assert_eq!(trashed.len(), 1);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn expiry_trashes_a_notes_file_only_while_its_digest_matches() {
+    let (base, directory) = finished_meeting("expire-notes", "Design sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    manifest.export_sha256 = file_sha256(&export);
+    let notes = base.join("2026-10-15 1418 Design sync.notes.md");
+    fs::write(&notes, "# Design sync\n").unwrap();
+    manifest.notes_export_path = Some(notes.clone());
+    manifest.notes_export_sha256 = file_sha256(&notes);
+    write_manifest(&directory, &manifest).unwrap();
+
+    let mut trashed = Vec::new();
+    trash_expired(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(trashed, [export.clone(), notes.clone(), directory.clone()]);
+
+    fs::write(&notes, "# My own notes\n").unwrap();
+    trashed.clear();
+    trash_expired(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(trashed, [export.clone(), directory.clone()]);
+
+    // The transcript's digest still moves it; an older manifest with no
+    // notes digest leaves the notes file alone.
+    manifest.notes_export_sha256 = None;
+    write_manifest(&directory, &manifest).unwrap();
+    trashed.clear();
+    trash_expired(&directory, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(trashed, [export, directory]);
     fs::remove_dir_all(base).unwrap();
 }
 

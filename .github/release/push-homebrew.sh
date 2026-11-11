@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # push-homebrew.sh <cask> <version>: pushes the rendered cask (checked with
 # brew in a job without secrets) to anomalyco/homebrew-tap as Casks/hex.rb
-# with the tap deploy key, github-actions-hex-homebrew. A cask that already
+# with the tap deploy key, anomaly-release. A cask that already
 # matches is left alone, so reruns are no-ops.
 . "$(dirname "$0")/lib.sh"
 

@@ -13,6 +13,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use crate::transcription::models::{
     AUTO_LANGUAGE, ModelDefinition, ModelRuntime, TranscriptionSelection,
 };
+use crate::transcription::transcript::TimestampLevel;
 
 /// 8 s of audio reaches every stream window shape a dictation can use (the
 /// left context grows to 5.6 s), so the GPU driver compiles those kernels
@@ -68,7 +69,13 @@ pub(crate) fn validate_gguf_artifact(
             artifact.variant
         ));
     }
-    if selection.language == AUTO_LANGUAGE && !supports_language_detect {
+    // Auto gates a hint, so it needs detection only from a model that takes
+    // one: a no-hint head (Parakeet v3, Granite) hears the language itself,
+    // whatever its file's lang_detect metadata says.
+    if selection.language == AUTO_LANGUAGE
+        && definition.accepts_language_hint
+        && !supports_language_detect
+    {
         return Err(eyre!(
             "{} does not advertise automatic language detection",
             definition.name
@@ -90,6 +97,33 @@ fn session_options(device_type: transcribe_cpp::DeviceType) -> transcribe_cpp::S
             }
         }
         _ => transcribe_cpp::SessionOptions::default(),
+    }
+}
+
+/// Why one whole-clip run happens.
+#[derive(Clone, Copy)]
+enum RunKind {
+    /// A transcript for dictation, a meeting, or the local API.
+    Transcript,
+    /// A warm-up: the weights come back onto the device before audio arrives.
+    Warmup,
+}
+
+impl RunKind {
+    /// Whether this run adds the configured vocabulary. A warm-up must not:
+    /// silence plus a long term list makes Qwen3-ASR read the list back to
+    /// its 256-token cap on every warm-up, which costs seconds and warms
+    /// nothing extra (#1568). Live streams already skip the prompt.
+    fn takes_vocabulary(self) -> bool {
+        matches!(self, Self::Transcript)
+    }
+
+    /// Whether a decode that stopped at its output limit still counts as a
+    /// run. A warm-up ran the whole graph on the device either way, so a
+    /// follow-up warm-up need not repeat it; a failed transcript does not
+    /// count.
+    fn counts_when_truncated(self) -> bool {
+        matches!(self, Self::Warmup)
     }
 }
 
@@ -194,7 +228,9 @@ impl OfflineGgufSession {
         }
     }
 
-    /// Whether a run or live stream completed within [`RECENT_RUN`].
+    /// Whether a run, live stream, or warm-up completed within
+    /// [`RECENT_RUN`]. A warm-up that stopped at its output limit counts: it
+    /// decoded on the device.
     pub(crate) fn ran_recently(&self) -> bool {
         ran_within(self.last_run, Instant::now(), RECENT_RUN)
     }
@@ -304,6 +340,29 @@ impl OfflineGgufSession {
         samples: &[f32],
         options: &transcribe_cpp::RunOptions,
     ) -> transcribe_cpp::Result<transcribe_cpp::Transcript> {
+        self.run_as(samples, options, RunKind::Transcript)
+    }
+
+    /// Runs `samples` exactly like [`Self::run`], but without adding the
+    /// vocabulary prompt. Silence plus a long term list makes a decoder such
+    /// as Qwen3-ASR read the list back to its output cap on every warm-up,
+    /// seconds of work that warms nothing extra (#1568). A decode that still
+    /// stops at that cap leaves the model warm and counts as a run, so a
+    /// prewarm right after the load is not repeated.
+    pub(crate) fn warm(
+        &mut self,
+        samples: &[f32],
+        options: &transcribe_cpp::RunOptions,
+    ) -> transcribe_cpp::Result<transcribe_cpp::Transcript> {
+        self.run_as(samples, options, RunKind::Warmup)
+    }
+
+    fn run_as(
+        &mut self,
+        samples: &[f32],
+        options: &transcribe_cpp::RunOptions,
+        kind: RunKind,
+    ) -> transcribe_cpp::Result<transcribe_cpp::Transcript> {
         // transcribe-cpp 0.1.x retains input-sized scheduler buffers for the
         // session lifetime. Drop each used session before creating its
         // successor so a long inference cannot pin that high-water mark or
@@ -315,9 +374,15 @@ impl OfflineGgufSession {
         if let Some(cancel) = job_cancel() {
             session.set_cancel_token(&cancel);
         }
-        let options = self.with_vocabulary(options, false);
+        let options = match kind.takes_vocabulary() {
+            true => self.with_vocabulary(options, false),
+            false => Cow::Borrowed(options),
+        };
         let result =
             keep_repetition_partial(session.run(samples, &options)).map(|mut transcript| {
+                // Only the vocabulary sets a prompt, and a warm-up leaves it
+                // out, so it has no echo to drop; reading the effective
+                // options keeps that true by construction.
                 if let Some(prompt) = &options.prompt {
                     drop_prompt_echo(&mut transcript, prompt);
                 }
@@ -325,7 +390,10 @@ impl OfflineGgufSession {
                 transcript
             });
         drop(session);
-        if result.is_ok() {
+        if result.is_ok()
+            || (kind.counts_when_truncated()
+                && matches!(&result, Err(transcribe_cpp::Error::OutputTruncated { .. })))
+        {
             self.last_run = Some(Instant::now());
         }
         match self.model.session_with(&self.options) {
@@ -376,6 +444,114 @@ impl OfflineGgufSession {
         }
         Ok(output.join(" "))
     }
+
+    /// [`Self::transcribe_chunked`] with the model's own segment and word
+    /// times, moved onto the clip's timeline by each chunk's sample position.
+    /// Text is joined exactly as the untimed run joins it.
+    pub(crate) fn transcribe_chunked_timed(
+        &mut self,
+        samples: &[f32],
+        options: &transcribe_cpp::RunOptions,
+        max_audio_samples: Option<usize>,
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        let Some(max_samples) =
+            max_audio_samples.filter(|&max_samples| samples.len() > max_samples)
+        else {
+            let transcript = self
+                .run(samples, options)
+                .wrap_err("transcription failed")?;
+            return Ok(timed(transcript, 0));
+        };
+        let mut timed = crate::transcription::transcript::Transcript::default();
+        let mut texts = Vec::new();
+        for (index, samples) in samples.chunks(max_samples).enumerate() {
+            if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
+                return Err(eyre!("transcription was cancelled"));
+            }
+            if !chunk_may_hold_speech(samples) {
+                tracing::info!(
+                    chunk_ms = samples.len() / 16,
+                    "skipped a chunk of a long clip with no speech"
+                );
+                continue;
+            }
+            let mut chunk = samples.to_vec();
+            crate::dictation::pad_for_parakeet(&mut chunk);
+            let transcript = self.run(&chunk, options).wrap_err("transcription failed")?;
+            let text = transcript.text.trim();
+            if !text.is_empty() {
+                texts.push(text.to_string());
+            }
+            // The offset comes from where the chunk sits in the clip, never
+            // from how many chunks produced text.
+            let spans = timed_spans(transcript, chunk_offset_ms(index, max_samples));
+            timed.segments.extend(spans.segments);
+            timed.words.extend(spans.words);
+        }
+        timed.text = texts.join(" ");
+        Ok(timed)
+    }
+}
+
+/// A whole clip's segments and words, from its single run.
+fn timed(
+    transcript: transcribe_cpp::Transcript,
+    offset_ms: i64,
+) -> crate::transcription::transcript::Transcript {
+    let text = transcript.text.clone();
+    let spans = timed_spans(transcript, offset_ms);
+    crate::transcription::transcript::Transcript {
+        text,
+        segments: spans.segments,
+        words: spans.words,
+    }
+}
+
+/// The native timing level a run options timestamp kind asks for.
+pub(crate) fn timestamp_level(kind: transcribe_cpp::TimestampKind) -> TimestampLevel {
+    match kind {
+        transcribe_cpp::TimestampKind::Word | transcribe_cpp::TimestampKind::Token => {
+            TimestampLevel::Word
+        }
+        transcribe_cpp::TimestampKind::Segment | transcribe_cpp::TimestampKind::Auto => {
+            TimestampLevel::Segment
+        }
+        transcribe_cpp::TimestampKind::None => TimestampLevel::None,
+    }
+}
+
+/// Where one chunk starts in the clip, in whole milliseconds.
+pub(crate) fn chunk_offset_ms(index: usize, chunk_samples: usize) -> i64 {
+    i64::try_from(index.saturating_mul(chunk_samples) / 16).unwrap_or(i64::MAX)
+}
+
+fn timed_spans(
+    transcript: transcribe_cpp::Transcript,
+    offset_ms: i64,
+) -> crate::transcription::transcript::Transcript {
+    use crate::transcription::transcript::TranscriptSegment;
+    let span = |start_ms: i64, end_ms: i64, text: String| {
+        let text = text.trim().to_owned();
+        let start_ms = start_ms.max(0);
+        (!text.is_empty()).then(|| TranscriptSegment {
+            start_ms: start_ms.saturating_add(offset_ms),
+            end_ms: end_ms.max(start_ms).saturating_add(offset_ms),
+            text,
+        })
+    };
+    crate::transcription::transcript::Transcript {
+        segments: transcript
+            .segments
+            .into_iter()
+            .filter_map(|segment| span(segment.t0_ms, segment.t1_ms, segment.text))
+            .collect(),
+        words: transcript
+            .words
+            .into_iter()
+            .filter_map(|word| span(word.t0_ms, word.t1_ms, word.text))
+            .collect(),
+        ..Default::default()
+    }
 }
 
 /// Whether one chunk of a long clip goes to the model. The clip as a whole
@@ -384,6 +560,19 @@ impl OfflineGgufSession {
 /// repeating text for that (#1194). Without the detector every chunk runs.
 fn chunk_may_hold_speech(samples: &[f32]) -> bool {
     crate::transcription::speech_detector::contains_speech(samples) != Some(false)
+}
+
+/// Whether `error` is a decode stopped at its output limit. A decoder that
+/// runs to its generation cap on silence (Qwen3-ASR 1.7B, #968) still ran the
+/// whole graph on the device, so a warm-up that ends this way leaves the model
+/// warm: it is not a failed device, and not a failed selection.
+pub(crate) fn output_truncated(error: &color_eyre::eyre::Report) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<transcribe_cpp::Error>(),
+            Some(transcribe_cpp::Error::OutputTruncated { .. })
+        )
+    })
 }
 
 /// transcribe-cpp 0.4 stops a decoder that starts looping and reports the text
@@ -554,6 +743,74 @@ mod tests {
     }
 
     #[test]
+    fn a_chunks_times_move_onto_the_clips_timeline_by_sample_position() {
+        // 30 s chunks at 16 kHz, and a short final chunk: offsets come from
+        // where each chunk starts, never from how many produced text.
+        assert_eq!(chunk_offset_ms(0, 30 * 16_000), 0);
+        assert_eq!(chunk_offset_ms(1, 30 * 16_000), 30_000);
+        assert_eq!(chunk_offset_ms(2, 30 * 16_000), 60_000);
+        assert_eq!(chunk_offset_ms(3, 1_600), 300);
+
+        let shifted = timed_spans(
+            transcribe_cpp::Transcript {
+                text: "hello".into(),
+                segments: vec![transcribe_cpp::Segment {
+                    text: " hello ".into(),
+                    t0_ms: 0,
+                    t1_ms: 480,
+                    ..Default::default()
+                }],
+                words: vec![
+                    transcribe_cpp::Word {
+                        text: "hello".into(),
+                        t0_ms: 10,
+                        t1_ms: 480,
+                        ..Default::default()
+                    },
+                    transcribe_cpp::Word {
+                        text: "  ".into(),
+                        t0_ms: 500,
+                        t1_ms: 600,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            chunk_offset_ms(2, 30 * 16_000),
+        );
+        assert_eq!(shifted.segments.len(), 1);
+        assert_eq!(
+            (
+                shifted.segments[0].start_ms,
+                shifted.segments[0].end_ms,
+                shifted.segments[0].text.as_str()
+            ),
+            (60_000, 60_480, "hello")
+        );
+        assert_eq!(shifted.words.len(), 1, "an empty word is dropped");
+        assert_eq!(
+            (shifted.words[0].start_ms, shifted.words[0].end_ms),
+            (60_010, 60_480)
+        );
+    }
+
+    #[test]
+    fn a_models_timestamp_kind_names_its_finest_level() {
+        for (kind, level) in [
+            (transcribe_cpp::TimestampKind::Word, TimestampLevel::Word),
+            (transcribe_cpp::TimestampKind::Token, TimestampLevel::Word),
+            (
+                transcribe_cpp::TimestampKind::Segment,
+                TimestampLevel::Segment,
+            ),
+            (transcribe_cpp::TimestampKind::Auto, TimestampLevel::Segment),
+            (transcribe_cpp::TimestampKind::None, TimestampLevel::None),
+        ] {
+            assert_eq!(timestamp_level(kind), level, "{kind:?}");
+        }
+    }
+
+    #[test]
     fn only_a_completed_run_inside_the_window_counts_as_recent() {
         let now = Instant::now();
         let window = Duration::from_secs(60);
@@ -588,6 +845,36 @@ mod tests {
             truncated,
             Err(transcribe_cpp::Error::OutputTruncated { .. })
         ));
+    }
+
+    #[test]
+    fn a_warmup_leaves_the_vocabulary_out_and_counts_when_truncated() {
+        assert!(
+            RunKind::Transcript.takes_vocabulary(),
+            "a transcript still gets the vocabulary"
+        );
+        assert!(
+            !RunKind::Warmup.takes_vocabulary(),
+            "silence plus a term list makes Qwen3-ASR read the list back (#1568)"
+        );
+        assert!(!RunKind::Transcript.counts_when_truncated());
+        assert!(RunKind::Warmup.counts_when_truncated());
+    }
+
+    #[test]
+    fn a_decode_stopped_at_its_output_limit_is_recognised_through_its_context() {
+        let truncated: Result<()> = Err(transcribe_cpp::Error::OutputTruncated {
+            message: "budget".into(),
+            partial: None,
+        })
+        .wrap_err("transcription failed");
+        assert!(output_truncated(&truncated.unwrap_err()));
+        let repeating: Result<()> = Err(transcribe_cpp::Error::OutputRepetition {
+            message: "loop".into(),
+            partial: None,
+        })
+        .wrap_err("transcription failed");
+        assert!(!output_truncated(&repeating.unwrap_err()));
     }
 
     #[test]
@@ -745,6 +1032,50 @@ mod tests {
         let mut silence = transcribe_cpp::Transcript::default();
         drop_prompt_echo(&mut silence, "  ");
         assert_eq!(silence, transcribe_cpp::Transcript::default());
+    }
+
+    fn validate_auto(
+        model: crate::transcription::models::TranscriptionModelId,
+        supports_language_detect: bool,
+    ) -> Result<Option<String>> {
+        let definition = crate::transcription::models::definition(model);
+        let ModelRuntime::Gguf(artifact) = definition.runtime else {
+            panic!("{} is not a GGUF model", definition.name);
+        };
+        validate_gguf_artifact(
+            Path::new("catalog.gguf"),
+            definition,
+            artifact.architecture,
+            artifact.variant,
+            &TranscriptionSelection {
+                model,
+                language: AUTO_LANGUAGE.into(),
+            },
+            supports_language_detect,
+        )
+    }
+
+    #[test]
+    fn auto_needs_detection_only_from_models_that_take_a_language_hint() {
+        use crate::transcription::models::TranscriptionModelId;
+
+        // Parakeet v2 takes the language as a hint and its file detects none.
+        assert!(validate_auto(TranscriptionModelId::ParakeetV2, false).is_err());
+        // A no-hint model never receives Auto as a hint, so the file's
+        // lang_detect metadata does not gate it (Granite's pinned file says 0).
+        for model in [
+            TranscriptionModelId::ParakeetV3,
+            TranscriptionModelId::ParakeetUltra,
+            TranscriptionModelId::Orukeet,
+            TranscriptionModelId::GraniteSpeech5,
+        ] {
+            assert_eq!(validate_auto(model, false).unwrap(), None, "{model:?}");
+        }
+        // A hint-taking model that detects still runs Auto with no hint.
+        assert_eq!(
+            validate_auto(TranscriptionModelId::WhisperLargeV3Turbo, true).unwrap(),
+            None
+        );
     }
 
     #[test]

@@ -37,7 +37,13 @@ it never accesses the microphone, speech model, or network.
     Both `HEXMobile` and `HEXKeyboard` render Hex's desktop menu-bar braided
     oscilloscope (`src/dot_scope.rs`, `src/rune_hud.wgsl`) at native display
     refresh via `CAMetalLayer` + `CADisplayLink`, pausing at 0% CPU/GPU once
-    settled in idle. Lock Screen / Dynamic Island Live Activities render a
+    settled in idle. The keyboard extension mounts it only while a capture or
+    transcription is active and shows a static `Canvas` dot row at rest, so a
+    fresh keyboard process builds no Metal device, pipeline, layer, display
+    link, or idle pre-roll before its first frame; the app's docked keyboard
+    preview keeps the live scope. The home-indicator swipe cue's pipeline is
+    compiled on first use, which only the app shows. Lock Screen / Dynamic
+    Island Live Activities render a
     matching `Canvas` dot-matrix badge (`HexDotMatrixBadge`) because WidgetKit
     archives static view snapshots rather than hosting live `CAMetalLayer`s.
     Meter polling stays alive through a temporary non-recording state of the
@@ -59,6 +65,25 @@ it never accesses the microphone, speech model, or network.
     to** menu; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
+  - **Apple Intelligence cleanup (Experiments › Clean up with Apple
+    Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
+    one on-device FoundationModels pass before formatting fixes clearly
+    misheard words and spoken self-corrections, within a 2 s budget. A
+    timeout, error, empty or implausible output keeps the raw transcript, and
+    the toggle is disabled with a reason when Apple Intelligence is unusable.
+  - **Custom vocabulary (Experiments › Custom vocabulary):** Off by default.
+    A local list of up to 100 names and phrases, applied to every engine. After
+    transcription, matching words are rewritten to the listed spelling across
+    case, spaces, tabs, a single hyphen, and possessive apostrophes, before
+    cleanup and again after formatting, so a style cannot undo a spelling. The
+    listed spelling is kept exactly, even at a sentence start (an all-lowercase
+    term stays lowercase), and a term that spells its own boundaries ("iPhone 7",
+    "X-ray") matches those boundaries exactly. A word that carries its own
+    apostrophe only matches a term that has one, several transcript words are
+    joined only when the term reads as a compound, and compound terms like
+    "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
+    the list is also sent as a best-effort recognition hint; Parakeet's batch
+    path gets no hint.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -103,3 +128,10 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
   changes have not been reproduced on hardware; the meter recovery tests inject
   that condition through `ActiveAudioCapture`.
+- **Apple Speech hint:** Custom vocabulary's contextual strings are best effort
+  and unverified on a physical iPhone. Apple documents contextual strings only
+  for `DictationTranscriber`, Hex sets them on `SpeechTranscriber`, and
+  Parakeet's batch path gets no hint.
+- **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
+  compiles or tests the iOS targets, so these checks run only in a local
+  `xcodebuild test`.

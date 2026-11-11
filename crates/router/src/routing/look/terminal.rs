@@ -95,15 +95,26 @@ pub fn tui_title(title: &str) -> TuiTitle<'_> {
     }
 }
 
-/// The session whose title the TUI shows as `shown`, preferring one working in `folder`, then
-/// the newest. `None` when no session's title fits.
+/// Which session the TUI's title names.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Titled<'a> {
+    One(&'a Candidate),
+    /// More than one session fits and nothing tells them apart.
+    Several,
+    None,
+}
+
+/// The session whose title the TUI shows as `shown`. When several fit, the one working in
+/// `folder`, then the one OpenCode's command line `opened`; if that still leaves more than one,
+/// `Several`, never a guess.
 pub fn session_titled<'a>(
     shown: &str,
     candidates: &'a [Candidate],
     folder: Option<&Path>,
-) -> Option<&'a Candidate> {
+    opened: Option<&str>,
+) -> Titled<'a> {
     let cut = shown.strip_suffix('…');
-    candidates
+    let mut fits: Vec<&Candidate> = candidates
         .iter()
         .filter(|c| {
             let title = c.title.trim();
@@ -112,12 +123,25 @@ pub fn session_titled<'a>(
                 None => title == shown,
             }
         })
-        .max_by_key(|c| {
-            (
-                folder.is_some() && c.directory.as_deref() == folder,
-                c.updated_ms,
-            )
-        })
+        .collect();
+    let tests: [&dyn Fn(&Candidate) -> bool; 2] = [
+        &|c| folder.is_some() && c.directory.as_deref() == folder,
+        &|c| opened == Some(c.id.as_str()),
+    ];
+    for test in tests {
+        if fits.len() <= 1 {
+            break;
+        }
+        let kept: Vec<&Candidate> = fits.iter().copied().filter(|c| test(c)).collect();
+        if !kept.is_empty() {
+            fits = kept;
+        }
+    }
+    match fits.as_slice() {
+        [] => Titled::None,
+        [one] => Titled::One(one),
+        _ => Titled::Several,
+    }
 }
 
 /// Ghostty's focused pane (AppleScript, Ghostty 1.3+), with what runs in front in it. `pid` is
@@ -270,15 +294,31 @@ mod tests {
             session("ses_short", &long[..37], "/code/hex", 2),
             session("ses_same", "Fix the HUD", "/code/other", 9),
             session("ses_here", "Fix the HUD", "/code/hex", 3),
+            session("ses_twin_a", "Twins", "/code/hex", 4),
+            session("ses_twin_b", "Twins", "/code/hex", 5),
         ];
-        let id = |shown: &str, folder: Option<&str>| {
-            session_titled(shown, &sessions, folder.map(Path::new)).map(|c| c.id.as_str())
+        let id = |shown: &str, folder: Option<&str>, opened: Option<&str>| match session_titled(
+            shown,
+            &sessions,
+            folder.map(Path::new),
+            opened,
+        ) {
+            Titled::One(found) => Some(found.id.as_str()),
+            Titled::Several => Some("several"),
+            Titled::None => None,
         };
-        assert_eq!(id(&shown, None), Some("ses_long"));
-        // Two sessions with one title: the one in the terminal's folder, else the newest.
-        assert_eq!(id("Fix the HUD", Some("/code/hex")), Some("ses_here"));
-        assert_eq!(id("Fix the HUD", None), Some("ses_same"));
-        assert_eq!(id("Nothing like it", None), None);
+        assert_eq!(id(&shown, None, None), Some("ses_long"));
+        // Two sessions with one title: the one in the terminal's folder.
+        assert_eq!(id("Fix the HUD", Some("/code/hex"), None), Some("ses_here"));
+        // Nothing to tell them apart: no guess, not even the newest.
+        assert_eq!(id("Fix the HUD", None, None), Some("several"));
+        assert_eq!(id("Twins", Some("/code/hex"), None), Some("several"));
+        // Two in one checkout with one title: the one OpenCode was opened on.
+        assert_eq!(
+            id("Twins", Some("/code/hex"), Some("ses_twin_a")),
+            Some("ses_twin_a")
+        );
+        assert_eq!(id("Nothing like it", None, None), None);
     }
 
     #[test]

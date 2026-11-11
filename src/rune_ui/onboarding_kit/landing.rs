@@ -7,7 +7,7 @@ use crate::desktop::i18n::tr;
 
 use super::super::controls::{KeySize, Paint, PushSize, key_tray, keycap};
 use super::fixture::Language;
-use super::hex_meter::{hex_meter, hex_meter_glowing};
+use super::hex_meter::{hex_logo, hex_meter};
 use super::pill::{FLY, PILL};
 
 /// One display heading style across every onboarding step (`26 pt`, softened
@@ -162,19 +162,20 @@ impl Home {
     }
 }
 
-/// Final `"Hex is ready"` landing: the thin single-hexagon mark arrives from
-/// the top pill with a soft outline glow, followed by staggered copy and a
-/// quiet macOS menu-bar preview showing where Hex lives.
+/// Final `"Hex is ready"` landing: the Hex logo builds outside in (its
+/// outline arriving from the top pill when `matched`), followed by
+/// staggered copy and where Hex lives. `age`: seconds since the page
+/// appeared.
 pub(crate) fn ready(
     p: Paint,
     caps: &[String],
     matched: Option<&str>,
-    now: f64,
+    age: f64,
     reduced: bool,
     motion: Motion,
     home: Home,
 ) -> El {
-    let mark = hex_meter_glowing(p, "meter", 64.0, now, reduced);
+    let mark = hex_logo(p, "meter", 64.0, age, reduced, matched.is_some());
     let mark = match matched {
         Some(id) => el().key(id).matched(id).motion(FLY).child(mark),
         None => motion.staggered(mark.key("mark"), 0.0, 8.0),

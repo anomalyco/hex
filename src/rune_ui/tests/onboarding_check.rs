@@ -35,8 +35,10 @@ pub(super) const SCENES: &[&str] = &[
     "windows-onboarding-microphone",
     // GNOME and KDE on Wayland: the desktop's paste permission, explained.
     "onboarding-paste",
-    // Almost ready: the model still downloads.
+    // Almost ready: the model still downloads, and a sketch from "Watch
+    // another one" while it does.
     "onboarding-waiting",
+    "onboarding-sketch",
     // Your turn: the practice game, and the shortcut that didn't start.
     "onboarding-try",
     "mac-onboarding-try",
@@ -158,6 +160,111 @@ fn onboarding_continue_without_model() {
     assert!(rt.state.first_run.is_none(), "onboarding closed");
 }
 
+/// The mic note follows the shortcut: Hold says hold, Toggle says tap,
+/// and a mic released while idle has nothing to explain.
+#[test]
+fn the_mic_note_follows_the_shortcut() {
+    let note = |toggle: bool, release: bool| {
+        let mut ui = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        super::super::onboarding_kit::scenes::mac_first_run(
+            &mut ui,
+            crate::rune_ui::onboarding::MacStep::TryIt,
+            Page::Try,
+        );
+        // Each poll reads both from settings again.
+        if toggle {
+            ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+        }
+        ui.settings.release_microphone_while_idle = release;
+        let s = ui.first_run.as_mut().expect("the first run is open");
+        s.toggle = toggle;
+        if let Some(live) = s.live.as_mut() {
+            live.release_microphone = release;
+        }
+        texts(&runtime_for(ui, true, PANE_SIZE))
+            .into_iter()
+            .find(|t| t.starts_with("It only records"))
+    };
+    let hold = note(false, false).expect("the note shows");
+    assert!(
+        hold.starts_with("It only records while you hold "),
+        "{hold}"
+    );
+    let tap = note(true, false).expect("the note shows");
+    assert!(tap.starts_with("It only records after you tap "), "{tap}");
+    assert_eq!(note(false, true), None, "no note once the mic is released");
+}
+
+/// The language capsule on the download page: English systems have no
+/// other language, and a later setup replaces the earlier setup's label.
+/// A test's own preferred language keeps both cases independent of the
+/// host locale.
+#[test]
+fn the_language_capsule_switches_only_between_different_languages() {
+    let setup = |model: TranscriptionModelId, language: &str| {
+        let mut ui = portal_fixture();
+        ui.settings.transcription = TranscriptionSelection {
+            model,
+            language: language.into(),
+        };
+        ui.preferred_language = Some("en".into());
+        super::super::onboarding::fixture(&mut ui, Step::Setup, true);
+        super::super::onboarding_kit::live::fixture(&mut ui, Page::Download);
+        runtime_for(ui, false, PANE_SIZE)
+    };
+
+    // An English system has no other language to offer.
+    let mut rt = setup(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
+    let before = sent(&rt).len();
+    tap(&mut rt, "language-capsule");
+    assert_eq!(sent(&rt).len(), before, "nothing downloads");
+
+    // Neither has another English model, such as a Cohere English pick.
+    let mut rt = setup(TranscriptionModelId::CohereTranscribe, "en");
+    let before = sent(&rt).len();
+    tap(&mut rt, "language-capsule");
+    assert_eq!(sent(&rt).len(), before, "English to English is no switch");
+
+    // A French setup switches to the recommended English model and back.
+    let mut rt = setup(TranscriptionModelId::ParakeetV3, "fr");
+    assert!(
+        matches!(
+            sent(&rt),
+            [Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language }] if language == "fr"
+        ),
+        "{:?}",
+        sent(&rt)
+    );
+    tap(&mut rt, "language-capsule");
+    assert!(matches!(
+        sent(&rt),
+        [
+            Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language: started },
+            Request::ChooseModel { model: TranscriptionModelId::ParakeetUnifiedEnglish, language },
+        ] if started == "fr" && language == "en"
+    ));
+    tap(&mut rt, "language-capsule");
+    assert!(
+        matches!(
+            sent(&rt).last(),
+            Some(Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language }) if language == "fr"
+        ),
+        "the toggle swaps back to the saved selection"
+    );
+
+    // Running setup again for Japanese replaces the earlier French label.
+    let rt = setup(
+        crate::transcription::models::recommended_selection("ja").model,
+        "ja",
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&"Japanese".to_owned()), "{shown:?}");
+    assert!(
+        !shown.contains(&"French".to_owned()),
+        "the previous setup's label is gone: {shown:?}"
+    );
+}
+
 #[test]
 fn onboarding_goldens() {
     let _goldens = Goldens::collect();
@@ -256,13 +363,13 @@ fn onboarding_walkthrough() {
     );
     rt.state.picker.installed = Some(vec![model]);
 
-    // The story plays on: the demo, then the practice game once the model
-    // is ready, then Hex is ready.
+    // The story plays on: the demo, then the practice game ("With Hex")
+    // once the model is ready, then Hex is ready.
     settle(&mut rt);
     rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
     assert_eq!(step(&rt), Some(Step::TryIt));
-    assert!(texts(&rt).contains(&"Clear your messages".to_owned()));
+    assert!(texts(&rt).contains(&"With Hex".to_owned()));
     assert!(rt.find("skip").is_some(), "Skip shows on the practice too");
     tap(&mut rt, "done");
     assert!(texts(&rt).contains(&"Hex is ready".to_owned()));

@@ -1,4 +1,4 @@
-//! Starting a plan on `ScreenCaptureKit`: one stream and one recording output per source.
+//! Starting a plan on `ScreenCaptureKit`: one stream and one movie writer per source.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -34,7 +34,7 @@ use crate::frames::FrameSampler;
 use crate::input::{HostInputDrain, InputLog};
 use crate::manifest::{Permission, TrackKind};
 use crate::plan::{
-    CursorDrawing, Exclusions, Input, Mic, Plan, Rect, Source, SourcePlan, output_size,
+    CursorDrawing, Encoder, Exclusions, Input, Mic, Plan, Rect, Source, SourcePlan, output_size,
 };
 use crate::session::{
     Active, Recording, RecordingEvent, RecordingEvents, SourceRun, SourceStream, Stopper,
@@ -42,6 +42,7 @@ use crate::session::{
 };
 use crate::system_audio::SystemAudioWriter;
 use crate::time::{HostTime, MediaTime};
+use crate::video_writer::{STREAM_COLOR_SPACE, VideoWriter};
 
 /// `ScreenCaptureKit` can need over a second to start a selected Core Audio device. The first
 /// source's recording output is attached only after that, so the MP4's audio and video tracks
@@ -76,6 +77,15 @@ impl Recorder {
         }
         validate_sources(&sources.iter().map(|plan| plan.source).collect::<Vec<_>>())?;
         names.validate(sources.len(), &audio)?;
+        if matches!(audio.mic, Mic::Device { .. })
+            && sources
+                .first()
+                .is_some_and(|plan| plan.encoder == Encoder::Hevc)
+        {
+            return Err(Error::ConfigureRecording(
+                "an HEVC movie holds video only: record the microphone with Mic::External".into(),
+            ));
+        }
         check_dir(&dir, names.all().chain([names.manifest_name()]))?;
         if let Mic::Device { id, .. } = &audio.mic
             && !AudioInputDevice::list()
@@ -142,6 +152,7 @@ impl Recorder {
                         (Mic::Device { id, warmup }, 0) => Some((id.as_str(), *warmup)),
                         _ => None,
                     },
+                    encoder: sources[index].encoder,
                     system_audio: audio.system && index == 0,
                     system_writer: (index == 0).then(|| active.system_audio.clone()).flatten(),
                     collector: Arc::clone(&collectors[index]),
@@ -281,8 +292,13 @@ impl Target {
             }
         };
         let scale = f64::from(filter.point_pixel_scale());
-        let (width, height) = output_size((rect.width, rect.height), scale, plan.long_edge)
-            .ok_or(Error::InvalidDimensions)?;
+        let (width, height) = output_size(
+            (rect.width, rect.height),
+            scale,
+            plan.long_edge,
+            plan.encoder,
+        )
+        .ok_or(Error::InvalidDimensions)?;
         Ok(Self {
             filter,
             label,
@@ -384,6 +400,7 @@ struct SourceContext<'a> {
     /// A region's area in global points. It places the cursor, whatever rect its frames report.
     region: Option<Rect>,
     fps: u32,
+    encoder: Encoder,
     cursor: CursorDrawing,
     telemetry: bool,
     /// The device and its warm-up.
@@ -425,16 +442,38 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
             .map_err(configure)?;
     }
 
-    let recording_config = SCRecordingOutputConfiguration::new()
-        .map_err(|error| Error::ConfigureRecording(error.to_string()))?
-        .with_output_url(&context.path)
-        .map_err(|error| Error::ConfigureRecording(error.to_string()))?
-        .with_video_codec(SCRecordingOutputCodec::H264)
-        .with_output_file_type(SCRecordingOutputFileType::MP4);
     let (sender, receiver) = mpsc::channel();
-    let output =
-        SCRecordingOutput::new_with_delegate(&recording_config, recording_callbacks(&sender))
-            .ok_or(Error::CreateRecordingOutput)?;
+    let output = match context.encoder {
+        Encoder::System => {
+            let recording_config = SCRecordingOutputConfiguration::new()
+                .map_err(|error| Error::ConfigureRecording(error.to_string()))?
+                .with_output_url(&context.path)
+                .map_err(|error| Error::ConfigureRecording(error.to_string()))?
+                .with_video_codec(SCRecordingOutputCodec::H264)
+                .with_output_file_type(SCRecordingOutputFileType::MP4);
+            Output::System(
+                SCRecordingOutput::new_with_delegate(
+                    &recording_config,
+                    recording_callbacks(&sender),
+                )
+                .ok_or(Error::CreateRecordingOutput)?,
+            )
+        }
+        Encoder::Hevc => {
+            config = config
+                .with_color_space_name(STREAM_COLOR_SPACE)
+                .map_err(|error| Error::ConfigureStream(error.to_string()))?;
+            Output::Hevc(
+                VideoWriter::create(
+                    &context.path,
+                    (target.width, target.height),
+                    context.fps,
+                    sender.clone(),
+                )
+                .map_err(Error::ConfigureRecording)?,
+            )
+        }
+    };
     let stream_stopping = Arc::clone(&context.stopping);
     let stream_callbacks = StreamCallbacks::new().on_stop(move |error| {
         if stream_stopping.load(Ordering::Acquire) {
@@ -457,11 +496,16 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
     }
 
     let attach = |native: &NativeStream| -> Result<HostTime, Error> {
-        native
-            .stream
-            .add_recording_output(&native.output)
-            .map_err(|error| Error::ConfigureRecording(error.to_string()))?;
+        if let Output::System(output) = &native.output {
+            native
+                .stream
+                .add_recording_output(output)
+                .map_err(|error| Error::ConfigureRecording(error.to_string()))?;
+        }
         let attached = HostTime::now();
+        if let Output::Hevc(writer) = &native.output {
+            writer.attach(attached);
+        }
         context
             .collector
             .lock()
@@ -500,7 +544,7 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
     };
 
     let mut audio_tracks = Vec::new();
-    if context.system_audio {
+    if context.system_audio && context.encoder == Encoder::System {
         audio_tracks.push(TrackKind::SystemAudio);
     }
     if context.microphone.is_some() {
@@ -542,8 +586,14 @@ fn recording_callbacks(sender: &Sender<RecordingEvent>) -> RecordingCallbacks {
 struct NativeStream {
     source: Source,
     stream: SCStream,
-    output: SCRecordingOutput,
+    output: Output,
     handlers: Vec<(usize, SCStreamOutputType)>,
+}
+
+/// What writes a source's movie.
+enum Output {
+    System(SCRecordingOutput),
+    Hevc(Arc<VideoWriter>),
 }
 
 impl NativeStream {
@@ -555,6 +605,10 @@ impl NativeStream {
         let pointer = context.pointer.clone();
         let frames = context.frames.clone();
         let stopping = Arc::clone(&context.stopping);
+        let writer = match &self.output {
+            Output::Hevc(writer) => Some(Arc::clone(writer)),
+            Output::System(_) => None,
+        };
         let screen = self
             .stream
             .add_output_handler(
@@ -579,6 +633,9 @@ impl NativeStream {
                             screen_rect,
                             point,
                         );
+                    if let Some(writer) = &writer {
+                        writer.append(&sample, info.frame_status, info.display_time);
+                    }
                     if let Some(frames) = &frames
                         && !stopping.load(Ordering::Acquire)
                     {
@@ -604,8 +661,12 @@ impl NativeStream {
 
     /// Unwinds a source that failed to start.
     fn abandon(&mut self, output_attached: bool) {
-        if output_attached {
-            let _ = self.stream.remove_recording_output(&self.output);
+        match &self.output {
+            Output::System(output) if output_attached => {
+                let _ = self.stream.remove_recording_output(output);
+            }
+            Output::System(_) => {}
+            Output::Hevc(writer) => writer.cancel(),
         }
         let _ = self.remove_handlers();
         let _ = self.stream.stop_capture();
@@ -614,9 +675,13 @@ impl NativeStream {
 
 impl SourceStream for NativeStream {
     fn detach_output(&self) -> Result<(), String> {
-        self.stream
-            .remove_recording_output(&self.output)
-            .map_err(|error| error.to_string())
+        match &self.output {
+            Output::System(output) => self
+                .stream
+                .remove_recording_output(output)
+                .map_err(|error| error.to_string()),
+            Output::Hevc(writer) => writer.detach(HostTime::now()),
+        }
     }
 
     fn remove_handlers(&mut self) -> Result<(), String> {
@@ -639,7 +704,11 @@ impl SourceStream for NativeStream {
     }
 
     fn recorded_duration(&self) -> Option<MediaTime> {
-        let duration = self.output.recorded_duration();
+        let output = match &self.output {
+            Output::System(output) => output,
+            Output::Hevc(writer) => return writer.recorded_duration(),
+        };
+        let duration = output.recorded_duration();
         if !duration.is_valid() {
             return None;
         }

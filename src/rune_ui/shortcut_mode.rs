@@ -2,8 +2,9 @@
 //! of the three saved settings behind it (`shortcut_mode`, `double_tap_lock`,
 //! `double_tap_only`). Of their eight combinations only four behave
 //! differently: Toggle ignores both double-tap settings, and double-tap only
-//! needs the lock and a shortcut with a key. General's row names the choice
-//! and opens the modal in `explainer` that makes it.
+//! needs the lock and a shortcut with a key (or, with Labs › Double-tap on a
+//! lone modifier, a shortcut without a key, one or more modifiers). General's
+//! row names the choice and opens the modal in `explainer` that makes it.
 
 use rune::El;
 
@@ -12,7 +13,9 @@ use super::controls::value_button;
 use super::controls::{Paint, copy_row};
 use super::explainer::{self, Script};
 use super::icons::HAND;
-use crate::app_settings::{AppSettings, HotkeyKey};
+use crate::app_settings::{
+    AppSettings, ExtraDictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers,
+};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 
@@ -38,7 +41,9 @@ impl Trigger {
             ShortcutMode::Toggle => Self::Tap,
             ShortcutMode::Hold if !settings.double_tap_lock => Self::Hold,
             ShortcutMode::Hold
-                if settings.double_tap_only && settings.dictation_hotkey.key.is_some() =>
+                if settings.double_tap_only
+                    && (settings.dictation_hotkey.key.is_some()
+                        || settings.double_tap_modifiers_allowed()) =>
             {
                 Self::DoubleTap
             }
@@ -94,17 +99,60 @@ impl Trigger {
         }
     }
 
-    /// Why this shortcut can't trigger this way, if it can't: a lone
-    /// modifier can't tell a double-tap from a chord.
+    /// Why this shortcut can't trigger this way, if it can't: a shortcut
+    /// without a key can't tell a double-tap from a chord without
+    /// Labs › Double-tap on a lone modifier.
     pub(super) fn unavailable(self, settings: &AppSettings) -> Option<String> {
-        (self == Self::DoubleTap && settings.dictation_hotkey.key.is_none()).then(|| {
-            let mut example = settings.dictation_hotkey.clone();
+        self.unavailable_for(
+            Some(&settings.dictation_hotkey),
+            settings.double_tap_modifiers_allowed(),
+        )
+    }
+
+    /// [`Self::unavailable`] for a Labs › More dictation shortcuts row, whose
+    /// binding is its own. `modifiers_allowed` is Labs › Double-tap on a lone
+    /// modifier, which the row follows as the dictation shortcut does.
+    pub(super) fn unavailable_for(
+        self,
+        binding: Option<&HotkeyBinding>,
+        modifiers_allowed: bool,
+    ) -> Option<String> {
+        (self == Self::DoubleTap
+            && !modifiers_allowed
+            && binding.is_none_or(|binding| binding.key.is_none()))
+        .then(|| {
+            let mut example = binding.cloned().unwrap_or_else(|| HotkeyBinding {
+                modifiers: HotkeyModifiers::option(),
+                key: None,
+            });
             example.key = Some(HotkeyKey::named("space"));
             tr_fill(
                 "Needs a shortcut with a key, like {}",
                 &example.keycaps().join("+"),
             )
         })
+    }
+
+    /// The choice that saves `mode` on a Labs › More dictation shortcuts row.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn from_extra(mode: ExtraDictationMode) -> Self {
+        match mode {
+            ExtraDictationMode::HoldOrDoubleTap => Self::HoldOrDoubleTap,
+            ExtraDictationMode::Hold => Self::Hold,
+            ExtraDictationMode::Tap => Self::Tap,
+            ExtraDictationMode::DoubleTap => Self::DoubleTap,
+        }
+    }
+
+    /// The mode a Labs › More dictation shortcuts row saves for `self`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn to_extra(self) -> ExtraDictationMode {
+        match self {
+            Self::HoldOrDoubleTap => ExtraDictationMode::HoldOrDoubleTap,
+            Self::Hold => ExtraDictationMode::Hold,
+            Self::Tap => ExtraDictationMode::Tap,
+            Self::DoubleTap => ExtraDictationMode::DoubleTap,
+        }
     }
 }
 
@@ -237,5 +285,38 @@ mod tests {
         for trigger in [Trigger::HoldOrDoubleTap, Trigger::Hold, Trigger::Tap] {
             assert!(trigger.unavailable(&settings(false)).is_none());
         }
+    }
+
+    /// A Labs › More dictation shortcuts row follows Labs › Double-tap on a
+    /// lone modifier as the dictation shortcut does.
+    #[test]
+    fn a_row_needs_a_key_or_the_lone_modifier_lab() {
+        let lone = HotkeyBinding {
+            modifiers: HotkeyModifiers::option(),
+            key: None,
+        };
+        let keyed = HotkeyBinding {
+            key: Some(HotkeyKey::named("space")),
+            ..lone.clone()
+        };
+        assert!(
+            Trigger::DoubleTap
+                .unavailable_for(Some(&lone), false)
+                .is_some()
+        );
+        assert!(Trigger::DoubleTap.unavailable_for(None, false).is_some());
+        // The lab lets a lone modifier double-tap, and an unbound row keep
+        // the choice until it is bound.
+        assert!(
+            Trigger::DoubleTap
+                .unavailable_for(Some(&lone), true)
+                .is_none()
+        );
+        assert!(Trigger::DoubleTap.unavailable_for(None, true).is_none());
+        assert!(
+            Trigger::DoubleTap
+                .unavailable_for(Some(&keyed), false)
+                .is_none()
+        );
     }
 }

@@ -40,6 +40,7 @@ describe("Promise client", () => {
       audioFormats: ["audio/wav"],
       partialTranscripts: false,
       serviceCapture: false,
+      outputProcessing: false,
     })
     expect(await host.client.models.list()).toMatchObject([{ id: "parakeet_v2", installed: true }])
     await host.client.models.prepare("parakeet_v2", {
@@ -51,6 +52,46 @@ describe("Promise client", () => {
       audio: { data: new Uint8Array([1, 2, 3]), contentType: "audio/wav" },
       model: "parakeet_v2",
       language: "en",
+    })).toEqual({ transcript: "hello from hex", durationMs: 750 })
+    expect(await host.client.transcribe({
+      audio: { data: new Uint8Array([1, 2, 3]), contentType: "audio/wav" },
+      model: "parakeet_v2",
+      language: "en",
+      process: "global",
+    })).toEqual({ transcript: "hello from hex", durationMs: 750, processed: "Hello from Hex." })
+    expect(await host.client.transcribe({
+      audio: { data: new Uint8Array([1, 2, 3]), contentType: "audio/wav" },
+      model: "parakeet_v2",
+      language: "en",
+      timestamps: "segment",
+    })).toEqual({
+      transcript: "hello from hex",
+      durationMs: 750,
+      timestampGranularity: "segment",
+      segments: [{ text: "hello from hex", startMs: 0, endMs: 750 }],
+    })
+    expect(await host.client.transcribe({
+      audio: { data: new Uint8Array([1, 2, 3]), contentType: "audio/wav" },
+      model: "parakeet_v2",
+      language: "en",
+      timestamps: "word",
+    })).toEqual({
+      transcript: "hello from hex",
+      durationMs: 750,
+      timestampGranularity: "word",
+      segments: [{ text: "hello from hex", startMs: 0, endMs: 750 }],
+      words: [
+        { text: "hello", startMs: 0, endMs: 300 },
+        { text: "from", startMs: 320, endMs: 480 },
+        { text: "hex", startMs: 500, endMs: 750 },
+      ],
+    })
+    // `none` sends no query parameter, so the response is the untimed one.
+    expect(await host.client.transcribe({
+      audio: { data: new Uint8Array([1, 2, 3]), contentType: "audio/wav" },
+      model: "parakeet_v2",
+      language: "en",
+      timestamps: "none",
     })).toEqual({ transcript: "hello from hex", durationMs: 750 })
 
     const pid = host.pid

@@ -151,8 +151,9 @@ fn encode(width: u32, height: u32, rgba: &[u8], _scale: f32) -> anyhow::Result<V
     Ok(bytes)
 }
 
+/// `png` to `out`; a send says `words`, or [`SEND_TEXT`] without any.
 #[cfg(target_os = "macos")]
-pub(super) fn deliver(out: &Out, png: &[u8]) -> anyhow::Result<()> {
+pub(super) fn deliver(out: &Out, png: &[u8], words: &str) -> anyhow::Result<()> {
     use crate::screenshots::save;
     match out {
         Out::Copy => save::copy(png, None),
@@ -163,14 +164,82 @@ pub(super) fn deliver(out: &Out, png: &[u8]) -> anyhow::Result<()> {
         Out::Send(dest) => {
             let folder = std::env::temp_dir().join("hex-screenshots");
             let path = save::write(&folder, png)?;
-            crate::capture_host::send_image(&dest.session, SEND_TEXT, &path)
+            let text = if words.is_empty() { SEND_TEXT } else { words };
+            crate::capture_host::send_image(&dest.session, text, &path)
         }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn deliver(_: &Out, _: &[u8]) -> anyhow::Result<()> {
+pub(super) fn deliver(_: &Out, _: &[u8], _: &str) -> anyhow::Result<()> {
     anyhow::bail!("the screenshot editor exports on macOS only")
+}
+
+/// What a recording's export needs, taken from the editor.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) struct ClipExport {
+    pub(super) movie: std::path::PathBuf,
+    /// The span kept, when it's less than the whole recording.
+    pub(super) trim: Option<[u64; 2]>,
+    pub(super) length_ms: u64,
+    /// The contact sheet's RGBA and size.
+    pub(super) sheet: Option<(u32, u32, Vec<u8>)>,
+    pub(super) words: String,
+}
+
+impl ClipExport {
+    /// Saves the span kept as a movie, or sends its contact sheet with its
+    /// words and the movie written beside it.
+    #[cfg(target_os = "macos")]
+    pub(super) fn deliver(&self, out: &Out) -> anyhow::Result<()> {
+        use crate::screenshots::save;
+        match out {
+            Out::Copy => anyhow::bail!("a recording isn't copied"),
+            Out::Save => {
+                let folder = crate::app_settings::screenshot_settings().folder();
+                super::clip::write_span(&self.movie, self.trim, &save::recording_path(&folder))
+            }
+            Out::Send(dest) => {
+                // The whole recording is already saved; only a cut is new.
+                let folder = std::env::temp_dir().join("hex-screenshots");
+                let movie = match self.trim {
+                    Some(_) => {
+                        let movie = save::recording_path(&folder);
+                        super::clip::write_span(&self.movie, self.trim, &movie)?;
+                        movie
+                    }
+                    None => self.movie.clone(),
+                };
+                let (w, h, rgba) = self
+                    .sheet
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("the recording has no frames"))?;
+                let sheet = save::write(&folder, &encode(*w, *h, rgba, 1.0)?)?;
+                let text = clip_text(&self.words, &movie, self.length_ms);
+                crate::capture_host::send_image(&dest.session, &text, &sheet)
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn deliver(&self, _: &Out) -> anyhow::Result<()> {
+        anyhow::bail!("recordings export on macOS only")
+    }
+}
+
+/// What a sent recording says: its words, then where its movie is.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn clip_text(words: &str, movie: &std::path::Path, length_ms: u64) -> String {
+    let line = format!(
+        "Screen recording ({}): {}",
+        super::clip::duration_label(length_ms),
+        movie.display()
+    );
+    if words.trim().is_empty() {
+        line
+    } else {
+        format!("{}\n\n{line}", words.trim())
+    }
 }
 
 /// Reads the open sessions into the list, on its own thread.

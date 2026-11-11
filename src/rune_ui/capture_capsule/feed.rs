@@ -12,7 +12,7 @@ use super::flow::{Action, Delivered, Dest, Failure, Grant, Input, Mode, Route, U
 use super::ink::InkOverlay;
 use super::picker::PickerOverlay;
 use crate::capture_host::{
-    CaptureCommand, CaptureNeed, CaptureRoute, CaptureSnapshot, CaptureTarget, NeedState,
+    AskedBy, CaptureCommand, CaptureNeed, CaptureRoute, CaptureSnapshot, CaptureTarget, NeedState,
     RouteAnswer, RouteDelivery, RouteDest,
 };
 
@@ -35,6 +35,9 @@ pub(crate) struct Follow {
     /// reached the capsule.
     route: Option<CaptureRoute>,
     phone: bool,
+    /// The shown capture is a Screenshots recording: once it stops, the
+    /// screenshot card takes it and the capsule folds.
+    clip: bool,
 }
 
 impl Follow {
@@ -93,6 +96,7 @@ impl Follow {
                 self.route = None;
                 self.worked = recording.worked;
                 self.began = recording.screen;
+                self.clip = recording.clip;
                 // No target chips: Annotate records the screen, and the
                 // capsule's toolbar (the pen) takes their place.
                 inputs.push(Input::Stage(Stage::Recording));
@@ -103,6 +107,21 @@ impl Follow {
             self.began |= recording.screen;
             return inputs;
         }
+        // A stopped recording folds unless it failed, which still shows.
+        // A failed clip keeps `clip` until the failure is handled, so its
+        // helper returns to the picker.
+        if self.clip
+            && let Some((bundle, Stage::Recording)) = &self.shown
+            && !snapshot
+                .last
+                .as_ref()
+                .is_some_and(|last| last.bundle == *bundle && last.stage == Stage::Failed)
+        {
+            self.clip = false;
+            self.shown = None;
+            inputs.push(Input::Gone);
+            return inputs;
+        }
         let stage = self.stage(snapshot);
         if stage == Some(Input::Stage(Stage::Done)) && heard_nothing(snapshot, self.shown.as_ref())
         {
@@ -111,6 +130,17 @@ impl Follow {
         inputs.extend(stage);
         inputs.extend(self.routed(snapshot));
         inputs
+    }
+
+    /// What a helper this capture opens should return to: a Screenshots
+    /// recording (`clip`) reopens its picker, any other capture records the
+    /// screen.
+    fn asked_by(&self) -> AskedBy {
+        if self.clip {
+            AskedBy::Screenshots { record: true }
+        } else {
+            AskedBy::Capture
+        }
     }
 
     /// What the router's news for the shown capture tells the capsule. The
@@ -313,7 +343,7 @@ impl CaptureOverlays {
         super::ink::on_drawing(move |on| lit.input(Input::Drawing(on)));
         follow(capsule.clone(), ink.clone());
         let helper = capsule.clone();
-        crate::capture_host::on_missing(move |need| show_helper(&helper, need));
+        crate::capture_host::on_missing(move |need, asked_by| show_helper(&helper, need, asked_by));
         Self {
             capsule,
             picker,
@@ -370,7 +400,7 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
                     if let Input::Failed(Failure::Start | Failure::Save, _) = &input
                         && screen_off()
                     {
-                        show_helper(&capsule, CaptureNeed::ScreenRecording);
+                        show_helper(&capsule, CaptureNeed::ScreenRecording, follow.asked_by());
                         continue;
                     }
                     capsule.input(input);
@@ -378,7 +408,12 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
                 // Sent with only the voice and marks: the helper follows
                 // once its capsule folds.
                 if screenless && screen_off() {
-                    show_helper(&capsule, CaptureNeed::ScreenRecording);
+                    show_helper(&capsule, CaptureNeed::ScreenRecording, follow.asked_by());
+                }
+                // The capture the clip flag describes settled: a later
+                // failure is its own.
+                if follow.clip && !matches!(follow.shown, Some((_, Stage::Recording))) {
+                    follow.clip = false;
                 }
             }
         });
@@ -461,6 +496,15 @@ pub(crate) fn act(action: Action) {
             command(CaptureCommand::FindPhone),
         ],
         Action::Start(target) => vec![command(CaptureCommand::Start(target))],
+        // The Screenshots picker's permission was granted: open it again,
+        // in the mode its shortcut asked for.
+        Action::OpenScreenshots { record } => {
+            #[cfg(target_os = "macos")]
+            crate::screenshots::open(record);
+            #[cfg(not(target_os = "macos"))]
+            let _ = record;
+            return;
+        }
         // What the picker would record, when it has nothing to record yet
         // (its windows still load): the pointer's display.
         // Wayland lists no windows: the portal's own picker chooses one.
@@ -510,8 +554,8 @@ fn screen_off() -> bool {
 }
 
 /// Opens the permission helper for `need` and follows its grant.
-fn show_helper(capsule: &CaptureCapsule, need: CaptureNeed) {
-    capsule.input(Input::NeedsPermission(need));
+fn show_helper(capsule: &CaptureCapsule, need: CaptureNeed, asked_by: AskedBy) {
+    capsule.input(Input::NeedsPermission(need, asked_by));
     watch_grant(capsule.clone(), need);
 }
 
@@ -574,6 +618,7 @@ mod tests {
                 screen: true,
                 target: crate::capture_host::TargetKind::Display,
                 worked: false,
+                clip: false,
             }),
             finishing: Vec::new(),
             last: None,
@@ -631,6 +676,56 @@ mod tests {
             [Input::Stage(Stage::Done)]
         );
         assert_eq!(follow.next(&settled("a", Stage::Done)), []);
+    }
+
+    #[test]
+    fn a_stopped_screenshot_recording_folds_the_capsule() {
+        let mut follow = Follow::default();
+        let mut clip = recording("a");
+        clip.recording.as_mut().unwrap().clip = true;
+        assert_eq!(follow.next(&clip), [Input::Stage(Stage::Recording)]);
+        assert_eq!(
+            follow.next(&finishing("a", Stage::Stopping, false)),
+            [Input::Gone]
+        );
+        assert_eq!(follow.next(&finishing("a", Stage::Writing, false)), []);
+        assert_eq!(follow.next(&settled("a", Stage::Done)), []);
+    }
+
+    /// A Screenshots recording that fails keeps its picker origin until the
+    /// helper is shown; one that folds normally leaves nothing behind.
+    #[test]
+    fn a_failed_screenshots_recording_asks_for_its_picker() {
+        let mut follow = Follow::default();
+        let mut clip = recording("a");
+        clip.recording.as_mut().unwrap().clip = true;
+        follow.next(&clip);
+        assert_eq!(follow.asked_by(), AskedBy::Screenshots { record: true });
+        let mut failed = settled("a", Stage::Failed);
+        failed.last.as_mut().unwrap().error = Some("screen recording stopped".into());
+        assert_eq!(
+            follow.next(&failed),
+            [Input::Failed(
+                Failure::Save,
+                Some("screen recording stopped".into())
+            )]
+        );
+        assert_eq!(
+            follow.asked_by(),
+            AskedBy::Screenshots { record: true },
+            "kept until the follow thread shows its helper"
+        );
+
+        let mut follow = Follow::default();
+        let mut clip = recording("a");
+        clip.recording.as_mut().unwrap().clip = true;
+        follow.next(&clip);
+        follow.next(&finishing("a", Stage::Stopping, false));
+        assert_eq!(
+            follow.asked_by(),
+            AskedBy::Capture,
+            "a folded clip leaves nothing behind"
+        );
     }
 
     #[test]

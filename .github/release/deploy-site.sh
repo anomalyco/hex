@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # deploy-site.sh <dev|production> <dir>: deploys the site Worker from a
-# verified Build Output artifact (<dir>, site/.cloudflare/output from Site's
+# verified Build Output artifact (<dir>, site/.cloudflare/output from Deploy's
 # build job) with the cf CLI pinned in cf/package-lock.json, which the
 # workflow installs (npm ci --ignore-scripts) before the token is in reach.
 #
@@ -15,13 +15,16 @@
 mode=$1
 case "$mode" in
   dev)
-    worker=hex-dev-site host=dev.anoma.ly bucket=hex-dev-files
+    worker=hex-dev-site host=dev.anoma.ly
     ;;
   production)
-    worker=hex-production-site host=anoma.ly bucket=hex-production-files
+    worker=hex-production-site host=anoma.ly
     ;;
   *) die "Unknown site mode: $mode" ;;
 esac
+# The frozen 2.3.1 files are the only bucket content left, the same for both
+# environments, and the Worker only reads them; CI holds no R2 credential.
+bucket=hex-production-files
 : "${CLOUDFLARE_API_TOKEN:?Set CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?Set CLOUDFLARE_ACCOUNT_ID}"
 

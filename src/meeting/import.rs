@@ -102,6 +102,7 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
                 samples,
                 dropped_packets: 0,
                 gaps: Vec::new(),
+                warning: None,
             },
             microphone: TrackManifest {
                 file: "microphone.wav".into(),
@@ -123,6 +124,9 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
             chapters_refined: false,
             retention_applies: true,
             export_sha256: None,
+            notes_export_path: None,
+            notes_export_sha256: None,
+            notes_export_removed: false,
             audio_removed_at_ms: None,
             imported: true,
         };

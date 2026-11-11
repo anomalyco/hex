@@ -3,8 +3,9 @@
 # since the previous dev build, from their titles, skipping CI fixes and
 # internal-only changes. The Release workflow runs it without secrets; its
 # dev-notes job checks the result (.github/release/publish-dev-notes.sh) and
-# uploads it to https://anoma.ly/hex/files/dev-notes.json, which
-# https://anoma.ly/hex/dev and the app's update item read.
+# publishes it to the one-commit `dev-notes` branch, which the site serves at
+# https://anoma.ly/hex/files/dev-notes.json and renders at
+# https://anoma.ly/hex/dev; the app's update item reads the same file.
 #
 #   release-dev-notes.sh <version> <commit> <out>
 #

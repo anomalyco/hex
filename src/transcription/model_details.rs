@@ -69,9 +69,66 @@ const PARAKEET_ULTRA: ModelDetails = ModelDetails {
                            digest, dataset revision, and scorer versions unknown",
 };
 
+const ORUKEET: ModelDetails = ModelDetails {
+    attribution: "Orukeet by Oruk AI, based on NVIDIA Parakeet TDT 0.6B v3. GGUF \
+                  conversion and quantization by handy-computer. Creative Commons \
+                  Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).",
+    source_url: "https://huggingface.co/handy-computer/orukeet-gguf/blob/\
+                 c5511a3850fce1cbbfa5d94ef815966e1d99275f/README.md",
+    license_url: "https://creativecommons.org/licenses/by-sa/4.0/legalcode.en#s3a",
+    notice: "Orukeet is an adaptation of NVIDIA Parakeet TDT 0.6B v3. NVIDIA retains \
+             copyright in its model and upstream work. The base weights are distributed \
+             under CC BY 4.0 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3). Oruk \
+             AI's changes comprise multilingual/accent continuation training, parameter \
+             blending, fitted and frozen Gabor-kernel replacement and recovery, native \
+             and ONNX export, application integration and evaluation. Model stages \
+             (https://github.com/Oruk-AI/orukeet/blob/main/release/model-stages.json) \
+             identifies r3 as the source of every current Orukeet download and records its \
+             ancestry. The r3 NeMo, ONNX INT8, Q8 GGUF and F16 GGUF weights, and their \
+             fitted Gabor kernels, are designated CC BY-SA 4.0. Modifications: \
+             handy-computer converted https://huggingface.co/oruk/orukeet at commit b59c13a \
+             to GGUF for transcribe.cpp (https://github.com/handy-computer/transcribe.cpp). \
+             Conversion repackages the weights, renaming and re-laying-out tensors; the \
+             quantized files (Q8_0, Q6_K, Q5_K_M, Q4_K_M) also store them at reduced numeric \
+             precision. The weights were not retrained or fine-tuned.",
+    peak_memory: None,
+    // transcribe.cpp 2778ae4's catalog/orukeet.json, Q8_0 FLEURS test records.
+    published: &[
+        ("bg", 11.14),
+        ("hr", 11.26),
+        ("cs", 10.22),
+        ("da", 16.58),
+        ("nl", 6.93),
+        ("en", 4.43),
+        ("et", 15.16),
+        ("fi", 11.88),
+        ("fr", 6.17),
+        ("de", 5.64),
+        ("el", 33.12),
+        ("hu", 13.53),
+        ("it", 3.11),
+        ("lv", 19.53),
+        ("lt", 17.72),
+        ("mt", 17.18),
+        ("pl", 7.35),
+        ("pt", 4.56),
+        ("ro", 10.86),
+        ("ru", 6.7),
+        ("sk", 8.99),
+        ("sl", 24.0),
+        ("es", 3.75),
+        ("sv", 13.26),
+        ("uk", 6.53),
+    ],
+    published_conditions: "FLEURS test · Q8_0 · CUDA · batch 8 · each language's hint · \
+                           no timestamps · transcribe.cpp 37273409 · the benchmark file's \
+                           digest, dataset revision, and scorer versions unknown",
+};
+
 pub fn details(id: TranscriptionModelId) -> Option<&'static ModelDetails> {
     match id {
         TranscriptionModelId::ParakeetUltra => Some(&PARAKEET_ULTRA),
+        TranscriptionModelId::Orukeet => Some(&ORUKEET),
         _ => None,
     }
 }
@@ -91,5 +148,34 @@ mod tests {
         assert_eq!(scored, languages);
         assert!(ultra.attribution.ends_with("(CC BY 4.0)."));
         assert!(details(TranscriptionModelId::ParakeetV3).is_none());
+    }
+
+    #[test]
+    fn orukeets_details_credit_its_base_and_cover_its_languages_once() {
+        let orukeet = details(TranscriptionModelId::Orukeet).unwrap();
+        let model = super::super::models::definition(TranscriptionModelId::Orukeet);
+        let mut scored: Vec<_> = orukeet.published.iter().map(|(code, _)| *code).collect();
+        let mut languages = model.languages.to_vec();
+        scored.sort_unstable();
+        languages.sort_unstable();
+        assert_eq!(scored, languages);
+        assert!(
+            orukeet
+                .attribution
+                .starts_with("Orukeet by Oruk AI, based on NVIDIA Parakeet TDT 0.6B v3.")
+        );
+        assert!(orukeet.attribution.ends_with("(CC BY-SA 4.0)."));
+        assert!(
+            orukeet
+                .source_url
+                .ends_with("c5511a3850fce1cbbfa5d94ef815966e1d99275f/README.md")
+        );
+        assert!(orukeet.license_url.ends_with("#s3a"));
+        assert!(
+            orukeet
+                .notice
+                .contains("The weights were not retrained or fine-tuned.")
+        );
+        assert!(orukeet.peak_memory.is_none());
     }
 }

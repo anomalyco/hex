@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::TextReplacement;
+use super::{KeyboardModelChoice, TextReplacement};
 use crate::dictation::vocabulary::{VocabularyEntry, serialize_saved};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -34,6 +34,10 @@ pub struct DictationMode {
     pub replacements: Vec<TextReplacement>,
     pub transformations: Vec<String>,
     pub post_processing: DictationPostProcessing,
+    /// The speech model and language this mode selects while it matches the
+    /// foreground app (Labs › Switch model with app). None means don't switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<KeyboardModelChoice>,
     /// Names heard and spelled here ahead of the shared vocabulary.
     #[serde(
         skip_serializing_if = "Vec::is_empty",

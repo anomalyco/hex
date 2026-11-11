@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 
+use super::HistoryEntry;
 use crate::transcription::models::TranscriptionSelection;
 use crate::transcription::service::{
     AudioClip, AudioError, TranscriptionService, TranscriptionServiceError,
@@ -45,12 +46,22 @@ impl Recording {
 }
 
 /// The recordings folder beside the history file at `history`.
-pub(super) fn directory(history: &Path) -> PathBuf {
+pub fn directory(history: &Path) -> PathBuf {
     history.with_file_name(DIRECTORY)
 }
 
 pub(super) fn path(directory: &Path, id: u64) -> PathBuf {
     directory.join(format!("{id}.wav"))
+}
+
+/// Entry `entry`'s recording in `directory` ([`directory`]), when it kept one
+/// and the file is still there. Labs › Keep recordings is the caller's gate.
+pub fn saved(directory: &Path, entry: &HistoryEntry) -> Option<PathBuf> {
+    if !entry.has_recording() {
+        return None;
+    }
+    let path = path(directory, entry.id);
+    path.is_file().then_some(path)
 }
 
 /// Writes entry `id`'s audio atomically and owner-only; returns its size.
@@ -126,7 +137,12 @@ pub fn retranscribe(path: &Path, selection: TranscriptionSelection) -> Result<St
         .admit_audio()
         .ok_or_else(|| "Another transcription is running.".to_string())?;
     let result = handle
-        .transcribe(selection, clip, admission)
+        .transcribe(
+            selection,
+            clip,
+            admission,
+            crate::transcription::transcript::TimestampLevel::None,
+        )
         .map_err(describe)
         .and_then(|job| match job.wait_timeout(RETRANSCRIBE_DEADLINE) {
             Ok(Some(result)) => result.map_err(describe),
@@ -137,7 +153,7 @@ pub fn retranscribe(path: &Path, selection: TranscriptionSelection) -> Result<St
     // keeping it would make the shutdown wait forever after the result.
     drop(handle);
     service.shutdown();
-    result.map(|text| text.trim().to_string())
+    result.map(|transcript| transcript.text.trim().to_string())
 }
 
 fn describe(error: TranscriptionServiceError) -> String {
@@ -145,6 +161,7 @@ fn describe(error: TranscriptionServiceError) -> String {
         TranscriptionServiceError::QueueFull => "Another transcription is running.".into(),
         TranscriptionServiceError::Unavailable => "Transcription stopped.".into(),
         TranscriptionServiceError::Cancelled => "Transcription was cancelled.".into(),
+        TranscriptionServiceError::Timestamps => "The model cannot give these timings.".into(),
         TranscriptionServiceError::Model(error) | TranscriptionServiceError::Inference(error) => {
             error
         }

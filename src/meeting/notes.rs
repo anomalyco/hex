@@ -446,19 +446,36 @@ pub(super) fn render_notes_block(notes: &MeetingNotes) -> String {
 }
 
 /// The line under the summary, naming the writer that actually wrote it.
-fn notes_footer(writer: Option<&NotesWriter>) -> String {
-    const DETAILS: &str = "the transcript below has the details.";
+pub(super) fn notes_footer(writer: Option<&NotesWriter>) -> String {
+    notes_footer_for(
+        writer,
+        "the transcript below has the details.",
+        "The transcript below has the details.",
+    )
+}
+
+/// The line under the separate notes file's summary: the same writer, but
+/// pointing at the linked transcript rather than the one below.
+pub(super) fn notes_file_footer(writer: Option<&NotesWriter>) -> String {
+    notes_footer_for(
+        writer,
+        "the transcript has the details.",
+        "The transcript has the details.",
+    )
+}
+
+fn notes_footer_for(writer: Option<&NotesWriter>, details: &str, without_a_writer: &str) -> String {
     match writer {
         Some(NotesWriter::AppleIntelligence) => {
-            format!("Written on this Mac by Apple Intelligence; {DETAILS}")
+            format!("Written on this Mac by Apple Intelligence; {details}")
         }
         Some(NotesWriter::OpenCode { model: Some(model) }) => {
-            format!("Written by {model} through OpenCode; {DETAILS}")
+            format!("Written by {model} through OpenCode; {details}")
         }
         Some(NotesWriter::OpenCode { model: None }) => {
-            format!("Written by OpenCode's default model; {DETAILS}")
+            format!("Written by OpenCode's default model; {details}")
         }
-        None => "The transcript below has the details.".into(),
+        None => without_a_writer.into(),
     }
 }
 
@@ -734,12 +751,14 @@ fn update_markdown_file(
 
 /// Applies the notes to the exported file and, with Labs › Descriptive
 /// meeting file names on, renames it to the new title. A missing file is
-/// left to the manifest alone.
+/// left to the manifest alone. A separate notes file is written beside it
+/// while Labs › Separate notes file is on.
 fn apply_notes_to_export(
     manifest: &mut MeetingManifest,
     previous_title: &str,
     title: &str,
     descriptive_filenames: bool,
+    separate_notes: bool,
 ) -> Result<()> {
     let Some(path) = manifest.export_path.clone().filter(|path| path.exists()) else {
         return Ok(());
@@ -753,6 +772,7 @@ fn apply_notes_to_export(
         &block,
     )?;
     super::export_name::rename_to_title(manifest, title, descriptive_filenames);
+    super::notes_file::write_after_notes(manifest, separate_notes);
     Ok(())
 }
 
@@ -912,6 +932,7 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
                 &previous_title,
                 &title,
                 crate::labs::meeting_descriptive_filenames(),
+                crate::labs::meeting_notes_file(),
             ) {
                 tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
                 manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
@@ -1649,6 +1670,7 @@ mod tests {
             "Zoom call — 2:30 PM",
             "Launch plan review",
             true,
+            false,
         )
         .unwrap();
         let renamed = changed.export_path.clone().unwrap();
@@ -1674,6 +1696,7 @@ mod tests {
             &mut unchanged,
             "Zoom call — 2:30 PM",
             "Launch plan review",
+            false,
             false,
         )
         .unwrap();

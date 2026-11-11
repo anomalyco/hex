@@ -137,11 +137,10 @@ once (as does `windows-listener.lock` on Windows).
 
 Macs on 2.3.1 or earlier run Sparkle with `com.kitlangton.hex2`; their
 `SUFeedURL` redirects to `https://anoma.ly/hex/files/appcast.xml`. They never
-auto-update into `anomaly.hex`: at the first release on the service, the
-Legacy appcast workflow replaces that appcast with
-`packaging/macos/legacy-appcast.xml`, one informational item (no enclosure)
-that links to https://anoma.ly/hex. Sparkle shows its notes and a download
-button and installs nothing. It needs no Sparkle EdDSA key: the item has no
+auto-update into `anomaly.hex`: the site serves
+`packaging/macos/legacy-appcast.xml` there, one informational item (no
+enclosure) that links to https://anoma.ly/hex. Sparkle shows its notes and a
+download button and installs nothing. It needs no Sparkle EdDSA key: the item has no
 archive to sign and 2.3.1 does not set `SURequireSignedFeed`. Set the item's
 version to the first `anomaly.hex` release before publishing.
 

@@ -17,3 +17,5 @@ __pycache__/
 /result
 /result-*
 /perf/seeds/.generated/
+/.render
+/captures

@@ -77,13 +77,15 @@ impl From<SourceJson> for Source {
     }
 }
 
-/// A source and the size it records at.
+/// A source, the size it records at, and how its video is encoded.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SourcePlan {
     pub source: Source,
     /// The longest side of the video in pixels, keeping the aspect. `None` records at the
-    /// source's own pixels; a source is never scaled above them.
+    /// source's own pixels; a source is never scaled above them, nor above what its
+    /// [`Encoder`] takes.
     pub long_edge: Option<u32>,
+    pub encoder: Encoder,
 }
 
 impl From<Source> for SourcePlan {
@@ -91,6 +93,32 @@ impl From<Source> for SourcePlan {
         Self {
             source,
             long_edge: None,
+            encoder: Encoder::default(),
+        }
+    }
+}
+
+/// How a source's video is encoded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Encoder {
+    /// `ScreenCaptureKit`'s own recording output: H.264 at a rate the system picks, which keeps
+    /// files small and starves fine text. A [`Mic::Device`] records into its movie.
+    #[default]
+    System,
+    /// Hardware HEVC at a constant quality, sized for crisp text: Rec. 709 tags, no B-frames, a
+    /// keyframe at least every 5 s, frames only when the picture changes. At most 8192×4320
+    /// pixels (4320×8192 tall), the hardware encoder's limit; a larger source is scaled to fit.
+    /// The movie holds video only: a plan with a [`Mic::Device`] is refused, and system audio
+    /// goes only to [`Names::system_audio`].
+    Hevc,
+}
+
+impl Encoder {
+    /// The largest frame the encoder takes, as (long side, short side).
+    const fn max_size(self) -> (u32, u32) {
+        match self {
+            Self::System => (u32::MAX, u32::MAX),
+            Self::Hevc => (8_192, 4_320),
         }
     }
 }
@@ -131,12 +159,14 @@ impl Rect {
 }
 
 /// The encoded size of a source `points` large at `scale` pixels per point, with its long edge at
-/// most `long_edge` pixels. Never above the source's own pixels; both sides even, as H.264 wants.
+/// most `long_edge` pixels. Never above the source's own pixels or what `encoder` takes; both
+/// sides even, as H.264 and HEVC want.
 #[must_use]
 pub(crate) fn output_size(
     points: (f64, f64),
     scale: f64,
     long_edge: Option<u32>,
+    encoder: Encoder,
 ) -> Option<(u32, u32)> {
     let (width, height) = points;
     if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
@@ -147,9 +177,14 @@ pub(crate) fn output_size(
     } else {
         1.0
     };
-    let scale = long_edge.map_or(native, |edge| {
-        (f64::from(edge) / width.max(height)).min(native)
-    });
+    let (max_long, max_short) = encoder.max_size();
+    let fit =
+        (f64::from(max_long) / width.max(height)).min(f64::from(max_short) / width.min(height));
+    let scale = long_edge
+        .map_or(native, |edge| {
+            (f64::from(edge) / width.max(height)).min(native)
+        })
+        .min(fit);
     let side = |points: f64| {
         let pixels = (points * scale).round();
         if !pixels.is_finite() || pixels > f64::from(u32::MAX) {
@@ -366,32 +401,62 @@ mod tests {
 
     #[test]
     fn output_size_caps_the_long_edge_and_keeps_the_aspect() {
+        let system = Encoder::System;
         // A 2x 1728×1117 display: 2560 px long edge, never above its 3456 px.
         assert_eq!(
-            output_size((1_728.0, 1_117.0), 2.0, Some(2_560)),
+            output_size((1_728.0, 1_117.0), 2.0, Some(2_560), system),
             Some((2_560, 1_654))
         );
         assert_eq!(
-            output_size((1_728.0, 1_117.0), 2.0, None),
+            output_size((1_728.0, 1_117.0), 2.0, None, system),
             Some((3_456, 2_234))
         );
         // A 1x 1920×1080 display is not upscaled.
         assert_eq!(
-            output_size((1_920.0, 1_080.0), 1.0, Some(2_560)),
+            output_size((1_920.0, 1_080.0), 1.0, Some(2_560), system),
             Some((1_920, 1_080))
         );
         // A 2x 480×320 region at 1280.
         assert_eq!(
-            output_size((480.0, 320.0), 2.0, Some(1_280)),
+            output_size((480.0, 320.0), 2.0, Some(1_280), system),
             Some((960, 640))
         );
         // A tall window keeps its long side at the cap.
         assert_eq!(
-            output_size((600.0, 1_600.0), 2.0, Some(1_280)),
+            output_size((600.0, 1_600.0), 2.0, Some(1_280), system),
             Some((480, 1_280))
         );
-        assert_eq!(output_size((0.0, 100.0), 2.0, None), None);
-        assert_eq!(output_size((f64::NAN, 100.0), 2.0, None), None);
+        assert_eq!(output_size((0.0, 100.0), 2.0, None, system), None);
+        assert_eq!(output_size((f64::NAN, 100.0), 2.0, None, system), None);
+    }
+
+    #[test]
+    fn hevc_records_native_pixels_up_to_the_hardware_limit() {
+        let hevc = Encoder::Hevc;
+        // A region of a 2x 5K display keeps every pixel.
+        assert_eq!(
+            output_size((2_545.0, 1_286.0), 2.0, None, hevc),
+            Some((5_090, 2_572))
+        );
+        // A 2x 6K display keeps every pixel too.
+        assert_eq!(
+            output_size((3_008.0, 1_692.0), 2.0, None, hevc),
+            Some((6_016, 3_384))
+        );
+        // A larger area is scaled to fit 8192×4320, keeping its shape.
+        assert_eq!(
+            output_size((6_016.0, 3_384.0), 2.0, None, hevc),
+            Some((7_680, 4_320))
+        );
+        // Tall: the short side is the width.
+        assert_eq!(
+            output_size((2_400.0, 4_400.0), 2.0, None, hevc),
+            Some((4_320, 7_920))
+        );
+        assert_eq!(
+            output_size((3_008.0, 1_692.0), 2.0, None, Encoder::System),
+            Some((6_016, 3_384))
+        );
     }
 
     #[test]

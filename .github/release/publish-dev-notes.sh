@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
 # publish-dev-notes.sh <dev-notes.json> <version> <commit>: checks the dev
 # channel's notes, written without secrets by scripts/release-dev-notes.sh,
-# and uploads them as dev-notes.json to HEX_RELEASE_BUCKET
-# (https://anoma.ly/hex/files/dev-notes.json) with .github/release/r2-put.sh.
+# and publishes them as dev-notes.json on the one-commit `dev-notes` branch.
+# The site Worker serves that file at
+# https://anoma.ly/hex/files/dev-notes.json and renders
+# https://anoma.ly/hex/dev from it, so a new dev build shows without a site
+# deploy and no job needs a bucket credential.
 #
-# The file is untrusted data: https://anoma.ly/hex/dev renders it and the
-# app shows it, so it must be the expected shape, put this build first, and
-# link only to this repository's pull requests and commits.
+# The file is untrusted data: the site renders it and the app shows it, so it
+# must be the expected shape, put this build first, and link only to this
+# repository's pull requests and commits. The branch is replaced, not
+# appended to, so its history never grows.
 . "$(dirname "$0")/lib.sh"
 
 [ $# -eq 3 ] || die "Usage: publish-dev-notes.sh <dev-notes.json> <version> <commit>"
 file=$1 version=$2 commit=$3
 [ -f "$file" ] || die "$file does not exist."
-# One JSON document, re-emitted by jq: what is uploaded is exactly what was
+: "${GH_TOKEN:?Set GH_TOKEN}"
+: "${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY}"
+repository=$GITHUB_REPOSITORY
+branch=dev-notes
+path=dev-notes.json
+# One JSON document, re-emitted by jq: what is published is exactly what was
 # checked, valid UTF-8 without duplicate keys.
 canonical=$(mktemp)
 trap 'rm -f "$canonical"' EXIT
@@ -37,6 +46,24 @@ jq -e --arg version "$version" --arg commit "$commit" '
       and (.url | type == "string"
         and test("^https://github\\.com/anomalyco/hex/(pull/[0-9]{1,7}|commit/[0-9a-f]{40})$"))))
 ' "$canonical" > /dev/null || die "The dev notes are not the expected shape for $version ($commit)."
-sh "$(dirname "$0")/r2-put.sh" \
-  dev-notes.json "$canonical" "application/json; charset=utf-8" "public, max-age=60"
+
+# Replace the branch with one commit that has no parent, so the repository
+# keeps the current file and no history.
+# gh prints the error body to stdout when the branch doesn't exist yet, so only a SHA counts.
+existing=$(gh api "repos/$repository/git/ref/heads/$branch" --jq .object.sha 2> /dev/null || true)
+[[ $existing =~ ^[0-9a-f]{40}$ ]] || existing=
+parents='[]'
+blob=$(jq -cn --arg content "$(base64 -w0 < "$canonical")" '{content: $content, encoding: "base64"}' |
+  gh api "repos/$repository/git/blobs" --method POST --input - --jq .sha)
+tree=$(jq -cn --arg blob "$blob" --arg path "$path" \
+  '{tree: [{path: $path, mode: "100644", type: "blob", sha: $blob}]}' |
+  gh api "repos/$repository/git/trees" --method POST --input - --jq .sha)
+published=$(jq -cn --arg message "Dev notes for $version" --arg tree "$tree" --argjson parents "$parents" \
+  '{message: $message, tree: $tree, parents: $parents}' |
+  gh api "repos/$repository/git/commits" --method POST --input - --jq .sha)
+if [ -n "$existing" ]; then
+  gh api "repos/$repository/git/refs/heads/$branch" --method PATCH -f sha="$published" -F force=true > /dev/null
+else
+  gh api "repos/$repository/git/refs" --method POST -f ref="refs/heads/$branch" -f sha="$published" > /dev/null
+fi
 echo "Published the notes for $version: https://anoma.ly/hex/dev#$version"

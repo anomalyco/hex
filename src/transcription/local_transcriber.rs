@@ -6,11 +6,12 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
 use crate::app_settings::TranscriptionDevice;
-use crate::transcription::gguf_session::OfflineGgufSession;
+use crate::transcription::gguf_session::{OfflineGgufSession, output_truncated};
 use crate::transcription::gpu_health;
 use crate::transcription::models::{
-    TranscriptionSelection, download_with_progress, model_path, validate,
+    TranscriptionModelId, TranscriptionSelection, download_with_progress, model_path, validate,
 };
+use crate::transcription::{pad_gguf_samples, trailing_silence_samples};
 
 /// A word or segment's start and end (ms from the clip's start) and text.
 pub type TimedSpan = (i64, i64, String);
@@ -214,9 +215,20 @@ pub fn transcribe_wav_with_selection(
     LocalTranscriber::load(selection)?.transcribe(&samples)
 }
 
+/// A WAV already in memory, as `hex transcribe` read it.
+pub fn transcribe_wav_bytes(wav: &[u8], selection: &TranscriptionSelection) -> Result<String> {
+    let samples = read_wav(std::io::Cursor::new(wav))?;
+    LocalTranscriber::load(selection)?.transcribe(&samples)
+}
+
 pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
-    let mut reader = hound::WavReader::open(path)
-        .wrap_err_with(|| format!("could not open {}", path.display()))?;
+    let file =
+        std::fs::File::open(path).wrap_err_with(|| format!("could not open {}", path.display()))?;
+    read_wav(std::io::BufReader::new(file))
+}
+
+fn read_wav(reader: impl std::io::Read + std::io::Seek) -> Result<Vec<f32>> {
+    let mut reader = hound::WavReader::new(reader)?;
     let spec = reader.spec();
     let samples = match spec.sample_format {
         hound::SampleFormat::Float => reader
@@ -414,12 +426,25 @@ impl LocalTranscriber {
         Ok(transcriber)
     }
 
-    /// Runs [`PREWARM_SAMPLES`] of silence through the model. A decoder
-    /// that runs to its generation cap on silence (Qwen3-ASR 1.7B, #968)
-    /// still ran the whole graph on the device, so that is a warm model,
-    /// not a failed device.
+    /// Runs [`PREWARM_SAMPLES`] of silence through the model, without the
+    /// vocabulary prompt: with it, a decoder such as Qwen3-ASR reads a long
+    /// term list back to its output cap on every warm-up (#1568). A decode
+    /// that still runs to that cap ran the whole graph on the device, so
+    /// that is a warm model, not a failed device.
     fn warm_on_silence(&mut self) -> Result<()> {
-        match self.transcribe(&vec![0.0; PREWARM_SAMPLES]) {
+        let run = |this: &mut Self| {
+            this.session
+                .warm(&vec![0.0; PREWARM_SAMPLES], &this.options)
+                .map(drop)
+                .wrap_err("transcription failed")
+        };
+        let result = match run(self) {
+            // A GPU that fails mid-run reloads on the CPU, as a transcript
+            // does; the CPU model is warmed by its own load.
+            Err(error) if self.gpu_failed(&error) => self.recover_on_cpu(&error),
+            result => result,
+        };
+        match result {
             Err(error) if output_truncated(&error) => {
                 tracing::info!(
                     error = format!("{error:#}"),
@@ -427,12 +452,23 @@ impl LocalTranscriber {
                 );
                 Ok(())
             }
-            result => result.map(drop),
+            result => result,
         }
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
         self.stream.as_ref()
+    }
+
+    /// Silence a live stream of this model hears before it finalizes, the
+    /// same trailing silence its whole-clip runs get.
+    pub(crate) fn stream_trailing_silence(&self) -> usize {
+        trailing_silence_samples(Some(self.model_id()))
+    }
+
+    /// The model this transcriber was loaded for.
+    pub(crate) fn model_id(&self) -> TranscriptionModelId {
+        self.selection.model
     }
 
     pub(crate) fn with_stream<R>(
@@ -465,10 +501,42 @@ impl LocalTranscriber {
             .wrap_err("could not prewarm transcription model")
     }
 
-    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
+    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is:
+    /// the minimum duration, then Unified English's trailing silence.
     pub(crate) fn transcribe_clip(&mut self, mut samples: Vec<f32>) -> Result<String> {
-        crate::dictation::pad_for_parakeet(&mut samples);
+        pad_gguf_samples(&mut samples, Some(self.model_id()));
         self.transcribe(&samples)
+    }
+
+    /// [`Self::transcribe_clip`] with the model's own segment and word times,
+    /// chunked and padded exactly as the untimed run chunks and pads it, so
+    /// the text matches and each chunk's times sit on the clip's timeline.
+    pub(crate) fn transcribe_timed(
+        &mut self,
+        mut samples: Vec<f32>,
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        pad_gguf_samples(&mut samples, Some(self.model_id()));
+        let options = RunOptions {
+            timestamps: self.finest_timestamps,
+            ..self.options.clone()
+        };
+        match self
+            .session
+            .transcribe_chunked_timed(&samples, &options, self.max_audio_samples)
+        {
+            Err(error) if self.gpu_failed(&error) => {
+                self.recover_on_cpu(&error)?;
+                self.session
+                    .transcribe_chunked_timed(&samples, &options, self.max_audio_samples)
+            }
+            result => result,
+        }
+    }
+
+    /// The finest native timings this model gives, as a timed request needs
+    /// them. Never the level a caller asked for.
+    pub(crate) fn timestamps(&self) -> crate::transcription::transcript::TimestampLevel {
+        crate::transcription::gguf_session::timestamp_level(self.finest_timestamps)
     }
 
     pub fn device_label(&self) -> &str {
@@ -643,16 +711,6 @@ impl LocalTranscriber {
             result => result,
         }
     }
-}
-
-/// Whether `error` is a decode stopped at its output limit.
-fn output_truncated(error: &color_eyre::eyre::Report) -> bool {
-    error.chain().any(|cause| {
-        matches!(
-            cause.downcast_ref::<transcribe_cpp::Error>(),
-            Some(transcribe_cpp::Error::OutputTruncated { .. })
-        )
-    })
 }
 
 /// The local API's own model, loaded for the selection a host asks for
@@ -852,22 +910,6 @@ pub(crate) struct SwapFailed {
 mod model_swap_tests {
     use super::*;
     use crate::transcription::models::TranscriptionModelId;
-
-    #[test]
-    fn a_truncated_decode_is_recognised_through_its_context() {
-        let truncated: Result<()> = Err(transcribe_cpp::Error::OutputTruncated {
-            message: "budget".into(),
-            partial: None,
-        })
-        .wrap_err("transcription failed");
-        assert!(output_truncated(&truncated.unwrap_err()));
-        let other: Result<()> = Err(transcribe_cpp::Error::OutputRepetition {
-            message: "loop".into(),
-            partial: None,
-        })
-        .wrap_err("transcription failed");
-        assert!(!output_truncated(&other.unwrap_err()));
-    }
 
     #[test]
     fn an_unchanged_selection_loads_nothing() {

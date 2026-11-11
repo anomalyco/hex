@@ -30,12 +30,21 @@ fn description(enabled: bool) -> &'static str {
 /// Turns Annotate on or off; turning it on fails while its shortcut
 /// collides with another, and leaves the shortcuts as they are.
 fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static str> {
-    if enabled
-        && super::settings::conflicts(settings, ShortcutTarget::Capture, &settings.capture.hotkey)
-    {
-        return Err(tr(
-            "The capture shortcut is already in use. Change it below before turning captures on.",
-        ));
+    if enabled {
+        // Judged as it will be, not as it is: a shortcut the capture
+        // shortcuts only reserve while Annotate is on (the Screenshots
+        // record shortcut among them) must still count.
+        let mut candidate = settings.clone();
+        candidate.capture.enabled = true;
+        if super::settings::conflicts(
+            &candidate,
+            ShortcutTarget::Capture,
+            &candidate.capture.hotkey,
+        ) {
+            return Err(tr(
+                "The capture shortcut is already in use. Change it below before turning captures on.",
+            ));
+        }
     }
     settings.capture.enabled = enabled;
     Ok(())
@@ -500,6 +509,47 @@ mod tests {
         assert_eq!(serde_json::to_value(&taken).unwrap(), before);
         // Turning captures off always works.
         set_enabled(&mut taken, false).unwrap();
+    }
+
+    /// A record shortcut saved while Annotate was off holds its key: giving
+    /// Annotate the same chord and turning it on is refused, since the
+    /// Screenshots record shortcut would otherwise go dead and Annotate's
+    /// whole-screen recording would take the chord.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn annotate_will_not_take_a_saved_record_shortcut() {
+        let record = crate::app_settings::HotkeyBinding {
+            modifiers: crate::app_settings::HotkeyModifiers {
+                command: Some(crate::app_settings::ModifierSide::Either),
+                shift: Some(crate::app_settings::ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(crate::app_settings::HotkeyKey::named("r")),
+        };
+        let mut settings = AppSettings::default();
+        settings.capture.enabled = false;
+        settings.labs.screenshots = true;
+        settings.screenshots.record_hotkey = Some(record.clone());
+        settings.capture.hotkey = record;
+        let before = serde_json::to_value(&settings).unwrap();
+        assert!(
+            set_enabled(&mut settings, true)
+                .unwrap_err()
+                .contains("already in use")
+        );
+        assert_eq!(serde_json::to_value(&settings).unwrap(), before);
+
+        // With the Lab off, the saved record shortcut still holds the key:
+        // Annotate can't take it until the record shortcut is cleared.
+        settings.labs.screenshots = false;
+        assert!(
+            set_enabled(&mut settings, true)
+                .unwrap_err()
+                .contains("already in use")
+        );
+        settings.screenshots.record_hotkey = None;
+        set_enabled(&mut settings, true).unwrap();
+        assert!(settings.capture.enabled);
     }
 
     /// The Scrawl pane drawn from `scene`, laid out headlessly.

@@ -3,10 +3,12 @@
 //!
 //! Exit codes: 0 when the command ran (or there was nothing to change), 1
 //! when Hex refused or failed it, 2 for usage errors (clap), 3 when Hex
-//! isn't running, and 4 when `dictation stop --print` heard no speech. Nothing here launches Hex except `start` and `restart`.
+//! isn't running, and 4 when `dictation stop --print` or `hex transcribe`
+//! heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
 mod human;
+mod transcribe;
 
 use clap::{Args, Subcommand};
 
@@ -81,6 +83,30 @@ pub enum ControlCli {
     },
     /// Paste the last dictation at the current focus (Option-Shift-V).
     PasteLast {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Run the focused field's text through its Output steps and replace it
+    /// (Labs › Transform typed text, Linux).
+    ///
+    /// Sends Ctrl+A and Ctrl+C, so it is not meant for terminals.
+    TypedText {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Transcribe a WAV file with the selected model and print it
+    /// (Labs › Transcribe files).
+    ///
+    /// Nothing is pasted, saved to History, or processed.
+    Transcribe {
+        /// The WAV file to transcribe.
+        file: std::path::PathBuf,
+        /// A model id from `hex model list` (default: the selected model).
+        #[arg(long)]
+        model: Option<String>,
+        /// A language the model supports (default: the saved language).
+        #[arg(long)]
+        language: Option<String>,
         #[command(flatten)]
         output: Output,
     },
@@ -427,6 +453,13 @@ pub fn run(command: ControlCli) -> u8 {
             send(ControlCommand::Dictation { action, print, raw }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
+        ControlCli::TypedText { output } => send(ControlCommand::TypedText, output),
+        ControlCli::Transcribe {
+            file,
+            model,
+            language,
+            output,
+        } => transcribe::run(file, model, language, output),
         ControlCli::Screenshot { pick, output } => {
             send(ControlCommand::Screenshot { pick }, output)
         }
@@ -546,7 +579,7 @@ pub fn run(command: ControlCli) -> u8 {
 }
 
 /// `hex model install`: the running Hex downloads in the background;
-/// without one, Linux and Windows download here.
+/// without one, Linux and Windows download and select here.
 fn install_model(model: Option<String>, language: Option<String>, output: Output) -> u8 {
     let model = match model {
         Some(model) => model,
@@ -557,14 +590,96 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
     };
     #[cfg(not(target_os = "macos"))]
     if !running() {
-        return report(selection(Some(model), language).and_then(|selection| {
-            crate::transcription::local_transcriber::install(
-                &selection,
-                &std::sync::atomic::AtomicBool::new(false),
-            )
-        }));
+        let selection = match selection(Some(model), language) {
+            Ok(selection) => selection,
+            Err(error) => return fail(&format!("{error:#}")),
+        };
+        if let Err(error) = crate::transcription::local_transcriber::install(
+            &selection,
+            &std::sync::atomic::AtomicBool::new(false),
+        ) {
+            return fail(&format!("{error:#}"));
+        }
+        return select_installed(&selection, output);
     }
     send(ControlCommand::ModelInstall { model, language }, output)
+}
+
+/// `model install` with no Hex running: make the switch the app would have
+/// made. A Hex that started while the model downloaded takes the choice;
+/// otherwise it is saved under the service lock `settings apply` uses, so a
+/// starting Hex is never written behind. An unchanged selection needs neither.
+#[cfg(not(target_os = "macos"))]
+fn select_installed(
+    selection: &crate::transcription::models::TranscriptionSelection,
+    output: Output,
+) -> u8 {
+    if crate::app_settings::AppSettings::read()
+        .is_ok_and(|settings| settings.transcription == *selection)
+    {
+        let name = crate::transcription::models::definition(selection.model).name;
+        println!("{name} ({}) is already selected", selection.language);
+        return 0;
+    }
+    let handoff = hand_off(
+        || select_in_running_hex(selection, output),
+        || match save_selection(selection) {
+            Ok(message) => {
+                println!("{message}");
+                0
+            }
+            Err(error) => fail(&format!(
+                "the model is installed, but selecting it failed: {error:#}"
+            )),
+        },
+    );
+    match handoff {
+        Handoff::Done(code) => code,
+        #[cfg(target_os = "linux")]
+        Handoff::OlderHex => fail(&format!(
+            "the model is installed, but an older Hex is still running; \
+             run `hex restart`, then `hex model use {}`",
+            selection.model.as_str()
+        )),
+        Handoff::Deadline => fail(&format!(
+            "the model is installed, but Hex is starting and holds its settings; \
+             run `hex model use {}` once it answers",
+            selection.model.as_str()
+        )),
+    }
+}
+
+/// Hands a downloaded model to a Hex that started while it downloaded.
+#[cfg(not(target_os = "macos"))]
+fn select_in_running_hex(
+    selection: &crate::transcription::models::TranscriptionSelection,
+    output: Output,
+) -> u8 {
+    send(
+        ControlCommand::ModelUse {
+            model: selection.model.as_str().to_owned(),
+            language: Some(selection.language.clone()),
+        },
+        output,
+    )
+}
+
+/// Records a downloaded model as the selected one, as the app's own switch
+/// does. An unchanged selection is left alone.
+#[cfg(not(target_os = "macos"))]
+fn save_selection(
+    selection: &crate::transcription::models::TranscriptionSelection,
+) -> color_eyre::Result<String> {
+    let name = crate::transcription::models::definition(selection.model).name;
+    let mut settings = crate::app_settings::AppSettings::load()?;
+    if settings.transcription == *selection {
+        return Ok(format!(
+            "{name} ({}) is already selected",
+            selection.language
+        ));
+    }
+    settings.save_transcription(selection.clone())?;
+    Ok(format!("Switched to {name} ({})", selection.language))
 }
 
 /// `hex model import`: checks, copies, and records the file here, in this
@@ -907,6 +1022,45 @@ pub fn settings(command: SettingsCommand) -> u8 {
     }
 }
 
+/// How handing settings to a running Hex went, or why it couldn't wait.
+enum Handoff {
+    /// The running Hex took the work, or the lock was free and the work was
+    /// written here; holds that command's exit code.
+    Done(u8),
+    /// On Linux, a Hex too old for `hex` commands answers on its socket.
+    #[cfg(target_os = "linux")]
+    OlderHex,
+    /// A Hex held the settings lock and didn't answer before the deadline.
+    Deadline,
+}
+
+/// `settings apply`'s wait, shared with `model install`: a Hex that holds the
+/// service lock may have read settings.json already, so hand the work to the
+/// Hex that answers (`send`), or write it here while the lock is held
+/// (`write`). Only a lock that never answers gives up.
+fn hand_off(send: impl FnOnce() -> u8, write: impl FnOnce() -> u8) -> Handoff {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+    loop {
+        if running() {
+            return Handoff::Done(send());
+        }
+        // A Hex that holds the service lock may have read settings.json
+        // already; wait for it to answer instead of writing behind it.
+        #[cfg(target_os = "linux")]
+        let lock = crate::desktop::instance::acquire("service");
+        #[cfg(not(target_os = "linux"))]
+        let lock: color_eyre::Result<()> = Ok(());
+        match lock {
+            Ok(_lock) if !running() => return Handoff::Done(write()),
+            Ok(_) => {}
+            #[cfg(target_os = "linux")]
+            Err(_) if crate::linux::service::instance_answers() => return Handoff::OlderHex,
+            Err(_) if std::time::Instant::now() >= deadline => return Handoff::Deadline,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+
 /// `hex settings apply`: the running Hex saves and adopts the settings, so
 /// it never overwrites them from memory; with no Hex running they are
 /// written to settings.json here.
@@ -926,35 +1080,28 @@ fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
         Ok(values) => values,
         Err(error) => return fail(&format!("expected a JSON object of settings: {error}")),
     };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
-    loop {
-        if running() {
-            return send(ControlCommand::SettingsApply { values }, output);
-        }
-        // A Hex that holds the service lock may have read settings.json
-        // already; wait for it to answer instead of writing behind it.
+    let handoff = hand_off(
+        || {
+            send(
+                ControlCommand::SettingsApply {
+                    values: values.clone(),
+                },
+                output,
+            )
+        },
+        || print(apply_offline(&values), output),
+    );
+    match handoff {
+        Handoff::Done(code) => code,
         #[cfg(target_os = "linux")]
-        let lock = crate::desktop::instance::acquire("service");
-        #[cfg(not(target_os = "linux"))]
-        let lock: color_eyre::Result<()> = Ok(());
-        match lock {
-            Ok(_lock) if !running() => return print(apply_offline(&values), output),
-            Ok(_) => {}
-            #[cfg(target_os = "linux")]
-            Err(_) if crate::linux::service::instance_answers() => {
-                return print(older_hex(), output);
-            }
-            Err(_) if std::time::Instant::now() >= deadline => {
-                return print(
-                    ControlReply::error(
-                        "busy",
-                        "Hex is starting but didn't answer; run `hex settings apply` again",
-                    ),
-                    output,
-                );
-            }
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
-        }
+        Handoff::OlderHex => print(older_hex(), output),
+        Handoff::Deadline => print(
+            ControlReply::error(
+                "busy",
+                "Hex is starting but didn't answer; run `hex settings apply` again",
+            ),
+            output,
+        ),
     }
 }
 

@@ -8,6 +8,7 @@
 //! Device enumeration is skipped: the fixture is the only input.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -113,6 +114,7 @@ pub(super) fn open(path: &Path) -> Result<AudioInput> {
         chunks,
         sample_rate,
         device_name: NAME.into(),
+        uid: None,
         selection: Selection::InUse,
         stream_errors,
         watch_service_restarts: false,
@@ -120,6 +122,7 @@ pub(super) fn open(path: &Path) -> Result<AudioInput> {
         hex_microphone: crate::audio::hex_microphone::capture_feed(sample_rate).1,
         stall_after: Some(STREAM_STALL_TIMEOUT),
         last_delivery: Mutex::new(Instant::now()),
+        reported_period: AtomicBool::new(false),
     })
 }
 

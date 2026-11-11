@@ -1,7 +1,13 @@
 //! Runtime request/scheduling regressions; no native model loading or settings writes.
 
+use super::runtime::Runtime;
 use super::*;
-use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
+use crate::app_settings::{DictationMode, KeyboardModelChoice, KeyboardModelSwitching};
+// `Request` moved beside `ShortcutTarget` into `macos_rune/request.rs`, so the
+// runtime's own imports no longer name the model IDs and selections these
+// tests build.
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
+use crate::transcription::preparation::TranscriptionPreparation;
 
 const WAIT: Duration = Duration::from_secs(3);
 
@@ -97,6 +103,10 @@ impl Fixture {
                     settings.keyboard_model_switching.clone(),
                     Some("ABC".into()),
                 ),
+                app_switcher: crate::transcription::app_model_switching::Switcher::new(
+                    settings.labs.app_model_switching,
+                    None,
+                ),
                 settings,
                 preparation,
                 automatic_preparation: false,
@@ -121,6 +131,20 @@ impl Fixture {
     fn due(&mut self) {
         self.runtime
             .tick_at(Instant::now() + Duration::from_secs(1));
+    }
+
+    /// Feeds one foreground read to the app switcher.
+    fn app(&mut self, application: Option<&str>, due: bool) {
+        let now = Instant::now()
+            + if due {
+                Duration::from_secs(1)
+            } else {
+                Duration::ZERO
+            };
+        self.runtime.follow_app(
+            crate::transcription::app_model_switching::Observation::frontmost(application),
+            now,
+        );
     }
 
     fn started(&self) -> (TranscriptionSelection, bool) {
@@ -226,6 +250,76 @@ fn a_mapping_to_the_current_model_in_another_language_switches_the_language() {
     assert_eq!(
         (selection.model, selection.language.as_str(), installed_only),
         (TranscriptionModelId::ParakeetV3, "es", true)
+    );
+    fixture.release();
+}
+
+#[test]
+fn a_modes_speech_choice_switches_when_its_app_comes_to_the_front() {
+    let mut settings = AppSettings::default();
+    settings.labs.app_model_switching = true;
+    settings.dictation_processing.modes = vec![DictationMode {
+        name: "Spanish".into(),
+        applications: vec!["Notes".into()],
+        speech: Some(KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "es".into(),
+        }),
+        ..DictationMode::default()
+    }];
+    let mut fixture = Fixture::new(settings);
+    fixture.app(Some("Notes"), false);
+    assert!(
+        fixture.started.try_recv().is_err(),
+        "the switch started before its debounce"
+    );
+    fixture.app(Some("Notes"), true);
+    let (selection, installed_only) = fixture.started();
+    assert_eq!(
+        (selection.model, selection.language.as_str(), installed_only),
+        (TranscriptionModelId::ParakeetV3, "es", true)
+    );
+    fixture.release();
+}
+
+#[test]
+fn hexs_own_window_applies_nothing_and_an_edit_waits_for_another_app() {
+    let mut settings = AppSettings::default();
+    settings.labs.app_model_switching = true;
+    settings.dictation_processing.default_mode.speech = Some(KeyboardModelChoice {
+        model: TranscriptionModelId::ParakeetV3,
+        language: "es".into(),
+    });
+    let mut fixture = Fixture::new(settings);
+    // Hex's own window names no mode, even though Global matches every app.
+    fixture.app(None, true);
+    assert!(
+        fixture.started.try_recv().is_err(),
+        "Hex's own window switched the model"
+    );
+    // Editing Global while Hex is in front changes nothing yet.
+    fixture
+        .runtime
+        .settings
+        .dictation_processing
+        .default_mode
+        .speech = Some(KeyboardModelChoice {
+        model: TranscriptionModelId::WhisperLargeV3Turbo,
+        language: "fr".into(),
+    });
+    fixture.app(None, true);
+    assert!(fixture.started.try_recv().is_err());
+    // The next app in front applies the edited choice after its debounce.
+    fixture.app(Some("Finder"), false);
+    assert!(
+        fixture.started.try_recv().is_err(),
+        "the switch started before its debounce"
+    );
+    fixture.app(Some("Finder"), true);
+    let (selection, installed_only) = fixture.started();
+    assert_eq!(
+        (selection.model, selection.language.as_str(), installed_only),
+        (TranscriptionModelId::WhisperLargeV3Turbo, "fr", true)
     );
     fixture.release();
 }

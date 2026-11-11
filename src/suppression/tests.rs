@@ -1,6 +1,7 @@
 use super::*;
 use crate::app_settings::{
-    COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, OPTION_KEY_MASK, SHIFT_KEY_MASK,
+    COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, LEFT_COMMAND_MASK, LEFT_CONTROL_MASK,
+    LEFT_OPTION_MASK, OPTION_KEY_MASK, RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
 };
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -15,17 +16,16 @@ unsafe extern "C" {
 fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<ObservedInputEvent>) {
     let (sender, receiver) = mpsc::channel();
     let context = EventTapContext {
-        sender,
+        sink: Arc::new(InputSink::new(sender, PendingInputEvents::default())),
         activity: InputActivity::default(),
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
         takes_cancel: Arc::new(AtomicBool::new(false)),
         caps_lock_cancel: Arc::new(AtomicBool::new(false)),
+        extra_cancel: Arc::new(AtomicBool::new(false)),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
-        pending: PendingInputEvents::default(),
-        next_sequence: AtomicU64::new(0),
     };
     (context, receiver)
 }
@@ -466,6 +466,26 @@ fn mouse_events_reach_the_filtering_tap_only_while_a_mouse_shortcut_is_bound() {
         assert_eq!(key & KEY_MASK, KEY_MASK);
         assert_eq!(observation & OBSERVATION_MASK, OBSERVATION_MASK);
     }
+
+    // Labs › More dictation shortcuts' mouse buttons filter clicks too.
+    let mut extra_mouse = RuntimeHotkeys::default();
+    extra_mouse.extra_dictation[0] = Some(
+        HotkeyBinding {
+            modifiers: Default::default(),
+            key: crate::app_settings::HotkeyKey::mouse(3),
+        }
+        .runtime(),
+    );
+    assert!(filters_mouse(extra_mouse));
+    let mouse_code = crate::app_settings::HotkeyKey::mouse_code(3).expect("mouse code");
+    assert!(matches!(
+        mouse_input(3, true, 0, extra_mouse),
+        Some(InputEvent::Key {
+            code,
+            down: true,
+            flags: 0,
+        }) if code == mouse_code
+    ));
 }
 
 #[test]
@@ -767,6 +787,30 @@ fn globe_key_events_are_not_a_chord_with_the_function_shortcut() {
         ..RuntimeHotkeys::default()
     };
     assert!(is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, option));
+    // A raw or extra shortcut holding Fn owns Globe too.
+    let raw = RuntimeHotkeys {
+        raw_dictation: Some(function_binding()),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(!is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, raw));
+    assert!(is_chord_evidence(0, FUNCTION_KEY_MASK, raw));
+    let extra = RuntimeHotkeys {
+        extra_dictation: [Some(function_binding()), None, None, None],
+        ..RuntimeHotkeys::default()
+    };
+    assert!(!is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, extra));
+    assert!(is_chord_evidence(0, FUNCTION_KEY_MASK, extra));
+    // Only the dictation shortcuts own Globe: any other shortcut holding Fn
+    // leaves it as chord evidence.
+    let paste_last = RuntimeHotkeys {
+        paste_last: Some(function_binding()),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(is_chord_evidence(
+        GLOBE_KEY_CODE,
+        FUNCTION_KEY_MASK,
+        paste_last
+    ));
 }
 
 #[test]
@@ -2060,7 +2104,7 @@ fn programmatic_ownership_disarms_pending_double_taps_without_losing_held_keys()
         flags: 0,
     };
     assert_eq!(hotkey.process(key(97, true), now), None);
-    assert!(matches!(hotkey.state, State::FirstTapPressed));
+    assert!(matches!(hotkey.state, State::FirstTapPressed { .. }));
     hotkey.disarm_pending_gesture();
     assert!(hotkey.pressed_keys.contains(&97));
     hotkey.track_key_state(key(97, false), now + Duration::from_millis(80));
@@ -2160,7 +2204,7 @@ fn stale_key_recovery_never_polls_holds_or_pending_gestures() {
             started_at: now,
             previous_release: None,
         },
-        State::FirstTapPressed,
+        State::FirstTapPressed { started_at: now },
         State::AwaitingSecondTap { released_at: now },
         State::SecondTapPressed {
             first_released_at: now,
@@ -2570,17 +2614,20 @@ fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
         modifiers: crate::app_settings::HotkeyModifiers::default(),
         key_code: Some(1),
     };
-    assert_eq!(tap_cancel_binding(Some(custom), false, true), None);
+    assert_eq!(tap_cancel_binding(Some(custom), false, true, false), None);
     assert_eq!(
-        tap_cancel_binding(Some(custom), true, true),
+        tap_cancel_binding(Some(custom), true, true, false),
         Some(escape),
         "a Caps Lock capture cancels on Escape even with another Toggle cancel"
     );
-    assert_eq!(tap_cancel_binding(Some(custom), true, false), Some(custom));
+    assert_eq!(
+        tap_cancel_binding(Some(custom), true, false, false),
+        Some(custom)
+    );
 
     let mut suppression = ShortcutSuppression::default();
     let armed = RuntimeHotkeys {
-        cancel: tap_cancel_binding(Some(custom), true, true),
+        cancel: tap_cancel_binding(Some(custom), true, true, false),
         ..RuntimeHotkeys::default()
     };
     assert!(suppression.process_all(
@@ -2593,6 +2640,148 @@ fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
         true,
         false,
     ));
+}
+
+/// An extra dictation shortcut cancels in its own mode: the tap keeps the
+/// armed cancel if Toggle configured one, else Escape, while it records.
+/// Escape itself only matches with no modifiers held, so a Hold row's chord
+/// keeps Escape from the tap.
+#[test]
+fn an_extra_capture_keeps_its_cancel_from_the_app() {
+    let escape = HotkeyBinding::cancel_default().runtime();
+    let custom = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::default(),
+        key_code: Some(1),
+    };
+    assert_eq!(
+        tap_cancel_binding(None, true, false, false),
+        None,
+        "no extra recording: the tap's cancel is unchanged"
+    );
+    assert_eq!(
+        tap_cancel_binding(None, true, false, true),
+        Some(escape),
+        "a recording extra arms Escape while it has no Toggle cancel"
+    );
+    assert_eq!(
+        tap_cancel_binding(Some(custom), true, false, true),
+        Some(custom),
+        "a Toggle-mode cancel binding is the extra's too"
+    );
+    assert_eq!(tap_cancel_binding(Some(custom), false, false, true), None);
+
+    let mut suppression = ShortcutSuppression::default();
+    let armed = RuntimeHotkeys {
+        cancel: tap_cancel_binding(None, true, false, true),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(suppression.process_all(
+        InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down: true,
+            flags: NO_FLAGS,
+        },
+        armed,
+        true,
+        false,
+    ));
+}
+
+/// Each extra-mode trigger sets the three switches the dictation shortcut's
+/// own mode sets; double-tap only still needs a keyed binding.
+#[test]
+fn an_extra_mode_sets_its_trigger_switches() {
+    use crate::app_settings::ExtraDictationMode;
+    let now = capture_time();
+    let keyed = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::option(),
+        key_code: Some(49),
+    };
+    for mode in ExtraDictationMode::ALL {
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, keyed);
+        hotkey.set_trigger(mode);
+        let (toggle, double_tap_enabled, double_tap_only) = mode.switches();
+        assert_eq!(hotkey.toggle, toggle, "{mode:?}");
+        assert_eq!(hotkey.double_tap_enabled, double_tap_enabled, "{mode:?}");
+        assert_eq!(hotkey.double_tap_only, double_tap_only, "{mode:?}");
+    }
+    let mut modifier_only = DictationHotkey::with_binding(false, now, true, option_binding());
+    modifier_only.set_trigger(ExtraDictationMode::DoubleTap);
+    assert!(
+        !modifier_only.double_tap_only,
+        "double-tap only folds away without a key, as the dictation mode does"
+    );
+    modifier_only.set_trigger(ExtraDictationMode::Tap);
+    assert!(modifier_only.toggle);
+    assert!(modifier_only.double_tap_enabled);
+    assert!(!modifier_only.double_tap_only);
+}
+
+/// A machine set to cancel in any mode takes its cancel binding while a
+/// locked Hold-or-double-tap capture records; an ordinary machine keeps
+/// ignoring it.
+#[test]
+fn a_cancel_in_any_mode_machine_takes_its_cancel_in_hold_mode() {
+    let now = capture_time();
+    let escape = |flags| InputEvent::Key {
+        code: ESCAPE_KEY_CODE,
+        down: true,
+        flags,
+    };
+    let cancel = HotkeyBinding::cancel_default().runtime();
+    let option = |hotkey: &mut DictationHotkey, at: CaptureInstant| {
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), at)
+    };
+    let lock = |hotkey: &mut DictationHotkey| {
+        assert_eq!(option(hotkey, now), Some(HotkeyAction::Start));
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(80)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(
+            option(hotkey, now + Duration::from_millis(180)),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(NO_FLAGS),
+                now + Duration::from_millis(260)
+            ),
+            None
+        );
+        assert!(hotkey.is_locked());
+    };
+
+    // A Hold machine never takes its cancel while the shortcut is held.
+    let mut plain = test_hotkey(false, now);
+    plain.set_cancel(Some(cancel));
+    assert_eq!(option(&mut plain, now), Some(HotkeyAction::Start));
+    assert_eq!(
+        plain.process(escape(OPTION_KEY_MASK), now + Duration::from_millis(50)),
+        None
+    );
+    assert!(plain.is_recording());
+
+    // A lock is hands-free, but only the flag lets a non-toggle machine
+    // take the cancel.
+    let mut locked = test_hotkey(false, now);
+    locked.set_cancel(Some(cancel));
+    lock(&mut locked);
+    assert_eq!(
+        locked.process(escape(NO_FLAGS), now + Duration::from_millis(200)),
+        None
+    );
+    assert!(locked.is_recording());
+
+    let mut extra = test_hotkey(false, now);
+    extra.set_cancel(Some(cancel));
+    extra.set_cancel_in_any_mode(true);
+    lock(&mut extra);
+    assert_eq!(
+        extra.process(escape(NO_FLAGS), now + Duration::from_millis(200)),
+        Some(HotkeyAction::CancelShortcut)
+    );
+    assert!(!extra.is_recording());
 }
 
 #[test]
@@ -2697,6 +2886,254 @@ fn double_tap_only_timeout_and_unrelated_chord_never_start_capture() {
         None
     );
     assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_starts_from_a_lone_modifier() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    for (binding, flags) in [
+        (option_binding(), option),
+        (function_binding(), FUNCTION_KEY_MASK),
+    ] {
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+        hotkey.double_tap_modifiers = || true;
+        hotkey.set_double_tap_only(true);
+
+        // One complete tap arms the window and records nothing.
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(0)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+        assert!(!hotkey.is_recording());
+
+        // A hold records nothing either, and keeps the modifier's own use.
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(400)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_000)), None);
+        assert!(!hotkey.is_recording());
+
+        // Two complete taps inside the window lock a hands-free capture.
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(1_400)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_480)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(1_580)), None);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_660)),
+            Some(HotkeyAction::Start)
+        );
+        assert!(hotkey.is_locked());
+
+        // A fresh press finishes it.
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(flags), ms(2_200)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(2_280)), None);
+        assert!(!hotkey.is_recording());
+    }
+}
+
+#[test]
+fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // One complete tap.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(0)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+    // The second press, then a key joining it while Option is held: a chord
+    // meant for another app, so the gesture goes dirty and records nothing.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(120)), None);
+    for (at, down) in [(ms(140), true), (ms(160), false)] {
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Key {
+                    code: 0,
+                    down,
+                    flags: option,
+                },
+                at,
+            ),
+            None
+        );
+    }
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(180)), None);
+    // The next complete tap is a fresh first tap, not the second of a pair.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(220)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(300)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_does_not_take_a_held_first_press_as_a_tap() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // A lone modifier held past the hold threshold is a hold, not a tap.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(0)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(400)), None);
+    // The tap right after it must not complete the held press as a pair.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(450)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(520)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_discards_a_different_modifier_between_taps() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let command = COMMAND_KEY_MASK | LEFT_COMMAND_MASK;
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(0)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+    // Command between the Option taps is a chord, not part of the pair.
+    assert_eq!(hotkey.process(InputEvent::Flags(command), ms(120)), None);
+    assert!(matches!(hotkey.state, State::Dirty));
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(160)), None);
+    // The next Option tap is a fresh first tap, so the pair before Command
+    // never locks.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(200)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(280)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_locks_a_keyless_control_option_chord() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let control = CONTROL_KEY_MASK | LEFT_CONTROL_MASK;
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let binding = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::control_option(),
+        key_code: None,
+    };
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // First chord: one flags event per key, released one key at a time.
+    assert_eq!(hotkey.process(InputEvent::Flags(control), ms(0)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(control | option), ms(40)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(control), ms(90)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(140)), None);
+    assert!(!hotkey.is_recording());
+
+    // The second chord starts with Control alone: it is the binding's own
+    // key, not a different modifier, so the pending tap stays live.
+    assert_eq!(hotkey.process(InputEvent::Flags(control), ms(200)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(control | option), ms(240)),
+        None
+    );
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(control), ms(280)),
+        Some(HotkeyAction::Start)
+    );
+    assert!(hotkey.is_locked());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_locks_a_both_options_chord() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let left = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let right = OPTION_KEY_MASK | RIGHT_OPTION_MASK;
+    let binding = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers {
+            option: Some(crate::app_settings::ModifierSide::Both),
+            ..Default::default()
+        },
+        key_code: None,
+    };
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // First chord: both sides go down together, then come up one at a time.
+    assert_eq!(hotkey.process(InputEvent::Flags(left), ms(0)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(left | right), ms(40)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(right), ms(90)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(140)), None);
+    assert!(!hotkey.is_recording());
+
+    // The second chord starts on one side: its own key, not a different
+    // modifier.
+    assert_eq!(hotkey.process(InputEvent::Flags(left), ms(200)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(left | right), ms(240)),
+        None
+    );
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(left), ms(280)),
+        Some(HotkeyAction::Start)
+    );
+    assert!(hotkey.is_locked());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_discards_the_other_option_side_between_taps() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let left = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let right = OPTION_KEY_MASK | RIGHT_OPTION_MASK;
+    let binding = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers {
+            option: Some(crate::app_settings::ModifierSide::Right),
+            ..Default::default()
+        },
+        key_code: None,
+    };
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // A Right Option tap arms the window.
+    assert_eq!(hotkey.process(InputEvent::Flags(right), ms(0)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+    // Left Option is a side the binding doesn't name: a chord.
+    assert_eq!(hotkey.process(InputEvent::Flags(left), ms(120)), None);
+    assert!(matches!(hotkey.state, State::Dirty));
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(160)), None);
+    // The next Right Option tap is a fresh first tap, not a second one.
+    assert_eq!(hotkey.process(InputEvent::Flags(right), ms(200)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(280)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn without_the_lab_double_tap_only_stays_off_for_a_lone_modifier() {
+    let now = capture_time();
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    for (binding, flags) in [
+        (option_binding(), option),
+        (function_binding(), FUNCTION_KEY_MASK),
+    ] {
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+        hotkey.double_tap_modifiers = || false;
+        hotkey.set_double_tap_only(true);
+        // The press is an ordinary hold, exactly as before the lab.
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(flags), now),
+            Some(HotkeyAction::Start)
+        );
+        assert!(!hotkey.is_locked());
+    }
 }
 
 #[test]
@@ -4241,6 +4678,38 @@ fn caps_lock_press_starts_and_finishes_its_own_hands_free_capture() {
     assert!(hotkey.is_locked());
     assert_eq!(hotkey.caps_lock_toggle(), Some(HotkeyAction::Finish));
     assert!(!hotkey.is_recording());
+}
+
+// Labs › Pause from menu bar's resume waits on `neutral_with`, which runs on
+// the real keyboard only in macOS builds; these pin its rules.
+#[test]
+fn a_toggled_caps_lock_still_reads_neutral() {
+    // CoreGraphics reports Caps Lock as a held key, and sets alpha shift,
+    // for as long as it is toggled on.
+    assert!(neutral_with(
+        || crate::caps_lock_dictation::ALPHA_SHIFT_MASK,
+        |code| code == CAPS_LOCK_KEY_CODE
+    ));
+    assert_eq!(held_key_with(|code| code == CAPS_LOCK_KEY_CODE), None);
+}
+
+#[test]
+fn a_held_key_reads_not_neutral() {
+    const K: u16 = 40;
+    assert!(!neutral_with(|| 0, |code| code == K));
+    assert_eq!(held_key_with(|code| code == K), Some(K));
+}
+
+#[test]
+fn a_held_modifier_reads_not_neutral() {
+    const LEFT_SHIFT: u16 = 56;
+    assert!(!neutral_with(|| SHIFT_KEY_MASK, |code| code == LEFT_SHIFT));
+}
+
+#[test]
+fn a_stuck_function_flag_still_reads_neutral() {
+    // Arrow-key metadata can leave SecondaryFn set after the key is up.
+    assert!(neutral_with(|| FUNCTION_KEY_MASK, |_| false));
 }
 
 #[test]

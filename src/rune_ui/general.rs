@@ -28,8 +28,14 @@ use crate::desktop::onboarding::PermissionKind;
 use crate::transcription::models as transcription_models;
 
 mod search;
+mod shortcuts;
+
+/// Labs › More dictation shortcuts (macOS): General's extra shortcut rows.
+#[cfg(target_os = "macos")]
+mod extra_shortcuts;
 
 pub(super) use self::search::{focus_search_key, pane};
+pub(super) use self::shortcuts::shortcut_rows;
 
 // ---------------------------------------------------------------------------
 // The basics
@@ -56,9 +62,8 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
             let (description, cancel) = search::cancel_rows(ui, p);
             rows.extend_described(tr("Cancel"), Some(description), cancel);
         }
-        // Labs › Second dictation shortcut (macOS): another key that
-        // dictates like the one above, such as on an external keyboard.
-        #[cfg(target_os = "macos")]
+        // Labs › Second dictation shortcut: another key that dictates like
+        // the one above, such as on an external keyboard.
         if crate::labs::Feature::SecondDictationShortcut.on(&ui.settings) {
             rows.extend_described(
                 tr("Second dictation shortcut"),
@@ -70,6 +75,33 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
                     &KEYBOARD,
                     tr("Second dictation shortcut"),
                     ShortcutTarget::SecondDictation,
+                    Some(tr("Dictates like the shortcut above")),
+                ),
+            );
+        }
+        // Labs › More dictation shortcuts (macOS): up to four more keys that
+        // each dictate like the one above, each with its own shortcut mode.
+        #[cfg(target_os = "macos")]
+        if crate::labs::Feature::MoreDictationShortcuts.on(&ui.settings) {
+            rows.extend(
+                tr("Extra dictation shortcut"),
+                extra_shortcuts::rows(ui, p, layer),
+            );
+        }
+        // Labs › Terminal paste shortcut (Windows, Linux): another key that
+        // dictates like the one above and always pastes with Ctrl+Shift+V.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if crate::labs::Feature::TerminalPasteShortcut.on(&ui.settings) {
+            rows.extend_described(
+                tr("Terminal paste shortcut"),
+                Some(tr("Dictates like the shortcut above")),
+                shortcut_rows(
+                    ui,
+                    p,
+                    "terminal-paste-shortcut",
+                    &KEYBOARD,
+                    tr("Terminal paste shortcut"),
+                    ShortcutTarget::TerminalPaste,
                     Some(tr("Dictates like the shortcut above")),
                 ),
             );
@@ -224,97 +256,6 @@ pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::Model
     }
     let (installed, progress) = super::onboarding::progress(ui);
     (!installed).then_some(progress)
-}
-
-/// A shortcut's row with what a shortcuts portal granted, and the note when
-/// the desktop kept it.
-pub(super) fn shortcut_rows(
-    ui: &Ui,
-    p: Paint,
-    key: &str,
-    glyph: &'static rune::Icon,
-    title: &str,
-    target: ShortcutTarget,
-    purpose: Option<&str>,
-) -> Vec<CardRow> {
-    let mut control = row()
-        .key(format!("{key}-control"))
-        .gap(4.0)
-        .center_y()
-        .child(keys_button(ui, p, target));
-    // The optional shortcuts can be turned off.
-    #[cfg(target_os = "macos")]
-    let second = target == ShortcutTarget::SecondDictation;
-    #[cfg(not(target_os = "macos"))]
-    let second = false;
-    let optional = second
-        || matches!(
-            target,
-            ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
-        );
-    if optional && s::binding(&ui.settings, target).is_some() {
-        control = control.child(icon_button(
-            p,
-            &format!("clear-{key}"),
-            &rune_theme_opencode::icons::TRASH,
-            tr("Clear shortcut"),
-            move |ui: &mut Ui| {
-                ui.update(|settings| match target {
-                    ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
-                    _ if second => settings.second_dictation_hotkey = None,
-                    _ => settings.paste_last_hotkey = None,
-                });
-            },
-        ));
-    }
-    // Labs › Restore shortcut default: Paste last dictation's default,
-    // offered while the shortcut is something else or off. Cancel's
-    // default, Escape, can't be recorded (Escape ends the recorder), so its
-    // restore is always offered.
-    let mut default_note = None;
-    let default = match target {
-        ShortcutTarget::PasteLast
-            if crate::labs::Feature::RestoreShortcutDefault.on(&ui.settings) =>
-        {
-            Some(crate::app_settings::HotkeyBinding::paste_last_default())
-        }
-        ShortcutTarget::Cancel => Some(crate::app_settings::HotkeyBinding::cancel_default()),
-        _ => None,
-    };
-    if let Some(default) = default {
-        let current = s::binding(&ui.settings, target);
-        if current.is_none() {
-            default_note = Some((
-                tr_fill("Default shortcut: {}", &default.keycaps().join("+")),
-                p.muted(),
-            ));
-        }
-        if current != Some(&default) {
-            control = control.child(icon_button(
-                p,
-                &format!("restore-{key}"),
-                &REFRESH,
-                tr("Restore default shortcut"),
-                move |ui: &mut Ui| s::restore_default(ui, target, default.clone()),
-            ));
-        }
-    }
-    let mut rows: Vec<CardRow> = vec![
-        icon_described_row(
-            p,
-            key,
-            glyph,
-            title,
-            default_note
-                .or_else(|| s::granted(ui, p, target))
-                .or_else(|| purpose.map(|purpose| (purpose.to_string(), p.muted()))),
-            control,
-        )
-        .into(),
-    ];
-    rows.extend(s::refused_note(ui, p, target).map(CardRow::from));
-    rows.extend(s::gnome_clash_note(ui, p, target).map(CardRow::from));
-    rows
 }
 
 /// The desktop's own dialog for the shortcuts its portal bound, where the

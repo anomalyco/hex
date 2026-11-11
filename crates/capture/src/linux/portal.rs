@@ -51,13 +51,17 @@ pub enum Source {
     Window,
 }
 
-/// A started screen cast: its PipeWire remote and node, and the stream's size and position in
-/// the desktop's logical coordinates when it reports them.
+/// A started screen cast: its PipeWire remote and node, the stream's size and position in the
+/// desktop's logical coordinates when it reports them, and the output it records when the
+/// desktop names one (a monitor pick).
 pub struct Cast {
     pub remote: Option<OwnedFd>,
     pub node: u32,
     pub size: Option<(i32, i32)>,
     pub position: Option<(i32, i32)>,
+    /// The picked monitor's connector name, such as `DP-3` (Hyprland's portal, 1.4.0+, sets
+    /// it for monitor picks). Window picks carry none.
+    pub mapping_id: Option<String>,
     runtime: tokio::runtime::Runtime,
     connection: Connection,
     session: OwnedObjectPath,
@@ -314,6 +318,7 @@ fn start_with(
         node: 0,
         size: None,
         position: None,
+        mapping_id: None,
         runtime,
         connection,
         session,
@@ -346,6 +351,10 @@ fn start_with(
     cast.node = node;
     cast.size = pair("size");
     cast.position = pair("position");
+    // A string beside `size` and `position`; absent or another type for a window.
+    cast.mapping_id = props
+        .get("mapping_id")
+        .and_then(|value| value.try_clone().ok()?.try_into().ok());
     Ok(cast)
 }
 

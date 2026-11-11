@@ -7,9 +7,16 @@ use serde_json::Value;
 
 use super::ControlError;
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeyModifiers, HotkeySlot,
-    ModifierSide,
+    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeySlot,
+    MAX_EXTRA_DICTATION_SHORTCUTS,
 };
+
+mod hotkeys;
+mod registry;
+
+use hotkeys::check_shortcut;
+pub use hotkeys::{format_hotkey, parse_hotkey};
+use registry::{CAPTURE_KEYS, KEYS, Key, Kind, NUMERIC_CHOICES, RETIRED, needs};
 
 /// One setting as `hex settings get` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -30,752 +37,6 @@ pub struct SettingValue {
 
 fn available() -> bool {
     true
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Kind {
-    Bool,
-    Number {
-        min: f64,
-        max: f64,
-    },
-    #[cfg_attr(not(hex_capture), allow(dead_code))]
-    Integer {
-        min: u64,
-        max: u64,
-    },
-    Choice(&'static [&'static str]),
-    Text,
-    Shortcut(HotkeySlot),
-    Path,
-    Json,
-}
-
-impl Kind {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Bool => "bool",
-            Self::Number { .. } => "number",
-            Self::Integer { .. } => "integer",
-            Self::Choice(_) => "choice",
-            Self::Text => "text",
-            Self::Shortcut(_) => "shortcut",
-            Self::Path => "path",
-            Self::Json => "json",
-        }
-    }
-}
-
-struct Key {
-    key: &'static str,
-    kind: Kind,
-    /// `none` clears it.
-    optional: bool,
-    /// Why it can't be set here, if it can't.
-    read_only: Option<&'static str>,
-    about: &'static str,
-}
-
-const fn key(key: &'static str, kind: Kind, about: &'static str) -> Key {
-    Key {
-        key,
-        kind,
-        optional: false,
-        read_only: None,
-        about,
-    }
-}
-
-const fn optional(key: &'static str, kind: Kind, about: &'static str) -> Key {
-    Key {
-        key,
-        kind,
-        optional: true,
-        read_only: None,
-        about,
-    }
-}
-
-const fn read_only(key: &'static str, kind: Kind, about: &'static str, why: &'static str) -> Key {
-    Key {
-        key,
-        kind,
-        optional: false,
-        read_only: Some(why),
-        about,
-    }
-}
-
-const UNIT: Kind = Kind::Number { min: 0.0, max: 1.0 };
-const MODEL_CHANGE: &str = "change the transcription model with `hex model use`";
-
-/// Choice keys whose values are numbers in settings.json.
-const NUMERIC_CHOICES: [&str; 2] = ["meetings.calendar.lead_minutes", "labs.unload_idle_minutes"];
-
-const KEYS: &[Key] = &[
-    key(
-        "keyboard_model_switching.enabled",
-        Kind::Bool,
-        "Labs: switch the model when the keyboard input source changes (macOS, Windows, X11)",
-    ),
-    key(
-        "keyboard_model_switching.mappings",
-        Kind::Json,
-        "Input-source IDs mapped to a model and language; absent sources don't switch (macOS, Windows, X11)",
-    ),
-    key(
-        "release_microphone_while_idle",
-        Kind::Bool,
-        "Release the microphone between dictations",
-    ),
-    key(
-        "sound_effects",
-        Kind::Bool,
-        "Play recording and error tones",
-    ),
-    key(
-        "sound_effect_volume",
-        UNIT,
-        "Tone volume from 0 to 1; 0 turns tones off",
-    ),
-    key(
-        "sound_theme",
-        Kind::Choice(&[
-            "signature",
-            "classic",
-            "click",
-            "soft",
-            "wood",
-            "analog",
-            "thock",
-        ]),
-        "Which sounds play; classic, Hex's original tones, is the default",
-    ),
-    optional(
-        "microphone",
-        Kind::Text,
-        "Microphone by name; system-default (or none) follows the system's default input",
-    ),
-    key(
-        "avoid_bluetooth_microphone",
-        Kind::Bool,
-        "System default records from the built-in or another wired microphone, not a Bluetooth headset's",
-    ),
-    key(
-        "recording_audio_behavior",
-        Kind::Choice(&["mute", "pause_media", "do_nothing", "duck"]),
-        "What other audio does while you dictate",
-    ),
-    key(
-        "recording_duck_volume",
-        UNIT,
-        "Fraction of original output volume while lowering audio, from 0 to 1",
-    ),
-    key(
-        "pause_browser_media",
-        Kind::Bool,
-        "Labs: also pause a playing browser tab while dictating (macOS, with Pause media)",
-    ),
-    key(
-        "double_tap_lock",
-        Kind::Bool,
-        "Double-tap the dictation shortcut to keep recording hands-free",
-    ),
-    key(
-        "double_tap_only",
-        Kind::Bool,
-        "Only a double tap starts dictation (needs double_tap_lock and a key chord)",
-    ),
-    key(
-        "shortcut_mode",
-        Kind::Choice(&["hold", "toggle"]),
-        "Hold the shortcut while speaking, or press once to start and again to finish",
-    ),
-    key(
-        "dictation_hotkey",
-        Kind::Shortcut(HotkeySlot::Dictation),
-        "The dictation shortcut",
-    ),
-    optional(
-        "paste_last_hotkey",
-        Kind::Shortcut(HotkeySlot::PasteLast),
-        "The paste-last-dictation shortcut; none turns it off",
-    ),
-    key(
-        "cancel_hotkey",
-        Kind::Shortcut(HotkeySlot::Cancel),
-        "Toggle mode's cancel shortcut, Escape by default: discards the recording, \
-         nothing pasted or saved. Hex takes the key only while a toggled recording runs",
-    ),
-    optional(
-        "raw_dictation_hotkey",
-        Kind::Shortcut(HotkeySlot::RawDictation),
-        "Dictate without processing: dictates and pastes the words as heard, skipping \
-         the Output steps; none (the default) turns it off",
-    ),
-    optional(
-        "second_dictation_hotkey",
-        Kind::Shortcut(HotkeySlot::SecondDictation),
-        "Labs: another shortcut that dictates like dictation_hotkey, such as a key on an \
-         external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
-         turns it off",
-    ),
-    key(
-        "screenshots.hotkey",
-        Kind::Shortcut(HotkeySlot::Screenshot),
-        "Labs: the screenshot shortcut, command+shift+4 by default: drag an area, or \
-         press space to pick a window (macOS, with labs.screenshots)",
-    ),
-    optional(
-        "screenshots.folder",
-        Kind::Path,
-        "Labs: folder screenshots are saved to; none uses the Desktop (macOS)",
-    ),
-    key(
-        "show_dock_icon",
-        Kind::Bool,
-        "Keep Hex in the Dock when Settings is closed (macOS)",
-    ),
-    read_only(
-        "transcription.model",
-        Kind::Text,
-        "The dictation model",
-        MODEL_CHANGE,
-    ),
-    read_only(
-        "transcription.language",
-        Kind::Text,
-        "The dictation language",
-        MODEL_CHANGE,
-    ),
-    read_only(
-        "transcription_recents",
-        Kind::Json,
-        "Recently used models, each with its language",
-        "Hex records these as you switch models",
-    ),
-    key(
-        "vocabulary_boost",
-        Kind::Choice(&["off", "light", "normal", "strong"]),
-        "How readily transcription swaps heard words for a vocabulary term",
-    ),
-    key(
-        "dictation_processing.default_mode",
-        Kind::Json,
-        "The Global mode: replacements, transformations, and rewriting",
-    ),
-    key(
-        "dictation_processing.modes",
-        Kind::Json,
-        "Modes for specific apps and websites, as a JSON array",
-    ),
-    key(
-        "history_retention",
-        Kind::Choice(&["off", "day", "week", "month", "forever"]),
-        "How long dictation history is kept",
-    ),
-    key(
-        "labs.live_text",
-        Kind::Bool,
-        "Labs: provisional words beside the HUD while dictating",
-    ),
-    key(
-        "labs.failure_notices",
-        Kind::Bool,
-        "Labs: when a dictation fails, show why for a few seconds beside the HUD",
-    ),
-    key(
-        "labs.live_typing",
-        Kind::Bool,
-        "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
-    ),
-    key(
-        "labs.settings_search",
-        Kind::Bool,
-        "Labs: a search field at the top of General that filters its rows",
-    ),
-    key(
-        "labs.live_chapters",
-        Kind::Bool,
-        "Labs: chapter meeting transcripts while recording",
-    ),
-    key(
-        "labs.playground",
-        Kind::Bool,
-        "Labs: the scene and story browser in the window",
-    ),
-    key(
-        "labs.vocabulary_biasing",
-        Kind::Bool,
-        "Labs: bias Parakeet transcription toward the vocabulary",
-    ),
-    key(
-        "labs.mouse_shortcuts",
-        Kind::Bool,
-        "Labs: record mouse buttons as shortcuts (macOS)",
-    ),
-    key(
-        "labs.unload_idle",
-        Kind::Bool,
-        "Labs: unload the speech model when idle, freeing its memory",
-    ),
-    key(
-        "labs.unload_idle_minutes",
-        Kind::Choice(&["5", "15", "30", "60"]),
-        "Minutes unused before Labs › Unload model when idle unloads the model",
-    ),
-    key(
-        "labs.restore_shortcut_default",
-        Kind::Bool,
-        "Labs: offer Restore default beside the Paste last dictation shortcut",
-    ),
-    key(
-        "labs.keep_on_clipboard",
-        Kind::Bool,
-        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS)",
-    ),
-    key(
-        "labs.copy_only",
-        Kind::Bool,
-        "Labs: put the dictation on the clipboard instead of pasting it (macOS)",
-    ),
-    key(
-        "labs.spoken_formatting",
-        Kind::Bool,
-        "Labs: turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks",
-    ),
-    key(
-        "labs.spoken_symbols",
-        Kind::Bool,
-        "Labs: turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words",
-    ),
-    key(
-        "labs.filler_words",
-        Kind::Bool,
-        "Labs: remove filler words such as um and uh from dictations, without an AI model",
-    ),
-    key(
-        "labs.subtitle_export",
-        Kind::Bool,
-        "Labs: export meeting transcripts as SRT or VTT subtitles with hex meetings show --srt|--vtt",
-    ),
-    key(
-        "labs.second_dictation_shortcut",
-        Kind::Bool,
-        "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
-    ),
-    key(
-        "labs.smart_spacing",
-        Kind::Bool,
-        "Labs: add a space before a dictation pasted right after a word (macOS)",
-    ),
-    key(
-        "labs.picker_sort_filter",
-        Kind::Bool,
-        "Labs: sort the Local transcription picker by recommendation, size, or name, and show only models for the saved language",
-    ),
-    key(
-        "labs.sided_modifier_chords",
-        Kind::Bool,
-        "Labs: the shortcut recorder keeps which side each modifier of a modifier-only chord is on, such as Right Command + Right Option (macOS)",
-    ),
-    key(
-        "labs.tap_or_hold",
-        Kind::Bool,
-        "Labs: in Toggle mode, a press held past the hold threshold dictates until it lifts; a short tap still starts and stops (macOS)",
-    ),
-    key(
-        "labs.benchmark_details",
-        Kind::Bool,
-        "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
-    ),
-    key(
-        "labs.parakeet_ultra",
-        Kind::Bool,
-        "Labs: Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker; stays on while it is the dictation model",
-    ),
-    key(
-        "labs.standalone_special_keys",
-        Kind::Bool,
-        "Labs: shortcuts may use Menu, Pause, or Scroll Lock, alone or with modifiers (Linux); off puts such a shortcut back to its default",
-    ),
-    key(
-        "labs.section_key_alone",
-        Kind::Bool,
-        "Labs: a shortcut may be the § key, left of 1 on ISO keyboards, with no modifier (Linux); off puts such a shortcut back to its default",
-    ),
-    key(
-        "labs.keep_recordings",
-        Kind::Bool,
-        "Labs: dictations saved to History keep their audio, so History can transcribe them again with another model; off stops saving, clearing History deletes it",
-    ),
-    key(
-        "labs.history_stats",
-        Kind::Bool,
-        "Labs: a summary of retained dictations at the top of History, and hex history stats",
-    ),
-    key(
-        "labs.recent_dictations",
-        Kind::Bool,
-        "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
-    ),
-    key(
-        "labs.hide_menu_bar_icon",
-        Kind::Bool,
-        "Labs: hide Hex's menu bar icon while nothing records; shortcuts keep working, and opening Hex again from Finder or Spotlight shows Settings (macOS)",
-    ),
-    key(
-        "labs.quit_closes_window",
-        Kind::Bool,
-        "Labs: the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits (macOS)",
-    ),
-    key(
-        "labs.caps_lock_dictation",
-        Kind::Bool,
-        "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
-    ),
-    key(
-        "labs.notch_indicator",
-        Kind::Bool,
-        "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
-    ),
-    key(
-        "labs.skip_pauses",
-        Kind::Bool,
-        "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
-    ),
-    key(
-        "labs.stop_when_call_ends",
-        Kind::Bool,
-        "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
-    ),
-    key(
-        "labs.more_call_apps",
-        Kind::Bool,
-        "Labs: offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages",
-    ),
-    key(
-        "labs.movable_meeting_capsules",
-        Kind::Bool,
-        "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
-    ),
-    key(
-        "labs.meeting_notes_vocabulary",
-        Kind::Bool,
-        "Labs: final meeting titles and summaries read the vocabulary, so names are spelled the way you wrote them",
-    ),
-    key(
-        "labs.meeting_finished_event",
-        Kind::Bool,
-        "Labs: the local API's GET /meetings/events tells one subscriber each finished meeting's id once its final transcript is written; no transcript, audio, path, or title",
-    ),
-    key(
-        "labs.screenshots",
-        Kind::Bool,
-        "Labs: screenshots.hotkey (command+shift+4) drags out an area or, after space, picks a window; the PNG is copied and saved to screenshots.folder (macOS)",
-    ),
-    key(
-        "labs.annotate_replay",
-        Kind::Bool,
-        "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened; macOS shows the screen-recording dot the whole time it's on (macOS 27+)",
-    ),
-    key(
-        "labs.gnome_clipboard_restore",
-        Kind::Bool,
-        "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
-    ),
-    key(
-        "labs.gnome_meeting_capsules",
-        Kind::Bool,
-        "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
-    ),
-    key(
-        "labs.follow_live_transcript",
-        Kind::Bool,
-        "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",
-    ),
-    key(
-        "labs.meeting_import",
-        Kind::Bool,
-        "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
-    ),
-    key(
-        "labs.meeting_descriptive_filenames",
-        Kind::Bool,
-        "Labs: an exported meeting's Markdown follows its title once notes or a rename provide one, keeping the date and time",
-    ),
-    key(
-        "labs.expire_meeting_audio",
-        Kind::Bool,
-        "Labs: finished meetings drop their WAVs on meetings.audio_retention while their transcripts, notes, summary, and Markdown stay",
-    ),
-    key(
-        "labs.output_fixes",
-        Kind::Bool,
-        "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
-    ),
-    key(
-        "labs.picker_active_first",
-        Kind::Bool,
-        "Labs: the speech model picker lists the model in use first",
-    ),
-    key(
-        "labs.model_in_place",
-        Kind::Bool,
-        "Labs: the speech model picker's Use model file where it is… adds a GGUF file without copying it, so several accounts can share one file",
-    ),
-    key(
-        "labs.picker_downloaded",
-        Kind::Bool,
-        "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",
-    ),
-    key(
-        "meetings.enabled",
-        Kind::Bool,
-        "Labs: Meetings (beta), call detection, recording, and transcripts",
-    ),
-    optional(
-        "meetings.output_folder",
-        Kind::Path,
-        "Folder for meeting Markdown; none uses ~/Documents/Hex Meetings",
-    ),
-    key(
-        "meetings.summaries",
-        SUMMARIES,
-        "Who titles and summarizes meetings: off, mac (Apple Intelligence, nothing leaves this Mac), or opencode (sends the transcript to the OpenCode model)",
-    ),
-    optional(
-        "meetings.opencode_model",
-        Kind::Text,
-        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none lets Hex pick a fast model",
-    ),
-    key(
-        "meetings.show_recording_indicator",
-        Kind::Bool,
-        "Show the floating recording indicator during meetings",
-    ),
-    key(
-        "meetings.recording_indicator_corner",
-        Kind::Choice(&["top_right", "top_left", "bottom_right", "bottom_left"]),
-        "Screen corner of the meeting recording indicator",
-    ),
-    optional(
-        "meetings.retention",
-        Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
-    ),
-    optional(
-        "meetings.audio_retention",
-        Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings keep their audio with Labs › Expire meeting audio separately on; none follows meetings.retention",
-    ),
-    key(
-        "meetings.providers",
-        Kind::Json,
-        "Per-app call choices, as a JSON array of {key, label, policy: ask|always_record|never_offer}",
-    ),
-    read_only(
-        "meetings.calendar.connected",
-        Kind::Bool,
-        "A calendar is connected for meeting reminders",
-        "connect a calendar from Settings › Meetings, which asks macOS for access",
-    ),
-    key(
-        "meetings.calendar.excluded_calendars",
-        Kind::Json,
-        "Calendars left out of reminders, as a JSON array of EventKit identifiers",
-    ),
-    key(
-        "meetings.calendar.remind",
-        Kind::Bool,
-        "Remind before calendar meetings",
-    ),
-    key(
-        "meetings.calendar.lead_minutes",
-        Kind::Choice(&["0", "1", "2", "5"]),
-        "Minutes before a meeting its reminder shows",
-    ),
-    key(
-        "experimental.hex_microphone",
-        Kind::Bool,
-        "Labs: the Voice Filter and its Hex Microphone virtual input",
-    ),
-    key(
-        "experimental.hex_microphone_mode",
-        Kind::Choice(&[
-            "normal",
-            "muffled",
-            "quiet",
-            "muted",
-            "chipmunk",
-            "robot",
-            "walkie",
-            "underwater",
-            "far",
-        ]),
-        "What Hex Microphone does to your voice while you dictate",
-    ),
-    key(
-        "experimental.hex_microphone_comfort_noise",
-        Kind::Bool,
-        "Hex Microphone fills silence with soft noise",
-    ),
-    key(
-        "experimental.hex_microphone_strength",
-        UNIT,
-        "How strongly Hex Microphone applies its filter, from 0 to 1",
-    ),
-    key(
-        "enable_on_launch",
-        Kind::Bool,
-        "Start listening when Hex opens (Windows and Linux)",
-    ),
-    key(
-        "paste_with_shift",
-        Kind::Bool,
-        "Paste with Ctrl-Shift-V for terminals (Linux and Windows)",
-    ),
-    key(
-        "gnome_keyboard_shortcuts",
-        Kind::Bool,
-        "Hex's own GNOME custom keyboard shortcuts, for GNOME without a shortcuts portal (Linux)",
-    ),
-    key(
-        "share_dictation_shortcut",
-        Kind::Bool,
-        "Labs: let other apps see the dictation shortcut too (Windows)",
-    ),
-    optional(
-        "ui_language",
-        Kind::Choice(&[
-            "en", "pl", "zh", "zh-Hant", "ja", "de", "es", "uk", "pt", "fr", "ru",
-        ]),
-        "Interface language; none follows the system",
-    ),
-    key(
-        "transcription_device",
-        Kind::Choice(&["auto", "gpu", "cpu"]),
-        "Where the speech model runs: auto (a GPU unless it failed before), gpu, or cpu (Linux and Windows)",
-    ),
-    key(
-        "indicator_position",
-        Kind::Choice(&["top", "bottom", "hidden"]),
-        "Where the dictation HUD appears",
-    ),
-    optional(
-        "updates.channel",
-        Kind::Choice(&["stable", "dev"]),
-        "Update channel; none follows the build (dev builds use dev, others stable)",
-    ),
-];
-
-/// Captures exist only in builds with the `capture` build option.
-#[cfg(hex_capture)]
-const CAPTURE_KEYS: &[Key] = &[
-    key(
-        "capture.enabled",
-        Kind::Bool,
-        "Annotate: record the screen while you draw and talk (on by default)",
-    ),
-    key(
-        "capture.hotkey",
-        Kind::Shortcut(HotkeySlot::Capture),
-        "The Annotate shortcut: press to start recording and again to finish",
-    ),
-    optional(
-        "capture.replay_hotkey",
-        Kind::Shortcut(HotkeySlot::CaptureReplay),
-        "Labs: shortcut to export the last 15 s from Annotate's rolling replay buffer, or hold to narrate over it (macOS 27+, with labs.annotate_replay); none turns it off",
-    ),
-    key(
-        "capture.transcriber",
-        Kind::Choice(&["parakeet", "apple"]),
-        "What transcribes a capture's narration: Hex's loaded model or Apple's",
-    ),
-    optional(
-        "capture.folder",
-        Kind::Path,
-        "Folder for new captures; none uses Scrawl's captures folder",
-    ),
-    optional(
-        "capture.media_days",
-        RETENTION_DAYS,
-        "Days a capture keeps its video and audio; none keeps them",
-    ),
-    optional(
-        "capture.bundle_days",
-        RETENTION_DAYS,
-        "Days a capture is kept; none keeps it",
-    ),
-    key(
-        "capture.capsule_flow",
-        Kind::Choice(&["list", "toast", "menu_bar", "cursor", "notch"]),
-        "How the capture capsule offers where to send a capture (prototypes): a list, a \
-         one-line toast, the menu bar, a card at the pointer, or a notch",
-    ),
-    key(
-        "capture.routing",
-        Kind::Json,
-        "Where captures go among OpenCode sessions: Scrawl's router settings (autoSend, sites, apps, smartRouting, …) as a JSON object",
-    ),
-    key(
-        "capture.show_overlays_in_recordings",
-        Kind::Bool,
-        "Let screen recordings, captures included, show Hex's capsules, ink, and HUD (for demos)",
-    ),
-];
-#[cfg(not(hex_capture))]
-const CAPTURE_KEYS: &[Key] = &[];
-#[cfg(hex_capture)]
-const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
-
-#[cfg(target_os = "macos")]
-const SUMMARIES: Kind = Kind::Choice(&["off", "mac", "opencode"]);
-#[cfg(not(target_os = "macos"))]
-const SUMMARIES: Kind = Kind::Choice(&["off", "opencode"]);
-
-/// Keys that were replaced, and what replaced them.
-const RETIRED: &[(&str, &str)] = &[
-    (
-        "meetings.summarize_with_apple_intelligence",
-        "meetings.summaries mac",
-    ),
-    (
-        "meetings.summarize_with_opencode",
-        "meetings.summaries opencode",
-    ),
-];
-
-/// Settings that act only where Hex has a capability (by its
-/// `rune_ui::capabilities` name), the same one that shows their row in the
-/// window. The first matching prefix decides.
-const NEEDS: &[(&str, &str)] = &[
-    ("meetings.calendar.", "calendar"),
-    ("meetings.", "meetings"),
-    ("labs.live_chapters", "meetings"),
-    ("labs.subtitle_export", "meetings"),
-    ("labs.stop_when_call_ends", "meetings"),
-    ("labs.more_call_apps", "meetings"),
-    ("labs.movable_meeting_capsules", "meetings"),
-    ("labs.meeting_notes_vocabulary", "meetings"),
-    ("labs.meeting_finished_event", "meetings"),
-    ("labs.meeting_descriptive_filenames", "meetings"),
-    ("labs.follow_live_transcript", "meetings"),
-    ("experimental.hex_microphone", "fun"),
-    ("show_dock_icon", "dock_icon"),
-    ("labs.hide_menu_bar_icon", "dock_icon"),
-    ("labs.quit_closes_window", "dock_icon"),
-    ("keyboard_model_switching.", "keyboard_model_switching"),
-    ("enable_on_launch", "listener_control"),
-    ("share_dictation_shortcut", "share_shortcut"),
-];
-
-/// The capability `key` needs, if any.
-fn needs(key: &str) -> Option<&'static str> {
-    NEEDS
-        .iter()
-        .find(|(prefix, _)| key == *prefix || key.starts_with(prefix))
-        .map(|(_, capability)| *capability)
 }
 
 /// Why `hex settings set` refuses `name` on this OS, if it does.
@@ -809,6 +70,12 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
         return Some(ControlError::new(
             "unsupported",
             format!("`{name}` belongs to Labs › Screenshots, which only macOS has"),
+        ));
+    }
+    if name == "extra_dictation_hotkeys" && !cfg!(target_os = "macos") {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to Labs › More dictation shortcuts, which only macOS has"),
         ));
     }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
@@ -1038,20 +305,34 @@ pub fn apply(
         }
         "double_tap_lock" if !candidate.double_tap_lock => candidate.double_tap_only = false,
         "double_tap_only" if candidate.double_tap_only => {
-            if !candidate.double_tap_lock || candidate.dictation_hotkey.key.is_none() {
+            if !candidate.double_tap_lock
+                || (candidate.dictation_hotkey.key.is_none()
+                    && !candidate.double_tap_modifiers_allowed())
+            {
+                let modifier_only = if cfg!(target_os = "macos") {
+                    ", or with Labs › Double-tap on a lone modifier on, a shortcut without a key"
+                } else {
+                    ""
+                };
                 return Err(invalid(
                     name,
-                    "a double-tap-only start needs double_tap_lock on and a dictation shortcut \
-                     with a key, such as option+space",
+                    &format!(
+                        "a double-tap-only start needs double_tap_lock on and a dictation \
+                         shortcut with a key, such as option+space{modifier_only}"
+                    ),
                 ));
             }
         }
+        "labs.double_tap_modifiers" => candidate.normalize_double_tap_settings(),
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
+        | "typed_text_hotkey"
         | "second_dictation_hotkey"
+        | "terminal_paste_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
+        | "screenshots.record_hotkey"
         | "capture.hotkey"
         | "capture.replay_hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
@@ -1061,40 +342,54 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
+                HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
+                // Each row of `extra_dictation_hotkeys` is validated from
+                // its own JSON list, not a shortcut key.
+                HotkeySlot::ExtraDictation(_) => None,
+                HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
+                HotkeySlot::ScreenshotRecord => candidate.screenshots.record_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
                 #[cfg(hex_capture)]
                 HotkeySlot::CaptureReplay => candidate.capture.replay_hotkey.as_ref(),
             };
             if let Some(binding) = binding {
-                if cfg!(target_os = "macos")
-                    && !candidate.labs.mouse_shortcuts
-                    && binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)
-                {
-                    return Err(invalid(
+                check_shortcut(settings, &candidate, name, slot, binding, shortcuts)?;
+            }
+            if candidate.dictation_hotkey.key.is_none() && !candidate.double_tap_modifiers_allowed()
+            {
+                candidate.double_tap_only = false;
+            }
+        }
+        "extra_dictation_hotkeys" => {
+            if candidate.extra_dictation_hotkeys.len() > MAX_EXTRA_DICTATION_SHORTCUTS {
+                return Err(invalid(
+                    name,
+                    &format!("at most {MAX_EXTRA_DICTATION_SHORTCUTS} extra dictation shortcuts"),
+                ));
+            }
+            for (index, row) in candidate.extra_dictation_hotkeys.iter().enumerate() {
+                if let Some(binding) = &row.binding {
+                    check_shortcut(
+                        &candidate,
+                        &candidate,
                         name,
-                        "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
-                    ));
-                }
-                if let Some(why) = special_key_refusal(&candidate, binding) {
-                    return Err(invalid(name, &why));
-                }
-                (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
-                if settings.hotkey_in_use(slot, binding) {
-                    return Err(ControlError::new(
-                        "shortcut-in-use",
-                        format!(
-                            "{} is already in use by another Hex shortcut",
-                            format_hotkey(binding)
-                        ),
-                    ));
+                        HotkeySlot::ExtraDictation(index),
+                        binding,
+                        shortcuts,
+                    )?;
                 }
             }
-            if candidate.dictation_hotkey.key.is_none() {
-                candidate.double_tap_only = false;
+            // A row can't be double-tap only without a key, or with Labs ›
+            // Double-tap on a lone modifier, without a key but modifiers.
+            let modifiers_allowed = candidate.double_tap_modifiers_allowed();
+            for row in &mut candidate.extra_dictation_hotkeys {
+                row.mode = row
+                    .mode
+                    .for_binding(row.binding.as_ref(), modifiers_allowed);
             }
         }
         "keyboard_model_switching.mappings" => {
@@ -1106,6 +401,7 @@ pub fn apply(
         }
         "dictation_processing.default_mode" => {
             candidate.dictation_processing.default_mode.name = "Global".into();
+            validate_mode_speech(name, &candidate.dictation_processing.default_mode)?;
         }
         "dictation_processing.modes" => {
             let mut names = std::collections::HashSet::new();
@@ -1114,6 +410,7 @@ pub fn apply(
                 if mode_name.is_empty() || !names.insert(mode_name.to_lowercase()) {
                     return Err(invalid(name, "every mode needs a unique, non-empty name"));
                 }
+                validate_mode_speech(name, mode)?;
             }
         }
         #[cfg(hex_capture)]
@@ -1250,6 +547,19 @@ fn invalid(name: &str, why: &str) -> ControlError {
     )
 }
 
+/// A mode's speech choice must name a model and a language it supports.
+fn validate_mode_speech(
+    name: &str,
+    mode: &crate::app_settings::DictationMode,
+) -> Result<(), ControlError> {
+    if let Some(choice) = &mode.speech {
+        choice
+            .validate()
+            .map_err(|error| invalid(name, &error.to_string()))?;
+    }
+    Ok(())
+}
+
 fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, ControlError> {
     let name = key.key;
     let trimmed = raw.trim();
@@ -1324,170 +634,12 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     }
 }
 
-/// Reads a shortcut such as `option`, `right-command`, `fn`, `f5`,
-/// `left-option+right-option` (both Options), or `control+option+space`:
-/// modifiers, then at most one key.
-pub fn parse_hotkey(
-    text: &str,
-    key_named: fn(&str) -> Result<HotkeyKey, String>,
-) -> Result<HotkeyBinding, String> {
-    let mut modifiers = HotkeyModifiers::default();
-    let mut key = None;
-    let mut sided = false;
-    let parts: Vec<&str> = text.split('+').map(str::trim).collect();
-    if parts.iter().any(|part| part.is_empty()) {
-        return Err("expected modifiers and a key joined by +, such as option+space".into());
-    }
-    for part in parts {
-        let lower = part.to_ascii_lowercase();
-        let (side, name) = if let Some(rest) =
-            lower.strip_prefix("left-").or(lower.strip_prefix("left"))
-        {
-            (Some(ModifierSide::Left), rest.to_string())
-        } else if let Some(rest) = lower.strip_prefix("right-").or(lower.strip_prefix("right")) {
-            (Some(ModifierSide::Right), rest.to_string())
-        } else {
-            (None, lower.clone())
-        };
-        let slot = match name.as_str() {
-            "control" | "ctrl" => Some(&mut modifiers.control),
-            "option" | "opt" | "alt" => Some(&mut modifiers.option),
-            "shift" => Some(&mut modifiers.shift),
-            "command" | "cmd" | "super" | "win" | "meta" => Some(&mut modifiers.command),
-            _ => None,
-        };
-        match slot {
-            Some(slot) => {
-                sided |= side.is_some();
-                *slot = Some(match (*slot, side) {
-                    (None, side) => side.unwrap_or(ModifierSide::Either),
-                    (Some(ModifierSide::Left), Some(ModifierSide::Right))
-                    | (Some(ModifierSide::Right), Some(ModifierSide::Left)) => ModifierSide::Both,
-                    _ => return Err(format!("{part} appears twice")),
-                });
-            }
-            None if side.is_none() && matches!(name.as_str(), "fn" | "function" | "globe") => {
-                if modifiers.function {
-                    return Err(format!("{part} appears twice"));
-                }
-                modifiers.function = true;
-            }
-            None if side.is_some() && name.is_empty() => {
-                // "left" or "right" alone is the arrow key.
-                if key.is_some() {
-                    return Err("a shortcut has at most one key".into());
-                }
-                key = Some(key_named(&lower)?);
-            }
-            None => {
-                if key.is_some() {
-                    return Err("a shortcut has at most one key".into());
-                }
-                key = Some(key_named(part)?);
-            }
-        }
-    }
-    let binding = HotkeyBinding { modifiers, key };
-    if let Some(key) = &binding.key {
-        if sided {
-            return Err("left- and right- apply only to shortcuts without a key".into());
-        }
-        if modifiers.function {
-            return Err("fn can't be combined with a key".into());
-        }
-        if binding.is_bare_primary_click() {
-            return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
-        }
-        // Menu, Pause, and Scroll Lock alone, and on Windows the navigation
-        // keys alone, are checked against their Labs toggle when set
-        // (`special_key_refusal`).
-        if modifiers.is_empty()
-            && !is_function_key(&key.label)
-            && !key.is_mouse()
-            && !HotkeyKey::special_name(&key.label)
-            && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
-            && !(cfg!(target_os = "linux") && HotkeyKey::section_name(&key.label))
-        {
-            return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
-        }
-    } else if modifiers.is_empty() {
-        return Err("expected at least one modifier or key".into());
-    }
-    Ok(binding)
-}
-
-/// Why `binding` can't be saved for its Menu, Pause, or Scroll Lock key: on
-/// Linux they need Labs › Special keys alone; Windows takes them alone, and
-/// a navigation key alone needs the toggle there; elsewhere one alone still
-/// needs a modifier.
-fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
-    // The § key alone needs Labs › Section key alone (Linux).
-    if cfg!(target_os = "linux") && binding.is_lone_section_key() && !settings.section_key_allowed()
-    {
-        return Some("section needs Labs › Section key alone: hex labs on section-key".into());
-    }
-    if cfg!(target_os = "windows") {
-        let key = binding.key.as_ref()?;
-        return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
-            format!(
-                "{} alone needs Labs › Special keys alone: hex labs on special-keys",
-                key.label.to_lowercase().replace(' ', "")
-            )
-        });
-    }
-    let key = binding.key.as_ref().filter(|key| key.is_special())?;
-    if settings.special_keys_allowed() {
-        return None;
-    }
-    let name = key.label.to_lowercase().replace(' ', "");
-    if cfg!(target_os = "linux") {
-        return Some(format!(
-            "{name} needs Labs › Special keys alone: hex labs on special-keys"
-        ));
-    }
-    binding
-        .modifiers
-        .is_empty()
-        .then(|| format!("add a modifier, such as option+{name}"))
-}
-
-fn is_function_key(label: &str) -> bool {
-    label
-        .strip_prefix(['F', 'f'])
-        .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| (1..=20).contains(&number))
-}
-
-/// The text `parse_hotkey` reads back: `left-option`, `option+shift+v`,
-/// `left-option+right-option`.
-pub fn format_hotkey(binding: &HotkeyBinding) -> String {
-    let modifiers = binding.modifiers;
-    let side = |side: Option<ModifierSide>, name: &str| match side {
-        Some(ModifierSide::Left) => Some(format!("left-{name}")),
-        Some(ModifierSide::Right) => Some(format!("right-{name}")),
-        Some(ModifierSide::Either) => Some(name.to_string()),
-        Some(ModifierSide::Both) => Some(format!("left-{name}+right-{name}")),
-        None => None,
-    };
-    let mut parts: Vec<String> = [
-        modifiers.function.then(|| "fn".to_string()),
-        side(modifiers.control, "control"),
-        side(modifiers.option, "option"),
-        side(modifiers.shift, "shift"),
-        side(modifiers.command, "command"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if let Some(key) = &binding.key {
-        parts.push(key.label.to_lowercase().replace(' ', ""));
-    }
-    parts.join("+")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::ModifierSide;
+
+    use super::registry::NEEDS;
 
     #[test]
     fn a_managed_setting_is_refused() {
@@ -1520,6 +672,72 @@ mod tests {
         } else {
             assert_eq!(refused, Some("unsupported"));
         }
+    }
+
+    /// A saved record shortcut and Annotate's shortcut can't share a chord
+    /// with either off. The reported sequence: Annotate off with the Lab on
+    /// and a record shortcut saved. Setting Annotate's shortcut to the
+    /// record chord is refused, and so is setting the record shortcut to
+    /// Annotate's chord. The old code allowed both, and Annotate then won
+    /// the key at runtime, recording the whole screen.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_screenshot_lab_and_annotate_never_share_a_shortcut() {
+        let chord = |code: u16, label: &str, modifiers: crate::app_settings::HotkeyModifiers| {
+            HotkeyBinding {
+                modifiers,
+                key: Some(HotkeyKey {
+                    code,
+                    label: label.into(),
+                }),
+            }
+        };
+        let mut settings = AppSettings {
+            capture: crate::app_settings::CaptureSettings {
+                enabled: false,
+                ..Default::default()
+            },
+            ..AppSettings::default()
+        };
+        settings.labs.screenshots = true;
+        settings.capture.hotkey = chord(
+            u16::from(b's'),
+            "S",
+            crate::app_settings::HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+        );
+        let record = chord(
+            u16::from(b'r'),
+            "R",
+            crate::app_settings::HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+        );
+        settings.screenshots.record_hotkey = Some(record.clone());
+
+        let error = apply(
+            &settings,
+            "capture.hotkey",
+            &format_hotkey(&record),
+            &rules(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "shortcut-in-use");
+
+        let annotate = settings.capture.hotkey.clone();
+        let error = apply(
+            &settings,
+            "screenshots.record_hotkey",
+            &format_hotkey(&annotate),
+            &rules(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "shortcut-in-use");
     }
 
     fn rules() -> ShortcutRules {
@@ -1665,6 +883,34 @@ mod tests {
     }
 
     #[test]
+    fn app_model_switching_is_named_and_modes_validate_their_speech_choice() {
+        let settings = apply(
+            &AppSettings::default(),
+            "labs.app_model_switching",
+            "on",
+            &rules(),
+        )
+        .unwrap()
+        .settings;
+        assert!(settings.labs.app_model_switching);
+        let modes = r#"[{"name":"Spanish","applications":["Notes"],"speech":{"model":"parakeet_v3","language":"es"}}]"#;
+        let change = apply(&settings, "dictation_processing.modes", modes, &rules()).unwrap();
+        assert_eq!(
+            change.settings.dictation_processing.modes[0].speech,
+            Some(crate::app_settings::KeyboardModelChoice {
+                model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            })
+        );
+        let invalid =
+            r#"[{"name":"Japanese","speech":{"model":"parakeet_unified_en","language":"ja"}}]"#;
+        assert!(
+            apply(&settings, "dictation_processing.modes", invalid, &rules()).is_err(),
+            "a language the model lacks was accepted"
+        );
+    }
+
+    #[test]
     fn keyboard_model_switching_settings_map_sources_to_a_model_and_its_language() {
         let settings = apply(
             &AppSettings::default(),
@@ -1768,6 +1014,8 @@ mod tests {
             ("shortcut_mode", "tap"),
             ("meetings.calendar.lead_minutes", "3"),
             ("meetings.output_folder", "relative/path"),
+            ("labs.caps_lock_light", "fast"),
+            ("labs.appearance_theme", "sepia"),
             ("dictation_processing.modes", "[{"),
         ] {
             assert_eq!(
@@ -1793,6 +1041,24 @@ mod tests {
         );
         let change = apply(&settings, "meetings.calendar.lead_minutes", "5", &rules()).unwrap();
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
+        let change = apply(&settings, "labs.caps_lock_light", "slow_blink", &rules()).unwrap();
+        assert_eq!(
+            change.settings.labs.caps_lock_light,
+            crate::app_settings::CapsLockLight::SlowBlink
+        );
+        assert_eq!(
+            get(&change.settings, "labs.caps_lock_light").unwrap()[0].value,
+            Value::String("slow_blink".into())
+        );
+        let change = apply(&settings, "labs.appearance_theme", "dark", &rules()).unwrap();
+        assert_eq!(
+            change.settings.labs.appearance_theme,
+            crate::app_settings::AppearanceTheme::Dark
+        );
+        assert_eq!(
+            get(&change.settings, "labs.appearance_theme").unwrap()[0].value,
+            Value::String("dark".into())
+        );
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
         let change = apply(
@@ -2037,6 +1303,140 @@ mod tests {
         );
     }
 
+    /// `extra_dictation_hotkeys` takes up to four rows, each binding meets a
+    /// recorded shortcut's checks, a row's mode folds to one its binding can
+    /// trigger, and the key only works on macOS.
+    #[test]
+    fn extra_dictation_hotkeys_takes_up_to_four_checked_rows() {
+        use crate::app_settings::{
+            ExtraDictationMode, HotkeyModifiers, MAX_EXTRA_DICTATION_SHORTCUTS,
+        };
+        let rules = rules();
+        let binding = |name: &str| {
+            serde_json::to_value(HotkeyBinding {
+                modifiers: HotkeyModifiers::control_option(),
+                key: Some(HotkeyKey::named(name)),
+            })
+            .unwrap()
+        };
+        let rows = |rows: Vec<Value>| Value::Array(rows).to_string();
+
+        let change = apply(
+            &AppSettings::default(),
+            "extra_dictation_hotkeys",
+            &rows(vec![
+                serde_json::json!({"binding": binding("f5"), "mode": "tap"}),
+            ]),
+            &rules,
+        )
+        .unwrap();
+        assert_eq!(change.settings.extra_dictation_hotkeys.len(), 1);
+        assert_eq!(
+            change.settings.extra_dictation_hotkeys[0].mode,
+            ExtraDictationMode::Tap
+        );
+
+        // A row without a key can't be double-tap only.
+        let change = apply(
+            &AppSettings::default(),
+            "extra_dictation_hotkeys",
+            &rows(vec![serde_json::json!({"mode": "double_tap"})]),
+            &rules,
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.extra_dictation_hotkeys[0].mode,
+            ExtraDictationMode::HoldOrDoubleTap
+        );
+
+        // More than four rows are refused.
+        let too_many = rows(
+            (0..=MAX_EXTRA_DICTATION_SHORTCUTS)
+                .map(|_| serde_json::json!({"mode": "hold"}))
+                .collect(),
+        );
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "extra_dictation_hotkeys",
+                &too_many,
+                &rules
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+
+        // Windows accepts Menu alone without the special-keys Lab.
+        let menu = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(HotkeyKey::named("menu")),
+        };
+        let without_lab = apply(
+            &AppSettings::default(),
+            "extra_dictation_hotkeys",
+            &rows(vec![serde_json::json!({"binding": menu})]),
+            &rules,
+        );
+        if cfg!(target_os = "windows") {
+            let change = without_lab.unwrap();
+            assert_eq!(
+                change.settings.extra_dictation_hotkeys[0].binding,
+                Some(menu)
+            );
+        } else {
+            assert_eq!(without_lab.unwrap_err().code, "invalid-value");
+        }
+
+        // The OS's own rule for a recorded shortcut applies to a row too.
+        let refuse = ShortcutRules {
+            key_named: rules.key_named,
+            rule: |_, _| Err("Modifier-only shortcuts aren't supported here".into()),
+        };
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "extra_dictation_hotkeys",
+                &rows(vec![serde_json::json!({"binding": binding("f5")})]),
+                &refuse
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+
+        // Two rows can't share a key while their Lab is on (macOS).
+        #[cfg(target_os = "macos")]
+        {
+            let mut settings = AppSettings::default();
+            settings.labs.more_dictation_shortcuts = true;
+            assert_eq!(
+                apply(
+                    &settings,
+                    "extra_dictation_hotkeys",
+                    &rows(vec![
+                        serde_json::json!({"binding": binding("f5")}),
+                        serde_json::json!({"binding": binding("f5")}),
+                    ]),
+                    &rules
+                )
+                .unwrap_err()
+                .code,
+                "shortcut-in-use"
+            );
+        }
+
+        // Off macOS the key is refused before it is read.
+        if cfg!(target_os = "macos") {
+            assert!(unavailable("extra_dictation_hotkeys").is_none());
+        } else {
+            assert_eq!(
+                unavailable("extra_dictation_hotkeys").map(|error| error.code),
+                Some("unsupported")
+            );
+        }
+    }
+
     #[test]
     fn a_bare_left_click_is_refused_but_other_mouse_buttons_are_not() {
         let named: fn(&str) -> Result<HotkeyKey, String> = |name| Ok(HotkeyKey::named(name));
@@ -2066,6 +1466,38 @@ mod tests {
         assert!(change.settings.double_tap_only);
         let change = apply(&change.settings, "double_tap_lock", "off", &rules()).unwrap();
         assert!(!change.settings.double_tap_only);
+    }
+
+    #[test]
+    fn double_tap_only_takes_a_lone_modifier_with_the_lab() {
+        let settings = AppSettings {
+            dictation_hotkey: parse_hotkey("option", rules().key_named).unwrap(),
+            ..AppSettings::default()
+        };
+        let refused = apply(&settings, "double_tap_only", "on", &rules()).unwrap_err();
+        assert_eq!(refused.code, "invalid-value");
+        // Only macOS has the lab, so only there does the refusal name it.
+        assert_eq!(
+            refused
+                .message
+                .contains("Labs › Double-tap on a lone modifier"),
+            cfg!(target_os = "macos"),
+            "{}",
+            refused.message
+        );
+        let mut with_lab = settings.clone();
+        with_lab.labs.double_tap_modifiers = true;
+        if with_lab.double_tap_modifiers_allowed() {
+            let change = apply(&with_lab, "double_tap_only", "on", &rules()).unwrap();
+            assert!(change.settings.double_tap_only);
+        } else {
+            assert!(apply(&with_lab, "double_tap_only", "on", &rules()).is_err());
+        }
+        // Turning the lab off clears a modifier-only double-tap-only start.
+        with_lab.double_tap_only = true;
+        let change = apply(&with_lab, "labs.double_tap_modifiers", "off", &rules()).unwrap();
+        assert!(!change.settings.double_tap_only);
+        assert!(change.settings.double_tap_lock);
     }
 
     #[test]

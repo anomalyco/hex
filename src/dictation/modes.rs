@@ -52,13 +52,34 @@ impl ModeRuntime {
         language: &str,
         context: &crate::dictation::context::ContextSnapshot,
         transformations: &crate::personal_commands::TransformationClient,
+        source: crate::dictation::processor::Source,
+    ) -> Processed {
+        self.process_cancellable(
+            raw_text,
+            language,
+            context,
+            transformations,
+            &AtomicBool::new(false),
+            source,
+        )
+    }
+
+    /// [`Self::process`] with a cancellation flag the stages check, for work
+    /// that ends early when Hex quits.
+    pub fn process_cancellable(
+        &self,
+        raw_text: &str,
+        language: &str,
+        context: &crate::dictation::context::ContextSnapshot,
+        transformations: &crate::personal_commands::TransformationClient,
+        cancelled: &AtomicBool,
+        source: crate::dictation::processor::Source,
     ) -> Processed {
         let text = self.replacements.replace(raw_text);
         let profile = self.profile(context);
-        let cancelled = AtomicBool::new(false);
         let mut processed =
-            Profiles::new(profile).process_cancellable(&text, language, context, &cancelled);
-        processed.apply_transformations(transformations, context, &cancelled);
+            Profiles::new(profile).process_cancellable(&text, language, context, cancelled, source);
+        processed.apply_transformations(transformations, context, cancelled, source);
         processed
     }
 
@@ -81,6 +102,31 @@ impl ModeRuntime {
             },
             Profile::from_mode,
         )
+    }
+}
+
+/// The live mode runtime and transformation client a listener shares with
+/// the local API's `process=global` processor, so saved settings and the
+/// personal-commands host apply to both.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Clone)]
+pub struct ProcessingState {
+    pub modes: std::sync::Arc<std::sync::RwLock<ModeRuntime>>,
+    pub transformations: std::sync::Arc<crate::personal_commands::TransformationClient>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl ProcessingState {
+    /// Reads `settings` once; a listener replaces `modes` as settings change.
+    pub fn from_settings(settings: &AppSettings) -> Self {
+        Self {
+            modes: std::sync::Arc::new(std::sync::RwLock::new(ModeRuntime::from_settings(
+                settings,
+            ))),
+            transformations: std::sync::Arc::new(
+                crate::personal_commands::TransformationClient::default(),
+            ),
+        }
     }
 }
 
@@ -172,6 +218,20 @@ fn mode_for_context<'a>(
     modes
         .iter()
         .find(|mode| matches_application(mode, application))
+}
+
+/// The speech model and language the mode matching the focused context
+/// carries, else Global's. `None` means the mode never switches.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn speech_for<'a>(
+    settings: &'a DictationProcessingSettings,
+    application: Option<&str>,
+    browser_host: Option<&str>,
+) -> Option<&'a crate::app_settings::KeyboardModelChoice> {
+    mode_for_context(&settings.modes, application, browser_host)
+        .unwrap_or(&settings.default_mode)
+        .speech
+        .as_ref()
 }
 
 /// Hosts compare case-insensitively with any trailing dot removed,
@@ -311,7 +371,13 @@ mod tests {
         };
         let transformations = crate::personal_commands::TransformationClient::default();
 
-        let processed = runtime.process("Use open code in hex.", "en", &context, &transformations);
+        let processed = runtime.process(
+            "Use open code in hex.",
+            "en",
+            &context,
+            &transformations,
+            crate::dictation::processor::Source::Dictation,
+        );
 
         assert_eq!(processed.text, "Use OpenCode in Hex.");
         assert!(processed.observation.is_none());
@@ -329,6 +395,7 @@ mod tests {
             "en",
             &crate::dictation::context::ContextSnapshot::default(),
             &transformations,
+            crate::dictation::processor::Source::Dictation,
         );
 
         assert_eq!(processed.text, "keep opencode exact.");
@@ -353,6 +420,44 @@ mod tests {
             ..crate::dictation::context::ContextSnapshot::default()
         };
         assert!(runtime.profile(&context).rewrites());
+    }
+
+    #[test]
+    fn a_modes_speech_choice_matches_its_application_or_website_else_global() {
+        use crate::app_settings::KeyboardModelChoice;
+        use crate::transcription::models::TranscriptionModelId;
+        let choice = |language: &str| KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: language.into(),
+        };
+        let settings = DictationProcessingSettings {
+            default_mode: DictationMode {
+                speech: Some(choice("en")),
+                ..DictationMode::default()
+            },
+            modes: vec![
+                DictationMode {
+                    applications: vec!["code".into()],
+                    speech: Some(choice("de")),
+                    ..DictationMode::default()
+                },
+                DictationMode {
+                    browser_hosts: vec!["x.com".into()],
+                    speech: Some(choice("es")),
+                    ..DictationMode::default()
+                },
+            ],
+        };
+        let matched = |application: Option<&str>, host: Option<&str>| {
+            speech_for(&settings, application, host).map(|choice| choice.language.as_str())
+        };
+
+        assert_eq!(matched(Some("vscode"), None), Some("de"));
+        // A website is more specific than an application.
+        assert_eq!(matched(Some("chrome"), Some("x.com")), Some("es"));
+        // Nothing matches, so Global's own choice applies.
+        assert_eq!(matched(Some("notepad"), None), Some("en"));
+        assert_eq!(matched(None, None), Some("en"));
     }
 
     #[test]

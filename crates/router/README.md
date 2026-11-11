@@ -29,6 +29,7 @@ impl Router {
     pub fn new(config: RouterConfig, dirs: RouterDirs) -> Self;
     pub fn with_log(self, log: impl Fn(&str) + Send + Sync + 'static) -> Self;
     pub fn with_summary(self, summary: env::Summary) -> Self;   // fn(&ScrawlBundle, &Path) -> String
+    pub fn with_opencode(self, opencode: Arc<dyn env::OpenCode>) -> Self;
     pub fn with_pages(self, pages: env::Pages) -> Self;         // fn(&str) -> Option<Registration>
     pub fn with_live(self, live: bool) -> Self;
     pub fn config(&self) -> &RouterConfig;
@@ -55,6 +56,7 @@ impl Router {
 - **`log_correction`** (`router log`): one correction line in Hex's spelling, joined to its decision.
 - **`eval`** (`router eval`): replays past captures and the items in `dirs.eval` through Jev and prints the accuracy.
 - **`run`** runs any module function (`routing::…`) with this router's settings. **`install_as_fallback`** makes them what the modules use outside a call, for a host that calls the modules directly.
+- **`with_opencode`** gives the router a host transport for OpenCode where this machine's registration isn't enough (Windows: a service in WSL). `None` from its request keeps the router's own local service path; its `directory` maps a capture folder to the path that server sees.
 
 Rules are part of the config: `config.with_rule(RuleKind::Site | RuleKind::App, key, target)` and `config.with_refused(key)` return a new `RouterConfig` for the host to save. Scrawl, which keeps its rules as JSON, uses `routing::policy::add_rule` and `refuse_rule` on its `routing` object instead.
 

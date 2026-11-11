@@ -31,9 +31,11 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(not(target_os = "windows"))]
+use rune::OverlayInput;
 use rune::{
-    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlayInput, OverlaySpec, Phase, ScreenEdge,
-    Spring, Tx, col, row, text,
+    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx,
+    col, row, text,
 };
 use rune_kit::{
     Badge, BadgeVariant, Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant,
@@ -115,6 +117,8 @@ enum Kind {
         title: String,
         started: Instant,
         automatic: bool,
+        /// The microphone is digitally silent (#1518).
+        warning: Option<crate::meeting::TrackWarning>,
     },
 }
 
@@ -267,7 +271,7 @@ impl Capsule {
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
         match &self.kind {
-            Some(Kind::Recording { .. }) => (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT),
+            Some(Kind::Recording { .. }) => recording_window_size(self.hovered),
             Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
@@ -302,6 +306,18 @@ impl Capsule {
             }
         }
     }
+}
+
+/// The recording capsule's window, as wide as the pill it draws: compact
+/// until hovered, then the open pill. Elsewhere the window stays as wide as
+/// the open pill, and only its `.hit()` body takes the pointer.
+fn recording_window_size(open: bool) -> (f32, f32) {
+    let width = if cfg!(target_os = "windows") && !open {
+        RECORDING_COMPACT_WIDTH
+    } else {
+        RECORDING_PANEL_WIDTH
+    };
+    (width, RECORDING_PANEL_HEIGHT)
 }
 
 /// Where a corner's capsule window sits: its edge and margin, and its
@@ -412,7 +428,8 @@ impl MeetingCapsules {
     ) -> Self {
         let choose: Choose = Arc::new(choose);
         let save_corner: SaveCorner = Arc::new(save_corner);
-        let overlay = |app: &mut rune::App<S>, name, size| {
+        let overlay = |app: &mut rune::App<S>, name, size: (f32, f32)| {
+            let height = size.1;
             let handle = app.overlay(
                 OverlaySpec {
                     name,
@@ -443,6 +460,11 @@ impl MeetingCapsules {
             );
             // Only the drawn capsule (its `.hit()` body) takes clicks; the
             // window's transparent rest passes them to the app beneath.
+            // Windows instead sizes each window to what it draws, so the
+            // whole window may take the pointer there (`recording_window_size`
+            // and `show_recording`); Regions' sampled pointer positions can
+            // leave the transparent rest of a wide window hit-testable.
+            #[cfg(not(target_os = "windows"))]
             handle.set_input(OverlayInput::Regions);
             let (hide, resize, shift) = (handle.clone(), handle.clone(), handle.clone());
             let copied = handle.clone();
@@ -459,7 +481,7 @@ impl MeetingCapsules {
                 capsule.copy_new = Some(copy_new);
                 capsule.hide = Some(Arc::new(move || hide.hide()));
                 capsule.resize = Some(Arc::new(move |width| {
-                    resize.resize((width, MEETING_PANEL_HEIGHT));
+                    resize.resize((width, height));
                 }));
                 capsule.shift = Some(Arc::new(move |corner, dx, dy| {
                     place_capsule(&shift, corner, dx, dy);
@@ -472,11 +494,7 @@ impl MeetingCapsules {
             "Hex meeting",
             (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         );
-        let recording = overlay(
-            app,
-            "Hex meeting recording",
-            (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT),
-        );
+        let recording = overlay(app, "Hex meeting recording", recording_window_size(false));
         Self {
             panel,
             recording,
@@ -550,6 +568,14 @@ impl MeetingCapsules {
                 self.recording.update(move |capsule, _| {
                     if let Some(Kind::Recording { title: shown, .. }) = &mut capsule.kind {
                         *shown = title;
+                    }
+                });
+            }
+            ControllerEvent::SourceWarning { warning } => {
+                let warning = *warning;
+                self.recording.update(move |capsule, _| {
+                    if let Some(Kind::Recording { warning: shown, .. }) = &mut capsule.kind {
+                        *shown = warning;
                     }
                 });
             }
@@ -684,6 +710,9 @@ impl MeetingCapsules {
     fn show_recording(&self, id: String, title: String, automatic: bool) {
         let corner = crate::app_settings::meeting_indicator_corner();
         place_capsule(&self.recording, corner, 0.0, 0.0);
+        // Windows: a new recording starts from the compact pill.
+        #[cfg(target_os = "windows")]
+        self.recording.resize(recording_window_size(false));
         let started = Instant::now();
         let ticker_id = id.clone();
         self.recording.update(move |capsule, tx| {
@@ -692,6 +721,7 @@ impl MeetingCapsules {
                 title,
                 started,
                 automatic,
+                warning: None,
             });
             capsule.live = Live::default();
             capsule.hovered = false;
@@ -1085,7 +1115,16 @@ fn ready(
 fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automatic: bool) -> El {
     let live = &capsule.live;
     let elapsed = meeting::format_duration(started.elapsed().as_millis() as u64);
-    let subtitle = if automatic && started.elapsed() < AUTOMATIC_LABEL {
+    let silent = matches!(
+        &capsule.kind,
+        Some(Kind::Recording {
+            warning: Some(_),
+            ..
+        })
+    );
+    let subtitle = if silent {
+        tr_fill("Microphone is silent · {}", &elapsed)
+    } else if automatic && started.elapsed() < AUTOMATIC_LABEL {
         tr_fill("Started automatically · {}", &elapsed)
     } else {
         elapsed
@@ -1150,10 +1189,19 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
         } else {
             RECORDING_CLOSE
         })
-        .on_hover_change(|c: &mut Capsule, inside, _| c.hovered = inside)
+        .on_hover_change(|c: &mut Capsule, inside, _| {
+            c.hovered = inside;
+            // Windows sizes the window to the drawn pill: grow it for the
+            // open pill and shrink it back when the pointer leaves.
+            #[cfg(target_os = "windows")]
+            if let Some(resize) = &c.resize {
+                resize(recording_window_size(inside).0);
+            }
+        })
         .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
         // Only the drawn pill takes the pointer; the rest of the window,
-        // as wide as the open pill, lets clicks through.
+        // as wide as the open pill, lets clicks through. On Windows the
+        // window is only as wide as the pill it draws instead.
         .hit();
     let pill = if open {
         pill.w_full()
@@ -1414,6 +1462,7 @@ mod tests {
             title: "Slack Huddle call — 2:30 PM".into(),
             started,
             automatic: true,
+            warning: None,
         };
         let (rt, _, _) = runtime(recording(Instant::now()), false, true, RECORDING);
         assert!(
@@ -1424,6 +1473,23 @@ mod tests {
         let earlier = Instant::now() - AUTOMATIC_LABEL - Duration::from_secs(1);
         let (rt, _, _) = runtime(recording(earlier), false, true, RECORDING);
         assert!(!texts(&rt).iter().any(|text| text.contains("automatically")));
+    }
+
+    #[test]
+    fn a_recording_says_when_its_microphone_is_silent() {
+        let mut kind = live_recording("m");
+        let Kind::Recording { warning, .. } = &mut kind else {
+            panic!("a recording");
+        };
+        *warning = Some(crate::meeting::TrackWarning::DigitalSilence);
+        let (rt, _, _) = runtime(kind, false, true, RECORDING);
+        assert!(
+            texts(&rt)
+                .iter()
+                .any(|text| text.starts_with("Microphone is silent · ")),
+            "{:?}",
+            texts(&rt)
+        );
     }
 
     #[test]
@@ -1504,6 +1570,7 @@ mod tests {
             title: "Q4 launch sync".into(),
             started: Instant::now() - Duration::from_secs(258),
             automatic: false,
+            warning: None,
         }
     }
 
@@ -1979,6 +2046,7 @@ mod tests {
                     title: "Slack Huddle call — 2:30 PM".into(),
                     started: Instant::now() - Duration::from_secs(4),
                     automatic: true,
+                    warning: None,
                 },
                 false,
                 RECORDING,

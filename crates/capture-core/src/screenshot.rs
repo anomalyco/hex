@@ -6,7 +6,7 @@ use screencapturekit::stream::configuration::SCStreamConfiguration;
 
 use crate::error::Error;
 use crate::native::Target;
-use crate::plan::{Exclusions, Source, SourcePlan};
+use crate::plan::{Encoder, Exclusions, Source, SourcePlan};
 
 /// A screenshot, tightly packed RGBA.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +49,7 @@ pub fn screenshot_with(
         SourcePlan {
             source: *source,
             long_edge,
+            encoder: Encoder::default(),
         },
         exclude,
     )?;

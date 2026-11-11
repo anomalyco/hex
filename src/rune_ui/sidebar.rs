@@ -65,6 +65,10 @@ pub(super) enum Pane {
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
+    /// The shots and recordings Labs › Screenshots saved (macOS, while
+    /// it's on).
+    #[cfg(hex_capture)]
+    Captures,
     /// Annotate (Scrawl's captures inside Hex): the switch, shortcuts,
     /// permission, transcriber, folder, retention, and Scrawl's own app.
     /// Dev builds, macOS and Linux only.
@@ -88,6 +92,8 @@ impl Pane {
         Pane::Meetings,
         Pane::History,
         #[cfg(hex_capture)]
+        Pane::Captures,
+        #[cfg(hex_capture)]
         Pane::Annotate,
         Pane::VoiceFilter,
         Pane::HudLab,
@@ -103,6 +109,9 @@ impl Pane {
             Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
+            // The Lab turns on only on macOS.
+            #[cfg(hex_capture)]
+            Pane::Captures => ui.settings.labs.screenshots,
             _ => true,
         }
     }
@@ -113,6 +122,8 @@ impl Pane {
             Pane::Output => tr("Output"),
             Pane::Modes => tr("Modes"),
             Pane::History => tr("History"),
+            #[cfg(hex_capture)]
+            Pane::Captures => tr("Captures"),
             Pane::Meetings => tr("Meetings"),
             #[cfg(hex_capture)]
             Pane::Annotate => tr("Annotate"),
@@ -128,6 +139,8 @@ impl Pane {
             Pane::Output => "nav-output",
             Pane::Modes => "nav-modes",
             Pane::History => "nav-history",
+            #[cfg(hex_capture)]
+            Pane::Captures => "nav-captures",
             Pane::Meetings => "nav-meetings",
             #[cfg(hex_capture)]
             Pane::Annotate => "nav-annotate",
@@ -143,6 +156,8 @@ impl Pane {
             Pane::Output => &OUTPUT_ICON,
             Pane::Modes => &MODES_ICON,
             Pane::History => &HISTORY_ICON,
+            #[cfg(hex_capture)]
+            Pane::Captures => &captures::CAPTURES_ICON,
             Pane::Meetings => &MEETINGS_ICON,
             #[cfg(hex_capture)]
             Pane::Annotate => &SCRAWL_ICON,
@@ -340,6 +355,56 @@ fn footer(ui: &Ui, p: Paint) -> El {
             line("version", &version_label(), p.faint()),
         ))
         .children(status)
+        .children(release_notes_link(ui, p))
+}
+
+/// This build's release notes, under the version and status while Labs ›
+/// Release notes link is on. Unlike What's new, it needs no staged update.
+fn release_notes_link(ui: &Ui, p: Paint) -> Option<El> {
+    if !crate::labs::Feature::ReleaseNotesLink.on(&ui.settings) {
+        return None;
+    }
+    // A source or test build has no published notes for its code.
+    if ui.build_preview.unwrap_or_else(build_kind) != BuildKind::Release {
+        return None;
+    }
+    // Goldens pin the version, as the version label does.
+    let version = if cfg!(test) {
+        "0.0.0-dev-12"
+    } else {
+        crate::VERSION
+    };
+    let url = crate::updater::notes::release_notes_url(version)?;
+    let c = &p.k.c;
+    Some(
+        row()
+            .key("release-notes")
+            .h(FOOTER_LINE)
+            .px(6.0)
+            .center_y()
+            .self_start()
+            .radius(p.k.radius.sm)
+            .role("link")
+            .label(tr("Release notes"))
+            .hover(c.hover)
+            .press(c.pressed)
+            .focusable(true)
+            .focus_ring(2.0, -2.0, c.border_focus)
+            .on_press(move |ui: &mut Ui| {
+                if ui.live()
+                    && let Err(error) = crate::desktop::opencode_catalog::open_url(&url)
+                {
+                    ui.error = Some(format!("{error:#}"));
+                }
+            })
+            .child(
+                text(tr("Release notes"))
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(c.text_muted)
+                    .truncate(),
+            ),
+    )
 }
 
 /// A local or test build marks itself beside the version, quietly: an outline

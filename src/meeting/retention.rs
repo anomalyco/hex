@@ -105,6 +105,18 @@ pub(super) fn trash_expired(
             );
         }
     }
+    if let Some(path) = super::notes_file::tracked(&manifest) {
+        if manifest.notes_export_sha256.is_some()
+            && file_sha256(&path) == manifest.notes_export_sha256
+        {
+            move_to_trash(&path)?;
+        } else {
+            tracing::info!(
+                meeting = manifest.id,
+                "kept the meeting's notes file, which changed since Hex wrote it"
+            );
+        }
+    }
     move_to_trash(directory)
 }
 

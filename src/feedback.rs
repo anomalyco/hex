@@ -13,11 +13,16 @@ use rodio::cpal::BufferSize;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Source};
 use serde::{Deserialize, Serialize};
 
+mod imessage;
+
 /// Auditionable key-sound styles for the onboarding typing demo.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum KeySoundStyle {
-    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse (default).
+    /// A real mechanical keyboard, presses cut from a CC0 recording of an IBM
+    /// Model M, each at one of three pitches (default).
     #[default]
+    Clack,
+    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse.
     Taptic,
     /// Whisper-quiet 28 ms felt-damped Magic Keyboard tap.
     Felt,
@@ -28,10 +33,17 @@ pub enum KeySoundStyle {
 }
 
 impl KeySoundStyle {
-    pub const ALL: [Self; 4] = [Self::Taptic, Self::Felt, Self::Soft, Self::Silent];
+    pub const ALL: [Self; 5] = [
+        Self::Clack,
+        Self::Taptic,
+        Self::Felt,
+        Self::Soft,
+        Self::Silent,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Clack => "Mechanical clack",
             Self::Taptic => "Taptic tick",
             Self::Felt => "Muted felt",
             Self::Soft => "Soft warm",
@@ -41,18 +53,43 @@ impl KeySoundStyle {
 
     pub fn next(self) -> Self {
         match self {
+            Self::Clack => Self::Taptic,
             Self::Taptic => Self::Felt,
             Self::Felt => Self::Soft,
             Self::Soft => Self::Silent,
-            Self::Silent => Self::Taptic,
+            Self::Silent => Self::Clack,
         }
     }
+}
+
+/// A Messages tapback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Tapback {
+    Heart,
+    ThumbsUp,
+    ThumbsDown,
+    Haha,
+    Exclamation,
+    Question,
+}
+
+impl Tapback {
+    pub const ALL: [Self; 6] = [
+        Self::Heart,
+        Self::ThumbsUp,
+        Self::ThumbsDown,
+        Self::Haha,
+        Self::Exclamation,
+        Self::Question,
+    ];
 }
 
 /// Soft, varied tactile and motion cues for first-run onboarding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OnboardingTone {
-    /// One of six distinct key taps (`0..6`) in `style`.
+    /// One of `style`'s distinct key taps: six for most styles, and for
+    /// [`KeySoundStyle::Clack`] eight presses at three pitches
+    /// ([`CLACK_KEYS`]` * pitch + press`).
     Key(KeySoundStyle, u8),
     /// Deeper stabilized space / return bar tap in `style`.
     KeySpace(KeySoundStyle),
@@ -70,7 +107,51 @@ pub enum OnboardingTone {
     PermissionTick,
     /// `"Almost ready"` appearing while finishing a slow model download.
     AlmostReady,
+    /// One of the Hex logo's three hexagons landing on `"Hex is ready"`,
+    /// outside in (`0..3`), rising to resolve on the last.
+    Build(u8),
+    /// A message arriving in the `"Without Hex"` conversation.
+    Incoming,
+    /// A reply leaving the field.
+    Sent,
+    /// The deadpan `"Read"` under a reply that should not have been sent.
+    Read,
+    /// The comedy winding back to before it went wrong.
+    Rewind,
+    /// A tapback landing on a message, each kind with its own sound.
+    Tapback(Tapback),
+    /// One low heartbeat under panicked typing.
+    Heartbeat,
+    /// The heartbeat stretched lower in slow motion.
+    HeartbeatSlow,
+    /// Time slowing hard: the clicks smear down.
+    SlowDown,
+    /// A comic title slamming onto the stage: a heavy bass hit.
+    Slam,
+    /// Confetti bursting over `"With Hex"`: a popper and falling paper.
+    Confetti,
+    /// Fireworks over `"With Hex"`: a whistle, a boom, and crackle.
+    Fireworks,
+    /// The triumphant sting as `"With Hex"` peaks: one of the candidates
+    /// (`0..TRIUMPHS`) still being chosen between.
+    Triumph(u8),
+    /// A word shooting out of the HUD, one of three (`0..3`) so a burst
+    /// never repeats one.
+    Word(u8),
+    /// A card struck by lightning and dissolving.
+    Burn,
+    /// `"Voice-first mode"` called as `"With Hex"` takes over: a rising
+    /// whoosh into a bright chord.
+    ModeVoice,
 }
+
+/// [`KeySoundStyle::Clack`]'s distinct presses, each also played a little
+/// higher and lower.
+pub const CLACK_KEYS: u8 = 8;
+/// The pitches each clack plays at, in cents.
+const CLACK_CENTS: [f64; 3] = [0.0, 45.0, -45.0];
+/// The triumph candidates, `triumph_1.wav` onwards.
+pub const TRIUMPHS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
@@ -82,7 +163,9 @@ pub enum Tone {
     DictationDone,
     /// Toggle's cancel shortcut discarded a recording.
     Cancel,
-    /// The first-run tour reached its last step.
+    /// The first-run tour reached its last step. The first run's Ready plays
+    /// its own rising notes, so only the sound sets' tests still ask for it.
+    #[cfg_attr(not(test), allow(dead_code))]
     OnboardingSuccess,
     /// A first-run onboarding cue (typing clacks, shortcut keycap, motion landings).
     Onboarding(OnboardingTone),
@@ -105,7 +188,8 @@ pub enum Tone {
 /// retracts it before or while it sounds.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Request {
-    Play(Tone),
+    /// A tone at a percentage of its level.
+    Play(Tone, u8),
     Audition(SoundSet, Audition),
     StopAudition,
     ProvisionalStart,
@@ -135,25 +219,44 @@ fn sounds_enabled() -> bool {
 }
 
 /// How long the output device stays open after the last tone finishes. Holding
-/// the default output open keeps macOS from idle-sleeping, so an idle app must
-/// release it. A tone implies recent user activity, so a grace shorter than any
-/// idle-sleep timer costs nothing while sparing bursts of dictation the cold
-/// device reopen.
+/// an open output costs something on every platform, so an idle app releases
+/// it, while a tone implies recent user activity and a short grace spares
+/// bursts of dictation the cold device reopen.
+///
+/// On macOS an open output is a live CoreAudio IO client: coreaudiod services
+/// its render callbacks and keeps an idle-sleep assertion for it. coreaudiod
+/// logged client timeouts against Hex's open output (#1531), and a
+/// shorter grace reduces how long such a client exists, so macOS releases the
+/// output about ten seconds after the last tone. Ten seconds still covers a
+/// quick start-tone to stop-tone dictation, though a dictation held past about
+/// ten seconds pays a cold output open for its stop tone; the tone is delayed,
+/// not dropped. Cold-open time on Bluetooth outputs is unmeasured.
 ///
 /// On Linux an open output is a listed stream in the desktop's sound controls
 /// (PipeWire, PulseAudio), so it closes about a second after the last tone
 /// (#720); the start tone still opens the device during its chord grace.
-#[cfg(not(target_os = "linux"))]
-const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(5 * 60);
+/// Windows keeps its five-minute grace.
+#[cfg(target_os = "macos")]
+const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(10);
 #[cfg(target_os = "linux")]
 const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(1);
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(5 * 60);
 const OPEN_RETRY_BACKOFF: Duration = Duration::from_secs(2);
+
+/// One opened output and the flag its stream error callback sets. The callback
+/// may run on a CoreAudio thread, so it only flips this flag. The flag is per
+/// sink: a late error from a dropped sink must never close a newer one.
+struct Opened<S> {
+    sink: S,
+    failed: Arc<AtomicBool>,
+}
 
 // Only the playback worker owns a device. It opens lazily for a tone, stays
 // open through the idle grace, and drops within one observation interval once
 // sounds turn off or the grace expires. Opening never blocks capture or UI.
 struct FeedbackOutput<S> {
-    sink: Option<S>,
+    sink: Option<Opened<S>>,
     retry_at: Instant,
     playing_until: Option<Instant>,
     /// The output route generation the device was opened (or last tried)
@@ -179,8 +282,9 @@ impl<S> FeedbackOutput<S> {
         &mut self,
         now: Instant,
         route: u64,
-        open: impl FnOnce() -> Result<S>,
+        open: impl FnOnce() -> Result<Opened<S>>,
     ) -> Result<()> {
+        self.drop_failed(now);
         if self.route != route {
             self.route = route;
             if self.sink.take().is_some() {
@@ -200,9 +304,29 @@ impl<S> FeedbackOutput<S> {
         self.playing_until = Some(self.playing_until.unwrap_or(until).max(until));
     }
 
+    /// Drops a sink whose stream reported a fatal error so the next tone opens
+    /// a fresh one. The stream error callback may run on a CoreAudio thread and
+    /// only sets the per-sink flag; this worker thread clears it and logs the
+    /// one warning.
+    fn drop_failed(&mut self, now: Instant) {
+        let failed = self
+            .sink
+            .as_ref()
+            .is_some_and(|opened| opened.failed.load(Ordering::Acquire));
+        if failed {
+            if let Some(opened) = self.sink.take() {
+                opened.failed.store(false, Ordering::Release);
+            }
+            self.playing_until = None;
+            self.retry_at = now;
+            tracing::warn!("feedback output stream failed; dropped it for the next tone");
+        }
+    }
+
     /// Releases the device when sounds are off or nothing has played within the
     /// idle grace. A released device reopens immediately for the next tone.
     fn release_when_idle(&mut self, enabled: bool, now: Instant) {
+        self.drop_failed(now);
         let idle = self
             .playing_until
             .is_none_or(|until| now >= until + IDLE_RELEASE_GRACE);
@@ -210,6 +334,7 @@ impl<S> FeedbackOutput<S> {
             self.playing_until = None;
             if self.sink.take().is_some() {
                 self.retry_at = now;
+                tracing::info!("released feedback output");
             }
         }
     }
@@ -284,11 +409,11 @@ pub fn preload() -> Result<()> {
                     continue;
                 }
                 let tone = match request {
-                    Some(Request::Play(tone)) => {
+                    Some(Request::Play(tone, percent)) => {
                         if tone == Tone::DictationStart {
                             start_tone.cancel_pending();
                         }
-                        Some(tone)
+                        Some((tone, percent))
                     }
                     Some(Request::ProvisionalStart) => {
                         start_tone.request(received_at);
@@ -325,9 +450,9 @@ pub fn preload() -> Result<()> {
                     }
                     None => None,
                 };
-                if let Some(tone) = tone {
+                if let Some((tone, percent)) = tone {
                     if let Some(sound) = sounds.get(sound_set(), tone) {
-                        output.play(sound.clone(), tone);
+                        output.play(sound.clone().amplify(f32::from(percent) / 100.0), tone);
                     }
                 } else if timed_out && start_tone.is_due(Instant::now()) {
                     // Only an empty queue reaches here, so a retraction sent while
@@ -361,6 +486,10 @@ static LAST_STOP: Mutex<Option<Instant>> = Mutex::new(None);
 /// [`DONE_MIN_AFTER_STOP`]; without a stop sound there is nothing to follow.
 fn done_is_late(stopped: Option<Instant>, now: Instant) -> bool {
     stopped.is_none_or(|at| now.saturating_duration_since(at) >= DONE_MIN_AFTER_STOP)
+}
+
+pub fn play(tone: Tone) {
+    play_at(tone, 100);
 }
 
 /// Stop tones counted from release until their output is restored (Lower
@@ -426,7 +555,9 @@ pub fn deferred_stop() -> impl FnOnce() + Send + Sync + 'static {
     PENDING_STOPS.defer(|| play(Tone::DictationStop))
 }
 
-pub fn play(tone: Tone) {
+/// [`play`] at `percent` of the tone's own level, such as a keystroke typed
+/// softly.
+pub fn play_at(tone: Tone, percent: u8) {
     if !sounds_enabled() {
         return;
     }
@@ -445,7 +576,7 @@ pub fn play(tone: Tone) {
     match tone {
         #[cfg(target_os = "macos")]
         Tone::Error if !sound_set().has_own_error() => play_system_sound(tone),
-        _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone)),
+        _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone, percent)),
     }
 }
 
@@ -749,92 +880,8 @@ impl SetSounds {
     }
 }
 
-/// Decoded onboarding cues (`resources/audio/sounds/onboarding/`).
-struct OnboardingSounds {
-    felt_keys: [SamplesBuffer; 6],
-    felt_space: SamplesBuffer,
-    felt_backspace: SamplesBuffer,
-    taptic_keys: [SamplesBuffer; 6],
-    taptic_space: SamplesBuffer,
-    soft_keys: [SamplesBuffer; 6],
-    soft_space: SamplesBuffer,
-    shortcut_down: SamplesBuffer,
-    shortcut_up: SamplesBuffer,
-    hexagon: SamplesBuffer,
-    panel_escape: SamplesBuffer,
-    permission_tick: SamplesBuffer,
-    almost_ready: SamplesBuffer,
-}
-
-impl OnboardingSounds {
-    fn load() -> Result<Self> {
-        Ok(Self {
-            felt_keys: [
-                decode_wav(bundled_sound!("onboarding", "key_1"))?,
-                decode_wav(bundled_sound!("onboarding", "key_2"))?,
-                decode_wav(bundled_sound!("onboarding", "key_3"))?,
-                decode_wav(bundled_sound!("onboarding", "key_4"))?,
-                decode_wav(bundled_sound!("onboarding", "key_5"))?,
-                decode_wav(bundled_sound!("onboarding", "key_6"))?,
-            ],
-            felt_space: decode_wav(bundled_sound!("onboarding", "key_space"))?,
-            felt_backspace: decode_wav(bundled_sound!("onboarding", "key_backspace"))?,
-            taptic_keys: [
-                decode_wav(bundled_sound!("onboarding", "taptic_1"))?,
-                decode_wav(bundled_sound!("onboarding", "taptic_2"))?,
-                decode_wav(bundled_sound!("onboarding", "taptic_3"))?,
-                decode_wav(bundled_sound!("onboarding", "taptic_4"))?,
-                decode_wav(bundled_sound!("onboarding", "taptic_5"))?,
-                decode_wav(bundled_sound!("onboarding", "taptic_6"))?,
-            ],
-            taptic_space: decode_wav(bundled_sound!("onboarding", "taptic_space"))?,
-            soft_keys: [
-                decode_wav(bundled_sound!("onboarding", "soft_key_1"))?,
-                decode_wav(bundled_sound!("onboarding", "soft_key_2"))?,
-                decode_wav(bundled_sound!("onboarding", "soft_key_3"))?,
-                decode_wav(bundled_sound!("onboarding", "soft_key_4"))?,
-                decode_wav(bundled_sound!("onboarding", "soft_key_5"))?,
-                decode_wav(bundled_sound!("onboarding", "soft_key_6"))?,
-            ],
-            soft_space: decode_wav(bundled_sound!("onboarding", "soft_key_space"))?,
-            shortcut_down: decode_wav(bundled_sound!("onboarding", "shortcut_down"))?,
-            shortcut_up: decode_wav(bundled_sound!("onboarding", "shortcut_up"))?,
-            hexagon: decode_wav(bundled_sound!("onboarding", "hexagon"))?,
-            panel_escape: decode_wav(bundled_sound!("onboarding", "panel_escape"))?,
-            permission_tick: decode_wav(bundled_sound!("onboarding", "permission_tick"))?,
-            almost_ready: decode_wav(bundled_sound!("onboarding", "almost_ready"))?,
-        })
-    }
-
-    fn get(&self, cue: OnboardingTone) -> Option<&SamplesBuffer> {
-        Some(match cue {
-            OnboardingTone::Key(KeySoundStyle::Silent, _)
-            | OnboardingTone::KeySpace(KeySoundStyle::Silent)
-            | OnboardingTone::KeyBackspace(KeySoundStyle::Silent) => return None,
-            OnboardingTone::Key(KeySoundStyle::Felt, i) => {
-                &self.felt_keys[usize::from(i) % self.felt_keys.len()]
-            }
-            OnboardingTone::Key(KeySoundStyle::Taptic, i) => {
-                &self.taptic_keys[usize::from(i) % self.taptic_keys.len()]
-            }
-            OnboardingTone::Key(KeySoundStyle::Soft, i) => {
-                &self.soft_keys[usize::from(i) % self.soft_keys.len()]
-            }
-            OnboardingTone::KeySpace(KeySoundStyle::Felt) => &self.felt_space,
-            OnboardingTone::KeySpace(KeySoundStyle::Taptic) => &self.taptic_space,
-            OnboardingTone::KeySpace(KeySoundStyle::Soft) => &self.soft_space,
-            OnboardingTone::KeyBackspace(KeySoundStyle::Felt) => &self.felt_backspace,
-            OnboardingTone::KeyBackspace(KeySoundStyle::Taptic) => &self.taptic_keys[3],
-            OnboardingTone::KeyBackspace(KeySoundStyle::Soft) => &self.soft_keys[3],
-            OnboardingTone::ShortcutDown => &self.shortcut_down,
-            OnboardingTone::ShortcutUp => &self.shortcut_up,
-            OnboardingTone::Hexagon => &self.hexagon,
-            OnboardingTone::PanelEscape => &self.panel_escape,
-            OnboardingTone::PermissionTick => &self.permission_tick,
-            OnboardingTone::AlmostReady => &self.almost_ready,
-        })
-    }
-}
+mod onboarding;
+use onboarding::OnboardingSounds;
 
 /// The decoded sounds the playback worker plays, every set at once so a new
 /// choice plays at once.
@@ -1076,30 +1123,69 @@ impl<S: Source> Source for Retractable<S> {
     }
 }
 
-fn open_output() -> Result<MixerDeviceSink> {
-    let mut sink = DeviceSinkBuilder::from_default_device()
+/// Whether a stream error leaves the output unusable. An underrun or overrun
+/// is a glitch on a stream that keeps running. A default-output change is only
+/// safe on macOS, where cpal reports `DeviceChanged` after the default-output
+/// unit has already rerouted the stream; on Windows cpal's WASAPI backend never
+/// rebinds, so a default-device change ends the stream with
+/// `StreamInvalidated`, which is fatal. Other kinds are treated as an output
+/// that may no longer work; dropping it costs only a cold reopen at the next
+/// tone.
+fn stream_error_is_fatal(kind: rodio::cpal::ErrorKind) -> bool {
+    !matches!(
+        kind,
+        rodio::cpal::ErrorKind::Xrun | rodio::cpal::ErrorKind::DeviceChanged
+    )
+}
+
+fn open_output() -> Result<Opened<MixerDeviceSink>> {
+    // The stream error callback may run on a CoreAudio thread, so it only
+    // flips this flag on a fatal error: no logging, allocation, or locks. The
+    // playback worker reads it, drops the sink, and logs once from its own
+    // thread.
+    let failed = Arc::new(AtomicBool::new(false));
+    let callback = {
+        let failed = failed.clone();
+        move |error: rodio::cpal::Error| {
+            if stream_error_is_fatal(error.kind()) {
+                failed.store(true, Ordering::Release);
+            }
+        }
+    };
+    let mut opened = DeviceSinkBuilder::from_default_device()
         .and_then(|builder| {
             builder
                 .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
+                .with_error_callback(callback)
                 .open_stream()
+                .map(|sink| Opened { sink, failed })
         })
-        .or_else(|_| DeviceSinkBuilder::open_default_sink())
+        // rodio's all-device fallback (`open_default_sink`) takes no error
+        // callback, so a sink opened there keeps rodio's default callback and
+        // never flags a failure.
+        .or_else(|_| {
+            DeviceSinkBuilder::open_default_sink().map(|sink| Opened {
+                sink,
+                failed: Arc::new(AtomicBool::new(false)),
+            })
+        })
         .wrap_err("could not open the audio output")?;
-    sink.log_on_drop(false);
-    Ok(sink)
+    opened.sink.log_on_drop(false);
+    Ok(opened)
 }
 
 impl FeedbackOutput<MixerDeviceSink> {
     /// Opens the output and starts its idle grace without playing anything.
     fn prepare(&mut self, now: Instant) {
         let opening = Instant::now();
+        self.drop_failed(now);
         let cold = self.sink.is_none();
         let route = crate::audio::output_route_generation();
         if let Err(error) = self.open_for_tone(now, route, open_output) {
             tracing::warn!(%error, "recording audio output unavailable; retrying");
         }
         if cold && self.sink.is_some() {
-            tracing::debug!(
+            tracing::info!(
                 open_ms = opening.elapsed().as_millis(),
                 "opened feedback output"
             );
@@ -1117,11 +1203,11 @@ impl FeedbackOutput<MixerDeviceSink> {
             self.release_when_idle(false, Instant::now());
             return false;
         }
-        let Some(sink) = self.sink.as_ref() else {
+        let Some(opened) = self.sink.as_ref() else {
             return false;
         };
         let duration = sound.total_duration().unwrap_or(Duration::ZERO);
-        sink.mixer().add(sound.amplify(volume()));
+        opened.sink.mixer().add(sound.amplify(volume()));
         tracing::debug!(?tone, "playing feedback tone");
         self.mark_playing(Instant::now(), duration);
         true
@@ -1159,12 +1245,12 @@ fn spawn_system_sound(sound: &str) -> Option<std::process::Child> {
         .ok()
 }
 
-/// Mixes a timed `(at_secs, Tone)` timeline offline into a 48 kHz 16-bit mono
+/// Mixes a timed `(at_secs, Tone, percent)` timeline offline into a 48 kHz 16-bit mono
 /// WAV file at `path` using the exact bundled `Sounds` without opening any
 /// audio output device. Used by headless `--video` renders and tests.
 pub(crate) fn mix_offline_wav(
     path: &std::path::Path,
-    cues: &[(f64, Tone)],
+    cues: &[(f64, Tone, u8)],
     set: SoundSet,
     gain: f32,
     duration_secs: f64,
@@ -1175,10 +1261,11 @@ pub(crate) fn mix_offline_wav(
     let gain = gain.clamp(0.0, 1.0);
     if gain > 0.0 && !cues.is_empty() {
         let sounds = Sounds::load()?;
-        for &(at, tone) in cues {
+        for &(at, tone, percent) in cues {
             if at < 0.0 {
                 continue;
             }
+            let gain = gain * f32::from(percent) / 100.0;
             let Some(buf) = sounds.get(set, tone) else {
                 continue;
             };
@@ -1255,6 +1342,13 @@ pub(crate) fn mix_offline_wav(
 }
 
 /// Decodes one of Hex's bundled 16-bit PCM sounds.
+/// `sound` played `cents` higher: the same samples at a faster rate.
+fn detune(sound: &SamplesBuffer, cents: f64) -> SamplesBuffer {
+    let rate = f64::from(sound.sample_rate().get()) * 2f64.powf(cents / 1200.0);
+    let rate = std::num::NonZero::new(rate.round() as u32).unwrap_or(sound.sample_rate());
+    SamplesBuffer::new(sound.channels(), rate, sound.clone().collect::<Vec<_>>())
+}
+
 fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     let reader =
         hound::WavReader::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
@@ -1291,6 +1385,14 @@ mod tests {
     impl<S> FeedbackOutput<S> {
         fn is_open(&self) -> bool {
             self.sink.is_some()
+        }
+    }
+
+    /// An opened output whose stream has not reported an error.
+    fn opened<S>(sink: S) -> Opened<S> {
+        Opened {
+            sink,
+            failed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1369,19 +1471,20 @@ mod tests {
     #[test]
     fn onboarding_cues_decode_stay_compact_and_respect_zero_volume_mix() {
         let sounds = Sounds::load().unwrap();
-        for style in [
-            KeySoundStyle::Taptic,
-            KeySoundStyle::Felt,
-            KeySoundStyle::Soft,
+        for (style, keys, longest) in [
+            (KeySoundStyle::Clack, CLACK_KEYS * 3, 100),
+            (KeySoundStyle::Taptic, 6, 60),
+            (KeySoundStyle::Felt, 6, 60),
+            (KeySoundStyle::Soft, 6, 60),
         ] {
-            for i in 0..6 {
+            for i in 0..keys {
                 let buf = sounds
                     .get(
                         SoundSet::Signature,
                         Tone::Onboarding(OnboardingTone::Key(style, i)),
                     )
                     .expect("key cue present");
-                assert!(buf.total_duration().unwrap() <= Duration::from_millis(60));
+                assert!(buf.total_duration().unwrap() <= Duration::from_millis(longest));
             }
             assert!(
                 sounds
@@ -1408,12 +1511,58 @@ mod tests {
             OnboardingTone::PanelEscape,
             OnboardingTone::PermissionTick,
             OnboardingTone::AlmostReady,
+            OnboardingTone::Build(0),
+            OnboardingTone::Build(1),
+            OnboardingTone::Read,
+            OnboardingTone::Rewind,
+            OnboardingTone::Heartbeat,
+            OnboardingTone::Word(0),
+            OnboardingTone::Word(1),
+            OnboardingTone::Word(2),
         ] {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
                 .expect("onboarding cue present");
-            assert!(buf.total_duration().unwrap() <= Duration::from_millis(250));
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(400));
         }
+        // The slow-motion and comic-hit cues, and the Messages sounds, ring
+        // longer, but not for long.
+        let tapbacks = Tapback::ALL.map(OnboardingTone::Tapback);
+        for cue in [
+            OnboardingTone::Incoming,
+            OnboardingTone::Sent,
+            OnboardingTone::HeartbeatSlow,
+            OnboardingTone::SlowDown,
+            OnboardingTone::Slam,
+            OnboardingTone::Burn,
+            OnboardingTone::ModeVoice,
+        ]
+        .iter()
+        .chain(&tapbacks)
+        {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(*cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(1200));
+        }
+        // The celebration rings longest of all.
+        let triumphs = (0..TRIUMPHS).map(OnboardingTone::Triumph);
+        for cue in [OnboardingTone::Confetti, OnboardingTone::Fireworks]
+            .into_iter()
+            .chain(triumphs)
+        {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(1600));
+        }
+        let land = sounds
+            .get(
+                SoundSet::Signature,
+                Tone::Onboarding(OnboardingTone::Build(2)),
+            )
+            .expect("the logo's last note");
+        assert!(land.total_duration().unwrap() <= Duration::from_millis(500));
 
         let k0: Vec<f32> = sounds.onboarding.felt_keys[0].clone().collect();
         let k1: Vec<f32> = sounds.onboarding.felt_keys[1].clone().collect();
@@ -1435,8 +1584,9 @@ mod tests {
             (
                 0.05,
                 Tone::Onboarding(OnboardingTone::Key(KeySoundStyle::Taptic, 0)),
+                100,
             ),
-            (0.20, Tone::DictationStart),
+            (0.20, Tone::DictationStart, 100),
         ];
         mix_offline_wav(&silent, &timeline, SoundSet::Signature, 0.0, 0.5).unwrap();
         mix_offline_wav(&audible, &timeline, SoundSet::Signature, 0.5, 0.5).unwrap();
@@ -1551,10 +1701,10 @@ mod tests {
         assert!(admission_error(waiting.recv_timeout(Duration::ZERO)).is_err());
         drop(waiting);
         publish_player(&player, sender, ready, Ok(()));
-        enqueue(player.get(), Request::Play(Tone::DictationStart));
+        enqueue(player.get(), Request::Play(Tone::DictationStart, 100));
         assert_eq!(
             receiver.try_recv().unwrap(),
-            Request::Play(Tone::DictationStart)
+            Request::Play(Tone::DictationStart, 100)
         );
     }
 
@@ -1572,7 +1722,7 @@ mod tests {
         let open = || {
             live.set(live.get() + 1);
             opens.set(opens.get() + 1);
-            Ok(Sink(&live))
+            Ok(opened(Sink(&live)))
         };
         let mut output = FeedbackOutput::new();
         let now = Instant::now();
@@ -1608,11 +1758,82 @@ mod tests {
         assert_eq!(live.get(), 0);
     }
 
+    /// Only an output that became unavailable or invalid drops the sink. A
+    /// glitch on a stream that keeps running must not, and neither must the
+    /// macOS default-output `DeviceChanged` that cpal reports after the unit
+    /// has already rerouted.
+    #[test]
+    fn only_an_unavailable_output_is_a_fatal_stream_error() {
+        use rodio::cpal::ErrorKind;
+        assert!(!stream_error_is_fatal(ErrorKind::Xrun));
+        assert!(!stream_error_is_fatal(ErrorKind::DeviceChanged));
+        assert!(stream_error_is_fatal(ErrorKind::DeviceNotAvailable));
+    }
+
+    /// A stream error is recorded in its sink's own flag; the worker drops
+    /// that sink, logs once, and the next tone opens a fresh one instead of
+    /// feeding a dead stream.
+    #[test]
+    fn an_errored_sink_is_dropped_and_reopened_on_the_next_tone() {
+        use std::cell::{Cell, RefCell};
+        struct Sink<'a>(&'a Cell<usize>);
+        impl Drop for Sink<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() - 1);
+            }
+        }
+        let live = Cell::new(0);
+        let opens = Cell::new(0);
+        let flags: RefCell<Vec<Arc<AtomicBool>>> = RefCell::new(Vec::new());
+        let open = || {
+            live.set(live.get() + 1);
+            opens.set(opens.get() + 1);
+            let failed = Arc::new(AtomicBool::new(false));
+            flags.borrow_mut().push(failed.clone());
+            Ok(Opened {
+                sink: Sink(&live),
+                failed,
+            })
+        };
+        let mut output = FeedbackOutput::new();
+        let now = Instant::now();
+        output.open_for_tone(now, 0, open).unwrap();
+        assert_eq!((opens.get(), live.get()), (1, 1));
+
+        // The audio callback set the open sink's flag. A tone arriving before
+        // the next idle observation drops that sink and reopens at once.
+        flags.borrow()[0].store(true, Ordering::Release);
+        output.open_for_tone(now, 0, open).unwrap();
+        assert_eq!((opens.get(), live.get()), (2, 1));
+        assert_eq!(output.playing_until, None);
+        assert!(
+            !flags.borrow()[0].load(Ordering::Acquire),
+            "the dropped sink's flag is cleared"
+        );
+
+        // A stale error from the dropped sink cannot close the newer one.
+        output.mark_playing(now, Duration::from_secs(1));
+        flags.borrow()[0].store(true, Ordering::Release);
+        output.release_when_idle(true, now);
+        assert!(output.is_open());
+
+        // The new sink's own error is noticed on the next idle observation,
+        // even without a tone.
+        flags.borrow()[1].store(true, Ordering::Release);
+        output.release_when_idle(true, now);
+        assert!(!output.is_open());
+        assert_eq!(live.get(), 0);
+
+        // The next tone opens again.
+        output.open_for_tone(now, 0, open).unwrap();
+        assert_eq!((opens.get(), live.get()), (3, 1));
+    }
+
     #[test]
     fn overlapping_tones_extend_playback_instead_of_truncating_it() {
         let mut output = FeedbackOutput::new();
         let now = Instant::now();
-        output.open_for_tone(now, 0, || Ok(())).unwrap();
+        output.open_for_tone(now, 0, || Ok(opened(()))).unwrap();
         output.mark_playing(now, Duration::from_secs(2));
         output.mark_playing(now + Duration::from_millis(300), Duration::from_secs(1));
         assert_eq!(output.playing_until, Some(now + Duration::from_secs(2)));
@@ -1633,13 +1854,13 @@ mod tests {
                 .is_err()
         );
         output
-            .open_for_tone(now + Duration::from_secs(1), 0, || -> Result<()> {
+            .open_for_tone(now + Duration::from_secs(1), 0, || -> Result<Opened<()>> {
                 panic!("must not spin on device failure")
             })
             .unwrap();
         assert!(!output.is_open());
         output
-            .open_for_tone(now + OPEN_RETRY_BACKOFF, 0, || Ok(()))
+            .open_for_tone(now + OPEN_RETRY_BACKOFF, 0, || Ok(opened(())))
             .unwrap();
         assert!(output.is_open());
     }
@@ -1653,18 +1874,20 @@ mod tests {
         let opens = Cell::new(0_u32);
         let open = || {
             opens.set(opens.get() + 1);
-            Ok(opens.get())
+            Ok(opened(opens.get()))
         };
+        let opened_sink =
+            |output: &FeedbackOutput<u32>| output.sink.as_ref().map(|opened| opened.sink);
         let mut output = FeedbackOutput::new();
         let now = Instant::now();
         output.open_for_tone(now, 0, open).unwrap();
         output.open_for_tone(now, 0, open).unwrap();
-        assert_eq!(output.sink, Some(1));
+        assert_eq!(opened_sink(&output), Some(1));
 
         // The default output went away: the old stream is dropped and the
         // new default opens for the next tone.
         output.open_for_tone(now, 1, open).unwrap();
-        assert_eq!(output.sink, Some(2));
+        assert_eq!(opened_sink(&output), Some(2));
 
         // A failed reopen backs off, but a later route change retries at once.
         assert!(
@@ -1676,7 +1899,7 @@ mod tests {
         output
             .open_for_tone(now + Duration::from_millis(10), 3, open)
             .unwrap();
-        assert_eq!(output.sink, Some(3));
+        assert_eq!(opened_sink(&output), Some(3));
     }
 
     #[test]
@@ -1764,16 +1987,16 @@ mod tests {
             if legacy {
                 let mut sink = DeviceSinkBuilder::open_default_sink().unwrap();
                 sink.log_on_drop(false);
-                sink
+                opened(sink)
             } else {
                 open_output().unwrap()
             }
         };
-        let measure = |sink: &mut Option<MixerDeviceSink>, label: &str| {
+        let measure = |sink: &mut Option<Opened<MixerDeviceSink>>, label: &str| {
             let requested = Instant::now();
             let sink = sink.get_or_insert_with(open);
             let opened = requested.elapsed();
-            let config = sink.config();
+            let config = sink.sink.config();
             let buffer = match config.buffer_size() {
                 BufferSize::Fixed(frames) => Duration::from_secs_f64(
                     f64::from(*frames) / f64::from(config.sample_rate().get()),
@@ -1781,7 +2004,7 @@ mod tests {
                 BufferSize::Default => Duration::ZERO,
             };
             let pulled = Arc::new(Mutex::new(None));
-            sink.mixer().add(
+            sink.sink.mixer().add(
                 Probe {
                     inner: start.clone(),
                     pulled: pulled.clone(),
@@ -1944,12 +2167,12 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(2);
         enqueue(Some(&sender), Request::ProvisionalStart);
         enqueue(Some(&sender), Request::RetractStart);
-        enqueue(Some(&sender), Request::Play(Tone::DictationStop));
+        enqueue(Some(&sender), Request::Play(Tone::DictationStop, 100));
         assert_eq!(receiver.try_recv().unwrap(), Request::ProvisionalStart);
         assert_eq!(receiver.try_recv().unwrap(), Request::RetractStart);
         assert!(receiver.try_recv().is_err());
         drop(receiver);
-        enqueue(Some(&sender), Request::Play(Tone::DictationStop));
+        enqueue(Some(&sender), Request::Play(Tone::DictationStop, 100));
         enqueue(None, Request::ProvisionalStart);
     }
 

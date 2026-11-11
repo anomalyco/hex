@@ -132,6 +132,36 @@ shutdown if native work must stop. Effect's low-level `client.models.prepare()`
 remains a progress `Stream`. `Hex.layer(options)` still supplies the low-level
 `Hex.Service` and owns its helper for the layer scope.
 
+On the running desktop app, `client.transcribe({ ..., process: "global" })`
+also asks for the text after your Global mode's output processing (Labs ›
+Process API transcripts) and returns it as `processed`. An embedded
+`hex-service` installs no processor and answers `processing-unavailable`;
+without `process`, results are raw transcripts as before. `capabilities()`
+reports `outputProcessing` when the host supports it; older hosts omit it.
+
+With Labs › Timestamps in API transcripts on, the same call takes
+`timestamps: "segment" | "word"` and returns the speech model's own times:
+
+```typescript
+const result = await client.transcribe({
+  audio: { data: wav, contentType: "audio/wav" },
+  model: "parakeet_unified_en",
+  timestamps: "word",
+})
+for (const word of result.words ?? []) {
+  console.log(word.text, word.startMs, word.endMs) // ms from the clip's start
+}
+```
+
+`segment` adds `segments`; `word` adds `segments` and `words`. Each is a
+`TimedText`: `text`, `startMs`, `endMs`. `"none"` and an absent option send no
+parameter, so the response is the untimed one. A model that cannot produce the
+level asked for answers `unsupported-timestamps`; the times are never estimated
+or cut down from a coarser level, and the Lab being off answers
+`timestamps-disabled`. An embedded helper reads the lab from saved settings
+once, on its first request, so restart it after turning the lab on; `connect()`
+reads the running app's value live.
+
 Use `models.list()` to discover available models rather than treating the exported
 `MODEL_IDS` as an availability list. `apple_speech` remains in the public type but
 is currently unavailable in the native catalog. The optional `language` argument

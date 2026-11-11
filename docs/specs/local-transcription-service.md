@@ -41,7 +41,7 @@ appear as Electron. The embedded helper never opens the microphone.
 | Model preparation is explicit | A transcription call never hides a large network download. |
 | Installed-but-cold models may reload automatically | A request for a different model in the same helper replaces its warm runtime. |
 | No product duration limit | Hotkey capture and service transcription end explicitly; operational resource exhaustion remains a typed failure. |
-| Raw transcripts only | The host owns meaning, rewriting, and insertion. |
+| Raw transcripts only | The host owns meaning, rewriting, and insertion. The running desktop app's authenticated API can apply Global mode's output processing when a request explicitly asks with `process=global` (opt-in); the embedded helper has no processor. |
 | Trusted Node/Electron main process | Ordinary browser code and untrusted renderers must not receive native process authority or service credentials. |
 | Host-spawned helper | The host owns the process, endpoint, and lifetime instead of discovering an independently elected service. |
 | Shared model artifacts, private warm runtime | Hosts reuse verified downloads without coupling their model choice or process lifecycle. |
@@ -119,6 +119,80 @@ transcription accept an optional `language` query parameter, defaulting to `en`.
 the returned catalog. Transcription requires `Content-Length`; chunked transfer
 encoding is not supported.
 
+`POST /transcriptions` accepts an optional `process=global` query parameter on
+the running desktop app's authenticated API (Labs › Process API transcripts,
+off by default; `true` and `1` are aliases). When present, the response keeps
+`transcript` and `durationMs` and adds `processed`: the same text a paste with
+no matching app or website mode would use, after global replacements, Global
+mode corrections, the optional OpenCode rewrite, and Global's selected
+transformations. Processing is best-effort and deadline-bounded like a paste,
+so a failed stage keeps its input and the request still succeeds. It never
+pastes, records History, updates the last dictation, or touches the clipboard.
+Any other value, or a repeated parameter, answers `400 invalid-request`.
+`hex service` and `--embedded` install no processor and answer `409
+processing-unavailable`, even while the lab is off; with a processor installed
+and the lab off the answer is `403 processing-disabled`. Processing runs one at
+a time across the local API, so while another holds it the answer is `429
+queue-full`; all three are decided before the audio body is read.
+`GET /capabilities` always includes `outputProcessing`, true only when a
+processor is installed and the lab is on.
+
+`POST /transcriptions` also accepts an optional `timestamps` query parameter:
+`none`, `segment`, or `word` (Labs › Timestamps in API transcripts, off by
+default). The running desktop app reads the lab live, so its next request sees
+a toggle. A `hex service` process without the app reads the saved
+`labs.api_timestamps` once, at startup, and the embedded helper (the SDK's
+direct child) loads no settings and reads the saved value once, on its first
+request. Neither re-reads it, so changing the lab reaches a running helper only
+after it restarts. Absent means `none`. Any other value, or a repeated
+parameter, answers `400 invalid-request`. With the lab off, `segment` and
+`word` answer `403 timestamps-disabled` before the audio body is read; `none`
+and an absent parameter are unaffected. An unknown value is `400` whether or
+not the lab is on.
+
+```typescript
+// The response with timestamps=segment, on top of today's fields.
+{
+  transcript: string;
+  durationMs: number;
+  timestampGranularity: "segment";
+  segments: readonly { text: string; startMs: number; endMs: number }[];
+}
+
+// timestamps=word adds the model's own words.
+{
+  transcript: string;
+  durationMs: number;
+  timestampGranularity: "word";
+  segments: readonly { text: string; startMs: number; endMs: number }[];
+  words: readonly { text: string; startMs: number; endMs: number }[];
+}
+```
+
+Times are whole milliseconds from the start of the submitted audio, never
+relative to the model's internal chunk: a long clip transcribed in chunks has
+each chunk's offset added once, from its sample position in the clip, so
+chunks that held no speech shift nothing. An end that padding (the minimum
+clip duration, or a model's trailing silence) pushed past the decoded audio
+is clamped to `durationMs`. A GGUF model answers a clip with no speech with
+`200`, an empty `transcript`, and empty `segments` and `words`; Apple Speech
+reports no speech instead, as `500 transcription-failed`, whether or not
+timings were asked for.
+
+The times are the model's own: nothing estimates them from text length or
+chunk boundaries, and a word request is never answered with segments. When
+the selected model or backend cannot produce the requested level the answer
+is `422 unsupported-timestamps`, after the model is resolved and before
+inference. A GGUF model's own `capabilities.max_timestamp_kind` metadata
+decides, so a model that advertises only segments answers `segment` and
+refuses `word`; Apple Speech gives segments only. The decision is the same on
+both inference paths: the running app's shared dictation engine when it holds
+the requested model, and the service's own copy otherwise. `none` adds no
+field, and the response is byte-for-byte what it was before. With
+`process=global`, the segments and words describe the raw transcript and
+`processed` stays a separate field. `/streams` and `/dictations` are unchanged
+and do not offer this parameter. `API_VERSION` stays `2`.
+
 `POST /transcriptions` accepts completed PCM WAV audio. The service reads
 request bodies incrementally into a bounded buffer, then validates WAV metadata
 before allocating decoded samples and running inference. It downmixes and
@@ -157,6 +231,7 @@ export interface Capabilities {
   audioFormats: readonly ["audio/wav"];
   partialTranscripts: false;
   serviceCapture: false;
+  outputProcessing: boolean;
   developerControl: false;
 }
 ```
@@ -164,6 +239,9 @@ export interface Capabilities {
 These capability values describe the embedded helper. The desktop local API can
 advertise capture and debug-only developer control. The SDK exposes
 `serviceCapture` as a boolean and omits the native-only `developerControl` field.
+`outputProcessing` is `false` from the embedded helper (it installs no
+processor) and true from the running app only while Labs › Process API
+transcripts is on.
 
 ### Models
 
@@ -172,6 +250,7 @@ export type ModelId =
   | "parakeet_unified_en"
   | "parakeet_v2"
   | "parakeet_v3"
+  | "orukeet"
   | "whisper_large_v3_turbo"
   | "qwen3_asr06_b"
   | "qwencleo_asr_1_7b"

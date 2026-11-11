@@ -1,0 +1,191 @@
+name: Deploy
+
+# Builds site/ and deploys its Worker (the site at /hex and the files at
+# /hex/files: built installers and appcast, the dev notes, and the frozen
+# 2.3.1 bucket). Pull requests run no site check (CI is minimal; the deploy
+# builds the site and checks every download link). A push (or a dispatch) on
+# dev deploys the dev site (https://dev.anoma.ly/hex); on production, which
+# moves only by a fast-forward from dev, the production site
+# (https://anoma.ly/hex). The mode always follows the branch. Split like
+# Release (docs/releasing.md):
+#
+# - build runs repository code (bun install, site/scripts/build.ts) with no
+#   environment and no secrets, and uploads the Worker's Build Output with a
+#   SHA256SUMS whose digest it reports.
+# - deploy runs in the mode's infra environment (infra-dev or
+#   infra-production, each admitting only its own branch) and mints a
+#   short-lived Cloudflare token for that mode's Worker from the token issuer
+#   after assuming the environment's role, github/hex-infra-<mode>
+#   (.github/release/cloudflare-token.sh). The AWS session is a step output
+#   given only to the token step, and the token only to the Deploy step. It
+#   checks out only .github/release/, verifies the artifact against that
+#   digest, and runs only .github/release/deploy-site.sh, which pins the
+#   Worker, routes, and bindings and deploys with the cf CLI locked in
+#   .github/release/cf/.
+# - verify checks the live site and every download link without secrets.
+on:
+  push:
+    branches: [dev, production]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/release/deploy-site.sh"
+      - ".github/release/cloudflare-token.sh"
+      - ".github/release/cf/**"
+      - ".github/release/install-linux.sh"
+      - ".github/release/install-windows.ps1"
+      - "packaging/macos/legacy-appcast.xml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/production'
+    runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - run: bun install --frozen-lockfile
+      # The checks the Installers and Legacy appcast workflows ran before they
+      # uploaded these files to the bucket. The site now serves them, so a
+      # broken installer or appcast fails the deploy instead.
+      - name: Check the legacy appcast
+        run: |
+          python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' ../packaging/macos/legacy-appcast.xml
+          grep -Fq '<sparkle:informationalUpdate' ../packaging/macos/legacy-appcast.xml
+          grep -Fq 'https://anoma.ly/hex' ../packaging/macos/legacy-appcast.xml
+      - name: Test the installers
+        run: |
+          sh ../scripts/test-install-linux-release.sh
+          pwsh -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw ../.github/release/install-windows.ps1))"
+      - name: Build
+        env:
+          MODE: ${{ github.ref_name == 'production' && 'production' || 'dev' }}
+        run: |
+          case "$MODE" in dev|production) ;; *) exit 1 ;; esac
+          bun run build --mode "$MODE"
+          # Vite's build manifest is not deployed, and artifacts drop hidden files.
+          rm -r .cloudflare/output/v0/workers/default/bundle/.vite
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: site-${{ github.ref_name == 'production' && 'production' || 'dev' }}
+          path: site/.cloudflare/output
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: infra-${{ github.ref_name == 'production' && 'production' || 'dev' }}
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: site-deploy-${{ github.ref_name == 'production' && 'production' || 'dev' }}
+      cancel-in-progress: false
+    env:
+      MODE: ${{ github.ref_name == 'production' && 'production' || 'dev' }}
+    steps:
+      - name: Require the branch for the mode
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          case "$MODE:$REF" in
+            production:refs/heads/production | dev:refs/heads/dev) ;;
+            *) echo "::error::The $MODE site deploys only from its own branch, not $REF."; exit 1 ;;
+          esac
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          # Nothing from the Actions cache, which jobs running repository code share.
+          package-manager-cache: false
+      - name: Install the pinned cf CLI
+        working-directory: .github/release/cf
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Download
+        uses: ./.github/release/download
+        with:
+          pattern: site-${{ env.MODE }}
+          digests: site-${{ env.MODE }}=${{ needs.build.outputs.digest }}
+      # Step outputs only: the token step gets the AWS session, and cf in the
+      # Deploy step never does.
+      - id: aws
+        name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-infra-${{ env.MODE }}
+          role-session-name: hex-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: us-east-1
+          output-env-credentials: false
+          output-credentials: true
+      - name: Cloudflare token
+        id: cloudflare-token
+        env:
+          CLOUDFLARE_TOKEN_URL: ${{ vars.CLOUDFLARE_TOKEN_URL }}
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+        run: bash .github/release/cloudflare-token.sh
+      - name: Deploy
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+        run: bash .github/release/deploy-site.sh "$MODE" "$RUNNER_TEMP/in/site-$MODE"
+
+  verify:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: site
+    env:
+      MODE: ${{ github.ref_name == 'production' && 'production' || 'dev' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - run: bun install --frozen-lockfile
+      - name: Check the live site and every download link
+        run: |
+          host=$([ "$MODE" = dev ] && echo dev.anoma.ly || echo anoma.ly)
+          for attempt in 1 2 3 4 5 6; do
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://$host/hex/")
+            [ "$status" = 200 ] && break
+            sleep 10
+          done
+          test "$status" = 200
+          bun scripts/release-data.ts --mode "$MODE"
+          bun run check:downloads
+      - name: Check the files the site serves
+        run: |
+          host=$([ "$MODE" = dev ] && echo dev.anoma.ly || echo anoma.ly)
+          for name in install-linux.sh install-windows.ps1 appcast.xml; do
+            curl -fsS "https://$host/hex/files/$name?check=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/$name"
+          done
+          cmp "$RUNNER_TEMP/install-linux.sh" ../.github/release/install-linux.sh
+          cmp "$RUNNER_TEMP/install-windows.ps1" ../.github/release/install-windows.ps1
+          cmp "$RUNNER_TEMP/appcast.xml" ../packaging/macos/legacy-appcast.xml

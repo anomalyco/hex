@@ -39,6 +39,7 @@ fn wait<T: windows::core::RuntimeType>(
 use crate::app_settings::RecordingAudioBehavior as WhileDictating;
 use crate::audio::idle_sleep::PreventSleep;
 use crate::audio::output_ducking;
+use crate::audio::output_route;
 
 enum Command {
     Suppress,
@@ -82,12 +83,7 @@ impl AudioSuppressor {
                     match command {
                         Command::Suppress if held.is_none() => {
                             held = Some(Held {
-                                audio: match mode {
-                                    WhileDictating::Mute => mute_other_sessions(),
-                                    WhileDictating::Duck => duck_other_sessions(),
-                                    WhileDictating::PauseMedia => pause_playing_media(),
-                                    WhileDictating::DoNothing => None,
-                                },
+                                audio: suppress(mode),
                                 _sleep: crate::audio::idle_sleep::prevent_sleep(),
                             });
                         }
@@ -124,6 +120,28 @@ impl Drop for AudioSuppressor {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+    }
+}
+
+/// What one recording changes: `mode` ("While dictating"), or nothing when
+/// Labs › Only on speakers is on and the default output is headphones. The
+/// route is read once per recording, here on the worker thread, so the
+/// dictation loop never waits on cpal; with the lab off it is not read at
+/// all. Idle sleep is not part of this.
+fn suppress(mode: WhileDictating) -> Option<Suppressed> {
+    if mode == WhileDictating::DoNothing {
+        return None;
+    }
+    if crate::labs::speakers_only() && !output_route::applies(output_route::default_output_route())
+    {
+        tracing::info!("left other audio alone while dictating on headphones");
+        return None;
+    }
+    match mode {
+        WhileDictating::Mute => mute_other_sessions(),
+        WhileDictating::Duck => duck_other_sessions(),
+        WhileDictating::PauseMedia => pause_playing_media(),
+        WhileDictating::DoNothing => None,
     }
 }
 

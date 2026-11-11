@@ -149,6 +149,7 @@ const PATHS: &[(&str, &str)] = &[
     ("modes", "Window/Modes/Modes"),
     ("modes-global", "Window/Modes/Global mode"),
     ("modes-picker", "Window/Modes/App picker"),
+    ("modes-speech", "Window/Modes/Speech model"),
     (
         "modes-transformation-menu",
         "Window/Modes/Transformation menu",
@@ -192,6 +193,10 @@ const PATHS: &[(&str, &str)] = &[
     ("history-clear", "Window/History/Clear all asks first"),
     ("history-stats", "Window/History/Stats dialog"),
     ("history-empty", "Window/History/Empty"),
+    #[cfg(hex_capture)]
+    ("captures", "Window/Captures/Captures"),
+    #[cfg(hex_capture)]
+    ("captures-empty", "Window/Captures/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]
@@ -240,6 +245,11 @@ const PATHS: &[(&str, &str)] = &[
     (
         "mac-onboarding-restart",
         "Window/Onboarding/Permissions · restart",
+    ),
+    ("mac-onboarding-waiting", "Window/Onboarding/Almost ready"),
+    (
+        "mac-onboarding-sketch",
+        "Window/Onboarding/Almost ready · watch another one",
     ),
     ("mac-onboarding-try", "Window/Onboarding/Your turn"),
     (
@@ -291,6 +301,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "onboarding-waiting",
         "Linux & Windows/Onboarding · almost ready",
+    ),
+    (
+        "onboarding-sketch",
+        "Linux & Windows/Onboarding · watch another one",
     ),
     (
         "onboarding-paste",

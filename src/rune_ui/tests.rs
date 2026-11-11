@@ -333,7 +333,7 @@ fn gnome_desktops_point_to_the_clipboard_lab_until_it_is_on() {
     open_labs(&mut rt);
     tap(&mut rt, "lab-gnome-clipboard-restore");
     assert!(rt.state.settings.labs.gnome_clipboard_restore);
-    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "nav-general");
     assert!(rt.find("terminal-paste").is_some(), "back on General");
     assert!(rt.find("clipboard-restore-note").is_none());
 }
@@ -1652,6 +1652,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("again").is_some());
+    assert!(rt.find("again-play").is_some(), "audio can be played");
     rt.state.history.selected = Some(plain);
     rt.invalidate();
     settle(&mut rt);
@@ -1659,6 +1660,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
         rt.find("again").is_none(),
         "an entry without audio has nothing to transcribe"
     );
+    assert!(rt.find("again-play").is_none());
 
     rt.state.history.selected = Some(id);
     rt.state.history.again = Some(history::Again::finished(
@@ -1706,11 +1708,101 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("versions").is_none(), "off, the versions hide");
+    assert!(rt.find("again-play").is_none(), "off, Play hides");
     assert!(
         texts(&rt).iter().any(|text| text == "Parakeet v3"),
         "the model shows either way"
     );
     let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn leaving_an_entry_or_turning_off_keep_recordings_stops_playback() {
+    use crate::history::playback::Playback;
+    let mut rt = runtime("history", true, GOLDEN_SIZE);
+    rt.state.settings.labs.keep_recordings = true;
+    for entry in &mut rt.state.history.entries {
+        if entry.id == 2 {
+            entry.recording_bytes = 32_000;
+        }
+    }
+    let start = |rt: &mut Runtime<Ui>| {
+        rt.state.history.selected = Some(2);
+        rt.state.history.playback = Some(Playback::test_playing(2));
+        rt.invalidate();
+        settle(rt);
+        assert!(
+            rt.state
+                .history
+                .playback
+                .as_ref()
+                .is_some_and(Playback::playing),
+            "the playback starts"
+        );
+        assert_eq!(
+            element(rt, "again-play").label.as_deref(),
+            Some("Stop"),
+            "the card offers Stop while it plays"
+        );
+    };
+    let stopped = |rt: &Runtime<Ui>| {
+        assert!(
+            !rt.state
+                .history
+                .playback
+                .as_ref()
+                .is_some_and(Playback::playing),
+            "the playback stopped"
+        );
+    };
+    let play = |rt: &Runtime<Ui>| {
+        assert_eq!(
+            element(rt, "again-play").label.as_deref(),
+            Some("Play"),
+            "the card offers Play again"
+        );
+    };
+
+    // Leaving for another entry.
+    start(&mut rt);
+    rt.state.history.selected = Some(3);
+    rt.invalidate();
+    settle(&mut rt);
+    stopped(&rt);
+    rt.state.history.selected = Some(2);
+    rt.invalidate();
+    settle(&mut rt);
+    play(&rt);
+
+    // Leaving History.
+    start(&mut rt);
+    rt.state.pane = Pane::General;
+    rt.invalidate();
+    settle(&mut rt);
+    stopped(&rt);
+    rt.state.pane = Pane::History;
+    rt.invalidate();
+    settle(&mut rt);
+    play(&rt);
+
+    // Turning the lab off.
+    start(&mut rt);
+    rt.state.settings.labs.keep_recordings = false;
+    rt.invalidate();
+    settle(&mut rt);
+    stopped(&rt);
+    assert!(rt.find("again-play").is_none(), "off, Play hides");
+
+    rt.state.settings.labs.keep_recordings = true;
+    rt.invalidate();
+    settle(&mut rt);
+    play(&rt);
+
+    // Closing the window: a hidden window only polls when woken, so on_close
+    // stops the playback itself.
+    start(&mut rt);
+    on_close(&mut rt.state, &mut rune::Tx::default());
+    stopped(&rt);
 }
 
 #[test]
@@ -2311,7 +2403,17 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
         command,
     );
     key(&mut rt, Key::Down, Mods::default());
-    assert_eq!(rt.state.pane, last, "Down stops at the last pane");
+    assert!(rt.state.labs_open, "Down from the last pane opens Labs");
+    assert!(
+        focused(&rt).ends_with("nav-labs"),
+        "focus follows to the Labs item: {}",
+        focused(&rt)
+    );
+    key(&mut rt, Key::Down, Mods::default());
+    assert!(rt.state.labs_open, "a second Down keeps Labs open");
+    key(&mut rt, Key::Up, Mods::default());
+    assert_eq!(rt.state.pane, last, "Up returns to the last pane");
+    assert!(!rt.state.labs_open);
 }
 
 #[test]
@@ -2808,11 +2910,13 @@ fn goldens() {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
             "history",
+            "captures",
             "mac-labs",
             "mac-labs-link",
             "output",
             "modes",
             "modes-picker",
+            "modes-speech",
             "picker-downloading",
         ] {
             check_golden(scene, dark, PANE_SIZE);
@@ -2881,6 +2985,32 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
         Some("0".repeat(64).as_str())
     );
     assert!(rt.find("allow-transformations").is_none());
+}
+
+/// Labs › Transform typed text: Output's Typed text section and its
+/// recorder appear only with the lab on, and the recorder listens like the
+/// raw dictation shortcut's.
+#[cfg(target_os = "linux")]
+#[test]
+fn typed_text_shows_its_recorder_only_with_its_lab() {
+    let output = |on: bool| {
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        output::fixture(&mut state);
+        state.pane = Pane::Output;
+        state.settings.labs.typed_text = on;
+        runtime_for(state, false, TALL_SIZE)
+    };
+    let off = output(false);
+    assert!(off.find("typed-text-hotkey").is_none());
+    assert!(!texts(&off).iter().any(|text| text == "Typed text"));
+
+    let mut on = output(true);
+    assert!(on.find("typed-text-hotkey").is_some());
+    tap(&mut on, "typed-text-hotkey");
+    assert!(
+        texts(&on).iter().any(|text| text == "Press shortcut"),
+        "the recorder listens"
+    );
 }
 
 /// Labs › Fix results in Output: the Try card offers Vocabulary and Fix

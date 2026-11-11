@@ -3,7 +3,7 @@
 
 use rune::{El, col, row, text};
 
-use super::super::controls::{ButtonKind, DESCRIPTION, Paint, button};
+use super::super::controls::{ButtonKind, DESCRIPTION, Paint, button, icon_button};
 use super::super::general::keys_button;
 use super::super::{ShortcutTarget, Ui};
 use crate::desktop::i18n::tr;
@@ -22,6 +22,12 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
             "screenshot-shortcut",
             tr("Shortcut"),
             keys_button(ui, p, ShortcutTarget::Screenshot),
+        ))
+        .child(fact(
+            p,
+            "screenshot-record-shortcut",
+            tr("Record screen"),
+            record_control(ui, p),
         ))
         .child(fact(
             p,
@@ -51,6 +57,50 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
         );
     }
     body
+}
+
+/// The record shortcut, unbound until recorded, or why it can't record:
+/// a recording is an Annotate capture. With Annotate off, a saved shortcut
+/// still shows (and can be cleared) so the key it holds stays visible.
+fn record_control(ui: &Ui, p: Paint) -> El {
+    let saved = ui.settings.screenshots.record_hotkey.is_some();
+    if !ui.settings.capture_on() {
+        let mut control = row().key("control").gap(8.0).center_y().child(
+            text(tr("Needs Annotate"))
+                .key("needs-annotate")
+                .font(DESCRIPTION)
+                .color(p.muted()),
+        );
+        if saved {
+            control = control
+                .child(keys_button(ui, p, ShortcutTarget::ScreenshotRecord))
+                .child(clear_record_shortcut(p));
+        }
+        return control;
+    }
+    let mut control = row().key("control").gap(4.0).center_y().child(keys_button(
+        ui,
+        p,
+        ShortcutTarget::ScreenshotRecord,
+    ));
+    if saved {
+        control = control.child(clear_record_shortcut(p));
+    }
+    control
+}
+
+/// Clears the saved record shortcut, freeing the key it holds while
+/// Annotate is off.
+fn clear_record_shortcut(p: Paint) -> El {
+    icon_button(
+        p,
+        "clear-screenshot-record-shortcut",
+        &rune_theme_opencode::icons::TRASH,
+        tr("Clear shortcut"),
+        |ui: &mut Ui| {
+            ui.update(|settings| settings.screenshots.record_hotkey = None);
+        },
+    )
 }
 
 fn fact(p: Paint, key: &str, label: &str, value: El) -> El {

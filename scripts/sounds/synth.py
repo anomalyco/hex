@@ -478,6 +478,9 @@ ONBOARDING_TARGETS = {
     "panel_escape": -30.0,
     "permission_tick": -29.5,
     "almost_ready": -30.5,
+    "build_1": -31.5,
+    "build_2": -31.0,
+    "build_3": -30.0,
 }
 
 
@@ -519,6 +522,15 @@ def onboarding():
         (0.0, 0.72 * warm(Fs5, 0.12, 0.036, h2=0.06, atk_ms=5.0)),
         (0.052, 0.85 * warm(A5, 0.15, 0.044, h2=0.06, bell=0.04, atk_ms=5.0)),
     ], 0.21)
+
+    # "Hex is ready" building the logo outside in, one note per hexagon:
+    # A5, B5, then home on D6 over a quiet A5, the sixth world's resolution.
+    s["build_1"] = 0.8 * warm(A5, 0.16, 0.042, h2=0.06, bell=0.06, atk_ms=3.0)
+    s["build_2"] = 0.85 * warm(B5, 0.16, 0.042, h2=0.06, bell=0.07, atk_ms=3.0)
+    s["build_3"] = mix([
+        (0.0, warm(D6, 0.42, 0.11, h2=0.06, bell=0.08, atk_ms=3.0)),
+        (0.008, 0.38 * warm(A5, 0.42, 0.10, h2=0.04, atk_ms=4.0)),
+    ], 0.43)
 
     return s
 

@@ -17,6 +17,11 @@ static NSPanel *guidePanel;
 static NSTimer *guideTimer;
 static BOOL sawSettingsWindow;
 static HexPermission activePermission;
+/// The pane the guide points at, opened again when Settings is closed under
+/// it, at most `guideReopenLimit` times before the guide gives up.
+static NSURL *guideSettingsURL;
+static NSUInteger guideReopens;
+static const NSUInteger guideReopenLimit = 2;
 static NSView *guideTile;
 
 /// The tile flies on its own from the click in Hex's window to its place in
@@ -255,13 +260,60 @@ int hex_permission_settings_state(void) {
     return (open ? 1 : 0) | (frontmost ? 2 : 0) | (active ? 4 : 0);
 }
 
+/// Whether System Settings still has a real window anywhere, on another
+/// Space or minimized included, rather than having been closed.
+static BOOL settingsWindowExists(void) {
+    NSArray<NSRunningApplication *> *apps =
+        [NSRunningApplication runningApplicationsWithBundleIdentifier:settingsBundleID];
+    if (apps.count == 0) {
+        return NO;
+    }
+    pid_t pid = apps.firstObject.processIdentifier;
+    NSArray *windows = CFBridgingRelease(
+        CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID));
+    for (NSDictionary *window in windows) {
+        if ([window[(id)kCGWindowOwnerPID] intValue] != pid ||
+            [window[(id)kCGWindowLayer] integerValue] != 0) {
+            continue;
+        }
+        CGRect frame;
+        if (CGRectMakeWithDictionaryRepresentation(
+                (__bridge CFDictionaryRef)window[(id)kCGWindowBounds], &frame) &&
+            frame.size.width >= 300 && frame.size.height >= 200) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 /// Opens System Settings at `url`. A System Settings that isn't running yet
 /// drops the pane in the URL while it restores the pane it showed last, so
 /// after a cold launch the URL goes again once its window is up and settled.
-static void openSettingsPane(NSURL *url) {
-    BOOL cold =
-        [NSRunningApplication runningApplicationsWithBundleIdentifier:settingsBundleID].count == 0;
+static void openSettingsPaneMayQuit(NSURL *url, BOOL mayQuit) {
+    NSArray<NSRunningApplication *> *running =
+        [NSRunningApplication runningApplicationsWithBundleIdentifier:settingsBundleID];
+    BOOL cold = running.count == 0;
     NSUInteger request = ++settingsRequest;
+    // A Settings window left on another Space would pull the whole screen
+    // there, away from Hex. Quit it so it opens fresh on this Space.
+    if (mayQuit && !cold && !settingsHasWindow() && settingsWindowExists()) {
+        NSRunningApplication *settings = running.firstObject;
+        [settings terminate];
+        __block NSUInteger waits = 0;
+        [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
+            waits += 1;
+            if (request != settingsRequest) {
+                [timer invalidate];
+                return;
+            }
+            if (!settings.terminated && waits < 40) {
+                return;
+            }
+            [timer invalidate];
+            openSettingsPaneMayQuit(url, NO);
+        }];
+        return;
+    }
     [[NSWorkspace sharedWorkspace] openURL:url];
     if (!cold) {
         return;
@@ -286,6 +338,10 @@ static void openSettingsPane(NSURL *url) {
             });
         }
     }];
+}
+
+static void openSettingsPane(NSURL *url) {
+    openSettingsPaneMayQuit(url, YES);
 }
 
 static NSRect appKitFrame(CGRect frame) {
@@ -350,8 +406,10 @@ static void closeGuide(void) {
     [guidePanel orderOut:nil];
     guidePanel = nil;
     guideTile = nil;
+    guideSettingsURL = nil;
     sawSettingsWindow = NO;
 }
+
 
 static CGFloat clamp01(CGFloat value) {
     return MIN(MAX(value, 0), 1);
@@ -491,9 +549,23 @@ static void updateGuidePosition(void) {
     }
     CGRect quartzFrame = currentSettingsFrame();
     if (CGRectIsNull(quartzFrame)) {
-        if (sawSettingsWindow) {
-            closeGuide();
+        if (!sawSettingsWindow) {
+            return;
         }
+        // Settings on another Space or minimized: wait for it, out of sight.
+        [guidePanel orderOut:nil];
+        if (settingsWindowExists()) {
+            return;
+        }
+        // Closed with the permission still missing: bring the pane back
+        // rather than leave the guide pointing at nothing.
+        if (guideSettingsURL == nil || guideReopens >= guideReopenLimit) {
+            closeGuide();
+            return;
+        }
+        guideReopens += 1;
+        sawSettingsWindow = NO;
+        openSettingsPane(guideSettingsURL);
         return;
     }
     sawSettingsWindow = YES;
@@ -528,6 +600,7 @@ void hex_show_permission_guide(int permission) {
                !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
     closeGuide();
     activePermission = (HexPermission)permission;
+    guideReopens = 0;
 
     NSURL *bundleURL = NSBundle.mainBundle.bundleURL.standardizedURL;
     NSString *listName = [NSString stringWithUTF8String:hex_permission_list_name(permission)];
@@ -553,6 +626,7 @@ void hex_show_permission_guide(int permission) {
     NSURL *settingsURL = [NSURL URLWithString:[NSString stringWithFormat:
         @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?%@", pane]];
     openSettingsPane(settingsURL);
+    guideSettingsURL = settingsURL;
     // A development binary has no bundle to list, so it gets the pane alone.
     if (![bundleURL.pathExtension.lowercaseString isEqualToString:@"app"]) {
         return;

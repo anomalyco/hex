@@ -139,8 +139,8 @@ cargo run -- devices
 cargo run -- model devices
 ```
 
-Install the selected model (with Hex stopped, `model install` downloads in
-this process), load it, and transcribe a WAV file:
+Install the selected model (with Hex stopped, `model install` downloads and
+selects it in this process), load it, and transcribe a WAV file:
 
 ```powershell
 cargo run -- model install
@@ -268,8 +268,15 @@ hex app
   (its HWND through `WindowHandle::with_raw_handle`) for the taskbar,
   Alt-Tab, and the caption. The native title bar keeps its icon and title,
   blended into the window: DWM paints the caption the theme's `bg_deep`
-  (`DWMWA_CAPTION_COLOR`, Windows 11; Windows 10 keeps its own caption
-  color). The view repaints it when the system theme switches.
+  (`DWMWA_CAPTION_COLOR`; Windows 10 has no caption colour and keeps DWM's
+  own dark or light caption from `DWMWA_USE_IMMERSIVE_DARK_MODE`, and builds
+  before 19041 keep the OS caption) and draws its text and buttons in the
+  window's light or dark mode. The view re-applies both when the window's
+  theme changes, and a window subclass re-applies that caption after a
+  `WM_SETTINGCHANGE` while Appearance forces a theme different from the OS:
+  winit repaints the frame from the OS theme on each one, and only reports
+  `ThemeChanged` when the OS theme actually changed. The subclass removes
+  itself when the window is destroyed.
 - Without a tray (creation failed) closing the window quits Hex.
   See the [single-process plan](plans/single-process.md#windows-under-rune).
 
@@ -351,7 +358,13 @@ through the same `dictation/processor` and `personal_commands` modules as
 macOS, and Windows reaches the running OpenCode service the same way: its
 registration file and loopback HTTP, never a CLI. Like macOS,
 an unset OpenCode model tries the ranked recommended models before the
-OpenCode default.
+OpenCode default. An OpenCode service running inside WSL2 is found only with
+Labs › OpenCode in WSL on: WSL2 forwards its loopback URL, and the lab adds
+the default distribution's registration and a Linux workspace path for
+`x-opencode-directory`. Annotate's capture sends use the same service: the
+prompt's "Recorded at" line names the capture folder as a Linux `/mnt/…` path
+while the summary header keeps the Windows path. Off, Hex reads only the
+Windows registration and an OpenCode in WSL isn't found.
 Remaining panes should be added only with their complete Windows behavior;
 empty look-alike screens do not count as parity.
 

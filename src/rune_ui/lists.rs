@@ -28,18 +28,28 @@ pub(super) enum Tone {
     Neutral,
     Accent,
     Success,
+    Warning,
     Danger,
+}
+
+impl Tone {
+    /// The tinted fill, border, and ink this tone paints.
+    fn colors(self, p: Paint) -> (Color, Color, Color) {
+        let c = &p.k.c;
+        let state = match self {
+            Self::Neutral => return (c.layer_02, c.border_base, c.text_muted),
+            Self::Accent => &c.info,
+            Self::Success => &c.success,
+            Self::Warning => &c.warning,
+            Self::Danger => &c.danger,
+        };
+        (state.bg, state.border, state.fg)
+    }
 }
 
 /// A small tinted status label, never pressable.
 pub(super) fn tone_tag(p: Paint, key: &str, label: &str, tone: Tone) -> El {
-    let c = &p.k.c;
-    let (fill, border, ink) = match tone {
-        Tone::Neutral => (c.layer_02, c.border_base, c.text_muted),
-        Tone::Accent => (c.info.bg, c.info.border, c.info.fg),
-        Tone::Success => (c.success.bg, c.success.border, c.success.fg),
-        Tone::Danger => (c.danger.bg, c.danger.border, c.danger.fg),
-    };
+    let (fill, border, ink) = tone.colors(p);
     row()
         .key(key)
         .role("status")
@@ -190,18 +200,18 @@ pub(super) fn message(p: Paint, key: &str, title: &str, detail: Option<&str>) ->
         }))
 }
 
-/// An error title and its detail, as a tinted panel.
-pub(super) fn error_panel(p: Paint, key: &str, title: &str, detail: &str) -> El {
-    let d = &p.k.c.danger;
+/// An error or warning title and its detail, as a tinted panel.
+pub(super) fn error_panel(p: Paint, key: &str, title: &str, detail: &str, tone: Tone) -> El {
+    let (fill, border, ink) = tone.colors(p);
     col()
         .key(key)
         .px(12.0)
         .py(10.0)
         .gap(2.0)
         .radius(p.k.radius.md)
-        .fill(d.bg)
-        .border(0.5, d.border)
-        .child(text(title).key("title").font(p.k.ty.ui_medium).color(d.fg))
+        .fill(fill)
+        .border(0.5, border)
+        .child(text(title).key("title").font(p.k.ty.ui_medium).color(ink))
         .child(
             text(detail)
                 .key("detail")

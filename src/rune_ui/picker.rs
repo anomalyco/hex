@@ -21,7 +21,7 @@ use super::controls::{
     ButtonKind, Paint, button, modal_scrim_transition, modal_transition, pressable_row, row_switch,
     segmented,
 };
-use super::lists::error_panel;
+use super::lists::{Tone, error_panel};
 use super::{Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
@@ -559,7 +559,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         let mut panels = col().key("errors").gap(8.0).px(inset).pb(8.0);
         for (key, title, detail) in errors {
             if let Some(detail) = detail {
-                panels = panels.child(error_panel(p, key, title, detail));
+                panels = panels.child(error_panel(p, key, title, detail, Tone::Danger));
             }
         }
         content = content.child(panels);

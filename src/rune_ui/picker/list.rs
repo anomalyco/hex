@@ -267,7 +267,9 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
     }
     if matches!(
         def.id,
-        TranscriptionModelId::ParakeetV3 | TranscriptionModelId::ParakeetUltra
+        TranscriptionModelId::ParakeetV3
+            | TranscriptionModelId::Orukeet
+            | TranscriptionModelId::ParakeetUltra
     ) && language != AUTO_LANGUAGE
     {
         copy = copy.child(line(

@@ -172,7 +172,7 @@ fn end_of(pts: CMTime, duration: CMTime) -> Option<CMTime> {
 }
 
 /// A host time as a media time in `timescale`, rounded down.
-fn in_timescale(at: HostTime, timescale: i32) -> Option<CMTime> {
+pub(crate) fn in_timescale(at: HostTime, timescale: i32) -> Option<CMTime> {
     if timescale <= 0 {
         return None;
     }

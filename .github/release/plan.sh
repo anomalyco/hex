@@ -11,16 +11,21 @@
 #          v<version> only after everything published, so the version must
 #          not be tagged yet.
 #
-# Environment: EVENT, REF_NAME, INPUT_REF, CHANNEL, SHA, GH_TOKEN, and
+# A run releases the commit it runs on: SHA (the checked-out commit) must be
+# GITHUB_SHA, so every job can check out github.sha.
+#
+# Environment: EVENT, REF_NAME, CHANNEL, SHA, GITHUB_SHA, GH_TOKEN, and
 # Cargo.toml of the commit in the working directory.
 . "$(dirname "$0")/lib.sh"
+
+[ -n "$SHA" ] && [ "$SHA" = "${GITHUB_SHA:-}" ] || die "The checked-out commit $SHA is not this run's commit ${GITHUB_SHA:-}."
 
 version=$(awk '/^\[package\]/ { package = 1; next } /^\[/ { package = 0 } package && /^version = "/ { gsub(/^version = "|"$/, ""); print; exit }' Cargo.toml)
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Stable releases need an X.Y.Z crate version, not $version."
 case "$CHANNEL" in
   stable)
-    if [ "$EVENT" != workflow_dispatch ] || [ "$REF_NAME" != production ] || [ "$INPUT_REF" != production ]; then
-      die "Stable releases are dispatched from production for ref production."
+    if [ "$EVENT" != workflow_dispatch ] || [ "$REF_NAME" != production ]; then
+      die "Stable releases are dispatched from production."
     fi
     tag="v$version"
     for existing in "$tag" "app-v$version"; do
@@ -36,7 +41,6 @@ case "$CHANNEL" in
     # A check run proves the tag job can push a v* tag past the ruleset with
     # a throwaway v0.0.0-test-<run> tag it deletes again.
     [ "$REF_NAME" = dev ] || die "The $CHANNEL channel runs from dev, not $REF_NAME."
-    if [ "$EVENT" = workflow_dispatch ] && [ "$INPUT_REF" != dev ]; then die "The $CHANNEL channel builds ref dev, not $INPUT_REF."; fi
     # Display text only: installs follow the channel's current release.
     # Renaming the workflow to release.yml (2026-10-27) restarted its run
     # numbers at 1, after release-desktop.yml had published up to
@@ -44,7 +48,7 @@ case "$CHANNEL" in
     # builds by it, and it names version directories), so continue past them.
     number=$((GITHUB_RUN_NUMBER + 100))
     release_channel=dev release_version="0.0.0-dev-$number" tag=""
-    # The dev changelog lists what each build changed (dev-notes jobs).
+    # The dev changelog lists what each build changed (dev-notes branch).
     notes="https://anoma.ly/hex/dev#$release_version"
     if [ "$CHANNEL" = check ]; then
       tag="v0.0.0-test-$number"
@@ -54,7 +58,6 @@ case "$CHANNEL" in
   *) die "Unknown channel $CHANNEL." ;;
 esac
 {
-  echo "sha=$SHA"
   echo "version=$version"
   echo "channel=$CHANNEL"
   echo "service=https://anoma.ly/release"

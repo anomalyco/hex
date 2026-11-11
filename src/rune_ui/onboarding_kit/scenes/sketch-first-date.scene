@@ -1,0 +1,31 @@
+# A sketch: "Without Hex" alone, played while the model downloads.
+
+title   Sam
+boss    Sam coral
+lead    Your first date is waiting. One quick reply by hand.
+
+Sam: I'm here! got us a table by the window
+
+start
+Sam: where are you? [0.35]
+type    runnign late, so srry [panic 0.3-0.45]
+send    meant running late, so sorry
+tap     👍 0.45
+wait    0.3
+
+Sam: no worries! how long? [0.3]
+type    5 mins, love you [panic 0.45-0.55]
+send    meant 5 mins
+wait    freeze
+read
+wait    0.6
+
+Sam: love you?? [0.3]
+type    sorry that was for my mom [panic 0.75-0.9]
+send    meant sorry, that was meant for my mom
+tap     ? 0.4
+wait    0.3
+
+Sam: you say love you to your mom mid text? [0.5]
+type    she worries [panic 0.9]
+end     blocked

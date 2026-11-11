@@ -1,5 +1,5 @@
 //! What a staged dev build changed: the dev channel's notes
-//! (`dev-notes.json`, written by the Release workflow's dev-notes jobs) from
+//! (`dev-notes.json`, published by the Release workflow's dev-notes job) from
 //! the offered build back to the running one, shown with Restart to update.
 //! What's new opens the changelog at those builds (`?since=<running>`).
 //! Notes are a nicety: any failure leaves the update without them.
@@ -14,6 +14,8 @@ use crate::desktop::host::UpdateNotes;
 
 const URL: &str = "https://anoma.ly/hex/files/dev-notes.json";
 const PAGE: &str = "https://anoma.ly/hex/dev";
+/// A stable release's notes, as the release workflow links them (`plan.sh`).
+const RELEASES: &str = "https://github.com/anomalyco/hex/releases/tag";
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ITEMS: usize = 40;
 const MAX_TITLE: usize = 200;
@@ -41,6 +43,29 @@ fn is_dev_version(version: &str) -> bool {
     version.strip_prefix("0.0.0-dev-").is_some_and(|number| {
         !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
     })
+}
+
+/// A plain `major.minor.patch`, with no suffix.
+fn is_stable_version(version: &str) -> bool {
+    fn digits(part: Option<&str>) -> bool {
+        part.is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    }
+    let mut parts = version.split('.');
+    digits(parts.next()) && digits(parts.next()) && digits(parts.next()) && parts.next().is_none()
+}
+
+/// Where the release notes for a running version are: the dev changelog for a
+/// dev version, GitHub's release for a stable one, and nothing for an odd one.
+/// The sidebar asks only on a release build, so a local or test build with a
+/// plain version still shows no link.
+pub fn release_notes_url(running: &str) -> Option<String> {
+    if is_dev_version(running) {
+        Some(format!("{PAGE}#{running}"))
+    } else if is_stable_version(running) {
+        Some(format!("{RELEASES}/v{running}"))
+    } else {
+        None
+    }
 }
 
 /// The changes from `offered` (newest first) back to, not including,
@@ -121,5 +146,37 @@ mod tests {
         assert!(parse(NOTES, "0.0.0-dev-8", "0.0.0-dev-99").is_none());
         assert!(parse(NOTES, "3.1.0", "3.1.1").is_none());
         assert!(parse("not json", "0.0.0-dev-8", "0.0.0-dev-11").is_none());
+    }
+
+    #[test]
+    fn a_dev_build_opens_the_changelog_at_itself() {
+        assert_eq!(
+            release_notes_url("0.0.0-dev-12").as_deref(),
+            Some("https://anoma.ly/hex/dev#0.0.0-dev-12")
+        );
+    }
+
+    #[test]
+    fn a_stable_build_opens_its_github_release() {
+        assert_eq!(
+            release_notes_url("3.3.0").as_deref(),
+            Some("https://github.com/anomalyco/hex/releases/tag/v3.3.0")
+        );
+    }
+
+    #[test]
+    fn an_odd_version_has_no_release_notes() {
+        for version in [
+            "0.0.0-dev-local-abc1234",
+            "0.0.0-local-abc1234-dirty",
+            "3.3",
+            "3.3.0.1",
+            "3.3.0-beta.1",
+            "3.3.0-dev-4",
+            "v3.3.0",
+            "",
+        ] {
+            assert_eq!(release_notes_url(version), None, "{version}");
+        }
     }
 }

@@ -17,6 +17,8 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+pub mod captures;
+pub mod playback;
 pub mod recordings;
 pub mod stats;
 pub mod versions;

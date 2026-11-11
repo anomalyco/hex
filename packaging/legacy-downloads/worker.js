@@ -1,8 +1,8 @@
 // Kit's old Hex hosts, all redirected to anoma.ly:
 // - downloads.hex.kitlangton.dev and .com (the bucket Hex 2.3.1 and earlier
-//   read): every path, 302, to https://anoma.ly/hex/files, where
-//   hex-production-files holds byte copies of everything they served and the
-//   Legacy appcast workflow publishes.
+//   read): every path, 302, to https://anoma.ly/hex/files, where the site
+//   Worker serves the frozen 2.3.1 history from hex-production-files and the
+//   appcast and installers from the site build.
 // - hex.kitlangton.com and .dev (the old website): 301 to https://anoma.ly/hex,
 //   with the download and installer paths kept working.
 const WEBSITE = {

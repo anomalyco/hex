@@ -23,31 +23,41 @@
 //! - [`landing`]: shared typography, zero-bounce transitions, and `"Hex is ready"`.
 
 mod cards;
+mod composition;
 mod dictated;
 mod field_text;
+mod fireworks;
 mod first_run;
+mod first_screen;
 mod fixture;
 mod flight;
 mod flows;
-mod game;
-pub(crate) mod game_fx;
+pub(crate) mod game;
 pub(crate) mod gpu_stage;
 mod hex_meter;
+mod high_score;
 mod hud_stage;
+mod inbox;
 mod keyboard;
 mod landing;
 pub(super) mod live;
+mod login;
 mod mic;
 mod mic_line;
 mod permissions;
 mod pill;
+mod scene_script;
+pub(super) mod scenes;
 mod sfx;
+mod sketches;
 mod sparks;
 mod stories;
+mod triumph;
 mod typing;
 mod versus;
 mod words;
 
 pub(crate) use game::add as game;
+pub(super) use sketches::fixture as sketch_fixture;
 pub(super) use stories::Onboard;
 pub(crate) use stories::{add as stories, set_live_window};

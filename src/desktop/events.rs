@@ -324,6 +324,18 @@ impl EventLog {
         })
     }
 
+    /// A recording shortcut whose microphone failed kept the audio delivered
+    /// before the loss; it is transcribed and copied instead of pasted.
+    pub fn salvaged_dictation(&self) -> io::Result<()> {
+        self.emit(&VoiceEvent::Dictation {
+            timestamp_ms: now_ms(),
+            phase: DictationPhase::Transcribing,
+            text: String::new(),
+            processing: None,
+            reason: Some("microphone-lost".into()),
+        })
+    }
+
     pub fn processed_dictation(
         &self,
         phase: DictationPhase,

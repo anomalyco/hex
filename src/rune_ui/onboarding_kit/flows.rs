@@ -80,6 +80,43 @@ pub(super) fn continue_button(p: Paint, s: &Onboard) -> El {
     button.build_push(p.k).key("continue").transition(arrives())
 }
 
+/// `Skip →`: a quiet way out once the comedy plays.
+pub(super) fn skip_button(p: Paint, s: &Onboard) -> El {
+    let font = p.k.ty.small;
+    let button = Button::new("Skip")
+        .variant(ButtonVariant::GhostFaint)
+        .label_with(move |_, ink| {
+            row()
+                .gap(4.0)
+                .center_y()
+                .child(text("Skip").key("label").font(font).color(ink))
+                .child(icon(&glyphs::ARROW_RIGHT, 12.0).key("arrow").color(ink))
+        });
+    let button = if s.live.is_some() {
+        button.on_press(super::live::on_ui(|s| {
+            s.skip_scene();
+        }))
+    } else {
+        button.on_press(|s: &mut Onboard| {
+            s.skip_scene();
+        })
+    };
+    button
+        .build_small_push(p.k)
+        .key("skip")
+        // The camera's push in swells the keyboard down over it.
+        .opacity(if super::versus::pushed_in(s) {
+            0.0
+        } else {
+            1.0
+        })
+        .opacity_motion(rune::Spring::new(0.2, 0.0))
+        .transition(Transition::opacity().springs(rune::SpringPair::new(
+            rune::Spring::new(0.6, 0.0),
+            rune::Spring::new(0.2, 0.0),
+        )))
+}
+
 fn hold(p: Paint, s: &Onboard, rest: &str) -> El {
     row()
         .key("hold")
@@ -124,7 +161,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 p,
                 &s.caps,
                 None,
-                s.now,
+                s.ready_age(),
                 s.reduced.get(),
                 s.motion,
                 s.home,
@@ -222,7 +259,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 p,
                 &s.caps,
                 Some(PILL),
-                s.now,
+                s.ready_age(),
                 s.reduced.get(),
                 s.motion,
                 s.home,
@@ -336,7 +373,15 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         _ => sentence(p, s, true),
     };
     let below = match s.step {
-        Step::Ready => ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion, s.home),
+        Step::Ready => ready(
+            p,
+            &s.caps,
+            None,
+            s.ready_age(),
+            s.reduced.get(),
+            s.motion,
+            s.home,
+        ),
         Step::Pick | Step::Started => heading(
             p,
             "intro",

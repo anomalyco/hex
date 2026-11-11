@@ -6,6 +6,8 @@ import type {
   ModelId,
   ModelInfo,
   ModelProgress,
+  TimedText,
+  TimestampGranularity,
   TranscriptionResult,
 } from "./types.js"
 import { MODEL_IDS } from "./types.js"
@@ -99,14 +101,25 @@ export const decodeHealth = (value: unknown): Health => {
 
 export const decodeCapabilities = (value: unknown): Capabilities => {
   const input = record(value)
+  const outputProcessing = input && (input.outputProcessing === undefined
+    ? undefined
+    : boolean(input.outputProcessing))
   if (
     !Array.isArray(input?.audioFormats)
     || input.audioFormats.length !== 1
     || input.audioFormats[0] !== "audio/wav"
     || input.partialTranscripts !== false
     || typeof input.serviceCapture !== "boolean"
+    || (input.outputProcessing !== undefined && outputProcessing === undefined)
   ) return invalid("capabilities response")
-  return { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+  return outputProcessing === undefined
+    ? { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+    : {
+      audioFormats: ["audio/wav"],
+      partialTranscripts: false,
+      serviceCapture: input.serviceCapture,
+      outputProcessing,
+    }
 }
 
 export const decodeDictationStart = (value: unknown): {
@@ -179,14 +192,72 @@ export const decodeModels = (value: unknown): readonly ModelInfo[] => {
   })
 }
 
+const decodeTimedText = (value: unknown): TimedText | undefined => {
+  const input = record(value)
+  const text = input && string(input.text)
+  const startMs = input && number(input.startMs)
+  const endMs = input && number(input.endMs)
+  if (
+    text === undefined
+    || startMs === undefined
+    || endMs === undefined
+    || startMs < 0
+    || endMs < startMs
+  ) {
+    return undefined
+  }
+  return { text, startMs, endMs }
+}
+
+const decodeTimedTextList = (value: unknown): readonly TimedText[] | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const spans: TimedText[] = []
+  for (const span of value) {
+    const decoded = decodeTimedText(span)
+    if (decoded === undefined) return undefined
+    spans.push(decoded)
+  }
+  return spans
+}
+
+const decodeGranularity = (value: unknown): TimestampGranularity | undefined =>
+  value === "segment" || value === "word" ? value : undefined
+
 export const decodeTranscription = (value: unknown): TranscriptionResult => {
   const input = record(value)
   const transcript = input && string(input.transcript)
   const durationMs = input && number(input.durationMs)
-  if (transcript === undefined || durationMs === undefined || durationMs < 0) {
+  const processed = input && (input.processed === undefined ? undefined : string(input.processed))
+  const granularity = input && (
+    input.timestampGranularity === undefined
+      ? undefined
+      : decodeGranularity(input.timestampGranularity)
+  )
+  const segments = input && (input.segments === undefined ? undefined : decodeTimedTextList(input.segments))
+  const words = input && (input.words === undefined ? undefined : decodeTimedTextList(input.words))
+  if (
+    transcript === undefined
+    || durationMs === undefined
+    || durationMs < 0
+    || (input?.processed !== undefined && processed === undefined)
+    || (input?.timestampGranularity !== undefined && granularity === undefined)
+    || (input?.segments !== undefined && segments === undefined)
+    || (input?.words !== undefined && words === undefined)
+    || (granularity !== undefined && segments === undefined)
+    || (segments !== undefined && granularity === undefined)
+    || (words !== undefined && granularity !== "word")
+    || (granularity === "word" && words === undefined)
+  ) {
     return invalid("transcription response")
   }
-  return { transcript, durationMs }
+  return {
+    transcript,
+    durationMs,
+    ...(processed === undefined ? {} : { processed }),
+    ...(granularity === undefined ? {} : { timestampGranularity: granularity }),
+    ...(segments === undefined ? {} : { segments }),
+    ...(words === undefined ? {} : { words }),
+  }
 }
 
 export const decodeProgress = (value: unknown): ModelProgress | "ok" => {

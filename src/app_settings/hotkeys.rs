@@ -183,6 +183,18 @@ impl HotkeyModifiers {
             && (!required.function || self.function)
     }
 
+    /// Every key `held` names is one these modifiers name too: a
+    /// side-specific binding covers only that side, `Either` covers any,
+    /// and `Both` covers both. `None` names no key. A keyless chord's own
+    /// keys may therefore go down or up one at a time.
+    pub(super) fn covers(self, held: Self) -> bool {
+        side_covers_held(self.control, held.control)
+            && side_covers_held(self.option, held.option)
+            && side_covers_held(self.shift, held.shift)
+            && side_covers_held(self.command, held.command)
+            && (!held.function || self.function)
+    }
+
     /// Exactly the keys `required` names are held: no other modifier, and
     /// no other side of one it names.
     pub(super) fn holds_exactly(self, required: Self) -> bool {
@@ -304,6 +316,19 @@ pub(super) fn side_covers(held: Option<ModifierSide>, required: Option<ModifierS
         (Some(_), Some(ModifierSide::Either)) => true,
         (Some(ModifierSide::Both), Some(ModifierSide::Left | ModifierSide::Right)) => true,
         (Some(held), Some(required)) => held == required,
+    }
+}
+
+/// `held` is one of the keys `allowed` names: `Either` covers any side,
+/// `Both` covers either side or both, and a side-specific binding covers
+/// only itself. Input that names no side counts as covered.
+pub(super) fn side_covers_held(allowed: Option<ModifierSide>, held: Option<ModifierSide>) -> bool {
+    match (allowed, held) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(_), Some(ModifierSide::Either)) => true,
+        (Some(ModifierSide::Either | ModifierSide::Both), Some(_)) => true,
+        (Some(allowed), Some(held)) => allowed == held,
     }
 }
 
@@ -1034,6 +1059,14 @@ impl RuntimeHotkey {
         modifiers_from_flags(flags).contains(self.modifiers)
     }
 
+    /// Every modifier `flags` names is one this binding names too, sides
+    /// included: a keyless chord's own keys may go down or up one at a time
+    /// without becoming a different modifier.
+    pub fn covers_modifiers(self, flags: u64) -> bool {
+        let flags = self.without_implied_function(flags);
+        self.modifiers.covers(modifiers_from_flags(flags))
+    }
+
     /// The device flags of each modifier the binding holds on both sides,
     /// whose two keys must go down together (`suppression`).
     pub fn both_sides_masks(self) -> impl Iterator<Item = (u64, u64)> {
@@ -1193,6 +1226,100 @@ pub fn normalized_modifier_flags(flags: u64, physical: Option<PhysicalModifierKe
     })
 }
 
+pub fn hotkey_conflicts(
+    candidate: &HotkeyBinding,
+    others: impl IntoIterator<Item = HotkeyBinding>,
+) -> bool {
+    others
+        .into_iter()
+        .any(|binding| candidate.overlaps(&binding))
+}
+
+impl AppSettings {
+    /// Whether `binding` overlaps a shortcut `slot` must not share: the other
+    /// active shortcuts (each active Labs › More dictation shortcuts row
+    /// included) and, where meetings exist (macOS), meeting paste. The two
+    /// capture shortcuts never share a key, on or off, since turning captures
+    /// on can't pull them apart. A saved Screenshots record shortcut and
+    /// Annotate's capture shortcuts never share a key, whether Annotate or the
+    /// Lab is on, since turning either on can't pull them apart.
+    pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
+        let mut others = Vec::new();
+        if slot != HotkeySlot::Dictation {
+            others.push(self.dictation_hotkey.clone());
+        }
+        if slot != HotkeySlot::PasteLast
+            && let Some(paste) = &self.paste_last_hotkey
+        {
+            others.push(paste.clone());
+        }
+        if slot != HotkeySlot::RawDictation
+            && let Some(raw) = &self.raw_dictation_hotkey
+        {
+            others.push(raw.clone());
+        }
+        if slot != HotkeySlot::TypedText
+            && cfg!(target_os = "linux")
+            && self.labs.typed_text
+            && let Some(typed) = &self.typed_text_hotkey
+        {
+            others.push(typed.clone());
+        }
+        if slot != HotkeySlot::Cancel {
+            others.push(self.cancel_hotkey.clone());
+        }
+        if slot != HotkeySlot::SecondDictation
+            && self.labs.second_dictation_shortcut
+            && let Some(second) = &self.second_dictation_hotkey
+            // Linux and Windows register a key, so a keyless binding never
+            // runs there and takes no key from another shortcut.
+            && (cfg!(target_os = "macos") || second.key.is_some())
+        {
+            others.push(second.clone());
+        }
+        if cfg!(target_os = "macos") && self.labs.more_dictation_shortcuts {
+            for (index, row) in self.extra_dictation_hotkeys.iter().enumerate() {
+                if slot != HotkeySlot::ExtraDictation(index)
+                    && let Some(extra) = &row.binding
+                {
+                    others.push(extra.clone());
+                }
+            }
+        }
+        if slot != HotkeySlot::TerminalPaste
+            && cfg!(any(target_os = "windows", target_os = "linux"))
+            && self.labs.terminal_paste_shortcut
+            && let Some(terminal) = &self.terminal_paste_hotkey
+        {
+            others.push(terminal.clone());
+        }
+        if cfg!(target_os = "macos") && self.meetings.available() {
+            others.push(HotkeyBinding::paste_meeting_default());
+        }
+        #[cfg(hex_capture)]
+        if slot != HotkeySlot::Capture && self.capture_on() {
+            others.push(self.capture.hotkey.clone());
+        }
+        #[cfg(hex_capture)]
+        if slot != HotkeySlot::CaptureReplay
+            && cfg!(target_os = "macos")
+            && self.capture_on()
+            && self.labs.annotate_replay
+            && let Some(replay) = &self.capture.replay_hotkey
+        {
+            others.push(replay.clone());
+        }
+        if slot != HotkeySlot::Screenshot && cfg!(target_os = "macos") && self.labs.screenshots {
+            others.push(self.screenshots.hotkey.clone());
+        }
+        // A saved record shortcut and Annotate's own capture shortcuts never
+        // share a key, even with one of them off, so turning either on can
+        // never leave one of the two dead.
+        others.extend(self.screenshots_record_counterparts(slot));
+        hotkey_conflicts(binding, others)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
@@ -1204,8 +1331,16 @@ pub struct RuntimeHotkeys {
     pub capture_replay: Option<RuntimeHotkey>,
     /// Dictate without processing, while it is bound.
     pub raw_dictation: Option<RuntimeHotkey>,
-    /// Labs › Second dictation shortcut (macOS), while it is on and bound.
+    /// Labs › Transform typed text (Linux), while it is on and bound.
+    pub typed_text: Option<RuntimeHotkey>,
+    /// Labs › Second dictation shortcut, while it is on and bound.
     pub second_dictation: Option<RuntimeHotkey>,
+    /// Labs › More dictation shortcuts (macOS), while the Lab is on and each
+    /// row is bound and shares no key.
+    pub extra_dictation: [Option<RuntimeHotkey>; MAX_EXTRA_DICTATION_SHORTCUTS],
+    /// Each extra row's activation mode, folded to one its binding can
+    /// trigger.
+    pub extra_dictation_modes: [ExtraDictationMode; MAX_EXTRA_DICTATION_SHORTCUTS],
     /// Toggle mode's cancel shortcut. Not among [`RuntimeHotkeys::all`]:
     /// Hex takes it only while a toggled recording runs.
     pub cancel: Option<RuntimeHotkey>,
@@ -1213,16 +1348,21 @@ pub struct RuntimeHotkeys {
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 7] {
-        [
+    pub fn all(self) -> [Option<RuntimeHotkey>; 8 + MAX_EXTRA_DICTATION_SHORTCUTS] {
+        let named = [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
             self.capture,
             self.capture_replay,
             self.raw_dictation,
+            self.typed_text,
             self.second_dictation,
-        ]
+        ];
+        let mut all = [None; 8 + MAX_EXTRA_DICTATION_SHORTCUTS];
+        all[..named.len()].copy_from_slice(&named);
+        all[named.len()..].copy_from_slice(&self.extra_dictation);
+        all
     }
 }
 
@@ -1236,7 +1376,11 @@ impl Default for RuntimeHotkeys {
             capture: None,
             capture_replay: None,
             raw_dictation: None,
+            typed_text: None,
             second_dictation: None,
+            extra_dictation: [None; MAX_EXTRA_DICTATION_SHORTCUTS],
+            extra_dictation_modes: [ExtraDictationMode::HoldOrDoubleTap;
+                MAX_EXTRA_DICTATION_SHORTCUTS],
             cancel: None,
         }
     }
@@ -1248,6 +1392,36 @@ mod tests {
 
     fn caps_lock_and(usages: impl IntoIterator<Item = u16>) -> PhysicalModifierKeys {
         PhysicalModifierKeys::from_usages([CAPS_LOCK_USAGE].into_iter().chain(usages))
+    }
+
+    #[test]
+    fn a_binding_covers_only_its_own_modifiers_and_sides() {
+        let left = modifiers_from_flags(OPTION_KEY_MASK | LEFT_OPTION_MASK);
+        let right = modifiers_from_flags(OPTION_KEY_MASK | RIGHT_OPTION_MASK);
+        let both = modifiers_from_flags(OPTION_KEY_MASK | LEFT_OPTION_MASK | RIGHT_OPTION_MASK);
+        let either = HotkeyModifiers::option();
+        assert!(either.covers(left));
+        assert!(either.covers(right));
+        assert!(either.covers(both));
+        let right_binding = HotkeyModifiers {
+            option: Some(ModifierSide::Right),
+            ..Default::default()
+        };
+        assert!(right_binding.covers(right));
+        assert!(!right_binding.covers(left));
+        assert!(!right_binding.covers(both));
+        let both_binding = HotkeyModifiers {
+            option: Some(ModifierSide::Both),
+            ..Default::default()
+        };
+        assert!(both_binding.covers(left));
+        assert!(both_binding.covers(right));
+        assert!(both_binding.covers(both));
+        // A keyless chord's own keys may go down one at a time; another
+        // modifier is not covered.
+        let control_option = HotkeyModifiers::control_option();
+        assert!(control_option.covers(modifiers_from_flags(CONTROL_KEY_MASK | LEFT_CONTROL_MASK)));
+        assert!(!control_option.covers(modifiers_from_flags(COMMAND_KEY_MASK | LEFT_COMMAND_MASK)));
     }
 
     #[test]

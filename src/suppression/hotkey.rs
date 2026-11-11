@@ -34,7 +34,9 @@ enum State {
         // still pair the next press with it.
         last_release_at: Option<CaptureInstant>,
     },
-    FirstTapPressed,
+    FirstTapPressed {
+        started_at: CaptureInstant,
+    },
     AwaitingSecondTap {
         released_at: CaptureInstant,
     },
@@ -58,7 +60,9 @@ impl State {
     fn is_pending_gesture(&self) -> bool {
         matches!(
             self,
-            Self::FirstTapPressed | Self::AwaitingSecondTap { .. } | Self::SecondTapPressed { .. }
+            Self::FirstTapPressed { .. }
+                | Self::AwaitingSecondTap { .. }
+                | Self::SecondTapPressed { .. }
         )
     }
 }
@@ -117,6 +121,14 @@ const TAP_OR_HOLD: fn() -> bool = if cfg!(test) {
     crate::labs::tap_or_hold
 };
 
+/// Labs › Double-tap on a lone modifier. Unit tests turn it on per machine,
+/// as they do Tap or hold.
+const DOUBLE_TAP_MODIFIERS: fn() -> bool = if cfg!(test) {
+    || false
+} else {
+    crate::labs::double_tap_modifiers
+};
+
 pub struct DictationHotkey {
     state: State,
     pressed_keys: HashSet<u16>,
@@ -124,9 +136,15 @@ pub struct DictationHotkey {
     double_tap_only: bool,
     /// Press to start, press again to finish: releasing locks the capture.
     toggle: bool,
+    /// Cancel works in every trigger mode, not only under Toggle: an extra
+    /// dictation shortcut has its own mode and always takes its cancel key.
+    cancel_in_any_mode: bool,
     /// Labs › Tap or hold, read at each Toggle release: a press held past
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
+    /// Labs › Double-tap on a lone modifier, read as the mode is applied: a
+    /// modifier-only binding may start a double-tap-only capture.
+    double_tap_modifiers: fn() -> bool,
     binding: RuntimeHotkey,
     /// Toggle's cancel shortcut; `None` in Hold mode.
     cancel: Option<RuntimeHotkey>,
@@ -179,7 +197,9 @@ impl DictationHotkey {
             double_tap_enabled,
             double_tap_only: false,
             toggle: false,
+            cancel_in_any_mode: false,
             tap_or_hold: TAP_OR_HOLD,
+            double_tap_modifiers: DOUBLE_TAP_MODIFIERS,
             binding,
             cancel: None,
             ignore_before: None,
@@ -231,8 +251,8 @@ impl DictationHotkey {
     }
 
     pub fn set_double_tap_only(&mut self, enabled: bool) {
-        self.double_tap_only =
-            enabled && self.binding.key_code.is_some() && self.double_tap_enabled;
+        let allowed = self.binding.key_code.is_some() || (self.double_tap_modifiers)();
+        self.double_tap_only = enabled && allowed && self.double_tap_enabled;
         // Active captures still need their release to reach the audio owner.
         if !self.double_tap_only && self.state.is_pending_gesture() {
             self.state = State::IDLE;
@@ -244,9 +264,32 @@ impl DictationHotkey {
         self.toggle = enabled;
     }
 
-    /// Toggle's cancel shortcut, or `None` for no cancel.
+    /// Applies a Labs › More dictation shortcuts row's activation mode.
+    /// Double-tap is enabled first because double-tap only reads it, then
+    /// double-tap only, then Toggle.
+    pub fn set_trigger(&mut self, mode: crate::app_settings::ExtraDictationMode) {
+        let (toggle, double_tap_enabled, double_tap_only) = mode.switches();
+        self.set_double_tap_enabled(double_tap_enabled);
+        self.set_double_tap_only(double_tap_only);
+        self.set_toggle(toggle);
+    }
+
+    /// Whether this machine takes its cancel shortcut in every trigger mode,
+    /// as an extra dictation shortcut does.
+    pub fn set_cancel_in_any_mode(&mut self, enabled: bool) {
+        self.cancel_in_any_mode = enabled;
+    }
+
+    /// Toggle's or an extra shortcut's cancel shortcut, or `None` for no
+    /// cancel.
     pub fn set_cancel(&mut self, cancel: Option<RuntimeHotkey>) {
         self.cancel = cancel;
+    }
+
+    /// The shortcut this machine matches, for rebinding a machine by its
+    /// binding.
+    pub fn binding(&self) -> RuntimeHotkey {
+        self.binding
     }
 
     pub fn set_binding(&mut self, binding: RuntimeHotkey) {
@@ -650,10 +693,11 @@ impl DictationHotkey {
             self.state = State::Dirty;
             return Some(action);
         }
-        // Toggle's cancel shortcut discards the recording; the tap kept the
-        // key from the app in front. Hold mode has no cancel.
+        // Toggle's cancel shortcut discards the recording, and an extra
+        // shortcut takes its own in every trigger mode. The tap kept the key
+        // from the app in front.
         if fresh_key_down
-            && self.toggle
+            && (self.toggle || self.cancel_in_any_mode)
             && self.is_recording()
             && let InputEvent::Key {
                 code,
@@ -741,11 +785,19 @@ impl DictationHotkey {
 
         let action = match self.state {
             State::Idle { .. } if self.double_tap_only && !self.toggle && trigger_pressed => {
-                self.state = State::FirstTapPressed;
+                self.state = State::FirstTapPressed { started_at: now };
                 None
             }
-            State::FirstTapPressed if trigger_released => {
-                self.state = State::AwaitingSecondTap { released_at: now };
+            State::FirstTapPressed { started_at } if trigger_released => {
+                // A lone modifier held past the hold threshold is a hold,
+                // not a tap: it neither arms the double tap nor records.
+                if self.binding.key_code.is_none()
+                    && now.duration_since(started_at) >= MINIMUM_HOLD_DURATION
+                {
+                    self.state = State::IDLE;
+                } else {
+                    self.state = State::AwaitingSecondTap { released_at: now };
+                }
                 None
             }
             State::AwaitingSecondTap { released_at }
@@ -768,11 +820,20 @@ impl DictationHotkey {
                 None
             }
             State::AwaitingSecondTap { .. }
-            | State::FirstTapPressed
+            | State::FirstTapPressed { .. }
             | State::SecondTapPressed { .. }
                 if unrelated_key_down
                     || extra_modifiers
-                    || matches!(event, InputEvent::MouseDown) =>
+                    || matches!(event, InputEvent::MouseDown)
+                    // A modifier or side the binding doesn't cover between a
+                    // keyless chord's taps is a chord too, such as Option,
+                    // Command, Option. The binding's own keys may go down and
+                    // up one at a time (⌃ then ⌥, or both Options).
+                    || (self.binding.key_code.is_none()
+                        && flags.is_some_and(|flags| {
+                            flags & HOTKEY_MODIFIERS_MASK != 0
+                                && !self.binding.covers_modifiers(flags)
+                        })) =>
             {
                 self.state = State::Dirty;
                 None
@@ -781,7 +842,7 @@ impl DictationHotkey {
                 if now.duration_since(released_at) >= DOUBLE_TAP_WINDOW =>
             {
                 self.state = if trigger_pressed {
-                    State::FirstTapPressed
+                    State::FirstTapPressed { started_at: now }
                 } else {
                     State::IDLE
                 };

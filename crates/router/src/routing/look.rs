@@ -240,20 +240,32 @@ pub fn terminal_rule_clue(folder: &Path, terminals: &[(String, PathBuf)]) -> Opt
 }
 
 /// The session OpenCode shows in the pane, once the sessions are read: the one its title names
-/// (`OC | <title>`), else the one its command line opened. Nothing on OpenCode's home screen.
+/// (`OC | <title>`), else the one its command line opened, unless that session's title shows
+/// the TUI has moved on. Nothing on OpenCode's home screen, or when several sessions fit the
+/// title and nothing tells them apart.
 pub fn open_session_clue(pane: &Pane, candidates: &[Candidate]) -> Option<Clue> {
     if !pane.runs_opencode() {
         return None;
     }
+    let opened = pane.argv_session();
     let (id, how) = match terminal::tui_title(&pane.title) {
         terminal::TuiTitle::Home => return None,
         terminal::TuiTitle::Session(shown) => {
-            match terminal::session_titled(shown, candidates, pane.folder()) {
-                Some(found) => (found.id.clone(), "its title"),
-                None => (pane.argv_session()?.to_owned(), "its command line"),
+            match terminal::session_titled(shown, candidates, pane.folder(), opened) {
+                terminal::Titled::One(found) => (found.id.clone(), "its title"),
+                terminal::Titled::Several => return None,
+                terminal::Titled::None => {
+                    let opened = opened?;
+                    // Read by ID: when its title is known and isn't the one shown, the TUI has
+                    // moved to a session not read.
+                    if candidates.iter().any(|c| c.id == opened) {
+                        return None;
+                    }
+                    (opened.to_owned(), "its command line")
+                }
             }
         }
-        terminal::TuiTitle::Other => (pane.argv_session()?.to_owned(), "its command line"),
+        terminal::TuiTitle::Other => (opened?.to_owned(), "its command line"),
     };
     Some(Clue::new(
         Source::TerminalSession,
@@ -265,14 +277,15 @@ pub fn open_session_clue(pane: &Pane, candidates: &[Candidate]) -> Option<Clue> 
     ))
 }
 
-/// How long finding a page's publisher may spend on OpenCode's API (resolving a marker's
-/// subagent session to its root, reading sessions not read yet).
+/// How long finding a page's publisher may spend on OpenCode's API (reading sessions not read
+/// yet).
 const PUBLISHER_BUDGET: Duration = Duration::from_secs(1);
 
 /// When the server behind the tab serves the page from outside its own project (a shared
 /// artifact gallery), or runs inside a folder sessions publish into (`served::content_root`),
 /// the port's clue drops (to [`served::SERVER_ONLY`] or [`served::SERVER_IN_CONTENT`]) and the
-/// page's files give the clues instead: who published them, and the words of their path.
+/// page's files give the clues instead: the session the page names, else who published them,
+/// and the words of their path.
 /// Sessions those name that weren't read are added to `candidates`. Does nothing twice.
 pub fn look_at_page(
     url: Option<&str>,
@@ -280,10 +293,12 @@ pub fn look_at_page(
     candidates: &mut Vec<Candidate>,
     senses: &Senses,
 ) {
-    if clues
-        .iter()
-        .any(|c| matches!(c.source, Source::Publisher | Source::Document))
-    {
+    if clues.iter().any(|c| {
+        matches!(
+            c.source,
+            Source::Signed | Source::Publisher | Source::Document
+        )
+    }) {
         return;
     }
     let Some(port) = clues
@@ -347,19 +362,16 @@ pub fn look_at_page(
     };
     let mut api = super::within(senses.hooks.api, PUBLISHER_BUDGET);
     let mut found = Vec::new();
+    // A page names the session that asked for its captures, a subagent's included.
     if let Some((id, how)) = served::marker(&page) {
-        let id = root_session(&mut api, &id);
-        found.push(
-            Clue::new(
-                Source::Publisher,
-                Pointer::Session {
-                    id,
-                    directory: None,
-                },
-                how,
-            )
-            .worth(served::MARKED),
-        );
+        found.push(Clue::new(
+            Source::Signed,
+            Pointer::Session {
+                id,
+                directory: None,
+            },
+            how,
+        ));
     } else if let (Some(needle), Some((from, to))) = (page.needle(), served::window(&changed)) {
         found.extend(served::writer_clues(
             &changed,
@@ -381,19 +393,6 @@ pub fn look_at_page(
         candidates.extend(read_candidates(&mut api, &[], &missing, 0).candidates);
     }
     clues.extend(found);
-}
-
-/// The root session of `id` (a subagent's session names its parent), or `id` when that can't
-/// be read.
-fn root_session(get: &mut ApiGet, id: &str) -> String {
-    let mut current = id.to_owned();
-    for _ in 0..5 {
-        let Some(parent) = get_session(get, &current).ok().and_then(|s| s.parent_id) else {
-            break;
-        };
-        current = parent;
-    }
-    current
 }
 
 /// Reads the sessions the clues and address could name, within [`super::LOOK_BUDGET`].
@@ -642,6 +641,7 @@ pub fn replay(saved: Evidence, bundle: &ScrawlBundle, apps: &[(String, PathBuf)]
         .filter(|clue| match clue.source {
             Source::Rule
             | Source::TerminalRule
+            | Source::Signed
             | Source::DevBuild
             | Source::Page
             | Source::Port
@@ -1041,6 +1041,15 @@ pub fn evidence_for_bundle(
         evidence.clues.retain(|c| c.source != Source::Rule);
         if let Some(clue) = url.as_deref().and_then(|url| rule_clue(url, senses)) {
             evidence.clues.insert(0, clue);
+        }
+        // A send a rule settled saved only the rule: the port is read now, so the page is too.
+        if !evidence.clues.iter().any(|c| c.source == Source::Port) {
+            evidence.clues.extend(
+                url.as_deref()
+                    .into_iter()
+                    .flat_map(|url| url_clues(url, senses, true))
+                    .filter(|c| c.source == Source::Port),
+            );
         }
         look_at_page(
             url.as_deref(),
@@ -1894,7 +1903,7 @@ mod tests {
 
     #[test]
     fn an_always_rule_makes_its_sites_next_capture_a_saved_rule() {
-        use super::super::policy::saved_rule;
+        use super::super::policy::explicit;
         use super::super::smart::{Decision, Policy, decide};
         let senses = Senses {
             hooks: Hooks {
@@ -1923,7 +1932,7 @@ mod tests {
             decide(&evidence, Policy::Weigh).decision
         };
         assert!(
-            !matches!(judge(), Decision::Send { ref to, .. } if saved_rule(to)),
+            !matches!(judge(), Decision::Send { ref to, .. } if explicit(to)),
             "nothing the person saved covers the site yet"
         );
         // "Always send board.example.com here", as the capsule saves it (to the session
@@ -1940,7 +1949,7 @@ mod tests {
             panic!("the saved rule names the session");
         };
         assert_eq!(to.candidate.id, "ses_board");
-        assert!(saved_rule(&to));
+        assert!(explicit(&to));
     }
 
     // MARK: Pages from a file server
@@ -2099,7 +2108,7 @@ mod tests {
         match judgement.decision {
             super::super::smart::Decision::Send { to, .. } => {
                 assert_eq!(to.candidate.id, "ses_board");
-                assert!(super::super::policy::saved_rule(&to));
+                assert!(super::super::policy::explicit(&to));
             }
             other => panic!("expected a send, got {other:?}"),
         }
@@ -2216,7 +2225,8 @@ mod tests {
         }
     }
 
-    /// A page that names its session (a subagent's, here) goes there, whatever the history says.
+    /// A page that names its session (a subagent's, here) goes to that session, not its parent,
+    /// whatever the history says.
     #[test]
     fn a_marked_page_names_its_publisher() {
         fn api(path: &str, _: Duration) -> Result<Vec<u8>> {
@@ -2268,8 +2278,88 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
         let judgement = decide(&evidence, Policy::Weigh);
         match &judgement.decision {
-            Decision::Send { to, .. } => assert_eq!(to.candidate.id, HEX),
+            Decision::Send { to, .. } => assert_eq!(to.candidate.id, "ses_child"),
             other => panic!("{other:?}"),
+        }
+    }
+
+    thread_local! {
+        static GALLERY: std::cell::RefCell<PathBuf> = std::cell::RefCell::default();
+    }
+
+    /// A `routing.sites` rule for a whole gallery host once sent pages a session had signed to
+    /// another session. The gallery runs in a repository whose
+    /// `artifacts` folder is a symlink to another disk, so the page wasn't found either.
+    #[cfg(unix)]
+    #[test]
+    fn a_signed_page_beats_a_rule_for_its_whole_host() {
+        use super::super::policy::explicit;
+        fn gallery(port: u16) -> Option<PathBuf> {
+            (port == 8444).then(|| GALLERY.with(|g| g.borrow().clone()))
+        }
+        fn host_rule() -> Vec<(String, PathBuf)> {
+            vec![(
+                "https://studio.example.ts.net:8444".into(),
+                PathBuf::from("ses_ruled"),
+            )]
+        }
+        fn down(_: &str, _: Duration) -> Result<Vec<u8>> {
+            anyhow::bail!("no server in tests")
+        }
+        let base =
+            std::env::temp_dir().join(format!("scrawl-signed-{}", crate::util::make_bundle_id()));
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".git")).unwrap();
+        let server = home.join("tools/gallery");
+        std::fs::create_dir_all(&server).unwrap();
+        let disk = base.join("disk/artifacts");
+        let page = disk.join("2026-01-02-demo/examples/queue/index.html");
+        std::fs::create_dir_all(page.parent().unwrap()).unwrap();
+        std::fs::write(
+            &page,
+            r#"<head><meta name="opencode-session" content="ses_signer"></head>"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&disk, home.join("artifacts")).unwrap();
+        GALLERY.with(|g| *g.borrow_mut() = server.clone());
+        let senses = Senses {
+            hooks: Hooks {
+                sdk: no_sdk,
+                listener_dir: gallery,
+                api: down,
+            },
+            tab: |_, _| None,
+            own_port: tailnet,
+            terminal: no_terminal,
+            servers: Vec::new,
+            sites: host_rule,
+            apps: Vec::new,
+            aliases: Vec::new,
+            writes: |_, _, _| Vec::new(),
+            executable: |_| None,
+        };
+        let url = "https://studio.example.ts.net:8444/2026-01-02-demo/examples/queue/";
+        let mut clues = url_clues(url, &senses, true);
+        assert!(clues.iter().any(|c| c.source == Source::Rule));
+        let mut candidates = Vec::new();
+        look_at_page(Some(url), &mut clues, &mut candidates, &senses);
+        std::fs::remove_dir_all(base).unwrap();
+        let evidence = Evidence {
+            clues,
+            candidates,
+            address: None,
+            now_ms: 0,
+            url: Some(url.into()),
+            sessions_error: None,
+        };
+        let judgement = decide(&evidence, Policy::Weigh);
+        let text = explain(&evidence, &judgement);
+        match &judgement.decision {
+            Decision::Send { to, .. } => {
+                assert_eq!(to.candidate.id, "ses_signer", "{text}");
+                assert!(explicit(to), "{text}");
+            }
+            other => panic!("{other:?}\n{text}"),
         }
     }
 

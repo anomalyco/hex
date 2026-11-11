@@ -13,6 +13,8 @@ mod lid;
 #[cfg(any(target_os = "windows", test))]
 mod mix_format;
 pub(crate) mod output_ducking;
+pub(crate) mod output_route;
+mod overloads;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod transport;
@@ -28,7 +30,6 @@ use std::time::{Duration, Instant};
 
 static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
 static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
-static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static AVOID_BLUETOOTH_MICROPHONE: AtomicBool = AtomicBool::new(true);
 
 /// Whether `HEX_AUDIO_FIXTURE` names a WAV file that stands in for every
@@ -53,10 +54,7 @@ fn avoid_bluetooth_microphone() -> bool {
 /// How long ago a microphone stream last reported an overload it continued
 /// through, for diagnosing captures.
 pub fn since_last_stream_glitch() -> Option<Duration> {
-    STREAM_GLITCHED_AT
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .map(|at| at.elapsed())
+    overloads::since_last()
 }
 
 pub fn notify_audio_service_restarted() {
@@ -215,6 +213,9 @@ pub struct AudioInput {
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
+    /// The device's stable OS identifier, when it has one, which is what a
+    /// call app's reported inputs are compared by.
+    pub uid: Option<String>,
     /// Whether this input stands in for the saved microphone until it can
     /// be opened again.
     pub selection: Selection,
@@ -227,6 +228,9 @@ pub struct AudioInput {
     stall_after: Option<Duration>,
     /// When the stream opened or last delivered a chunk.
     last_delivery: Mutex<Instant>,
+    /// Whether this stream's first chunk has reported how often it delivers
+    /// audio.
+    reported_period: AtomicBool,
 }
 
 /// A running stream delivers audio every few milliseconds, even silence. One
@@ -452,12 +456,14 @@ impl AudioInput {
                 stream_errors,
                 sample_rate: 48_000,
                 device_name: "Test microphone".into(),
+                uid: None,
                 selection: Selection::InUse,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
                 stall_after: None,
                 last_delivery: Mutex::new(Instant::now()),
+                reported_period: AtomicBool::new(false),
             },
             sender,
         )
@@ -513,7 +519,11 @@ impl AudioInput {
     fn open_device(device: Device, device_name: String, follows_default: bool) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
+        let uid = device.id().ok().map(|id| id.id().to_owned());
         let restart_generation = audio_service_restart_generation();
+        // Taken before the stream runs, so CoreAudio's real-time thread reads
+        // an initialized clock.
+        overloads::start_clock();
         let started = input_format::start_stream_with_fallback(
             &device,
             &device_name,
@@ -525,6 +535,7 @@ impl AudioInput {
             chunks: started.chunks,
             sample_rate: started.sample_rate,
             device_name,
+            uid,
             selection: Selection::InUse,
             stream_errors: started.stream_errors,
             watch_service_restarts: true,
@@ -532,6 +543,7 @@ impl AudioInput {
             hex_microphone: started.hex_microphone,
             stall_after: Some(STREAM_STALL_TIMEOUT),
             last_delivery: Mutex::new(Instant::now()),
+            reported_period: AtomicBool::new(false),
         })
     }
 
@@ -543,6 +555,10 @@ impl AudioInput {
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> AudioInputEvent {
+        // The one place a stream's overloads reach the log, whoever reported
+        // them: the error callback only counts them, and this poll writes the
+        // count.
+        overloads::report();
         if self.watch_service_restarts
             && audio_service_restart_generation() != self.restart_generation
         {
@@ -564,6 +580,7 @@ impl AudioInput {
         }
         match received {
             Ok((samples, captured_through)) => {
+                self.report_period(samples.len());
                 if self.stall_after.is_some() {
                     *self
                         .last_delivery
@@ -593,6 +610,37 @@ impl AudioInput {
                 AudioInputEvent::StreamFailed("microphone audio channel disconnected".into())
             }
         }
+    }
+
+    /// Reports how much audio the stream's callbacks deliver, once per open.
+    /// cpal exposes no readback of the period it picks for `BufferSize::Default`
+    /// and overloads arrive sooner on a smaller one, so the first chunk says
+    /// what the device actually does. A fixture input's chunks are its WAV
+    /// file's, not a device's, so it says nothing.
+    fn report_period(&self, frames: usize) {
+        let first = !self.reported_period.swap(true, Ordering::Relaxed);
+        #[cfg(target_os = "macos")]
+        if first && !uses_fixture() {
+            tracing::info!(
+                device = %self.device_name,
+                sample_rate = self.sample_rate,
+                frames,
+                period_us = duration_for_frames(frames, self.sample_rate).as_micros() as u64,
+                "microphone stream opened"
+            );
+        }
+        // Only macOS logs the period; every platform keeps the same open state.
+        #[cfg(not(target_os = "macos"))]
+        let _ = (frames, first);
+    }
+}
+
+impl Drop for AudioInput {
+    fn drop(&mut self) {
+        // Stop the stream before the count is taken, so a closing stream's last
+        // burst is written here instead of beside the next open's lines.
+        self._stream = None;
+        overloads::flush();
     }
 }
 
@@ -712,14 +760,20 @@ impl RecoveringAudioInput {
     /// Makes `input` the listener's microphone and the only stream feeding
     /// Hex Microphone, stopping the previous stream first.
     fn install(&mut self, input: AudioInput) {
-        if let Some(previous) = self.input.take() {
-            previous.feed_hex_microphone(false);
-            drop(previous);
-        }
+        self.retire_input();
         input.feed_hex_microphone(true);
         self.input = Some(input);
         self.outage = None;
         self.retry_warning = None;
+    }
+
+    /// Stops the open stream and drops it, so no stream of Hex's is left on
+    /// the device.
+    fn retire_input(&mut self) {
+        if let Some(previous) = self.input.take() {
+            previous.feed_hex_microphone(false);
+            drop(previous);
+        }
     }
 
     pub fn close(&mut self) {
@@ -790,9 +844,18 @@ impl RecoveringAudioInput {
             }
             match result {
                 Ok(Opened::Unchanged { selection }) => {
-                    if let Some(input) = &mut self.input {
-                        input.selection = selection;
+                    let Some(input) = self.input.as_mut() else {
+                        // Nothing was open to keep; open a fresh input.
+                        self.recovery.request_stream_recovery(now);
+                        return RecoveringAudioInputEvent::Timeout;
+                    };
+                    // A stream that failed while this open was in flight is
+                    // dead; open it again rather than keeping it.
+                    if self.recovery.blocks_audio() {
+                        self.recovery.next_attempt = Some(now);
+                        return RecoveringAudioInputEvent::Timeout;
                     }
+                    input.selection = selection;
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
                     self.after_resolving(now);
@@ -802,7 +865,13 @@ impl RecoveringAudioInput {
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
                     self.after_resolving(now);
-                    tracing::info!(device = %self.device_name(), "dictation microphone reopened");
+                    let reopened = self.input.as_ref().expect("just installed");
+                    tracing::info!(
+                        device = %reopened.device_name,
+                        uid = reopened.uid.as_deref().unwrap_or("none"),
+                        sample_rate = reopened.sample_rate,
+                        "dictation microphone reopened"
+                    );
                     return RecoveringAudioInputEvent::Reopened;
                 }
                 Ok(Opened::Input(_)) => {
@@ -893,6 +962,12 @@ impl RecoveringAudioInput {
             .as_ref()
             .filter(|_| !self.recovery.blocks_audio())
             .map(|input| input.device_name.clone());
+        // A failed or silent stream lets go of the device before its
+        // replacement opens, so the replacement starts cold, as at launch. A
+        // live stream stays until its replacement is ready to install.
+        if self.recovery.blocks_audio() {
+            self.retire_input();
+        }
         let request = OpenRequest {
             device_override: self.device_override.clone(),
             selected_device: self.selected_device.clone(),
@@ -1417,21 +1492,19 @@ impl StreamErrorReporter {
 }
 
 fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
-    if matches!(
-        error.kind(),
-        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied
-    ) {
-        // CoreAudio reports processor overloads, common while a cold device
-        // starts, without stopping the stream. Real sample gaps still surface as
+    match error.kind() {
+        // An overload or a refused real-time promotion is a glitch on a stream
+        // that keeps running, common while a cold device starts. Some hosts
+        // report it from the thread that runs the stream, where a log line or a
+        // lock blocks an already-late cycle, so only the counters move here and
+        // the audio owner writes the burst. Real sample gaps still surface as
         // capture discontinuities.
-        tracing::warn!(%error, "microphone stream glitched; continuing");
-        *STREAM_GLITCHED_AT
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(Instant::now());
-        return;
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => overloads::record(),
+        _ => {
+            tracing::error!(%error, "microphone stream failed");
+            let _ = sender.try_send(error.to_string());
+        }
     }
-    tracing::error!(%error, "microphone stream failed");
-    let _ = sender.try_send(error.to_string());
 }
 
 fn build_stream<T: SizedSample>(
@@ -2107,6 +2180,14 @@ mod tests {
         TEST_ROUTE_GENERATION.load(Ordering::Acquire)
     }
 
+    /// A route generation only this test changes, so another test's route
+    /// change cannot open the stream it is about to fail.
+    static DEAD_STREAM_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+    fn dead_stream_route_generation() -> u64 {
+        DEAD_STREAM_ROUTE_GENERATION.load(Ordering::Acquire)
+    }
+
     /// Polls until any open the input starts has finished, returning the
     /// last event.
     fn settle(input: &mut RecoveringAudioInput, capture_idle: bool) -> RecoveringAudioInputEvent {
@@ -2307,6 +2388,7 @@ mod tests {
         report_stream_error(&sender, cpal::ErrorKind::Xrun.into());
         report_stream_error(&sender, cpal::ErrorKind::RealtimeDenied.into());
         assert!(errors.try_recv().is_err());
+        assert!(since_last_stream_glitch().is_some());
 
         report_stream_error(&sender, cpal::ErrorKind::DeviceNotAvailable.into());
         assert!(errors.try_recv().is_ok());
@@ -2606,5 +2688,64 @@ mod tests {
             RecoveringAudioInputEvent::Interrupted
         ));
         assert!(input.is_recovering());
+    }
+
+    /// What the opener saw of the previous stream's feed switch when it ran.
+    fn recording_opener(
+        seen: &Arc<Mutex<Option<bool>>>,
+        switch: &hex_microphone::CaptureFeedSwitch,
+    ) -> impl Fn(&OpenRequest) -> Result<Opened> + Send + Sync + 'static {
+        let seen = seen.clone();
+        let switch = switch.clone();
+        move |_| {
+            *seen.lock().unwrap() = Some(switch.is_on());
+            Ok(Opened::Input(Box::new(named_input(
+                "Replacement microphone",
+            ))))
+        }
+    }
+
+    #[test]
+    fn a_dead_stream_is_stopped_before_its_replacement_opens() {
+        // A failed stream lets go of the device before its replacement opens.
+        let (failed, samples) = AudioInput::channel_for_test();
+        let failed_switch = failed.hex_microphone.clone();
+        let seen = Arc::new(Mutex::new(None));
+        let mut input = RecoveringAudioInput::with_opener_for_test(
+            None,
+            dead_stream_route_generation,
+            recording_opener(&seen, &failed_switch),
+        );
+        input.finish_initial_open(Ok(failed), Instant::now());
+        drop(samples);
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Interrupted
+        ));
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(*seen.lock().unwrap(), Some(false));
+        assert!(!failed_switch.is_on());
+
+        // A route change still keeps the old stream until the new one installs.
+        let (old, samples) = AudioInput::channel_for_test();
+        let old_switch = old.hex_microphone.clone();
+        let seen = Arc::new(Mutex::new(None));
+        let mut routed = RecoveringAudioInput::with_opener_for_test(
+            None,
+            dead_stream_route_generation,
+            recording_opener(&seen, &old_switch),
+        );
+        routed.finish_initial_open(Ok(old), Instant::now());
+        std::mem::forget(samples);
+        DEAD_STREAM_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+        assert!(matches!(
+            settle(&mut routed, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(*seen.lock().unwrap(), Some(true));
+        assert!(!old_switch.is_on());
     }
 }

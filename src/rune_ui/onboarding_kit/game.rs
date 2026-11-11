@@ -1,7 +1,7 @@
 //! The practice step as a mini game (`t1121`). Messages drift in, one is
 //! lit at a time, the player holds the shortcut and answers it, the words
 //! fly into it, and a bolt of lightning strikes it and burns it away
-//! (`game_fx`, after Psychopomp's lightning and dissolve). Three messages
+//! (`fx`, after Psychopomp's lightning and dissolve). Three messages
 //! end on a certificate the player signs by saying their name; signing it
 //! shows a score card, and Keep playing carries on for as long as they like.
 //! Done is always there, and the game never ends by itself.
@@ -11,37 +11,45 @@
 //! answer. The first run's `"Your turn"` feeds it Hex's own dictation; the
 //! playground story feeds it scripted answers.
 
+mod certificate;
+pub(crate) mod fx;
+mod lines;
+mod share;
+
 use crate::desktop::i18n::tr;
 use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cx, El, Playground, Story, TextEdit, TextStyle, Transition, Tx, col, effect, el,
-    row, text,
+    Anim, Color, Cx, El, MotionIntent, Playground, ScrollSpec, Story, TextEdit, TextStyle,
+    Transition, Tx, col, effect, el, row, text,
 };
 use rune_kit::{Button, ButtonVariant, TextInput};
 
 use super::super::Ui;
 use super::super::controls::{Paint, PushSize};
-use super::cards::{
-    ADAM, App, CARD_W, DAX, FRANK, Notice, Reply, field_text_origin, floating, lines_card_height,
-    notice,
-};
+use super::cards::{CARD_W, Notice, Reply, field_text_origin, floating, lines_card_height, notice};
 use super::field_text::{CARD, Field};
 use super::fixture::Take;
 use super::flight::{Flight, ember_tone, flicker, flying, typeset};
-use super::game_fx::{self, BURN, BURN_MARK, Bolt, Burn, Fx, Mote, STRIKE_MARK, Tones};
+use super::high_score;
+use super::hud_stage::{LiveHud, frame_slot};
 use super::landing::{LEAD, keys, title_font};
 use super::live;
-use super::mic::mic_level;
+use super::sfx::{SfxTrack, WordHits};
 use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
 use crate::desktop::onboarding::Practice;
+use crate::dictation::indicator::DotFrame;
+use certificate::certificate;
+use fx::{BURN, BURN_MARK, Bolt, Burn, Fx, Mote, STRIKE_MARK, Tones};
 
 const STAGE_W: f32 = 880.0;
 const STAGE_H: f32 = 620.0;
 const HUD_AT: [f32; 2] = [STAGE_W * 0.5, STAGE_H - 34.0];
+const HUD_SCALE: f32 = 1.0;
 const FRAME: Duration = Duration::from_millis(16);
 
 /// When the first card shows, and when it lights.
@@ -65,27 +73,39 @@ const LINES: usize = 3;
 const SLOTS: usize = 200;
 /// The story's Keep playing variant presses it after this long.
 const SHARE_HOLD: f64 = 2.8;
+/// Cards an autoplaying story burns before it presses Done.
+const AUTOPLAY_CARDS: usize = 4;
 /// Keep playing folds the share card into the score pill.
 const FOLD: f32 = 0.45;
-/// The score pill's top-left, level with Done, and its size.
+/// The score pill's top-left, level with Done, its height (Done's), and its
+/// padding and gap; it's as wide as its number and label need ([`pill_size`]).
 const SCORE_AT: [f32; 2] = [24.0, 18.0];
-const PILL: [f32; 2] = [112.0, 30.0];
+const PILL_H: f32 = 28.0;
+const PILL_PAD: f32 = 12.0;
+const PILL_GAP: f32 = 8.0;
+
+/// The score pill's number.
+fn score_font() -> TextStyle {
+    TextStyle::new(14.0, 640.0).lh(18.0).features("'tnum' 1")
+}
+
+/// The score pill hugging `destroyed` and its label, with the same padding
+/// either side in every language.
+fn pill_size(p: Paint, destroyed: usize) -> [f32; 2] {
+    let number = rune::text::advance(&destroyed.to_string(), score_font());
+    let label = rune::text::advance(tr("destroyed"), p.k.ty.small);
+    [2.0 * PILL_PAD + number + PILL_GAP + label, PILL_H]
+}
 const SHARE_W: f32 = 432.0;
 const SHARE_PAD: f32 = 24.0;
 const SHARE_GAP: f32 = 16.0;
-/// The share card's rows, top to bottom, each a fixed height so the card's
-/// own height is known: brand, score, rule, stats, rule, signature, actions.
+/// The share card's fixed rows, top to bottom: brand, score, rule, stats,
+/// rule, signature, actions. The transcript sits between the second rule
+/// and the signature, as tall as it needs up to [`SAID_MAX`].
 const SHARE_ROWS: [f32; 7] = [20.0, 78.0, 1.0, 42.0, 1.0, 32.0, 28.0];
-const SHARE_H: f32 = 2.0 * SHARE_PAD
-    + SHARE_ROWS[0]
-    + SHARE_ROWS[1]
-    + SHARE_ROWS[2]
-    + SHARE_ROWS[3]
-    + SHARE_ROWS[4]
-    + SHARE_ROWS[5]
-    + SHARE_ROWS[6]
-    + 6.0 * SHARE_GAP;
-const SHARE_Y: f32 = 128.0;
+/// The transcript's most height; a longer one scrolls.
+const SAID_MAX: f32 = 150.0;
+const SAID_GAP: f32 = 10.0;
 const BIG_SIZE: f32 = 76.0;
 const BIG_LINE: f32 = 78.0;
 
@@ -99,62 +119,9 @@ const SIGN: Field = Field {
 };
 const SIGN_Y: f32 = CERT_H - CERT_PAD - 8.0 - 30.0;
 
-const MILK: Notice = Notice {
-    key: "milk",
-    app: App::Messages,
-    from: "Sam next door",
-    place: None,
-    body: "hey are you near the shop? could you grab some milk",
-    field: "iMessage",
-};
-const GREG: Notice = Notice {
-    key: "greg",
-    app: App::Slack,
-    from: "Greg",
-    place: Some("#general"),
-    body: "quick question. actually, can we hop on a call? just 30 mins",
-    field: "Reply in thread",
-};
-
-const SAY_MILK: Take = Take {
-    updates: &[
-        (0.25, "Sure,"),
-        (0.45, "Sure, oat"),
-        (0.62, "Sure, oat or"),
-        (0.85, "Sure, oat or normal?"),
-        (1.05, "Sure, oat or normal? Back"),
-        (1.2, "Sure, oat or normal? Back in"),
-        (1.42, "Sure, oat or normal? Back in ten."),
-    ],
-    release: 1.6,
-};
-const SAY_GREG: Take = Take {
-    updates: &[(0.3, "Nope.")],
-    release: 0.65,
-};
 const SAY_NAME: Take = Take {
     updates: &[(0.35, "Kit"), (0.7, NAME)],
     release: 0.95,
-};
-const SAY_FRANK: Take = Take {
-    updates: &[(0.3, "It"), (0.5, "It is"), (0.75, "It is now.")],
-    release: 1.0,
-};
-const SAY_DAX: Take = Take {
-    updates: &[
-        (0.3, "On"),
-        (0.45, "On it,"),
-        (0.75, "On it, five minutes."),
-    ],
-    release: 1.0,
-};
-const SAY_ADAM: Take = Take {
-    updates: &[
-        (0.3, "Figma"),
-        (0.55, "Figma deserved"),
-        (0.85, "Figma deserved it."),
-    ],
-    release: 1.05,
 };
 
 #[derive(Clone, Copy)]
@@ -180,69 +147,49 @@ const LEFT: f32 = (STAGE_W - 2.0 * CARD_W - GUTTER) * 0.5;
 const RIGHT: f32 = LEFT + CARD_W + GUTTER;
 const GUTTER: f32 = 12.0;
 
-const SCRIPT: [Spec; 3] = [
-    Spec {
-        card: Card::Chat(MILK),
-        demo: &SAY_MILK,
-        heat: 0.5,
-        home: [LEFT, 128.0],
-        from: [-520.0, 40.0],
-    },
-    Spec {
-        card: Card::Chat(GREG),
-        demo: &SAY_GREG,
-        heat: 0.92,
-        home: [RIGHT, 218.0],
-        from: [520.0, -30.0],
-    },
-    Spec {
-        card: Card::Certificate,
-        demo: &SAY_NAME,
-        heat: 0.62,
-        home: [LEFT, 318.0],
-        from: [-80.0, 420.0],
-    },
+/// Where the first three cards sit (two messages, then the certificate),
+/// and where each drifts in from.
+const OPENING: [([f32; 2], [f32; 2]); 3] = [
+    ([LEFT, 128.0], [-520.0, 40.0]),
+    ([RIGHT, 218.0], [520.0, -30.0]),
+    ([LEFT, 318.0], [-80.0, 420.0]),
 ];
-const CERTIFICATE: usize = SCRIPT.len() - 1;
+const CERTIFICATE: usize = OPENING.len() - 1;
 
-/// Keep playing's messages, round and round, each in the other column
-/// from the one before.
-const ENDLESS: [Spec; 4] = [
-    Spec {
-        card: Card::Chat(FRANK),
-        demo: &SAY_FRANK,
-        heat: 0.55,
-        home: [RIGHT, 140.0],
-        from: [500.0, -60.0],
-    },
-    Spec {
-        card: Card::Chat(DAX),
-        demo: &SAY_DAX,
-        heat: 0.6,
-        home: [LEFT, 260.0],
-        from: [-520.0, 0.0],
-    },
-    Spec {
-        card: Card::Chat(ADAM),
-        demo: &SAY_ADAM,
-        heat: 0.75,
-        home: [RIGHT, 330.0],
-        from: [480.0, 300.0],
-    },
-    Spec {
-        card: Card::Chat(GREG),
-        demo: &SAY_GREG,
-        heat: 0.92,
-        home: [LEFT, 128.0],
-        from: [-520.0, -30.0],
-    },
+/// Keep playing's places, round and round, each in the other column from
+/// the one before.
+const ENDLESS: [([f32; 2], [f32; 2]); 4] = [
+    ([RIGHT, 140.0], [500.0, -60.0]),
+    ([LEFT, 260.0], [-520.0, 0.0]),
+    ([RIGHT, 330.0], [480.0, 300.0]),
+    ([LEFT, 128.0], [-520.0, -30.0]),
 ];
 
-fn spec(n: usize) -> Spec {
-    SCRIPT
+/// The `n`th card of a run with `seed`: the opening theme's first two
+/// messages, the certificate, then (on Keep playing) the rest of the
+/// messages in threes ([`lines`]).
+fn spec(seed: u64, n: usize) -> Spec {
+    let (home, from) = OPENING
         .get(n)
         .copied()
-        .unwrap_or_else(|| ENDLESS[(n - SCRIPT.len()) % ENDLESS.len()])
+        .unwrap_or_else(|| ENDLESS[(n - OPENING.len()) % ENDLESS.len()]);
+    if n == CERTIFICATE {
+        return Spec {
+            card: Card::Certificate,
+            demo: &SAY_NAME,
+            heat: 0.62,
+            home,
+            from,
+        };
+    }
+    let line = lines::nth(seed, if n < CERTIFICATE { n } else { n - 1 });
+    Spec {
+        card: Card::Chat(line.notice),
+        demo: line.demo,
+        heat: line.heat,
+        home,
+        from,
+    }
 }
 
 /// One card, from drifting in to burning away.
@@ -263,10 +210,10 @@ struct Round {
 }
 
 impl Round {
-    fn new(n: usize, arrive: f64) -> Self {
+    fn new(n: usize, spec: Spec, arrive: f64) -> Self {
         Self {
             n,
-            spec: spec(n),
+            spec,
             arrive,
             target: None,
             text: String::new(),
@@ -381,8 +328,25 @@ fn field_of(r: &Round) -> (Field, [f32; 2], [f32; 2]) {
     }
 }
 
+/// A cleared message and what the player said to it, for the score card's
+/// transcript.
+struct Cleared {
+    notice: Notice,
+    reply: String,
+}
+
+/// What the score card counts: the messages destroyed when it showed, and
+/// the best score before them.
+#[derive(Clone, Copy)]
+struct Score {
+    destroyed: usize,
+    best: usize,
+}
+
 /// The game, on the caller's clock.
 pub(crate) struct Play {
+    /// Which order the run plays the themes in ([`lines::order`]).
+    seed: u64,
     rounds: Vec<Round>,
     /// Cards shown so far, including burnt ones dropped from `rounds`.
     spawned: usize,
@@ -392,17 +356,29 @@ pub(crate) struct Play {
     first_hold: Option<f64>,
     /// When the dictation that sent the live words ended, until its paste.
     ended: Option<f64>,
-    /// When the score card shows.
+    /// When the score card shows: after the certificate, and after Done.
     share: Option<f64>,
-    /// When Keep playing was pressed.
+    /// Where it rises from.
+    share_from: [f32; 2],
+    /// When Keep playing folded it away.
     kept: Option<f64>,
+    score: Option<Score>,
+    /// The best score ever, this run's included.
+    best: usize,
+    /// Every message answered, in order.
+    log: Vec<Cleared>,
+    /// Words said, all run.
+    words: usize,
+    /// Answers that landed, all run: the HUD's Done.
+    landed: usize,
     /// Keys typed into the answer field.
     keys: usize,
 }
 
 impl Play {
-    pub(crate) fn new(now: f64) -> Self {
+    pub(crate) fn new(now: f64, seed: u64, best: usize) -> Self {
         let mut play = Self {
+            seed,
             rounds: Vec::new(),
             spawned: 0,
             dropped: 0,
@@ -410,7 +386,13 @@ impl Play {
             first_hold: None,
             ended: None,
             share: None,
+            share_from: [STAGE_W * 0.5, STAGE_H * 0.5],
             kept: None,
+            score: None,
+            best,
+            log: Vec::new(),
+            words: 0,
+            landed: 0,
             keys: 0,
         };
         play.spawn(now + FIRST_ARRIVES);
@@ -420,10 +402,11 @@ impl Play {
 
     /// The next card drifts in; after the certificate, only on Keep playing.
     fn spawn(&mut self, at: f64) {
-        if self.spawned >= SCRIPT.len() && self.kept.is_none() {
+        if self.spawned >= OPENING.len() && self.kept.is_none() {
             return;
         }
-        self.rounds.push(Round::new(self.spawned, at));
+        let n = self.spawned;
+        self.rounds.push(Round::new(n, spec(self.seed, n), at));
         self.spawned += 1;
     }
 
@@ -483,7 +466,7 @@ impl Play {
         // Keep playing goes on for good; cards long burnt stop counting.
         let before = self.rounds.len();
         self.rounds
-            .retain(|r| r.n < SCRIPT.len() || now < r.shatter() + 3.0);
+            .retain(|r| r.n < OPENING.len() || now < r.shatter() + 3.0);
         self.dropped += before - self.rounds.len();
     }
 
@@ -504,10 +487,21 @@ impl Play {
             .map(|(f, _, _)| f.arrives())
             .fold(now, f64::max);
         round.explode = landed + AFTER_LAND;
-        let (n, shatter) = (round.n, round.shatter());
+        let (n, shatter, centre) = (round.n, round.shatter(), round.centre());
+        let cleared = match round.spec.card {
+            Card::Chat(notice) => Some(Cleared {
+                notice,
+                reply: round.text.clone(),
+            }),
+            Card::Certificate => None,
+        };
+        self.words += round.text.split_whitespace().count();
+        self.landed += 1;
+        self.log.extend(cleared);
         if n == CERTIFICATE {
             // The certificate all but burns away before the score card takes its place.
-            self.share = Some(shatter + 0.85);
+            self.share_from = centre;
+            self.show_score(shatter + 0.85);
             return;
         }
         if self.waiting() == 0 {
@@ -518,6 +512,40 @@ impl Play {
         {
             next.target = Some((next.arrive + 1.1).max(shatter + 0.6));
         }
+    }
+
+    /// Done: once the last answered card has burnt, the score card shows
+    /// what this run destroyed against the best. False when nothing was
+    /// destroyed, so Done just leaves.
+    pub(crate) fn finish(&mut self, now: f64) -> bool {
+        if !self.playing() {
+            return true;
+        }
+        let answered = self.rounds.iter().filter(|r| r.answered);
+        if self.dropped + answered.clone().count() == 0 {
+            return false;
+        }
+        let burnt = answered.map(|r| r.shatter() + 0.35).fold(now, f64::max);
+        self.forget();
+        self.share_from = [STAGE_W * 0.5, HUD_AT[1]];
+        self.show_score(burnt);
+        true
+    }
+
+    fn show_score(&mut self, at: f64) {
+        let destroyed = self.dropped
+            + self
+                .rounds
+                .iter()
+                .filter(|r| r.answered && r.shatter() <= at)
+                .count();
+        self.share = Some(at);
+        self.kept = None;
+        self.score = Some(Score {
+            destroyed,
+            best: self.best,
+        });
+        self.best = self.best.max(destroyed);
     }
 
     /// Drops the live words of a dictation that never pasted.
@@ -535,8 +563,10 @@ impl Play {
             return;
         }
         self.kept = Some(now);
-        self.spawn(now);
-        if let Some(round) = self.rounds.last_mut() {
+        if self.waiting() == 0 {
+            self.spawn(now);
+        }
+        if let Some(round) = self.rounds.iter_mut().find(|r| !r.answered) {
             round.target = Some(now + FIRST_LIGHTS);
         }
     }
@@ -549,33 +579,42 @@ impl Play {
         self.rounds.iter().find(|r| r.n == CERTIFICATE)
     }
 
-    /// The score card's numbers: words said up to the certificate, keys
-    /// typed, and seconds from the first press to the certificate's burn.
+    /// The score card's numbers: words said, keys typed, and seconds from
+    /// the first press to the score card.
     fn stats(&self) -> (usize, usize, f64) {
-        let words = self
-            .rounds
-            .iter()
-            .filter(|r| r.answered && r.n <= CERTIFICATE)
-            .map(|r| r.text.split_whitespace().count())
-            .sum();
-        let secs = match (self.first_hold, self.certificate()) {
-            (Some(from), Some(cert)) => (cert.shatter() - from).max(0.0),
+        let secs = match (self.first_hold, self.share) {
+            (Some(from), Some(to)) => (to - from).max(0.0),
             _ => 0.0,
         };
-        (words, self.keys, secs)
+        (self.words, self.keys, secs)
     }
 }
+
+/// One of the game's buttons.
+type Action<S> = Rc<dyn Fn(&mut S)>;
 
 /// What the game shows around [`Play`], and what its buttons do.
 struct Look<'a, S> {
     caps: &'a [String],
+    /// Hex's Dot scope, the words' launch pad.
+    hud: Option<&'a DotFrame>,
+    /// When the scope last came or went, on the game's clock.
+    hud_changed: f64,
+    /// The heading over the cards.
+    title: &'static str,
+    /// The shortcut starts and stops dictation instead of being held.
+    toggle: bool,
     /// The listener runs but hasn't started listening: the game says so
     /// instead of inviting a hold that does nothing.
     warming: bool,
-    /// The microphone's level while dictation records.
-    meter: Option<(f32, f32)>,
     /// What the last try needs said.
     hint: Option<&'static str>,
+    /// Switches the shortcut to tap to start, for a player who keeps
+    /// tapping it.
+    offer: Option<Action<S>>,
+    /// Done: the score card, or straight on when nothing was destroyed.
+    finish: Rc<dyn Fn(&mut S)>,
+    /// The score card's Continue.
     done: Rc<dyn Fn(&mut S)>,
     keep: Rc<dyn Fn(&mut S)>,
 }
@@ -593,6 +632,8 @@ struct Script {
     streams: bool,
     /// Presses Keep playing once the score card has shown a while.
     keep: bool,
+    /// Presses Done once this many cards have burnt.
+    done_after: Option<usize>,
     /// Which card, and when its shortcut went down.
     held: Option<(usize, f64)>,
     meter: Option<(f32, f32)>,
@@ -606,9 +647,18 @@ impl Script {
         }
     }
 
-    fn run(&mut self, play: &mut Play, now: f64) {
+    /// Plays the script to `now`, returning the take it starts saying, if
+    /// it presses the shortcut now.
+    fn run(&mut self, play: &mut Play, now: f64) -> Option<&'static Take> {
         if self.keep && play.share.is_some_and(|at| now >= at + SHARE_HOLD) {
             play.keep(now);
+        }
+        if play.share.is_none()
+            && self
+                .done_after
+                .is_some_and(|n| play.destroyed(now) >= n && play.playing())
+        {
+            play.finish(now);
         }
         self.meter = None;
         let next = play
@@ -618,12 +668,13 @@ impl Script {
             .map(|r| (r.n, r.lit_at(), r.spec.demo));
         let Some((n, lit, take)) = next.filter(|_| play.playing()) else {
             play.hear(false, None, now);
-            return;
+            return None;
         };
         match self.held.filter(|(held, _)| *held == n) {
             None if now >= lit + 0.55 => {
                 self.held = Some((n, now));
                 play.hear(true, None, now);
+                return Some(take);
             }
             None => play.hear(false, None, now),
             Some((_, from)) if now - from < take.release => {
@@ -636,6 +687,7 @@ impl Script {
                 play.paste(take.text(), now);
             }
         }
+        None
     }
 }
 
@@ -648,15 +700,79 @@ pub(crate) struct Session {
     /// words; Return or a paste sends it.
     typed: String,
     practice: Option<Practice>,
+    /// The best score on disk, for a real run; a story's game keeps none.
+    saved: Option<usize>,
+    hud: GameHud,
+    /// Whether the run's first score card has sounded its triumph.
+    cheered: bool,
+    /// How many of each card's words have sounded leaving the HUD.
+    flicked: BTreeMap<usize, usize>,
+    /// The cards whose burn has sounded.
+    burnt: BTreeSet<usize>,
+    hits: WordHits,
 }
 
 impl Session {
     fn new(s: &Onboard, now: f64) -> Self {
+        let saved = s.live.is_some().then(high_score::load);
+        let fixture = s.live.as_ref().is_some_and(|live| live.fixture);
+        let seed = if s.rehearsal.is_some() || fixture {
+            0
+        } else {
+            lines::fresh_seed()
+        };
         Self {
-            play: Play::new(now),
-            script: s.rehearsal.map(|r| Script::new(r.streams)),
+            play: Play::new(now, seed, saved.unwrap_or(0)),
+            saved,
+            ..Self::preview(s, now)
+        }
+    }
+
+    /// The game as it will start, before the step's first poll.
+    fn preview(s: &Onboard, now: f64) -> Self {
+        Self {
+            play: Play::new(now, 0, 0),
+            script: s.rehearsal.map(|r| Script {
+                done_after: s.autoplay.then_some(AUTOPLAY_CARDS),
+                ..Script::new(r.streams)
+            }),
             typed: String::new(),
             practice: None,
+            saved: None,
+            hud: GameHud::default(),
+            cheered: false,
+            flicked: BTreeMap::new(),
+            burnt: BTreeSet::new(),
+            hits: WordHits::default(),
+        }
+    }
+
+    /// Schedules what the game has newly set in motion: each word leaving
+    /// the HUD, each card's strike, and the first score card's triumph.
+    fn sound(&mut self, sfx: &mut SfxTrack) {
+        for r in &self.play.rounds {
+            let flicked = self.flicked.entry(r.n).or_default();
+            if r.launch.len() > *flicked {
+                sfx.on_words(r.launch[*flicked..].iter().copied(), &mut self.hits);
+                *flicked = r.launch.len();
+            }
+            if r.explode.is_finite() && self.burnt.insert(r.n) {
+                sfx.on_burn(r.explode);
+            }
+        }
+        if let Some(at) = self.play.share.filter(|_| !self.cheered) {
+            self.cheered = true;
+            sfx.on_game_score(at);
+        }
+    }
+
+    /// Writes a new best score down.
+    fn keep_best(&mut self) {
+        if let Some(saved) = self.saved
+            && self.play.best > saved
+        {
+            high_score::save(self.play.best);
+            self.saved = Some(self.play.best);
         }
     }
 }
@@ -675,9 +791,25 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         return false;
     }
     let mut session = s.game.take().unwrap_or_else(|| Session::new(s, now));
+    let reduced = s.reduced.get();
     if let Some(script) = session.script.as_mut() {
-        script.run(&mut session.play, now);
+        if let Some(take) = script.run(&mut session.play, now) {
+            s.sfx.on_voice_take(now, take);
+        }
+        let peak = script.meter.map(|(_, peak)| peak);
+        session
+            .hud
+            .step(&session.play, now, peak.is_some(), peak, reduced);
+        session.sound(&mut s.sfx);
+        let leave = s.autoplay
+            && session
+                .play
+                .share
+                .is_some_and(|at| now >= at + SHARE_HOLD + 1.2);
         s.game = Some(session);
+        if leave {
+            s.leave_game_keeping_sound(now);
+        }
         return true;
     }
     // Hex's own dictation sounds its own tones; without it, the story
@@ -718,6 +850,10 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
         _ => Some(session.typed.as_str()).filter(|typed| !typed.trim().is_empty()),
     };
     session.play.hear(held, words, now);
+    let peak = crate::audio::input_level::recent().filter(|_| held);
+    session.hud.step(&session.play, now, held, peak, reduced);
+    session.keep_best();
+    session.sound(&mut s.sfx);
     s.game = Some(session);
     true
 }
@@ -763,6 +899,25 @@ pub(super) fn answer(s: &mut Onboard) {
     s.sfx.on_live_dictation_landed(now);
 }
 
+/// Done: the score card first, if anything was destroyed.
+fn finish(s: &mut Onboard) {
+    let now = s.now;
+    let scored = s.game.as_mut().is_some_and(|session| {
+        let scored = session.play.finish(now);
+        session.keep_best();
+        scored
+    });
+    if !scored {
+        s.after_game();
+    }
+}
+
+/// Whether the practice offers tap to start: the player keeps tapping a
+/// shortcut that has to be held.
+fn offers_toggle(s: &Onboard) -> bool {
+    !s.toggle && s.taps >= super::stories::TAPS_BEFORE_TOGGLE
+}
+
 fn keep(s: &mut Onboard) {
     let now = s.now;
     if let Some(session) = s.game.as_mut() {
@@ -782,26 +937,35 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     let session = match &s.game {
         Some(session) => session,
         None => {
-            fresh = Session::new(s, s.now);
+            fresh = Session::preview(s, s.now);
             &fresh
         }
     };
-    let meter = match &session.script {
-        Some(script) => script.meter,
-        None => s.live_hold_from.is_some().then(|| {
-            let level = crate::audio::input_level::recent().unwrap_or(0.0);
-            (level * 0.6, level)
-        }),
+    let hud = session.hud.frame();
+    let offers = offers_toggle(s);
+    let hint = if offers {
+        Some("Rather not hold it? Tap to start, tap again to stop.")
+    } else {
+        s.live.as_ref().and_then(live::hint_copy)
     };
-    let hint = s.live.as_ref().and_then(live::hint_copy);
+    let title = if s.flow == super::stories::Flow::FirstRun {
+        tr("With Hex")
+    } else {
+        tr("Clear your messages")
+    };
     let warming = s.live.as_ref().is_some_and(|live| live.warming);
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
             caps: &s.caps,
+            hud,
+            hud_changed: session.hud.changed,
+            title,
+            toggle: s.toggle,
             warming,
-            meter,
             hint,
-            done: Rc::new(live::on_ui(Onboard::jump_to_ready)),
+            offer: offers.then(|| Rc::new(live::use_toggle) as Action<Ui>),
+            finish: Rc::new(live::on_ui(finish)),
+            done: Rc::new(live::on_ui(Onboard::after_game)),
             keep: Rc::new(live::on_ui(keep)),
         };
         let field = TextInput::new(&s.practice)
@@ -816,10 +980,20 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     } else {
         let look = Look::<Onboard> {
             caps: &s.caps,
+            hud,
+            hud_changed: session.hud.changed,
+            title,
+            toggle: s.toggle,
             warming: false,
-            meter,
             hint,
-            done: Rc::new(Onboard::jump_to_ready),
+            offer: offers.then(|| {
+                Rc::new(|s: &mut Onboard| {
+                    s.toggle = true;
+                    s.practice.focused = true;
+                }) as Action<Onboard>
+            }),
+            finish: Rc::new(finish),
+            done: Rc::new(Onboard::after_game),
             keep: Rc::new(keep),
         };
         let field = TextInput::new(&s.practice)
@@ -860,6 +1034,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
 pub(crate) struct Game {
     play: Play,
     script: Script,
+    hud: GameHud,
     now: f64,
     started: bool,
     force_reduced: bool,
@@ -869,8 +1044,9 @@ pub(crate) struct Game {
 impl Game {
     fn new() -> Self {
         Self {
-            play: Play::new(0.0),
+            play: Play::new(0.0, 0, 0),
             script: Script::new(true),
+            hud: GameHud::default(),
             now: 0.0,
             started: false,
             force_reduced: false,
@@ -878,8 +1054,10 @@ impl Game {
         }
     }
 
+    /// Plays again, in a new order after the first time.
     fn restart(&mut self) {
-        self.play = Play::new(self.now);
+        let seed = if self.started { lines::fresh_seed() } else { 0 };
+        self.play = Play::new(self.now, seed, self.play.best);
         self.script = Script {
             keep: self.script.keep,
             ..Script::new(self.script.streams)
@@ -907,10 +1085,13 @@ fn poll(g: &mut Game, now: f64, tx: &mut Tx) -> bool {
     g.now = now;
     // Plays on open, so headless renders and recordings start at once.
     if !g.started {
-        g.started = true;
         g.restart();
+        g.started = true;
     }
     g.script.run(&mut g.play, now);
+    let peak = g.script.meter.map(|(_, peak)| peak);
+    g.hud
+        .step(&g.play, now, peak.is_some(), peak, g.reduced.get());
     tx.wake_after(FRAME);
     true
 }
@@ -935,9 +1116,18 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
         g.reduced.get(),
         &Look::<Game> {
             caps: &caps,
+            hud: g.hud.frame(),
+            hud_changed: g.hud.changed,
+            title: "Clear your messages",
+            toggle: false,
             warming: false,
-            meter: g.script.meter,
             hint: None,
+            offer: None,
+            finish: Rc::new(|g: &mut Game| {
+                if !g.play.finish(g.now) {
+                    g.restart();
+                }
+            }),
             done: Rc::new(Game::restart),
             keep: Rc::new(|g: &mut Game| g.play.keep(g.now)),
         },
@@ -957,13 +1147,16 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
     let mut world = el()
         .key("world")
         .size(STAGE_W, STAGE_H)
+        // The screen shake: a kick along the last word's heading under
+        // noise, whose steps can be a jump from one frame to the next.
+        .motion_intent(MotionIntent::KICK | MotionIntent::STEP)
         .offset(shake[0], shake[1])
         .rotate(tilt)
         .offset_motion(Anim::INSTANT)
         .rotate_motion(Anim::INSTANT)
         .child(header(p, g, destroyed, t, reduced, look))
-        .child(hud(p, g, t, look.meter))
-        .children(look.hint.map(|copy| hint(p, copy)));
+        .children(hud(p, g, t, reduced, look))
+        .children(look.hint.map(|copy| hint(p, copy, look.offer.as_ref())));
 
     for r in &g.rounds {
         if let Some(card) = card(p, r, t, reduced, reward_fade(g, r, t)) {
@@ -981,8 +1174,8 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
                 .size(STAGE_W, STAGE_H),
         );
     }
-    game_fx::publish(fx);
-    world = world.children(share(p, g, t, destroyed, reduced, look));
+    fx::publish(fx);
+    world = world.children(share::share(p, g, t, reduced, look));
 
     el().key("stage")
         .size(STAGE_W, STAGE_H)
@@ -1080,7 +1273,7 @@ fn header<S: 'static>(
     };
     let number = text(destroyed.to_string())
         .key(format!("n{destroyed}"))
-        .font(TextStyle::new(14.0, 640.0).lh(18.0).features("'tnum' 1"))
+        .font(score_font())
         .color(if destroyed > 0 {
             ember_tone(p, 0.7)
         } else {
@@ -1098,11 +1291,11 @@ fn header<S: 'static>(
         .opacity(pill)
         .scale_motion(Anim::INSTANT)
         .opacity_motion(Anim::INSTANT)
-        .size(PILL[0], PILL[1])
-        .px(12.0)
-        .gap(8.0)
+        .size(pill_size(p, destroyed)[0], PILL_H)
+        .px(PILL_PAD)
+        .gap(PILL_GAP)
         .center_y()
-        .radius(15.0)
+        .radius(PILL_H * 0.5)
         .fill(k.c.surface_raised)
         .border(p.hair, k.c.border_weak)
         .child(number)
@@ -1122,7 +1315,7 @@ fn header<S: 'static>(
         .gap(6.0)
         .items_center()
         .child(
-            text(tr("Clear your messages"))
+            text(look.title)
                 .key("t")
                 .font(title_font(p))
                 .color(p.text()),
@@ -1139,10 +1332,15 @@ fn header<S: 'static>(
                 .key("lead")
                 .gap(8.0)
                 .center_y()
-                .child(text(tr("Hold")).key("hold").font(LEAD).color(p.muted()))
+                .child(
+                    text(if look.toggle { "Tap" } else { "Hold" })
+                        .key("hold")
+                        .font(LEAD)
+                        .color(p.muted()),
+                )
                 .child(keys(p, "keys", look.caps, g.holding))
                 .child(
-                    text(tr("and answer the one that's lit"))
+                    text(tr("and answer the one that's lit."))
                         .key("rest")
                         .font(LEAD)
                         .color(p.muted()),
@@ -1161,7 +1359,7 @@ fn header<S: 'static>(
             .child(
                 Button::new(tr("Done"))
                     .variant(ButtonVariant::Neutral)
-                    .on_press(act(&look.done))
+                    .on_press(act(&look.finish))
                     .build_push(k)
                     .key("done"),
             )
@@ -1174,31 +1372,168 @@ fn header<S: 'static>(
         .children(done)
 }
 
-/// A stand-in for the Dot scope HUD the words fly out of, on the
-/// microphone's level while dictation records.
-fn hud(p: Paint, g: &Play, t: f64, meter: Option<(f32, f32)>) -> El {
-    let (avg, peak) = meter.unwrap_or((0.04, 0.06));
-    let k = p.k;
-    row()
-        .key("hud")
-        .absolute(HUD_AT[0] - 46.0, HUD_AT[1] - 15.0)
-        .size(92.0, 30.0)
-        .opacity(chrome(g, t))
+/// Hex's Dot scope, which the words fly out of, while a take records and
+/// lands; between takes, a pill that says nothing is recording and asks for
+/// the shortcut. Both step aside for the score card.
+fn hud<S>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<S>) -> Vec<El> {
+    let chrome = chrome(g, t);
+    if chrome <= 0.01 {
+        return Vec::new();
+    }
+    let scope = look
+        .hud
+        .filter(|_| chrome > 0.5)
+        .map(|frame| frame_slot("game-dot-hud", HUD_AT, HUD_SCALE, frame));
+    // The stage lands every change at once, so the pill's fade and settle
+    // are worked out on the game's clock: it gives way fast as the scope
+    // opens, comes back slower once it has gone, and steps aside with the
+    // rest of the chrome for the score card.
+    let waiting = look.hud.is_none();
+    let since = (t - look.hud_changed).max(0.0);
+    let shown = if waiting {
+        settled(since, 0.35)
+    } else {
+        1.0 - settled(since, 0.12)
+    };
+    let scale = if reduced {
+        1.0
+    } else {
+        0.92 + 0.08
+            * if waiting {
+                settled(since, 0.3)
+            } else {
+                1.0 - settled(since, 0.3)
+            }
+    };
+    if shown * chrome <= 0.002 {
+        return scope.into_iter().collect();
+    }
+    let pill = idle_pill(p, look.caps, look.toggle, t, reduced)
+        .opacity(shown * chrome)
+        .scale(scale)
         .opacity_motion(Anim::INSTANT)
-        .center()
-        .radius(15.0)
-        .fill(if k.dark { k.c.bg_deep } else { k.c.text_strong })
-        .border(p.hair, k.c.border_weak)
-        .child(mic_level(p, "level", 16.0, avg, peak, meter.is_some()))
+        .scale_motion(Anim::INSTANT);
+    std::iter::once(pill).chain(scope).collect()
+}
+
+/// A zero-bounce spring of `response` seconds, `t` after it sets off; long
+/// settled (or never set off) is `1`.
+fn settled(t: f64, response: f64) -> f32 {
+    if !t.is_finite() || t > 8.0 * response {
+        return 1.0;
+    }
+    let w = std::f64::consts::TAU / response;
+    (1.0 - (1.0 + w * t) * (-w * t).exp()) as f32
+}
+
+/// Seconds between the idle pill's invitations to press the shortcut.
+const INVITE_EVERY: f64 = 2.6;
+
+/// `Not recording · Hold ⌥ to answer`, centred on the HUD: its keys dip
+/// as if pressed every [`INVITE_EVERY`] seconds (still under Reduce Motion).
+fn idle_pill(p: Paint, caps: &[String], toggle: bool, t: f64, reduced: bool) -> El {
+    let k = p.k;
+    const H: f32 = 34.0;
+    let phase = t.rem_euclid(INVITE_EVERY);
+    let dip = !reduced && (1.2..1.38).contains(&phase);
+    let glow = if reduced {
+        0.0
+    } else {
+        (0.5 - 0.5 * (std::f64::consts::TAU * phase / INVITE_EVERY).cos()) as f32
+    };
+    let dot = el()
+        .key("idle-dot")
+        .size(7.0, 7.0)
+        .radius(3.5)
+        .border(1.5, p.faint());
+    let pill = row()
+        .key("idle-pill")
+        .h(H)
+        .px(14.0)
+        .gap(8.0)
+        .center_y()
+        .radius(H * 0.5)
+        .fill(k.c.bg_base)
+        .border(p.hair, p.faint().alpha(0.25 + 0.35 * glow))
+        .child(dot)
+        .child(
+            text("Not recording")
+                .key("idle-state")
+                .font(k.ty.small)
+                .color(p.faint()),
+        )
+        .child(
+            el().key("idle-rule")
+                .size(p.hair, 14.0)
+                .fill(k.c.border_weak),
+        )
+        .child(
+            text(if toggle { "Tap" } else { "Hold" })
+                .key("idle-hold")
+                .font(LEAD)
+                .color(p.text()),
+        )
+        .child(keys(p, "idle-keys", caps, dip))
+        .child(
+            text(if toggle { "to start" } else { "to answer" })
+                .key("idle-rest")
+                .font(LEAD)
+                .color(p.text()),
+        );
+    row()
+        .key("idle-at")
+        .absolute(0.0, HUD_AT[1] - H * 0.5)
+        .w(STAGE_W)
+        .justify_center()
+        .child(pill)
+}
+
+/// The game's Dot scope, as the desktop HUD runs: away while the game
+/// waits, it appears when the shortcut goes down, records on the
+/// microphone's level while it is held, shows Done when the answer lands,
+/// and leaves again.
+struct GameHud {
+    hud: LiveHud,
+    landed: usize,
+    /// When the scope last came or went, on the game's clock.
+    changed: f64,
+}
+
+impl Default for GameHud {
+    fn default() -> Self {
+        Self {
+            hud: LiveHud::until_pressed(),
+            landed: 0,
+            changed: f64::NEG_INFINITY,
+        }
+    }
+}
+
+impl GameHud {
+    fn step(&mut self, play: &Play, now: f64, held: bool, peak: Option<f32>, reduced: bool) {
+        let landed = play.landed != self.landed;
+        self.landed = play.landed;
+        let shown = self.hud.frame().is_some();
+        self.hud.step(now, held, peak, landed, reduced);
+        if self.hud.frame().is_some() != shown {
+            self.changed = now;
+        }
+    }
+
+    fn frame(&self) -> Option<&DotFrame> {
+        self.hud.frame()
+    }
 }
 
 /// What the last try needs said, over the HUD.
-fn hint(p: Paint, copy: &'static str) -> El {
+fn hint<S: 'static>(p: Paint, copy: &'static str, offer: Option<&Action<S>>) -> El {
     row()
         .key("hint")
-        .absolute(0.0, HUD_AT[1] - 48.0)
+        .absolute(0.0, HUD_AT[1] - if offer.is_some() { 58.0 } else { 48.0 })
         .w(STAGE_W)
+        .gap(6.0)
         .justify_center()
+        .center_y()
         .child(
             text(copy)
                 .key(copy)
@@ -1206,6 +1541,13 @@ fn hint(p: Paint, copy: &'static str) -> El {
                 .color(p.muted())
                 .transition(Transition::opacity()),
         )
+        .children(offer.map(|offer| {
+            Button::new("Use tap to start")
+                .variant(ButtonVariant::Ghost)
+                .on_press(act(offer))
+                .build_push(p.k)
+                .key("use-toggle")
+        }))
 }
 
 /// The notice or certificate as it looks at `t`.
@@ -1405,60 +1747,6 @@ fn card(p: Paint, r: &Round, t: f64, reduced: bool, clear: f32) -> Option<El> {
 
 /// How far the card swells into the hit-stop.
 const SWELL: f32 = 1.035;
-
-fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
-    let k = p.k;
-    let line = el()
-        .key("sign-line")
-        .absolute(CERT_PAD, SIGN_Y + SIGN.line + 2.0)
-        .size(CARD_W - 2.0 * CERT_PAD, p.hair.max(1.0))
-        .fill(if targeted {
-            k.c.border_focus
-        } else {
-            k.c.border_base
-        });
-    let hint = (!signed).then(|| {
-        text(tr("Sign by saying your name"))
-            .key("hint")
-            .font(k.ty.ui)
-            .color(p.faint())
-            .absolute(CERT_PAD, SIGN_Y + 6.0)
-            .transition(Transition::opacity())
-    });
-    let card = el()
-        .key("certificate")
-        .size(CARD_W, CERT_H)
-        .radius(16.0)
-        .continuous_corners()
-        .fill(if k.dark {
-            k.c.surface_raised
-        } else {
-            k.c.bg_base
-        })
-        .border(p.hair, k.c.border_weak)
-        .child(
-            col()
-                .key("copy")
-                .absolute(CERT_PAD, CERT_PAD - 2.0)
-                .gap(2.0)
-                .child(text("Hex").key("app").font(k.ty.small).color(p.muted()))
-                .child(
-                    text(tr("Certificate of completion"))
-                        .key("title")
-                        .font(k.ty.ui_medium)
-                        .color(p.text()),
-                )
-                .child(
-                    text(tr("I hereby have completed Hex onboarding."))
-                        .key("body")
-                        .font(k.ty.ui)
-                        .color(p.text()),
-                ),
-        )
-        .child(line)
-        .children(hint);
-    k.elevate(card, &k.elevation.floating)
-}
 
 fn words(p: Paint, g: &Play, t: f64, reduced: bool) -> El {
     let mut out = el().key("words").absolute(0.0, 0.0).size(STAGE_W, STAGE_H);
@@ -1743,7 +2031,7 @@ fn tones(p: Paint) -> Tones {
     }
 }
 
-/// This frame's strike and burn for the compositor (`game_fx`).
+/// This frame's strike and burn for the compositor (`fx`).
 fn fx(p: Paint, g: &Play, t: f64, reduced: bool) -> Fx {
     let mut fx = Fx {
         dark: p.k.dark,
@@ -1832,7 +2120,7 @@ fn ash(fx: &mut Fx, r: &Round, seed: u32, age: f32, clear: f32) {
             hash(seed ^ 0xA5, n * 3) * size[0],
             hash(seed ^ 0xA5, n * 3 + 1) * size[1],
         ];
-        let born = game_fx::passes(game_fx::field(local, size, impact, seed));
+        let born = fx::passes(fx::field(local, size, impact, seed));
         let life = lerp(0.6, 1.3, hash(seed, n * 7 + 2));
         let a = age - born;
         if !(0.0..life).contains(&a) {
@@ -1886,310 +2174,6 @@ fn ease_in_out(x: f32) -> f32 {
     }
 }
 
-/// The shareable moment: the certificate's blast becomes a score card. Its
-/// surface goes opaque at once, then its content shows; Keep playing folds
-/// the surface and the number into the score pill.
-fn share<S: 'static>(
-    p: Paint,
-    g: &Play,
-    t: f64,
-    destroyed: usize,
-    reduced: bool,
-    look: &Look<'_, S>,
-) -> Option<El> {
-    let age = (t - g.share?) as f32;
-    let fold = fold(g, t);
-    let cert = g.certificate()?;
-    if age < 0.0 || fold >= 1.0 {
-        return None;
-    }
-    let k = p.k;
-    let w = SHARE_W;
-    let [cx, cy] = cert.centre();
-    let x = (age / 0.6).clamp(0.0, 1.0);
-    let rise = if reduced {
-        1.0
-    } else {
-        1.0 - (1.0 - x).powi(4)
-    };
-    // easeOutBack: a touch past full size, then settles.
-    let settle = if reduced {
-        1.0
-    } else {
-        let c = 1.4;
-        1.0 + (c + 1.0) * (x - 1.0).powi(3) + c * (x - 1.0).powi(2)
-    };
-    let home = [(STAGE_W - w) * 0.5, SHARE_Y];
-    let from = [cx - (home[0] + w * 0.5), cy - (home[1] + SHARE_H * 0.5)];
-    let surface_in = smooth(0.0, 0.11, age);
-    let content_in = smooth(0.11, 0.23, age);
-    let pill = pill_in(fold, reduced);
-    // The fold: everything but the number goes in its first 100 ms, the
-    // surface and number become the pill, and the pill takes over at the end.
-    let (morph, rest) = if reduced {
-        (0.0, 1.0 - pill)
-    } else {
-        (ease_in_out(fold), 1.0 - smooth(0.0, 0.1 / FOLD, fold))
-    };
-    // Still warm from the blast, cooling.
-    let warm = (-age / 0.45).exp();
-    let (words, keys, secs) = g.stats();
-    // The number counts up, each tick landing with a small kick.
-    let count = if reduced {
-        destroyed as f32
-    } else {
-        smooth(0.15, 0.75, age) * destroyed as f32
-    };
-    let shown = count.ceil() as usize;
-    let since_tick = if reduced || shown == 0 {
-        1.0
-    } else {
-        // When the count passed `shown - 1`: smoothstep's inverse.
-        let y = (shown as f32 - 1.0) / destroyed as f32;
-        let x = 0.5 - ((1.0 - 2.0 * y).asin() / 3.0).sin();
-        age - lerp(0.15, 0.75, x)
-    };
-    let kick = if reduced {
-        0.0
-    } else {
-        (-since_tick.max(0.0) * 9.0).exp()
-    };
-    let ember = ember_tone(p, 0.7);
-    let stat = |key: &str, value: String, label: &str| {
-        col()
-            .key(key.to_string())
-            .gap(1.0)
-            .grow(1.0)
-            .child(
-                text(value)
-                    .key("v")
-                    .font(TextStyle::new(17.0, 620.0).lh(22.0).features("'tnum' 1"))
-                    .color(p.text()),
-            )
-            .child(
-                text(label.to_string())
-                    .key("l")
-                    .font(k.ty.small)
-                    .color(p.muted()),
-            )
-    };
-    let rule = |key: &str| {
-        el().key(key.to_string())
-            .size(w - 2.0 * SHARE_PAD, SHARE_ROWS[2])
-            .fill(k.c.border_weak)
-    };
-    let big = TextStyle::new(BIG_SIZE, 720.0)
-        .lh(BIG_LINE)
-        .tracking(-2.0)
-        .features("'tnum' 1");
-    let number = |key: &str, color: Color| {
-        el().key(key.to_string())
-            .scale(1.0 + 0.1 * kick)
-            .origin(0.5, 0.8)
-            .scale_motion(Anim::INSTANT)
-            .child(
-                text(shown.to_string())
-                    .key("glow")
-                    .font(big)
-                    .color(ember.alpha((0.45 + 0.35 * kick) * warm))
-                    .absolute(0.0, 0.0)
-                    .blur(12.0),
-            )
-            .child(text(shown.to_string()).key("n").font(big).color(color))
-    };
-    let folding = fold > 0.0 && !reduced;
-    let content = col()
-        .key("content")
-        .absolute(0.0, 0.0)
-        .w(w)
-        .padding(SHARE_PAD)
-        .gap(SHARE_GAP)
-        .opacity(content_in * rest)
-        .opacity_motion(Anim::INSTANT)
-        .child(
-            row()
-                .key("top")
-                .h(SHARE_ROWS[0])
-                .center_y()
-                .child(
-                    text("Hex")
-                        .key("brand")
-                        .font(k.ty.ui_medium)
-                        .color(p.text()),
-                )
-                .child(el().key("space").grow(1.0))
-                .child(
-                    text(tr("Onboarding complete"))
-                        .key("when")
-                        .font(k.ty.small)
-                        .color(p.muted()),
-                ),
-        )
-        .child(
-            row()
-                .key("score")
-                .h(SHARE_ROWS[1])
-                .gap(16.0)
-                .items_end()
-                .child(
-                    number("number", ember_tone(p, 0.85 + 0.15 * kick))
-                        .opacity(if folding { 0.0 } else { 1.0 })
-                        .opacity_motion(Anim::INSTANT),
-                )
-                .child(
-                    col()
-                        .key("what")
-                        .pb(14.0)
-                        .gap(2.0)
-                        .child(
-                            text(tr("messages destroyed"))
-                                .key("a")
-                                .font(LEAD)
-                                .color(p.text()),
-                        )
-                        .child(
-                            text(tr("by voice, no typing"))
-                                .key("b")
-                                .font(k.ty.small)
-                                .color(p.muted()),
-                        ),
-                ),
-        )
-        .child(rule("rule-1"))
-        .child(
-            row()
-                .key("stats")
-                .h(SHARE_ROWS[3])
-                .gap(12.0)
-                .child(stat("words", words.to_string(), "words said"))
-                .child(stat("keys", keys.to_string(), "keys typed"))
-                .child(stat("time", format!("{secs:.1} s"), "start to finish")),
-        )
-        .child(rule("rule-2"))
-        .child(
-            row()
-                .key("signed")
-                .h(SHARE_ROWS[5])
-                .gap(10.0)
-                .items_end()
-                .child(
-                    text(tr("Signed"))
-                        .key("s")
-                        .font(k.ty.small)
-                        .color(p.muted())
-                        .pb(6.0),
-                )
-                .child(
-                    col()
-                        .key("sig")
-                        .gap(2.0)
-                        .child(
-                            text(cert.text.clone())
-                                .key("name")
-                                .font(SIGN.font.lh(28.0))
-                                .color(p.text()),
-                        )
-                        .child(
-                            el().key("line")
-                                .size(200.0, p.hair.max(1.0))
-                                .fill(k.c.border_base),
-                        ),
-                ),
-        )
-        .child(
-            row()
-                .key("actions")
-                .h(SHARE_ROWS[6])
-                .gap(8.0)
-                .center_y()
-                .child(el().key("space").grow(1.0))
-                .child(
-                    Button::new(tr("Keep playing"))
-                        .variant(ButtonVariant::Ghost)
-                        .on_press(act(&look.keep))
-                        .build_push(k)
-                        .key("keep"),
-                )
-                .child(
-                    Button::new(tr("Continue"))
-                        .variant(ButtonVariant::Contrast)
-                        .on_press(act(&look.done))
-                        .build_push(k)
-                        .key("continue"),
-                ),
-        );
-    // The surface, from the card's rect to the pill's.
-    let pill_rect = [
-        SCORE_AT[0] - home[0],
-        SCORE_AT[1] - home[1],
-        PILL[0],
-        PILL[1],
-    ];
-    let card_rect = [0.0, 0.0, w, SHARE_H];
-    let [sx, sy, sw, sh]: [f32; 4] =
-        std::array::from_fn(|n| lerp(card_rect[n], pill_rect[n], morph));
-    let fill = if k.dark {
-        k.c.surface_raised
-    } else {
-        k.c.bg_base.mix(k.c.surface_raised, morph)
-    };
-    let surface = el()
-        .key("surface")
-        .absolute(sx, sy)
-        .size(sw, sh)
-        .radius(lerp(20.0, PILL[1] * 0.5, morph))
-        .continuous_corners()
-        .fill(fill)
-        .radial_gradient(
-            [0.14, 0.28],
-            [240.0, 160.0],
-            [(0.0, ember.alpha(0.12 * warm)), (1.0, ember.alpha(0.0))],
-        )
-        .border(p.hair, k.c.border_weak);
-    let surface = k.elevate(surface, &k.elevation.floating);
-    let surface = if warm > 0.02 {
-        surface.shadow(0.0, 96.0, ember.alpha(0.16 * warm))
-    } else {
-        surface
-    }
-    .opacity(surface_in * (1.0 - pill))
-    .opacity_motion(Anim::INSTANT);
-    // The number flies to the pill's, shrinking to its size.
-    let tiny = 14.0 / BIG_SIZE;
-    let num_from = [SHARE_PAD, SHARE_PAD + SHARE_ROWS[0] + SHARE_GAP];
-    let num_to = [
-        SCORE_AT[0] + 12.0 - home[0],
-        SCORE_AT[1] + (PILL[1] - BIG_LINE * tiny) * 0.5 - home[1],
-    ];
-    let flying_number = folding.then(|| {
-        number("number-fold", ember_tone(p, lerp(0.85, 0.7, morph)))
-            .absolute(
-                lerp(num_from[0], num_to[0], morph),
-                lerp(num_from[1], num_to[1], morph),
-            )
-            .scale(lerp(1.0, tiny, morph))
-            .origin(0.0, 0.0)
-            .opacity(1.0 - pill)
-            .opacity_motion(Anim::INSTANT)
-    });
-    Some(
-        el().key("share")
-            .absolute(home[0], home[1])
-            .size(w, SHARE_H)
-            .offset(from[0] * (1.0 - rise), from[1] * (1.0 - rise))
-            .scale(if reduced {
-                1.0
-            } else {
-                lerp(0.86, 1.0, settle)
-            })
-            .offset_motion(Anim::INSTANT)
-            .scale_motion(Anim::INSTANT)
-            .child(surface)
-            .child(content)
-            .children(flying_number),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::stories::{Flow, Rehearsal, Step};
@@ -2197,7 +2181,7 @@ mod tests {
 
     /// The script plays the game to `until`.
     fn played(streams: bool, keep: bool, until: f64) -> Play {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         let mut script = Script {
             keep,
             ..Script::new(streams)
@@ -2208,6 +2192,14 @@ mod tests {
             t += 1.0 / 60.0;
         }
         play
+    }
+
+    #[test]
+    fn the_idle_pill_springs_settle_and_never_go_nan() {
+        assert_eq!(settled(f64::INFINITY, 0.35), 1.0);
+        assert_eq!(settled(0.0, 0.12), 0.0);
+        let half = settled(0.1, 0.35);
+        assert!(half > 0.0 && half < 1.0, "{half}");
     }
 
     #[test]
@@ -2232,7 +2224,7 @@ mod tests {
 
     #[test]
     fn a_paste_answers_the_lit_card_and_lights_the_next() {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         play.hear(true, None, 1.5);
         assert_eq!(play.rounds.len(), 2, "the next card comes in");
         play.hear(true, Some("sure oat"), 2.0);
@@ -2248,7 +2240,7 @@ mod tests {
 
     #[test]
     fn live_words_that_never_paste_are_dropped() {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         play.hear(true, Some("hello"), 1.5);
         play.hear(false, None, 2.0);
         play.hear(false, None, 2.0 + WAIT - 0.1);
@@ -2259,7 +2251,7 @@ mod tests {
 
     #[test]
     fn the_certificate_is_signed_with_the_answer() {
-        let mut play = Play::new(0.0);
+        let mut play = Play::new(0.0, 0, 0);
         play.paste("On my way.", 1.5);
         play.paste("Nope.", 4.0);
         play.paste("Alex Rivera", 7.0);
