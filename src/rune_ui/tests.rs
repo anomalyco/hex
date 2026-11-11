@@ -1513,6 +1513,25 @@ fn history_a_jittered_press_keeps_a_shift_range() {
 }
 
 #[test]
+fn history_a_press_dragged_inside_its_row_keeps_a_command_toggle() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    let (x, y) = rt.find("history-entry2").unwrap();
+    hold(&mut rt, command());
+    // 8 pt along the same row: past the click slop, but still row 2, so the
+    // release must not choose row 2 a second time and undo the toggle.
+    rt.pointer_down(x, y);
+    rt.pointer_move(x + 8.0, y);
+    rt.pointer_up(x + 8.0, y);
+    settle(&mut rt);
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 2);
+    assert!(rt.state.history.selection.contains(3));
+    assert!(rt.state.history.selection.contains(2));
+    assert_eq!(rt.state.history.selected, Some(2));
+}
+
+#[test]
 fn history_keyboard_activation_selects_a_row_in_the_set() {
     let mut rt = history_multi();
     tap(&mut rt, "history-entry3");

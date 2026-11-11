@@ -218,9 +218,12 @@ pub(super) fn gesture(row: El, id: u64, primary: bool) -> El {
         Phase::Move => dragged(ui, id, drag, tx),
         Phase::Up => {
             ui.history.selection.drag = None;
-            // A press that travelled is a drag, whose release presses nothing:
-            // the next keyboard activation of this row still selects it.
-            if drag.dx.abs() > CLICK_SLOP || drag.dy.abs() > CLICK_SLOP {
+            // A press that reached another row is a drag, whose release presses
+            // nothing: the next keyboard activation of this row still selects
+            // it. A cancelled gesture presses nothing either. Movement that
+            // stayed on the pressed row is still its click, and its release
+            // must not choose the row a second time.
+            if ui.history.selection.drag_left || drag.cancelled() {
                 ui.history.selection.pressed = None;
             }
         }
