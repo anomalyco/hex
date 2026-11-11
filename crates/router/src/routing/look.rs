@@ -2044,11 +2044,20 @@ mod tests {
     }
 
     #[test]
-    fn a_tui_title_naming_no_session_falls_back_to_its_command_line() {
+    fn a_tui_that_moved_off_its_command_lines_session_names_none() {
+        // Started on `ses_other` ("OTHER"), now showing a session not read: no guess.
         let live = look_at_pane(
             opencode_pane("/p/board", "OC | Not a session here"),
             Vec::new,
         );
+        assert!(
+            !live
+                .clues
+                .iter()
+                .any(|c| c.source == Source::TerminalSession)
+        );
+        // Showing no title of its own, its command line names it.
+        let live = look_at_pane(opencode_pane("/p/board", "opencode-cli"), Vec::new);
         assert_eq!(
             lead_of(&live),
             ("ses_other".into(), Some(Source::TerminalSession))
@@ -2334,6 +2343,7 @@ mod tests {
             servers: Vec::new,
             sites: host_rule,
             apps: Vec::new,
+            terminals: Vec::new,
             aliases: Vec::new,
             writes: |_, _, _| Vec::new(),
             executable: |_| None,
@@ -2350,6 +2360,7 @@ mod tests {
             address: None,
             now_ms: 0,
             url: Some(url.into()),
+            terminal: None,
             sessions_error: None,
         };
         let judgement = decide(&evidence, Policy::Weigh);
