@@ -2442,16 +2442,23 @@ fn labs_groups_follow_each_os() {
             .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
             .collect()
     };
-    for (scene, has, lacks) in [
-        ("windows-labs", "terminal-paste", "mouse-shortcuts"),
-        ("linux-labs", "section-key", "terminal-paste"),
-        ("mac-labs", "section-key", "terminal-paste"),
-    ] {
+    let cases: [(&str, &[&str], &str); 3] = [
+        ("windows-labs", &["terminal-paste"], "mouse-shortcuts"),
+        ("linux-labs", &["section-key"], "terminal-paste"),
+        (
+            "mac-labs",
+            &["section-key", "mouse-shortcuts"],
+            "terminal-paste",
+        ),
+    ];
+    for (scene, shows, hides) in cases {
         let mut rt = runtime(scene, true, (980.0, 4000.0));
         unfold_labs(&mut rt);
         let shown = cards(&rt);
-        assert!(shown.contains(&has.to_string()), "{scene} shows {has}");
-        assert!(!shown.contains(&lacks.to_string()), "{scene} hides {lacks}");
+        for id in shows {
+            assert!(shown.contains(&id.to_string()), "{scene} shows {id}");
+        }
+        assert!(!shown.contains(&hides.to_string()), "{scene} hides {hides}");
         for group in crate::labs::Group::ALL {
             let any = shown.iter().any(|id| {
                 crate::labs::Feature::from_name(id)

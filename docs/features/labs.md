@@ -1220,7 +1220,8 @@ Settings › General › Shortcut, press the section key alone  // labs.section-
 
 While bound, Hex takes the section key from every app (an X11 grab, a portal
 shortcut, or the macOS session tap holds its key), so typing it needs another
-key. The window's `settings::recorded_binding` and `control/settings.rs`'s
+key. The window's `settings::recorded_binding` (Linux; macOS uses
+`ChordCapture::key_down` in rune_ui/macos_host.rs) and `control/settings.rs`'s
 `parse_hotkey` let a lone section key through on Linux and macOS; the gates are
 `AppSettings::section_key_allowed` in the window's `settings::validate` and in
 `control/settings.rs`'s `apply` (`special_key_refusal`), and
@@ -1248,8 +1249,7 @@ and `a_dead_key_records_its_layout_label` and
 `the_section_key_records_alone` in
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs) (macOS-only tests).
 Not yet observed: a real ISO keyboard on X11 or a Wayland portal granting
-`section`, and a German Mac keyboard recorded end to end; the Labs page goldens
-need regenerating on Linux with the new row and wording.
+`section`, and a German Mac keyboard recorded end to end.
 
 Dictation stats (`history-stats`, issue 790, every OS): while on, History's
 header shows a Secondary "Stats" button beside its retention select once

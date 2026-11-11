@@ -192,6 +192,8 @@ fn resolve_key_code(character: char, command: bool) -> Result<u16> {
 /// no-dead-keys option so a dead key names itself. The shortcut recorder
 /// falls back to it when AppKit gives no character for a key: on a German
 /// layout the key left of 1 (ISO section, virtual key code 10) is `^`.
+///
+/// Enters TIS, so only the main thread or a headless CLI process may call it.
 pub fn key_label(code: u16) -> Option<String> {
     with_layout(|layout| {
         translate_with_options(layout, code, NO_MODIFIER_STATE, KEY_TRANSLATE_NO_DEAD_KEYS)
@@ -202,6 +204,8 @@ pub fn key_label(code: u16) -> Option<String> {
 /// The key whose base character is `character` on the active layout,
 /// translated with the no-dead-keys option: `^` names the ISO section key on
 /// a German layout, where AppKit reports no character for the dead key.
+///
+/// Enters TIS, so only the main thread or a headless CLI process may call it.
 pub fn key_code_for_base_label(character: char) -> Option<u16> {
     let mut target = [0; 4];
     let target = character.encode_utf8(&mut target);
@@ -221,6 +225,8 @@ pub fn key_code_for_base_label(character: char) -> Option<u16> {
 
 /// Runs `read` against the active layout's bytes under the layout lock, as
 /// every other native layout lookup does.
+///
+/// Enters TIS, so only the main thread or a headless CLI process may call it.
 fn with_layout<T>(read: impl FnOnce(*const u8) -> T) -> Option<T> {
     let _access = LAYOUT_ACCESS
         .lock()

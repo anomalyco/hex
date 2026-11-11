@@ -32,8 +32,7 @@ use super::practice::PracticeFeed;
 use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::{
-    CalendarSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, ISO_SECTION_KEY_CODE,
-    modifiers_from_flags,
+    CalendarSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, modifiers_from_flags,
 };
 use crate::calendar::{AccessAnswer, CalendarAccess, CalendarSnapshot};
 use crate::desktop::host::DesktopAction;
@@ -319,12 +318,12 @@ impl ChordCapture {
             Ok(key) => key,
             Err(message) => return Some(Chord::Captured(Err(message))),
         };
-        // A key that types nothing may be a shortcut alone as a function or
-        // navigation key, or the ISO section key. The recorder takes the
-        // section key either way; `settings::validate` refuses it while Labs ›
-        // Section key alone is off, as Linux's recorder does.
+        // Function and navigation keys type nothing, so one may be a shortcut
+        // alone. The section key does type something, but the recorder takes it
+        // alone too: `settings::validate` refuses it while Labs › Section key
+        // alone is off, as Linux's recorder does.
         let stands_alone =
-            is_function_key(&key.label) || is_navigation_key(code) || code == ISO_SECTION_KEY_CODE;
+            is_function_key(&key.label) || is_navigation_key(code) || key.is_section();
         if modifiers.is_empty() && !stands_alone {
             return Some(Chord::Captured(Err(tr("Add a modifier"))));
         }
@@ -1458,7 +1457,7 @@ fn notes_availability() -> NotesAvailability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_settings::ModifierSide;
+    use crate::app_settings::{ISO_SECTION_KEY_CODE, ModifierSide};
 
     #[test]
     fn paste_last_needs_a_key() {
