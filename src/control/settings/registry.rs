@@ -342,7 +342,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.keep_on_clipboard",
         Kind::Bool,
-        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS and Windows)",
+        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there",
     ),
     key(
         "labs.copy_only",

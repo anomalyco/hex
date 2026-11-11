@@ -449,10 +449,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("share-dictation-shortcut").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
-    assert!(
-        rt.find("lab-keep-on-clipboard").is_some(),
-        "macOS and Windows"
-    );
+    assert!(rt.find("lab-keep-on-clipboard").is_some(), "every OS");
     assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
@@ -466,6 +463,16 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
+
+    // Linux's paster keeps the dictation on the clipboard too; only macOS
+    // and Windows can skip the paste.
+    let mut rt = runtime("linux-labs", true, (980.0, 4000.0));
+    unfold_labs(&mut rt);
+    assert!(rt.find("lab-keep-on-clipboard").is_some(), "every OS");
+    assert!(rt.find("lab-copy-only").is_none(), "macOS and Windows only");
+    assert!(!rt.state.settings.labs.keep_on_clipboard);
+    tap(&mut rt, "lab-keep-on-clipboard");
+    assert!(rt.state.settings.labs.keep_on_clipboard);
 }
 
 /// Summaries is one choice in Meetings › Settings › After a meeting: Off,

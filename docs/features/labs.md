@@ -48,7 +48,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Unload model when idle no labs.unload_idle + labs.unload_idle_minutes (5/15/30/60, default 15)
 │                                        the engine frees the speech model after that long unused (#442)
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
-├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS, Windows) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
+├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
@@ -469,8 +469,8 @@ and `appearance_shows_its_theme_on_its_card_while_on` in
 language. The Windows title bar change is only type-checked; no person has
 seen it on Windows yet. Not yet observed in a real window.
 
-Keep dictation on clipboard (`keep-on-clipboard`, issue 200, macOS and
-Windows): while on, a pasted dictation stays on the clipboard. `paste::Paster`
+Keep dictation on clipboard (`keep-on-clipboard`, issue 200, every OS): while
+on, a pasted dictation stays on the clipboard. `paste::Paster`
 reads `labs::keep_on_clipboard()` as each paste commits: it writes the
 transcript without the nspasteboard.org transient markers (so clipboard
 managers may record it), schedules no 500 ms restore, and drops any earlier
@@ -481,16 +481,27 @@ clipboard after typing. On Windows, `windows::paste::WindowsPaster` reads the
 same gate as each paste commits: it writes an ordinary clipboard entry (not
 marked out of clipboard history or cloud sync), calls its
 `ClipboardRestore::keep`, sends Ctrl+V as usual, and schedules no restore, so
-the dictation stays in Windows clipboard history (Win+V). Off, pasting and
+the dictation stays in Windows clipboard history (Win+V). On Linux,
+`linux::paste::LinuxPaster::paste` reads the same gate as each paste commits:
+it snapshots nothing, schedules no 500 ms restore, and calls its
+`Restore::keep`, so a paste made while the lab was on leaves nothing for a
+later paste with it off to bring back. A typed-text replacement, which saved
+the clipboard before it copied the selection, and a capture's PNG still
+restore; one whose clipboard snapshot failed has nothing to restore and falls
+back to the ordinary paste, so it follows the toggle too. Off, pasting and
 clipboard restore are exactly as before. Checks:
 `a_kept_paste_leaves_nothing_to_restore` and
 `a_kept_transcript_is_an_ordinary_clipboard_entry` in
 [paste.rs](../../src/paste.rs) (macOS only);
 `keeping_the_paste_cancels_a_pending_restore` in
 [windows/paste.rs](../../src/windows/paste.rs) (Windows only);
+`a_kept_paste_stands_down_the_pending_restore` in
+[linux/paste.rs](../../src/linux/paste.rs); and
 `contributed_options_are_labs_toggles_off_by_default` in
-[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real paste
-on a Mac or Windows PC with the toggle on.
+[panes.rs](../../src/rune_ui/tests/panes.rs). The ignored native Wayland test
+also checks a kept paste on a real compositor, though it has not been run.
+Not yet observed: a real paste on a Mac, Windows PC, or Linux desktop with the
+toggle on.
 
 Copy dictation only (`copy-only`, issue 629, macOS and Windows): while on, a
 finished dictation (on macOS the dictation shortcut, Dictate without
@@ -512,7 +523,8 @@ update as for a paste, and Paste last dictation still pastes (meeting pastes
 on macOS too). Off, output is exactly as before. Checks:
 `a_copy_only_dictation_is_left_on_the_clipboard_with_nothing_to_restore` in
 [paste.rs](../../src/paste.rs) (macOS only);
-`clipboard_labs_are_macos_or_windows_only` in [labs.rs](../../src/labs.rs);
+`keeping_the_clipboard_is_everywhere_and_copy_only_is_macos_or_windows` in
+[labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation on a Mac or Windows PC with the toggle on.
@@ -2409,7 +2421,7 @@ meeting-platform-icons` still answers with that and exits 0
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
-restore (Labs › Keep dictation on clipboard skips it on macOS and Windows), the
+restore (Labs › Keep dictation on clipboard skips it on every OS), the
 vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 
 ## Features

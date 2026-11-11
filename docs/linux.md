@@ -623,6 +623,15 @@ fails after `wl-copy` has taken the transcript, it stays on the clipboard for
 Ctrl+V. Nothing confirms the target read the paste, so a target stalled past
 the delay can paste the restored clipboard instead (see
 [#24](https://github.com/anomalyco/hex/issues/24)).
+
+Labs › Keep dictation on clipboard (`hex labs on keep-on-clipboard`, off by
+default) leaves each ordinary dictation on the clipboard instead: the paste
+snapshots nothing and schedules no restore, and a restore an earlier paste was
+still waiting to make is dropped, so a later paste with the lab off cannot
+bring an older clipboard back. A typed-text replacement, which saved the
+clipboard before it copied the selection, and a capture's PNG still restore,
+and while the lab is off nothing changes.
+
 On Wayland, restoring needs the compositor's `ext-data-control` protocol
 (KDE Plasma 6, recent wlroots compositors) or `wlr-data-control` (wlroots
 compositors, niri, Hyprland); without either the transcript stays, and
