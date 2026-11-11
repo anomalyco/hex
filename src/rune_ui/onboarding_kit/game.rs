@@ -109,7 +109,7 @@ const SAID_GAP: f32 = 10.0;
 const BIG_SIZE: f32 = 76.0;
 const BIG_LINE: f32 = 78.0;
 
-const NAME: &str = "Kit Langton";
+const NAME: &str = "Alex Morgan";
 const CERT_H: f32 = 150.0;
 const CERT_PAD: f32 = 16.0;
 const SIGN: Field = Field {
@@ -120,7 +120,7 @@ const SIGN: Field = Field {
 const SIGN_Y: f32 = CERT_H - CERT_PAD - 8.0 - 30.0;
 
 const SAY_NAME: Take = Take {
-    updates: &[(0.35, "Kit"), (0.7, NAME)],
+    updates: &[(0.35, "Alex"), (0.7, NAME)],
     release: 0.95,
 };
 

@@ -142,7 +142,7 @@ pub(crate) enum Route {
         site: Option<String>,
     },
     /// Guesses, best first; nothing was sent. `site` is what a rule
-    /// would match ("problems.kitlangton.com").
+    /// would match ("example.com").
     Guess {
         suggested: Vec<Dest>,
         recent: Vec<Dest>,
@@ -1211,7 +1211,7 @@ mod tests {
                 Dest::new("HEX", "last sent"),
             ],
             recent: vec![Dest::new("HOME", "yesterday")],
-            site: Some("problems.kitlangton.com".into()),
+            site: Some("example.com".into()),
         }
     }
 
@@ -1224,7 +1224,7 @@ mod tests {
             to: to.clone(),
             suggested: vec![to],
             recent: vec![Dest::new("HOME", "yesterday")],
-            site: Some("problems.kitlangton.com".into()),
+            site: Some("example.com".into()),
         }
     }
 
@@ -1736,7 +1736,7 @@ mod tests {
                 Dest::new("HEX", "last sent").session("ses_hex"),
                 Dest::new("HOME", "recent").session("ses_home"),
             ],
-            site: Some("problems.kitlangton.com".into()),
+            site: Some("example.com".into()),
         }
     }
 
@@ -1987,7 +1987,7 @@ mod tests {
         flow.input(Input::Undone(Undone::TakenBack), 2.2);
         assert_eq!(rows(&flow, 2.2), ["HEX", "HOME", "SEER"], "last of all");
         let (_, list) = done(&flow, 2.2).open.unwrap();
-        assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
+        assert_eq!(list.always, Some(("example.com".into(), false)));
     }
 
     /// The session taken back goes once to the end of the whole list,
@@ -2164,7 +2164,7 @@ mod tests {
             flow.input(Input::Send { always: true }, 4.0),
             [Action::Send {
                 to: "SEER".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
     }
@@ -2479,7 +2479,7 @@ mod tests {
         assert_eq!(names, ["SEER", "HEX", "HOME"], "suggested, then recent");
         assert_eq!(list.selected, 0, "the best is marked");
         assert_eq!(list.footer, Footer::Suggesting);
-        assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
+        assert_eq!(list.always, Some(("example.com".into(), false)));
         assert_eq!(
             flow.keys(),
             Some(CapsuleKeys::Suggest {
@@ -2698,7 +2698,7 @@ mod tests {
         flow.input(Input::Routed(guess()), 0.0);
         flow.input(Input::Shift(true), 0.5);
         let (_, list) = done(&flow, 0.5).open.unwrap();
-        assert_eq!(list.always, Some(("problems.kitlangton.com".into(), true)));
+        assert_eq!(list.always, Some(("example.com".into(), true)));
         assert!(
             list.rows().all(|dest| dest.why != "always"),
             "over the suggestions a click picks: off the rows, nowhere yet"
@@ -2717,7 +2717,7 @@ mod tests {
         );
         flow.input(Input::Shift(false), 1.0);
         let (_, list) = done(&flow, 1.0).open.unwrap();
-        assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
+        assert_eq!(list.always, Some(("example.com".into(), false)));
         assert!(
             list.rows().all(|dest| dest.why != "always"),
             "released, as before"
@@ -2727,7 +2727,7 @@ mod tests {
             flow.input(Input::SendRow(1), 2.0),
             [Action::Send {
                 to: "HEX".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
         let sent = done(&flow, 2.0);
@@ -2747,7 +2747,7 @@ mod tests {
             flow.click(Id::Row(0), 1.0),
             [Action::Send {
                 to: "SEER".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
     }
@@ -2779,7 +2779,7 @@ mod tests {
             flow.click(super::super::surface::Id::Row(2), 0.5),
             [Action::Send {
                 to: "HOME".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
         // In the search the highlight follows the pointer, and the arrows
@@ -2802,7 +2802,7 @@ mod tests {
             flow.input(Input::Send { always: true }, 0.4),
             [Action::Send {
                 to: "HEX".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
     }
@@ -2835,7 +2835,7 @@ mod tests {
             actions,
             vec![Action::Send {
                 to: "SEER".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
         let shown = done(&flow, 1.0);
@@ -2964,7 +2964,7 @@ mod tests {
             flow.input(Input::Send { always: true }, 1.0),
             [Action::Send {
                 to: "ses_hex".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
         assert_eq!(done(&flow, 1.0).why.as_deref(), Some("always"));
@@ -2978,7 +2978,7 @@ mod tests {
             flow.input(Input::Send { always: true }, 2.0),
             [Action::Send {
                 to: "ses_hex".into(),
-                always: Some("problems.kitlangton.com".into())
+                always: Some("example.com".into())
             }]
         );
     }

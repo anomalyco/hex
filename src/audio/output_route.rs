@@ -349,8 +349,8 @@ mod tests {
                "ports": [{"name": "analog-output-speaker", "description": "Speakers", "availability": "availability unknown"},
                          {"name": "analog-output-headphones", "description": "Headphones", "availability": "not available"}],
                "active_port": "analog-output-speaker"},
-              {"index": 1, "state": "SUSPENDED", "name": "alsa_output.usb-Kit_Audio-00.analog-stereo",
-               "description": "Kit Audio Analog Stereo", "driver": "PipeWire", "mute": false,
+              {"index": 1, "state": "SUSPENDED", "name": "alsa_output.usb-USB_Audio-00.analog-stereo",
+               "description": "USB Audio Analog Stereo", "driver": "PipeWire", "mute": false,
                "properties": {"device.api": "alsa", "device.class": "sound", "device.bus": "usb"},
                "active_port": "analog-output-headphones"},
               {"index": 2, "state": "SUSPENDED", "name": "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
@@ -358,11 +358,11 @@ mod tests {
                "properties": {"device.api": "alsa", "device.class": "sound", "device.bus": "pci"},
                "active_port": "hdmi-output-0"},
               {"index": 3, "state": "SUSPENDED", "name": "bluez_output.AA_BB_CC_DD_EE_FF.1",
-               "description": "Kit Pods", "driver": "PipeWire", "mute": false,
+               "description": "Alex Pods", "driver": "PipeWire", "mute": false,
                "properties": {"device.api": "bluez5", "device.form_factor": "headset"},
                "active_port": null},
               {"index": 4, "state": "SUSPENDED", "name": "bluez_output.11_22_33_44_55_66.1",
-               "description": "Kit Speaker", "driver": "PipeWire", "mute": false,
+               "description": "Alex Speaker", "driver": "PipeWire", "mute": false,
                "properties": {"device.api": "bluez5", "device.form_factor": "speaker"},
                "active_port": null}
             ]"#,
@@ -378,7 +378,7 @@ mod tests {
             OutputRoute::Speakers
         );
         assert_eq!(
-            classify_sink("alsa_output.usb-Kit_Audio-00.analog-stereo", &sinks()),
+            classify_sink("alsa_output.usb-USB_Audio-00.analog-stereo", &sinks()),
             OutputRoute::Headphones
         );
         assert_eq!(

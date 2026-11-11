@@ -993,7 +993,7 @@ mod tests {
     fn a_cabled_phone_shows_its_chip() {
         let mut follow = Follow::default();
         let mut snapshot = CaptureSnapshot {
-            phone: Some("Kit's iPhone".into()),
+            phone: Some("Alex's iPhone".into()),
             ..CaptureSnapshot::default()
         };
         assert_eq!(follow.next(&snapshot), [Input::Phone(true)]);

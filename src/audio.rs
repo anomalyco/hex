@@ -1991,7 +1991,7 @@ mod tests {
         use InputTarget::{Named, StandIn, SystemDefault};
         let names = listed(&[
             "Hex Microphone",
-            "KIT PODS",
+            "ALEX PODS",
             "MacBook Pro Microphone",
             "USB Mic",
         ]);
@@ -2002,17 +2002,17 @@ mod tests {
 
         // A listed saved microphone wins over the default.
         assert_eq!(
-            plan(Some("USB Mic"), Some("KIT PODS")),
+            plan(Some("USB Mic"), Some("ALEX PODS")),
             found(Named(3), Selection::InUse)
         );
         // System default follows the OS default, even a Bluetooth headset.
         assert_eq!(
-            plan(None, Some("KIT PODS")),
+            plan(None, Some("ALEX PODS")),
             found(SystemDefault, Selection::InUse)
         );
         // A missing saved microphone stands in with the default.
         assert_eq!(
-            plan(Some("Studio Display Microphone"), Some("KIT PODS")),
+            plan(Some("Studio Display Microphone"), Some("ALEX PODS")),
             found(SystemDefault, Selection::Unlisted)
         );
         // A Hex Microphone default never loops back: the built-in mic stands in.
@@ -2030,7 +2030,7 @@ mod tests {
         assert_eq!(plan(None, None), found(StandIn(2), Selection::InUse));
         // A saved Hex Microphone is never captured from.
         assert_eq!(
-            plan(Some("Hex Microphone"), Some("KIT PODS")),
+            plan(Some("Hex Microphone"), Some("ALEX PODS")),
             found(SystemDefault, Selection::InUse)
         );
         // No real inputs at all.
@@ -2144,13 +2144,13 @@ mod tests {
 
     #[test]
     fn device_override_wins_and_never_falls_back() {
-        let names = listed(&["Hex Microphone", "KIT PODS", "USB Mic"]);
+        let names = listed(&["Hex Microphone", "ALEX PODS", "USB Mic"]);
         let plan = |device_override| {
             resolve_input(
                 device_override,
-                Some("KIT PODS"),
+                Some("ALEX PODS"),
                 &names,
-                Some("KIT PODS"),
+                Some("ALEX PODS"),
                 other,
                 OPEN,
             )
@@ -2209,7 +2209,7 @@ mod tests {
 
     #[test]
     fn a_default_change_switches_only_while_capture_is_idle() {
-        let default = Arc::new(Mutex::new("KIT PODS".to_owned()));
+        let default = Arc::new(Mutex::new("ALEX PODS".to_owned()));
         let opener_default = default.clone();
         let mut input = RecoveringAudioInput::with_opener_for_test(
             None,
@@ -2224,7 +2224,7 @@ mod tests {
                 Ok(Opened::Input(Box::new(named_input(&name))))
             },
         );
-        input.finish_initial_open(Ok(named_input("KIT PODS")), Instant::now());
+        input.finish_initial_open(Ok(named_input("ALEX PODS")), Instant::now());
 
         // The OS default changes during a recording: nothing opens yet.
         *default.lock().unwrap() = "MacBook Pro Microphone".into();
@@ -2234,7 +2234,7 @@ mod tests {
             RecoveringAudioInputEvent::Timeout
         ));
         assert!(!input.is_opening());
-        assert_eq!(input.device_name(), "KIT PODS");
+        assert_eq!(input.device_name(), "ALEX PODS");
 
         // Once capture is idle, the new default replaces the old one.
         assert!(matches!(
@@ -2254,7 +2254,7 @@ mod tests {
     }
 
     /// An input saved as "USB Mic" that opens once `connected` is set and
-    /// until then stands in with "KIT PODS" for the given reason.
+    /// until then stands in with "ALEX PODS" for the given reason.
     fn standing_in(
         missing: Selection,
         reports_new_devices: bool,
@@ -2273,7 +2273,7 @@ mod tests {
                 let (name, selection) = if opener_connected.load(Ordering::Acquire) {
                     ("USB Mic", Selection::InUse)
                 } else {
-                    ("KIT PODS", missing)
+                    ("ALEX PODS", missing)
                 };
                 if request.keep.as_deref() == Some(name) {
                     return Ok(Opened::Unchanged { selection });
@@ -2284,7 +2284,7 @@ mod tests {
             },
         );
         input.reports_new_devices = reports_new_devices;
-        let mut stand_in = named_input("KIT PODS");
+        let mut stand_in = named_input("ALEX PODS");
         stand_in.selection = missing;
         let started = Instant::now();
         input.finish_initial_open(Ok(stand_in), started);
@@ -2305,7 +2305,7 @@ mod tests {
             settle(&mut input, true),
             RecoveringAudioInputEvent::Timeout
         ));
-        assert_eq!(input.device_name(), "KIT PODS");
+        assert_eq!(input.device_name(), "ALEX PODS");
         assert_eq!(input.selection_retry, MICROPHONE_RETRY_INITIAL * 4);
 
         connected.store(true, Ordering::Release);

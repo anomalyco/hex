@@ -190,7 +190,7 @@ mod tests {
         let guess_of = |suggested: Vec<Dest>, recent: Vec<Dest>| Route::Guess {
             suggested,
             recent,
-            site: Some("problems.kitlangton.com".into()),
+            site: Some("example.com".into()),
         };
         let mut flow = Flow::new();
         flow.input(

@@ -1270,17 +1270,20 @@ mod tests {
 
     #[test]
     fn the_default_folder_named_explicitly_is_not_a_custom_root() {
-        let data = Path::new("/home/kit/.local/share");
+        let data = Path::new("/home/alex/.local/share");
         assert!(default_root(
-            Path::new("/home/kit/.local/share/hex"),
+            Path::new("/home/alex/.local/share/hex"),
             Some(data)
         ));
         assert!(default_root(
-            Path::new("/home/kit/.local/share/hex/"),
+            Path::new("/home/alex/.local/share/hex/"),
             Some(data)
         ));
         assert!(!default_root(Path::new("/tmp/hex-test"), Some(data)));
-        assert!(!default_root(Path::new("/home/kit/.local/share/hex"), None));
+        assert!(!default_root(
+            Path::new("/home/alex/.local/share/hex"),
+            None
+        ));
     }
 
     #[test]

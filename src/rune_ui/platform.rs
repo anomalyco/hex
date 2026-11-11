@@ -176,7 +176,7 @@ impl CalendarView {
         Self {
             access: CalendarAccess::FullAccess,
             calendars: vec![
-                calendar("work", "Work", "kit@anoma.ly"),
+                calendar("work", "Work", "alex@example.com"),
                 calendar("home", "Home", "iCloud"),
                 calendar("birthdays", "Birthdays", "Other"),
             ],
@@ -187,7 +187,7 @@ impl CalendarView {
                     Some(CallProvider::GoogleMeet),
                 ),
                 meeting("Rune review", "Today · 4:00 PM", Some(CallProvider::Zoom)),
-                meeting("1:1 with Dax", "Tomorrow · 10:00 AM", None),
+                meeting("1:1 with Sam", "Tomorrow · 10:00 AM", None),
             ],
             connecting: false,
             error: None,

@@ -786,7 +786,7 @@ mod tests {
             ),
             (
                 "location",
-                "Zoom: https://zoom.us/my/kit.",
+                "Zoom: https://zoom.us/my/alex.",
                 CallProvider::Zoom,
             ),
             (
@@ -816,7 +816,7 @@ mod tests {
             ),
             (
                 "notes",
-                "(https://acme.webex.com/meet/kit)",
+                "(https://acme.webex.com/meet/alex)",
                 CallProvider::Webex,
             ),
             (

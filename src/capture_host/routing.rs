@@ -1853,13 +1853,13 @@ mod tests {
     /// sheet yet, and the capsule said only "couldn't reach SEER".
     #[test]
     fn a_failed_send_says_what_went_wrong() {
-        let unread = "OpenCode said: Unable to read attachment: file:///Users/kit/Library/\
+        let unread = "OpenCode said: Unable to read attachment: file:///Users/alex/Library/\
                       Application%20Support/scrawl/captures/1.scrawl/contact-sheet.png: \
                       OpenCode API failed: HTTP 400 Bad Request";
         assert_eq!(send_why(unread, false), FILES_UNSEEN);
         assert_eq!(
             send_why(unread, true),
-            "Unable to read attachment: file:///Users/kit/Library/Applica…"
+            "Unable to read attachment: file:///Users/alex/Library/Applic…"
         );
         let cases = [
             (

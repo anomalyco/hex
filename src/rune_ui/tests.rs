@@ -2646,10 +2646,10 @@ fn microphone_value(rt: &mut Runtime<Ui>) -> Option<String> {
 fn the_microphone_field_names_the_input_in_use() {
     let field = microphone_value;
     let mut rt = runtime("mac-settings", true, TALL_SIZE);
-    assert_eq!(field(&mut rt).as_deref(), Some("System default, Kit Pods"));
+    assert_eq!(field(&mut rt).as_deref(), Some("System default, Alex Pods"));
 
     let mut rt = runtime("mac-microphone-missing", true, TALL_SIZE);
-    assert_eq!(field(&mut rt).as_deref(), Some("System default, Kit Pods"));
+    assert_eq!(field(&mut rt).as_deref(), Some("System default, Alex Pods"));
     let texts = texts(&rt);
     assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
     assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
@@ -2684,7 +2684,7 @@ fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
 
 #[test]
 fn a_passed_over_bluetooth_default_names_the_input_in_use() {
-    let note = "Kit Pods is Bluetooth, so Hex listens to MacBook Pro Microphone";
+    let note = "Alex Pods is Bluetooth, so Hex listens to MacBook Pro Microphone";
     let mut rt = runtime("mac-microphone-bluetooth", true, TALL_SIZE);
     assert_eq!(
         a11y_value(&rt, "microphone-control").as_deref(),
@@ -2696,7 +2696,7 @@ fn a_passed_over_bluetooth_default_names_the_input_in_use() {
     assert!(!rt.state.settings.avoid_bluetooth_microphone);
     // A saved Bluetooth microphone is used as named, without the note.
     rt.state.settings.avoid_bluetooth_microphone = true;
-    rt.state.settings.microphone = Some("Kit Pods".into());
+    rt.state.settings.microphone = Some("Alex Pods".into());
     rt.invalidate();
     settle(&mut rt);
     assert!(!texts(&rt).contains(&note.to_owned()));

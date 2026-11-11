@@ -658,7 +658,7 @@ mod tests {
             .command
         };
         assert!(matches!(
-            parse(&["/Users/kit/.local/bin/hex-meetings-mcp"]),
+            parse(&["/Users/alex/.local/bin/hex-meetings-mcp"]),
             Some(Command::Control(ControlCli::Mcp { meetings_dir: None }))
         ));
         assert!(matches!(

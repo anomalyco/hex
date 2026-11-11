@@ -1500,7 +1500,7 @@ mod tests {
     fn start_forwards_the_callers_hex_environment() {
         let vars = || {
             [
-                ("HOME", "/Users/kit"),
+                ("HOME", "/Users/alex"),
                 ("HEX_RETAIN_DICTATION_AUDIO", "1"),
                 ("HEX_ENABLE_LLM", "1"),
             ]
