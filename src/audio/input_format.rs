@@ -1,5 +1,6 @@
 //! Which format a microphone stream opens in: the device's default, else,
-//! when the driver refuses it, the other formats the device lists.
+//! when the driver refuses it, the other formats the device lists. A
+//! silence-triggered open makes the device renegotiate its sample rate first.
 
 use std::sync::mpsc::{self, Receiver};
 
@@ -39,14 +40,28 @@ const MAX_ALTERNATIVE_INPUT_CONFIGS: usize = 12;
 /// Smart Sound on Windows, #988) refuse a stream in the format they report
 /// as their default, so the other formats they list are tried before
 /// failing with the default's error.
+///
+/// `renegotiate_rate` marks a silence recovery's open: the device's clock can
+/// be stuck, so its rate changes before the real stream opens (#1575).
 pub(super) fn start_stream_with_fallback(
     device: &Device,
     device_name: &str,
     default_name: Option<String>,
+    renegotiate_rate: bool,
 ) -> Result<StartedStream> {
     let supported = device
         .default_input_config()
         .wrap_err("could not read the input device configuration")?;
+    // A device a call app let go can stay on a clock that delivers only zeros
+    // until its rate changes. A throwaway stream at another rate makes the
+    // driver renegotiate; the real stream opens in the format remembered
+    // before it, which sets the device back.
+    #[cfg(target_os = "macos")]
+    if renegotiate_rate {
+        renegotiate_sample_rate(device, device_name, &supported);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = renegotiate_rate;
     // ALSA's default period, PipeWire's included, can be large: about a
     // second of audio per chunk put speech from before the press into the
     // pre-roll (#1309). Ask for about 20 ms first.
@@ -283,6 +298,79 @@ fn start_stream(
         hex_microphone,
         sample_rate,
     })
+}
+
+/// Opens and immediately stops a stream at another sample rate, so the device
+/// renegotiates its clock before the real stream opens. A failure only logs:
+/// the real open carries on as it is.
+#[cfg(target_os = "macos")]
+fn renegotiate_sample_rate(device: &Device, device_name: &str, supported: &SupportedStreamConfig) {
+    let from_rate = supported.sample_rate();
+    let Some(via_rate) = other_sample_rate(device, from_rate) else {
+        tracing::debug!(
+            device = %device_name,
+            from_rate,
+            "the microphone lists no other sample rate to renegotiate"
+        );
+        return;
+    };
+    let throwaway = SupportedStreamConfig::new(
+        supported.channels(),
+        via_rate,
+        *supported.buffer_size(),
+        supported.sample_format(),
+    );
+    match start_stream(device, &throwaway, BufferSize::Default, None) {
+        Ok(started) => {
+            drop(started);
+            tracing::info!(
+                device = %device_name,
+                from_rate,
+                via_rate,
+                "renegotiated the microphone's sample rate after digital silence"
+            );
+        }
+        Err(error) => tracing::warn!(
+            error = format!("{error:#}"),
+            device = %device_name,
+            via_rate,
+            "could not renegotiate the microphone's sample rate; opening it as it is"
+        ),
+    }
+}
+
+/// A sample rate `device` lists other than `current`: 44.1 kHz before 48 kHz
+/// for a 48 kHz device and the reverse otherwise, then the bounds of the
+/// formats it lists.
+#[cfg(target_os = "macos")]
+fn other_sample_rate(device: &Device, current: u32) -> Option<u32> {
+    let ranges = match device.supported_input_configs() {
+        Ok(ranges) => ranges.collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::warn!(%error, "could not list the microphone's formats");
+            return None;
+        }
+    };
+    let listed = |rate: u32| {
+        ranges.iter().any(|range| {
+            is_supported_sample_format(range.sample_format())
+                && range.min_sample_rate() <= rate
+                && rate <= range.max_sample_rate()
+        })
+    };
+    let preferred = [
+        if current == 48_000 { 44_100 } else { 48_000 },
+        44_100,
+        48_000,
+    ];
+    preferred
+        .into_iter()
+        .chain(
+            ranges
+                .iter()
+                .flat_map(|range| [range.min_sample_rate(), range.max_sample_rate()]),
+        )
+        .find(|rate| *rate != current && listed(*rate))
 }
 
 #[cfg(test)]

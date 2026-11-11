@@ -1145,8 +1145,10 @@ impl Owner {
     /// A finished dictation's audio was exactly zero: the stream runs but
     /// delivers digital silence, as after some call apps release the device
     /// (#1122), and stays that way until reopened. Reopen it now, as after a
-    /// stream failure. A cold microphone closes once idle and opens fresh
-    /// for the next press anyway.
+    /// stream failure, and renegotiate the device's sample rate as it opens:
+    /// the device can stay on a stale clock that delivers only zeros (#1575).
+    /// A cold microphone closes once idle and opens fresh for the next press
+    /// anyway.
     fn reopen_silent_stream(&mut self) {
         if self.release_while_idle || !self.input.is_open() || self.input.is_recovering() {
             return;
@@ -1156,7 +1158,7 @@ impl Owner {
             "dictation audio was digital silence; reopening the microphone"
         );
         self.discontinuity_at = Some(Instant::now());
-        self.input.request_recovery();
+        self.input.request_silence_recovery();
         self.state.recovering.store(true, Ordering::Release);
     }
 

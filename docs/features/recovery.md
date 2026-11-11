@@ -310,6 +310,13 @@ warm stream keeps running but delivers only exact zeros (macOS and Linux hotkey 
   -> that dictation is discarded as near-silent, as before
   -> its finish reopens the microphone like a stream failure // logged once
      -> the dead stream is closed first, so the replacement opens cold as at launch
+     -> macOS: that open makes the device renegotiate its clock first (#1575)
+        -> a throwaway stream at another rate the device lists (44.1 kHz for a
+           48 kHz device, else 48 kHz, else another listed rate), stopped at once
+        -> then the real stream opens in the format remembered before it, so
+           cpal sets the device back; a device on a stale rate delivers only
+           zeros, and the change is what clears it
+        -> the throwaway step failing only logs; the open still runs
   -> next dictation records from a fresh stream
 
 meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
@@ -373,7 +380,11 @@ values; no iPhone observed with the lid closed),
 `a_stream_that_stops_before_proving_itself_backs_off`,
 `a_route_change_ends_a_stall_wait_without_resetting_its_backoff`,
 `a_dictation_press_retries_a_stalled_microphone_at_once`,
-`a_dead_stream_is_stopped_before_its_replacement_opens`;
+`a_dead_stream_is_stopped_before_its_replacement_opens`,
+`a_silent_stream_reopens_with_a_rate_renegotiation`;
+[audio/recovery.rs](../../src/audio/recovery.rs):
+`only_a_silence_recovery_renegotiates_the_next_open`,
+`a_reopen_or_a_reset_forgets_a_renegotiation_no_open_took`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_a_recording_captures_delivered_audio`,
@@ -529,6 +540,21 @@ dictation does the same for a warm microphone; service and programmatic
 captures do not check it, and one released while idle opens fresh. The
 first such dictation is still discarded. Not verified with a real WhatsApp
 call.
+
+**Fixed after dev ([#1575](https://github.com/anomalyco/hex/issues/1575)):** a
+silence reopen opened its stream in the device's current default format. A
+device a call app had just let go could already report that format as its own,
+so cpal's physical-format change did nothing and the reopened stream delivered
+zeros too, until Hex restarted. The one open that follows digital silence now
+renegotiates the device's clock first, on macOS: it opens a throwaway stream at
+another rate the device lists (44.1 kHz for a 48 kHz device, else 48 kHz, else
+another listed rate) and stops it, then opens the real stream in the format it
+remembered before the throwaway, so cpal sets the device back. A stream-failure
+reopen is unchanged, the renegotiation is used by exactly one open, and a
+throwaway that fails only logs. Field logs showed the one same-process reopen
+that recovered was followed by cpal reporting a sample-rate change and another
+reopen; this makes that change happen on purpose.
+Not verified on a device that stayed silent before this change.
 
 **Meeting capture ([#1518](https://github.com/anomalyco/hex/issues/1518)):**
 during a meeting, the microphone stream kept delivering chunks of exact 0.0
