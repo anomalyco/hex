@@ -75,16 +75,17 @@ impl Models {
     /// field does.
     #[cfg(all(test, target_os = "linux"))]
     pub(super) fn open_picker(&mut self) {
-        self.picker.open = true;
-        self.picker.search.focused = true;
+        let _ = self
+            .picker
+            .step(rune_kit::ComboboxEvent::Toggle { current: None });
     }
 
     /// Adopts a finished load. While `wanted` (a pane that uses the catalog
     /// shows), loads it the first time and looks for a stopped OpenCode
     /// now and then; otherwise touches nothing.
     pub(super) fn poll(&mut self, wanted: bool) -> bool {
-        let opened = self.picker.open && !self.picker_was_open;
-        self.picker_was_open = self.picker.open;
+        let opened = self.picker.is_open() && !self.picker_was_open;
+        self.picker_was_open = self.picker.is_open();
         // Opening the picker reads the catalog again, keeping the models it
         // shows until the new list arrives.
         if wanted && opened && self.receiver.is_none() {

@@ -2059,15 +2059,35 @@ cloaked window), Rune reports why (`OverlayHandle::failure`). Hex logs the
 HUD's surface (backend, adapter, alpha mode) once, and treats a dictation
 start whose HUD presents no frame within 1.5 s as a failure too. Each
 failure is logged as an error in process.log once per reason, and Settings
-shows it as the listener's warning (`HudSender::failure`). Every OS takes dark or light and Reduce Motion
-from Rune, and loads `dot-scope.json` at launch. Windows and Linux drop the
-HUD's painter, and its buffers, bind group and pipeline, once Rune's own hold
-on the device would end: five minutes after the HUD hides on Windows, ten on
-Linux (Rune's surface idle plus the five minutes it then parks the device),
-and also when the indicator is set to Hidden while the HUD shows; macOS keeps
-it. The GPU device itself frees only once Rune's parked device also expires,
-and on Wayland layer-shell Rune keeps its own device regardless. The memory
-drop is not yet measured on a real Windows machine (#1431).
+shows it as the listener's warning (`HudSender::failure`). Each start that
+isn't Hidden opens a fresh first-frame attempt: its own present baseline and
+clock, its own one recovery hide, and no inherited no-frame decision, so a
+previous attempt's reason can stay in Settings without hiding the new one,
+and a second start while the first still runs restarts the attempt. The
+attempt hides the overlay at once (the immediate hide, not the exit fade,
+which itself needs a frame) when it presents no frame after 1.5 s; Rune's
+overlay failure is reported as the reason but never hides on its own, since a
+failed overlay presents nothing and the frame-less check covers it. That
+clears the HUD's shown state and lets Rune give its window and GPU surface
+back (Windows' zero idle parks both), so the next dictation start makes both
+again, and a lost GPU device such as a laptop resumed from standby costs one
+HUD rather than the rest of the session. Each attempt hides at most once, and
+a later frame-less start hides again. Checked by `rune_hud::tests`'
+first-frame tests (`a_frame_less_start_hides_once`,
+`a_new_start_does_not_hide_on_the_previous_reason`,
+`a_second_start_while_pending_restarts_the_attempt`,
+`an_overlay_failure_never_hides_on_its_own`, `an_attempt_hides_only_once`,
+and `the_next_start_hides_again_after_a_hide`), not on Windows hardware.
+Every OS takes dark or light and Reduce Motion from Rune, and loads
+`dot-scope.json` at launch.
+Windows and Linux drop the HUD's painter, and its buffers, bind group and
+pipeline, once Rune's own hold on the device would end: five minutes after
+the HUD hides on Windows, ten on Linux (Rune's surface idle plus the five
+minutes it then parks the device), and also when the indicator is set to
+Hidden while the HUD shows; macOS keeps it. The GPU device itself frees only
+once Rune's parked device also expires, and on Wayland layer-shell Rune keeps
+its own device regardless. The memory drop is not yet measured on a real
+Windows machine (#1431).
 
 Each chunk's meter removes the chunk's mean before measuring RMS and peak, so
 a microphone's DC offset (a Ryzen built-in digital microphone, #841) never

@@ -368,3 +368,137 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
         std::thread::yield_now();
     }
 }
+
+#[test]
+fn a_frame_less_start_hides_once() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 7);
+    let early = first_frame.poll(start + Duration::from_millis(100), 7, None, None);
+    assert!(!early.hide);
+    assert_eq!(early.reason, None);
+    let resolved = first_frame.poll(start + FIRST_FRAME, 7, None, Some("dx12 on Intel"));
+    assert!(resolved.hide, "the attempt presented nothing");
+    assert!(
+        resolved
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("presented no frame")),
+        "{:?}",
+        resolved.reason
+    );
+    let after = first_frame.poll(start + FIRST_FRAME + Duration::from_secs(1), 7, None, None);
+    assert!(!after.hide);
+}
+
+#[test]
+fn a_new_start_does_not_hide_on_the_previous_reason() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 0);
+    assert!(first_frame.poll(start + FIRST_FRAME, 0, None, None).hide);
+    // The last known reason stays in Settings, but it can't hide the next
+    // start before that start has had its own first-frame window.
+    let next = start + FIRST_FRAME + Duration::from_millis(1);
+    first_frame.start(next, 0);
+    let tick = first_frame.poll(next + Duration::from_millis(250), 0, None, None);
+    assert!(!tick.hide);
+    assert!(
+        tick.reason.is_some(),
+        "the last attempt's reason still shows"
+    );
+    let just_before =
+        first_frame.poll(next + FIRST_FRAME - Duration::from_millis(1), 0, None, None);
+    assert!(!just_before.hide);
+}
+
+#[test]
+fn a_second_start_while_pending_restarts_the_attempt() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 5);
+    let second = start + Duration::from_millis(900);
+    first_frame.start(second, 5);
+    // 1.5 s after the first start is only 600 ms into the second.
+    let early = first_frame.poll(start + FIRST_FRAME, 5, None, None);
+    assert!(
+        !early.hide,
+        "the second start gets its own first-frame window"
+    );
+    // The second attempt's baseline is its own: one frame since then presents.
+    let resolved = first_frame.poll(second + FIRST_FRAME, 6, None, None);
+    assert!(!resolved.hide);
+    assert_eq!(resolved.reason, None);
+}
+
+#[test]
+fn an_overlay_failure_never_hides_on_its_own() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 0);
+    // Rune clears the failure it replaced on the overlay thread; a poll right
+    // after the start still sees the previous attempt's. A failure is only a
+    // reason for Settings and the log: it never hides anything by itself.
+    for at in [
+        Duration::from_millis(1),
+        Duration::from_millis(250),
+        FIRST_FRAME - Duration::from_millis(1),
+    ] {
+        let check = first_frame.poll(start + at, 0, Some("device lost"), None);
+        assert!(!check.hide);
+        assert_eq!(check.reason.as_deref(), Some("device lost"));
+    }
+    // Even after the attempt resolves, a failure still set doesn't hide on its
+    // own: the frame that presented is what matters.
+    let presented = first_frame.poll(start + FIRST_FRAME, 1, Some("device lost"), None);
+    assert!(!presented.hide);
+    assert_eq!(presented.reason.as_deref(), Some("device lost"));
+}
+
+#[test]
+fn an_attempt_hides_only_once() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 0);
+    assert!(first_frame.poll(start + FIRST_FRAME, 0, None, None).hide);
+    assert!(
+        !first_frame
+            .poll(
+                start + FIRST_FRAME + Duration::from_millis(250),
+                0,
+                None,
+                None
+            )
+            .hide
+    );
+    assert!(
+        !first_frame
+            .poll(
+                start + FIRST_FRAME + Duration::from_millis(500),
+                0,
+                Some("device lost"),
+                None
+            )
+            .hide,
+        "a later failure doesn't hide the attempt again"
+    );
+}
+
+#[test]
+fn the_next_start_hides_again_after_a_hide() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 3);
+    assert!(
+        first_frame.poll(start + FIRST_FRAME, 3, None, None).hide,
+        "the first attempt presented nothing"
+    );
+    // The recovery is per start: the next one gets its own hide if it is
+    // frame-less too.
+    let next = start + FIRST_FRAME + Duration::from_secs(1);
+    first_frame.start(next, 4);
+    assert!(
+        first_frame.poll(next + FIRST_FRAME, 4, None, None).hide,
+        "the next attempt presented nothing either"
+    );
+}

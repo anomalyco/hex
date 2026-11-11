@@ -2,11 +2,13 @@
 //! display, which keeps a hybrid laptop's discrete GPU asleep. A broken
 //! integrated GPU driver can crash Hex before its first frame (#662), and a
 //! driver crash can't be caught, so the app marks its launch from when Rune
-//! starts its first GPU device until a frame reaches the screen or it quits
-//! cleanly. A tray launch that never draws makes no device and leaves no
-//! marker. A marker this build left behind means that launch crashed while
-//! drawing: this one draws on the high-performance GPU, and so does every
-//! launch of this build. An update tries the integrated GPU again.
+//! starts its first GPU device until a frame reaches the screen or it starts
+//! to quit (a clean quit, or the Windows logoff or shutdown Rune's quit hook
+//! hears before the process may end). A tray launch that never draws makes no
+//! device and leaves no marker. A marker this build left behind means that
+//! launch crashed while drawing: this one draws on the high-performance GPU,
+//! and so does every launch of this build. An update tries the integrated GPU
+//! again.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

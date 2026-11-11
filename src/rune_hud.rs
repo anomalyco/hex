@@ -102,16 +102,98 @@ struct Watch {
     /// The overlay failure last logged, so each is logged once.
     logged: Option<String>,
     described: bool,
-    /// A dictation's start awaiting the HUD's first frame: when, and the
-    /// frames presented before it.
-    pending: Option<(Instant, u64)>,
-    /// The last start presented nothing.
+    first_frame: FirstFrame,
+}
+
+/// The first-frame watch behind a Windows HUD show: each start opens one
+/// attempt, which resolves once and asks for at most one recovery hide. It
+/// is pure so its decisions are unit-tested on every OS; [`HudSender`] wires
+/// it to Rune only on Windows.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Default)]
+struct FirstFrame {
+    /// The attempt a start began: when, and the presents before it.
+    attempt: Option<Attempt>,
+    /// The last attempt that presented nothing: why, for Settings and the log.
     unpresented: Option<String>,
+    /// This attempt asked for its recovery hide.
+    released: bool,
+}
+
+#[cfg(any(target_os = "windows", test))]
+struct Attempt {
+    started: Instant,
+    presents: u64,
+}
+
+/// What one poll of a [`FirstFrame`] found.
+#[cfg(any(target_os = "windows", test))]
+struct FirstFrameCheck {
+    /// Why the HUD can't show, for Settings and the log, when it can't.
+    reason: Option<String>,
+    /// Hide now: this attempt's one recovery hide.
+    hide: bool,
 }
 
 /// How long a started HUD has to present its first frame.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 const FIRST_FRAME: std::time::Duration = std::time::Duration::from_millis(1500);
+
+#[cfg(any(target_os = "windows", test))]
+impl FirstFrame {
+    /// A non-Hidden start begins a fresh attempt: its own present baseline and
+    /// clock, its own hide, and no inherited no-frame decision. A second start
+    /// while the last attempt still runs restarts it.
+    fn start(&mut self, at: Instant, presents: u64) {
+        self.attempt = Some(Attempt {
+            started: at,
+            presents,
+        });
+        self.released = false;
+    }
+
+    /// One poll: resolves the attempt once `FIRST_FRAME` has passed, then
+    /// decides its one hide. Only this attempt's own frame-less resolve hides:
+    /// Rune's overlay failure is a reason for Settings and the log, never a
+    /// hide of its own, since a failed overlay presents nothing and the
+    /// frame-less resolve covers it. A previous attempt's `unpresented` reason
+    /// is still returned for Settings and the log, but never hides anything.
+    /// `surface` names what draws the HUD, for the reason.
+    fn poll(
+        &mut self,
+        now: Instant,
+        presents: u64,
+        failure: Option<&str>,
+        surface: Option<&str>,
+    ) -> FirstFrameCheck {
+        let resolved = self
+            .attempt
+            .as_ref()
+            .is_some_and(|attempt| now.saturating_duration_since(attempt.started) >= FIRST_FRAME);
+        let attempt = if resolved { self.attempt.take() } else { None };
+        let mut presented_nothing = false;
+        if let Some(attempt) = attempt {
+            presented_nothing = presents == attempt.presents;
+            self.unpresented = presented_nothing.then(|| {
+                format!(
+                    "shown but presented no frame in {} ms; surface: {}",
+                    FIRST_FRAME.as_millis(),
+                    surface.unwrap_or("none")
+                )
+            });
+        }
+        let hide = !self.released && presented_nothing;
+        if hide {
+            self.released = true;
+        }
+        FirstFrameCheck {
+            reason: failure
+                .map(str::to_owned)
+                .or_else(|| self.unpresented.clone()),
+            hide,
+        }
+    }
+}
 
 impl HudSender {
     pub(crate) fn send(&self, event: HudEvent) {
@@ -146,8 +228,10 @@ impl HudSender {
         if matches!(&event, HudEvent::Started) {
             let presents = self.overlay.surface_stats().totals.presents;
             let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
-            if watch.position != IndicatorPosition::Hidden && watch.pending.is_none() {
-                watch.pending = Some((Instant::now(), presents));
+            if watch.position != IndicatorPosition::Hidden {
+                // Every start is a fresh attempt: its own baseline, clock and
+                // hide, even when the last one never resolved.
+                watch.first_frame.start(Instant::now(), presents);
             }
         }
         self.overlay.update(move |hud, _| hud.handle(event));
@@ -173,9 +257,9 @@ impl HudSender {
             .update(move |hud, _| hud.set_position(position));
     }
 
-    /// Why Windows could not show the HUD, for Settings: Rune's reason, or a
-    /// started HUD that presented no frame. Logged as an error the first time
-    /// each reason is seen; what draws the HUD is logged once it exists.
+    /// Why Windows could not show the HUD, for Settings: Rune's reason, or an
+    /// attempt that presented no frame. Logged as an error the first time each
+    /// reason is seen; what draws the HUD is logged once it exists.
     #[cfg(target_os = "windows")]
     pub(crate) fn failure(&self) -> Option<String> {
         let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
@@ -186,26 +270,28 @@ impl HudSender {
             tracing::info!(%surface, "dictation HUD surface");
             watch.described = true;
         }
-        if let Some((at, before)) = watch.pending
-            && at.elapsed() >= FIRST_FRAME
-        {
-            watch.pending = None;
-            let presents = self.overlay.surface_stats().totals.presents;
-            watch.unpresented = (presents == before).then(|| {
-                format!(
-                    "shown but presented no frame in {} ms; surface: {}",
-                    FIRST_FRAME.as_millis(),
-                    surface.as_deref().unwrap_or("none")
-                )
-            });
-        }
-        let reason = self
-            .overlay
-            .failure()
-            .or_else(|| watch.unpresented.clone())?;
+        let failure = self.overlay.failure();
+        let check = watch.first_frame.poll(
+            Instant::now(),
+            self.overlay.surface_stats().totals.presents,
+            failure.as_deref(),
+            surface.as_deref(),
+        );
+        let reason = check.reason?;
         if watch.logged.as_deref() != Some(reason.as_str()) {
             tracing::error!(%reason, "dictation HUD can't show");
             watch.logged = Some(reason.clone());
+        }
+        if check.hide {
+            drop(watch);
+            // Rune only gives a shown overlay up when a frame it draws fades it
+            // out, and a HUD that never presents draws nothing: it would stay
+            // shown until Hex restarts. Hide it at once instead (the immediate
+            // hide, not the exit fade), on the overlay's own thread through
+            // `update`, so the HUD's shown state clears, Rune releases its
+            // window and GPU surface (a zero idle on Windows), and the next
+            // start makes both again.
+            self.overlay.update(|hud, _| hud.hide());
         }
         Some(format!(
             "The recording HUD can't show ({reason}). Dictation still works."
