@@ -98,6 +98,60 @@ fn unset_retention_saves_a_shape_older_hex_can_read() {
 }
 
 #[test]
+fn saved_keys_are_sorted_at_every_level() {
+    let file = SettingsFile::new(b"{}");
+    let settings = AppSettings {
+        sound_effect_volume: 0.37,
+        ..AppSettings::default()
+    };
+    settings.write_to(&file.path).unwrap();
+    let raw = fs::read_to_string(&file.path).unwrap();
+    let keys = assert_sorted_keys(&raw);
+    assert!(keys > 40, "only {keys} keys checked");
+    let saved: Value = serde_json::from_str(&raw).unwrap();
+    // These sections have several keys each, so nested objects are covered.
+    assert!(saved["meetings"].as_object().unwrap().len() > 1);
+    assert!(saved["transcription"].as_object().unwrap().len() > 1);
+    assert_eq!(AppSettings::load_from(&file.path).unwrap(), settings);
+}
+
+/// Asserts that every object in the pretty-printed JSON `raw` has ascending
+/// keys, including the objects inside arrays, and returns the number of keys it
+/// checked. `Value` sorts keys as it parses, so this reads the file's own text:
+/// serde_json gives every key its own line, indented two spaces per level.
+fn assert_sorted_keys(raw: &str) -> usize {
+    /// The key of a line that starts a member (`"key": ...`).
+    fn key_at(line: &str) -> Option<&str> {
+        let rest = line.strip_prefix('"')?;
+        let key = &rest[..rest.find('"')?];
+        rest[key.len() + 1..].starts_with(':').then_some(key)
+    }
+    // Each open object by the indentation of its keys, with the last key seen.
+    let mut open: Vec<(usize, &str)> = Vec::new();
+    let mut checked = 0;
+    for line in raw.lines() {
+        let indent = line.len() - line.trim_start().len();
+        open.retain(|(key_indent, _)| *key_indent <= indent);
+        let Some(key) = key_at(line.trim_start()) else {
+            continue;
+        };
+        checked += 1;
+        match open.last_mut() {
+            Some((key_indent, previous)) if *key_indent == indent => {
+                assert!(
+                    *previous < key,
+                    "settings.json writes \"{key}\" after \"{previous}\" at nesting level {}",
+                    indent / 2
+                );
+                *previous = key;
+            }
+            _ => open.push((indent, key)),
+        }
+    }
+    checked
+}
+
+#[test]
 fn invalid_enum_resets_only_that_field_and_leaves_disk_alone() {
     let original = br#"{"recording_audio_behavior":"future-mode","sound_effect_volume":0.37,"meetings":{"enabled":true}}"#;
     let file = SettingsFile::new(original);

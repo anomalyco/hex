@@ -243,7 +243,12 @@ impl AppSettings {
             }
             _ => {}
         }
-        let bytes = serde_json::to_vec_pretty(&*self.as_saved(policy, original.as_deref()))?;
+        // A `Value` object is a `BTreeMap` (serde_json's `preserve_order`
+        // feature is off), so going through one writes every object's keys
+        // alphabetically and leaves array order alone. A settings file kept in
+        // version control then changes only where a setting does.
+        let value = serde_json::to_value(&*self.as_saved(policy, original.as_deref()))?;
+        let bytes = serde_json::to_vec_pretty(&value)?;
         crate::durable::write(path, &bytes)?;
         Ok(())
     }

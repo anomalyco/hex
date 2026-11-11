@@ -88,12 +88,17 @@ restart. macOS and Windows still read the file only at launch, through
 written as an absent key, so older builds with a non-optional retention still
 read the file; existing `null` values also load in the current build.
 
+Every object in the settings file has its keys sorted alphabetically, at every
+nesting level, while array order is kept, so a file kept in version control
+changes only where a setting does. Loading does not depend on key order.
+
 Source and checks: [settings persistence](../../src/app_settings/persistence.rs)
 and its [tests](../../src/app_settings/persistence/tests.rs): old-shape retention,
 invalid enums, nested types, list entries, unknown keys, invalid JSON and
 non-object documents (defaults, refused saves, no backup), a file fixed while
 the process still holds stale settings (refused until the explicit clear),
-exactly-once private backups, interrupted saves, and backup failure. These checks use
+exactly-once private backups, interrupted saves, backup failure, and sorted keys
+at every level (`saved_keys_are_sorted_at_every_level`). These checks use
 temporary files; they do not exercise a real app launch or the Linux poll.
 
 ### Finish Without Losing Other Work
