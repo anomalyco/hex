@@ -892,7 +892,8 @@ const HISTORY_MULTI_SELECT: u64 = API_TIMESTAMPS << 1;
 /// The last free bit: with Release microphone while idle on, the microphone
 /// stays open for a while after a capture (Labs › Keep mic open after
 /// dictating). Its window does not fit above the minutes, so it lives in
-/// [`MICROPHONE_LINGER_SECONDS`].
+/// [`MICROPHONE_LINGER_SECONDS`]. The word is full now, so a new lab needs its
+/// own atomic, as [`PRINT_START`] does.
 const KEEP_MICROPHONE_OPEN: u64 = HISTORY_MULTI_SELECT << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is

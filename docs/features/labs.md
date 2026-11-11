@@ -656,7 +656,7 @@ in `a_printing_stop_answers_with_the_transcript`
 `a_printing_start_follows_the_shortcut_that_finishes_it` and
 `a_held_print_reply_never_answers_a_later_dictation` in
 [recognition/hotkeys.rs](../../src/recognition/hotkeys.rs) (compiled only on
-macOS); `print_start_is_its_own_bit_and_macos_only` in
+macOS); `print_start_is_its_own_switch_and_macos_only` in
 [labs.rs](../../src/labs.rs); the row in
 `contributed_options_are_labs_toggles_off_by_default`
 ([panes.rs](../../src/rune_ui/tests/panes.rs)); `desktop::i18n`'s tables carry
