@@ -24,7 +24,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
 
@@ -165,6 +165,7 @@ impl Feature {
             | Self::ApiTimestamps
             | Self::SpeakersOnly
             | Self::PauseMenu
+            | Self::PrintStart
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -243,7 +244,7 @@ impl Feature {
             | Self::ApiTimestamps
             | Self::PauseMenu
             | Self::HistoryMultiSelect => 20261110,
-            Self::KeepMicrophoneOpen => 20261111,
+            Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
         }
     }
 
@@ -315,6 +316,7 @@ impl Feature {
             | Self::CapsLockDictation
             | Self::DoubleTapModifiers
             | Self::PauseMenu
+            | Self::PrintStart
             | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
             Self::CopyOnly => cfg!(any(target_os = "macos", target_os = "windows")),
             Self::ReturnToApp => cfg!(target_os = "macos"),
@@ -446,6 +448,7 @@ impl Feature {
             Self::ApiTimestamps => "api-timestamps",
             Self::SpeakersOnly => "speakers-only",
             Self::PauseMenu => "pause-menu",
+            Self::PrintStart => "print-start",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -526,6 +529,7 @@ impl Feature {
             Self::ApiTimestamps => "labs.api_timestamps",
             Self::SpeakersOnly => "labs.speakers_only",
             Self::PauseMenu => "labs.pause_menu",
+            Self::PrintStart => "labs.print_start",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -610,6 +614,7 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::PauseMenu => settings.labs.pause_menu,
+            Self::PrintStart => settings.labs.print_start,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -692,6 +697,7 @@ impl Feature {
             &mut labs.speakers_only,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
+            &mut labs.print_start,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -779,6 +785,7 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
+            Self::PrintStart => settings.labs.print_start = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -897,6 +904,11 @@ static STATE: AtomicU64 = AtomicU64::new(0);
 /// window itself has no room in the word.
 static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 
+/// `hex dictation start --print`'s switch, set beside [`STATE`]: the state
+/// word is full (bit 63 is Keep mic open after dictating), so this lab has its
+/// own atomic, written by [`state`] and [`apply`].
+static PRINT_START: AtomicBool = AtomicBool::new(false);
+
 fn on(bit: u64) -> bool {
     state() & bit != 0
 }
@@ -913,6 +925,7 @@ fn state() -> u64 {
                 // between them sees the switch on with no window, which reads
                 // as off, and the next read is right.
                 MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
+                PRINT_START.store(print_start_enabled(&saved), Ordering::Release);
             }
             STATE.load(Ordering::Acquire)
         }
@@ -925,6 +938,12 @@ fn linger_seconds(settings: &LabsSettings) -> u64 {
     settings
         .keep_microphone_open_for()
         .map_or(0, |window| window.as_secs())
+}
+
+/// Whether `settings` turn on `hex dictation start --print` in this build,
+/// before its managed lock; the state word has no bit for it.
+fn print_start_enabled(settings: &LabsSettings) -> bool {
+    settings.print_start && Feature::PrintStart.shipped() && Feature::PrintStart.managed().is_none()
 }
 
 /// Whether the main window draws dark: the OS's appearance, unless Labs ›
@@ -949,6 +968,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     // after both is right.
     STATE.store(encode(settings), Ordering::Release);
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
+    PRINT_START.store(print_start_enabled(settings), Ordering::Release);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
     crate::shortcut_pause::reconcile(pause_menu());
@@ -1892,6 +1912,25 @@ mod tests {
         assert_eq!(Feature::PauseMenu.group(), Group::Shortcuts);
         assert_eq!(Feature::PauseMenu.settings_key(), "labs.pause_menu");
         assert_eq!(Feature::PauseMenu.name(), "pause-menu");
+    }
+
+    #[test]
+    fn print_start_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!print_start_enabled(&labs));
+        labs.print_start = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(print_start_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PAUSE_MENU, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(Feature::PrintStart.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::PrintStart.added(), 20261111);
+        assert_eq!(Feature::PrintStart.audience(), Audience::Everyone);
+        assert_eq!(Feature::PrintStart.group(), Group::Output);
+        assert_eq!(Feature::PrintStart.settings_key(), "labs.print_start");
+        assert_eq!(Feature::PrintStart.name(), "print-start");
     }
 
     #[test]

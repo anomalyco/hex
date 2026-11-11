@@ -34,6 +34,7 @@ hex
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
 ├── dictation start|stop|toggle
+│   ├── start --print              (Labs, macOS) answer with the transcript when the recording ends
 │   ├── stop --print               print the transcript instead of pasting it (below)
 │   └── start|toggle --raw         paste the transcript as heard, skipping the Output steps
 ├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
@@ -104,10 +105,34 @@ corrections, OpenCode rewriting, and transformations). History keeps it as
 clip, or an empty transcript) exits 4 with code `no-speech` and prints
 nothing; with nothing recording it refuses with `not-recording`. A failure,
 or the 60 s timeout prints nothing, exits 1, and never
-falls back to pasting. `--print` with any other action is a usage error
+falls back to pasting. `--print` with `toggle` or `cancel` is a usage error
 (exit 2). The command is the same on Linux and Windows, where `hex dictation`
 and `hex paste-last` reach the listener's own queue as its shortcut would;
 Linux's `hex typed-text` does too.
+
+`dictation start --print` (Labs › Print-only CLI dictation, off by default,
+macOS) records a dictation that belongs to the command instead of the person's
+focused app: the command blocks and answers only when the recording ends,
+however it ends, with the transcript (`transcript`, exit 0) instead of pasting
+or copying it. It starts exactly as `start` does and locks the recording; the
+shortcut press that finishes it, `dictation stop`, `dictation toggle`, and a
+microphone loss that keeps the audio all hand the text to that command, never
+to whatever app has focus. A discarded or silent clip answers `no-speech`
+(exit 4), a cancel (`dictation cancel` or Toggle's cancel shortcut) answers
+`failed` (exit 1), and any other end, such as a microphone loss with no kept
+audio or suspended shortcuts, answers `failed` too, so the command never
+hangs. A printing `start` while anything already records is refused with
+`busy`: it never takes over the person's own dictation or a programmatic one.
+A plain `dictation stop` of a print-only recording answers as any plain stop
+does (`done`, or `discarded` for no audio or silence) and the transcript still
+goes to the start; `stop --print` of it answers `done` too, and both commands
+wait for the one transcript. With the lab off, or on Linux
+and Windows, it answers `disabled` or `unsupported`. The text gets the same
+processing as a paste and History keeps it as `printed`, as `stop --print`
+does; Paste Last skips it. A printing start waits at most 31 minutes; if it
+gives up, the recording stays print-only and is never pasted. `--raw` is
+allowed: the transcript comes back as heard. `--print` with `toggle` or
+`cancel` is a usage error (exit 2).
 
 `dictation start --raw` and `toggle --raw` start a dictation that pastes the
 transcript as heard, skipping the Output pane's steps, as the Dictate without
@@ -251,7 +276,7 @@ state, the recording capsule, and Stop & Transcribe all apply to it.
 1  Hex refused or failed it (an error reply), or the transport failed
 2  usage error (clap)
 3  Hex isn't running (code `not-running`); control commands never launch it
-4  `dictation stop --print` or `hex transcribe` heard no speech (code `no-speech`); nothing printed
+4  `dictation start --print`, `dictation stop --print`, or `hex transcribe` heard no speech (code `no-speech`); nothing printed
 ```
 
 ## Transport
@@ -268,7 +293,12 @@ transcription and `/streams`, but answer `/control` with
 
 - Request bodies are JSON up to 64 KiB; replies are at most 1 MiB.
 - The app answers within 10 s (`504 control-timeout` otherwise); the CLI waits
-  15 s. `dictation stop --print` gets 65 s, and the CLI waits 70 s.
+  15 s. `dictation stop --print` gets 65 s, and the CLI waits 70 s;
+  `dictation start --print` gets 31 min 5 s, and the CLI waits 31 min 10 s.
+- A waiting `dictation start --print` holds one of the local API's four
+  connection workers until its recording ends or it hits that cap, even if
+  the CLI that asked is killed: it answers a dropped receiver harmlessly,
+  never pastes, and frees the worker only then.
 - Every answer the app gives is `200` with a `ControlResponse`, refusals
   included. Transport-level failures use HTTP status codes:
   `400 invalid-control-command` (malformed or unknown command),
@@ -291,13 +321,14 @@ Requests are flat objects tagged by `command` (kebab-case):
 {"version": 4, "command": "meeting-record", "title": "Design sync"}
 {"version": 4, "command": "settings-set", "key": "sound_effects", "value": "off"}
 {"version": 4, "command": "dictation", "action": "start"}
+{"version": 4, "command": "dictation", "action": "start", "print": true}
 {"version": 4, "command": "dictation", "action": "stop", "print": true}
 ```
 
 ```ts
 status | quit {force} | restart {force}
-dictation {action, print?}                       action: start | stop | toggle | cancel;
-                                                 print (stop only) answers `transcript`
+dictation {action, print?, raw?}                 action: start | stop | toggle | cancel;
+                                                 print (start and stop) answers `transcript`
 paste-last
 typed-text
 meeting-record {title?} | meeting-stop | meeting-copy-last
@@ -410,7 +441,7 @@ busy                   something is in progress (recording, transcribing, a full
                        or the listener couldn't confirm it's idle
 resource-exhausted     `hex transcribe`'s file is over 64 MiB or too long to decode
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
-no-speech              `dictation stop --print` heard no speech; nothing printed (exit 4)
+no-speech              `dictation start --print` or `stop --print` heard no speech; nothing printed (exit 4)
 not-recording          `dictation stop --print` with nothing recording
 unavailable            a part of Hex the command needs isn't available
 unsupported            this build or OS can't do it (e.g. restart from a development binary)

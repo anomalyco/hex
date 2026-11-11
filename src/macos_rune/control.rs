@@ -563,19 +563,30 @@ fn listener_command(
             raw,
         } => background(reply, move || {
             let action = control::check_flags(action, true, raw)?;
+            let printing_start = action == control::CaptureAction::Start;
+            if printing_start && !crate::labs::print_start() {
+                return Err(control::ControlError::new(
+                    "disabled",
+                    "Labs › Print-only CLI dictation is off; turn it on with \
+                     `hex labs on print-start`",
+                ));
+            }
             listener_ready(&runtime)?;
             let (print, printed) = control::PrintReply::channel();
-            // The listener answers once the recording stopped; only this
-            // command then waits for the transcript.
+            // A printing start answers only when its dictation ends; a
+            // printing stop answers once the recording stopped.
+            let wait = if printing_start {
+                control::PRINT_START_WAIT
+            } else {
+                control::PRINT_WAIT
+            };
             match ask(&runtime, |reply| RecognitionControl::Capture {
                 action,
                 print: Some(print),
-                raw: false,
+                raw: printing_start && raw,
                 reply,
             })? {
-                ControlReply::Done { .. } => {
-                    Ok(control::await_printed(&printed, control::PRINT_WAIT))
-                }
+                ControlReply::Done { .. } => Ok(control::await_printed(&printed, wait)),
                 refused => Ok(refused),
             }
         }),

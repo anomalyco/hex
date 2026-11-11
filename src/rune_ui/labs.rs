@@ -527,6 +527,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Return to app"),
             tr("If another app comes to the front while you dictate, Hex switches back to the app you started in before pasting. If it can't, nothing is pasted and Paste last dictation has the text."),
         ));
+        // macOS's listener answers a printing start when its dictation ends.
+        rows.push(row(
+            Feature::PrintStart,
+            None,
+            tr("Print-only CLI dictation"),
+            tr("Let hex dictation start --print answer with the transcript when it ends"),
+        ));
     }
     // macOS's shortcut machine takes a shortcut without a key.
     if caps.os == super::platform::Os::Macos {
@@ -973,6 +980,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
+        Feature::PrintStart => "lab-print-start",
     }
 }
 

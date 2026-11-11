@@ -409,6 +409,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-keep-on-clipboard",
         "lab-copy-only",
         "lab-return-to-app",
+        "lab-print-start",
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-spoken-symbols",
@@ -438,6 +439,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.return_to_app);
     tap(&mut rt, "lab-return-to-app");
     assert!(rt.state.settings.labs.return_to_app);
+    assert!(!rt.state.settings.labs.print_start);
+    tap(&mut rt, "lab-print-start");
+    assert!(rt.state.settings.labs.print_start);
     assert!(!rt.state.settings.labs.caps_lock_dictation);
     tap(&mut rt, "lab-caps-lock-dictation");
     assert!(rt.state.settings.labs.caps_lock_dictation);
