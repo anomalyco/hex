@@ -115,7 +115,9 @@ impl HistoryPane {
     }
 
     /// Refreshes the bounded snapshot for the current query, and the stats.
+    /// A reload, as entering the pane does, stops any Delete… confirmation.
     pub(super) fn reload(&mut self) {
+        self.delete_armed = None;
         self.reload_entries();
         self.reload_stats();
     }
@@ -148,7 +150,7 @@ impl HistoryPane {
         }
     }
 
-    /// Escape, or a press elsewhere: Delete… stops asking.
+    /// Escape: Delete… stops asking. Returns whether it was asking.
     pub(super) fn cancel_delete(&mut self) -> bool {
         self.delete_armed.take().is_some()
     }
@@ -1052,16 +1054,13 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             .key("delete-confirm")
             .gap(8.0)
             .pt(14.0)
-            .child(
-                button(
-                    p,
-                    "history-confirm-delete",
-                    tr("Confirm delete"),
-                    ButtonKind::Danger,
-                    move |ui: &mut Ui, _| delete(ui, id),
-                )
-                .default_button(),
-            )
+            .child(button(
+                p,
+                "history-confirm-delete",
+                tr("Confirm delete"),
+                ButtonKind::Danger,
+                move |ui: &mut Ui, _| delete(ui, id),
+            ))
             .child(button(
                 p,
                 "history-cancel-delete",

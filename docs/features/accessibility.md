@@ -43,7 +43,7 @@ Settings window                               // a11y.window
 │   ├── The window behind it leaves the tree while it is open
 │   ├── Compare -> one group per model column, named by the model
 │   └── Every model -> lists per group, each model a list item with its place
-└── Icon-only buttons -> named (Close, Copy, Delete, Remove, Back, More, …)
+└── Icon-only buttons -> named (Close, Copy, Delete or Delete…, Remove, Back, More, …)
 ```
 
 Sources: [controls.rs](../../src/rune_ui/controls.rs) (`copy_row_tagged`,
