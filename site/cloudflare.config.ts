@@ -22,12 +22,12 @@ export default defineConfig(({ mode }) => {
         ASSETS: bindings.assets(),
         // The frozen 2.3.1 history is the same for both environments and is
         // only read. CI holds no R2 credential.
-        FILES: bindings.r2({ name: "hex-production-files" }),
+        FILES: bindings.r2({ name: dev ? "hex-dev-files" : "hex-production-files" }),
         CANONICAL_HOST: bindings.text(host),
       },
       triggers: [
-        triggers.fetch({ pattern: `${host}${BASE_PATH}`, zone: "anoma.ly" }),
-        triggers.fetch({ pattern: `${host}${BASE_PATH}/*`, zone: "anoma.ly" }),
+        triggers.fetch({ pattern: `${host}${BASE_PATH}`, zone: host }),
+        triggers.fetch({ pattern: `${host}${BASE_PATH}/*`, zone: host }),
       ],
       workersDev: false,
       previewUrls: false,
