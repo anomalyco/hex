@@ -434,18 +434,14 @@ pub(crate) struct Sender<'a> {
 const FACE: f32 = 24.0;
 const FACE_GAP: f32 = 7.0;
 
-/// The sender's face beside a line in a group, or the room it would take.
+/// The sender's face beside a line in a group, or the room it would take. The
+/// face stays mounted at zero opacity on the older lines, so a newer line
+/// fades it out there as it fades in on itself instead of the photo popping
+/// off in one frame.
 fn face_slot(p: Paint, sender: Sender<'_>) -> El {
-    match sender {
-        sender if sender.last => {
-            super::inbox::face(p, sender.name, sender.colour, FACE).key("face")
-        }
-        _ => el()
-            .key("face")
-            .size(FACE, FACE)
-            .radius(FACE * 0.5)
-            .border(p.hair, Color::TRANSPARENT),
-    }
+    super::inbox::face(p, sender.name, sender.colour, FACE)
+        .key("face")
+        .opacity(if sender.last { 1.0 } else { 0.0 })
 }
 
 /// One message in [`chat`]'s thread: theirs on the left, yours on the right
