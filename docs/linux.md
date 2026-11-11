@@ -497,10 +497,12 @@ hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last"))
 ```
 
   Traditional Hyprland configs write
-  `bind = , End, global, anomaly.hex:dictation`. Earlier builds put the
-  recorded key in the name (`anomaly.hex:dictation-ALT-space`), and binds to
-  `hex:dictation` or `hex:paste-last` (names from before Hex's app id was
-  `anomaly.hex`) are older still; both do nothing now, so replace them. Remove any `cancel-dictation`
+  `bind = , End, global, anomaly.hex:dictation`. Hex 3.3 and earlier put the
+  recorded key in the name (`anomaly.hex:dictation-ALT-space`); Hex still
+  answers those names, but only for the key recorded in Settings when the
+  bind was written, so switch them to the bare names before you record
+  another key. Binds to `hex:dictation` or `hex:paste-last` (names from
+  before Hex's app id was `anomaly.hex`) do nothing now, so replace them. Remove any `cancel-dictation`
   bind: Hex no longer has it. Hyprland 0.56's Lua binds send no release when the modifier comes
   up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
   unaffected: the next press still finishes. In Hold, recording continues

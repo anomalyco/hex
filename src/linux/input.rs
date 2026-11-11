@@ -528,6 +528,19 @@ fn portal_shortcut_id(base: &str, trigger: &str, desktop_assigns: bool) -> Strin
     format!("{base}-{}", trigger.replace('+', "-"))
 }
 
+/// The name Hex 3.3 and earlier gave `shortcut` on Hyprland, the trigger in
+/// the id (`dictation-ALT-space`), which configs written then still bind.
+/// Hex binds it beside the bare id so those binds keep working while the
+/// recorded key is the one they were written for. Only the shortcuts 3.3
+/// had get one.
+fn hyprland_legacy_id(shortcut: Shortcut, trigger: &str) -> Option<String> {
+    matches!(
+        shortcut,
+        Shortcut::Dictation | Shortcut::PasteLast | Shortcut::Capture | Shortcut::RawDictation
+    )
+    .then(|| portal_shortcut_id(shortcut.portal_id().0, trigger, false))
+}
+
 /// The trigger the desktop granted a shortcut, by the id Hex bound it under.
 fn granted_trigger<'a>(
     granted: &'a std::collections::HashMap<String, Option<String>>,
@@ -1252,6 +1265,7 @@ impl Backend {
         let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let mut shortcuts = Vec::new();
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
+        let mut legacy_ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         for (shortcut, key) in requested.into_iter().flatten() {
             let (base, description) = shortcut.portal_id();
             // Keep keyboard shortcuts usable after moving X11 settings to
@@ -1265,8 +1279,16 @@ impl Backend {
             shortcuts.push(crate::linux::portal::Shortcut {
                 id,
                 description,
-                trigger: Some(trigger),
+                trigger: Some(trigger.clone()),
             });
+            if desktop_assigns && let Some(legacy) = hyprland_legacy_id(shortcut, &trigger) {
+                legacy_ids[shortcut.index()] = Some(legacy.clone());
+                shortcuts.push(crate::linux::portal::Shortcut {
+                    id: legacy,
+                    description,
+                    trigger: Some(trigger),
+                });
+            }
         }
         // Every shortcut goes in this one bind: a second bind would replace
         // the set on KDE. Escape is never among them (#786).
@@ -1345,9 +1367,10 @@ impl Backend {
         self.status.configure.store(false, Ordering::Release);
         self.mark_ready(DesktopShortcuts::Portal(granted));
         let shortcut_for = |id: &str| {
-            Shortcut::ALL
-                .into_iter()
-                .find(|shortcut| ids[shortcut.index()].as_deref() == Some(id))
+            Shortcut::ALL.into_iter().find(|shortcut| {
+                ids[shortcut.index()].as_deref() == Some(id)
+                    || legacy_ids[shortcut.index()].as_deref() == Some(id)
+            })
         };
         while !self.stopping() {
             // Wakes on the desktop's signals; the timeout only lets queued
@@ -1970,6 +1993,27 @@ mod tests {
             id(Shortcut::TerminalPaste, "CTRL+SHIFT+t"),
             "terminal-paste"
         );
+    }
+
+    /// A config written for 3.3 binds `anomaly.hex:dictation-ALT-space`;
+    /// Hex binds that name too, for the key it was written for.
+    #[test]
+    fn hyprland_keeps_the_names_3_3_bound() {
+        assert_eq!(
+            hyprland_legacy_id(Shortcut::Dictation, "ALT+space").as_deref(),
+            Some("dictation-ALT-space")
+        );
+        assert_eq!(
+            hyprland_legacy_id(Shortcut::PasteLast, "CTRL+ALT+v").as_deref(),
+            Some("paste-last-CTRL-ALT-v")
+        );
+        assert_eq!(
+            hyprland_legacy_id(Shortcut::RawDictation, "F9").as_deref(),
+            Some("raw-dictation-F9")
+        );
+        // Shortcuts 3.3 didn't have were never bound by the old names.
+        assert_eq!(hyprland_legacy_id(Shortcut::TerminalPaste, "CTRL+t"), None);
+        assert_eq!(hyprland_legacy_id(Shortcut::SecondDictation, "F10"), None);
     }
 
     #[test]
