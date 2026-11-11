@@ -12,17 +12,15 @@ fn pending_name(route: &Route) -> Option<String> {
 pub(super) fn undoable(phase: &Phase, now: f64) -> Option<Action> {
     if let Phase::Routed(r) = phase
         && !r.delivered
+        && !r.sending
         && !r.taken_back
         && let Some(to) = pending_name(&r.route)
     {
         return Some(Action::Undo { to });
     }
+    // A rule's send that went is past Undo; a pick's can still be taken
+    // back for its window.
     let (to, at) = match phase {
-        Phase::Routed(Routed {
-            route: Route::Rule { to, .. },
-            at,
-            ..
-        }) => (&to.name, *at),
         Phase::Sent(Sent {
             to,
             at,
@@ -287,7 +285,7 @@ mod tests {
         let Pres::Done(done) = flow.pres(2.0) else {
             panic!("missing capsule");
         };
-        assert_eq!(done.countdown, Some(undo_s()));
+        assert_eq!(done.countdown, Some(send_hold_s()));
         let mut unresolved = Flow::new();
         unresolved.input(
             Input::Routed(Route::ResolvingRule {

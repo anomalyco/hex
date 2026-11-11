@@ -18,7 +18,7 @@ use rune::color::{srgb_decode, srgb_encode};
 use rune::{Color, El, LineCap, Shape, Tween, canvas, el};
 
 use super::super::controls::Paint;
-use super::flow::{Pres, undo_s};
+use super::flow::Pres;
 use super::surface::{CHIP_RADIUS, HINT_GAP, medium, undo_label};
 
 const STROKE: f32 = 1.5;
@@ -111,8 +111,7 @@ pub(crate) struct Ring {
 }
 
 impl Ring {
-    fn new(end: f64, held: Option<f64>, now: f64, reduced: bool) -> Self {
-        let window = undo_s();
+    fn new(end: f64, window: f64, held: Option<f64>, now: f64, reduced: bool) -> Self {
         let left = held.unwrap_or(end - now).clamp(0.0, window);
         // How far round the moving end is now, and when it's back at the top.
         let past = (1.0 - left / window) as f32;
@@ -142,9 +141,9 @@ impl Ring {
 /// Keeps `ring` on the window `pres` counts down: built when one begins,
 /// kept while it runs, dropped when Undo has none.
 pub(crate) fn sync(ring: &mut Option<Ring>, pres: &Pres, now: f64, reduced: bool) {
-    let (end, held) = match pres {
-        Pres::Done(done) if done.undo => (done.countdown, done.held),
-        _ => (None, None),
+    let (end, window, held) = match pres {
+        Pres::Done(done) if done.undo => (done.countdown, done.window, done.held),
+        _ => (None, 0.0, None),
     };
     match end {
         None => *ring = None,
@@ -152,7 +151,7 @@ pub(crate) fn sync(ring: &mut Option<Ring>, pres: &Pres, now: f64, reduced: bool
             if ring
                 .as_ref()
                 .is_some_and(|ring| (ring.end, ring.held) == (end, held)) => {}
-        Some(end) => *ring = Some(Ring::new(end, held, now, reduced)),
+        Some(end) => *ring = Some(Ring::new(end, window, held, now, reduced)),
     }
 }
 

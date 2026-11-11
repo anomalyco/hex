@@ -188,6 +188,7 @@ impl Follow {
             {
                 inputs.push(Input::Delivered(Delivered::Sent { to }));
             }
+            Some(RouteDelivery::Sending { .. }) => inputs.push(Input::Sending),
             // A send the capsule knows of, or one from `hex capture send`.
             Some(RouteDelivery::Sent { .. }) => inputs.push(Input::Settled),
             Some(RouteDelivery::TakenBack) => inputs.push(Input::Undone(Undone::TakenBack)),
@@ -929,15 +930,18 @@ mod tests {
         let sending = || Some(RouteDelivery::Sending { to: "SEER".into() });
         assert_eq!(
             follow.next(&routed("a", rule(), sending())),
-            [Input::Routed(Route::Rule {
-                to: Dest::new("SEER", "rule").session("ses_SEER"),
-                suggested: vec![
-                    Dest::new("SEER", "rule").session("ses_SEER"),
-                    Dest::new("HEX", "last sent").session("ses_HEX"),
-                ],
-                recent: vec![Dest::new("HOME", "yesterday").session("ses_HOME")],
-                site: Some("seer.example.com".into()),
-            })]
+            [
+                Input::Routed(Route::Rule {
+                    to: Dest::new("SEER", "rule").session("ses_SEER"),
+                    suggested: vec![
+                        Dest::new("SEER", "rule").session("ses_SEER"),
+                        Dest::new("HEX", "last sent").session("ses_HEX"),
+                    ],
+                    recent: vec![Dest::new("HOME", "yesterday").session("ses_HOME")],
+                    site: Some("seer.example.com".into()),
+                }),
+                Input::Sending
+            ]
         );
         assert_eq!(follow.next(&routed("a", rule(), sending())), []);
         // Sent settles it (Send to… no longer brings it back) and

@@ -93,7 +93,7 @@ pub use permissions::{
 };
 pub use replay::available as replay_available;
 pub use routing::CaptureRoute;
-pub use routing::{RouteAnswer, RouteDelivery, RouteDest};
+pub use routing::{RouteAnswer, RouteDelivery, RouteDest, SEND_HOLD};
 #[cfg(target_os = "macos")]
 pub use routing::{recent_sessions, send_image};
 #[cfg(target_os = "macos")]
