@@ -790,8 +790,10 @@ pub(crate) fn run(
                     );
                     service_ended |= !service.is_active();
                 }
-                // Recording starts at the microphone's first chunk.
+                // Recording starts at the first chunk. A failed stream keeps
+                // its backoff, but the client's start asks for it now.
                 Effect::Start => {
+                    input.retry_now();
                     if release_while_idle && !input.is_active() {
                         input.request_open();
                     }
@@ -862,6 +864,10 @@ pub(crate) fn run(
                         .as_mut()
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start { flavour } if !capture.is_recording() && !start_pending => {
+                    // A failed stream keeps its backoff; the press asks now.
+                    if input.is_recovering() {
+                        input.retry_now();
+                    }
                     recording_flavour = flavour;
                     // A short tap or chord must never create an input method;
                     // Live typing starts at the hold threshold (or the Toggle

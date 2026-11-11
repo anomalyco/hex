@@ -632,6 +632,10 @@ impl Owner {
                     self.drain_through(at);
                 }
                 if self.input.is_recovering() {
+                    // A stalled stream waits out a growing backoff; the press
+                    // asks for the microphone now, though it still cannot
+                    // capture until the stream opens.
+                    self.input.retry_now();
                     let _ = reply.send(false);
                     return true;
                 }

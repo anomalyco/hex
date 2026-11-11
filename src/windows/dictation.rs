@@ -561,7 +561,10 @@ pub fn run(
                     service_ended |= !service.is_active();
                 }
                 // Recording starts at the released microphone's first chunk.
+                // A failed stream keeps its backoff, but the client's start
+                // asks for the microphone now.
                 Effect::Start => {
+                    input.retry_now();
                     if !input.is_active() {
                         input.request_open();
                     }
@@ -643,6 +646,13 @@ pub fn run(
                         host.annotate_up(&timeline);
                     }
                 }
+                // A failed stream keeps its backoff; the press asks for the
+                // microphone now, though it cannot capture until it opens.
+                HotkeyAction::Start
+                    if !recording && input.is_recovering() && !release_while_idle =>
+                {
+                    input.retry_now();
+                }
                 HotkeyAction::Start
                     if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
                 {
@@ -665,7 +675,12 @@ pub fn run(
                         start_tone_played = true;
                     } else {
                         // The released microphone opens on demand; recording
-                        // begins at the first chunk (no audio pre-roll).
+                        // begins at the first chunk (no audio pre-roll). A
+                        // failed stream keeps its backoff, but the press
+                        // asks for it now.
+                        if input.is_recovering() {
+                            input.retry_now();
+                        }
                         start_pending = true;
                         input.request_open();
                         crate::feedback::prepare();
