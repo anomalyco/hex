@@ -1935,14 +1935,23 @@ Linux beta                               // not macOS feature parity
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener's notice or warning (a missing wl-copy outranks it)
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, desktop/tray_icon, rune::Tray)
-│   ├── Mark -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
-│   │   ├── Read when the tray is created; a later switch applies at the next launch
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, linux/icons, desktop/tray_icon, rune::Tray)
+│   ├── Symbolic theme icon -> `anomaly.hex-symbolic.svg` written to hicolor/scalable/apps at startup, its name served beside the pixmap
+│   │   ├── Plasma 6, GNOME's AppIndicator extension, Waybar -> draw the mark in the panel's text color
+│   │   │   // check: the_tray_icon_is_a_recolorable_symbolic_svg,
+│   │   │   // the_tray_icon_lands_in_the_users_scalable_hicolor_theme,
+│   │   │   // a_dangling_tray_icon_link_is_not_in_place
+│   │   │   // not checked against a real KDE or GNOME panel
+│   │   ├── Plasma 6 -> recolors only with icon themes that follow the color scheme (Breeze, Papirus); else the SVG's default color
+│   │   ├── Plasma 5 -> also prefers IconName but has no panel palette, so the SVG's color there is untested
+│   │   ├── A running Plasma session -> told to reload icons after Hex writes the file, since KIconLoader lists hicolor folders at startup
+│   │   ├── A user's own file at that name -> kept and named; a dangling link or failed write -> the name is unset
+│   │   └── Default color -> the same light/dark guess as the pixmap
+│   ├── Mark (pixmap) -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
+│   │   ├── Read once when the tray is created; a later switch applies at the next launch
 │   │   ├── // check: only_an_explicit_light_color_scheme_gets_the_dark_mark
-│   │   │   // decodes the portal value; not checked against a real KDE or GNOME panel
-│   │   └── KDE's portal derives the scheme from the window palette, so a mixed theme
-│   │       with light windows and a dark panel (Breeze Twilight) gets the black mark on
-│   │       a dark panel
+│   │   │   // decodes the portal value
+│   │   └── Shown by hosts that don't use theme names, or can't find the name (Waybar falls back)
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
