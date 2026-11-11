@@ -8,12 +8,14 @@
 //! AppIndicator extension, Waybar) draws a mark that stays visible on any
 //! panel. Hosts that don't know the name keep using the pixmap.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
 use tokio::runtime::Runtime;
+use tokio::time::error::Elapsed;
 use zbus::{Connection, OwnedVariant, Variant};
 
 use crate::desktop::host::DesktopAction;
@@ -135,7 +137,7 @@ async fn scheme(bus: &Connection) -> Option<bool> {
 /// nothing until the next login. Emits on the connection's own runtime;
 /// best-effort, so a failure must not unset the name.
 fn reload_icons(runtime: &Runtime, bus: &Connection) {
-    let sent = runtime.block_on(tokio::time::timeout(RELOAD_TIMEOUT, async {
+    let sent = with_timeout(runtime, RELOAD_TIMEOUT, async {
         bus.emit_signal(
             None::<&str>,
             ICON_LOADER_PATH,
@@ -144,12 +146,22 @@ fn reload_icons(runtime: &Runtime, bus: &Connection) {
             &(0i32,),
         )
         .await
-    }));
+    });
     match sent {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(%error, "could not ask the desktop to reload icons"),
         Err(_) => tracing::warn!("the desktop did not take the icon reload in time"),
     }
+}
+
+/// Runs `future` on `runtime` under `timeout`. The timeout is built inside the
+/// runtime: `tokio::time::timeout` creates a `Sleep` on the calling thread, so
+/// one built before `block_on` sees no reactor and panics.
+fn with_timeout<F>(runtime: &Runtime, timeout: Duration, future: F) -> Result<F::Output, Elapsed>
+where
+    F: Future,
+{
+    runtime.block_on(async { tokio::time::timeout(timeout, future).await })
 }
 
 /// The portal's `color-scheme` value, read with `method`.
@@ -265,5 +277,25 @@ mod tests {
         assert!(prefers_light(&Variant::Variant(Box::new(Variant::from(
             2u32
         )))));
+    }
+
+    /// `start` runs on the host thread, which has no ambient tokio context, and
+    /// the tray's own runtime has the time driver on. A timeout built before
+    /// `block_on` panicked there with "there is no reactor running".
+    #[test]
+    fn the_reload_timeout_is_built_inside_its_runtime() {
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let sent = with_timeout(&runtime, RELOAD_TIMEOUT, async { Ok::<(), ()>(()) });
+        assert!(matches!(sent, Ok(Ok(()))), "a ready future completes");
+        let stalled = with_timeout(
+            &runtime,
+            Duration::from_millis(1),
+            std::future::pending::<()>(),
+        );
+        assert!(stalled.is_err(), "the deadline needs the time driver");
     }
 }
