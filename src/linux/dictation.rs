@@ -9,6 +9,7 @@ use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
 use crate::app_settings::AppSettings;
+use crate::audio::linger::MicrophoneLinger;
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::control::{PrintReply, PrintedTranscript};
 use crate::desktop::events::{
@@ -30,9 +31,11 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
 mod gap;
 mod shortcuts;
+mod typing;
 
 use gap::{ChunkStep, chunk_step};
 use shortcuts::shortcuts;
+use typing::CaptureTyping;
 
 struct Job {
     transcript: PendingTranscript,
@@ -50,13 +53,6 @@ struct Job {
     /// text is committed instead of pasted. Dropping an unfinished job
     /// cancels it.
     typing: Option<crate::linux::live_typing::Session>,
-}
-
-/// A hotkey capture whose provisional words go into the focused text field.
-struct CaptureTyping {
-    session: crate::linux::live_typing::Session,
-    /// Keeps the dictation stream publishing its text without the HUD plate.
-    _demand: crate::dictation::live_text::TypingDemand,
 }
 
 enum OutputJob {
@@ -351,6 +347,9 @@ pub(crate) fn run(
     // microphone opens only while a dictation records.
     let mut input = microphone_input(&settings, device);
     let mut release_while_idle = settings.release_microphone_while_idle;
+    // Labs › Keep mic open after dictating: a finished capture's
+    // microphone stays open for its window before release.
+    let mut linger = MicrophoneLinger::default();
     let (binding, options) = shortcuts(&settings);
     let hotkey_label = binding.label();
     let mut toggle = options.toggle;
@@ -488,8 +487,6 @@ pub(crate) fn run(
     let mut capture_host =
         crate::capture_host::CaptureHost::start(Some(engine.clone()), &environment);
     let capture_controls = crate::capture_host::listen_for_controls();
-    // The microphone stays open for a capture even while released when idle.
-    let mut capture_holds_microphone = false;
     // The draw shortcut started a recording: drawing turns on once its
     // engine takes input.
     let mut draw_pending = false;
@@ -690,26 +687,10 @@ pub(crate) fn run(
                 tracing::warn!(message, "a capture command did nothing");
             }
         }
-        // A capture copies this microphone: a released one opens for it,
-        // and closes again once nothing records.
-        if release_while_idle {
-            let wants = timeline.wants_audio();
-            if wants && !input.is_active() {
-                input.request_open();
-            }
-            if wants {
-                capture_holds_microphone = true;
-            } else if capture_holds_microphone
-                && !capture.is_recording()
-                && !start_pending
-                && finishing.is_none()
-                && !service.is_active()
-            {
-                capture_holds_microphone = false;
-                input.close();
-                last_captured_through = None;
-                audio_ready = false;
-            }
+        // A capture copies this microphone: a released one opens for it, and
+        // the one release check below closes it once nothing records.
+        if release_while_idle && timeline.wants_audio() && !input.is_active() {
+            input.request_open();
         }
         if let Some(hotkey) = &hotkey
             && let Ok(error) = hotkey.errors.try_recv()
@@ -756,11 +737,6 @@ pub(crate) fn run(
                 capture = DictationCapture::new(sample_rate);
             }
             suppressor.restore();
-            if release_while_idle && !timeline.wants_audio() {
-                input.close();
-                last_captured_through = None;
-                audio_ready = false;
-            }
             emit_state(
                 &mut events,
                 active_state(capture.is_recording(), pending),
@@ -827,11 +803,6 @@ pub(crate) fn run(
         if service_ended && !service.is_active() {
             capture.cancel();
             suppressor.restore();
-            if release_while_idle && !timeline.wants_audio() {
-                input.close();
-                last_captured_through = None;
-                audio_ready = false;
-            }
         }
         for (id, result) in service_finished.try_iter() {
             service.complete(id, result);
@@ -910,11 +881,6 @@ pub(crate) fn run(
                         print.send(PrintedTranscript::NoSpeech);
                     }
                     suppressor.restore();
-                    if release_while_idle && !timeline.wants_audio() {
-                        input.close();
-                        last_captured_through = None;
-                        audio_ready = false;
-                    }
                     events.dictation(
                         if action == HotkeyEvent::Cancel {
                             DictationPhase::Cancelled
@@ -973,11 +939,6 @@ pub(crate) fn run(
                     feedback::retract_start();
                     feedback::play(Tone::Cancel);
                     suppressor.restore();
-                    if release_while_idle && !timeline.wants_audio() {
-                        input.close();
-                        last_captured_through = None;
-                        audio_ready = false;
-                    }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(
                         &mut events,
@@ -1028,6 +989,25 @@ pub(crate) fn run(
                 active_state(capture.is_recording(), pending),
                 &device_label,
             )?;
+        }
+
+        // The one place a released microphone closes: once nothing records,
+        // no client dictates, no release tail runs, no capture copies it, and
+        // Labs › Keep mic open after dictating's window has passed.
+        if release_while_idle
+            && input.is_active()
+            && linger.may_close(
+                Instant::now(),
+                capture.is_recording()
+                    || start_pending
+                    || finishing.is_some()
+                    || service.is_active()
+                    || timeline.wants_audio(),
+            )
+        {
+            input.close();
+            last_captured_through = None;
+            audio_ready = false;
         }
 
         indicator.update(capture.is_recording() || start_pending, pending);
@@ -1426,15 +1406,8 @@ fn reopen_silent_stream(input: &mut RecoveringAudioInput, release_while_idle: bo
 }
 
 /// Starts Live typing at the hold threshold (or the Toggle press), before
-/// the stream opens so the engine sees the demand. It does not wait for a
-/// stream: a CPU or non-streaming model still commits its final text through
-/// the input method, with no preedit words. Short taps and chords never get
-/// here, so they create no input method.
-fn live_typing_due(recording: bool, intentional: bool, toggle: bool) -> bool {
-    recording && (toggle || intentional)
-}
-
-#[allow(clippy::too_many_arguments)]
+/// the stream opens so the engine sees the demand; see
+/// [`typing::begin`]. Short taps and chords create no input method.
 fn begin_live_typing(
     capture: &DictationCapture,
     toggle: bool,
@@ -1443,32 +1416,19 @@ fn begin_live_typing(
     next_capture_id: &mut u64,
     typing: &mut Option<CaptureTyping>,
 ) {
-    if typing.is_some()
-        || !wayland
-        || !crate::labs::live_typing()
-        || !live_typing_due(capture.is_recording(), capture.is_intentional(), toggle)
-    {
-        return;
-    }
-    if !live_typing.as_ref().is_none_or(|live| live.is_accepting()) {
-        return;
-    }
-    let live = live_typing
-        .get_or_insert_with(crate::linux::live_typing::LiveTyping::start)
-        .clone();
-    *next_capture_id += 1;
-    let mut started = CaptureTyping {
-        session: crate::linux::live_typing::Session::new(live, *next_capture_id),
-        _demand: crate::dictation::live_text::typing_demand(),
-    };
-    started.session.start();
-    *typing = Some(started);
+    typing::begin(
+        capture,
+        toggle,
+        wayland,
+        live_typing,
+        next_capture_id,
+        typing,
+    );
 }
 
-/// Ends a capture's Live typing session without committing anything; the
-/// session guard clears the preedit.
+/// Ends a capture's Live typing session without committing anything.
 fn cancel_typing(typing: &mut Option<CaptureTyping>) {
-    typing.take();
+    typing::cancel(typing);
 }
 
 fn active_state(recording: bool, pending: usize) -> VoiceState {
@@ -2043,19 +2003,5 @@ mod tests {
         assert!(result.is_err());
         assert!(stopped.load(Ordering::Acquire));
         assert!(finished.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn live_typing_waits_for_a_recording_and_the_hold_or_toggle() {
-        assert!(
-            !live_typing_due(false, false, true),
-            "idle Toggle chunks start nothing"
-        );
-        assert!(
-            !live_typing_due(true, false, false),
-            "a Hold press waits for the threshold"
-        );
-        assert!(live_typing_due(true, true, false));
-        assert!(live_typing_due(true, false, true), "Toggle starts at once");
     }
 }

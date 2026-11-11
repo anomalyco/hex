@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
+use crate::audio::linger::MicrophoneLinger;
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::desktop::events::{
@@ -246,6 +247,9 @@ pub fn run(
         tracing::warn!(%error, "Windows recording feedback is unavailable");
     }
     let mut release_while_idle = release_microphone_while_idle;
+    // Labs › Keep mic open after dictating: a finished capture's
+    // microphone stays open for its window before release.
+    let mut linger = MicrophoneLinger::default();
     let mut device = device;
     let mut input = create_input(
         device.as_deref(),
@@ -299,8 +303,6 @@ pub fn run(
     let mut capture_host =
         crate::capture_host::CaptureHost::start(Some(engine.clone()), &environment);
     let capture_controls = crate::capture_host::listen_for_controls();
-    // The microphone stays open for a capture even while released when idle.
-    let mut capture_holds_microphone = false;
     let mut finishing: Option<Finishing> = None;
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
@@ -469,25 +471,10 @@ pub fn run(
                 tracing::warn!(message, "a capture command did nothing");
             }
         }
-        // A capture copies this microphone: a released one opens for it,
-        // and closes again once nothing records.
-        if release_while_idle {
-            let wants = timeline.wants_audio();
-            if wants && !input.is_active() {
-                input.request_open();
-            }
-            if wants {
-                capture_holds_microphone = true;
-            } else if capture_holds_microphone
-                && !recording
-                && !start_pending
-                && finishing.is_none()
-                && !service.is_active()
-            {
-                capture_holds_microphone = false;
-                input.close();
-                audio_ready = false;
-            }
+        // A capture copies this microphone: a released one opens for it, and
+        // the one release check below closes it once nothing records.
+        if release_while_idle && timeline.wants_audio() && !input.is_active() {
+            input.request_open();
         }
         if let Ok(error) = hotkey.errors.try_recv() {
             return Err(eyre!("Windows hotkey monitor stopped: {error}"));
@@ -531,10 +518,6 @@ pub fn run(
                 });
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
-            if release_while_idle && !timeline.wants_audio() {
-                input.close();
-                audio_ready = false;
-            }
         }
         // `/dictations`: a client's dictation never ends a shortcut capture,
         // and only its owner (or its lapsed lease) ends it.
@@ -602,10 +585,6 @@ pub fn run(
                 indicator.as_ref(),
                 &mut service_recording,
             );
-            if release_while_idle && !timeline.wants_audio() {
-                input.close();
-                audio_ready = false;
-            }
         }
         for (id, result) in service_finished.try_iter() {
             service.complete(id, result);
@@ -696,10 +675,6 @@ pub fn run(
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
                     audio_suppressor.restore();
-                    if !timeline.wants_audio() {
-                        input.close();
-                        audio_ready = false;
-                    }
                     if let Some(print) = print.take() {
                         print.send(PrintedTranscript::NoSpeech);
                     }
@@ -756,10 +731,6 @@ pub fn run(
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_current_state(&mut events, recording, pending, &device_label)?;
-                    if release_while_idle && !timeline.wants_audio() {
-                        input.close();
-                        audio_ready = false;
-                    }
                 }
                 HotkeyAction::PasteLast if !recording => {
                     submit_paste_last(
@@ -823,6 +794,24 @@ pub fn run(
                 Err(error) => fail(&events, error)?,
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
+        }
+
+        // The one place a released microphone closes: once nothing records,
+        // no client dictates, no release tail runs, no capture copies it, and
+        // Labs › Keep mic open after dictating's window has passed.
+        if release_while_idle
+            && input.is_active()
+            && linger.may_close(
+                Instant::now(),
+                recording
+                    || start_pending
+                    || finishing.is_some()
+                    || service.is_active()
+                    || timeline.wants_audio(),
+            )
+        {
+            input.close();
+            audio_ready = false;
         }
 
         let idle = !recording
@@ -899,10 +888,6 @@ pub fn run(
                             chunk_captured_through,
                             input.sample_rate(),
                         );
-                        if !service_recording && release_while_idle && !timeline.wants_audio() {
-                            input.close();
-                            audio_ready = false;
-                        }
                     }
                     emit_current_state(&mut events, recording, pending, &device_label)?;
                     continue;

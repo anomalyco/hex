@@ -47,6 +47,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
 ├── Unload model when idle no labs.unload_idle + labs.unload_idle_minutes (5/15/30/60, default 15)
 │                                        the engine frees the speech model after that long unused (#442)
+├── Keep mic open after dictating no labs.keep_microphone_open + labs.keep_microphone_open_seconds (30/60/180/300/1800, default 60)
+│                                        with Turn off the mic when not dictating on, the microphone stays open for that
+│                                        long after a capture, so the next dictation starts at once
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
@@ -236,10 +239,12 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled
 ├── A lab's own settings show on its card while it's on -> Unload model when idle: Unload after (5/15/30/60 min);
+│   Keep mic open after dictating: Keep open for (30 s, 1/3/5/30 min);
 │   Appearance: Theme (System, Light mode, Dark mode);
 │   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
 │   Annotate 15 s replay's shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
+│   // keep_microphone_open_shows_its_window_on_its_card_while_on,
 │   // appearance_shows_its_theme_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
 │   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one). It never turns a lab on. An unknown
@@ -289,7 +294,8 @@ playground only after Hex restarts.
 Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
-`labs::more_call_apps()`, `app_settings::meetings_enabled()`, or
+`labs::more_call_apps()`, `labs::microphone_linger()`,
+`app_settings::meetings_enabled()`, or
 `app_settings::hex_microphone_enabled()`.
 Add a new feature to `labs::Feature` (name, settings key, description, audience), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
@@ -383,6 +389,43 @@ next. Check: `unload_idle_carries_its_minutes` in [labs.rs](../../src/labs.rs);
 `a_parked_engine_holds_its_selection_and_reloads_it_before_the_first_job` in
 [transcription/engine.rs](../../src/transcription/engine.rs) covers a parked
 start and its first job. The unload itself has no automated check.
+
+Keep mic open after dictating (`keep-microphone-open`): while on, its
+card shows "Keep open for" (30 s, 1, 3, 5, or 30 minutes; default 1 minute).
+It applies only while General's Turn off the mic when not dictating
+(`release_microphone_while_idle`) is on: with that off the microphone is
+always open, so the lab has nothing to do. When both are on, a capture that
+finishes or is cancelled no longer closes the microphone at once. The one
+release check every listener now makes (`audio::linger::MicrophoneLinger`)
+arms a window on the first pass with nothing recording, clears it when a
+capture starts, and closes only once the window passes with still nothing
+recording: no dictation, no local API dictation, no release tail, and no
+capture copying the microphone (`capture_host`'s `ListenerTimeline`). A press
+inside the window takes the ordinary warm path: the microphone is already
+open, so the capture starts at once and keeps its pre-roll (up to 450 ms;
+none while "While dictating" mutes, pauses, or lowers audio) from the warm
+stream, instead of the cold open's asynchronous start with no pre-roll that
+happens today with the release setting on. Turning the lab off while the microphone
+lingers releases it at the next idle pass, exactly as before; turning the
+release setting off leaves the microphone open, as that setting always did.
+macOS reads the gate as `dictation/audio`'s owner reconciles the input (its
+loop ticks every 10 ms while the input is active, so the deadline is
+observed); Windows and Linux check it once per pass before their idle wait.
+The window has no room in the Labs state word beside Unload model when idle's
+minutes, so the switch holds the word's last free bit and the window lives in
+its own atomic, both written by `labs::apply`. Checks: the `audio::linger`
+tests (`the_microphone_closes_only_after_the_window`,
+`a_new_capture_clears_the_window_and_its_end_starts_a_fresh_one`,
+`no_window_keeps_the_plain_release_while_idle_close`,
+`a_cleared_window_waits_for_the_next_capture_to_end`),
+`keep_microphone_open_is_its_own_bit_and_carries_its_window` and
+`a_window_outside_the_choices_turns_the_linger_off` in
+[labs.rs](../../src/labs.rs), the persistence tests in
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs), and
+`a_microphone_linger_window_is_seconds_in_settings_json` in
+[control/settings.rs](../../src/control/settings.rs). Not yet observed on a
+real Mac, Windows PC, or Linux desktop: no capture has been run with the lab
+on, and the Labs page goldens need regenerating for the new card.
 
 Restore shortcut default (`restore-shortcut-default`, issue 613): while on,
 General › Advanced › Paste last dictation shows a Restore default shortcut

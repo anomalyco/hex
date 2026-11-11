@@ -1092,6 +1092,9 @@ Release when idle -> Press shortcut                   // dictate.cold-microphone
      │   never paste                       // recover.interrupted-dictation
      └── Ready while held or locked -> Capture
   -> Capture idle -> Microphone can close             // accepted jobs do not keep it open
+     └── Labs › Keep mic open after dictating -> Keep it open for the
+         chosen window (30 s, 1/3/5/30 min), then close; a press inside it
+         takes the warm path above with its pre-roll (labs.md)
 ```
 
 Source: `DictationCapture` in [dictation.rs](../../src/dictation.rs); checks:

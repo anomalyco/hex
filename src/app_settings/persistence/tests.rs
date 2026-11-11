@@ -202,6 +202,39 @@ fn an_invalid_appearance_theme_resets_only_that_field() {
 }
 
 #[test]
+fn a_microphone_linger_window_outside_the_choices_loads_the_default() {
+    let original = br#"{"labs":{"keep_microphone_open":true,"keep_microphone_open_seconds":45,"live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(
+        settings.labs.keep_microphone_open,
+        "the switch stays as saved"
+    );
+    assert_eq!(
+        settings.labs.keep_microphone_open_seconds,
+        crate::app_settings::LabsSettings::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS
+    );
+    assert_eq!(
+        settings.labs.keep_microphone_open_for(),
+        Some(std::time::Duration::from_secs(60))
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn a_microphone_linger_window_from_the_choices_keeps_its_seconds() {
+    let original = br#"{"labs":{"keep_microphone_open":true,"keep_microphone_open_seconds":180}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(
+        settings.labs.keep_microphone_open_for(),
+        Some(std::time::Duration::from_secs(180))
+    );
+}
+
+#[test]
 fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,

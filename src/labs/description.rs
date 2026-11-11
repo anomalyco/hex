@@ -35,6 +35,9 @@ impl Feature {
             Self::UnloadIdle => {
                 "Free the speech model's memory after a while unused (labs.unload_idle_minutes); the next dictation reloads it"
             }
+            Self::KeepMicrophoneOpen => {
+                "With Turn off the mic when not dictating on, keep the microphone open for a while after each dictation (labs.keep_microphone_open_seconds), so the next one starts at once"
+            }
             Self::RestoreShortcutDefault => {
                 "Offer Restore default next to Paste last dictation's shortcut"
             }

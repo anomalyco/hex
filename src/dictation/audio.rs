@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
+use crate::audio::linger::MicrophoneLinger;
 use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::dictation::{
@@ -157,6 +158,9 @@ enum Command {
 struct Owner {
     input: RecoveringAudioInput,
     release_while_idle: bool,
+    /// Labs › Keep mic open after dictating: how long a finished or
+    /// cancelled capture's microphone keeps open before it is released.
+    linger: MicrophoneLinger,
     pending_capture: Option<PendingCapture>,
     capture: DictationCapture,
     recording_environment: RecordingEnvironmentController,
@@ -565,6 +569,7 @@ impl Owner {
         let owner = Self {
             input,
             release_while_idle,
+            linger: MicrophoneLinger::default(),
             pending_capture: None,
             capture,
             recording_environment,
@@ -1078,8 +1083,12 @@ impl Owner {
     }
 
     fn reconcile_input(&mut self) {
-        if self.release_while_idle && !self.capture_sink_open() {
-            if self.capture_idle() && self.input.is_active() {
+        if self.release_while_idle {
+            // Labs › Keep mic open after dictating: a capture's end
+            // keeps the microphone open for the lab's window, and closing
+            // waits for it. Off, this is the plain idle close.
+            let busy = !self.capture_idle() || self.capture_sink_open();
+            if self.input.is_active() && self.linger.may_close(Instant::now(), busy) {
                 self.close_input();
             }
         } else if !self.input.is_active() {

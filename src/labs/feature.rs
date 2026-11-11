@@ -20,6 +20,7 @@ pub enum Feature {
     PauseBrowser,
     ShareShortcut,
     UnloadIdle,
+    KeepMicrophoneOpen,
     RestoreShortcutDefault,
     KeepOnClipboard,
     CopyOnly,
@@ -81,7 +82,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 73] = [
+    pub const ALL: [Self; 74] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -97,6 +98,7 @@ impl Feature {
         Self::PauseBrowser,
         Self::ShareShortcut,
         Self::UnloadIdle,
+        Self::KeepMicrophoneOpen,
         Self::RestoreShortcutDefault,
         Self::KeepOnClipboard,
         Self::CopyOnly,

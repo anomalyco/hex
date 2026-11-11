@@ -350,3 +350,18 @@ pub fn unload_idle() -> Option<std::time::Duration> {
     (state & UNLOAD_IDLE != 0)
         .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
 }
+
+/// How long a capture's microphone keeps open after it ends, while Labs ›
+/// Keep mic open after dictating is on: read as each capture ends and
+/// on every pass that would release the microphone, so turning the lab off
+/// releases it. `None` leaves Release microphone while idle exactly as it was.
+pub fn microphone_linger() -> Option<std::time::Duration> {
+    let state = state();
+    if state & KEEP_MICROPHONE_OPEN == 0 {
+        return None;
+    }
+    match MICROPHONE_LINGER_SECONDS.load(Ordering::Acquire) {
+        0 => None,
+        seconds => Some(std::time::Duration::from_secs(seconds)),
+    }
+}
