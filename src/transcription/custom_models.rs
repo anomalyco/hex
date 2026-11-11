@@ -189,9 +189,10 @@ struct Registry {
     /// The folder and modification time the entries were read at.
     stamp: Option<(PathBuf, Option<SystemTime>)>,
     entries: Vec<Entry>,
-    /// Definitions built so far, by ID and name: a rename or re-import
-    /// builds one, and every other read reuses it.
-    built: HashMap<(CustomModelId, String), &'static ModelDefinition>,
+    /// Definitions built so far, by ID, name, and the file it uses: a
+    /// rename, an in-place change, or a re-import builds one, and every
+    /// other read reuses it.
+    built: HashMap<(CustomModelId, String, Option<PathBuf>), &'static ModelDefinition>,
     placeholders: HashMap<CustomModelId, &'static ModelDefinition>,
 }
 
@@ -250,7 +251,7 @@ impl Registry {
                 };
                 let definition = *self
                     .built
-                    .entry((id, manifest.name.clone()))
+                    .entry((id, manifest.name.clone(), manifest.path.clone()))
                     .or_insert_with(|| build(id, &manifest));
                 let receipt = fs::read(receipt_path(&model_file(&directory, id)))
                     .ok()
