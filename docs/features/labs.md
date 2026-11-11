@@ -1421,7 +1421,9 @@ path (`custom_models::add_in_place`), never copied
 is `model_import::in_place_on`, read when the button draws and again when the
 dialog answers, before the worker starts. Off, the picker is exactly as
 before. Checks:
-`a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`
+`a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`,
+`hex_s_own_copy_chosen_through_another_path_is_never_deleted`, and
+`an_independent_identical_file_replaces_hex_s_copy`
 in [transcription/custom_models.rs](../../src/transcription/custom_models.rs);
 `every_feature_is_off_by_default_and_round_trips` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real window or a second
