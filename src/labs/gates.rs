@@ -45,8 +45,7 @@ pub fn mouse_shortcuts() -> bool {
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
-/// clipboard being restored (macOS and Windows; read as each paste commits).
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+/// clipboard being restored (read as each paste commits).
 pub fn keep_on_clipboard() -> bool {
     on(KEEP_ON_CLIPBOARD)
 }

@@ -7,7 +7,8 @@
 //! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
-//! clipboard or only copying it (macOS), a second dictation shortcut,
+//! clipboard, only copying it instead (macOS and Windows), a second
+//! dictation shortcut,
 //! more dictation shortcuts with their own activation modes
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
 //! recording when its call ends (macOS), transcribing a saved WAV file from a
@@ -310,9 +311,7 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::PauseMenu
             | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
-            Self::KeepOnClipboard | Self::CopyOnly => {
-                cfg!(any(target_os = "macos", target_os = "windows"))
-            }
+            Self::CopyOnly => cfg!(any(target_os = "macos", target_os = "windows")),
             Self::ReturnToApp => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
@@ -334,6 +333,7 @@ impl Feature {
             | Self::VocabularyBiasing
             | Self::UnloadIdle
             | Self::RestoreShortcutDefault
+            | Self::KeepOnClipboard
             | Self::SpokenFormatting
             | Self::SpokenSymbols
             | Self::PickerSortFilter
@@ -1806,11 +1806,8 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_labs_are_macos_or_windows_only() {
-        assert_eq!(
-            Feature::KeepOnClipboard.on_this_os(),
-            cfg!(any(target_os = "macos", target_os = "windows"))
-        );
+    fn keeping_the_clipboard_is_everywhere_and_copy_only_is_macos_or_windows() {
+        assert!(Feature::KeepOnClipboard.on_this_os());
         assert_eq!(
             Feature::CopyOnly.on_this_os(),
             cfg!(any(target_os = "macos", target_os = "windows"))

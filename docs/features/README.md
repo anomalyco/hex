@@ -833,7 +833,7 @@ Completed output                         // output
 ├── Paste -> Current focus, in submission order
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
 │   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
-│   ├── Labs > Keep dictation on clipboard (macOS, Windows, off) -> the dictation stays on the clipboard (labs.md)
+│   ├── Labs > Keep dictation on clipboard (every OS, off) -> the dictation stays on the clipboard (labs.md)
 │   │   └── Windows -> kept as an ordinary entry, in history too
 │   └── Labs > Copy dictation only (macOS, Windows, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
@@ -1960,6 +1960,8 @@ Linux beta                               // not macOS feature parity
 │   └── Released while idle, on-demand open fails -> Failed entry; stays released
 │   └── Overload (Xrun) glitch -> Counted; the polling thread logs one line per burst; not a failure
 ├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
+│   ├── Labs > Keep dictation on clipboard (off) -> no snapshot, no restore; an
+│   │   earlier paste's pending restore stands down and the dictation stays (labs.md)
 │   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone
 │   ├── Over the cap or unreadable -> transcript stays; the log says why

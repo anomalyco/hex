@@ -500,17 +500,18 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Each mode can pick a speech model; Hex switches to it when you change apps"),
         ));
     }
-    // macOS's and Windows' pasters can leave a dictation on the clipboard.
+    // Every OS's paster can leave a dictation on the clipboard; only macOS's
+    // and Windows' can skip the paste.
+    rows.push(row(
+        Feature::KeepOnClipboard,
+        None,
+        tr("Keep dictation on clipboard"),
+        tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
+    ));
     if matches!(
         caps.os,
         super::platform::Os::Macos | super::platform::Os::Windows
     ) {
-        rows.push(row(
-            Feature::KeepOnClipboard,
-            None,
-            tr("Keep dictation on clipboard"),
-            tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
-        ));
         rows.push(row(
             Feature::CopyOnly,
             None,
