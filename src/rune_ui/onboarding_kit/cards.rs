@@ -436,16 +436,13 @@ const FACE_GAP: f32 = 7.0;
 
 /// The sender's face beside a line in a group, or the room it would take.
 fn face_slot(p: Paint, sender: Sender<'_>) -> El {
-    match sender {
-        sender if sender.last => {
-            super::inbox::face(p, sender.name, sender.colour, FACE).key("face")
-        }
-        _ => el()
-            .key("face")
-            .size(FACE, FACE)
-            .radius(FACE * 0.5)
-            .border(p.hair, Color::TRANSPARENT),
-    }
+    // The face rides the run's last line. It stays mounted and fades when a
+    // newer line takes it over: swapping to an empty circle in one frame
+    // blinks the photo off (the motion gate's `sender/face` snap).
+    super::inbox::face(p, sender.name, sender.colour, FACE)
+        .key("face")
+        .opacity(if sender.last { 1.0 } else { 0.0 })
+        .opacity_motion(Spring::new(0.32, 0.0))
 }
 
 /// One message in [`chat`]'s thread: theirs on the left, yours on the right
