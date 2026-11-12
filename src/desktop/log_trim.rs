@@ -19,14 +19,15 @@ const INTERVAL: Duration = Duration::from_secs(60 * 60);
 const STALE_LOCK: Duration = Duration::from_secs(5 * 60);
 const CHUNK: usize = 64 * 1024;
 const LOGS: [&str; 2] = ["live.ndjson", "process.log"];
-/// Present once the event log from before dictated words were kept out of it
-/// has been cleared.
-const CLEARED_MARKER: &str = ".event-log-cleared";
+/// Present once the logs from before they kept personal text out have been
+/// cleared. Named apart from the first version's `.event-log-cleared`, which
+/// cleared `live.ndjson` alone, so those installs clear `process.log` too.
+const CLEARED_MARKER: &str = ".old-logs-cleared";
 
-/// Clears an event log written before it kept dictated words out, once, then
-/// trims the logs now and every hour on a background thread.
+/// Clears logs written before they kept personal text out, once, then trims
+/// the logs now and every hour on a background thread.
 pub fn start(log_dir: &Path) {
-    clear_old_event_log(log_dir);
+    clear_old_logs(log_dir);
     let log_dir = log_dir.to_path_buf();
     let spawned = std::thread::Builder::new()
         .name("log-trim".into())
@@ -42,24 +43,24 @@ pub fn start(log_dir: &Path) {
 }
 
 /// Older builds wrote each dictation's text and page addresses into
-/// `live.ndjson`. Truncating rather than deleting keeps any Hex still
-/// appending to it writing to the file everyone reads.
-fn clear_old_event_log(log_dir: &Path) {
+/// `live.ndjson`, and meeting titles, capture summaries, and scripts' output
+/// into `process.log`. Truncating rather than deleting keeps any Hex still
+/// appending to them writing to the files everyone reads.
+fn clear_old_logs(log_dir: &Path) {
     let marker = log_dir.join(CLEARED_MARKER);
     if marker.exists() {
         return;
     }
-    let cleared = match OpenOptions::new()
-        .write(true)
-        .open(log_dir.join("live.ndjson"))
-    {
-        Ok(file) => file.set_len(0),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    };
+    let cleared = LOGS.iter().try_for_each(|name| {
+        match OpenOptions::new().write(true).open(log_dir.join(name)) {
+            Ok(file) => file.set_len(0),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    });
     match cleared.and_then(|()| fs::write(&marker, b"")) {
         Ok(()) => {}
-        Err(error) => tracing::warn!(%error, "could not clear the old event log"),
+        Err(error) => tracing::warn!(%error, "could not clear the old logs"),
     }
 }
 
@@ -190,17 +191,24 @@ mod tests {
     }
 
     #[test]
-    fn the_old_event_log_is_cleared_once() {
+    fn the_old_logs_are_cleared_once() {
         let directory = directory("clear");
-        let path = directory.join("live.ndjson");
-        fs::write(&path, "{\"kind\":\"dictation\",\"text\":\"old words\"}\n").unwrap();
+        let events = directory.join("live.ndjson");
+        let process = directory.join("process.log");
+        fs::write(&events, "{\"kind\":\"dictation\",\"text\":\"old words\"}\n").unwrap();
+        fs::write(&process, "published meeting transcript title=Offer call\n").unwrap();
+        // The first version cleared live.ndjson alone under another marker.
+        fs::write(directory.join(".event-log-cleared"), b"").unwrap();
 
-        clear_old_event_log(&directory);
-        assert_eq!(fs::read(&path).unwrap(), b"");
+        clear_old_logs(&directory);
+        assert_eq!(fs::read(&events).unwrap(), b"");
+        assert_eq!(fs::read(&process).unwrap(), b"");
 
-        fs::write(&path, "{\"kind\":\"dictation\",\"text\":\"\"}\n").unwrap();
-        clear_old_event_log(&directory);
-        assert!(!fs::read(&path).unwrap().is_empty());
+        fs::write(&events, "{\"kind\":\"dictation\",\"text\":\"\"}\n").unwrap();
+        fs::write(&process, "listener started\n").unwrap();
+        clear_old_logs(&directory);
+        assert!(!fs::read(&events).unwrap().is_empty());
+        assert!(!fs::read(&process).unwrap().is_empty());
         fs::remove_dir_all(directory).unwrap();
     }
 

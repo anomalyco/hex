@@ -303,8 +303,9 @@ substitute for source inspection or a second roadmap.
   `desktop/log_trim` keeps `live.ndjson` and `process.log` under 10 MB each:
   at launch and hourly, under a lock file, it drops a log's oldest lines in
   place to its newest 5 MB (never a rename, since every Hex process appends to
-  the same files), and once clears an event log from before dictated words
-  were kept out of it.
+  the same files), and once clears both logs from before they kept personal
+  text out. `EventReader` starts over when a log's first bytes change, so a
+  trim under an open reader never leaves it reading moved records.
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
