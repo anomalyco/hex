@@ -35,7 +35,7 @@ mod silence;
 mod typing;
 
 use gap::{ChunkStep, chunk_step};
-use shortcuts::shortcuts;
+use shortcuts::{reregister, shortcuts};
 use silence::reopen_silent_stream;
 use typing::CaptureTyping;
 
@@ -374,13 +374,13 @@ pub(crate) fn run(
     // Labs › Keep mic open after dictating: a finished capture's
     // microphone stays open for its window before release.
     let mut linger = MicrophoneLinger::default();
-    let (binding, options) = shortcuts(&settings);
-    let hotkey_label = binding.label();
-    let mut toggle = options.toggle;
-    let start_shortcuts = |(binding, options): (LinuxHotkey, HotkeyOptions)| {
+    let mut running = shortcuts(&settings);
+    let hotkey_label = running.0.label();
+    let mut toggle = running.1.toggle;
+    let monitor = |(binding, options): (LinuxHotkey, HotkeyOptions)| {
         LinuxHotkeyMonitor::start(binding, options, hotkey_status.clone(), commands.clone())
     };
-    let mut hotkey = Some(start_shortcuts((binding, options))?);
+    let mut hotkey = Some(monitor(running.clone())?);
     let mut shortcuts_suspended = false;
     let mut indicator = LinuxIndicator::new(settings.indicator_position);
     let mut suppressor =
@@ -661,10 +661,9 @@ pub(crate) fn run(
                 settings = next;
             }
             if register {
-                // The old registration goes first: X11 grabs the same keys again.
                 drop(hotkey.take());
                 if !shortcuts_suspended {
-                    hotkey = Some(start_shortcuts(shortcuts(&settings))?);
+                    hotkey = Some(reregister(&settings, &mut running, monitor, &events)?);
                 }
             }
             // A GPU without room for two copies: the engine swaps in place.

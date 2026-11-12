@@ -186,19 +186,27 @@ pub(super) fn history(
     connect.as_ref()?.history()
 }
 
+/// The window's recorder and `hex settings set` both refuse a key X11 or
+/// the shortcuts portal can't bind, before it is saved.
 pub(super) fn validate_hotkey(
-    _: ShortcutTarget,
+    target: ShortcutTarget,
     binding: &HotkeyBinding,
 ) -> Result<(), &'static str> {
-    if binding.key.as_ref().is_some_and(|key| key.is_mouse())
-        && crate::linux::session::LinuxSession::detect().is_wayland()
-    {
+    let wayland = crate::linux::session::LinuxSession::detect().is_wayland();
+    if binding.key.as_ref().is_some_and(|key| key.is_mouse()) && wayland {
         return Err(tr(
             "Configure mouse shortcuts in your Wayland desktop using the hex commands",
         ));
     }
-    LinuxHotkey::from(binding)
+    let hotkey = LinuxHotkey::from(binding);
+    hotkey
         .validate()
+        // The cancel key is never asked of the portal.
+        .and_then(|()| match target {
+            ShortcutTarget::Cancel => Ok(()),
+            _ if wayland => hotkey.portal_trigger().map(drop),
+            _ => Ok(()),
+        })
         .map_err(|_| tr("Add a key Linux can register"))
 }
 

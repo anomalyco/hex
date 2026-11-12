@@ -165,46 +165,8 @@ fn accelerator(binding: &HotkeyBinding) -> Option<String> {
             accelerator.push_str(name);
         }
     }
-    accelerator.push_str(&keysym(&key.name()));
+    accelerator.push_str(&crate::linux::input::keysym(&key.name())?.name);
     Some(accelerator)
-}
-
-/// A key's lowercase name as the X keysym GTK reads.
-fn keysym(name: &str) -> String {
-    if let Some(named) = named_keysym(name) {
-        return named.into();
-    }
-    match name.strip_prefix('f') {
-        Some(number) if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) => {
-            format!("F{number}")
-        }
-        _ => name.into(),
-    }
-}
-
-/// The X keysym of a named (non-character) key, by its lowercase name as
-/// Settings records it. GNOME's accelerators and the shortcuts portal's
-/// triggers share it, so both Linux paths accept the same keys.
-pub(crate) fn named_keysym(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "return" | "enter" => "Return",
-        "tab" => "Tab",
-        "escape" => "Escape",
-        "backspace" => "BackSpace",
-        "delete" => "Delete",
-        "insert" => "Insert",
-        "home" => "Home",
-        "end" => "End",
-        "pageup" => "Page_Up",
-        "pagedown" => "Page_Down",
-        "up" => "Up",
-        "down" => "Down",
-        "left" => "Left",
-        "right" => "Right",
-        "print" => "Print",
-        "pause" => "Pause",
-        _ => return None,
-    })
 }
 
 /// `word` as one argument for GNOME, which splits the command as a shell
