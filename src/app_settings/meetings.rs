@@ -468,8 +468,9 @@ pub fn set_meeting_provider(meetings: &mut MeetingSettings, choice: MeetingProvi
 pub fn save_meeting_provider(choice: MeetingProviderChoice) {
     match AppSettings::load() {
         Ok(mut settings) => {
+            let base = settings.clone();
             if set_meeting_provider(&mut settings.meetings, choice)
-                && let Err(error) = settings.save()
+                && let Err(error) = base.update(&settings)
             {
                 tracing::warn!(%error, "could not save a meeting provider choice");
             }
@@ -485,8 +486,9 @@ pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
             if settings.meetings.recording_indicator_corner == corner {
                 return;
             }
+            let base = settings.clone();
             settings.meetings.recording_indicator_corner = corner;
-            if let Err(error) = settings.save() {
+            if let Err(error) = base.update(&settings) {
                 tracing::warn!(%error, "could not save the recording capsule's corner");
             }
         }

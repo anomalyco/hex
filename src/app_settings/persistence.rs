@@ -4,11 +4,10 @@
 //! those bytes beside the original, including when a migration is first.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
 use color_eyre::eyre::{Result, eyre};
 use serde::Deserialize;
@@ -20,14 +19,31 @@ use super::{AppSettings, path};
 use crate::policy::Policy;
 
 // A settings editor and a background migration may save at the same time.
-static WRITER: Mutex<()> = Mutex::new(());
+static WRITER: Mutex<u64> = Mutex::new(0);
 
-/// Paths whose read failed or found something other than a JSON object. While one
-/// is here, a save refuses to write the defaults that read used, even after
-/// the file is fixed, until a fresh read (a control command, the Linux poll,
-/// or a restart) clears it. Keyed by path so tests in one process do not
-/// interfere.
-static UNPARSEABLE: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Default::default);
+/// Load provenance travels with a snapshot, but isn't a preference and never
+/// participates in settings equality or serialization.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Source {
+    pub(crate) revision: u64,
+    path: Option<PathBuf>,
+    writable: bool,
+}
+
+impl PartialEq for Source {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+fn stamp(settings: &mut AppSettings, path: &Path, writable: bool, revision: &mut u64) {
+    *revision += 1;
+    settings.source = Source {
+        revision: *revision,
+        path: Some(path.into()),
+        writable,
+    };
+}
 
 /// What launch loaded: settings for the first render and the note to show.
 pub(crate) struct LaunchLoad {
@@ -91,21 +107,19 @@ impl AppSettings {
         Ok(Self::load_checked_from(path)?.0)
     }
 
-    /// Clears the refusal recorded for a file that wasn't a JSON object.
-    /// Only the Linux poll calls this, after it adopts a valid or removed
-    /// file; every other platform waits for a restart.
-    #[cfg(any(target_os = "linux", test))]
-    pub(crate) fn forget_unparseable(path: &Path) {
-        remember_unparseable(path, false);
-    }
-
     /// `load_from` with the file problem it recovered from, from the same
     /// read, so a caller deciding whether to adopt cannot race an edit.
     pub(crate) fn load_checked_from(path: &Path) -> Result<(Self, Option<LoadIssue>)> {
-        let (settings, migrated, issue) = Self::read_managed_checked_from(path, Policy::current())?;
-        if migrated && let Err(error) = settings.write_to(path) {
+        let mut revision = WRITER.lock().unwrap_or_else(|error| error.into_inner());
+        let policy = Policy::current();
+        let (mut settings, migrated, issue) = Self::read_managed_checked_from(path, policy)?;
+        if issue.is_none()
+            && migrated
+            && let Err(error) = settings.write_locked(path, policy)
+        {
             tracing::warn!(%error, "could not persist normalized settings");
         }
+        stamp(&mut settings, path, issue.is_none(), &mut revision);
         Ok((settings, issue))
     }
 
@@ -117,7 +131,9 @@ impl AppSettings {
     }
 
     pub(super) fn read_managed_from(path: &Path, policy: Policy) -> Result<(Self, bool)> {
-        let (settings, migrated, _) = Self::read_managed_checked_from(path, policy)?;
+        let mut revision = WRITER.lock().unwrap_or_else(|error| error.into_inner());
+        let (mut settings, migrated, issue) = Self::read_managed_checked_from(path, policy)?;
+        stamp(&mut settings, path, issue.is_none(), &mut revision);
         Ok((settings, migrated))
     }
 
@@ -138,16 +154,12 @@ impl AppSettings {
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "could not read settings; using defaults without changing the file");
-                remember_unparseable(path, true);
                 return Ok((Self::default(), false, Some(LoadIssue::Unreadable)));
             }
         };
         let issue = match settings_object(&data) {
             Ok(_) => None,
-            Err(reason) => {
-                remember_unparseable(path, true);
-                Some(LoadIssue::Unparseable(reason))
-            }
+            Err(reason) => Some(LoadIssue::Unparseable(reason)),
         };
         let (mut settings, mut repaired) = decode(&data);
         let loaded = serde_json::to_value(&settings)?;
@@ -210,13 +222,63 @@ impl AppSettings {
         Ok((settings, migrated, issue))
     }
 
+    #[cfg(test)]
     pub(super) fn write_to(&self, path: &Path) -> Result<()> {
         self.write_managed_to(path, Policy::current())
     }
 
+    #[cfg(test)]
     pub(super) fn write_managed_to(&self, path: &Path, policy: Policy) -> Result<()> {
-        self.validate_recording_duck_volume()?;
         let _writer = WRITER.lock().unwrap_or_else(|error| error.into_inner());
+        self.write_locked(path, policy)
+    }
+
+    /// Commit only edits made since this snapshot. Every production writer
+    /// goes through this read/merge/write transaction and adopts its result.
+    pub fn update(&self, candidate: &Self) -> Result<Self> {
+        let path = path()?;
+        self.update_at(candidate, &path, Policy::current())
+    }
+
+    pub(super) fn update_at(&self, candidate: &Self, path: &Path, policy: Policy) -> Result<Self> {
+        let mut revision = WRITER.lock().unwrap_or_else(|error| error.into_inner());
+        if !self.source.writable || self.source.path.as_deref() != Some(path) {
+            return Err(eyre!(
+                "Settings weren't read successfully. Reload settings before saving. Nothing was saved."
+            ));
+        }
+        let (current, _, issue) = Self::read_managed_checked_from(path, policy)?;
+        if issue.is_some() {
+            return Err(eyre!("Settings couldn't be read. Nothing was saved."));
+        }
+        let mut merged = json(&current)?;
+        merge(&mut merged, &json(self)?, &json(candidate)?);
+        let mut merged: Self = serde_json::from_value(merged)?;
+        merged.write_locked(path, policy)?;
+        policy.enforce(&mut merged);
+        stamp(&mut merged, path, true, &mut revision);
+        merged.apply_runtime();
+        Ok(merged)
+    }
+
+    /// Runtime hosts check for external edits off the window thread. Failed
+    /// reads never replace the settings already running.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    pub(crate) fn refreshed(&self) -> Result<Option<Self>> {
+        let Some(path) = self.source.path.as_deref() else {
+            return Ok(None);
+        };
+        let (settings, issue) = Self::load_checked_from(path)?;
+        if issue.is_none() && (!self.source.writable || settings != *self) {
+            settings.apply_runtime();
+            Ok(Some(settings))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn write_locked(&self, path: &Path, policy: Policy) -> Result<()> {
+        self.validate_recording_duck_volume()?;
         let parent = path
             .parent()
             .ok_or_else(|| eyre!("settings path has no parent"))?;
@@ -234,7 +296,7 @@ impl AppSettings {
         };
         // The in-memory settings came from a file that wasn't a JSON object.
         // They may be stale defaults, so a fixed file must be loaded instead.
-        if load_found_unparseable(path) {
+        if self.source.revision != 0 && !self.source.writable {
             return Err(eyre!(
                 "settings.json couldn't be read when Hex loaded it. Restart Hex to load the fixed file. Nothing was saved."
             ));
@@ -255,7 +317,31 @@ impl AppSettings {
         // then changes only where a setting does.
         let saved = self.as_saved(policy, original.as_deref());
         let compact = serde_json::to_vec(&*saved)?;
-        let value: Value = serde_json::from_slice(&compact)?;
+        let mut value: Value = serde_json::from_slice(&compact)?;
+        if let Some(original) = original.as_deref() {
+            let mut original: Value = serde_json::from_slice(original)?;
+            let known = json(&decode_value(&mut original).0)?;
+            // These are understood migration inputs, not unknown settings.
+            for (parent, keys) in [
+                ("", &["text_replacements"][..]),
+                ("/transcription", &["recognition_hints"][..]),
+                (
+                    "/meetings",
+                    &[
+                        "never_offer",
+                        "summarize_with_opencode",
+                        "summarize_with_apple_intelligence",
+                    ][..],
+                ),
+            ] {
+                if let Some(Value::Object(object)) = original.pointer_mut(parent) {
+                    for key in keys {
+                        object.remove(*key);
+                    }
+                }
+            }
+            keep_unknown(&mut value, &original, &known);
+        }
         let bytes = serde_json::to_vec_pretty(&value)?;
         crate::durable::write(path, &bytes)?;
         Ok(())
@@ -276,26 +362,64 @@ impl AppSettings {
     }
 }
 
-fn warn(key: &str, reason: &str) {
-    tracing::warn!(key, reason, "invalid setting; using its default in memory");
+fn json(settings: &AppSettings) -> Result<Value> {
+    Ok(serde_json::from_slice(&serde_json::to_vec(settings)?)?)
 }
 
-fn remember_unparseable(path: &Path, unparseable: bool) {
-    let mut paths = UNPARSEABLE
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if unparseable {
-        paths.insert(path.to_path_buf());
-    } else {
-        paths.remove(path);
+/// Retain fields this build doesn't understand, including nested fields.
+/// Known optional fields omitted by the candidate still get removed.
+fn keep_unknown(saved: &mut Value, original: &Value, known: &Value) {
+    if let (Value::Object(saved), Value::Object(original), Value::Object(known)) =
+        (saved, original, known)
+    {
+        for (key, value) in original {
+            match known.get(key) {
+                None if !value.is_null() => {
+                    saved.insert(key.clone(), value.clone());
+                }
+                None => {}
+                Some(known) => {
+                    if let Some(saved) = saved.get_mut(key) {
+                        keep_unknown(saved, value, known);
+                    }
+                }
+            }
+        }
     }
 }
 
-fn load_found_unparseable(path: &Path) -> bool {
-    UNPARSEABLE
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .contains(path)
+/// Objects merge by key; arrays and scalar values are indivisible edits.
+fn merge(current: &mut Value, base: &Value, candidate: &Value) {
+    if base == candidate {
+        return;
+    }
+    if let (Value::Object(current), Value::Object(base), Value::Object(candidate)) =
+        (&mut *current, base, candidate)
+    {
+        for key in base.keys().chain(candidate.keys()) {
+            if base.get(key) == candidate.get(key) {
+                continue;
+            }
+            match candidate.get(key) {
+                None => {
+                    current.remove(key);
+                }
+                Some(value) => {
+                    merge(
+                        current.entry(key.clone()).or_insert(Value::Null),
+                        base.get(key).unwrap_or(&Value::Null),
+                        value,
+                    );
+                }
+            }
+        }
+    } else {
+        *current = candidate.clone();
+    }
+}
+
+fn warn(key: &str, reason: &str) {
+    tracing::warn!(key, reason, "invalid setting; using its default in memory");
 }
 
 /// Why a load used defaults without a settings JSON object on disk, even
@@ -409,9 +533,13 @@ fn decode(data: &[u8]) -> (AppSettings, bool) {
             return (AppSettings::default(), true);
         }
     };
+    decode_value(&mut value)
+}
+
+fn decode_value(value: &mut Value) -> (AppSettings, bool) {
     let mut repaired = false;
     loop {
-        match serde_path_to_error::deserialize::<_, AppSettings>(&value) {
+        match serde_path_to_error::deserialize::<_, AppSettings>(&*value) {
             Ok(settings) => return (settings, repaired),
             Err(error) => {
                 let path: Vec<_> = error.path().iter().collect();
@@ -419,7 +547,7 @@ fn decode(data: &[u8]) -> (AppSettings, bool) {
                 // Deleting a field invokes its actual serde default, including
                 // section-specific defaults. A malformed list/map entry with
                 // required fields is removed as a unit on the next attempt.
-                if !remove(&mut value, &path) {
+                if !remove(value, &path) {
                     return (AppSettings::default(), true);
                 }
                 repaired = true;

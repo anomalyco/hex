@@ -47,7 +47,7 @@ hand, cannot prevent the app from opening.
 
 ```ts
 Launch -> read settings.json
-├── Unknown keys -> ignored
+├── Unknown keys -> ignored in memory, preserved on save
 ├── Invalid field -> log its key and reason -> that field's default
 │   └── Valid siblings and unrelated sections stay
 ├── Invalid JSON / not a JSON object -> log why -> defaults in memory
@@ -57,8 +57,8 @@ Launch -> read settings.json
 └── Save
     ├── Invalid JSON / not an object on disk -> save refused
     │   └── fix or remove the file; original stays exactly as it was
-    ├── This process couldn't read a settings object -> save refused
-    │   └── even after the file is fixed; a restart (or the Linux poll) clears it
+    ├── This save's base couldn't read a settings object -> save refused
+    │   └── a successful reload authorizes only the newly adopted snapshot
     └── Invalid fields -> preserve exact original first
         ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once
         └── Backup fails / original cannot be read -> save fails, original stays
@@ -67,24 +67,35 @@ Launch -> read settings.json
 Loading repaired settings does not itself rewrite the file. A later settings
 save (including a migration save) takes the backup before replacing invalid
 fields. A file that is not valid JSON, or is valid JSON but not an object, is
-never backed up or replaced: every save is refused until Hex restarts, and
-launch keeps running with defaults in memory while naming the parse error. A
-process that loaded such a file keeps refusing saves even after the file is
-fixed, because its in-memory settings may be stale defaults. Reading the fixed
-file does not clear that refusal; the refusal says to restart. On Linux only,
-the two-second poll clears it when it adopts a valid or removed file.
-Backups are never automatically removed. On Linux, the running Hex checks
-`settings.json` every two seconds and adopts an edit made outside the window
-(by hand or by an agent), so its modes reach the listener and the next save
-keeps it (#970). The check runs only when the file's mtime changes. A file that
-isn't a JSON object is never adopted: the running settings stay, the parse
-error appears in the settings error surface, and the message is not logged on
-every tick. A later check that reads a valid file, or finds the file removed,
-adopts it (even when it equals the running settings), clears that error, and
-clears the process's refusal marker, so the window's next save works without a
-restart. macOS and Windows still read the file only at launch, through
-`hex settings set`, or through their own save-and-reload path. Unchosen
-`meetings.retention` is
+never backed up or replaced. Launch keeps running with defaults while naming
+the error. That failed snapshot can never save, even after another reader
+successfully loads the repaired file. Backups are never automatically removed.
+Every OS's runtime checks for external edits every two seconds, off the window
+thread. Linux checks on mtime changes and shows parse errors; macOS and Windows
+keep their previous settings on failed reads. Adopting a valid or removed file
+replaces the failed snapshot and allows new edits to save.
+
+`recover.settings-writers`: every production save passes its base and candidate
+to `AppSettings::update`. Under one process-wide lock, it rereads current
+settings and applies only fields changed from the base. Objects merge by key;
+arrays are whole-field edits, and a local edit wins a same-field conflict.
+Managed switches keep their saved values. The returned snapshot includes other
+writers' changes and a monotonic in-process revision; the window rejects older
+revisions and rebases dirty Modes fields individually. A capsule's provider or
+corner choice uses this same path, without an optimistic settings mirror.
+This protects writers in one Hex process; an uncoordinated external writer
+replacing the file during the transaction is not serialized by the mutex.
+
+```ts
+window starts with A -> CLI saves A + X
+  -> window submits base A, candidate A + Y
+     -> owner reads A + X -> writes A + X + Y -> window adopts it
+```
+
+History retention applies when the runtime adopts settings, including external
+edits while its window is closed; queries and pruning share the retention cutoff.
+Onboarding refreshes its microphone explanation from the adopted setting.
+Unchosen `meetings.retention` is
 written as an absent key, so older builds with a non-optional retention still
 read the file; existing `null` values also load in the current build.
 
@@ -96,10 +107,15 @@ Source and checks: [settings persistence](../../src/app_settings/persistence.rs)
 and its [tests](../../src/app_settings/persistence/tests.rs): old-shape retention,
 invalid enums, nested types, list entries, unknown keys, invalid JSON and
 non-object documents (defaults, refused saves, no backup), a file fixed while
-the process still holds stale settings (refused until the explicit clear),
+the process still holds stale settings (refused even after a healthy read),
 exactly-once private backups, interrupted saves, backup failure, and sorted keys
 at every level (`saved_keys_are_sorted_at_every_level`). These checks use
-temporary files; they do not exercise a real app launch or the Linux poll.
+temporary files; they do not exercise a real app launch or native polling.
+`base_aware_updates_keep_other_writers_and_nested_unknown_fields` and
+`simultaneous_updates_serialize_the_read_merge_and_write` cover stale and
+concurrent writers; `a_fresh_reader_cannot_authorize_a_failed_base` covers
+failed-read provenance. `rune_ui::modes` tests cover revision ordering and
+field-level draft rebasing. These are state tests, not native end-to-end proof.
 
 ### Finish Without Losing Other Work
 

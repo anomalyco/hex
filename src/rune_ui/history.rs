@@ -374,11 +374,6 @@ fn set_retention(ui: &mut Ui, retention: HistoryRetention) {
     if !ui.update(|settings| settings.history_retention = retention) {
         return;
     }
-    if let Some(store) = &ui.history.store
-        && let Err(error) = store.set_retention(retention)
-    {
-        ui.history.error = Some(error.to_string());
-    }
     ui.history.reload();
 }
 

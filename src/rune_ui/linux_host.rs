@@ -90,9 +90,13 @@ impl Backend {
     }
 
     /// Saves through the host, which adopts the settings at once.
-    pub(super) fn save(&mut self, settings: &AppSettings) -> Result<()> {
+    pub(super) fn save(
+        &mut self,
+        base: &AppSettings,
+        settings: &AppSettings,
+    ) -> Result<AppSettings> {
         match self {
-            Self::Host(host, _) => host.save_settings(settings.clone()),
+            Self::Host(host, _) => host.save_settings(base, settings),
             Self::Status(..) => Err(eyre!("This window only shows `hex status`")),
         }
     }

@@ -55,7 +55,7 @@ pub(crate) trait Host {
     }
     /// Saves `settings` as the window would and lets the runtime, the
     /// listener, and an open window adopt them.
-    fn save(&self, settings: AppSettings) -> Result<(), ControlError>;
+    fn save(&self, base: &AppSettings, settings: AppSettings) -> Result<(), ControlError>;
     fn history(&self) -> Option<crate::history::History>;
     fn show_window(&self, pane: Option<Pane>) -> Result<(), ControlError>;
     /// Closes the window; false when it wasn't open.
@@ -247,9 +247,10 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
         })),
         ControlCommand::VocabularyAdd { .. } | ControlCommand::VocabularyRemove { .. } => {
             reply(load().and_then(|mut settings| {
+                let base = settings.clone();
                 let reply = super::edit_vocabulary(&mut settings.vocabulary, &command)?;
                 if matches!(reply, ControlReply::Done { changed: true, .. }) {
-                    host.save(settings)?;
+                    host.save(&base, settings)?;
                 }
                 Ok(reply)
             }))
@@ -398,16 +399,9 @@ fn commit(
     if !change.changed(before) {
         return Ok(ControlReply::unchanged(unchanged()));
     }
-    host.save(change.settings)?;
+    host.save(before, change.settings)?;
     for effect in change.effects {
         match effect {
-            settings::Effect::HistoryRetention(retention) => {
-                if let Some(history) = host.history()
-                    && let Err(error) = history.set_retention(retention)
-                {
-                    tracing::warn!(%error, "could not apply history retention");
-                }
-            }
             settings::Effect::DockIcon => {}
             settings::Effect::CheckForUpdates => {
                 let _ = host.check_for_updates();
@@ -681,7 +675,7 @@ mod tests {
         fn paste_last(&self) -> Result<(), ControlError> {
             Ok(())
         }
-        fn save(&self, _: AppSettings) -> Result<(), ControlError> {
+        fn save(&self, _: &AppSettings, _: AppSettings) -> Result<(), ControlError> {
             Ok(())
         }
         fn history(&self) -> Option<crate::history::History> {

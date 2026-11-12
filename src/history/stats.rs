@@ -129,10 +129,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 impl HistoryStore {
     /// Every entry within retention, not just a search's first results.
     pub fn stats(&self, now_ms: u64) -> HistoryStats {
-        let cutoff = self
-            .retention
-            .max_age_ms()
-            .map(|max_age| now_ms.saturating_sub(max_age));
+        let cutoff = self.retention.cutoff(now_ms);
         summarize(
             self.entries
                 .iter()

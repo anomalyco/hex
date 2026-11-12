@@ -60,12 +60,12 @@ impl Meetings {
                 app,
                 commands,
                 move |choice| {
-                    crate::app_settings::save_meeting_provider(choice.clone());
-                    chosen.update(move |ui, _| crate::rune_ui::meeting_provider_chosen(ui, choice));
+                    crate::app_settings::save_meeting_provider(choice);
+                    chosen.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
                 },
                 move |corner| {
                     crate::app_settings::save_meeting_indicator_corner(corner);
-                    moved.update(move |ui, _| crate::rune_ui::meeting_corner_moved(ui, corner));
+                    moved.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
                 },
             )
         };

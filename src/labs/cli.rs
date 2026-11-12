@@ -95,8 +95,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         println!("{} is already {state}.", feature.name());
         return Ok(());
     }
+    let base = settings.clone();
     feature.set(&mut settings, on);
-    settings.save()?;
+    base.update(&settings)?;
     println!("Turned {} {state}.", feature.name());
     Ok(())
 }

@@ -308,15 +308,20 @@ impl WindowsDesktopHost {
                 }
             }
             Request::Quit => return true,
-            Request::ReloadSettings => match AppSettings::load() {
-                Ok(settings) => self.apply_settings(&settings),
-                Err(error) => tracing::warn!(%error, "could not reload settings"),
-            },
+            Request::ReloadSettings => self.reload_settings(),
             Request::CaptureShortcutFor(_)
             | Request::CancelShortcut
             | Request::SetShortcut { .. } => {}
         }
         false
+    }
+
+    fn reload_settings(&mut self) {
+        match self.settings.refreshed() {
+            Ok(Some(settings)) => self.apply_settings(&settings),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "could not reload settings"),
+        }
     }
 
     fn dispatch(&mut self, action: DesktopAction) -> bool {
@@ -536,8 +541,8 @@ impl WindowsDesktopHost {
         }
         let mut candidate = self.settings.clone();
         candidate.enable_on_launch = enabled;
-        match save_listening(&candidate) {
-            Ok(()) => self.apply_settings(&candidate),
+        match save_listening(&self.settings, &candidate) {
+            Ok(saved) => self.apply_settings(&saved),
             Err(error) => tracing::warn!(%error, "could not save Enable on launch"),
         }
     }
@@ -630,8 +635,8 @@ impl WindowsDesktopHost {
         }
         let mut candidate = self.settings.clone();
         candidate.remember_transcription(failed.kept);
-        match candidate.save() {
-            Ok(()) => self.apply_settings(&candidate),
+        match self.settings.update(&candidate) {
+            Ok(saved) => self.apply_settings(&saved),
             Err(error) => tracing::warn!(%error, "could not restore the running model setting"),
         }
         self.preparation.set_error(Some(failed.error));
@@ -679,8 +684,11 @@ impl WindowsDesktopHost {
                 crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
                 let mut candidate = self.settings.clone();
                 candidate.remember_transcription(selection);
-                candidate.save().map_err(|e| format!("{e:#}"))?;
-                self.apply_settings(&candidate);
+                let saved = self
+                    .settings
+                    .update(&candidate)
+                    .map_err(|e| format!("{e:#}"))?;
+                self.apply_settings(&saved);
                 Ok(())
             });
             if let Err(error) = result {
@@ -702,6 +710,9 @@ impl WindowsDesktopHost {
         // Settings may set up the workspace at any time.
         if self.personal_commands_checked_at.elapsed() >= Duration::from_secs(2) {
             self.personal_commands_checked_at = Instant::now();
+            if !cfg!(test) {
+                self.reload_settings();
+            }
             self.refresh_personal_commands_host();
         }
         let mut start_listener = false;
@@ -870,14 +881,14 @@ impl ForeignWindow {
 }
 
 #[cfg(not(test))]
-fn save_listening(settings: &AppSettings) -> Result<()> {
-    settings.save()
+fn save_listening(base: &AppSettings, settings: &AppSettings) -> Result<AppSettings> {
+    base.update(settings)
 }
 
 /// Tests never write the person's `settings.json`.
 #[cfg(test)]
-fn save_listening(_: &AppSettings) -> Result<()> {
-    Ok(())
+fn save_listening(_: &AppSettings, settings: &AppSettings) -> Result<AppSettings> {
+    Ok(settings.clone())
 }
 
 #[cfg(test)]

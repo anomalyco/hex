@@ -223,22 +223,9 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
         .collect()
 }
 
-/// A capsule's "Never offer" or "Always record" choice, kept in the window's
-/// live settings so its next save doesn't drop it.
-pub(crate) fn meeting_provider_chosen(
-    ui: &mut Ui,
-    choice: crate::app_settings::MeetingProviderChoice,
-) {
-    crate::app_settings::set_meeting_provider(&mut ui.settings.meetings, choice);
-}
-
-/// The corner the recording capsule was dragged to, kept in the window's live
-/// settings so its next save doesn't move it back.
-pub(crate) fn meeting_corner_moved(
-    ui: &mut Ui,
-    corner: crate::app_settings::MeetingIndicatorCorner,
-) {
-    ui.settings.meetings.recording_indicator_corner = corner;
+/// The capsule committed a choice; adopt the owner's next revision.
+pub(crate) fn meeting_settings_saved(ui: &mut Ui) {
+    ui.send(super::host::Request::ReloadSettings);
 }
 
 /// A meeting recording could not start or finish; the Meetings pane says why.

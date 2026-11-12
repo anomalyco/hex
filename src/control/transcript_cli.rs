@@ -201,7 +201,7 @@ fn history_output<'a>(
     recordings: Option<&Path>,
 ) -> Result<HistoryOutput<'a>> {
     let range = TimeRange::parse(args.since.as_deref(), args.until.as_deref(), now)?;
-    let cutoff = retention.max_age_ms().map(|age| now.saturating_sub(age));
+    let cutoff = retention.cutoff(now);
     let app = args.app.as_ref().map(|s| s.to_lowercase());
     let grep = args.grep.as_ref().map(|s| s.to_lowercase());
     let mut matching: Vec<_> = entries
@@ -327,7 +327,7 @@ fn stats_output(
     day_of: impl Fn(u64) -> i64,
 ) -> Result<StatsOutput> {
     let range = TimeRange::parse(since, until, now)?;
-    let cutoff = retention.max_age_ms().map(|age| now.saturating_sub(age));
+    let cutoff = retention.cutoff(now);
     let stats = crate::history::stats::summarize(
         entries
             .iter()
