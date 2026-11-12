@@ -2325,6 +2325,21 @@ mod tests {
     fn waiting_for_another_processs_download_reports_its_partial_bytes() {
         use std::sync::Arc;
 
+        /// Holds the lock only until the worker is told to stop: a panic
+        /// anywhere in the test cancels it before the lock can be released,
+        /// so it never reaches the real download.
+        struct Held {
+            canceled: Arc<AtomicBool>,
+            lock: Option<File>,
+        }
+
+        impl Drop for Held {
+            fn drop(&mut self) {
+                self.canceled.store(true, Ordering::Relaxed);
+                drop(self.lock.take());
+            }
+        }
+
         let directory = std::env::temp_dir().join(format!(
             "hex-external-download-{}-{}",
             std::process::id(),
@@ -2335,11 +2350,14 @@ mod tests {
             .join("fixture.gguf")
             .with_extension("gguf.partial");
         fs::write(&partial, b"hel").unwrap();
+        let canceled = Arc::new(AtomicBool::new(false));
         // Another process (`hex model install` in a terminal) owns the lock
         // and is still writing the partial file.
-        let held = lock_downloads(&directory, &AtomicBool::new(false), || {}).unwrap();
+        let held = Held {
+            canceled: canceled.clone(),
+            lock: Some(lock_downloads(&directory, &AtomicBool::new(false), || {}).unwrap()),
+        };
 
-        let canceled = Arc::new(AtomicBool::new(false));
         let worker_canceled = canceled.clone();
         let downloaded = Arc::new(AtomicU64::new(0));
         let worker_downloaded = downloaded.clone();
@@ -2368,7 +2386,6 @@ mod tests {
         canceled.store(true, Ordering::Relaxed);
         let result = worker.join().unwrap();
         drop(held);
-        set_test_models_dir(None);
         let error = result.unwrap_err().to_string();
         assert!(error.contains("canceled"), "{error}");
         assert!(!directory.join("fixture.gguf").exists());
