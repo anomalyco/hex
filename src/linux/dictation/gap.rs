@@ -26,7 +26,7 @@ pub(super) struct StreamClock {
 
 impl StreamClock {
     /// A stalled stream's lag is not counted past this.
-    const MAX_LAG: Duration = Duration::from_secs(2);
+    pub(super) const MAX_LAG: Duration = Duration::from_secs(2);
 
     pub(super) fn chunk(&mut self, captured_through: CaptureInstant, received: Instant) {
         self.newest = Some((captured_through, received));

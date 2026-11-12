@@ -747,18 +747,17 @@ pub fn run(
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
                         print: print.take(),
-                        context: capture
-                            .would_transcribe(occurred_at)
-                            .then(|| {
-                                crate::windows::context::begin_capture(
-                                    !recording_flavour.raw()
-                                        && capture_modes
-                                            .read()
-                                            .unwrap_or_else(|error| error.into_inner())
-                                            .reads_page(),
-                                )
-                            })
-                            .unwrap_or_default(),
+                        context: if capture.would_transcribe(occurred_at) {
+                            crate::windows::context::begin_capture(
+                                !recording_flavour.raw()
+                                    && capture_modes
+                                        .read()
+                                        .unwrap_or_else(|error| error.into_inner())
+                                        .reads_page(),
+                            )
+                        } else {
+                            Default::default()
+                        },
                         release: ReleaseWait::new(&capture, occurred_at),
                     });
                 }

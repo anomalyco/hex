@@ -59,7 +59,7 @@ struct Job {
 }
 
 enum OutputJob {
-    Dictation(Job),
+    Dictation(Box<Job>),
     /// Pastes the newest completed dictation again.
     PasteLast,
     /// Runs the focused field's text through its Output steps and replaces
@@ -924,17 +924,16 @@ pub(crate) fn run(
                     let released_at = clock.at(Instant::now()).unwrap_or(CaptureInstant::ZERO);
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
-                        context: capture
-                            .would_transcribe(released_at)
-                            .then(|| {
-                                crate::linux::context::begin_capture(
-                                    !recording_flavour.raw()
-                                        && (crate::dictation::modes::uses_page(
-                                            &settings.dictation_processing,
-                                        ) || settings.labs.voice_prompt),
-                                )
-                            })
-                            .unwrap_or_default(),
+                        context: if capture.would_transcribe(released_at) {
+                            crate::linux::context::begin_capture(
+                                !recording_flavour.raw()
+                                    && (crate::dictation::modes::uses_page(
+                                        &settings.dictation_processing,
+                                    ) || settings.labs.voice_prompt),
+                            )
+                        } else {
+                            Default::default()
+                        },
                         ..begin_finishing(&capture, released_at, print.take(), || {
                             suppressor.restore_then(feedback::deferred_stop())
                         })
@@ -1401,7 +1400,7 @@ fn submit_capture(
                 .unwrap_or_else(|| crate::app_settings::transcription_selection().1)
                 .language;
             let recording = crate::history::Recording::keep(&samples);
-            let job = OutputJob::Dictation(Job {
+            let job = OutputJob::Dictation(Box::new(Job {
                 transcript: engine.finish(stream, samples)?,
                 context,
                 audio_ms,
@@ -1410,7 +1409,7 @@ fn submit_capture(
                 print,
                 flavour,
                 typing: typing.map(|CaptureTyping { session, .. }| session),
-            });
+            }));
             match jobs.try_send(job) {
                 Ok(()) => {
                     *pending += 1;
