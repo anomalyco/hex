@@ -936,6 +936,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Another dictation shortcut that always pastes with Ctrl+Shift+V"),
         ));
     }
+    // A written capture's copy goes through Scrawl's engine on every OS.
+    #[cfg(hex_capture)]
+    rows.push(row(
+        Feature::CopyCaptureZip,
+        None,
+        tr("Copy captures as a zip"),
+        tr("A finished capture copies as one zip file you can attach anywhere, without its video and audio"),
+    ));
     #[cfg(hex_capture)]
     if ui.platform.scrawl.is_some() {
         let locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
@@ -1028,6 +1036,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
         Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
+        Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
         Feature::MeetingNotesFile => "lab-meeting-notes-file",

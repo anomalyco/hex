@@ -203,6 +203,28 @@ pub fn copy_png_to_clipboard(png_bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// `path` alone on the clipboard, as a file URL, so a paste into Finder, an
+/// agent, or a chat attaches the file.
+#[cfg(target_os = "macos")]
+pub fn copy_file_to_clipboard(path: &Path) -> Result<()> {
+    use objc2::runtime::ProtocolObject;
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::{NSArray, NSURL};
+
+    objc2::rc::autoreleasepool(|_| {
+        let url = NSURL::from_file_path(path)
+            .ok_or_else(|| anyhow::anyhow!("not a file path: {}", path.display()))?;
+        let pasteboard = NSPasteboard::generalPasteboard();
+        pasteboard.clearContents();
+        let objects = NSArray::from_retained_slice(&[ProtocolObject::from_retained(url)]);
+        ensure!(
+            pasteboard.writeObjects(&objects),
+            "Could not put the file on the clipboard"
+        );
+        Ok(())
+    })
+}
+
 #[cfg(target_os = "windows")]
 pub fn copy_string_to_clipboard(content: &str) -> Result<()> {
     crate::win::clipboard::set_text(content)

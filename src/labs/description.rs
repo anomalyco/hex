@@ -163,6 +163,9 @@ impl Feature {
             Self::Screenshots => {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
             }
+            Self::CopyCaptureZip => {
+                "A finished capture copies as one zip file you can attach anywhere, without its video and audio"
+            }
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }

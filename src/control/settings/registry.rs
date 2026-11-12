@@ -558,6 +558,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened; macOS shows the screen-recording dot the whole time it's on (macOS 27+)",
     ),
     key(
+        "labs.copy_capture_zip",
+        Kind::Bool,
+        "Labs: a finished Annotate capture copies to the clipboard as one light zip file you can attach anywhere, without its video and audio (macOS, Linux, Windows)",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",

@@ -3342,7 +3342,9 @@ fn finish_captures(
                     missing_transcript = written.missing_transcript.as_deref(),
                     "capture finished"
                 );
-                copy_to_clipboard(&bundle);
+                if !crate::capture_zip::copy_as_zip(&bundle) {
+                    copy_to_clipboard(&bundle);
+                }
                 let route = look.as_ref().map(|_| CaptureRoute::looking());
                 lock(outcomes).settle_with(bundle.clone(), Stage::Done, Some(written), None, route);
                 if let Some(look) = look {
@@ -3452,7 +3454,7 @@ fn summary(bundle: &Path) -> anyhow::Result<String> {
 /// The process's one paster for captures. On X11 it serves the clipboard
 /// for as long as it lives, so a copied capture stays pasteable.
 #[cfg(target_os = "linux")]
-fn with_linux_paster(
+pub(crate) fn with_linux_paster(
     use_it: impl FnOnce(&mut crate::linux::paste::LinuxPaster) -> Result<()>,
 ) -> anyhow::Result<()> {
     static PASTER: Mutex<Option<crate::linux::paste::LinuxPaster>> = Mutex::new(None);

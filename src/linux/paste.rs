@@ -3,6 +3,7 @@ use std::io::{ErrorKind, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -347,6 +348,28 @@ fn copied_only(
     )
 }
 
+/// `path` as a `text/uri-list` entry: one absolute `file://` URI, CRLF
+/// terminated, with everything but unreserved characters and `/`
+/// percent-encoded.
+fn file_uri(path: &Path) -> Result<String> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| eyre!("not a UTF-8 path: {}", path.display()))?;
+    if !path.is_absolute() {
+        return Err(eyre!("not an absolute path: {}", path.display()));
+    }
+    let mut uri = String::from("file://");
+    for &byte in text.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            uri.push(byte as char);
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri.push_str("\r\n");
+    Ok(uri)
+}
+
 impl LinuxPaster {
     pub(crate) fn new(
         stop: Arc<AtomicBool>,
@@ -392,6 +415,35 @@ impl LinuxPaster {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);
                 run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
+                    .wrap_err("could not own the Wayland clipboard; install wl-clipboard")
+            }
+        }
+    }
+
+    /// Puts `path` on the clipboard as a `text/uri-list` file, so a chat app
+    /// or agent attaches the file itself (Labs › Copy captures as a zip).
+    pub(crate) fn copy_file_uri(&mut self, path: &Path) -> Result<()> {
+        let uri = file_uri(path)?;
+        let mut restore = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
+        restore.keep();
+        match &mut self.backend {
+            Backend::X11(paster) => {
+                let target = paster
+                    .clipboard
+                    .getter
+                    .get_atom("text/uri-list")
+                    .wrap_err("could not name the X11 text/uri-list target")?;
+                let atoms = &paster.clipboard.getter.atoms;
+                paster
+                    .clipboard
+                    .store(atoms.clipboard, target, uri.as_bytes())
+                    .wrap_err("could not own the X11 clipboard")
+            }
+            Backend::Wayland(_) => {
+                require_wl_copy()?;
+                let mut copy = Command::new(WL_COPY);
+                copy.args(["--type", "text/uri-list"]);
+                run_helper(copy, uri.as_bytes(), &self.stop, HELPER_TIMEOUT)
                     .wrap_err("could not own the Wayland clipboard; install wl-clipboard")
             }
         }
@@ -920,6 +972,19 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", script]);
         command
+    }
+
+    #[test]
+    fn a_file_is_one_percent_encoded_uri_list_line() {
+        assert_eq!(
+            file_uri(Path::new("/home/me/Scrawl 1/12.scrawl.slim.zip")).unwrap(),
+            "file:///home/me/Scrawl%201/12.scrawl.slim.zip\r\n"
+        );
+        assert_eq!(
+            file_uri(Path::new("/tmp/%s#?")).unwrap(),
+            "file:///tmp/%25s%23%3F\r\n"
+        );
+        assert!(file_uri(Path::new("relative/file")).is_err());
     }
 
     /// A typed-text job may start while a dictation paste still waits to

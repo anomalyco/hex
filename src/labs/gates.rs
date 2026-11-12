@@ -56,6 +56,16 @@ pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }
 
+/// A finished Annotate capture copies to the clipboard as one light zip file
+/// rather than its image and summary (read where a written capture is copied).
+#[cfg_attr(not(hex_capture), allow(dead_code))]
+pub fn copy_capture_zip() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    COPY_CAPTURE_ZIP.load(Ordering::Acquire) && Feature::CopyCaptureZip.on_this_os()
+}
+
 /// A pasted dictation stays on the clipboard rather than the previous
 /// clipboard being restored (read as each paste commits).
 pub fn keep_on_clipboard() -> bool {

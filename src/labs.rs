@@ -170,6 +170,7 @@ impl Feature {
             | Self::PauseMenu
             | Self::PrintStart
             | Self::VoicePrompt
+            | Self::CopyCaptureZip
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -249,7 +250,7 @@ impl Feature {
             | Self::PauseMenu
             | Self::HistoryMultiSelect => 20261110,
             Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
-            Self::ScreenVocabulary | Self::VoicePrompt => 20261112,
+            Self::ScreenVocabulary | Self::VoicePrompt | Self::CopyCaptureZip => 20261112,
         }
     }
 
@@ -378,6 +379,7 @@ impl Feature {
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::VoicePrompt
+            | Self::CopyCaptureZip
             | Self::SpeakersOnly => true,
         }
     }
@@ -461,6 +463,7 @@ impl Feature {
             Self::PauseMenu => "pause-menu",
             Self::PrintStart => "print-start",
             Self::VoicePrompt => "voice-prompt",
+            Self::CopyCaptureZip => "copy-capture-zip",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -544,6 +547,7 @@ impl Feature {
             Self::PauseMenu => "labs.pause_menu",
             Self::PrintStart => "labs.print_start",
             Self::VoicePrompt => "labs.voice_prompt",
+            Self::CopyCaptureZip => "labs.copy_capture_zip",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -631,6 +635,7 @@ impl Feature {
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
+            Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -716,6 +721,7 @@ impl Feature {
             &mut labs.pause_menu,
             &mut labs.print_start,
             &mut labs.voice_prompt,
+            &mut labs.copy_capture_zip,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -806,6 +812,7 @@ impl Feature {
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
+            Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -939,6 +946,11 @@ static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 /// own atomic, written by [`state`] and [`apply`].
 static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Copy captures as a zip's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: a written capture copies as one zip file. The state word
+/// is full, so this lab has its own atomic.
+static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
+
 /// The words that start a voice prompt, set beside [`STATE`] by [`state`] and
 /// [`apply`]. An invalid saved phrase reads as the default.
 static VOICE_PROMPT_PHRASE: LazyLock<RwLock<String>> =
@@ -963,6 +975,7 @@ fn state() -> u64 {
                 PRINT_START.store(print_start_enabled(&saved), Ordering::Release);
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
+                COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
             STATE.load(Ordering::Acquire)
@@ -1000,6 +1013,14 @@ fn voice_prompt_enabled(settings: &LabsSettings) -> bool {
         && Feature::VoicePrompt.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Copy captures as a zip in this build,
+/// before its managed lock; the state word has no bit for it.
+fn copy_capture_zip_enabled(settings: &LabsSettings) -> bool {
+    settings.copy_capture_zip
+        && Feature::CopyCaptureZip.shipped()
+        && Feature::CopyCaptureZip.managed().is_none()
+}
+
 /// Records the trigger phrase matching reads; an invalid value never turns
 /// matching off.
 fn store_voice_prompt_phrase(phrase: &str) {
@@ -1034,6 +1055,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     PRINT_START.store(print_start_enabled(settings), Ordering::Release);
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
+    COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
@@ -2048,6 +2070,35 @@ mod tests {
             "labs.screen_vocabulary"
         );
         assert_eq!(Feature::ScreenVocabulary.name(), "screen-vocabulary");
+    }
+
+    #[test]
+    fn copy_capture_zip_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!copy_capture_zip_enabled(&labs));
+        labs.copy_capture_zip = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(copy_capture_zip_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & SCREENSHOTS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CopyCaptureZip.on_this_os(),
+            cfg!(any(
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "windows"
+            ))
+        );
+        assert_eq!(Feature::CopyCaptureZip.added(), 20261112);
+        assert_eq!(Feature::CopyCaptureZip.audience(), Audience::Everyone);
+        assert_eq!(Feature::CopyCaptureZip.group(), Group::Annotate);
+        assert_eq!(
+            Feature::CopyCaptureZip.settings_key(),
+            "labs.copy_capture_zip"
+        );
+        assert_eq!(Feature::CopyCaptureZip.name(), "copy-capture-zip");
     }
 
     #[test]

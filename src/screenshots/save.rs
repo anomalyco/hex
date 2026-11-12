@@ -149,22 +149,10 @@ pub(crate) fn copy_saved(path: &Path, recording: bool) -> anyhow::Result<()> {
 }
 
 /// Just `path` on the clipboard, so a paste into Finder or a chat gets the
-/// file.
+/// file. The capture crate's, so a written Annotate capture copies the same
+/// way (Labs › Copy captures as a zip).
 fn copy_file(path: &Path) -> anyhow::Result<()> {
-    use objc2::runtime::ProtocolObject;
-    use objc2_app_kit::NSPasteboard;
-    use objc2_foundation::{NSArray, NSURL};
-
-    let url = NSURL::from_file_path(path)
-        .ok_or_else(|| anyhow::anyhow!("not a file path: {}", path.display()))?;
-    let pasteboard = NSPasteboard::generalPasteboard();
-    pasteboard.clearContents();
-    let objects = NSArray::from_retained_slice(&[ProtocolObject::from_retained(url)]);
-    anyhow::ensure!(
-        pasteboard.writeObjects(&objects),
-        "could not put the recording on the clipboard"
-    );
-    Ok(())
+    scrawl_capture::handoff::copy_file_to_clipboard(path)
 }
 
 /// Moves `path` to the Trash, as Finder does.
