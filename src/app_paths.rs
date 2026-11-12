@@ -131,8 +131,9 @@ fn tighten(path: &Path, mode: u32) {
 }
 
 /// Creates the logs directory, appends process diagnostics to `process.log`
-/// alongside stderr, installs the global tracing subscriber, and routes Ctrl-C
-/// to `shutdown`. Returns the logs directory.
+/// alongside stderr, installs the global tracing subscriber, keeps the logs
+/// bounded (`desktop::log_trim`), and routes Ctrl-C to `shutdown`. Returns the
+/// logs directory.
 pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
     let log_dir = logs_dir()?;
     create_private_dir(&log_dir)?;
@@ -144,6 +145,7 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
         .with_writer(std::io::stderr.and(Mutex::new(process_log)))
         .init();
     log_panics();
+    crate::desktop::log_trim::start(&log_dir);
     ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
     Ok(log_dir)
 }

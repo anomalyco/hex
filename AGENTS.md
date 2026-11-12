@@ -300,6 +300,11 @@ substitute for source inspection or a second roadmap.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
   logs and shared state. The logs folder and its files are owner-only on
   Unix (0700/0600, tightened when an older Hex left them open).
+  `desktop/log_trim` keeps `live.ndjson` and `process.log` under 10 MB each:
+  at launch and hourly, under a lock file, it drops a log's oldest lines in
+  place to its newest 5 MB (never a rename, since every Hex process appends to
+  the same files), and once clears an event log from before dictated words
+  were kept out of it.
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
