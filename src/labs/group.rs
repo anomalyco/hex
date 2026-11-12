@@ -56,6 +56,7 @@ impl Feature {
             | Self::LiveTyping
             | Self::NotchIndicator
             | Self::VocabularyBiasing
+            | Self::ScreenVocabulary
             | Self::PauseBrowser
             | Self::KeepMicrophoneOpen
             | Self::SkipPauses

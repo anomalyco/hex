@@ -71,6 +71,9 @@ pub struct LabsSettings {
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
     pub vocabulary_biasing: bool,
+    /// Names and terms shown in the focused window become temporary
+    /// vocabulary for each dictation (macOS).
+    pub screen_vocabulary: bool,
     /// Mouse buttons may be recorded as shortcuts (macOS, issue 209).
     pub mouse_shortcuts: bool,
     /// The engine unloads the speech model after `unload_idle_minutes` (5, 15 default, 30, 60) unused (issue 442).
@@ -282,6 +285,7 @@ impl Default for LabsSettings {
             live_chapters: false,
             playground: false,
             vocabulary_biasing: false,
+            screen_vocabulary: false,
             mouse_shortcuts: false,
             unload_idle: false,
             unload_idle_minutes: 15,

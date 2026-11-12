@@ -4,7 +4,8 @@
 //! group's collapsible header (`Feature::group`). A feature
 //! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
 //! as a normal item while on and is hidden while off; a behaviour-only
-//! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
+//! feature (Live text, Live chapters, Vocabulary biasing, Screen vocabulary,
+//! keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard, only copying it instead (macOS and Windows), a second
@@ -100,6 +101,7 @@ impl Feature {
             | Self::LiveTyping
             | Self::LiveChapters
             | Self::VocabularyBiasing
+            | Self::ScreenVocabulary
             | Self::TerminalPaste
             | Self::KeyboardModelSwitching
             | Self::AppModelSwitching
@@ -245,6 +247,7 @@ impl Feature {
             | Self::PauseMenu
             | Self::HistoryMultiSelect => 20261110,
             Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
+            Self::ScreenVocabulary => 20261112,
         }
     }
 
@@ -317,6 +320,7 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::PauseMenu
             | Self::PrintStart
+            | Self::ScreenVocabulary
             | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
             Self::CopyOnly => cfg!(any(target_os = "macos", target_os = "windows")),
             Self::ReturnToApp => cfg!(target_os = "macos"),
@@ -383,6 +387,7 @@ impl Feature {
             Self::LiveTyping => "live-typing",
             Self::LiveChapters => "live-chapters",
             Self::VocabularyBiasing => "vocabulary-biasing",
+            Self::ScreenVocabulary => "screen-vocabulary",
             Self::TerminalPaste => "terminal-paste",
             Self::KeyboardModelSwitching => "keyboard-model-switching",
             Self::AppModelSwitching => "app-model-switching",
@@ -464,6 +469,7 @@ impl Feature {
             Self::LiveTyping => "labs.live_typing",
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
+            Self::ScreenVocabulary => "labs.screen_vocabulary",
             Self::TerminalPaste => "paste_with_shift",
             Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
             Self::AppModelSwitching => "labs.app_model_switching",
@@ -549,6 +555,7 @@ impl Feature {
             Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
+            Self::ScreenVocabulary => settings.labs.screen_vocabulary,
             Self::TerminalPaste => settings.paste_with_shift,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled,
             Self::AppModelSwitching => settings.labs.app_model_switching,
@@ -636,6 +643,7 @@ impl Feature {
             &mut labs.live_typing,
             &mut labs.live_chapters,
             &mut labs.vocabulary_biasing,
+            &mut labs.screen_vocabulary,
             &mut labs.mouse_shortcuts,
             &mut labs.unload_idle,
             &mut labs.keep_microphone_open,
@@ -717,6 +725,7 @@ impl Feature {
             Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
+            Self::ScreenVocabulary => settings.labs.screen_vocabulary = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled = on,
             Self::AppModelSwitching => settings.labs.app_model_switching = on,
@@ -910,6 +919,11 @@ static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 /// own atomic, written by [`state`] and [`apply`].
 static PRINT_START: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Screen vocabulary's switch, set beside [`STATE`] like [`PRINT_START`]:
+/// that lab reads the focused window once per dictation and has its own
+/// atomic because the state word is full.
+static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
+
 fn on(bit: u64) -> bool {
     state() & bit != 0
 }
@@ -927,6 +941,7 @@ fn state() -> u64 {
                 // as off, and the next read is right.
                 MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
                 PRINT_START.store(print_start_enabled(&saved), Ordering::Release);
+                SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
             }
             STATE.load(Ordering::Acquire)
         }
@@ -945,6 +960,14 @@ fn linger_seconds(settings: &LabsSettings) -> u64 {
 /// before its managed lock; the state word has no bit for it.
 fn print_start_enabled(settings: &LabsSettings) -> bool {
     settings.print_start && Feature::PrintStart.shipped() && Feature::PrintStart.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Screen vocabulary in this build, before
+/// its managed lock; the state word has no bit for it.
+fn screen_vocabulary_enabled(settings: &LabsSettings) -> bool {
+    settings.screen_vocabulary
+        && Feature::ScreenVocabulary.shipped()
+        && Feature::ScreenVocabulary.managed().is_none()
 }
 
 /// Whether the main window draws dark: the OS's appearance, unless Labs ›
@@ -970,6 +993,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
     PRINT_START.store(print_start_enabled(settings), Ordering::Release);
+    SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
     crate::shortcut_pause::reconcile(pause_menu());
@@ -1207,6 +1231,7 @@ pub fn log_launch() {
         typed_text = typed_text(),
         playground = playground(),
         vocabulary_biasing = vocabulary_biasing(),
+        screen_vocabulary = screen_vocabulary(),
         history_multi_select = history_multi_select(),
         "labs"
     );
@@ -1932,6 +1957,31 @@ mod tests {
         assert_eq!(Feature::PrintStart.group(), Group::Output);
         assert_eq!(Feature::PrintStart.settings_key(), "labs.print_start");
         assert_eq!(Feature::PrintStart.name(), "print-start");
+    }
+
+    #[test]
+    fn screen_vocabulary_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!screen_vocabulary_enabled(&labs));
+        labs.screen_vocabulary = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(screen_vocabulary_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & VOCABULARY_BIASING, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::ScreenVocabulary.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::ScreenVocabulary.added(), 20261112);
+        assert_eq!(Feature::ScreenVocabulary.audience(), Audience::Everyone);
+        assert_eq!(Feature::ScreenVocabulary.group(), Group::Dictation);
+        assert_eq!(
+            Feature::ScreenVocabulary.settings_key(),
+            "labs.screen_vocabulary"
+        );
+        assert_eq!(Feature::ScreenVocabulary.name(), "screen-vocabulary");
     }
 
     #[test]

@@ -85,6 +85,27 @@ Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // 
 │   both models return it on silence or noise (README.md#get-ready)
 └── "Sounds like" spellings are not sent; rewriting and search use them
 
+Screen vocabulary (Labs › Screen vocabulary, macOS)  // vocabulary.screen
+├── Off by default; off, no Accessibility read happens for a dictation
+├── On, as a capture becomes real: one background read of the focused
+│   window's text, bounded to 1,500 elements, 40 levels, 32 KB, and 150 ms
+├── At most 24 terms: mixed-case and CamelCase words, letters with digits,
+│   2–6 letter acronyms, and capitalized words away from a sentence's start;
+│   plain lowercase words, sentence-start capitals, and saved terms are dropped
+├── Joins that dictation after the mode's terms and the shared list, inside
+│   the same 64-term/character budgets; a model with VocabularyUse::None gets
+│   nothing
+├── A capture with terms uses its whole-clip run rather than a live stream's
+│   text: a stream fixes its vocabulary when it starts
+├── Only that capture: meetings, the local API, and OpenCode rewriting never
+│   see the terms, and nothing is saved or logged (a count may be)
+└── Password fields and their subtrees are skipped; Hex's own window is never
+    read
+    // checks: dictation::screen_vocabulary::tests (Qdrant, sentence starts,
+    // the 24-term cap, dedup against the saved list),
+    // a_captures_screen_terms_come_last_and_leave_with_it in vocabulary.rs;
+    // not observed on a real Mac
+
 Recognition hints, folded in                // vocabulary.hints
 ├── Loading settings.json -> `recognition_hints` of the selected model and the
 │   recent models (newest first), split on commas, semicolons, and line

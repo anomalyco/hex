@@ -5,7 +5,7 @@
 //! toward it through [`transcription_bias`], and Whisper and Qwen3-ASR read
 //! it as their context prompt through [`transcription_prompt`].
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::io::Read as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -122,6 +122,9 @@ static FOCUS: OnceLock<RwLock<Option<ContextSnapshot>>> = OnceLock::new();
 
 thread_local! {
     static DICTATING: Cell<bool> = const { Cell::new(false) };
+    /// Labs › Screen vocabulary's terms for the capture this thread is
+    /// transcribing, set by [`for_capture`]; empty for a job that has none.
+    static SCREEN_TERMS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Records the focused app and page, so the next dictation's transcription
@@ -147,8 +150,27 @@ pub(crate) fn for_dictation<R>(work: impl FnOnce() -> R) -> R {
     work()
 }
 
+/// Runs one dictation's inference with the terms Labs › Screen vocabulary
+/// read from its window. The terms belong to that run alone: a nested run
+/// restores the outside value, and a job with none clears it, so a meeting or
+/// a local API request never hears another capture's screen.
+pub(crate) fn for_capture<R>(terms: &[String], work: impl FnOnce() -> R) -> R {
+    struct Restore(Vec<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SCREEN_TERMS.with(|slot| *slot.borrow_mut() = std::mem::take(&mut self.0));
+        }
+    }
+    let previous =
+        SCREEN_TERMS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), terms.to_vec()));
+    let _restore = Restore(previous);
+    work()
+}
+
 /// The focused mode's own terms first, so the bias cap keeps them, then the
-/// shared list, each term once.
+/// shared list, then the terms this capture read from its window, each term
+/// once. Screen terms are lowest priority because they change with every
+/// window, and only a dictation hears them.
 fn transcription_entries() -> Vec<VocabularyEntry> {
     let shared = entries();
     if !DICTATING.with(Cell::get) {
@@ -160,13 +182,32 @@ fn transcription_entries() -> Vec<VocabularyEntry> {
         .unwrap_or_else(|error| error.into_inner())
         .clone();
     #[cfg(target_os = "macos")]
-    if let Some(context) = focused {
-        let own = crate::dictation::config::dictation_profiles().vocabulary_for(&context);
-        return merged(&own, &shared);
-    }
+    let shared = match &focused {
+        Some(context) => {
+            let own = crate::dictation::config::dictation_profiles().vocabulary_for(context);
+            merged(&own, &shared)
+        }
+        None => shared,
+    };
     #[cfg(not(target_os = "macos"))]
     let _ = focused;
-    shared
+    let screen = SCREEN_TERMS.with(|terms| screen_entries(&terms.borrow()));
+    if screen.is_empty() {
+        return shared;
+    }
+    merged(&shared, &screen)
+}
+
+/// Labs › Screen vocabulary's terms as entries with no "sounds like"
+/// spellings.
+fn screen_entries(terms: &[String]) -> Vec<VocabularyEntry> {
+    terms
+        .iter()
+        .map(|term| VocabularyEntry {
+            term: term.clone(),
+            sounds_like: Vec::new(),
+        })
+        .collect()
 }
 
 /// `first`, then the entries of `then` whose term `first` lacks, in any case.
@@ -536,6 +577,19 @@ mod tests {
         });
         assert!(inside.iter().any(|entry| entry.term == "OpenCode"));
         assert!(!DICTATING.with(Cell::get));
+    }
+
+    #[test]
+    fn a_captures_screen_terms_come_last_and_leave_with_it() {
+        apply(&[entry("OpenCode", &[])], VocabularyBoost::Normal);
+        let terms = vec!["opencode".to_string(), "Qdrant".to_string()];
+        let inside = for_dictation(|| for_capture(&terms, transcription_entries));
+        assert_eq!(inside, [entry("OpenCode", &[]), entry("Qdrant", &[])]);
+        // A later job, such as a local API request or a meeting, hears none.
+        assert_eq!(
+            for_dictation(transcription_entries),
+            [entry("OpenCode", &[])]
+        );
     }
 
     #[test]

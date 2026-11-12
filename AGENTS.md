@@ -41,7 +41,8 @@ A feature with its own pane joins the sidebar as a normal item while
 on and is hidden while off; a behaviour-only feature is just its toggle. Today:
 Meetings (beta), Voice Filter (Dev; locked on while its macOS driver is
 installed, and a stable build with the driver keeps its pane for Uninstall
-alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing, Switch
+alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing,
+Screen vocabulary (macOS), Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
 pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
 Unload model when idle (#442), Terminal paste (Windows), and Terminal paste
@@ -238,7 +239,8 @@ substitute for source inspection or a second roadmap.
 - `paste`: clipboard insertion, continuation joins, and generation-safe
   clipboard restoration.
 - `accessibility`: bounded focused-window and selected-text capture through
-  Accessibility without touching the clipboard.
+  Accessibility without touching the clipboard, including the bounded visible
+  window text Labs › Screen vocabulary reads (macOS).
 - `recognition`: the macOS listener coordinator for hotkey and programmatic
   dictation controls, workers, and observations. It does not own the
   authoritative microphone timeline.

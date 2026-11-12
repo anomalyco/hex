@@ -1,5 +1,7 @@
+use std::collections::VecDeque;
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
+use std::time::{Duration, Instant};
 
 type CfTypeRef = *const c_void;
 type CfStringRef = *const c_void;
@@ -76,6 +78,78 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
     let application = foreign_application(pid)?;
     let window = copy_element(&application, c"AXFocusedWindow")?;
     copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
+}
+
+/// How much of a focused window Labs › Screen vocabulary reads: elements
+/// walked, depth below the window, bytes collected, and wall-clock time.
+const MAX_TEXT_NODES: usize = 1_500;
+const MAX_TEXT_DEPTH: usize = 40;
+const MAX_TEXT_BYTES: usize = 32 * 1024;
+const TEXT_DEADLINE: Duration = Duration::from_millis(150);
+
+/// The visible text of another process's focused window, for Labs › Screen
+/// vocabulary: each element's value, title, and description, breadth-first
+/// and hard-bounded. Secure text fields and their subtrees are skipped, so a
+/// password never leaves the app. `None` for Hex's own window or when the
+/// tree has no text.
+pub fn focused_window_text(pid: i32) -> Option<String> {
+    let application = foreign_application(pid)?;
+    let window = copy_element(&application, c"AXFocusedWindow")?;
+    let started = Instant::now();
+    let mut text = String::new();
+    let mut queue = VecDeque::from([(window, 0_usize)]);
+    let mut visited = 0_usize;
+    while let Some((element, depth)) = queue.pop_front() {
+        if visited >= MAX_TEXT_NODES
+            || started.elapsed() >= TEXT_DEADLINE
+            || text.len() >= MAX_TEXT_BYTES
+        {
+            break;
+        }
+        visited += 1;
+        if is_secure_text_field(&element) {
+            continue;
+        }
+        for name in [c"AXValue", c"AXTitle", c"AXDescription"] {
+            let Some(value) = copy_string(&element, name) else {
+                continue;
+            };
+            let room = MAX_TEXT_BYTES.saturating_sub(text.len() + 1);
+            if room == 0 {
+                break;
+            }
+            let end = char_boundary(&value, value.len().min(room));
+            text.push_str(&value[..end]);
+            text.push('\n');
+            if end < value.len() || text.len() >= MAX_TEXT_BYTES {
+                break;
+            }
+        }
+        if depth >= MAX_TEXT_DEPTH || visited + queue.len() >= MAX_TEXT_NODES {
+            continue;
+        }
+        let room = MAX_TEXT_NODES - visited - queue.len();
+        for child in copy_elements_up_to(&element, c"AXChildren", room) {
+            queue.push_back((child, depth + 1));
+        }
+    }
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// Whether an element holds a password. macOS marks most secure fields with
+/// the `AXSecureTextField` subrole, and some apps use it as the role.
+fn is_secure_text_field(element: &CfObject) -> bool {
+    [c"AXRole", c"AXSubrole"]
+        .into_iter()
+        .any(|name| copy_string(element, name).as_deref() == Some("AXSecureTextField"))
+}
+
+/// The largest boundary of `text` at or below `at`.
+fn char_boundary(text: &str, mut at: usize) -> usize {
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }
 
 /// The page address of the web area holding the application's focused
@@ -187,13 +261,21 @@ impl crate::dictation::browser_page::AxNode for Element {
 
 /// An attribute holding elements (`AXWindows`, `AXChildren`), each bounded.
 fn copy_elements(element: &CfObject, name: &CStr) -> Vec<CfObject> {
+    copy_elements_up_to(element, name, usize::MAX)
+}
+
+/// The first `limit` elements of an attribute, each bounded like
+/// [`copy_elements`], so a window with a huge child array cannot cost more
+/// than the caller's node budget.
+fn copy_elements_up_to(element: &CfObject, name: &CStr, limit: usize) -> Vec<CfObject> {
     let Some(array) = copy_attribute(element, name) else {
         return Vec::new();
     };
     if unsafe { CFGetTypeID(array.0) } != unsafe { CFArrayGetTypeID() } {
         return Vec::new();
     }
-    let count = unsafe { CFArrayGetCount(array.0) };
+    let limit = isize::try_from(limit).unwrap_or(isize::MAX);
+    let count = unsafe { CFArrayGetCount(array.0) }.min(limit);
     (0..count)
         .filter_map(|index| {
             // SAFETY: Get rule: the array owns the item, so it is retained
@@ -363,6 +445,7 @@ mod tests {
     #[test]
     fn a_missing_attribute_is_none() {
         assert_eq!(focused_window_title(i32::MAX), None);
+        assert_eq!(focused_window_text(i32::MAX), None);
         assert_eq!(focused_web_url(i32::MAX), None);
         assert_eq!(char_before_caret(i32::MAX), None);
     }
@@ -375,6 +458,7 @@ mod tests {
         let own_pid = std::process::id() as i32;
         assert!(foreign_application(own_pid).is_none());
         assert_eq!(focused_window_title(own_pid), None);
+        assert_eq!(focused_window_text(own_pid), None);
         assert_eq!(focused_web_url(own_pid), None);
         assert_eq!(char_before_caret(own_pid), None);
         assert!(browser_pages(own_pid).urls.is_empty());

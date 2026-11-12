@@ -3,6 +3,7 @@
 //! for it briefly instead of using the previous dictation's page.
 
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -25,6 +26,52 @@ pub(super) struct ContextWatch {
     activity: InputActivity,
     /// The one refresh this capture owes, if any.
     capture: CaptureRefresh,
+    /// Labs › Screen vocabulary's one read, for this capture.
+    screen: ScreenVocabulary,
+}
+
+/// One capture's screen vocabulary: a background read of the focused window,
+/// started as the capture becomes real and taken only if it finished in time.
+#[derive(Default)]
+struct ScreenVocabulary {
+    read: Option<mpsc::Receiver<Vec<String>>>,
+}
+
+impl ScreenVocabulary {
+    /// Starts this capture's one read, if Labs › Screen vocabulary is on.
+    /// Off, nothing reads Accessibility at all.
+    fn start(&mut self) {
+        if self.read.is_some() || !crate::labs::screen_vocabulary() {
+            return;
+        }
+        let (sender, read) = mpsc::channel();
+        self.read = Some(read);
+        let spawned = thread::Builder::new()
+            .name("screen-vocabulary".into())
+            .spawn(move || {
+                if let Some(terms) = crate::dictation::screen_vocabulary::from_focused_window() {
+                    let _ = sender.send(terms);
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "could not start the screen vocabulary reader");
+            self.read = None;
+        }
+    }
+
+    /// This capture's terms, if the read finished before its run.
+    fn take(&mut self) -> Vec<String> {
+        self.read
+            .take()
+            .and_then(|read| read.try_recv().ok())
+            .unwrap_or_default()
+    }
+
+    /// The capture ended without transcribing, or a new one started: a late
+    /// read is discarded instead of reaching another dictation.
+    fn cancel(&mut self) {
+        self.read = None;
+    }
 }
 
 impl ContextWatch {
@@ -34,6 +81,7 @@ impl ContextWatch {
             snapshot: ContextSnapshot::default(),
             activity,
             capture: CaptureRefresh::default(),
+            screen: ScreenVocabulary::default(),
         }
     }
 
@@ -62,21 +110,25 @@ impl ContextWatch {
     }
 
     /// A shortcut's press started a capture. It may still be a provisional
-    /// press a chord discards, so nothing reads the page yet.
+    /// press a chord discards, so nothing reads the page or the screen yet.
     pub(super) fn begin(&mut self) {
+        self.screen.cancel();
         self.capture.begin();
     }
 
     /// The capture became real: a control start (no hold to judge), a hold
     /// past its threshold, or a released microphone finally opening. Ask for
-    /// its page now, once per capture.
+    /// its page and its screen's vocabulary now, once per capture.
     pub(super) fn intend(&mut self) {
+        self.screen.start();
         let monitor = &self.monitor;
         self.capture.intend(|| monitor.request_refresh());
     }
 
-    /// The capture ended without transcribing: no finish waits for its page.
+    /// The capture ended without transcribing: no finish waits for its page,
+    /// and a late screen vocabulary read is discarded.
     pub(super) fn cancel(&mut self) {
+        self.screen.cancel();
         self.capture.cancel();
     }
 
@@ -86,6 +138,18 @@ impl ContextWatch {
     /// real asks for its page here, and a finish with no capture at all (the
     /// loop's own context) returns it unchanged.
     pub(super) fn finish(&mut self, events: &mut EventLog) -> Result<ContextSnapshot> {
+        let mut snapshot = self.finish_snapshot(events)?;
+        let terms = self.screen.take();
+        if !terms.is_empty() {
+            snapshot.screen_terms = terms;
+        }
+        Ok(snapshot)
+    }
+
+    /// The context itself: the refreshed page when it arrived in time, else
+    /// the same context without a page rather than the page of a previous
+    /// dictation.
+    fn finish_snapshot(&mut self, events: &mut EventLog) -> Result<ContextSnapshot> {
         let monitor = &self.monitor;
         let Some(ticket) = self.capture.finish(|| monitor.request_refresh()) else {
             return Ok(self.snapshot.clone());

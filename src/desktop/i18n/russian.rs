@@ -148,6 +148,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("On while the Hex Microphone driver is installed. Uninstall the driver in Voice Filter to turn it off.", "Включено, пока установлен драйвер Hex Microphone. Чтобы выключить, удалите драйвер в Голосовом фильтре."),
     ("Vocabulary biasing", "Усиление словаря"),
     ("Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way", "Склоняет распознавание Parakeet к вашему словарю; переписывание и поиск используют его в любом случае"),
+    ("Screen vocabulary", "Словарь с экрана"),
+    ("Window names and terms become temporary vocabulary. Read locally, never saved.", "Имена и термины в окне становятся временным словарём. Читается локально и никогда не сохраняется."),
     ("Transcription uses these only with Labs › Vocabulary biasing on; rewriting and search always do", "Распознавание использует их, только если включено Лаборатория › Усиление словаря; переписывание и поиск — всегда"),
     ("This model reads the first {read} of {total} terms", "Эта модель читает первые {read} из {total} терминов"),
     ("Mouse shortcuts", "Сочетания с мышью"),

@@ -484,6 +484,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Vocabulary biasing"),
         tr("Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"),
     ));
+    // macOS reads the focused window through Accessibility as a capture
+    // becomes real.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(
+            Feature::ScreenVocabulary,
+            Some(&BOOK),
+            tr("Screen vocabulary"),
+            tr("Window names and terms become temporary vocabulary. Read locally, never saved."),
+        ));
+    }
     if caps.keyboard_model_switching {
         rows.push(row(
             Feature::KeyboardModelSwitching,
@@ -914,6 +924,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
+        Feature::ScreenVocabulary => "lab-screen-vocabulary",
         Feature::TerminalPaste => "lab-terminal-paste",
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
         Feature::AppModelSwitching => "lab-app-model-switching",
