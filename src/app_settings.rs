@@ -1404,11 +1404,14 @@ pub fn dock_icon_visible(show_dock_icon: bool, status_item_available: bool) -> b
     show_dock_icon || !status_item_available
 }
 
+/// Shows or hides the Dock icon, and returns whether the activation policy
+/// actually changed. A call that leaves the policy as it was, or cannot
+/// change it, returns false: the window server has nothing new to apply.
 #[cfg(target_os = "macos")]
-pub fn set_dock_icon_visible(visible: bool) {
+pub fn set_dock_icon_visible(visible: bool) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         tracing::warn!("Dock icon visibility must be changed on the main thread");
-        return;
+        return false;
     };
     let application = NSApplication::sharedApplication(mtm);
     let policy = if visible {
@@ -1416,9 +1419,14 @@ pub fn set_dock_icon_visible(visible: bool) {
     } else {
         NSApplicationActivationPolicy::Accessory
     };
-    if application.activationPolicy() != policy && !application.setActivationPolicy(policy) {
-        tracing::warn!(visible, "could not change Dock icon visibility");
+    if application.activationPolicy() == policy {
+        return false;
     }
+    if !application.setActivationPolicy(policy) {
+        tracing::warn!(visible, "could not change Dock icon visibility");
+        return false;
+    }
+    true
 }
 
 #[cfg(target_os = "macos")]

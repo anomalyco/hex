@@ -2038,25 +2038,40 @@ that looped the sequence went with GPUI.) This does not prove that actual
 capture caused that state.
 
 The macOS HUD is a click-through, nonactivating `NSPanel` with
-`CanJoinAllSpaces`, `CanJoinAllApplications`, and `FullScreenAuxiliary` collection
-behaviors. The cross-application flag explicitly allows the overlay to join
+`CanJoinAllSpaces`, `Stationary`, `IgnoresCycle`, `FullScreenAuxiliary`, and
+`CanJoinAllApplications` collection behaviors, the mask Rune sets when it makes
+the panel. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
 
 Each time the HUD shows, Rune clears and resets those collection behaviors
 before ordering the panel in, and orders it out first if it is still shown on
 another Space (#1084). Changing the activation policy (the Dock icon follows
-Settings) could leave the panel tied to one Space while AppKit still reported
-the old mask, and re-setting an unchanged mask does nothing. Rune repairs that
-only as its panel shows, so while the HUD is shown Hex also checks each pump
-turn that the panel is on the active Space, and re-homes it when a Space switch
-or a full-screen exit left it behind: it orders the panel out, clears and
-restores the mask, and orders it back in. That reorders the panel but leaves
-Rune's presence state and alpha alone. It is attempted once per show, and once
-more for each later Space change after the panel has been seen on the active
-Space, so a repair that did not take cannot loop. The live-text plate beside
-the HUD is a separate panel and does not get this repair yet. Not yet observed
-on hardware; only the macOS compile is checked.
+Settings) can leave the panel tied to one Space while AppKit still reports the
+old mask and the active Space, and re-setting an unchanged mask does nothing.
+Rune repairs that only as its panel shows, so Hex also repairs the panel from
+the pump (`rune_hud::rehome`, `rune_hud::macos`):
+
+- While the HUD is shown, each pump turn checks whether the panel is on the
+  active Space. When a Space switch or a full-screen exit left it behind, Hex
+  orders the panel out, clears the mask, sets the mask Rune intends (never the
+  panel's read-back), and orders it back in. That reorders the panel but leaves
+  Rune's presence state and alpha alone. One stranding gets at most three
+  attempts, at least 150 ms apart, and the budget resets when the panel is seen
+  on the active Space or the HUD hides, so a repair that did not take cannot
+  loop.
+- Every change of the Dock icon's activation policy (the policy follows
+  Settings; an open Settings window forces the icon on) marks the panel for one
+  repair. A call that leaves the policy as it was, which is the usual case when
+  the icon stays on, does not. On the next pump turn a hidden panel only gets
+  the mask written again, so a queued hide is not undone and no repair attempt
+  is spent; a shown one is ordered out, written, and ordered back in whatever
+  AppKit reports. A change that arrives before Rune has made the panel waits
+  for it.
+
+The live-text plate beside the HUD is a separate panel and does not get this
+repair yet. Not yet observed on hardware; only the macOS compile and the pure
+`rune_hud::rehome` unit tests are checked.
 
 At the top position the HUD sits 6 pt below the menu bar (`rune_hud::hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
