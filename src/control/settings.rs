@@ -7,8 +7,7 @@ use serde_json::Value;
 
 use super::ControlError;
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeySlot,
-    MAX_EXTRA_DICTATION_SHORTCUTS,
+    AppSettings, HotkeyBinding, HotkeyKey, HotkeySlot, MAX_EXTRA_DICTATION_SHORTCUTS,
 };
 
 mod hotkeys;
@@ -16,7 +15,7 @@ mod registry;
 
 use hotkeys::check_shortcut;
 pub use hotkeys::{format_hotkey, parse_hotkey};
-use registry::{CAPTURE_KEYS, KEYS, Key, Kind, NUMERIC_CHOICES, RETIRED, needs};
+use registry::{CAPTURE_KEYS, KEYS, Key, Kind, RETIRED, needs};
 
 /// One setting as `hex settings get` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -217,7 +216,7 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
             Ok(Some(binding)) => Value::String(format_hotkey(&binding)),
             _ => Value::Null,
         },
-        Kind::Choice(_) if NUMERIC_CHOICES.contains(&key.key) => Value::String(raw.to_string()),
+        Kind::NumberChoice(_) => Value::String(raw.to_string()),
         _ => raw,
     };
     SettingValue {
@@ -225,7 +224,9 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
         value,
         kind: key.kind.name().into(),
         choices: match key.kind {
-            Kind::Choice(choices) => choices.iter().map(|&choice| choice.into()).collect(),
+            Kind::Choice(choices) | Kind::NumberChoice(choices) => {
+                choices.iter().map(|&choice| choice.into()).collect()
+            }
             _ => Vec::new(),
         },
         writable: key.read_only.is_none()
@@ -593,26 +594,17 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
                     &format!("expected a whole number from {min} to {max}"),
                 )
             }),
-        Kind::Choice(choices) => {
+        Kind::Choice(choices) | Kind::NumberChoice(choices) => {
             let normalized = trimmed.to_ascii_lowercase().replace('-', "_");
             let choice = choices
                 .iter()
                 .find(|choice| choice.to_ascii_lowercase().replace('-', "_") == normalized)
                 .ok_or_else(|| invalid(name, &format!("expected one of {}", choices.join(", "))))?;
-            Ok(if name == "meetings.calendar.lead_minutes" {
-                let minutes: u8 = choice.parse().expect("lead choices are numbers");
-                debug_assert!(CALENDAR_LEAD_MINUTES.contains(&minutes));
-                Value::from(minutes)
-            } else if name == "labs.unload_idle_minutes" {
-                let minutes: u32 = choice.parse().expect("idle choices are numbers");
-                debug_assert!(crate::app_settings::UNLOAD_IDLE_MINUTES.contains(&minutes));
-                Value::from(minutes)
-            } else if name == "labs.keep_microphone_open_seconds" {
-                let seconds: u32 = choice.parse().expect("linger choices are numbers");
-                debug_assert!(crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds));
-                Value::from(seconds)
-            } else {
-                Value::String((*choice).into())
+            Ok(match key.kind {
+                Kind::NumberChoice(_) => {
+                    Value::from(choice.parse::<u32>().expect("number choices are numbers"))
+                }
+                _ => Value::String((*choice).into()),
             })
         }
         Kind::Text => Ok(Value::String(raw.into())),
@@ -1296,6 +1288,48 @@ mod tests {
         let change = apply(&change.settings, "sound_effect_volume", "0.25", &rules()).unwrap();
         assert!(change.settings.sound_effects);
         assert_eq!(change.settings.sound_effect_volume, 0.25);
+    }
+
+    /// The Labs card and the key's help are constants, so they can't be
+    /// formatted from the grace; this keeps them saying it.
+    #[test]
+    fn stop_when_call_ends_copy_names_the_grace() {
+        let grace = format!(
+            " {} s ",
+            crate::meeting::detection::AUTO_STOP_GRACE.as_secs()
+        );
+        let key = keys()
+            .find(|key| key.key == "labs.stop_when_call_ends")
+            .unwrap();
+        assert!(key.about.contains(&grace), "{}", key.about);
+        let card = crate::labs::Feature::StopWhenCallEnds.description();
+        assert!(card.contains(&grace), "{card}");
+    }
+
+    #[test]
+    fn number_choices_offer_exactly_what_settings_accept() {
+        let choices = |name: &str| {
+            let key = keys().find(|key| key.key == name).unwrap();
+            let Kind::NumberChoice(choices) = key.kind else {
+                panic!("{name} is a number choice");
+            };
+            choices
+                .iter()
+                .map(|choice| choice.parse::<u32>().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            choices("meetings.calendar.lead_minutes"),
+            crate::app_settings::CALENDAR_LEAD_MINUTES.map(u32::from)
+        );
+        assert_eq!(
+            choices("labs.unload_idle_minutes"),
+            crate::app_settings::UNLOAD_IDLE_MINUTES
+        );
+        assert_eq!(
+            choices("labs.keep_microphone_open_seconds"),
+            crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS
+        );
     }
 
     #[test]

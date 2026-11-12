@@ -11,7 +11,7 @@ use crate::app_settings::AppSettings;
 use crate::desktop::activity::{DesktopActivity, last_completed_at};
 use crate::desktop::events::EventReader;
 use crate::desktop::host::{
-    DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot,
+    DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot, ListenerStatus,
 };
 use crate::transcription::models::{ModelPreparationStage, TranscriptionSelection};
 use crate::transcription::preparation::TranscriptionPreparation;
@@ -318,13 +318,12 @@ impl Runtime {
                 running,
                 warming: false,
                 status: if failure.is_some() {
-                    "Stopped"
+                    ListenerStatus::Stopped
                 } else if running {
-                    "Enabled"
+                    ListenerStatus::Enabled
                 } else {
-                    "Waiting for setup"
-                }
-                .into(),
+                    ListenerStatus::WaitingForSetup
+                },
                 warning: failure,
                 notice: None,
                 last_failure: self

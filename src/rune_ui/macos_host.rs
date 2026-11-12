@@ -938,7 +938,7 @@ impl NativeHost for MacHost {
             .then(crate::desktop::permission_guide::settings_focus)
             .unwrap_or_default();
         let mut next_stale = Vec::new();
-        for (slot, (kind, untrusted)) in [
+        for (kind, untrusted) in [
             (
                 PermissionKind::Accessibility,
                 matches!(
@@ -957,10 +957,10 @@ impl NativeHost for MacHost {
                     false
                 }
             }),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        ] {
+            let Some(slot) = stale_slot(kind) else {
+                continue;
+            };
             if !self.resetting[slot] && self.stale[slot].poll(now, untrusted, focus) {
                 next_stale.push(kind);
             }

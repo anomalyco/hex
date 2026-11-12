@@ -1352,9 +1352,12 @@ pub struct RuntimeHotkeys {
 }
 
 impl RuntimeHotkeys {
+    /// The shortcuts [`Self::all`] lists by name, before the extra rows.
+    const NAMED: usize = 8;
+
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 8 + MAX_EXTRA_DICTATION_SHORTCUTS] {
-        let named = [
+    pub fn all(self) -> [Option<RuntimeHotkey>; Self::NAMED + MAX_EXTRA_DICTATION_SHORTCUTS] {
+        let named: [_; Self::NAMED] = [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
@@ -1364,7 +1367,7 @@ impl RuntimeHotkeys {
             self.typed_text,
             self.second_dictation,
         ];
-        let mut all = [None; 8 + MAX_EXTRA_DICTATION_SHORTCUTS];
+        let mut all = [None; Self::NAMED + MAX_EXTRA_DICTATION_SHORTCUTS];
         all[..named.len()].copy_from_slice(&named);
         all[named.len()..].copy_from_slice(&self.extra_dictation);
         all

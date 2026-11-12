@@ -24,6 +24,7 @@ use crate::desktop::activity::{DesktopActivity, last_completed_at};
 use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot,
+    ListenerStatus,
 };
 use crate::desktop::i18n::tr_fill;
 use crate::history::History;
@@ -67,7 +68,7 @@ pub(crate) struct WindowsDesktopHost {
     listen_when_ready: bool,
     /// Enable on launch waits for first-run setup.
     listen_after_setup: bool,
-    status: String,
+    status: ListenerStatus,
     error: Option<String>,
     settings: AppSettings,
     history: Option<History>,
@@ -238,7 +239,7 @@ impl WindowsDesktopHost {
             awaiting_session_start: false,
             listen_when_ready: false,
             listen_after_setup: false,
-            status: "Disabled".into(),
+            status: ListenerStatus::Disabled,
             error: settings_error,
             settings,
             history,
@@ -467,7 +468,7 @@ impl WindowsDesktopHost {
             return;
         }
         if !self.model_ready() {
-            self.status = "Model required".into();
+            self.status = ListenerStatus::ModelRequired;
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -516,11 +517,11 @@ impl WindowsDesktopHost {
                 });
                 self.session_before_start = self.activity.session_started_at;
                 self.awaiting_session_start = true;
-                self.status = "Enabling…".into();
+                self.status = ListenerStatus::Enabling;
                 self.error = None;
             }
             Err(error) => {
-                self.status = "Couldn't enable".into();
+                self.status = ListenerStatus::CouldNotEnable;
                 self.error = Some(tr_fill("Could not start listener: {}", &error.to_string()));
             }
         }
@@ -542,17 +543,17 @@ impl WindowsDesktopHost {
 
     pub(crate) fn stop(&mut self) {
         self.listen_when_ready = false;
-        self.signal_stop("Disabling…");
+        self.signal_stop(ListenerStatus::Disabling);
     }
 
     fn is_running(&self) -> bool {
         self.listener.is_some()
     }
 
-    fn signal_stop(&mut self, status: &str) {
+    fn signal_stop(&mut self, status: ListenerStatus) {
         if let Some(listener) = &self.listener {
             listener.stop.store(true, Ordering::Relaxed);
-            self.status = status.into();
+            self.status = status;
         }
     }
 
@@ -718,11 +719,11 @@ impl WindowsDesktopHost {
                 }
                 match result {
                     Ok(()) => {
-                        self.status = "Disabled".into();
+                        self.status = ListenerStatus::Disabled;
                         start_listener = self.listen_when_ready;
                     }
                     Err(error) => {
-                        self.status = "Couldn't enable".into();
+                        self.status = ListenerStatus::CouldNotEnable;
                         self.error = Some(error);
                     }
                 }
@@ -744,7 +745,7 @@ impl WindowsDesktopHost {
             && !self.awaiting_session_start
             && let Some(status) = self.activity.state_label()
         {
-            self.status = status.into();
+            self.status = status;
         }
     }
 
@@ -767,7 +768,7 @@ impl WindowsDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 warming: self.is_running() && self.awaiting_session_start,
-                status: self.status.clone(),
+                status: self.status,
                 warning: self.indicator.failure(),
                 last_failure: self
                     .activity

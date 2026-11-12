@@ -6,8 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use color_eyre::eyre::Result;
 use hound::{SampleFormat, WavSpec, WavWriter};
 
+use super::PARAKEET_SAMPLE_RATE as SAMPLE_RATE;
+
 const RETENTION_ENV: &str = "HEX_RETAIN_DICTATION_AUDIO";
-const SAMPLE_RATE: u32 = 16_000;
 
 /// Retains a transcribed clip as `dictation-<ms>.wav`.
 pub fn persist(samples: &[f32]) {

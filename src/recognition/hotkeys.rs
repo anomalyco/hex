@@ -144,12 +144,12 @@ impl Hotkeys {
             .any(DictationHotkey::is_recording)
     }
 
-    /// Whether one of the Labs › More dictation shortcuts records.
-    pub(super) fn extra_recording(&self) -> bool {
-        self.extra
-            .iter()
-            .flatten()
-            .any(DictationHotkey::is_recording)
+    /// The cancel shortcut of the recording that takes one, for the tap to
+    /// keep from the app in front.
+    pub(super) fn recording_cancel(&self) -> Option<crate::app_settings::RuntimeHotkey> {
+        Shortcut::all()
+            .filter_map(|shortcut| self.machine(shortcut))
+            .find_map(DictationHotkey::recording_cancel)
     }
 
     pub(super) fn suppresses_recognition(&self) -> bool {
@@ -441,6 +441,41 @@ mod tests {
             DictationHotkey::new(base, true, option),
             DictationHotkey::new(base, false, RuntimeHotkey::default()),
         )
+    }
+
+    /// The tap keeps the recording's own cancel key: Toggle's while a toggled
+    /// recording runs, none in Hold mode, and Escape for a Caps Lock capture
+    /// whatever Toggle's cancel is.
+    #[test]
+    fn the_tap_cancels_with_the_recording_machines_own_key() {
+        let escape = crate::app_settings::HotkeyBinding::cancel_default().runtime();
+        let custom = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::default(),
+            key_code: Some(1),
+        };
+        let mut machines = hotkeys();
+        machines.dictation.set_cancel(Some(custom));
+        assert_eq!(machines.recording_cancel(), None, "nothing records");
+        assert!(machines.dictation.lock());
+        assert_eq!(machines.recording_cancel(), None, "Hold mode has no cancel");
+        machines.dictation.set_toggle(true);
+        assert_eq!(machines.recording_cancel(), Some(custom));
+
+        let mut machines = hotkeys();
+        machines.dictation.set_cancel(Some(custom));
+        machines.caps_lock.set_toggle(true);
+        machines.caps_lock.set_cancel(Some(escape));
+        assert!(machines.caps_lock.lock());
+        assert_eq!(machines.recording_cancel(), Some(escape));
+
+        // An extra row cancels in its own mode, Hold included.
+        let mut machines = hotkeys();
+        let mut extra = DictationHotkey::new(CaptureInstant::ZERO, false, custom);
+        extra.set_cancel(Some(escape));
+        extra.set_cancel_in_any_mode(true);
+        assert!(extra.lock());
+        machines.extra[0] = Some(extra);
+        assert_eq!(machines.recording_cancel(), Some(escape));
     }
 
     #[test]

@@ -892,6 +892,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Enabling…", "Ativando…"),
     ("Disabling…", "Desativando…"),
     ("Couldn't enable", "Não foi possível ativar"),
+    ("Stopped", "Parado"),
+    ("Waiting for setup", "Aguardando configuração"),
     ("Saving settings", "Salvando ajustes"),
     ("Service disconnected", "Serviço desconectado"),
     ("Linux can't bind both sides. Use one with a key, like Space", "O Linux não associa os dois lados. Use um deles com uma tecla, como Espaço"),

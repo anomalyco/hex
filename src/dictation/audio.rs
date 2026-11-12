@@ -24,6 +24,9 @@ const RECOGNITION_QUEUE_CAPACITY: usize = 64;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
 /// How long past the tail itself a finish waits for the stream to deliver it.
 const TAIL_DELIVERY_GRACE: Duration = Duration::from_millis(100);
+/// The capture's rate while no input is open: a placeholder, since opening
+/// one starts a capture at the device's own rate.
+const CLOSED_INPUT_SAMPLE_RATE: u32 = 16_000;
 
 pub struct RecognitionAudio {
     pub samples: Vec<f32>,
@@ -558,7 +561,7 @@ impl Owner {
             if input.is_open() {
                 input.sample_rate()
             } else {
-                16_000
+                CLOSED_INPUT_SAMPLE_RATE
             },
             &recording_environment,
         );
@@ -1078,7 +1081,7 @@ impl Owner {
         if self.input.is_open() {
             self.input.sample_rate()
         } else {
-            16_000
+            CLOSED_INPUT_SAMPLE_RATE
         }
     }
 

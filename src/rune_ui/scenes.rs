@@ -46,7 +46,7 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         if let Some(view) = &mut ui.view {
             view.listener.running = false;
-            view.listener.status = "Disabled".into();
+            view.listener.status = crate::desktop::host::ListenerStatus::Disabled;
         }
     }),
     ("capturing", |ui| {
@@ -931,7 +931,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         listener: DesktopListenerSnapshot {
             running: true,
             warming: false,
-            status: "Enabled".into(),
+            status: crate::desktop::host::ListenerStatus::Enabled,
             warning: None,
             notice: None,
             last_failure: None,

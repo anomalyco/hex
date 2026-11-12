@@ -762,7 +762,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   always finish. Hex takes the key only while a toggled recording runs, and
   then keeps it (repeats and release included) from the app in front; idle,
   and always in Hold mode, it stays with every app. macOS suppresses it in
-  the session tap only while the listener arms it (`set_takes_cancel`),
+  the session tap only while the listener arms it (`set_cancel`),
   Windows' hook only while its capture records, and X11 grabs it only for
   the recording. A shortcuts portal holds a key for as long as Hex runs, so
   on Wayland Hex binds nothing for it and Settings says to bind

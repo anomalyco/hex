@@ -885,6 +885,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Enabling…", "Включение…"),
     ("Disabling…", "Выключение…"),
     ("Couldn't enable", "Не удалось включить"),
+    ("Stopped", "Остановлено"),
+    ("Waiting for setup", "Ожидает настройки"),
     ("Saving settings", "Сохранение настроек"),
     ("Service disconnected", "Связь со службой потеряна"),
     ("Linux can't bind both sides. Use one with a key, like Space", "Linux не может назначить обе стороны. Используйте одну с клавишей, например Пробел"),

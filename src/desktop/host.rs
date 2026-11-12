@@ -27,6 +27,81 @@ pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) preparing: Option<TranscriptionModelId>,
 }
 
+/// What the listener card and `hex status` say the listener is doing, on
+/// every OS. Each name is translated, so a new status needs translations.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(into = "&'static str", try_from = "String")]
+pub(crate) enum ListenerStatus {
+    #[default]
+    Disabled,
+    Enabling,
+    Enabled,
+    Disabling,
+    CouldNotEnable,
+    ModelRequired,
+    WaitingForSetup,
+    Stopped,
+    Sleeping,
+    Recording,
+    Transcribing,
+}
+
+impl ListenerStatus {
+    pub(crate) const ALL: [Self; 11] = [
+        Self::Disabled,
+        Self::Enabling,
+        Self::Enabled,
+        Self::Disabling,
+        Self::CouldNotEnable,
+        Self::ModelRequired,
+        Self::WaitingForSetup,
+        Self::Stopped,
+        Self::Sleeping,
+        Self::Recording,
+        Self::Transcribing,
+    ];
+
+    /// The English name, the key its translations are found by.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Disabled => "Disabled",
+            Self::Enabling => "Enabling…",
+            Self::Enabled => "Enabled",
+            Self::Disabling => "Disabling…",
+            Self::CouldNotEnable => "Couldn't enable",
+            Self::ModelRequired => "Model required",
+            Self::WaitingForSetup => "Waiting for setup",
+            Self::Stopped => "Stopped",
+            Self::Sleeping => "Sleeping",
+            Self::Recording => "Recording",
+            Self::Transcribing => "Transcribing",
+        }
+    }
+}
+
+impl From<ListenerStatus> for &'static str {
+    fn from(status: ListenerStatus) -> Self {
+        status.name()
+    }
+}
+
+impl TryFrom<String> for ListenerStatus {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<Self, String> {
+        Self::ALL
+            .into_iter()
+            .find(|status| status.name() == name)
+            .ok_or_else(|| format!("unknown listener status {name:?}"))
+    }
+}
+
+impl std::fmt::Display for ListenerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopListenerSnapshot {
     pub(crate) running: bool,
@@ -34,7 +109,7 @@ pub(crate) struct DesktopListenerSnapshot {
     /// shortcut does nothing.
     #[serde(default)]
     pub(crate) warming: bool,
-    pub(crate) status: String,
+    pub(crate) status: ListenerStatus,
     /// Why the listener itself could not run (stopped, or its HUD could not
     /// show). `hex status` treats this as a stopped listener.
     #[serde(default)]
@@ -157,10 +232,10 @@ mod tests {
     #[test]
     fn older_listener_snapshots_have_no_warning_or_shortcuts() {
         let snapshot: DesktopListenerSnapshot =
-            serde_json::from_str(r#"{"running":true,"status":"Listening"}"#).unwrap();
+            serde_json::from_str(r#"{"running":true,"status":"Enabled"}"#).unwrap();
         assert!(snapshot.running);
         assert!(!snapshot.warming);
-        assert_eq!(snapshot.status, "Listening");
+        assert_eq!(snapshot.status, ListenerStatus::Enabled);
         assert!(snapshot.warning.is_none());
         assert!(snapshot.notice.is_none());
         assert_eq!(snapshot.shortcuts, DesktopShortcuts::Unregistered);

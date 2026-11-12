@@ -742,6 +742,10 @@ fn agent_prompt(fix: Option<(&str, &str)>) -> String {
         |_| "Hex's settings.json".into(),
         |path| path.display().to_string(),
     );
+    let builtins = crate::personal_commands::builtin_transformation_ids()
+        .map(|id| format!("\"{id}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
         "I use Hex for dictation. Change what it does to my words before it pastes them.\n\
          \n\
@@ -761,8 +765,7 @@ fn agent_prompt(fix: Option<(&str, &str)>) -> String {
          model (`opencode2 models` lists them). \
          If the rewrite fails or runs past the deadline, Hex pastes the text without it.\n\
          \n\
-         Built-in transformations: \"lowercase\", \"no-trailing-punctuation\", \
-         \"spongebob-case\". Others are functions in ~/.config/hex/hex.config.ts \
+         Built-in transformations: {builtins}. Others are functions in ~/.config/hex/hex.config.ts \
          (run `hex commands init` for its typings; the API, including fetch and \
          node:child_process, is documented at {TRANSFORMS_DOCS}).\n\
          \n\
@@ -837,6 +840,13 @@ pub(super) fn trust_fixture(ui: &mut Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_built_in_transformation_has_a_step_name() {
+        for id in crate::personal_commands::builtin_transformation_ids() {
+            assert!(builtin(id).is_some(), "{id:?} has no step name");
+        }
+    }
 
     #[test]
     fn the_preview_runs_corrections_then_built_in_steps_in_order() {

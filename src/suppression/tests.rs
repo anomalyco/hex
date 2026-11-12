@@ -19,9 +19,7 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         sink: Arc::new(InputSink::new(sender, PendingInputEvents::default())),
         activity: InputActivity::default(),
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
-        takes_cancel: Arc::new(AtomicBool::new(false)),
-        caps_lock_cancel: Arc::new(AtomicBool::new(false)),
-        extra_cancel: Arc::new(AtomicBool::new(false)),
+        cancel: Arc::new(Mutex::new(None)),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
@@ -2605,86 +2603,6 @@ fn the_cancel_key_is_suppressed_only_while_armed() {
     };
     assert!(suppression.process_all(escape(true), armed, true, false));
     assert!(suppression.process_all(escape(false), armed, true, false));
-}
-
-#[test]
-fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
-    let escape = HotkeyBinding::cancel_default().runtime();
-    let custom = RuntimeHotkey {
-        modifiers: crate::app_settings::HotkeyModifiers::default(),
-        key_code: Some(1),
-    };
-    assert_eq!(tap_cancel_binding(Some(custom), false, true, false), None);
-    assert_eq!(
-        tap_cancel_binding(Some(custom), true, true, false),
-        Some(escape),
-        "a Caps Lock capture cancels on Escape even with another Toggle cancel"
-    );
-    assert_eq!(
-        tap_cancel_binding(Some(custom), true, false, false),
-        Some(custom)
-    );
-
-    let mut suppression = ShortcutSuppression::default();
-    let armed = RuntimeHotkeys {
-        cancel: tap_cancel_binding(Some(custom), true, true, false),
-        ..RuntimeHotkeys::default()
-    };
-    assert!(suppression.process_all(
-        InputEvent::Key {
-            code: ESCAPE_KEY_CODE,
-            down: true,
-            flags: NO_FLAGS,
-        },
-        armed,
-        true,
-        false,
-    ));
-}
-
-/// An extra dictation shortcut cancels in its own mode: the tap keeps the
-/// armed cancel if Toggle configured one, else Escape, while it records.
-/// Escape itself only matches with no modifiers held, so a Hold row's chord
-/// keeps Escape from the tap.
-#[test]
-fn an_extra_capture_keeps_its_cancel_from_the_app() {
-    let escape = HotkeyBinding::cancel_default().runtime();
-    let custom = RuntimeHotkey {
-        modifiers: crate::app_settings::HotkeyModifiers::default(),
-        key_code: Some(1),
-    };
-    assert_eq!(
-        tap_cancel_binding(None, true, false, false),
-        None,
-        "no extra recording: the tap's cancel is unchanged"
-    );
-    assert_eq!(
-        tap_cancel_binding(None, true, false, true),
-        Some(escape),
-        "a recording extra arms Escape while it has no Toggle cancel"
-    );
-    assert_eq!(
-        tap_cancel_binding(Some(custom), true, false, true),
-        Some(custom),
-        "a Toggle-mode cancel binding is the extra's too"
-    );
-    assert_eq!(tap_cancel_binding(Some(custom), false, false, true), None);
-
-    let mut suppression = ShortcutSuppression::default();
-    let armed = RuntimeHotkeys {
-        cancel: tap_cancel_binding(None, true, false, true),
-        ..RuntimeHotkeys::default()
-    };
-    assert!(suppression.process_all(
-        InputEvent::Key {
-            code: ESCAPE_KEY_CODE,
-            down: true,
-            flags: NO_FLAGS,
-        },
-        armed,
-        true,
-        false,
-    ));
 }
 
 /// Each extra-mode trigger sets the three switches the dictation shortcut's

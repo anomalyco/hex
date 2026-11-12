@@ -312,6 +312,8 @@ fn legacy_never_offer() -> MeetingPolicy {
     MeetingPolicy::NeverOffer
 }
 
+pub(super) const DEFAULT_SHOW_RECORDING_INDICATOR: bool = true;
+
 impl Default for MeetingSettings {
     fn default() -> Self {
         Self {
@@ -320,7 +322,7 @@ impl Default for MeetingSettings {
             summaries: MeetingSummaries::platform_default(),
             summarize_with_apple_intelligence: None,
             summarize_with_opencode: None,
-            show_recording_indicator: true,
+            show_recording_indicator: DEFAULT_SHOW_RECORDING_INDICATOR,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
             calendar: CalendarSettings::default(),

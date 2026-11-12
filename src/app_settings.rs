@@ -45,20 +45,24 @@ pub use screenshots::{
     ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey, screenshot_settings,
 };
 
-static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
+const DEFAULT_RECORDING_DUCK_VOLUME: f32 = 0.2;
+const DEFAULT_DOUBLE_TAP_LOCK: bool = true;
+
+static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(DEFAULT_RECORDING_DUCK_VOLUME.to_bits());
 // Until settings load, "While dictating" is its default, not Mute: the
 // hotkey pre-roll depends on it.
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 =
     AtomicU8::new(RecordingAudioBehavior::DoNothing.encoded());
-static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
+static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(DEFAULT_DOUBLE_TAP_LOCK);
 static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
 static SHORTCUT_TOGGLE: AtomicBool = AtomicBool::new(false);
 static MEETINGS_ENABLED: AtomicBool = AtomicBool::new(false);
 static PAUSE_BROWSER_MEDIA: AtomicBool = AtomicBool::new(false);
 static HEX_MICROPHONE_ENABLED: AtomicBool = AtomicBool::new(false);
 static MEETING_SUMMARIES: AtomicU8 = AtomicU8::new(MeetingSummaries::platform_default() as u8);
-static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
-static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
+static MEETING_INDICATOR_ENABLED: AtomicBool =
+    AtomicBool::new(meetings::DEFAULT_SHOW_RECORDING_INDICATOR);
+static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(MeetingIndicatorCorner::TopRight as u8);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
 static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
@@ -424,9 +428,9 @@ impl Default for AppSettings {
             microphone: None,
             avoid_bluetooth_microphone: true,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
-            recording_duck_volume: 0.2,
+            recording_duck_volume: DEFAULT_RECORDING_DUCK_VOLUME,
             pause_browser_media: false,
-            double_tap_lock: true,
+            double_tap_lock: DEFAULT_DOUBLE_TAP_LOCK,
             double_tap_only: false,
             shortcut_mode: crate::dictation::ShortcutMode::Hold,
             dictation_hotkey: HotkeyBinding::default(),
