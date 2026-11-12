@@ -256,7 +256,8 @@ hex app
   polling the keyboard with the listener's hook suspended, because modifier-only chords never reach the window as key events.
 - Models are prepared in-process through `transcription/preparation`; the
   runtime saves the selection when it is ready and restarts the listener.
-- Enable on launch waits until first-run setup has recorded completion.
+- Enable on launch waits until first-run setup is ready (so the tour's
+  practice can dictate), or the tour finished without a model.
 - The dictation HUD is a Rune overlay (`rune_hud.rs`, shared with Linux): a
   HUD thread steps the shared indicator model and Dot scope, and the
   overlay's compositor draws each frame on the GPU with `rune_hud.wgsl`; Rune shows it in a topmost tool window

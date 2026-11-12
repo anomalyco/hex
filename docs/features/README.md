@@ -212,7 +212,7 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   ├── Nothing found -> this page as always, the recommended model downloading
 │   ├── Progress moves to the top pill once the story moves on; failure ->
 │   │   why, in one line (a proxy or certificate, #894), + Use a model
-│   │   file… + Try again
+│   │   file… + Try again (the model picked from the list, if one was)
 │   ├── Failed, or stalled 30 s without bytes, with every permission ready
 │   │   -> Continue without a model (quiet), saying dictation won't work
 │   │   until a model is added with Add model file…      // setup.without-model
@@ -229,6 +229,15 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   └── Jay's face rides the newest message: it fades out on the older line as
 │       it fades in on the new one, never popping off in one frame
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
+│   ├── The saved step is the one record of an unfinished tour; only Start
+│   │   using Hex (with setup ready) or Continue without a model records it
+│   │   finished, and that replaces the step. Setup becoming ready does not:
+│   │   a run quit on the practice resumes at the practice, one quit on Hex
+│   │   is ready resumes there. Check:
+│   │   `a_tour_quit_part_way_stays_unfinished_until_it_finishes`
+│   ├── Resumed at setup -> the first permission still missing; with none
+│   │   (Linux and Windows) straight on to the practice or Almost ready.
+│   │   Check: `a_run_resumed_at_setup_asks_only_for_what_is_missing`
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do
 ├── Permissions, one page each           // setup.checklist; skipped when granted
@@ -262,8 +271,9 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   first session starts (desktop/host.rs `warming`)
 │   │   // setup.warming; Check: `the_practice_page_waits_for_the_listener`
 │   ├── macOS, mic kept open (General's "Turn off the mic when not dictating"
-│   │   off when the run opened) -> a note at the window's foot, here and on
-│   │   Hex is ready, says why macOS shows the mic in use  // setup.mic-note
+│   │   off, read on every poll, so `hex settings set` updates it) -> a note at
+│   │   the window's foot, here and on Hex is ready, says why macOS shows the
+│   │   mic in use  // setup.mic-note
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice

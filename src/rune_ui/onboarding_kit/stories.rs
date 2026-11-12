@@ -608,12 +608,17 @@ impl Onboard {
         self.ensure_download(false);
     }
 
-    /// A real first run resumed while macOS still has a permission to ask.
+    /// A real first run resumed at setup: the first permission it still
+    /// asks for, else (Linux and Windows ask for none) on to the practice.
     pub(super) fn resume_setup(&mut self) {
-        if self.mic_granted {
+        if !self.mic_granted {
+            self.jump_to_microphone();
+        } else if !self.granted {
             self.jump_to_accessibility();
         } else {
-            self.jump_to_microphone();
+            self.leave_for_permission();
+            let now = self.now;
+            self.auto_due_at = to_practice(self, now).map(|secs| now + secs);
         }
     }
 
@@ -1491,6 +1496,25 @@ mod tests {
         s.speech = speech;
         s.examples_from = Some(0.0);
         s
+    }
+
+    #[test]
+    fn a_run_resumed_at_setup_asks_only_for_what_is_missing() {
+        let resumed = |mic: bool, granted: bool| {
+            let mut s = run(Flow::FirstRun, Speech::AfterDownload);
+            s.mic_granted = mic;
+            s.granted = granted;
+            s.resume_setup();
+            s.step
+        };
+        assert_eq!(resumed(false, false), Step::Microphone);
+        assert_eq!(resumed(true, false), Step::Accessibility);
+        // Linux and Windows ask for no permissions: no Accessibility card.
+        assert_eq!(
+            resumed(true, true),
+            Step::Waiting,
+            "the model still downloads"
+        );
     }
 
     #[test]

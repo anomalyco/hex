@@ -487,6 +487,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let scanning = ui.found.scanning();
     let caps = ui.settings.dictation_hotkey.keycaps();
     let toggle = ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
+    let release_microphone = ui.settings.release_microphone_while_idle;
     let Some(choice) = ui
         .first_run
         .as_ref()
@@ -635,6 +636,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     s.mic_granted = mic_granted;
     s.caps = caps;
     s.toggle = toggle;
+    live.release_microphone = release_microphone;
     if let Some(download) = s.download.as_mut() {
         if let Some(total) = model.and_then(|m| m.download_bytes()) {
             download.total = total;
@@ -650,8 +652,19 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     // Hex's state arrives between frames, so the first run keeps polling;
     // a fixture shows one moment and stays still.
     advance_to(s, now, tx);
+    let ready = s.step == Step::Ready;
     if live_window {
         tx.wake_after(FRAME);
+    }
+    // Hex is ready ends the tour's practice too, so a run quit on it
+    // resumes there rather than at the practice.
+    if ready
+        && ui
+            .tour
+            .as_ref()
+            .is_some_and(|tour| tour.flow.step() == TourStep::TryIt)
+    {
+        onboarding::input(ui, Input::Skip);
     }
     true
 }
@@ -710,28 +723,15 @@ pub(in crate::rune_ui) fn continue_without_model(ui: &mut Ui) {
     if !offered {
         return;
     }
-    if ui.live()
-        && !crate::desktop::onboarding::completion_recorded()
-        && let Err(error) = crate::desktop::onboarding::record_completion()
-    {
-        tracing::warn!(%error, "could not record onboarding completion");
-    }
-    ui.first_run = None;
-    ui.tour = None;
+    onboarding::close(ui, true);
 }
 
-/// "Start using Hex": closes the first run and the tour under it.
+/// "Start using Hex": closes the first run and the tour under it, and
+/// records the tour finished once setup is ready.
 pub(super) fn finish(ui: &mut Ui) {
     let installed = ui.picker.selected_installed(&ui.settings);
-    if ui.live()
-        && ui.platform.setup_status(installed).ready()
-        && !crate::desktop::onboarding::completion_recorded()
-        && let Err(error) = crate::desktop::onboarding::record_completion()
-    {
-        tracing::warn!(%error, "could not record onboarding completion");
-    }
-    ui.first_run = None;
-    ui.tour = None;
+    let ready = ui.platform.setup_status(installed).ready();
+    onboarding::close(ui, ready);
 }
 
 fn choose(ui: &mut Ui, selection: &TranscriptionSelection) {
@@ -807,6 +807,8 @@ pub(super) fn use_file(ui: &mut Ui) {
     super::super::model_import::use_file(ui);
 }
 
+/// "Try again": retries the model the person picked from the list, else the
+/// language capsule's choice.
 pub(super) fn retry_download(ui: &mut Ui) {
     let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) else {
         return;
@@ -815,7 +817,10 @@ pub(super) fn retry_download(ui: &mut Ui) {
     live.stalled = false;
     live.progress = None;
     let choice = live.choice.clone();
-    choose(ui, &choice);
+    match ui.found.picked {
+        Some(index) => found_choice::pick(ui, index),
+        None => choose(ui, &choice),
+    }
 }
 
 /// Allow on a permission row.

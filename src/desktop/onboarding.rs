@@ -419,6 +419,15 @@ impl Flow {
         let was_ready = self.setup_ready();
         self.microphone_row |= status.microphone != PermissionState::Ready;
         self.status = status;
+        // A grant answers what was asked, as the host's own record of asks
+        // does: a permission switched off again is asked for afresh.
+        if status.microphone == PermissionState::Ready {
+            self.asked[0] = false;
+            self.microphone_guide = false;
+        }
+        if status.accessibility == PermissionState::Ready {
+            self.asked[1] = false;
+        }
         if !grantable(self.status.accessibility) {
             self.accessibility_stale = false;
         }
@@ -808,7 +817,8 @@ fn relaunched_at_consumed(marker: &Path) -> Option<u64> {
 }
 
 /// Remembers the tour's step, so a tour quit part-way (macOS's own "Quit &
-/// Reopen" after a grant, or ⌘Q) resumes there.
+/// Reopen" after a grant, or ⌘Q) resumes there. The step is the one record
+/// of an unfinished tour: [`record_completion`] replaces it.
 pub fn record_step(step: Step) {
     let result =
         crate::app_paths::support_dir().and_then(|directory| record_step_at(&directory, step));
@@ -861,7 +871,10 @@ pub(crate) fn completion_recorded_at(directory: &Path) -> bool {
     if directory.join("onboarding-complete").is_file() {
         return true;
     }
-    if directory.join("onboarding-pending").is_file() || !directory.join("settings.json").is_file()
+    // A saved step is a tour quit part-way, never settings from before it.
+    if directory.join("onboarding-pending").is_file()
+        || directory.join("onboarding-step").is_file()
+        || !directory.join("settings.json").is_file()
     {
         return false;
     }
@@ -955,6 +968,10 @@ pub(crate) fn record_completion_at(directory: &Path) -> color_eyre::Result<()> {
     let temporary = directory.join(".onboarding-complete.tmp");
     write_owner_only_marker(&temporary, true)?;
     fs::rename(temporary, destination)?;
+    match fs::remove_file(directory.join("onboarding-step")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
     crate::durable::sync_directory(directory)?;
     Ok(())
 }
@@ -1344,6 +1361,31 @@ mod tests {
     }
 
     #[test]
+    fn a_tour_quit_part_way_stays_unfinished_until_it_finishes() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-onboarding-unfinished-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        // Settings the tour saved, with no pending marker (Linux and Windows).
+        fs::write(directory.join("settings.json"), b"{}").unwrap();
+        record_step_at(&directory, Step::TryIt).unwrap();
+
+        assert!(!completion_recorded_at(&directory));
+        assert!(!directory.join("onboarding-complete").exists());
+        assert_eq!(saved_step_at(&directory), Some(Step::TryIt));
+
+        record_completion_at(&directory).unwrap();
+        assert!(completion_recorded_at(&directory));
+        assert_eq!(
+            saved_step_at(&directory),
+            None,
+            "completion replaces the step"
+        );
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn fresh_install_does_not_skip_onboarding() {
         let directory =
             std::env::temp_dir().join(format!("hex-onboarding-fresh-{}", std::process::id()));
@@ -1586,6 +1628,39 @@ mod tests {
             flow.on(Input::Grant(SetupItem::Model)),
             Effect::None,
             "a running download is not restarted"
+        );
+    }
+
+    #[test]
+    fn a_permission_switched_off_after_its_grant_is_asked_for_afresh() {
+        let mut flow = Flow::new(Step::Setup, fresh_status(), true, true);
+        let denied = SetupStatus {
+            microphone: PermissionState::NeedsSettings,
+            ..fresh_status()
+        };
+        flow.on(Input::Status(denied, ModelProgress::default()));
+        flow.on(Input::Grant(SetupItem::Microphone));
+        flow.on(Input::Grant(SetupItem::Accessibility));
+        assert_eq!(
+            statuses(&flow),
+            [
+                (SetupItem::Microphone, ItemStatus::Waiting, false),
+                (SetupItem::Accessibility, ItemStatus::Waiting, false),
+            ]
+        );
+        let granted = SetupStatus {
+            transcription_model: false,
+            ..ready_status()
+        };
+        flow.on(Input::Status(granted, ModelProgress::default()));
+        flow.on(Input::Status(denied, ModelProgress::default()));
+        assert_eq!(
+            statuses(&flow),
+            [
+                (SetupItem::Microphone, ItemStatus::Denied, true),
+                (SetupItem::Accessibility, ItemStatus::Todo, false),
+            ],
+            "not still waiting on the earlier ask"
         );
     }
 
