@@ -7,8 +7,8 @@
 //! so it needs no archive dependency: local headers, a central directory, and
 //! an end-of-central-directory record, all written by hand. It sits beside
 //! the bundle's other files, `<folder name>.slim.zip`, so capture retention
-//! removes it with the bundle. Its `summary.md` is written with the bundle's
-//! absolute path as `.`, so the copy reads the same wherever it is unzipped.
+//! removes it with the bundle. Its `summary.md` is generated with the bundle
+//! folder as `.`, so the copy reads the same wherever it is unzipped.
 
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -102,10 +102,12 @@ impl Entry {
 fn entries(directory: &Path, bundle: &crate::model::ScrawlBundle) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
     collect(directory, Path::new(""), &mut entries)?;
-    let summary = crate::sketch::summary_markdown(bundle, directory);
-    let summary = relative_summary(&summary, directory);
+    // The header names the bundle folder; `.` reads right wherever the copy is
+    // unzipped, and nothing else in the summary names it.
+    let summary = crate::sketch::summary_markdown(bundle, Path::new("."));
     let modified = fs::metadata(directory.join(SUMMARY))
-        .map_or(UNIX_EPOCH, |meta| meta.modified().unwrap_or(UNIX_EPOCH));
+        .and_then(|meta| meta.modified())
+        .unwrap_or_else(|_| current_time());
     let summary = summary.into_bytes();
     match entries.iter_mut().find(|entry| entry.name == SUMMARY) {
         Some(entry) => {
@@ -182,24 +184,21 @@ fn zip_name(path: &Path) -> Result<String> {
     Ok(parts.join("/"))
 }
 
-/// `summary` with the bundle's own folder written as `.`, so the header and
-/// any other path in it reads correctly wherever the copy is unzipped.
-fn relative_summary(summary: &str, directory: &Path) -> String {
-    let absolute = directory.display().to_string();
-    if absolute.is_empty() {
-        return summary.to_owned();
-    }
-    summary.replace(&absolute, ".")
+/// A bundle with no `summary.md` on disk has no file time; its entry is being
+/// written now.
+#[allow(clippy::disallowed_methods)] // no injected clock reaches this crate
+fn current_time() -> SystemTime {
+    SystemTime::now()
 }
 
 fn write_zip(path: &Path, entries: &[Entry]) -> Result<()> {
     ensure!(
-        entries.len() <= usize::from(u16::MAX),
+        entries.len() < usize::from(u16::MAX),
         "Too many files for one capture copy"
     );
     let total: u64 = entries.iter().map(|entry| entry.size).sum();
     ensure!(
-        total <= u64::from(u32::MAX),
+        total < u64::from(u32::MAX),
         "The capture's light files are too large for one zip"
     );
     let mut file =
@@ -209,7 +208,7 @@ fn write_zip(path: &Path, entries: &[Entry]) -> Result<()> {
     for entry in entries {
         let name = entry.name.as_bytes();
         ensure!(
-            name.len() <= usize::from(u16::MAX),
+            name.len() < usize::from(u16::MAX),
             "A file name is too long for one zip"
         );
         let size = u32::try_from(entry.size).context("A light file is too large for one zip")?;
@@ -245,8 +244,9 @@ fn write_zip(path: &Path, entries: &[Entry]) -> Result<()> {
         u32::try_from(offset).context("The capture's light files are too large for one zip")?;
     let central_size = u32::try_from(central.len())
         .context("The capture's light files are too large for one zip")?;
+    let archived = offset + central.len() as u64;
     ensure!(
-        offset + central.len() as u64 <= u64::from(u32::MAX),
+        archived < u64::from(u32::MAX),
         "The capture's light files are too large for one zip"
     );
     file.write_all(&central)?;
@@ -296,6 +296,8 @@ fn put_u32(out: &mut Vec<u8>, value: u32) {
 }
 
 /// The zip's DOS date and time for `time`, in UTC: seconds are stored in two.
+/// A zip stores local time, but this crate has no local-time facility without
+/// a new dependency, so a reader in another time zone may show a shifted time.
 fn dos_time(time: SystemTime) -> (u16, u16) {
     let seconds = time
         .duration_since(UNIX_EPOCH)

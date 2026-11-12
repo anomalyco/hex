@@ -100,7 +100,9 @@ pub fn set_file(path: &Path) -> Result<()> {
             std::mem::size_of::<DROPFILES>(),
         )
     };
-    let mut list = wide(&path.to_string_lossy());
+    use std::os::windows::ffi::OsStrExt as _;
+    // A file name Windows can't read as text still reaches the clipboard.
+    let mut list: Vec<u16> = path.as_os_str().encode_wide().collect();
     // Two NULs end the list.
     list.push(0);
     let mut bytes = Vec::with_capacity(header_bytes.len() + list.len() * 2);

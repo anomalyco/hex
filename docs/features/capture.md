@@ -795,17 +795,21 @@ Copying a written capture                 // capture.copy; Labs › Copy capture
 │   │   frames-full/, contact-sheet-full.png), .media-pending, .media-sending,
 │   │   .deliver.json and its .tmp, and any earlier *.slim.zip or temp file;
 │   │   symlinks are skipped
-│   ├── summary.md inside the zip writes the bundle's absolute path as `.`,
-│   │   in its header and anywhere else, so it reads wherever it is unzipped;
-│   │   the summary.md on disk is unchanged
+│   ├── summary.md inside the zip is generated with the bundle folder as `.`,
+│   │   so its header reads anywhere it is unzipped; the summary.md on disk
+│   │   is unchanged
 │   ├── A failed build or clipboard write is logged, and the capture copies
 │   │   as it did before
-│   ├── Refused rather than written as ZIP64 past 0xFFFF files or 0xFFFFFFFF
+│   ├── Refused rather than written as ZIP64 at 0xFFFF files or 0xFFFFFFFF
 │   │   bytes
+│   ├── A terminal paste gets no text: the clipboard holds only the file
+│   ├── scrawl.json and summary.md still name media the zip leaves out
+│   │   (recording.mp4, audio.wav, frames-full/), because they describe the
+│   │   whole capture
 │   └── The capsule's Paste, Inspect, Send to…, routing, and retention still
 │       see the same bundle; the zip goes when the bundle does
 │       // checks: `cargo test --manifest-path crates/capture/Cargo.toml --lib slim_zip`
-│       // (CRC-32 vector, central-directory read-back, excludes, summary rewrite,
+│       // (CRC-32 vector, central-directory read-back, excludes, header path,
 │       // a second copy); a_file_is_one_percent_encoded_uri_list_line (linux/paste.rs);
 │       // copy_capture_zip_is_its_own_switch_and_everywhere (labs.rs)
 │       // not verified: pasting the zip into a real chat or agent app on any OS,

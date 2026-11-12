@@ -17,7 +17,7 @@ use rune::{El, Icon, TextEdit, Tx, row, text};
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{
-    BOOK, CAMERA, CLOCK, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
+    BOOK, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
 };
 use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
@@ -936,17 +936,28 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Another dictation shortcut that always pastes with Ctrl+Shift+V"),
         ));
     }
-    // A written capture's copy goes through Scrawl's engine on every OS.
-    #[cfg(hex_capture)]
-    rows.push(row(
-        Feature::CopyCaptureZip,
-        None,
-        tr("Copy captures as a zip"),
-        tr("A finished capture copies as one zip file you can attach anywhere, without its video and audio"),
-    ));
     #[cfg(hex_capture)]
     if ui.platform.scrawl.is_some() {
-        let locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
+        // A written capture's copy runs through the same engine and the same
+        // Annotate lock.
+        let annotate_locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
+        let locked = annotate_locked || Feature::CopyCaptureZip.managed().is_some();
+        rows.push(Row {
+            locked,
+            about: if locked {
+                super::managed_note()
+            } else {
+                tr("A finished capture copies as one zip file, without video or audio.")
+            },
+            on: !locked && Feature::CopyCaptureZip.on(settings),
+            ..row(
+                Feature::CopyCaptureZip,
+                Some(&FOLDER),
+                tr("Copy captures as a zip"),
+                "",
+            )
+        });
+        let locked = annotate_locked;
         rows.push(Row {
             lab: Lab::Annotate,
             icon: Pane::Annotate.icon(),

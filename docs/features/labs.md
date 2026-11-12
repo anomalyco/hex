@@ -197,7 +197,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
 │                                        macOS keeps its screen-recording dot lit the whole time it is on
-├── Copy captures as a zip no labs.copy_capture_zip     (macOS, Linux, Windows)
+├── Copy captures as a zip no labs.copy_capture_zip (macOS, Linux, Windows)
 │                                        a finished Annotate capture goes on the clipboard as one file, <stem>.scrawl.slim.zip, written
 │                                        inside its bundle: the manifest, summary (with the bundle's path written as `.`), contact sheet,
 │                                        and keyframes, without recording.mp4/.mov, audio.wav, frames-full/, contact-sheet-full.png, the
@@ -206,8 +206,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        leaves it out. macOS puts a file URL on the clipboard,
 │                                        Windows CF_HDROP, Linux text/uri-list (the X11 target, or wl-copy --type text/uri-list). A failed
 │                                        build or clipboard write logs and copies the capture as before; the capsule's Paste and Send
-│                                        are unchanged, and off, the normal image and summary copy is unchanged
-│                                        // checks: slim_zip (CRC-32 vector, central-directory read-back, excludes, summary rewrite,
+│                                        are unchanged, and off, the normal copy is unchanged. A terminal paste gets no text (the
+│                                        clipboard holds only the file), and scrawl.json and summary.md still name media the zip
+│                                        leaves out, because they describe the whole capture
+│                                        // checks: slim_zip (CRC-32 vector, central-directory read-back, excludes, header rewrite,
 │                                        // a second copy); a_file_is_one_percent_encoded_uri_list_line (linux/paste.rs);
 │                                        // copy_capture_zip_is_its_own_switch_and_everywhere (labs.rs); not observed pasting the
 │                                        // zip into a real chat or agent app, and the Windows clipboard write is cross-compiled only
