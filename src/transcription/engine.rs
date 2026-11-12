@@ -878,14 +878,20 @@ impl TranscriptionEngine {
             return None;
         }
         match self.held_selection() {
-            Some(selection)
-                if !crate::transcription::models::definition(selection.model).streams =>
-            {
-                Some("the selected speech model doesn't stream")
+            Some(selection) => {
+                use crate::transcription::models::{TranscriptionModelId, definition};
+                // An imported model's catalog entry says it can't stream, but
+                // its GGUF is only checked when it loads; blame the device.
+                if !matches!(selection.model, TranscriptionModelId::Custom(_))
+                    && !definition(selection.model).streams
+                {
+                    Some("the selected speech model doesn't stream")
+                } else {
+                    Some(
+                        "the speech model isn't streaming on this device (a CPU, or a GPU that could not start streaming)",
+                    )
+                }
             }
-            Some(_) => Some(
-                "the speech model isn't streaming on this device (a CPU, or a GPU that could not start streaming)",
-            ),
             None => Some("no streaming speech model is loaded"),
         }
     }
@@ -1255,17 +1261,25 @@ impl Worker {
             .model()
             .and_then(|model| model.stream_options().cloned());
         let Some(options) = options else {
+            let loaded = self.model.is_some();
             let model_streams = self
                 .model
                 .as_ref()
                 .and_then(|model| model.gguf_selection())
                 .map(|selection| crate::transcription::models::definition(selection.model).streams);
-            tracing::info!(
-                stream = id,
-                live_text = partials.is_some(),
-                model_streams,
-                "a live stream was requested but this model can't stream on its device; transcribing the whole clip"
-            );
+            match loaded {
+                true => tracing::info!(
+                    stream = id,
+                    live_text = partials.is_some(),
+                    model_streams,
+                    "a live stream was requested but this model can't stream on its device; transcribing the whole clip"
+                ),
+                false => tracing::info!(
+                    stream = id,
+                    live_text = partials.is_some(),
+                    "a live stream was requested but no speech model is loaded; transcribing the whole clip"
+                ),
+            }
             return;
         };
         self.running.enter(cancel);
@@ -2569,6 +2583,21 @@ mod tests {
         assert_eq!(
             engine.stream_refusal(),
             Some("the selected speech model doesn't stream")
+        );
+        // An imported model's catalog entry says it can't stream, but its
+        // GGUF is only checked when it loads: blame the device instead.
+        *engine.held.lock().unwrap() = Some(crate::transcription::models::TranscriptionSelection {
+            model: crate::transcription::models::TranscriptionModelId::Custom(
+                crate::transcription::models::CustomModelId::parse("custom-0123456789abcdef")
+                    .unwrap(),
+            ),
+            language: "en".into(),
+        });
+        assert_eq!(
+            engine.stream_refusal(),
+            Some(
+                "the speech model isn't streaming on this device (a CPU, or a GPU that could not start streaming)"
+            )
         );
     }
 }

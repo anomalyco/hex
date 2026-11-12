@@ -105,30 +105,28 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
 }
 
 /// Says why a lab just turned on can't work in this session (Labs › Live
-/// typing away from a compositor that offers the input method).
+/// typing on a compositor that offers no input method).
 fn announce_note(feature: Feature, on: bool) {
     if on
         && feature == Feature::LiveTyping
+        && feature.managed().is_none()
         && let Some(note) = live_typing_note()
     {
         println!("Note: {note}.");
     }
 }
 
-/// Why Labs › Live typing can't work here, on Linux: no Wayland session, or
-/// a compositor without the input-method protocol it uses (GNOME, KDE).
-/// `None` when it can work, and on every other OS.
+/// Why Labs › Live typing can't work here, on this Wayland compositor: it
+/// offers no input method Hex can use (GNOME). `None` when it can work, off
+/// Wayland, and on every other OS.
 #[cfg(target_os = "linux")]
 fn live_typing_note() -> Option<&'static str> {
     if !crate::linux::session::LinuxSession::detect().is_wayland() {
-        return Some("Live typing needs a Wayland session; dictations paste normally");
+        return None;
     }
-    if !crate::linux::paste::wayland_offers("zwp_input_method_manager_v2") {
-        return Some(
-            "This desktop's compositor doesn't offer the input method Live typing needs (GNOME doesn't); dictations paste normally",
-        );
-    }
-    None
+    (!crate::linux::paste::wayland_offers("zwp_input_method_manager_v2")).then_some(
+        "This desktop's compositor doesn't offer the input method Live typing needs (GNOME doesn't); dictations paste normally",
+    )
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -176,7 +174,7 @@ fn list(settings: &AppSettings) -> String {
         let on = feature.on(settings)
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
-        let note = (feature == Feature::LiveTyping)
+        let note = (feature == Feature::LiveTyping && feature.managed().is_none())
             .then(live_typing_note)
             .flatten()
             .map(|note| format!(" ({note})"))

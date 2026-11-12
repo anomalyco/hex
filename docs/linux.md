@@ -41,8 +41,7 @@ compositor's registry when the window loads: on a Wayland desktop without the
 protocol (GNOME) Settings › Labs keeps its card, disabled while off, with a
 note that this desktop offers no input method Live typing needs, and `hex labs`
 prints the same note in its list and after `hex labs on live-typing`. The
-toggle is not refused, and dictations paste normally. In an X11 session the
-card is hidden and the CLI says it needs Wayland. It has **not** been
+toggle is not refused, and dictations paste normally. It has **not** been
 verified on a real compositor yet; only its unit tests and the build ran.
 
 With **Labs › Transform typed text** on (`labs.typed_text`, off by default),

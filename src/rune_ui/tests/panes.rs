@@ -2787,6 +2787,12 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
             .any(|text| text.starts_with("This desktop doesn't offer the input method")),
         "its card says why"
     );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Show provisional words in the focused text field")),
+        "its description stays under the note"
+    );
 
     // Already on, it can still be turned off.
     rt.state.settings.labs.live_typing = true;

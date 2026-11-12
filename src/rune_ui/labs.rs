@@ -438,11 +438,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
             let on = live_typing.on;
             rows.push(Row {
                 locked: unsupported && !on,
-                about: if unsupported {
+                note: unsupported.then(|| {
                     tr("This desktop doesn't offer the input method Live typing needs (GNOME doesn't), so dictations paste normally")
-                } else {
-                    live_typing.about
-                },
+                        .to_owned()
+                }),
                 ..live_typing
             });
         }
@@ -1005,27 +1004,38 @@ fn rows(ui: &Ui) -> Vec<Row> {
 
 /// The Live text card's line when it can't show words: the selected model's
 /// own catalog flag, or a Linux speech engine explicitly set to the CPU
-/// (which never streams). `None` when nothing known would stop it.
+/// (which never streams). `None` when nothing known would stop it, and for an
+/// imported model, whose streaming is only known once it loads.
 fn live_text_note(ui: &Ui) -> Option<String> {
-    let cpu_engine = cfg!(target_os = "linux")
+    let cpu_engine = ui.platform.caps.os == super::platform::Os::Linux
         && ui.settings.transcription_device == crate::app_settings::TranscriptionDevice::Cpu;
-    live_text_note_for(ui.settings.transcription.model, cpu_engine)
+    live_text_note_for(
+        ui.settings.transcription.model,
+        &ui.settings.transcription.language,
+        cpu_engine,
+    )
 }
 
-/// [`live_text_note`] over the model and engine choice, so its copy is
-/// tested without a window.
+/// [`live_text_note`] over the model, language, and engine choice, so its
+/// copy is tested without a window.
 fn live_text_note_for(
     model: crate::transcription::models::TranscriptionModelId,
+    language: &str,
     cpu_engine: bool,
 ) -> Option<String> {
-    use crate::transcription::models::{MODELS, definition};
+    use crate::transcription::models::{MODELS, TranscriptionModelId, definition};
+    // An imported model's catalog entry says it can't stream, but its GGUF is
+    // only checked when it loads.
+    if matches!(model, TranscriptionModelId::Custom(_)) {
+        return None;
+    }
     if definition(model).streams {
         return cpu_engine
             .then(|| tr("Live words need the GPU, and Speech engine is set to CPU").to_owned());
     }
     let streaming: Vec<&'static str> = MODELS
         .iter()
-        .filter(|model| model.streams)
+        .filter(|model| model.streams && model.supports_language(language))
         .map(|model| model.name)
         .collect();
     match *streaming.as_slice() {
@@ -1037,7 +1047,7 @@ fn live_text_note_for(
             "This speech model doesn't show live words; pick {}",
             only,
         )),
-        [] => None,
+        [] => Some(tr("The selected speech model doesn't show live words").to_owned()),
     }
 }
 
@@ -1341,33 +1351,58 @@ fn keep_microphone_open_for(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription::models::TranscriptionModelId;
+    use crate::transcription::models::{CustomModelId, TranscriptionModelId};
+
+    fn custom_model() -> TranscriptionModelId {
+        TranscriptionModelId::Custom(
+            CustomModelId::parse("custom-0123456789abcdef").expect("a custom id"),
+        )
+    }
 
     /// The Live text card names the catalog's streaming models instead of
-    /// hardcoding them.
+    /// hardcoding them, filtered to the selected language.
     #[test]
     fn live_text_says_which_models_show_live_words() {
-        let note = live_text_note_for(TranscriptionModelId::ParakeetV3, false).unwrap();
+        let note = live_text_note_for(TranscriptionModelId::ParakeetV3, "en", false).unwrap();
         let streaming: Vec<&str> = crate::transcription::models::MODELS
             .iter()
-            .filter(|model| model.streams)
+            .filter(|model| model.streams && model.supports_language("en"))
             .map(|model| model.name)
             .collect();
         for name in streaming.iter().take(2) {
             assert!(note.contains(*name), "{note:?} names {name}");
         }
         assert_eq!(
-            live_text_note_for(TranscriptionModelId::ParakeetUnifiedEnglish, false),
+            live_text_note_for(TranscriptionModelId::ParakeetUnifiedEnglish, "en", false),
             None
         );
+    }
+
+    /// With no streaming model for the saved language, the card says so
+    /// without suggesting one that can't run it.
+    #[test]
+    fn live_text_suggests_no_model_for_another_language() {
+        let note = live_text_note_for(TranscriptionModelId::ParakeetV3, "he", false).unwrap();
+        assert_eq!(
+            note,
+            tr("The selected speech model doesn't show live words")
+        );
+    }
+
+    /// An imported model's catalog entry says it can't stream, but its file is
+    /// only checked when it loads, so its card claims nothing.
+    #[test]
+    fn live_text_never_judges_an_imported_model() {
+        assert_eq!(live_text_note_for(custom_model(), "en", false), None);
+        assert_eq!(live_text_note_for(custom_model(), "en", true), None);
     }
 
     /// A streaming model on a CPU engine still shows no live words, and the
     /// card says which setting to change.
     #[test]
     fn live_text_says_when_the_cpu_engine_stops_the_words() {
-        let note =
-            live_text_note_for(TranscriptionModelId::ParakeetUnifiedEnglish, true).expect("a note");
+        let note = live_text_note_for(TranscriptionModelId::ParakeetUnifiedEnglish, "en", true)
+            .expect("a note");
         assert!(note.contains(tr("Speech engine")), "{note:?}");
         assert!(note.to_lowercase().contains("gpu"), "{note:?}");
     }

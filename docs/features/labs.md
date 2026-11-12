@@ -2760,22 +2760,32 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   feeds, and no host adds the line's overlay. Each dictation's `finished
   live stream` line in process.log counts its text changes (`partials`);
   `RUST_LOG=hex=debug` adds a `live text` line per change with the audio
-  fed and the word counts, never the words. Its card says when no words can
-  show: the selected model's catalog `ModelDefinition::streams` is false (the
-  card names the streaming models from the catalog), or, on Linux, Speech
-  engine is explicitly CPU (which never streams). A resolved CPU on Auto
-  (#856's slow-iGPU verdict) isn't known to the window, so that case has no
-  card note. When a capture wants live text and no stream opens, process.log
-  says why once per capture (`the selected speech model doesn't stream`, or
-  `the speech model isn't streaming on this device`), and a stream begun
-  while the loaded model can't stream logs
-  `a live stream was requested but this model can't stream on its device`.
+  fed and the word counts, never the words. Under its description, its card
+  adds a line when no words can show: the selected model's catalog
+  `ModelDefinition::streams` is false (the line names the streaming models
+  from the catalog that take the saved language, and with none for it says
+  only that the model doesn't show live words), or, on Linux, Speech engine
+  is explicitly CPU (which never streams). An imported model gets no line:
+  its catalog entry says it can't stream, but its GGUF is only checked when it
+  loads. A resolved CPU on Auto (#856's slow-iGPU verdict) isn't known to the
+  window, so that case has no card line. When a capture wants live text and
+  no stream opens yet, process.log names the reason once per capture (the
+  model doesn't stream, it isn't streaming on this device, or no streaming
+  speech model is loaded), and a stream begun while the loaded model can't
+  stream logs `a live stream was requested but this model can't stream on its
+  device`, or says no speech model is loaded when none could load.
   Checks:
   `a_dictation_stream_publishes_its_text_after_each_feed_with_live_text`,
   `without_live_text_a_dictation_stream_publishes_nothing`,
   `each_dictation_stream_has_its_own_text`, and
   `a_failed_feed_clears_the_text_and_stops_publishing` in
-  [transcription/engine.rs](../../src/transcription/engine.rs);
+  [transcription/engine.rs](../../src/transcription/engine.rs), and
+  `a_stream_refusal_names_the_model_or_the_device` there;
+  `live_text_says_which_models_show_live_words`,
+  `live_text_suggests_no_model_for_another_language`,
+  `live_text_never_judges_an_imported_model`, and
+  `live_text_says_when_the_cpu_engine_stops_the_words` in
+  [rune_ui/labs.rs](../../src/rune_ui/labs.rs);
   `live_text_follows_the_recording_and_never_outlives_it` in
   [dictation.rs](../../src/dictation.rs); the three tests in
   [dictation/live_text.rs](../../src/dictation/live_text.rs) (a recording's end clears only its
@@ -2820,10 +2830,12 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   only, and its card is hidden in an X11 session). On Wayland, the card asks
   the compositor's registry once at window load
   (`linux::paste::wayland_offers("zwp_input_method_manager_v2")`); without
-  that global (GNOME) it stays listed, disabled while off, with a note that
-  this desktop offers no input method it needs and dictations paste normally,
-  and `hex labs` prints the same note in its list and after
-  `hex labs on live-typing` (never refusing the toggle). It is read at the hold
+  that global (GNOME) it stays listed, disabled while off, with a line under
+  its description that this desktop offers no input method it needs and
+  dictations paste normally, and `hex labs` prints the same note in its list
+  and after `hex labs on live-typing` (never refusing the toggle). An
+  organization's managed lock keeps its own note, and the CLI adds none. It is
+  read at the hold
   threshold, or at the Toggle press, never for a Local API
   dictation, `/streams`, or Voice Action; the final text still goes through
   Output's processing, and History and Paste Last update as they do for a
@@ -2873,7 +2885,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
   [dictation/live_text.rs](../../src/dictation/live_text.rs); and
   `the_plate_follows_the_decision_made_when_the_stream_opened` in
-  [dictation.rs](../../src/dictation.rs). **Not verified
+  [dictation.rs](../../src/dictation.rs), and
+  `live_typing_says_when_the_desktop_cannot_use_it` in
+  [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). **Not verified
   on a real compositor**: only unit tests and the build, plus the Linux Labs
   golden's new card.
 - Playground: Rune's playground in the window (every OS), `labs.playground`

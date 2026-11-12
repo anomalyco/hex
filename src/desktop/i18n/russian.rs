@@ -1287,6 +1287,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Live words need the GPU, and Speech engine is set to CPU", "Слова в реальном времени требуют GPU, а Движок речи выбран CPU"),
     ("This speech model doesn't show live words; pick {first} or {second}", "Эта речевая модель не показывает слова в реальном времени; выберите {first} или {second}"),
     ("This speech model doesn't show live words; pick {}", "Эта речевая модель не показывает слова в реальном времени; выберите {}"),
+    ("The selected speech model doesn't show live words", "Выбранная речевая модель не показывает слова в реальном времени"),
 ];
 
 #[cfg(test)]
