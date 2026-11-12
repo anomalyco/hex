@@ -6,7 +6,7 @@
 //! stitched together. macOS applies its own stricter 250 ms limit in
 //! [`crate::dictation::audio`].
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::audio::{CaptureInstant, STREAM_STALL_TIMEOUT};
 use crate::dictation::CHUNK_GAP_TOLERANCE;
@@ -14,6 +14,42 @@ use crate::dictation::CHUNK_GAP_TOLERANCE;
 /// Linux pads any gap the stream-stall watchdog would not already have
 /// treated as a dead stream.
 const MAX_PADDED_GAP: Duration = STREAM_STALL_TIMEOUT;
+
+/// Where the microphone stream's clock stands between chunks: the newest
+/// chunk's end plus the time since it arrived. PipeWire and ALSA can deliver
+/// large chunks (#1309), so the newest audio may trail a press by most of
+/// one; shortcut presses and releases are placed here instead.
+#[derive(Default)]
+pub(super) struct StreamClock {
+    newest: Option<(CaptureInstant, Instant)>,
+}
+
+impl StreamClock {
+    /// A stalled stream's lag is not counted past this.
+    pub(super) const MAX_LAG: Duration = Duration::from_secs(2);
+
+    pub(super) fn chunk(&mut self, captured_through: CaptureInstant, received: Instant) {
+        self.newest = Some((captured_through, received));
+    }
+
+    /// A replaced or reopened stream keeps its own clock: nothing of the old
+    /// one carries over.
+    pub(super) fn reset(&mut self) {
+        self.newest = None;
+    }
+
+    /// The end of the newest chunk.
+    pub(super) fn through(&self) -> CaptureInstant {
+        self.newest
+            .map_or(CaptureInstant::ZERO, |(through, _)| through)
+    }
+
+    /// The stream time at `now`; `None` before this stream's first chunk.
+    pub(super) fn at(&self, now: Instant) -> Option<CaptureInstant> {
+        let (through, received) = self.newest?;
+        Some(through + now.saturating_duration_since(received).min(Self::MAX_LAG))
+    }
+}
 
 /// One chunk on the microphone timeline, relative to the chunk before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

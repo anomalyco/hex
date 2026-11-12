@@ -2,8 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use crate::app_settings::DictationProcessingSettings;
-use crate::dictation::processor::{Profile, Profiles};
-use crate::dictation::text_replacements::ReplacementSet;
+use crate::dictation::processor::Profiles;
 
 static DICTATION_PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
 static READS_BROWSER: AtomicBool = AtomicBool::new(false);
@@ -73,28 +72,7 @@ fn dictation_profiles_lock() -> &'static RwLock<Profiles> {
 }
 
 fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles {
-    let global = &settings.default_mode;
-    let mut profiles = Profiles::new(
-        Profile::configured(
-            "Global",
-            ReplacementSet::default(),
-            global.transformations.clone(),
-            &global.post_processing,
-        )
-        .vocabulary(global.vocabulary.clone())
-        .speech(global.speech.clone()),
-    )
-    .global_replacements(ReplacementSet::new(&global.replacements));
-    for mode in &settings.modes {
-        let profile = Profile::from_mode(mode);
-        for application in &mode.applications {
-            profiles = profiles.application(application.clone(), profile.clone());
-        }
-        for host in &mode.browser_hosts {
-            profiles = profiles.browser_host(host.clone(), profile.clone());
-        }
-    }
-    profiles
+    Profiles::from_settings(settings)
 }
 
 #[cfg(test)]

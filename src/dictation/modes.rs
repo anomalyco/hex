@@ -1,26 +1,18 @@
-//! Dictation modes for the Windows and Linux listeners. The focused
-//! application or website selects a mode, and its replacements,
-//! post-processing, and transformations run in the shared
-//! `dictation_processor` order. macOS selects modes through `config`.
+//! The Windows and Linux listeners' snapshot of the shared processing pipeline.
 
 use std::sync::atomic::AtomicBool;
 
 use url::Url;
 
-use crate::app_settings::{AppSettings, DictationMode, DictationProcessingSettings};
-use crate::dictation::processor::{PostProcessingSettings, Processed, Profile, Profiles};
-use crate::dictation::text_replacements::ReplacementSet;
+use crate::app_settings::{AppSettings, DictationProcessingSettings};
+use crate::dictation::processor::{Processed, Profiles};
 
 /// Live mode-processing snapshot. The output worker clones it before any
 /// deadline-bounded OpenCode call, so settings writes never wait on
 /// inference.
 #[derive(Clone)]
 pub struct ModeRuntime {
-    replacements: ReplacementSet,
-    default: PostProcessingSettings,
-    default_transformations: Vec<String>,
-    default_vocabulary: Vec<crate::dictation::vocabulary::VocabularyEntry>,
-    modes: Vec<DictationMode>,
+    profiles: Profiles,
     reads_page: bool,
 }
 
@@ -28,11 +20,7 @@ impl ModeRuntime {
     pub fn from_settings(settings: &AppSettings) -> Self {
         let processing = &settings.dictation_processing;
         Self {
-            replacements: ReplacementSet::new(&processing.default_mode.replacements),
-            default: processing.default_mode.post_processing.clone(),
-            default_transformations: processing.default_mode.transformations.clone(),
-            default_vocabulary: processing.default_mode.vocabulary.clone(),
-            modes: processing.modes.clone(),
+            profiles: Profiles::from_settings(processing),
             // Labs › Voice prompt carries the browser host in its request,
             // so its mode runtime reads the page too.
             reads_page: uses_page(processing) || settings.labs.voice_prompt,
@@ -46,8 +34,8 @@ impl ModeRuntime {
         self.reads_page
     }
 
-    /// Global replacements, then the matching mode's corrections,
-    /// post-processing, and transformations.
+    /// Speech preparation, Global corrections, mode corrections, rewrite,
+    /// and transformations, through the same profiles macOS uses.
     pub fn process(
         &self,
         raw_text: &str,
@@ -77,33 +65,11 @@ impl ModeRuntime {
         cancelled: &AtomicBool,
         source: crate::dictation::processor::Source,
     ) -> Processed {
-        let text = self.replacements.replace(raw_text);
-        let profile = self.profile(context);
-        let mut processed =
-            Profiles::new(profile).process_cancellable(&text, language, context, cancelled, source);
+        let mut processed = self
+            .profiles
+            .process_cancellable(raw_text, language, context, cancelled, source);
         processed.apply_transformations(transformations, context, cancelled, source);
         processed
-    }
-
-    /// The matching mode's profile, or Global's.
-    fn profile(&self, context: &crate::dictation::context::ContextSnapshot) -> Profile {
-        let mode = mode_for_context(
-            &self.modes,
-            context.application.as_deref(),
-            context.browser_host(),
-        );
-        mode.map_or_else(
-            || {
-                Profile::configured(
-                    "Global",
-                    ReplacementSet::default(),
-                    self.default_transformations.clone(),
-                    &self.default,
-                )
-                .vocabulary(self.default_vocabulary.clone())
-            },
-            Profile::from_mode,
-        )
     }
 }
 
@@ -183,58 +149,19 @@ pub fn history_draft(
     }
 }
 
-/// Whether a mode's applications match the focused application. Windows
-/// and Linux name applications by executable, and a rule matches any
-/// case-insensitive substring of that name ("code" matches "vscode").
-fn matches_application(mode: &DictationMode, application: &str) -> bool {
-    let application = application.to_lowercase();
-    mode.applications.iter().any(|candidate| {
-        let candidate = candidate.trim().to_lowercase();
-        !candidate.is_empty() && application.contains(&candidate)
-    })
-}
-
-/// Whether a mode's websites match the focused page's exact host.
-fn matches_website(mode: &DictationMode, host: &str) -> bool {
-    let host = normalize_host(host);
-    mode.browser_hosts.iter().any(|candidate| {
-        // Entries are stored as typed; pasted URLs, ports, and IDN text
-        // reduce to their host here.
-        canonical_host(candidate).is_some_and(|candidate| candidate == host)
-    })
-}
-
-/// The first mode matching the focused context. A website rule is more
-/// specific than an application rule, so browser-host matches win, like
-/// the macOS selector ordering.
-fn mode_for_context<'a>(
-    modes: &'a [DictationMode],
-    application: Option<&str>,
-    browser_host: Option<&str>,
-) -> Option<&'a DictationMode> {
-    if let Some(host) = browser_host
-        && let Some(mode) = modes.iter().find(|mode| matches_website(mode, host))
-    {
-        return Some(mode);
-    }
-    let application = application?;
-    modes
-        .iter()
-        .find(|mode| matches_application(mode, application))
-}
-
 /// The speech model and language the mode matching the focused context
 /// carries, else Global's. `None` means the mode never switches.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub(crate) fn speech_for<'a>(
-    settings: &'a DictationProcessingSettings,
+pub(crate) fn speech_for(
+    settings: &DictationProcessingSettings,
     application: Option<&str>,
     browser_host: Option<&str>,
-) -> Option<&'a crate::app_settings::KeyboardModelChoice> {
-    mode_for_context(&settings.modes, application, browser_host)
-        .unwrap_or(&settings.default_mode)
-        .speech
-        .as_ref()
+) -> Option<crate::app_settings::KeyboardModelChoice> {
+    Profiles::from_settings(settings).speech_for(&crate::dictation::context::ContextSnapshot {
+        application: application.map(str::to_owned),
+        browser_url: browser_host.and_then(|host| Url::parse(&format!("https://{host}")).ok()),
+        ..Default::default()
+    })
 }
 
 /// Hosts compare case-insensitively with any trailing dot removed,
@@ -261,6 +188,7 @@ pub fn canonical_host(entry: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::DictationMode;
 
     fn mode(name: &str, applications: &[&str], browser_hosts: &[&str]) -> DictationMode {
         DictationMode {
@@ -274,12 +202,26 @@ mod tests {
         }
     }
 
-    fn matched<'a>(
-        modes: &'a [DictationMode],
+    fn matched(
+        modes: &[DictationMode],
         application: Option<&str>,
         host: Option<&str>,
-    ) -> Option<&'a str> {
-        mode_for_context(modes, application, host).map(|mode| mode.name.as_str())
+    ) -> Option<String> {
+        let settings = DictationProcessingSettings {
+            modes: modes
+                .iter()
+                .cloned()
+                .map(|mut mode| {
+                    mode.speech = Some(crate::app_settings::KeyboardModelChoice {
+                        language: mode.name.clone(),
+                        model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
+                    });
+                    mode
+                })
+                .collect(),
+            ..Default::default()
+        };
+        speech_for(&settings, application, host).map(|choice| choice.language)
     }
 
     fn runtime(settings: impl FnOnce(&mut AppSettings)) -> ModeRuntime {
@@ -294,9 +236,19 @@ mod tests {
             mode("Code", &["Code", "rustrover"], &[]),
             mode("Chat", &["slack"], &[]),
         ];
-        assert_eq!(matched(&modes, Some("code"), None), Some("Code"));
-        assert_eq!(matched(&modes, Some("slack"), None), Some("Chat"));
-        assert_eq!(matched(&modes, Some("vscode"), None), Some("Code"));
+        assert_eq!(matched(&modes, Some("code"), None).as_deref(), Some("Code"));
+        assert_eq!(
+            matched(&modes, Some("slack"), None).as_deref(),
+            Some("Chat")
+        );
+        assert_eq!(
+            matched(&modes, Some("vscode"), None).as_deref(),
+            if cfg!(target_os = "macos") {
+                None
+            } else {
+                Some("Code")
+            }
+        );
         assert_eq!(matched(&modes, Some("notepad"), None), None);
         assert_eq!(matched(&modes, None, None), None);
     }
@@ -307,12 +259,18 @@ mod tests {
             mode("Browser", &["chrome"], &[]),
             mode("X", &[], &["X.com"]),
         ];
-        assert_eq!(matched(&modes, Some("chrome"), Some("x.com.")), Some("X"));
         assert_eq!(
-            matched(&modes, Some("chrome"), Some("news.x.com")),
+            matched(&modes, Some("chrome"), Some("x.com.")).as_deref(),
+            Some("X")
+        );
+        assert_eq!(
+            matched(&modes, Some("chrome"), Some("news.x.com")).as_deref(),
             Some("Browser")
         );
-        assert_eq!(matched(&modes, Some("chrome"), None), Some("Browser"));
+        assert_eq!(
+            matched(&modes, Some("chrome"), None).as_deref(),
+            Some("Browser")
+        );
     }
 
     #[test]
@@ -377,7 +335,7 @@ mod tests {
             }];
         });
         let context = crate::dictation::context::ContextSnapshot {
-            application: Some("Visual Studio Code".into()),
+            application: Some("code".into()),
             ..crate::dictation::context::ContextSnapshot::default()
         };
         let transformations = crate::personal_commands::TransformationClient::default();
@@ -430,7 +388,7 @@ mod tests {
             application: Some("kitty".into()),
             ..crate::dictation::context::ContextSnapshot::default()
         };
-        assert!(runtime.profile(&context).rewrites());
+        assert!(runtime.profiles.processes(&context));
     }
 
     #[test]
@@ -460,15 +418,18 @@ mod tests {
             ],
         };
         let matched = |application: Option<&str>, host: Option<&str>| {
-            speech_for(&settings, application, host).map(|choice| choice.language.as_str())
+            speech_for(&settings, application, host).map(|choice| choice.language)
         };
 
-        assert_eq!(matched(Some("vscode"), None), Some("de"));
+        assert_eq!(matched(Some("code"), None).as_deref(), Some("de"));
         // A website is more specific than an application.
-        assert_eq!(matched(Some("chrome"), Some("x.com")), Some("es"));
+        assert_eq!(
+            matched(Some("chrome"), Some("x.com")).as_deref(),
+            Some("es")
+        );
         // Nothing matches, so Global's own choice applies.
-        assert_eq!(matched(Some("notepad"), None), Some("en"));
-        assert_eq!(matched(None, None), Some("en"));
+        assert_eq!(matched(Some("notepad"), None).as_deref(), Some("en"));
+        assert_eq!(matched(None, None).as_deref(), Some("en"));
     }
 
     #[test]

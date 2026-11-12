@@ -149,7 +149,6 @@ pub(crate) fn mode_choice(
     #[cfg(not(target_os = "macos"))]
     {
         crate::dictation::modes::speech_for(&settings.dictation_processing, Some(application), None)
-            .cloned()
     }
 }
 

@@ -34,13 +34,14 @@ mod shortcuts;
 mod silence;
 mod typing;
 
-use gap::{ChunkStep, chunk_step};
+use gap::{ChunkStep, StreamClock, chunk_step};
 use shortcuts::{reregister, shortcuts};
 use silence::reopen_silent_stream;
 use typing::CaptureTyping;
 
 struct Job {
     transcript: PendingTranscript,
+    context: crate::linux::context::PendingContext,
     audio_ms: u64,
     /// The language the model was asked for at submission.
     language: String,
@@ -58,7 +59,7 @@ struct Job {
 }
 
 enum OutputJob {
-    Dictation(Job),
+    Dictation(Box<Job>),
     /// Pastes the newest completed dictation again.
     PasteLast,
     /// Runs the focused field's text through its Output steps and replaces
@@ -78,45 +79,10 @@ enum OutputKind {
 /// A release whose capture is still collecting its post-release tail.
 struct Finishing {
     release: ReleaseWait,
+    context: crate::linux::context::PendingContext,
     print: Option<PrintReply>,
     flavour: crate::dictation::DictationFlavour,
     released: Instant,
-}
-
-/// Where the microphone stream's clock stands between chunks: the newest
-/// chunk's end plus the time since it arrived. PipeWire and ALSA can deliver
-/// large chunks (#1309), so the newest audio may trail a press by most of
-/// one; shortcut presses and releases are placed here instead.
-#[derive(Default)]
-struct StreamClock {
-    newest: Option<(CaptureInstant, Instant)>,
-}
-
-impl StreamClock {
-    /// A stalled stream's lag is not counted past this.
-    const MAX_LAG: Duration = Duration::from_secs(2);
-
-    fn chunk(&mut self, captured_through: CaptureInstant, received: Instant) {
-        self.newest = Some((captured_through, received));
-    }
-
-    /// A replaced or reopened stream keeps its own clock: nothing of the old
-    /// one carries over.
-    fn reset(&mut self) {
-        self.newest = None;
-    }
-
-    /// The end of the newest chunk.
-    fn through(&self) -> CaptureInstant {
-        self.newest
-            .map_or(CaptureInstant::ZERO, |(through, _)| through)
-    }
-
-    /// The stream time at `now`; `None` before this stream's first chunk.
-    fn at(&self, now: Instant) -> Option<CaptureInstant> {
-        let (through, received) = self.newest?;
-        Some(through + now.saturating_duration_since(received).min(Self::MAX_LAG))
-    }
 }
 
 struct OutputWorker {
@@ -210,13 +176,13 @@ impl DictationOutput {
         started: Instant,
         recording: Option<crate::history::Recording>,
         typing: Option<crate::linux::live_typing::Session>,
+        context: crate::dictation::context::ContextSnapshot,
     ) -> Result<String> {
         let modes = self
             .modes
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
-        let context = crate::linux::context::capture(!flavour.raw() && modes.reads_page());
         let processed = if flavour.raw() {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
@@ -399,8 +365,8 @@ pub(crate) fn run(
                 break;
             }
             let (mut job, kind) = match job {
-                OutputJob::Dictation(job) if job.print.is_some() => (job, OutputKind::Printed),
-                OutputJob::Dictation(job) => (job, OutputKind::Dictation),
+                OutputJob::Dictation(job) if job.print.is_some() => (*job, OutputKind::Printed),
+                OutputJob::Dictation(job) => (*job, OutputKind::Dictation),
                 OutputJob::PasteLast => {
                     let result = last_dictation
                         .clone()
@@ -467,6 +433,7 @@ pub(crate) fn run(
                         started,
                         job.recording.take(),
                         job.typing.take(),
+                        job.context.finish(),
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
@@ -482,6 +449,7 @@ pub(crate) fn run(
                     started,
                     job.recording.take(),
                     job.typing.take(),
+                    job.context.finish(),
                 )
             })()
             .map_err(|error| format!("{error:#}"));
@@ -754,6 +722,7 @@ pub(crate) fn run(
             );
             let Finishing {
                 release,
+                context,
                 print,
                 flavour,
                 ..
@@ -769,6 +738,7 @@ pub(crate) fn run(
                 print,
                 flavour,
                 &mut active_typing,
+                context,
             )?;
             if silent
                 && reopen_silent_stream(
@@ -954,6 +924,16 @@ pub(crate) fn run(
                     let released_at = clock.at(Instant::now()).unwrap_or(CaptureInstant::ZERO);
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
+                        context: if capture.would_transcribe(released_at) {
+                            crate::linux::context::begin_capture(
+                                !recording_flavour.raw()
+                                    && (crate::dictation::modes::uses_page(
+                                        &settings.dictation_processing,
+                                    ) || settings.labs.voice_prompt),
+                            )
+                        } else {
+                            Default::default()
+                        },
                         ..begin_finishing(&capture, released_at, print.take(), || {
                             suppressor.restore_then(feedback::deferred_stop())
                         })
@@ -1369,6 +1349,7 @@ fn begin_finishing(
     }
     Finishing {
         release,
+        context: Default::default(),
         print,
         flavour: crate::dictation::DictationFlavour::Normal,
         released: Instant::now(),
@@ -1387,6 +1368,7 @@ fn submit_capture(
     print: Option<PrintReply>,
     flavour: crate::dictation::DictationFlavour,
     typing: &mut Option<CaptureTyping>,
+    context: crate::linux::context::PendingContext,
 ) -> Result<bool> {
     // A discarded capture drops this guard without starting or ending a
     // session; a transcribed one moves it into the job.
@@ -1418,15 +1400,16 @@ fn submit_capture(
                 .unwrap_or_else(|| crate::app_settings::transcription_selection().1)
                 .language;
             let recording = crate::history::Recording::keep(&samples);
-            let job = OutputJob::Dictation(Job {
+            let job = OutputJob::Dictation(Box::new(Job {
                 transcript: engine.finish(stream, samples)?,
+                context,
                 audio_ms,
                 language,
                 recording,
                 print,
                 flavour,
                 typing: typing.map(|CaptureTyping { session, .. }| session),
-            });
+            }));
             match jobs.try_send(job) {
                 Ok(()) => {
                     *pending += 1;
@@ -1659,6 +1642,7 @@ mod tests {
             None,
             crate::dictation::DictationFlavour::Normal,
             &mut None,
+            Default::default(),
         )
         .unwrap();
         assert!(silent);
@@ -1808,6 +1792,7 @@ mod tests {
             None,
             crate::dictation::DictationFlavour::Normal,
             &mut None,
+            Default::default(),
         )
         .unwrap();
         assert_eq!(pending, 1);
@@ -1877,6 +1862,7 @@ mod tests {
             finishing.print,
             crate::dictation::DictationFlavour::Normal,
             &mut None,
+            Default::default(),
         )
         .unwrap();
 
@@ -1912,6 +1898,7 @@ mod tests {
             None,
             crate::dictation::DictationFlavour::Normal,
             &mut None,
+            Default::default(),
         )
         .unwrap();
         assert!(queued.try_recv().is_ok());
@@ -2016,6 +2003,7 @@ mod tests {
             Instant::now(),
             None,
             None,
+            Default::default(),
         );
 
         assert!(result.is_err(), "the failed paste is still reported");

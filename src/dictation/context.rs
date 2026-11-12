@@ -121,6 +121,7 @@ struct Frontmost {
 pub enum ContextSelector {
     BrowserHost(String),
     Application(String),
+    ApplicationSubstring(String),
 }
 
 impl ContextSelector {
@@ -129,13 +130,20 @@ impl ContextSelector {
     }
 
     pub fn browser_host(host: impl Into<String>) -> Self {
-        Self::BrowserHost(normalize_browser_host(&host.into()))
+        Self::BrowserHost(crate::dictation::modes::canonical_host(&host.into()).unwrap_or_default())
     }
 
     pub fn matches(&self, context: &ContextSnapshot) -> bool {
         match self {
             Self::BrowserHost(host) => context.browser_host_is(host),
             Self::Application(application) => context.application_is(application),
+            Self::ApplicationSubstring(application) => {
+                !application.is_empty()
+                    && context
+                        .application
+                        .as_ref()
+                        .is_some_and(|current| current.to_lowercase().contains(application))
+            }
         }
     }
 
@@ -705,10 +713,6 @@ fn parse_tab_output(output: &str) -> Option<(Url, Option<String>)> {
     Some((url, (!title.is_empty()).then(|| title.to_string())))
 }
 
-fn normalize_browser_host(host: &str) -> String {
-    host.trim_end_matches('.').to_ascii_lowercase()
-}
-
 fn application_names_equal(left: &str, right: &str) -> bool {
     strip_bundle_extension(left).eq_ignore_ascii_case(strip_bundle_extension(right))
 }
@@ -739,6 +743,26 @@ mod tests {
     use std::cell::Cell;
     use std::sync::atomic::{AtomicI32, AtomicUsize};
     use std::time::Instant;
+
+    #[test]
+    fn website_selectors_accept_saved_urls_ports_and_idn() {
+        for (entry, page) in [
+            ("https://X.com/home", "https://x.com/other"),
+            ("x.com:3000", "https://x.com/"),
+            (" X.com. ", "https://x.com/"),
+            ("bücher.example", "https://xn--bcher-kva.example/"),
+        ] {
+            let context = ContextSnapshot {
+                browser_url: Some(Url::parse(page).unwrap()),
+                ..Default::default()
+            };
+            assert!(
+                ContextSelector::browser_host(entry).matches(&context),
+                "{entry}"
+            );
+            assert!(!ContextSelector::browser_host("news.x.com").matches(&context));
+        }
+    }
 
     fn next(monitor: &ContextMonitor) -> ContextSnapshot {
         monitor

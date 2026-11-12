@@ -54,6 +54,7 @@ pub fn wake() {
 }
 
 struct Job {
+    context: crate::windows::context::PendingContext,
     transcript: PendingTranscript,
     audio_ms: u64,
     /// The language the model was asked for at submission.
@@ -69,6 +70,7 @@ struct Job {
 
 /// A release whose capture is still collecting its post-release tail.
 struct Finishing {
+    context: crate::windows::context::PendingContext,
     release: ReleaseWait,
     print: Option<PrintReply>,
     flavour: crate::dictation::DictationFlavour,
@@ -307,6 +309,7 @@ pub fn run(
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
     let worker_paste_with_shift = paste_with_shift.clone();
+    let capture_modes = mode_runtime.clone();
     let worker = thread::Builder::new()
         .name("windows-dictation-output".into())
         .spawn(move || {
@@ -508,6 +511,7 @@ pub fn run(
         {
             let Some(Finishing {
                 release,
+                context,
                 print,
                 flavour,
                 ..
@@ -525,6 +529,7 @@ pub fn run(
                 &mut pending,
                 print,
                 flavour,
+                context,
             )?;
             if submitted {
                 next_job_id += 1;
@@ -742,7 +747,18 @@ pub fn run(
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
                         print: print.take(),
-                        ..begin_finishing(&capture, occurred_at)
+                        context: if capture.would_transcribe(occurred_at) {
+                            crate::windows::context::begin_capture(
+                                !recording_flavour.raw()
+                                    && capture_modes
+                                        .read()
+                                        .unwrap_or_else(|error| error.into_inner())
+                                        .reads_page(),
+                            )
+                        } else {
+                            Default::default()
+                        },
+                        release: ReleaseWait::new(&capture, occurred_at),
                     });
                 }
                 HotkeyAction::Cancel if recording => {
@@ -1050,13 +1066,6 @@ fn process_dictation_job(
 ) -> JobResult {
     let started = Instant::now();
     let printed = job.print.is_some();
-    // The context read starts now so the UIA walk overlaps inference.
-    let reads_page = !job.flavour.raw()
-        && mode_runtime
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .reads_page();
-    let pending_context = crate::windows::context::begin_capture(reads_page);
     let inference_started = Instant::now();
     let transcription = job.transcript.wait().map(|transcribed| {
         tracing::info!(
@@ -1068,7 +1077,7 @@ fn process_dictation_job(
         transcribed.text
     });
     let inference_ms = inference_started.elapsed().as_millis() as u64;
-    let context = pending_context.finish();
+    let context = job.context.finish();
     let application = context.application.clone();
     let result = transcription.and_then(|raw_text| {
         if raw_text.is_empty() {
@@ -1338,15 +1347,6 @@ fn end_service_capture(
     }
 }
 
-fn begin_finishing(capture: &DictationCapture, ended_at: CaptureInstant) -> Finishing {
-    Finishing {
-        // A short tap is discarded on its release alone and needs no tail.
-        release: ReleaseWait::new(capture, ended_at),
-        print: None,
-        flavour: crate::dictation::DictationFlavour::Normal,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn submit_capture(
     capture: &mut DictationCapture,
@@ -1358,6 +1358,7 @@ fn submit_capture(
     pending: &mut usize,
     print: Option<PrintReply>,
     flavour: crate::dictation::DictationFlavour,
+    context: crate::windows::context::PendingContext,
 ) -> Result<bool> {
     let mut submitted = false;
     let no_speech = |print: Option<PrintReply>| {
@@ -1384,6 +1385,7 @@ fn submit_capture(
                 .language;
             let recording = crate::history::Recording::keep(&samples);
             let job = OutputJob::Dictation(Job {
+                context,
                 transcript: engine.finish(stream, samples)?,
                 audio_ms,
                 language,
