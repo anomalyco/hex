@@ -182,3 +182,25 @@ downloaded, the full check refusing a mismatched file),
 `rune-onboarding-model-found-downloading-light`,
 `rune-onboarding-model-found-recommended-light`, and
 `rune-onboarding-model-found-back-light`.
+
+## A Download Another Process Runs
+
+```ts
+models/.download.lock held by `hex model install` (a terminal) or another Hex,
+writing models/<file>.gguf.partial  // transcription::models::lock_downloads
+├── Onboarding, Settings, or `hex model install` starts the same model -> it
+│   waits for that lock instead of failing or downloading a second copy
+├── While it waits, downloaded_bytes comes from the partial file's size, so
+│   `hex status --json`, the picker, and onboarding show that process's
+│   progress rather than 0%
+├── Cancel stops only the wait; the other process's download continues
+└── The lock is released -> the finished file is verified against its
+    receipt and adopted, with no second download
+```
+
+Checks: `transcription::models::tests::waiting_for_another_processs_download_reports_its_partial_bytes`
+holds the lock and writes three bytes of the partial, then asserts a waiting
+download reports those bytes and stops canceled without fetching anything.
+That a foreign lock makes `hex model install`/onboarding show it in the real
+service has **not** been run; the Linux app's snapshot was checked by reading
+`linux::app::snapshot`.
