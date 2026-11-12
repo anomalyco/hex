@@ -12,7 +12,7 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 
 use crate::desktop::events::now_ms;
-use crate::durable::{sync_directory, sync_file};
+use crate::durable::{lock_contended, sync_directory, sync_file};
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
@@ -1083,13 +1083,6 @@ fn meeting_is_active(directory: &Path) -> Option<bool> {
             None
         }
     }
-}
-
-/// Whether a failed try-lock means another handle holds the lock: `flock`'s
-/// `EWOULDBLOCK` on Unix, `ERROR_LOCK_VIOLATION` on Windows.
-fn lock_contended(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::WouldBlock
-        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 
 fn recovered_status(

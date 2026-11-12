@@ -24,6 +24,14 @@ pub(crate) fn sync_directory(directory: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Whether a failed try-lock means another handle holds the lock: `flock`'s
+/// `EWOULDBLOCK` on Unix, `ERROR_LOCK_VIOLATION` on Windows (which `io`
+/// does not call `WouldBlock`).
+pub(crate) fn lock_contended(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock
+        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+}
+
 /// Replaces `path` with `contents` so a crash leaves either the old file or
 /// the complete new one. The staging file is unique to this write, so
 /// concurrent writers never share one. A symlinked `path` (settings kept in

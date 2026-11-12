@@ -1,4 +1,4 @@
-use crate::durable::{sync_directory, sync_file};
+use crate::durable::{lock_contended, sync_directory, sync_file};
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
@@ -981,7 +981,7 @@ pub(crate) fn remove_installed_at(path: &Path) -> Result<()> {
     let lock = File::create(directory.join(".download.lock"))?;
     match lock.try_lock_exclusive() {
         Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+        Err(error) if lock_contended(&error) => {
             bail!("A model download is in progress. Try again when it finishes.")
         }
         Err(error) => return Err(error.into()),
@@ -1070,7 +1070,7 @@ fn lock_downloads(directory: &Path, canceled: &AtomicBool, waiting: impl Fn()) -
         check_canceled(canceled)?;
         match lock.try_lock_exclusive() {
             Ok(()) => return Ok(lock),
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+            Err(error) if lock_contended(&error) => {
                 waiting();
                 thread::sleep(Duration::from_millis(100));
             }
