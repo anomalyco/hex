@@ -531,8 +531,8 @@ const QUIET_SEARCH_SAMPLES: usize = 5 * 16_000;
 
 /// Splits a clip into consecutive ranges of at most `max_samples`, cutting
 /// each window at the middle of the quietest 100 ms in its last five seconds
-/// (or half the window, when that is shorter), as Cohere's reference
-/// processor does. An exact sample cut lands mid-word, and each slice starts a
+/// (or half the window, when that is shorter), adapted from Cohere's reference
+/// processor. An exact sample cut lands mid-word, and each slice starts a
 /// fresh sentence with a capital and a closing full stop, so a long dictation
 /// reads as many sentences instead of one.
 ///

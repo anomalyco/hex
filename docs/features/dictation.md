@@ -1514,15 +1514,13 @@ Completed long recording                  // dictate.model-windows
 Chunking bounds inference, not capture duration. No silence is removed.
 ```
 
-A window used to be cut at an exact sample count, which lands mid-word: the
-model closed the slice with a full stop and capitalized the next one, so a
-long dictation read as many sentences. Each window is now cut through the
-middle of the quietest 100 ms in its last five seconds (or its last half,
-when that is shorter), the way Cohere's reference processor cuts. The search
-is energy-based and bounded: continuous speech with no quieter stretch there
-is still cut where it is quietest, which can land inside a word, and a pause
-earlier in the window is not considered. `chunk_ranges` in
-[gguf_session.rs](../../src/transcription/gguf_session.rs) owns the cut;
+Each window is cut through the middle of the quietest 100 ms in its last five
+seconds (or its last half, when that is shorter), adapted from Cohere's
+reference processor. The search is energy-based and bounded: continuous speech
+with no quieter stretch there is still cut where it is quietest, which can
+land inside a word, and a pause earlier in the window is not considered.
+`chunk_ranges` in [gguf_session.rs](../../src/transcription/gguf_session.rs)
+owns the cut;
 `a_long_clip_is_cut_inside_a_silence_near_the_window_end`,
 `a_clip_without_silence_still_cuts_in_the_search_region`,
 `long_clip_ranges_cover_every_sample_once_within_the_limit`, and
@@ -1551,9 +1549,10 @@ to zero after chunking; the 73-second paused fixture went from 71 errors to one.
 Short references transcribed correctly before and after. The retained native
 regression also passed a roughly 235-second repeated fixture, retaining all three
 sections in each repetition. This is Metal inference evidence on an M2 Max, not
-physical capture/paste or Linux runtime proof. Chunk boundaries can still affect
-individual words when a cut lands in speech; this is not a claim of perfect
-recognition or silence handling.
+physical capture/paste or Linux runtime proof. It predates the quiet-point cut,
+and the native long-form check has not been re-run with it. Chunk boundaries can
+still affect individual words when a cut lands in speech; this is not a claim of
+perfect recognition or silence handling.
 
 `pad_gguf_samples` in [transcription.rs](../../src/transcription.rs) owns backend
 input padding on every OS for ordinary transcription: the minimum duration,
