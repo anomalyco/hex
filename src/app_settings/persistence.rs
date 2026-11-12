@@ -8,6 +8,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use color_eyre::eyre::{Result, eyre};
 use serde::Deserialize;
@@ -20,6 +21,7 @@ use crate::policy::Policy;
 
 // A settings editor and a background migration may save at the same time.
 static WRITER: Mutex<u64> = Mutex::new(0);
+static COMMITTED_REVISION: AtomicU64 = AtomicU64::new(0);
 
 /// Load provenance travels with a snapshot, but isn't a preference and never
 /// participates in settings equality or serialization.
@@ -257,6 +259,7 @@ impl AppSettings {
         merged.write_locked(path, policy)?;
         policy.enforce(&mut merged);
         stamp(&mut merged, path, true, &mut revision);
+        COMMITTED_REVISION.store(merged.source.revision, Ordering::Release);
         merged.apply_runtime();
         Ok(merged)
     }
@@ -269,7 +272,11 @@ impl AppSettings {
             return Ok(None);
         };
         let (settings, issue) = Self::load_checked_from(path)?;
-        if issue.is_none() && (!self.source.writable || settings != *self) {
+        if issue.is_none()
+            && (!self.source.writable
+                || settings != *self
+                || self.source.revision < COMMITTED_REVISION.load(Ordering::Acquire))
+        {
             settings.apply_runtime();
             Ok(Some(settings))
         } else {

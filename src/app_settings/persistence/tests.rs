@@ -110,6 +110,29 @@ fn a_delayed_read_cannot_republish_runtime_values_from_before_a_save() {
     assert!(crate::app_settings::microphone_policy().release_while_idle);
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[test]
+fn a_revert_before_the_host_reloads_still_publishes_a_new_revision() {
+    let _restore = RestoredRuntime;
+    let file = SettingsFile::new(b"{}");
+    let host = AppSettings::load_from(&file.path).unwrap();
+    let mut candidate = host.clone();
+    candidate.release_microphone_while_idle = true;
+    let window = host
+        .update_at(&candidate, &file.path, Policy::default())
+        .unwrap();
+    // An external editor reverts before the host has seen the window's save.
+    fs::write(&file.path, serde_json::to_vec(&host).unwrap()).unwrap();
+    let reverted = host.refreshed().unwrap().expect("notify the window");
+    assert_eq!(reverted, host);
+    assert!(reverted.source.revision > window.source.revision);
+    assert!(!crate::app_settings::microphone_policy().release_while_idle);
+    assert!(
+        reverted.refreshed().unwrap().is_none(),
+        "unchanged polls stay quiet"
+    );
+}
+
 #[test]
 fn a_fresh_reader_cannot_authorize_a_failed_base() {
     let file = SettingsFile::new(b"[]");

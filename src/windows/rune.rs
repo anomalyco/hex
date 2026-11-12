@@ -380,7 +380,10 @@ fn run_runtime(
         let published = Arc::new(host.publish());
         let changed = {
             let mut current = lock(&shared.published);
-            let changed = current.as_deref() != Some(&published);
+            let changed = current.as_deref() != Some(&published)
+                || current.as_ref().is_some_and(|old| {
+                    old.settings.source.revision != published.settings.source.revision
+                });
             if changed {
                 *current = Some(published.clone());
             }
