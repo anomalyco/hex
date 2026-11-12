@@ -1256,7 +1256,11 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── Release, short tap, or a lost microphone -> The recording ends -> Hidden
   ├── Provisional: never pasted, copied, or kept (the final text replaces it)
   ├── A failed or interrupted stream clears the text while the capture goes on
-  └── process.log: `partials` on "finished live stream"; per change at debug (no words)
+  ├── process.log: `partials` on "finished live stream"; per change at debug (no words)
+  └── No stream (the model doesn't stream, or it runs on a device that can't,
+      such as a CPU) -> process.log names the reason once per capture, and the
+      Labs card names the catalog's streaming models (Linux: or says Speech
+      engine is set to CPU)
   Labs + labs.live_typing (Linux Wayland) -> The same text is the focused field's preedit  // labs.live-typing
   ├── Begin at the intentional start, before the stream opens; destroyed at Finish or Cancel, so another input method keeps the seat
   ├── Non-streaming model -> No words while speaking, but the final text still commits through the input method

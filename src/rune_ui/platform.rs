@@ -322,6 +322,10 @@ pub(super) struct PlatformState {
     /// A Wayland desktop without data-control (GNOME): a paste can't put
     /// the clipboard back unless Labs › Restore clipboard on GNOME is on.
     pub(super) clipboard_unrestorable: bool,
+    /// This Wayland desktop offers no input-method protocol, so Labs › Live
+    /// typing can't work here (GNOME, KDE): its card says so. Fixtures keep
+    /// it false.
+    pub(super) live_typing_unsupported: bool,
     /// A scene's state: [`Self::setup_status`] reports `permissions` on
     /// every OS rather than asking this computer.
     preview: bool,
@@ -413,6 +417,7 @@ impl PlatformState {
             relaunch_failed: false,
             paste: None,
             clipboard_unrestorable: false,
+            live_typing_unsupported: false,
             preview: false,
             developer: false,
             accessibility_renamed: false,

@@ -2768,6 +2768,45 @@ fn ducking_goldens() {
     check_golden("mac-settings-sides", true, PANE_SIZE);
 }
 
+/// Labs › Live typing says when this desktop has no input method to use, and
+/// refuses to turn on; where it is offered it turns on as usual.
+#[test]
+fn live_typing_says_when_the_desktop_cannot_use_it() {
+    let mut rt = runtime("linux-labs", false, PANE_SIZE);
+    rt.state.platform.live_typing_unsupported = true;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    tap(&mut rt, "lab-live-typing");
+    assert!(
+        !rt.state.settings.labs.live_typing,
+        "the switch stays off where it can't work"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("This desktop doesn't offer the input method")),
+        "its card says why"
+    );
+
+    // Already on, it can still be turned off.
+    rt.state.settings.labs.live_typing = true;
+    refresh(&mut rt);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("This desktop doesn't offer the input method")),
+        "the note stays while it's on"
+    );
+    tap(&mut rt, "lab-live-typing");
+    assert!(!rt.state.settings.labs.live_typing);
+
+    // A compositor that offers the input method turns it on.
+    rt.state.platform.live_typing_unsupported = false;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-live-typing");
+    assert!(rt.state.settings.labs.live_typing);
+}
+
 #[test]
 fn an_installed_driver_keeps_the_voice_filter_on() {
     let mut rt = runtime("mac-voice-filter", true, (980.0, 1400.0));

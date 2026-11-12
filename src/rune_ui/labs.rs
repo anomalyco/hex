@@ -22,7 +22,7 @@ use super::icons::{
 use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
-use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::labs::{Feature, Group};
 
 pub(super) static LABS_ICON: Icon = Icon {
@@ -324,6 +324,9 @@ struct Row {
     icon: &'static Icon,
     title: &'static str,
     about: &'static str,
+    /// A line computed from this computer's state, shown instead of `about`
+    /// (the Live text card naming the models that stream).
+    note: Option<String>,
     on: bool,
     /// Can't be switched: on while an installed Hex Microphone driver or
     /// the dictation model needs it, off under an organization's lock.
@@ -350,6 +353,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             icon: icon.unwrap_or_else(|| group::icon(group)),
             title,
             about,
+            note: None,
             on: feature.on(settings),
             locked: false,
             group,
@@ -400,12 +404,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
         "Playground",
         tr("Scene and story browser in the window"),
     ));
-    rows.push(row(
+    let live_text = row(
         Feature::LiveText,
         Some(&WAVE),
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
-    ));
+    );
+    rows.push(Row {
+        note: live_text_note(ui),
+        ..live_text
+    });
     rows.push(row(
         Feature::FailureNotices,
         None,
@@ -413,12 +421,31 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Show why a dictation failed beside the HUD"),
     ));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
-        rows.push(row(
+        let live_typing = row(
             Feature::LiveTyping,
             Some(&KEYBOARD),
             tr("Live typing"),
-            tr("Show provisional words in the focused text field while dictating on Wayland, then type the final text there"),
-        ));
+            tr(
+                "Show provisional words in the focused text field while dictating on Wayland, then type the final text there",
+            ),
+        );
+        // An organization's lock and its note already say why the switch is
+        // off; the desktop's own limit only replaces an unlocked card.
+        if Feature::LiveTyping.managed().is_some() {
+            rows.push(live_typing);
+        } else {
+            let unsupported = ui.platform.live_typing_unsupported;
+            let on = live_typing.on;
+            rows.push(Row {
+                locked: unsupported && !on,
+                about: if unsupported {
+                    tr("This desktop doesn't offer the input method Live typing needs (GNOME doesn't), so dictations paste normally")
+                } else {
+                    live_typing.about
+                },
+                ..live_typing
+            });
+        }
     }
     rows.push(row(
         Feature::SettingsSearch,
@@ -967,12 +994,51 @@ fn rows(ui: &Ui) -> Vec<Row> {
             } else {
                 tr("Record your screen, draw on it, and talk over it with a shortcut")
             },
+            note: None,
             on: !locked && ui.settings.capture.enabled,
             locked,
             group: Group::Annotate,
         });
     }
     rows
+}
+
+/// The Live text card's line when it can't show words: the selected model's
+/// own catalog flag, or a Linux speech engine explicitly set to the CPU
+/// (which never streams). `None` when nothing known would stop it.
+fn live_text_note(ui: &Ui) -> Option<String> {
+    let cpu_engine = cfg!(target_os = "linux")
+        && ui.settings.transcription_device == crate::app_settings::TranscriptionDevice::Cpu;
+    live_text_note_for(ui.settings.transcription.model, cpu_engine)
+}
+
+/// [`live_text_note`] over the model and engine choice, so its copy is
+/// tested without a window.
+fn live_text_note_for(
+    model: crate::transcription::models::TranscriptionModelId,
+    cpu_engine: bool,
+) -> Option<String> {
+    use crate::transcription::models::{MODELS, definition};
+    if definition(model).streams {
+        return cpu_engine
+            .then(|| tr("Live words need the GPU, and Speech engine is set to CPU").to_owned());
+    }
+    let streaming: Vec<&'static str> = MODELS
+        .iter()
+        .filter(|model| model.streams)
+        .map(|model| model.name)
+        .collect();
+    match *streaming.as_slice() {
+        [first, second, ..] => Some(tr_named(
+            "This speech model doesn't show live words; pick {first} or {second}",
+            &[("first", first), ("second", second)],
+        )),
+        [only] => Some(tr_fill(
+            "This speech model doesn't show live words; pick {}",
+            only,
+        )),
+        [] => None,
+    }
 }
 
 fn row_key(lab: Lab) -> &'static str {
@@ -1270,4 +1336,39 @@ fn keep_microphone_open_for(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         },
         layer,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::models::TranscriptionModelId;
+
+    /// The Live text card names the catalog's streaming models instead of
+    /// hardcoding them.
+    #[test]
+    fn live_text_says_which_models_show_live_words() {
+        let note = live_text_note_for(TranscriptionModelId::ParakeetV3, false).unwrap();
+        let streaming: Vec<&str> = crate::transcription::models::MODELS
+            .iter()
+            .filter(|model| model.streams)
+            .map(|model| model.name)
+            .collect();
+        for name in streaming.iter().take(2) {
+            assert!(note.contains(*name), "{note:?} names {name}");
+        }
+        assert_eq!(
+            live_text_note_for(TranscriptionModelId::ParakeetUnifiedEnglish, false),
+            None
+        );
+    }
+
+    /// A streaming model on a CPU engine still shows no live words, and the
+    /// card says which setting to change.
+    #[test]
+    fn live_text_says_when_the_cpu_engine_stops_the_words() {
+        let note =
+            live_text_note_for(TranscriptionModelId::ParakeetUnifiedEnglish, true).expect("a note");
+        assert!(note.contains(tr("Speech engine")), "{note:?}");
+        assert!(note.to_lowercase().contains("gpu"), "{note:?}");
+    }
 }

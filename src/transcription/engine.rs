@@ -868,6 +868,27 @@ impl TranscriptionEngine {
             .unwrap_or_else(|error| error.into_inner())
             .clone()
     }
+
+    /// Why a live stream cannot open for a capture, when it can't: the
+    /// model's own definition doesn't stream, or it streams in principle but
+    /// not on the device it loaded on (a CPU, or a GPU whose stream probe
+    /// failed). `None` when a stream can open.
+    pub(crate) fn stream_refusal(&self) -> Option<&'static str> {
+        if self.streams.load(Ordering::Acquire) {
+            return None;
+        }
+        match self.held_selection() {
+            Some(selection)
+                if !crate::transcription::models::definition(selection.model).streams =>
+            {
+                Some("the selected speech model doesn't stream")
+            }
+            Some(_) => Some(
+                "the speech model isn't streaming on this device (a CPU, or a GPU that could not start streaming)",
+            ),
+            None => Some("no streaming speech model is loaded"),
+        }
+    }
 }
 
 /// Whether a dictation or a meeting records, so an idle model stays loaded:
@@ -1230,10 +1251,21 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let Some(options) = self
+        let options = self
             .model()
-            .and_then(|model| model.stream_options().cloned())
-        else {
+            .and_then(|model| model.stream_options().cloned());
+        let Some(options) = options else {
+            let model_streams = self
+                .model
+                .as_ref()
+                .and_then(|model| model.gguf_selection())
+                .map(|selection| crate::transcription::models::definition(selection.model).streams);
+            tracing::info!(
+                stream = id,
+                live_text = partials.is_some(),
+                model_streams,
+                "a live stream was requested but this model can't stream on its device; transcribing the whole clip"
+            );
             return;
         };
         self.running.enter(cancel);
@@ -2507,5 +2539,36 @@ mod tests {
             commands.try_iter().collect::<Vec<_>>().as_slice(),
             [Command::Finish { stream: None, .. }]
         ));
+    }
+
+    /// A capture that wanted live text is told which side refuses: the
+    /// model's own definition, or the device it loaded on.
+    #[test]
+    fn a_stream_refusal_names_the_model_or_the_device() {
+        let (engine, _commands) = TranscriptionEngine::for_test();
+        assert_eq!(engine.stream_refusal(), None, "it can stream");
+        engine.streams.store(false, Ordering::Release);
+        assert_eq!(
+            engine.stream_refusal(),
+            Some("no streaming speech model is loaded")
+        );
+        *engine.held.lock().unwrap() = Some(crate::transcription::models::TranscriptionSelection {
+            model: crate::transcription::models::TranscriptionModelId::ParakeetUnifiedEnglish,
+            language: "en".into(),
+        });
+        assert_eq!(
+            engine.stream_refusal(),
+            Some(
+                "the speech model isn't streaming on this device (a CPU, or a GPU that could not start streaming)"
+            )
+        );
+        *engine.held.lock().unwrap() = Some(crate::transcription::models::TranscriptionSelection {
+            model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
+            language: "en".into(),
+        });
+        assert_eq!(
+            engine.stream_refusal(),
+            Some("the selected speech model doesn't stream")
+        );
     }
 }
