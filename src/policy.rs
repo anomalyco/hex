@@ -122,14 +122,17 @@ impl Policy {
         self.0 != 0
     }
 
-    /// The lock on a Labs feature: Labs, Meetings for Meetings, or Annotate
-    /// for Annotate replay.
+    /// The lock on a Labs feature: Labs, Meetings for Meetings, Annotate for
+    /// Annotate replay, or OpenCode processing for a voice prompt.
     pub fn labs_lock(self, feature: crate::labs::Feature) -> Option<Lock> {
         if feature == crate::labs::Feature::Meetings && self.locks(Lock::Meetings) {
             return Some(Lock::Meetings);
         }
         if feature == crate::labs::Feature::AnnotateReplay && self.locks(Lock::Annotate) {
             return Some(Lock::Annotate);
+        }
+        if feature == crate::labs::Feature::VoicePrompt && self.locks(Lock::OpenCodeProcessing) {
+            return Some(Lock::OpenCodeProcessing);
         }
         self.locks(Lock::Labs).then_some(Lock::Labs)
     }
@@ -158,7 +161,8 @@ impl Policy {
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),
             // `meetings.summaries` is a choice, not a switch; see `enforce`.
-            Lock::OpenCodeProcessing => Vec::new(),
+            // A voice prompt is one of the OpenCode requests the lock stops.
+            Lock::OpenCodeProcessing => vec![&mut settings.labs.voice_prompt],
             Lock::Transforms | Lock::LoopbackTransforms => Vec::new(),
             Lock::Labs => crate::labs::Feature::switches(settings),
         }
@@ -255,11 +259,54 @@ mod tests {
     }
 
     #[test]
+    fn a_voice_prompt_is_locked_by_opencode_processing() {
+        let feature = crate::labs::Feature::VoicePrompt;
+        assert_eq!(Policy::default().labs_lock(feature), None);
+        let opencode = Policy::default().with(Lock::OpenCodeProcessing);
+        assert_eq!(
+            opencode.labs_lock(feature),
+            Some(Lock::OpenCodeProcessing),
+            "the card shows it managed"
+        );
+        assert_eq!(
+            opencode.setting_lock("labs.voice_prompt"),
+            Some(Lock::OpenCodeProcessing)
+        );
+        assert_eq!(
+            opencode.setting_lock("labs.voice_prompt_phrase"),
+            Some(Lock::OpenCodeProcessing)
+        );
+        let labs = Policy::default().with(Lock::Labs);
+        assert_eq!(labs.labs_lock(feature), Some(Lock::Labs));
+    }
+
+    #[test]
+    fn the_opencode_lock_turns_only_the_voice_prompt_off_and_keeps_it_saved() {
+        let mut saved = AppSettings::default();
+        saved.labs.voice_prompt = true;
+        saved.labs.live_text = true;
+        let policy = Policy::default().with(Lock::OpenCodeProcessing);
+        let mut loaded = saved.clone();
+        policy.enforce(&mut loaded);
+        assert!(!loaded.labs.voice_prompt, "the locked lab reads off");
+        assert!(loaded.labs.live_text, "another lab is untouched");
+
+        let mut written = loaded.clone();
+        policy.keep_saved(&mut written, &saved);
+        assert!(
+            written.labs.voice_prompt,
+            "the saved switch is written back"
+        );
+        assert!(written.labs.live_text);
+    }
+
+    #[test]
     fn locked_switches_read_off_and_save_as_they_were() {
         let mut saved = AppSettings::default();
         saved.meetings.enabled = true;
         saved.meetings.summaries = MeetingSummaries::OpenCode;
         saved.labs.live_text = true;
+        saved.labs.voice_prompt = true;
         saved.pause_browser_media = true;
         let policy = Policy::default()
             .with(Lock::Meetings)
@@ -270,6 +317,7 @@ mod tests {
         assert!(!loaded.meetings.enabled);
         assert_eq!(loaded.meetings.summaries, MeetingSummaries::Off);
         assert!(!loaded.labs.live_text);
+        assert!(!loaded.labs.voice_prompt);
         assert!(!loaded.pause_browser_media);
         for feature in crate::labs::Feature::ALL {
             assert!(!feature.on(&loaded), "{} reads on", feature.name());
@@ -282,6 +330,7 @@ mod tests {
         assert!(written.meetings.enabled);
         assert_eq!(written.meetings.summaries, MeetingSummaries::OpenCode);
         assert!(written.labs.live_text);
+        assert!(written.labs.voice_prompt);
         assert!(written.pause_browser_media);
         assert_eq!(written.sound_effects, loaded.sound_effects);
     }

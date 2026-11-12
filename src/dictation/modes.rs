@@ -33,7 +33,9 @@ impl ModeRuntime {
             default_transformations: processing.default_mode.transformations.clone(),
             default_vocabulary: processing.default_mode.vocabulary.clone(),
             modes: processing.modes.clone(),
-            reads_page: uses_page(processing),
+            // Labs › Voice prompt carries the browser host in its request,
+            // so its mode runtime reads the page too.
+            reads_page: uses_page(processing) || settings.labs.voice_prompt,
         }
     }
 
@@ -133,7 +135,8 @@ impl ProcessingState {
 /// Whether anything set up in `settings` looks at the focused page: a mode
 /// chosen by website, an OpenCode rewrite (its prompt names the site), or a
 /// script transformation (it receives the page address). Every OS asks the
-/// browser for its page only then (macOS through `config::reads_browser`).
+/// browser for its page only for one of these or Labs › Voice prompt (macOS
+/// through `config::reads_browser`).
 pub(crate) fn uses_page(settings: &DictationProcessingSettings) -> bool {
     settings
         .modes
@@ -337,6 +340,14 @@ mod tests {
                     .default_mode
                     .post_processing
                     .enabled = true;
+            })
+            .reads_page()
+        );
+        // A voice prompt's request carries the browser host, so its lab
+        // reads the page even with no rewrite or website rule.
+        assert!(
+            runtime(|settings| {
+                settings.labs.voice_prompt = true;
             })
             .reads_page()
         );

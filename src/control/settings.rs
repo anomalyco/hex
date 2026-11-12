@@ -891,6 +891,41 @@ mod tests {
     }
 
     #[test]
+    fn a_voice_prompt_phrase_needs_two_words_and_six_letters() {
+        let change = apply(&AppSettings::default(), "labs.voice_prompt", "on", &rules()).unwrap();
+        assert!(change.settings.labs.voice_prompt);
+        assert_eq!(
+            change.settings.labs.voice_prompt_phrase,
+            crate::dictation::voice_prompt::DEFAULT_PHRASE
+        );
+        let change = apply(
+            &change.settings,
+            "labs.voice_prompt_phrase",
+            "  say it better ",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.voice_prompt_phrase, "say it better",
+            "a saved phrase is trimmed"
+        );
+        for (raw, reason) in [
+            ("rewrite", "two words"),
+            ("a b c", "six letters"),
+            ("", "two words"),
+        ] {
+            let error =
+                apply(&change.settings, "labs.voice_prompt_phrase", raw, &rules()).unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{raw}");
+            assert!(error.message.contains(reason), "{raw}: {}", error.message);
+        }
+        assert_eq!(
+            change.settings.labs.voice_prompt_phrase, "say it better",
+            "a refused draft leaves the saved phrase"
+        );
+    }
+
+    #[test]
     fn settings_name_real_capabilities_and_keys() {
         let capabilities = crate::rune_ui::capabilities();
         for (prefix, capability) in NEEDS {

@@ -211,6 +211,9 @@ impl Feature {
             Self::PrintStart => {
                 "Let hex dictation start --print hand the transcript to the command that started it, however the recording ends"
             }
+            Self::VoicePrompt => {
+                "Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model"
+            }
         }
     }
 }

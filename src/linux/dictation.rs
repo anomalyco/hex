@@ -224,6 +224,15 @@ impl DictationOutput {
             )
         };
         let printed = paster.is_none();
+        // A voice prompt that deliberately asked nothing ends quietly: no
+        // failure, no paste, no last dictation, and no History. A live
+        // preedit for the capture is discarded rather than committed empty.
+        if processed.nothing {
+            if let Some(session) = typing {
+                session.cancel();
+            }
+            return Ok(processed.text);
+        }
         // Live typing inserts the final text through the input method; a
         // printed or copy-only dictation clears its preedit and takes the
         // usual path instead.
@@ -462,6 +471,7 @@ pub(crate) fn run(
             .map_err(|error| format!("{error:#}"));
             if let Some(print) = job.print.take() {
                 print.send(match &result {
+                    Ok(text) if text.trim().is_empty() => PrintedTranscript::NoSpeech,
                     Ok(text) => PrintedTranscript::Text(text.clone()),
                     Err(error) => PrintedTranscript::Failed(error.clone()),
                 });
@@ -473,6 +483,7 @@ pub(crate) fn run(
             );
             if let Ok(text) = &result
                 && kind == OutputKind::Dictation
+                && !text.trim().is_empty()
             {
                 last_dictation = Some(text.clone());
             }
@@ -1010,9 +1021,16 @@ pub(crate) fn run(
                 continue;
             }
             pending = pending.saturating_sub(1);
-            indicator.finished(result.as_ref().err().map(String::as_str));
             match result {
+                // A voice prompt that asked nothing ends as a discard: no
+                // done tone and no empty pasted transcript. The HUD closes
+                // the submitted job as cancelled in `update` below.
+                Ok(text) if text.is_empty() => {
+                    indicator.discarded();
+                    events.discarded_voice_prompt()?;
+                }
                 Ok(text) => {
+                    indicator.finished(None);
                     feedback::play(Tone::DictationDone);
                     events.emit(&VoiceEvent::Transcript {
                         timestamp_ms: now_ms(),
@@ -1022,7 +1040,10 @@ pub(crate) fn run(
                     })?;
                     events.dictation(phase, text)?;
                 }
-                Err(error) => fail(&events, error)?,
+                Err(error) => {
+                    indicator.finished(Some(&error));
+                    fail(&events, error)?;
+                }
             }
             emit_state(
                 &mut events,

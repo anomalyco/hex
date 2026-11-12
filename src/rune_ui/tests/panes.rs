@@ -2198,6 +2198,74 @@ fn a_labs_link_sets_the_stores_tab_chip_and_search() {
 }
 
 #[test]
+fn voice_prompt_shows_its_phrase_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::VoicePrompt.group()));
+    settle(&mut rt);
+    assert!(rt.find("voice-prompt-phrase").is_none(), "hidden while off");
+    tap(&mut rt, "lab-voice-prompt");
+    assert!(rt.state.settings.labs.voice_prompt);
+    assert!(rt.find("voice-prompt-phrase").is_some());
+    assert_eq!(
+        rt.state.lab_store.phrase.text,
+        crate::dictation::voice_prompt::DEFAULT_PHRASE,
+        "the field starts at the saved phrase"
+    );
+    let (field, _) = rt
+        .presented("voice-prompt-phrase")
+        .expect("the phrase field");
+    let (card, _) = rt.presented("lab-card-voice-prompt").expect("its card");
+    assert!(
+        field[0] + field[2] <= card[0] + card[2],
+        "the phrase field stays inside its card"
+    );
+
+    // A draft that fails validation stays in the field, says why, and leaves
+    // the saved phrase working.
+    let saved = rt.state.settings.labs.voice_prompt_phrase.clone();
+    rt.update(|ui, _| ui.lab_store.phrase = rune::TextEdit::new("rewrite".to_string()));
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.voice_prompt_phrase, saved);
+    refresh(&mut rt);
+    assert!(rt.find("voice-prompt-phrase-error").is_some());
+
+    // A valid draft saves.
+    rt.update(|ui, _| {
+        ui.lab_store.phrase = rune::TextEdit::new("say it better".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.voice_prompt_phrase, "say it better");
+    refresh(&mut rt);
+    assert!(rt.find("voice-prompt-phrase-error").is_none());
+
+    // A phrase saved elsewhere updates the field.
+    let mut external = rt.state.settings.clone();
+    external.labs.voice_prompt_phrase = "say it clearer".to_string();
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.phrase.text, "say it clearer");
+
+    // An invalid draft is dropped when another writer turns the lab off and
+    // back on, so it can't survive the toggle.
+    rt.update(|ui, _| ui.lab_store.phrase = rune::TextEdit::new("rewrite".to_string()));
+    let mut off = rt.state.settings.clone();
+    off.labs.voice_prompt = false;
+    assert!(rt.state.adopt(off.clone()));
+    let mut on = off;
+    on.labs.voice_prompt = true;
+    assert!(rt.state.adopt(on));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.phrase.text, "say it clearer");
+    assert!(rt.find("voice-prompt-phrase-error").is_none());
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-voice-prompt");
+    assert!(!rt.state.settings.labs.voice_prompt);
+    assert!(rt.find("voice-prompt-phrase").is_none());
+}
+
+#[test]
 fn a_labs_card_shows_its_description_and_its_switch_turns_it_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));

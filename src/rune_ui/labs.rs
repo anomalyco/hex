@@ -10,6 +10,7 @@ mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 mod screenshots;
 mod store;
+mod voice_prompt;
 
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
@@ -206,11 +207,49 @@ pub(super) struct Store {
     pub(super) tab: Tab,
     /// The chip selected: only this group's labs show.
     pub(super) group: Option<Group>,
+    /// Labs › Voice prompt's phrase while it's on: a draft, so invalid words
+    /// stay in its field instead of replacing the saved phrase.
+    pub(super) phrase: TextEdit,
+    /// Whether `phrase` started from the saved phrase.
+    pub(super) phrase_synced: bool,
 }
 
 impl Store {
     fn query(&self) -> String {
         self.search.text.trim().to_lowercase()
+    }
+
+    /// Starts the phrase field at `saved` when Labs opens or its lab turns on.
+    pub(super) fn sync_phrase(&mut self, saved: &str) {
+        self.phrase = TextEdit::new(saved.to_owned());
+        self.phrase_synced = true;
+    }
+
+    /// Adopts a phrase another writer saved, unless the field holds an
+    /// unsaved draft.
+    pub(super) fn rebase_phrase(&mut self, before: &str, after: &str) {
+        if !self.phrase_synced || self.phrase.text.trim() == before {
+            self.sync_phrase(after);
+        }
+    }
+
+    /// The phrase `settings` should hold: the draft when it passes
+    /// validation. An invalid draft never replaces the saved phrase.
+    pub(super) fn project_phrase(&self, settings: &mut crate::app_settings::AppSettings) {
+        let draft = self.phrase.text.trim();
+        if crate::dictation::voice_prompt::phrase_problem(draft).is_none() {
+            settings.labs.voice_prompt_phrase = draft.to_owned();
+        }
+    }
+
+    /// Whether the phrase field holds typing the saved settings don't have.
+    /// A lab that's off has no draft to keep.
+    pub(super) fn phrase_dirty(&self, settings: &crate::app_settings::AppSettings) -> bool {
+        if !settings.labs.voice_prompt {
+            return false;
+        }
+        let draft = self.phrase.text.trim();
+        !draft.is_empty() && draft != settings.labs.voice_prompt_phrase
     }
 }
 
@@ -269,6 +308,8 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
     ui.select_pane(Pane::General, tx);
     ui.labs_open = true;
     ui.lab_store = Store::default();
+    ui.lab_store
+        .sync_phrase(&ui.settings.labs.voice_prompt_phrase);
     tx.settle();
 }
 
@@ -776,6 +817,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"),
     ));
     rows.push(row(
+        Feature::VoicePrompt,
+        None,
+        tr("Voice prompt"),
+        tr("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model"),
+    ));
+    rows.push(row(
         Feature::PickerSortFilter,
         None,
         tr("Sort and filter models"),
@@ -992,6 +1039,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
         Feature::PrintStart => "lab-print-start",
+        Feature::VoicePrompt => "lab-voice-prompt",
     }
 }
 
@@ -1027,6 +1075,12 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::AppModelSwitching => ui.open = None,
         // The card's duration menu closes when its lab does.
         Feature::KeepMicrophoneOpen => ui.open = None,
+        // The phrase field starts at the saved phrase, and an invalid draft
+        // leaves with its lab.
+        Feature::VoicePrompt => {
+            let saved = ui.settings.labs.voice_prompt_phrase.clone();
+            ui.lab_store.sync_phrase(&saved);
+        }
         // A notice already on screen leaves with its lab.
         Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
         // Hex hears the browser through System Audio Recording.
@@ -1100,6 +1154,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                 )
                 .child(appearance_theme(ui, p)),
         ),
+        Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

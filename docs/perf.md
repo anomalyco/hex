@@ -153,8 +153,10 @@ Windows and Linux write once the model has loaded and warmed, then 2 s
 more, and at least 10 s in all. A new build's first launch compiles the GPU
 driver's shaders during that load: about 5 s of CPU on an idle machine, and
 over 10 s on a busy one. A fixed 10 s wait let that compile run into the
-measured runs, which then read 1 to 2.5 s of `cpu.work` instead of about
-10 ms.
+measured runs, which then read 1 to 2.5 s of `cpu.work` instead of tens of
+milliseconds. strobe prints times in microseconds (`--unit ms` for
+milliseconds): a check of the released profile on a busy Windows machine
+reads `cpu.work 27,219 µs · cpu.wakes 134/s`.
 
 As in the dictation cases, the profiles move the copy's shortcuts to F19
 and F18 and unbind Paste Last, so a key pressed while a bench runs on a
