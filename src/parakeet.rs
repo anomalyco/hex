@@ -1109,7 +1109,15 @@ fn finish_output(
                                 );
                                 return Err(error.to_string());
                             }
-                            paste(&completed.text, mode, &commit)
+                            // A paste that fails (another app changed the
+                            // clipboard while Hex saved it) keeps the text
+                            // for Paste last dictation, as above, so the
+                            // dictation isn't lost.
+                            paste(&completed.text, mode, &commit).inspect_err(|_| {
+                                if !control.is_cancelled() {
+                                    *last_transcript = Some(completed.text.clone());
+                                }
+                            })
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print
@@ -1586,6 +1594,44 @@ mod tests {
             "You: First. Still me.\n\nThem: Reply.\n\nYou: Second."
         );
         assert!(format_meeting_delta(&[]).is_err());
+    }
+
+    #[test]
+    fn a_failed_paste_keeps_the_dictation_for_paste_last() {
+        let text = "the dictation whose paste failed";
+        let mut last_transcript = Some("an older dictation".to_string());
+        let event = finish_output(
+            OutputJob::Completed {
+                job_id: DictationJobId(1),
+                control: Arc::new(JobControl::default()),
+                target: TranscriptionTarget::Paste,
+                result: Box::new(Ok(CompletedTranscript {
+                    text: text.into(),
+                    nothing: false,
+                    raw: text.into(),
+                    application: None,
+                    return_to: None,
+                    timings: JobTimings {
+                        total_started: Instant::now(),
+                        queue_ms: 0,
+                        audio_ms: 2_000,
+                        prepare_ms: 0,
+                        inference_ms: 0,
+                    },
+                    processing: None,
+                    recording: None,
+                })),
+            },
+            &mut |_, _, _| Err(eyre!("clipboard changed while Hex was preserving it")),
+            &mut last_transcript,
+            None,
+        );
+
+        assert!(matches!(
+            event,
+            WorkerEvent::Completed { result: Err(_), .. }
+        ));
+        assert_eq!(last_transcript.as_deref(), Some(text));
     }
 
     #[test]
