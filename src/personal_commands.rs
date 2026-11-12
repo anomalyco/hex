@@ -1030,9 +1030,20 @@ fn bounded_status_error(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::UNIX_EPOCH;
+    use std::sync::atomic::AtomicU64;
 
     mod host_apis;
+
+    /// A temp path no other test, nextest process, or later run shares.
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{}-{id}-{nanos}", std::process::id()))
+    }
 
     #[test]
     fn transformation_context_names_its_source() {
@@ -1259,12 +1270,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn workspace_fingerprint_does_not_follow_symlinks_or_excessive_depth() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("hex-watch-{unique}"));
-        let outside = std::env::temp_dir().join(format!("hex-watch-outside-{unique}.ts"));
+        let root = unique_temp_dir("hex-watch");
+        let outside = unique_temp_dir("hex-watch-outside").with_extension("ts");
         fs::create_dir_all(&root).unwrap();
         fs::write(&outside, "first").unwrap();
         std::os::unix::fs::symlink(&outside, root.join("linked.ts")).unwrap();
@@ -1286,11 +1293,7 @@ mod tests {
 
     #[test]
     fn status_snapshot_roundtrips_atomically() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("hex-status-{unique}"));
+        let root = unique_temp_dir("hex-status");
         let path = root.join("personal-commands.json");
         let status = StatusSnapshot {
             active_generation: Some(4),
@@ -1327,11 +1330,7 @@ mod tests {
 
     impl Harness {
         fn new(config: &str) -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let root = std::env::temp_dir().join(format!("hex-scripts-{unique}"));
+            let root = unique_temp_dir("hex-scripts");
             let workspace = root.join("hex");
             fs::create_dir_all(&workspace).unwrap();
             fs::write(workspace.join("hex.config.ts"), config).unwrap();
@@ -1663,11 +1662,7 @@ export default defineHexConfig({
 
     #[test]
     fn initialization_writes_typings_and_a_starter_config_but_keeps_the_users() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let workspace = std::env::temp_dir().join(format!("hex-init-{unique}"));
+        let workspace = unique_temp_dir("hex-init");
         initialize_workspace_at(&workspace).unwrap();
         assert!(
             check_workspace_at(&workspace)

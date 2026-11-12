@@ -251,11 +251,7 @@ export default {
 /// as Hex runs it.
 #[test]
 fn a_throwing_or_slow_transformation_pastes_the_text_unchanged() {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("hex-fallback-{unique}"));
+    let root = unique_temp_dir("hex-fallback");
     let workspace = root.join("hex");
     fs::create_dir_all(&workspace).unwrap();
     fs::write(
