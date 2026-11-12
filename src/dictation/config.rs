@@ -30,8 +30,10 @@ fn uses_scripts(settings: &DictationProcessingSettings) -> bool {
         .any(|id| !crate::personal_commands::is_builtin_transformation(id))
 }
 
-fn uses_browser(settings: &DictationProcessingSettings) -> bool {
-    crate::dictation::modes::uses_page(settings)
+fn uses_browser(settings: &DictationProcessingSettings, voice_prompt: bool) -> bool {
+    // Labs › Voice prompt's request carries the browser host, so its lab
+    // asks for the page too.
+    crate::dictation::modes::uses_page(settings) || voice_prompt
 }
 
 pub fn dictation_profiles() -> Profiles {
@@ -51,9 +53,9 @@ pub fn speech_for(
     build_dictation_profiles(settings).speech_for(context)
 }
 
-pub fn update_dictation_profiles(settings: &DictationProcessingSettings) {
+pub fn update_dictation_profiles(settings: &DictationProcessingSettings, voice_prompt: bool) {
     let profiles = build_dictation_profiles(settings);
-    READS_BROWSER.store(uses_browser(settings), Ordering::Release);
+    READS_BROWSER.store(uses_browser(settings, voice_prompt), Ordering::Release);
     READS_WINDOW_TITLE.store(uses_scripts(settings), Ordering::Release);
     *dictation_profiles_lock()
         .write()
@@ -240,22 +242,32 @@ mod tests {
             ..DictationProcessingSettings::default()
         };
 
-        assert!(!uses_browser(&DictationProcessingSettings::default()));
-        assert!(!uses_browser(&with(DictationMode {
-            applications: vec!["Slack".into()],
-            transformations: vec!["lowercase".into()],
-            ..DictationMode::default()
-        })));
-        assert!(uses_browser(&with(DictationMode {
-            browser_hosts: vec!["x.com".into()],
-            ..DictationMode::default()
-        })));
+        assert!(!uses_browser(
+            &DictationProcessingSettings::default(),
+            false
+        ));
+        assert!(uses_browser(&DictationProcessingSettings::default(), true));
+        assert!(!uses_browser(
+            &with(DictationMode {
+                applications: vec!["Slack".into()],
+                transformations: vec!["lowercase".into()],
+                ..DictationMode::default()
+            }),
+            false
+        ));
+        assert!(uses_browser(
+            &with(DictationMode {
+                browser_hosts: vec!["x.com".into()],
+                ..DictationMode::default()
+            }),
+            false
+        ));
         let script = with(DictationMode {
             applications: vec!["Slack".into()],
             transformations: vec!["my-script".into()],
             ..DictationMode::default()
         });
-        assert!(uses_browser(&script));
+        assert!(uses_browser(&script, false));
         assert!(uses_scripts(&script));
         let rewrite = with(DictationMode {
             applications: vec!["Slack".into()],
@@ -265,7 +277,7 @@ mod tests {
             },
             ..DictationMode::default()
         });
-        assert!(uses_browser(&rewrite));
+        assert!(uses_browser(&rewrite, false));
         assert!(!uses_scripts(&rewrite));
 
         let global = |transformation: &str| DictationProcessingSettings {

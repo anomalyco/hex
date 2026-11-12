@@ -687,14 +687,17 @@ instruction for the mode's OpenCode model. While on, `Profiles::process_cancella
 reads `labs::voice_prompt()` and the phrase as each dictation's processing starts,
 after speech preparation and replacements have run, and splits the transcript at
 the phrase's last whole-word occurrence. Matching ignores case, punctuation,
-hyphens, and apostrophes, so "Rewrite-this" matches while "write this" and
-"overwrite this" don't; there is no fuzzy matching.
+and apostrophes and hyphens inside a word, so "re-write this" matches "rewrite
+this" and "don't" matches "dont", while "write this", "overwrite this", and
+"this's" don't; there is no fuzzy matching. The text before the phrase and the
+instruction after it keep their own punctuation and quotes; only whitespace and
+joins next to the phrase (`, ; :` and en/em dashes) leave.
 
 ```ts
-Dictate "we ship friday. rewrite this, make it formal"   // labs.voice_prompt + labs.voice_prompt_phrase
+Dictate "we ship friday. rewrite this, make it formal."   // labs.voice_prompt + labs.voice_prompt_phrase
 ├── Phrase absent -> the mode's rewrite and transformations run exactly as before
 ├── Text before + instruction after -> one request applies the instruction to the text
-├── Text before only (nothing after, or only thanks / thank you / please) -> rewrite the text clearly and concisely
+├── Text before only (nothing after, or only thanks / thank you / please ...) -> rewrite the text clearly and concisely
 ├── Instruction after only (nothing before) -> write what the instruction asks for
 ├── Neither (just the phrase, or thanks or please after it) -> no request, nothing pasted
 └── Afterwards -> the mode's selected transformations still run, except after Neither
@@ -702,22 +705,30 @@ Dictate "we ship friday. rewrite this, make it formal"   // labs.voice_prompt + 
 
 The one request replaces the mode's normal rewrite, including while the mode's
 rewrite switch is off, and uses that mode's model, variant, and deadline; no
-model means Hex's ranked default list. With the mode's rewrite on, its prompt
-rides along as background instructions that the spoken one overrides. The
-vocabulary (the mode's terms before the shared list) and the foreground
-application and browser host are the same ones the rewrite carries, and the
-protocol still asks for paste-ready text only. A failed, empty, or timed-out
-request pastes the text before the phrase; with no such text it pastes the whole
-corrected transcript. An organization's DisableOpenCodeProcessing lock reads as
-off: the phrase is not split, and that mode processes as usual.
+model means Hex's ranked default list. With the mode's rewrite on and a prompt
+saved, its prompt rides along as background instructions that the spoken one
+overrides. The vocabulary (the mode's terms before the shared list) and the
+foreground application and browser host are the same ones the rewrite carries,
+and the protocol still asks for paste-ready text only. A failed, empty, or
+timed-out request pastes the text before the phrase, with the punctuation it
+was dictated with; with no such text it pastes the whole corrected transcript.
+
+An organization's DisableOpenCodeProcessing lock reads as off: the card shows it
+managed, the phrase is not split, and that mode processes as usual. While the
+lab is on, Windows and Linux read the browser host for the request even when no
+mode rule or rewrite would (`ModeRuntime::reads_page`), and macOS shows the
+Processing stage even when the mode has no rewrite or transformations.
 
 Nothing pasted really is nothing. On macOS, an empty processed result skips the
 paste, last dictation, and History in `finish_output`
-([parakeet.rs](../../src/parakeet.rs)). The Windows and Linux listeners fail the
-job before their paster and History with "text replacements produced empty
-output" ([windows/dictation.rs](../../src/windows/dictation.rs),
-[linux/dictation.rs](../../src/linux/dictation.rs)). The local API's
-`process=global` returns an empty `processed` and never pastes or records
+([parakeet.rs](../../src/parakeet.rs)). The Neither outcome carries
+`Processed::nothing`, so the Windows and Linux listeners finish quietly without
+a failure, a paste, a last dictation, or History
+([windows/dictation.rs](../../src/windows/dictation.rs),
+[linux/dictation.rs](../../src/linux/dictation.rs)); an ordinary empty result
+still fails there as before. A printing stop answers `no-speech` instead of an
+empty transcript. The local API's `process=global` returns an empty `processed`
+and never pastes or records
 ([local_api/processing.rs](../../src/local_api/processing.rs)); the Neither
 outcome also drops the mode's transformations, so one can't turn the empty
 result into text.
@@ -729,20 +740,28 @@ can't start it. An invalid value is an `invalid-value` error; settings load
 falls back to the default without changing the saved file. While the lab is on,
 its card shows Phrase: a draft that fails validation stays in the field with the
 reason under it in danger color, and the saved phrase keeps working; a valid
-draft saves once typing pauses, like the window's other text fields. Off,
-processing is byte-for-byte unchanged. Checks:
+draft saves once typing pauses, like the window's other text fields. A phrase
+saved elsewhere updates the field without resetting its focus, and an invalid
+draft leaves when the lab is turned off, whether from its card or `hex settings`.
+Off, processing is byte-for-byte unchanged. Checks:
 `the_phrase_matches_whole_words_in_any_case`,
 `write_this_and_overwrite_this_never_match`,
-`punctuation_hyphens_and_apostrophes_are_ignored`,
+`hyphens_and_apostrophes_inside_words_are_ignored`,
+`the_edges_keep_their_punctuation_and_quotes`,
 `the_last_occurrence_splits_the_dictation`,
 `the_outcome_table_covers_every_piece`, and
 `a_phrase_needs_two_words_and_six_letters` in
 [dictation/voice_prompt.rs](../../src/dictation/voice_prompt.rs);
 `a_spoken_instruction_replaces_the_rewrite_and_carries_context`,
 `a_failed_voice_prompt_pastes_its_text_or_the_whole_transcript`,
-`a_voice_prompt_answer_or_its_fallback_keeps_the_modes_transformations`, and
+`text_only_and_prompt_only_requests_ask_for_the_right_thing`,
+`a_closed_or_locked_voice_prompt_gate_leaves_processing_alone`,
+`a_voice_prompt_that_asks_nothing_ends_through_process_cancellable`, and
 `a_voice_prompt_with_nothing_to_ask_pastes_nothing_and_runs_no_transformations`
 in [dictation/processor.rs](../../src/dictation/processor.rs);
+`a_voice_prompt_is_locked_by_opencode_processing` in
+[policy.rs](../../src/policy.rs); `the_page_is_read_only_when_processing_uses_it`
+in [dictation/modes.rs](../../src/dictation/modes.rs);
 `voice_prompt_is_its_own_atomic_and_carries_its_phrase` in
 [labs.rs](../../src/labs.rs); `a_voice_prompt_phrase_needs_two_words_and_six_letters`
 in [control/settings.rs](../../src/control/settings.rs);

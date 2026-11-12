@@ -324,12 +324,18 @@ pub fn print_start() -> bool {
 /// dictation's processing starts). An organization's
 /// DisableOpenCodeProcessing lock reads as off.
 pub fn voice_prompt() -> bool {
+    voice_prompt_under(crate::policy::Policy::current())
+}
+
+/// [`voice_prompt`] under an explicit policy, so its managed lock is read
+/// where the gate is tested.
+pub(crate) fn voice_prompt_under(policy: crate::policy::Policy) -> bool {
     // The state word has no bit for it: its own atomic, written by
     // `labs::apply`, and loaded here first in a process that never applied.
     let _ = state();
     VOICE_PROMPT.load(Ordering::Acquire)
         && Feature::VoicePrompt.on_this_os()
-        && !crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
+        && !policy.locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
 /// The words that start a voice prompt (read as each dictation's processing

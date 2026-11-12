@@ -1073,7 +1073,15 @@ impl Ui {
             if !drafts.vocabulary && service.vocabulary != self.settings.vocabulary {
                 self.vocabulary.reload(&service.vocabulary);
             }
-            if !drafts.phrase {
+            // Only a saved phrase that actually changed may reset the field,
+            // so any other external save leaves its focus and caret alone. A
+            // lab toggled elsewhere resyncs it, dropping a stale draft.
+            if service.labs.voice_prompt != self.settings.labs.voice_prompt {
+                self.lab_store
+                    .sync_phrase(&service.labs.voice_prompt_phrase);
+            } else if !drafts.phrase
+                && service.labs.voice_prompt_phrase != self.settings.labs.voice_prompt_phrase
+            {
                 self.lab_store.rebase_phrase(
                     &self.settings.labs.voice_prompt_phrase,
                     &service.labs.voice_prompt_phrase,

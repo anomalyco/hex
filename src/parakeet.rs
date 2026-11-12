@@ -691,7 +691,9 @@ fn process_job_text(
     processing: impl FnOnce(),
 ) -> crate::dictation::processor::Processed {
     let profiles = profiles();
-    if profiles.processes(&job.context) {
+    // A voice prompt can run a request even when the mode's own rewrite and
+    // transformations are off, so the HUD shows its stage too.
+    if profiles.processes(&job.context) || crate::labs::voice_prompt() {
         processing();
     }
     profiles.process_cancellable(

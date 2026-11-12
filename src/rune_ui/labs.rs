@@ -243,7 +243,11 @@ impl Store {
     }
 
     /// Whether the phrase field holds typing the saved settings don't have.
+    /// A lab that's off has no draft to keep.
     pub(super) fn phrase_dirty(&self, settings: &crate::app_settings::AppSettings) -> bool {
+        if !settings.labs.voice_prompt {
+            return false;
+        }
         let draft = self.phrase.text.trim();
         !draft.is_empty() && draft != settings.labs.voice_prompt_phrase
     }

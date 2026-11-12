@@ -1088,6 +1088,11 @@ fn process_dictation_job(
             )
         };
         let text = processed.text.clone();
+        // A voice prompt that deliberately asked nothing ends quietly: no
+        // failure, no paste, no last dictation, and no History.
+        if processed.nothing {
+            return Ok(text);
+        }
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
@@ -1138,6 +1143,7 @@ fn process_dictation_job(
     );
     if let Some(print) = job.print.take() {
         print.send(match &result {
+            Ok(text) if text.trim().is_empty() => PrintedTranscript::NoSpeech,
             Ok(text) => PrintedTranscript::Text(text.clone()),
             Err(error) => PrintedTranscript::Failed(error.clone()),
         });

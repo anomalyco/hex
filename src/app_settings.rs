@@ -842,7 +842,10 @@ impl AppSettings {
         ));
         set_microphone_selection(self.microphone.as_deref());
         #[cfg(target_os = "macos")]
-        crate::dictation::config::update_dictation_profiles(&self.dictation_processing);
+        crate::dictation::config::update_dictation_profiles(
+            &self.dictation_processing,
+            self.labs.voice_prompt,
+        );
         crate::dictation::vocabulary::apply(&self.vocabulary, self.vocabulary_boost);
     }
 

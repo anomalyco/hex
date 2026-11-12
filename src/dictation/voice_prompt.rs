@@ -1,9 +1,10 @@
 //! Labs › Voice prompt: a spoken trigger phrase inside a dictation splits it
 //! into text and a one-off instruction for the mode's OpenCode model.
 //!
-//! Matching is word-aligned and case-insensitive, ignoring punctuation,
-//! hyphens, and apostrophes: "rewrite this" matches "Rewrite-this!" and never
-//! "write this" or "overwrite this". No fuzzy matching.
+//! Matching is word-aligned and case-insensitive. Apostrophes and hyphens
+//! inside a word are ignored when comparing, and punctuation otherwise
+//! separates words: "re-write this" and "Rewrite-this!" both match "rewrite
+//! this", while "write this", "overwrite this", and "this's" do not.
 
 /// The phrase Labs › Voice prompt starts with.
 pub const DEFAULT_PHRASE: &str = "rewrite this";
@@ -49,10 +50,7 @@ pub enum Instruction {
 /// Splits `transcript` at its last whole-word `phrase`; `None` when the
 /// phrase isn't there, so processing is exactly as it was.
 pub fn instruction(transcript: &str, phrase: &str) -> Option<Instruction> {
-    let phrase_words: Vec<String> = words(phrase)
-        .into_iter()
-        .map(|word| word.normalized)
-        .collect();
+    let phrase_words: Vec<String> = words(phrase).into_iter().map(|word| word.key).collect();
     if phrase_words.is_empty() {
         return None;
     }
@@ -65,7 +63,7 @@ pub fn instruction(transcript: &str, phrase: &str) -> Option<Instruction> {
         if phrase_words
             .iter()
             .zip(&transcript_words[start..])
-            .all(|(phrase, word)| *phrase == word.normalized)
+            .all(|(phrase, word)| *phrase == word.key)
         {
             found = Some(start);
         }
@@ -73,9 +71,18 @@ pub fn instruction(transcript: &str, phrase: &str) -> Option<Instruction> {
     let start = found?;
     let first = &transcript_words[start];
     let last = &transcript_words[start + phrase_words.len() - 1];
-    let text = trim_edges(&transcript[..first.start]).to_owned();
-    let prompt = trim_edges(&transcript[last.end..]);
-    let prompt = if courtesy_words(&words(prompt)) {
+    // The edges against the phrase lose joins such as a comma, while the
+    // text's own outer edge keeps its punctuation and quotes: it is what a
+    // failed request pastes.
+    let text = before_phrase(&transcript[..first.start]);
+    let prompt = after_phrase(&transcript[last.end..]);
+    let prompt_words = words(prompt);
+    let text = if words(text).is_empty() {
+        String::new()
+    } else {
+        text.to_owned()
+    };
+    let prompt = if courtesy_words(&prompt_words) {
         String::new()
     } else {
         prompt.to_owned()
@@ -98,7 +105,7 @@ pub fn phrase_problem(phrase: &str) -> Option<PhraseProblem> {
     }
     let letters: usize = words
         .iter()
-        .flat_map(|word| word.normalized.chars())
+        .flat_map(|word| word.key.chars())
         .filter(|character| character.is_alphabetic())
         .count();
     if letters < MINIMUM_LETTERS {
@@ -120,95 +127,104 @@ pub fn accepted_phrase(phrase: &str) -> String {
 
 /// A word of a transcript or phrase and where its bytes sit in the original.
 struct Word {
-    normalized: String,
+    /// Letters and digits, lowercased, with apostrophes and hyphens dropped.
+    key: String,
     start: usize,
     end: usize,
 }
 
-/// The alphanumeric runs of `text`, lowercased, at their byte offsets.
-/// Everything else is a separator, which ignores punctuation, hyphens, and
-/// apostrophes.
+/// The words of `text` at their byte offsets. Letters, digits, apostrophes,
+/// and hyphens make a word; everything else separates words. Apostrophes
+/// and hyphens stay in the span but leave the key, so "don't" and "dont"
+/// compare equal while "this's" stays different from "this".
 fn words(text: &str) -> Vec<Word> {
     let mut words = Vec::new();
-    let mut current: Option<Word> = None;
+    let mut current: Option<(String, usize, usize)> = None;
     for (index, character) in text.char_indices() {
-        if character.is_alphanumeric() {
+        if character.is_alphanumeric() || is_word_joiner(character) {
             match &mut current {
-                Some(word) => {
-                    word.normalized.extend(character.to_lowercase());
-                    word.end = index + character.len_utf8();
+                Some((key, _, end)) => {
+                    if character.is_alphanumeric() {
+                        key.extend(character.to_lowercase());
+                    }
+                    *end = index + character.len_utf8();
                 }
                 None => {
-                    current = Some(Word {
-                        normalized: character.to_lowercase().collect(),
-                        start: index,
-                        end: index + character.len_utf8(),
-                    })
+                    let key = if character.is_alphanumeric() {
+                        character.to_lowercase().collect()
+                    } else {
+                        String::new()
+                    };
+                    current = Some((key, index, index + character.len_utf8()));
                 }
             }
-        } else if let Some(word) = current.take() {
-            words.push(word);
+        } else if let Some((key, start, end)) = current.take()
+            && !key.is_empty()
+        {
+            words.push(Word { key, start, end });
         }
     }
-    words.extend(current);
+    if let Some((key, start, end)) = current
+        && !key.is_empty()
+    {
+        words.push(Word { key, start, end });
+    }
     words
 }
 
-/// Whether these normalized words say nothing more than thanks or please.
+/// Characters that stay inside a word so its apostrophes and hyphens can be
+/// ignored: `re-write`, `don't`, and `don’t` are single words.
+fn is_word_joiner(character: char) -> bool {
+    matches!(character, '\'' | '’' | '-')
+}
+
+/// What sits between a word and the phrase: whitespace and the marks that
+/// join a phrase to the words around it.
+fn is_joining(character: char) -> bool {
+    character.is_whitespace() || matches!(character, ',' | ';' | ':' | '–' | '—')
+}
+
+/// The text before the phrase with only the edge against the phrase
+/// trimmed, so its own punctuation and quotes survive.
+fn before_phrase(text: &str) -> &str {
+    text.trim_end_matches(is_joining).trim_start()
+}
+
+/// The prompt after the phrase with only the edge against the phrase
+/// trimmed, so its own punctuation survives.
+fn after_phrase(text: &str) -> &str {
+    text.trim_start_matches(is_joining).trim_end()
+}
+
+/// Whether these words say only thanks or please, or nothing at all.
 fn courtesy_words(words: &[Word]) -> bool {
-    let mut index = 0;
-    while index < words.len() {
-        match words[index].normalized.as_str() {
-            "thanks" | "please" => index += 1,
-            "thank"
-                if words
-                    .get(index + 1)
-                    .is_some_and(|word| word.normalized == "you") =>
-            {
-                index += 2;
-            }
-            _ => return false,
-        }
+    let tokens: Vec<&str> = words.iter().map(|word| word.key.as_str()).collect();
+    courtesy_sequence(&tokens)
+}
+
+/// One or more courtesy phrases in a row, such as "thanks a lot, please".
+fn courtesy_sequence(tokens: &[&str]) -> bool {
+    if tokens.is_empty() {
+        return true;
     }
-    !words.is_empty()
+    COURTESY
+        .iter()
+        .any(|phrase| tokens.starts_with(phrase) && courtesy_sequence(&tokens[phrase.len()..]))
 }
 
-/// `text` without whitespace or punctuation around it; what sits between the
-/// words stays as it was.
-fn trim_edges(text: &str) -> &str {
-    text.trim_matches(|character: char| character.is_whitespace() || is_punctuation(character))
-}
-
-/// Punctuation a split piece can start or end with, ASCII and typographic.
-fn is_punctuation(character: char) -> bool {
-    character.is_ascii_punctuation()
-        || matches!(
-            character,
-            '…' | '–'
-                | '—'
-                | '‘'
-                | '’'
-                | '“'
-                | '”'
-                | '«'
-                | '»'
-                | '¡'
-                | '¿'
-                | '·'
-                | '。'
-                | '、'
-                | '，'
-                | '．'
-                | '！'
-                | '？'
-                | '：'
-                | '；'
-                | '（'
-                | '）'
-                | '「'
-                | '」'
-        )
-}
+/// The courtesy phrases a prompt may be made of and nothing else.
+const COURTESY: &[&[&str]] = &[
+    &["thanks"],
+    &["thanks", "a", "lot"],
+    &["thanks", "so", "much"],
+    &["thanks", "very", "much"],
+    &["thank", "you"],
+    &["thank", "you", "a", "lot"],
+    &["thank", "you", "so", "much"],
+    &["thank", "you", "very", "much"],
+    &["please"],
+    &["please", "and", "thank", "you"],
+];
 
 #[cfg(test)]
 mod tests {
@@ -223,8 +239,8 @@ mod tests {
         assert_eq!(
             split("Ship it Friday. REWRITE THIS, make it formal."),
             Some(Instruction::Rewrite {
-                text: "Ship it Friday".into(),
-                prompt: "make it formal".into(),
+                text: "Ship it Friday.".into(),
+                prompt: "make it formal.".into(),
             })
         );
         assert_eq!(
@@ -242,24 +258,74 @@ mod tests {
             "overwrite this make it formal",
             "unrewrite this",
             "rewriting this",
+            "rewrite this's ok",
         ] {
             assert_eq!(split(transcript), None, "{transcript}");
         }
     }
 
     #[test]
-    fn punctuation_hyphens_and_apostrophes_are_ignored() {
+    fn hyphens_and_apostrophes_inside_words_are_ignored() {
         assert_eq!(
-            split("We're shipping on Friday. Rewrite-this: make it formal!"),
+            split("We're shipping on Friday. Re-write this: make it formal!"),
             Some(Instruction::Rewrite {
-                text: "We're shipping on Friday".into(),
+                text: "We're shipping on Friday.".into(),
+                prompt: "make it formal!".into(),
+            })
+        );
+        // A hyphenated phrase matches the plain words too.
+        assert_eq!(
+            instruction(
+                "We're shipping Friday. rewrite this make it formal",
+                "re-write this"
+            ),
+            Some(Instruction::Rewrite {
+                text: "We're shipping Friday.".into(),
                 prompt: "make it formal".into(),
             })
         );
+        // An apostrophe inside the phrase is ignored the same way.
         assert_eq!(
-            split("Rewrite, this. Make it bold."),
+            instruction("dont do that make it shorter", "don't do that"),
             Some(Instruction::Write {
-                prompt: "Make it bold".into(),
+                prompt: "make it shorter".into(),
+            })
+        );
+        assert_eq!(
+            instruction("do not do that make it shorter", "don't do that"),
+            None
+        );
+        // Hyphens join a word, they don't split it into the phrase's words.
+        assert_eq!(split("Re-write-this: make it formal!"), None);
+    }
+
+    #[test]
+    fn the_edges_keep_their_punctuation_and_quotes() {
+        assert_eq!(
+            split("Are we shipping Friday? rewrite this"),
+            Some(Instruction::RewriteText {
+                text: "Are we shipping Friday?".into(),
+            })
+        );
+        assert_eq!(
+            split("\"Hello,\" she said. rewrite this"),
+            Some(Instruction::RewriteText {
+                text: "\"Hello,\" she said.".into(),
+            })
+        );
+        // Joins against the phrase leave; the prompt's own punctuation stays.
+        assert_eq!(
+            split("Ship it. rewrite this, make it formal."),
+            Some(Instruction::Rewrite {
+                text: "Ship it.".into(),
+                prompt: "make it formal.".into(),
+            })
+        );
+        assert_eq!(
+            split("Ship it; rewrite this — make it formal"),
+            Some(Instruction::Rewrite {
+                text: "Ship it".into(),
+                prompt: "make it formal".into(),
             })
         );
     }
@@ -269,7 +335,7 @@ mod tests {
         assert_eq!(
             split("Rewrite this is not the trigger. Ship it. rewrite this make it formal"),
             Some(Instruction::Rewrite {
-                text: "Rewrite this is not the trigger. Ship it".into(),
+                text: "Rewrite this is not the trigger. Ship it.".into(),
                 prompt: "make it formal".into(),
             })
         );
@@ -281,7 +347,7 @@ mod tests {
         assert_eq!(
             split("We ship Friday. rewrite this make it formal"),
             Some(Instruction::Rewrite {
-                text: "We ship Friday".into(),
+                text: "We ship Friday.".into(),
                 prompt: "make it formal".into(),
             })
         );
@@ -289,14 +355,14 @@ mod tests {
         assert_eq!(
             split("We ship Friday. rewrite this."),
             Some(Instruction::RewriteText {
-                text: "We ship Friday".into(),
+                text: "We ship Friday.".into(),
             })
         );
         // A prompt only: write what it asks for.
         assert_eq!(
-            split("rewrite this: an email to Bob about Friday"),
+            split("rewrite this: an email to Bob about Friday."),
             Some(Instruction::Write {
-                prompt: "an email to Bob about Friday".into(),
+                prompt: "an email to Bob about Friday.".into(),
             })
         );
         // Neither: just the phrase, or it followed by thanks or please.
@@ -307,6 +373,9 @@ mod tests {
             "rewrite this thank you",
             "rewrite this please.",
             "rewrite this thanks please thank you",
+            "rewrite this thanks a lot",
+            "rewrite this thank you very much",
+            "rewrite this please and thank you",
         ] {
             assert_eq!(
                 split(transcript),
@@ -326,12 +395,19 @@ mod tests {
                 prompt: "please make it formal".into(),
             })
         );
+        assert_eq!(
+            split("rewrite this thanks a lot make it formal"),
+            Some(Instruction::Write {
+                prompt: "thanks a lot make it formal".into(),
+            })
+        );
     }
 
     #[test]
     fn a_phrase_needs_two_words_and_six_letters() {
         assert_eq!(phrase_problem("rewrite this"), None);
-        assert_eq!(phrase_problem("  Rewrite-this!  "), None);
+        assert_eq!(phrase_problem("  Re-write this!  "), None);
+        assert_eq!(phrase_problem("don't do that"), None);
         assert_eq!(phrase_problem("okay go"), None, "six letters in two words");
         assert_eq!(phrase_problem("héllo wörld"), None);
         assert_eq!(
