@@ -365,8 +365,8 @@ pub(crate) fn run(
                 break;
             }
             let (mut job, kind) = match job {
-                OutputJob::Dictation(job) if job.print.is_some() => (job, OutputKind::Printed),
-                OutputJob::Dictation(job) => (job, OutputKind::Dictation),
+                OutputJob::Dictation(job) if job.print.is_some() => (*job, OutputKind::Printed),
+                OutputJob::Dictation(job) => (*job, OutputKind::Dictation),
                 OutputJob::PasteLast => {
                     let result = last_dictation
                         .clone()
