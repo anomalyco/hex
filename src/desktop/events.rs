@@ -328,6 +328,7 @@ impl EventLog {
     }
 
     /// A voice prompt that deliberately asked nothing.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
     pub fn discarded_voice_prompt(&self) -> io::Result<()> {
         self.discarded_dictation(Some(VOICE_PROMPT_NOTHING_REASON))
     }
