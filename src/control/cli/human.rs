@@ -318,6 +318,18 @@ pub(super) fn human_status(report: &StatusReport) -> String {
             ", not installed"
         }
     );
+    if let Some(fallback) = &model.fallback {
+        use crate::transcription::custom_models::FallbackReason;
+        let reason = match fallback.reason {
+            FallbackReason::Missing => "it is missing",
+            FallbackReason::Changed => "it changed since it was added",
+            FallbackReason::LabsOff => "its Labs toggle is off",
+        };
+        model_line.push_str(&format!(
+            "; using {} ({}) because {reason}",
+            fallback.name, fallback.language
+        ));
+    }
     if let Some(preparing) = &model.preparing {
         model_line.push_str(&format!(
             "; preparing {preparing} ({} MB)",

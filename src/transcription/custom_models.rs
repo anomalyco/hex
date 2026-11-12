@@ -438,13 +438,38 @@ pub fn imported() -> Vec<Imported> {
         .collect()
 }
 
+/// Why the listener runs [`fallback`] in place of a saved selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FallbackReason {
+    /// The import's file or manifest is gone.
+    Missing,
+    /// The import's file is not the one imported.
+    Changed,
+    /// Parakeet Ultra with its Labs toggle off.
+    LabsOff,
+}
+
+/// Why `selection` can't run now, if it can't.
+pub fn fallback_reason(selection: &TranscriptionSelection) -> Option<FallbackReason> {
+    match selection.model {
+        TranscriptionModelId::Custom(id) => match status(id) {
+            Status::Ready => None,
+            Status::Missing => Some(FallbackReason::Missing),
+            Status::Changed => Some(FallbackReason::Changed),
+        },
+        TranscriptionModelId::ParakeetUltra => {
+            (!crate::labs::parakeet_ultra()).then_some(FallbackReason::LabsOff)
+        }
+        _ => None,
+    }
+}
+
 /// The selection the listener runs for `selection`: the same one, unless it
-/// names an import that can't run or Parakeet Ultra with its toggle off,
-/// when it is a downloaded fallback. The saved
-/// choice stays as it is until the person fixes it or picks another.
+/// can't run ([`fallback_reason`]), when it is a downloaded fallback. The
+/// saved choice stays as it is until the person fixes it or picks another.
 pub fn runnable(selection: &TranscriptionSelection) -> TranscriptionSelection {
-    let gated = selection.model.is_labs_gated();
-    if gated && !super::models::definition(selection.model).available() {
+    if fallback_reason(selection).is_some() {
         fallback()
     } else {
         selection.clone()

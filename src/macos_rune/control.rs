@@ -921,9 +921,7 @@ fn status(
     };
     let open = window.is_visible();
     let settings = &published.settings;
-    let selection = &settings.transcription;
-    let definition = crate::transcription::models::definition(selection.model);
-    let setup = crate::desktop::onboarding::status(selection);
+    let setup = crate::desktop::onboarding::status(&settings.transcription);
     Ok(ControlReply::Status(Box::new(StatusReport {
         app_version: crate::VERSION.into(),
         pid: std::process::id(),
@@ -940,16 +938,13 @@ fn status(
         capture,
         meeting,
         model: ModelReport {
-            id: selection.model.as_str().into(),
-            name: definition.name.into(),
-            language: selection.language.clone(),
-            installed: crate::transcription::models::is_installed(definition, &selection.language),
             preparing: published
                 .preparation
                 .model
                 .map(|model| model.as_str().into()),
             downloaded_bytes: published.preparation.downloaded_bytes,
             error: published.preparation.error.clone(),
+            ..ModelReport::saved(&settings.transcription)
         },
         features: FeatureReport {
             meetings: crate::app_settings::meetings_enabled(),

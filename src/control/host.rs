@@ -553,9 +553,7 @@ pub(crate) fn capture_from_state(
 fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
     let state = host.state()?;
     let settings = &state.settings;
-    let selection = &settings.transcription;
-    let definition = crate::transcription::models::definition(selection.model);
-    let installed = crate::transcription::models::is_installed(definition, &selection.language);
+    let ready = crate::desktop::onboarding::model_ready(&settings.transcription);
     let capture = if state.listener.running {
         CaptureReport::from(state.capture)
     } else {
@@ -593,16 +591,13 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
         capture,
         meeting: meeting_report(),
         model: ModelReport {
-            id: selection.model.as_str().into(),
-            name: definition.name.into(),
-            language: selection.language.clone(),
-            installed,
             preparing: state
                 .transcription
                 .preparing
                 .map(|model| model.as_str().into()),
             downloaded_bytes: state.transcription.downloaded_bytes,
             error: state.transcription.error.clone(),
+            ..ModelReport::saved(&settings.transcription)
         },
         features: FeatureReport {
             meetings: crate::app_settings::meetings_enabled(),
@@ -614,10 +609,10 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
         },
         // Linux and Windows gate dictation on no privacy permission.
         permissions: PermissionReport {
-            ready: installed,
+            ready,
             microphone: "ready".into(),
             accessibility: "ready".into(),
-            transcription_model: installed,
+            transcription_model: ready,
         },
         window: WindowReport {
             open: state.window_open,
