@@ -1174,7 +1174,10 @@ open the macOS dialog mid-dictation). macOS 15.4 and later no longer tell other 
 what is playing, so Hex hears the browsers through a private process tap
 (aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
 play only after it saw the browser go silent right after its own pause. The
-sequence checks in [audio/browser_media.rs](../../src/audio/browser_media.rs) run on fakes:
+browsers are the ones [microphone_activity.rs](../../src/microphone_activity.rs)
+knows: Chrome, Brave, Safari, Firefox, Edge, Arc, Vivaldi, and Helium, whose
+helpers count as their browser. The sequence checks in
+[audio/browser_media.rs](../../src/audio/browser_media.rs) run on fakes:
 `a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
 `a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
 `no_level_sends_nothing`, `a_play_the_browser_never_takes_is_paused_again`,
