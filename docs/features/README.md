@@ -1274,7 +1274,7 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
     // Its drafts and delete confirmation follow the unique saved mode name
     // across reloads; removing, renaming or duplicating it drops the draft.
 
-Foreground context -> Select processing
+Context retained when dictation stops -> Select processing
 ├── Matching website                     // macOS: scriptable browsers, then AXWebArea; Windows: UIA; Linux: AT-SPI
 ├── Otherwise matching application
 ├── Hex itself in front                  // application only: Hex never reads its own AX tree (#1402)
@@ -1282,6 +1282,7 @@ Foreground context -> Select processing
 
 Selected mode                            // replaces Global's rewrite and transformations
   -> Its vocabulary, then the shared one   // features/vocabulary.md (vocabulary.modes)
+  -> Speech Labs preparation              // formatting, symbols, English filler removal
   -> Global's corrections, then the mode's  // every OS
   -> Labs > Voice prompt's phrase          // Labs off, or no phrase, processes as before
      -> one spoken instruction replaces the rewrite, with the mode's model and deadline (labs.md)
@@ -1355,6 +1356,24 @@ Selection and stage checks start in
 [dictation/text_replacements.rs](../../src/dictation/text_replacements.rs), and
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
+
+Every OS compiles settings through `Profiles::from_settings` and uses the same
+selection and correction pipeline. Website rules accept bare hosts, URLs,
+ports, and internationalized domains; the first matching website wins over
+the first matching application. Application matching retains each adapter's
+policy: exact names ignoring `.app` on macOS, case-insensitive substrings on
+Windows and Linux. Global corrections run once, after speech preparation.
+The corpus comparison `shared_pipeline_preserves_the_macos_corpus_output`,
+`speech_preparation_precedes_global_and_mode_corrections`, and
+`website_selectors_accept_saved_urls_ports_and_idn` cover these rules without
+inference or a provider call.
+
+Linux and Windows pin the foreground window when stop is handled, carry its
+pending accessibility read through the release tail and output queue, and
+resolve it before processing. macOS retains its capture-end monitor snapshot.
+Switching apps while inference or an older rewrite runs no longer selects a
+different mode for queued speech. Paste still targets the current focus.
+This handoff has unit coverage; native focus switching has not been observed.
 
 Website context per OS: no OS reads a page until something uses it: a mode
 chosen by website, an OpenCode rewrite (its prompt names the site), or a

@@ -35,6 +35,7 @@ const URL_READ_DEADLINE: Duration = Duration::from_millis(300);
 
 /// A context read in flight: the application stem is immediate, the UIA
 /// URL read proceeds on a helper thread while the caller transcribes.
+#[derive(Default)]
 pub struct PendingContext {
     application: Option<String>,
     url: Option<mpsc::Receiver<Option<String>>>,
@@ -46,11 +47,15 @@ pub struct PendingContext {
 /// processing uses it (`ModeRuntime::reads_page`): a UIA client turns on a
 /// Chromium browser's accessibility tree, and `finish` waits for the walk.
 pub fn begin_capture(read_page: bool) -> PendingContext {
-    let application = crate::windows::input::foreground_process_stem();
+    let window = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    let application = crate::windows::input::window_process_path(window).and_then(|path| {
+        path.file_stem()
+            .map(|stem| stem.to_string_lossy().to_lowercase())
+    });
     let url = application
         .as_deref()
         .filter(|stem| read_page && BROWSER_STEMS.contains(stem))
-        .and_then(|_| spawn_url_read());
+        .and_then(|_| spawn_url_read(window as isize));
     PendingContext { application, url }
 }
 
@@ -96,7 +101,7 @@ fn host_of(url: &str) -> Option<String> {
 /// pile blocked threads one per dictation.
 static URL_READ_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
-fn spawn_url_read() -> Option<mpsc::Receiver<Option<String>>> {
+fn spawn_url_read(window: isize) -> Option<mpsc::Receiver<Option<String>>> {
     if URL_READ_IN_FLIGHT.swap(true, Ordering::AcqRel) {
         tracing::debug!("skipping the browser URL read; a previous read is still blocked");
         return None;
@@ -105,7 +110,7 @@ fn spawn_url_read() -> Option<mpsc::Receiver<Option<String>>> {
     let spawned = std::thread::Builder::new()
         .name("windows-uia-context".into())
         .spawn(move || {
-            let url = read_foreground_document_url();
+            let url = read_foreground_document_url(window);
             URL_READ_IN_FLIGHT.store(false, Ordering::Release);
             if url.is_none() {
                 tracing::debug!("the foreground browser exposed no page URL");
@@ -121,7 +126,7 @@ fn spawn_url_read() -> Option<mpsc::Receiver<Option<String>>> {
     }
 }
 
-fn read_foreground_document_url() -> Option<String> {
+fn read_foreground_document_url(window: isize) -> Option<String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
@@ -132,18 +137,16 @@ fn read_foreground_document_url() -> Option<String> {
         CUIAutomation, IUIAutomation, IUIAutomationValuePattern, TreeScope_Descendants,
         UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_ValuePatternId,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     unsafe {
-        let window = GetForegroundWindow();
-        if window.is_null() {
+        if window == 0 {
             return None;
         }
         let com = CoInitializeEx(None, COINIT_MULTITHREADED);
         let url = (|| -> windows::core::Result<Option<String>> {
             let automation: IUIAutomation =
                 CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
-            let root = automation.ElementFromHandle(HWND(window.cast()))?;
+            let root = automation.ElementFromHandle(HWND(window as *mut _))?;
             // An i32 VARIANT holding the Document control type; VT_I4 owns
             // nothing, so the ManuallyDrop payload never needs dropping.
             let document_type = VARIANT {
@@ -194,6 +197,21 @@ fn read_foreground_document_url() -> Option<String> {
 mod tests {
     use super::*;
     use crate::dictation::modes::canonical_host;
+
+    #[test]
+    fn queued_context_keeps_the_stopped_application_and_page() {
+        let (sender, receiver) = mpsc::channel();
+        let pending = PendingContext {
+            application: Some("chrome".into()),
+            url: Some(receiver),
+        };
+        sender
+            .send(Some("https://example.com/draft".into()))
+            .unwrap();
+        let context = pending.finish();
+        assert_eq!(context.application.as_deref(), Some("chrome"));
+        assert_eq!(context.browser_host(), Some("example.com"));
+    }
 
     fn capture() -> ContextSnapshot {
         begin_capture(true).finish()

@@ -6,6 +6,8 @@
 //! the global settings. AT-SPI then finds that window's page address.
 
 use std::collections::HashMap;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use wayland_client::backend::ObjectId;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
@@ -36,40 +38,88 @@ struct FocusedWindow {
 /// the page, or for the process of a window the display server names no
 /// other way; its walk runs before the paste, for up to its deadline.
 pub(crate) fn capture(read_page: bool) -> ContextSnapshot {
+    begin_capture(read_page).finish()
+}
+
+#[derive(Default)]
+pub(crate) struct PendingContext {
+    snapshot: ContextSnapshot,
+    accessible: Option<mpsc::Receiver<Option<crate::linux::atspi::AccessibleWindow>>>,
+    read_page: bool,
+    needs_process: bool,
+}
+
+impl PendingContext {
+    pub(crate) fn finish(self) -> ContextSnapshot {
+        let accessible = self.accessible.and_then(|receiver| {
+            receiver
+                .recv_timeout(Duration::from_millis(500))
+                .ok()
+                .flatten()
+        });
+        ContextSnapshot {
+            application: self
+                .needs_process
+                .then(|| {
+                    accessible
+                        .as_ref()
+                        .and_then(|window| window.pid)
+                        .and_then(process_name)
+                })
+                .flatten()
+                .or(self.snapshot.application),
+            browser_url: accessible
+                .filter(|_| self.read_page)
+                .and_then(|window| window.url),
+            ..self.snapshot
+        }
+    }
+}
+
+/// Pin the window at stop; its bounded accessibility read overlaps inference
+/// and never looks up a later foreground window from the output queue.
+pub(crate) fn begin_capture(read_page: bool) -> PendingContext {
     let window = if crate::linux::session::LinuxSession::detect().is_wayland() {
         wayland_focused_window()
     } else {
         x11_focused_window()
     };
     let Some(window) = window else {
-        return ContextSnapshot::default();
+        return PendingContext::default();
     };
     let desktop_name = window
         .app_id
         .as_deref()
         .and_then(crate::application_catalog::desktop_application_name);
-    let accessible = (read_page || (desktop_name.is_none() && window.pid.is_none()))
+    let needs_process = desktop_name.is_none() && window.pid.is_none();
+    let accessible = (read_page || needs_process)
         .then(|| {
-            crate::linux::atspi::focused_window(&WindowHint {
+            let hint = WindowHint {
                 pid: window.pid,
                 title: window.title.clone(),
-            })
+            };
+            let (sender, receiver) = mpsc::channel();
+            std::thread::Builder::new()
+                .name("linux-atspi-context".into())
+                .spawn(move || {
+                    let _ = sender.send(crate::linux::atspi::focused_window(&hint));
+                })
+                .ok()
+                .map(|_| receiver)
         })
         .flatten();
-    let pid = window
-        .pid
-        .or_else(|| accessible.as_ref().and_then(|accessible| accessible.pid));
     let application = desktop_name
-        .or_else(|| pid.and_then(process_name))
+        .or_else(|| window.pid.and_then(process_name))
         .or_else(|| window.app_id.as_deref().map(str::to_lowercase));
-    ContextSnapshot {
-        application,
-        browser_url: accessible
-            .filter(|_| read_page)
-            .and_then(|accessible| accessible.url),
-        window_title: window.title,
-        input_revision: None,
-        screen_terms: Vec::new(),
+    PendingContext {
+        snapshot: ContextSnapshot {
+            application,
+            window_title: window.title,
+            ..Default::default()
+        },
+        accessible,
+        read_page,
+        needs_process,
     }
 }
 
@@ -237,6 +287,51 @@ fn process_name(pid: u32) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_context_keeps_the_stopped_window_and_its_page() {
+        let (sender, receiver) = mpsc::channel();
+        let pending = PendingContext {
+            snapshot: ContextSnapshot {
+                application: Some("editor".into()),
+                window_title: Some("Draft".into()),
+                ..Default::default()
+            },
+            accessible: Some(receiver),
+            read_page: true,
+            needs_process: false,
+        };
+        sender
+            .send(Some(crate::linux::atspi::AccessibleWindow {
+                pid: None,
+                url: Some(url::Url::parse("https://example.com/draft").unwrap()),
+            }))
+            .unwrap();
+        let context = pending.finish();
+        assert_eq!(context.application.as_deref(), Some("editor"));
+        assert_eq!(context.window_title.as_deref(), Some("Draft"));
+        assert_eq!(context.browser_host(), Some("example.com"));
+    }
+
+    #[test]
+    fn a_failed_page_read_keeps_the_stopped_application() {
+        let (sender, receiver) = mpsc::channel();
+        drop(sender);
+        let pending = PendingContext {
+            snapshot: ContextSnapshot {
+                application: Some("editor".into()),
+                ..Default::default()
+            },
+            accessible: Some(receiver),
+            read_page: true,
+            needs_process: false,
+        };
+        let context = pending.finish();
+        assert_eq!(context.application.as_deref(), Some("editor"));
+        assert_eq!(context.browser_host(), None);
+    }
+
     #[test]
     fn the_current_process_has_a_name() {
         assert!(super::process_name(std::process::id()).is_some());

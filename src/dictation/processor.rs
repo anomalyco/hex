@@ -302,12 +302,35 @@ struct ContextualProfile {
 pub struct Profiles {
     default: Profile,
     contextual: Vec<ContextualProfile>,
-    /// Global's corrections, run before the selected mode's own on every
-    /// dictation, as the Windows and Linux listeners do.
+    /// Global's corrections, run after speech preparation and before the mode's.
     global: ReplacementSet,
 }
 
 impl Profiles {
+    pub(crate) fn from_settings(
+        settings: &crate::app_settings::DictationProcessingSettings,
+    ) -> Self {
+        let mut global = Profile::from_mode(&settings.default_mode);
+        global.name = "Global".into();
+        let replacements = std::mem::take(&mut global.replacements);
+        let mut profiles = Self::new(global).global_replacements(replacements);
+        for mode in &settings.modes {
+            let profile = Profile::from_mode(mode);
+            for application in &mode.applications {
+                let selector = if cfg!(target_os = "macos") {
+                    ContextSelector::application(application.clone())
+                } else {
+                    ContextSelector::ApplicationSubstring(application.trim().to_lowercase())
+                };
+                profiles = profiles.push(selector, profile.clone());
+            }
+            for host in &mode.browser_hosts {
+                profiles = profiles.browser_host(host.clone(), profile.clone());
+            }
+        }
+        profiles
+    }
+
     pub fn new(default: Profile) -> Self {
         Self {
             default,
@@ -321,6 +344,7 @@ impl Profiles {
         self
     }
 
+    #[cfg(test)]
     pub fn application(self, application: impl Into<String>, profile: Profile) -> Self {
         self.push(ContextSelector::application(application.into()), profile)
     }
@@ -376,6 +400,20 @@ impl Profiles {
         profile.ai_enabled || !profile.transformations.is_empty()
     }
 
+    fn corrected(
+        &self,
+        profile: &Profile,
+        transcript: &str,
+        language: &str,
+        source: Source,
+        labs: DictationLabs,
+    ) -> String {
+        let prepared = prepare_transcript(transcript, language, source, labs);
+        profile
+            .replacements
+            .replace(&self.global.replace(&prepared))
+    }
+
     /// Whether processing `transcript` would run a voice prompt request: the
     /// lab is on, this is heard speech, and the phrase is there after
     /// preparation and replacements. The `Nothing` outcome asks nothing, so
@@ -397,10 +435,13 @@ impl Profiles {
             return false;
         };
         let profile = self.select(context);
-        let prepared = prepare_transcript(transcript, language, source, DictationLabs::current());
-        let corrected = profile
-            .replacements
-            .replace(&self.global.replace(&prepared));
+        let corrected = self.corrected(
+            profile,
+            transcript,
+            language,
+            source,
+            DictationLabs::current(),
+        );
         matches!(
             crate::dictation::voice_prompt::instruction(&corrected, &phrase),
             Some(instruction) if !matches!(instruction, Instruction::Nothing)
@@ -441,10 +482,13 @@ impl Profiles {
         // Labs › Spoken formatting, spoken symbols, and filler words only
         // make sense for speech: typed text starts from what is already
         // written and skips them.
-        let prepared = prepare_transcript(transcript, language, source, DictationLabs::current());
-        let corrected = profile
-            .replacements
-            .replace(&self.global.replace(&prepared));
+        let corrected = self.corrected(
+            profile,
+            transcript,
+            language,
+            source,
+            DictationLabs::current(),
+        );
         // Labs › Voice prompt: heard speech may carry a spoken instruction
         // that replaces the mode's rewrite with one request of its own.
         if source == Source::Dictation
@@ -1946,6 +1990,114 @@ mod tests {
             prepare_transcript(speech, "en", Source::Dictation, DictationLabs::default()),
             speech
         );
+    }
+
+    #[test]
+    fn speech_preparation_precedes_global_and_mode_corrections() {
+        use crate::app_settings::{DictationMode, DictationProcessingSettings};
+        use crate::dictation::text_replacements::TextReplacement;
+        let pair = |from: &str, to: &str| TextReplacement {
+            matched_phrase: from.into(),
+            output: to.into(),
+        };
+        let profiles = Profiles::from_settings(&DictationProcessingSettings {
+            default_mode: DictationMode {
+                replacements: vec![pair("comma", "WRONG"), pair("thanks", "thank you")],
+                ..Default::default()
+            },
+            modes: vec![DictationMode {
+                applications: vec!["Notes".into()],
+                replacements: vec![pair("thank you", "cheers")],
+                ..Default::default()
+            }],
+        });
+        let profile = profiles.select(&context("Notes", None));
+        let labs = DictationLabs {
+            spoken_symbols: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            profiles.corrected(profile, "done comma thanks", "en", Source::Dictation, labs),
+            "done, cheers"
+        );
+        assert_eq!(
+            profiles.corrected(profile, "done comma thanks", "en", Source::TypedText, labs),
+            "done WRONG cheers"
+        );
+    }
+
+    #[test]
+    fn shared_pipeline_preserves_the_macos_corpus_output() {
+        use crate::app_settings::{AppSettings, DictationMode};
+        use crate::dictation::text_replacements::TextReplacement;
+        let mut settings = AppSettings::default();
+        settings.dictation_processing.default_mode.replacements = vec![TextReplacement {
+            matched_phrase: "notes".into(),
+            output: "documents".into(),
+        }];
+        settings.dictation_processing.default_mode.transformations = vec!["lowercase".into()];
+        settings.dictation_processing.modes = vec![DictationMode {
+            name: "Writing".into(),
+            applications: vec!["Notes".into()],
+            browser_hosts: vec!["example.com".into()],
+            replacements: vec![TextReplacement {
+                matched_phrase: "documents".into(),
+                output: "drafts".into(),
+            }],
+            transformations: vec!["no-trailing-punctuation".into()],
+            ..Default::default()
+        }];
+        // The former macOS compiler, independent of the shared settings entry point.
+        let global = &settings.dictation_processing.default_mode;
+        let mode = &settings.dictation_processing.modes[0];
+        let reference = Profiles::new(Profile::configured(
+            "Global",
+            ReplacementSet::default(),
+            global.transformations.clone(),
+            &global.post_processing,
+        ))
+        .global_replacements(ReplacementSet::new(&global.replacements))
+        .application("Notes", Profile::from_mode(mode))
+        .browser_host("example.com", Profile::from_mode(mode));
+        let runtime = crate::dictation::modes::ModeRuntime::from_settings(&settings);
+        let transformations = crate::personal_commands::TransformationClient::default();
+        let corpus: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/vocabulary/manifest.json"
+        ))
+        .unwrap();
+        for clip in corpus["clips"].as_array().unwrap() {
+            let text = clip["expected"].as_str().unwrap();
+            for context in [
+                context("Other", None),
+                context("Notes", None),
+                context("Browser", Some("https://example.com/page")),
+            ] {
+                let mut expected = reference.process_cancellable(
+                    text,
+                    "en",
+                    &context,
+                    &AtomicBool::new(false),
+                    Source::Dictation,
+                );
+                expected.apply_transformations(
+                    &transformations,
+                    &context,
+                    &AtomicBool::new(false),
+                    Source::Dictation,
+                );
+                let actual =
+                    runtime.process(text, "en", &context, &transformations, Source::Dictation);
+                assert_eq!(actual.text, expected.text, "{}", clip["id"]);
+                assert_eq!(actual.nothing, expected.nothing);
+                assert_eq!(
+                    actual
+                        .observation
+                        .as_ref()
+                        .and_then(|value| value.fallback.as_ref()),
+                    None
+                );
+            }
+        }
     }
 
     #[test]

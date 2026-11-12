@@ -844,9 +844,9 @@ Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_formatting()` as each dictation's processing starts and runs
-`dictation::spoken_formatting::apply` before the mode's corrections, OpenCode
-rewriting, and transformations (on Windows and Linux, after the Global
-replacements). Whole phrases, ignoring case and Spanish accents, are
+`dictation::spoken_formatting::apply` before Global corrections, mode corrections,
+OpenCode rewriting, and transformations on every OS. Whole phrases, ignoring
+case and Spanish accents, are
 replaced: "new line", "line break", "nueva línea", and "salto de línea" by
 one line break, "new paragraph" and "nuevo párrafo" by two, "open quote",
 "abrir comillas", and "abre comillas" by an opening `"`, and "close quote",
