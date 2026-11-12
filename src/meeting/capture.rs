@@ -311,9 +311,10 @@ impl InputRecorders {
     }
 
     /// Records `current` for `uid`, reporting whether a process known on that
-    /// same input stopped recording. A different input starts over, and a
-    /// release within [`RENEGOTIATION_SETTLE`] of our own rate change is not
-    /// another app's.
+    /// same input stopped recording. A different input starts over. The
+    /// comparison made by our own renegotiating open, and by any reopen
+    /// within [`RENEGOTIATION_SETTLE`] of it, ignores a disappearing pid:
+    /// the driver is restarting its streams, not another app letting go.
     fn update(&self, uid: Option<&str>, current: Vec<i32>, now: Instant) -> bool {
         let mut renegotiated = self
             .renegotiated

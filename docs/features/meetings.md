@@ -792,9 +792,12 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       │      change that can let one work
 │       │   -> the release is recorded where it is seen, so a stream that
 │       │      fails before its next chunk cannot lose it; the last set is
-│       │      shared across reopens; the comparison our renegotiating open
-│       │      makes, and any poll in the second after it, ignore a pid
-│       │      that disappears: the driver is restarting, not an app
+│       │      shared across reopens; the comparison made by our own
+│       │      renegotiating open, and by any reopen within a second of it,
+│       │      ignores a disappearing pid: the driver is restarting, not an
+│       │      app
+│       │   -> needs macOS 14+ process audio metadata, as call-app input
+│       │      detection does; older macOS warns without retrying
 │       ├── A dictation captures or infers -> the quick reopens and the
 │       │   retries wait until it is idle, so a rate change never cuts a
 │       │   dictation; a release stays pending meanwhile, and an open
@@ -826,6 +829,7 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // a_warned_microphone_retries_after_the_call_app_lets_go,
 │          // audible_audio_resets_the_episodes_retries,
 │          // a_reopen_waits_while_dictation_is_active,
+│          // a_spent_recording_warns_even_while_dictation_is_active,
 │          // a_release_triggered_retry_waits_while_dictation_is_active,
 │          // a_pending_renegotiation_reopens_once_dictation_is_idle,
 │          // audible_audio_clears_a_pending_renegotiation,

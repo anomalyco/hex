@@ -351,9 +351,11 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
   │     -> a release seen before the warning still counts, and one seen
   │        before a reopen and gone after it counts too
   │     -> the release is noted where it is seen, so a stream that fails
-  │        before its next chunk cannot lose it; the comparison our
-  │        renegotiating open makes, and any poll in the second after it,
-  │        ignore a pid that disappears: the driver is restarting, not an app
+  │        before its next chunk cannot lose it; the comparison made by our
+  │        own renegotiating open, and by any reopen within a second of it,
+  │        ignores a disappearing pid: the driver is restarting, not an app
+  │     -> needs macOS 14+ process audio metadata, as call-app input
+  │        detection does; older macOS warns without retrying
   ├── a dictation captures or infers -> the quick reopens and retries wait
   │     until it is idle; a release stays pending meanwhile, and an open
   │     already decided under dictation opens without renegotiating: the
@@ -441,6 +443,7 @@ values; no iPhone observed with the lid closed),
 `a_warned_microphone_retries_after_the_call_app_lets_go`,
 `audible_audio_resets_the_episodes_retries`,
 `a_reopen_waits_while_dictation_is_active`,
+`a_spent_recording_warns_even_while_dictation_is_active`,
 `a_release_triggered_retry_waits_while_dictation_is_active`,
 `a_pending_renegotiation_reopens_once_dictation_is_idle`,
 `audible_audio_clears_a_pending_renegotiation`,
@@ -637,22 +640,25 @@ shared last-known set survives a supervisor reopen, so a process seen before
 one and gone after it counts as a release, a release is noted where it is
 seen so a stream that fails or stalls before its next chunk cannot lose it,
 and a release seen before the warning still counts once it shows. The
-comparison our own renegotiating open makes, and any recorder poll in the
-second after it, ignore a pid that disappears: the driver is restarting its
-streams, not another app. Switching inputs forgets the old input's release
+comparison made by our own renegotiating open, and by any reopen within a
+second of it, ignores a disappearing pid: the driver is restarting its
+streams, not another app. Release detection needs macOS 14+ process audio
+metadata, as call-app input detection does, so older macOS raises the
+warning without retrying. Switching inputs forgets the old input's release
 and pending renegotiation. A renegotiating open takes the renegotiation when
 it is attempted, so a failing open retries plainly rather than flipping the
 rate on every supervisor retry, and a successful one spends a release noted
 before it. Silence alone never retries, and one silent episode gets at most 3
 such retries. A dictation capture or inference defers both the quick reopens
-and the retries until it is idle, and a release stays pending meanwhile; an
-open already decided under dictation opens without renegotiating, and the
-still-silent stream reopens once dictation is idle without spending another
-reopen or retry, so a rate change never cuts a dictation. Nonzero audio
-clears the live warning, including in a stream reopened after a supervisor
-restart, and starts the silent episode's retry count over, clears a pending
-renegotiation, and leaves the recording's two quick reopens spent. A later
-episode warns at once, then gets its own retries. Each gated episode is also
+and the retries until it is idle, while the warning is still raised, and a
+release stays pending meanwhile; an open already decided under dictation
+opens without renegotiating, and the still-silent stream reopens once
+dictation is idle without spending another reopen or retry, so a rate change
+never cuts a dictation. Nonzero audio clears the live warning, including in
+a stream reopened after a supervisor restart, and starts the silent
+episode's retry count over, clears a pending renegotiation, and leaves the
+recording's two quick reopens spent. A later episode warns at once, then
+gets its own retries. Each gated episode is also
 logged once at info level with the opened device and the call app's reported
 inputs, so field logs can confirm the gate. The 3 s watch, its per-recording
 reopen budget, the release-triggered retry cap, and its gating are

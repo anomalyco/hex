@@ -171,6 +171,12 @@ pub(super) struct SilenceRecovery {
 }
 
 impl SilenceRecovery {
+    /// Whether the recording still has a quick reopen left, without
+    /// spending it.
+    fn has_reopen(&self) -> bool {
+        self.reopens.load(Ordering::Relaxed) < SILENCE_REOPENS
+    }
+
     /// Claims one of the recording's quick reopens; false once they are
     /// spent, which is when a warning is raised instead.
     fn claim_reopen(&self) -> bool {
@@ -330,6 +336,8 @@ impl SilencePolicy {
             return SilenceAction::Reopen;
         }
         if self.warning {
+            // Taking the release before claiming the retry spends it even
+            // when the cap is spent, so it cannot fire a later retry.
             if self.recovery.has_release()
                 && !dictation_active()
                 && self.recovery.take_release()
@@ -346,6 +354,11 @@ impl SilencePolicy {
             }
             self.gated = true;
             return SilenceAction::Gated;
+        }
+        // The warning changes nothing on the device, so it is raised even
+        // while dictation is active; only a quick reopen waits.
+        if !self.recovery.has_reopen() {
+            return SilenceAction::Warn;
         }
         if dictation_active() {
             return SilenceAction::Nothing;
@@ -585,6 +598,16 @@ mod tests {
         assert_eq!(
             policy.observe(&[0.0; 100], true, || false),
             SilenceAction::Reopen
+        );
+    }
+
+    #[test]
+    fn a_spent_recording_warns_even_while_dictation_is_active() {
+        let mut policy = SilencePolicy::new(1_000, spent_recovery(), false);
+        assert_eq!(
+            policy.observe(&[0.0; 3_000], true, || true),
+            SilenceAction::Warn,
+            "the warning changes nothing on the device, so dictation does not defer it"
         );
     }
 
