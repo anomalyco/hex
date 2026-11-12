@@ -2835,8 +2835,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   dictations paste normally, and `hex labs` prints the same note in its list
   and after `hex labs on live-typing` (never refusing the toggle). An
   organization's managed lock keeps its own note, and the CLI adds none. It is
-  read at the hold
-  threshold, or at the Toggle press, never for a Local API
+  read at the hold threshold, or at the Toggle press, never for a Local API
   dictation, `/streams`, or Voice Action; the final text still goes through
   Output's processing, and History and Paste Last update as they do for a
   paste. Hex creates the input method when the capture becomes intentional
@@ -2885,7 +2884,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
   [dictation/live_text.rs](../../src/dictation/live_text.rs); and
   `the_plate_follows_the_decision_made_when_the_stream_opened` in
-  [dictation.rs](../../src/dictation.rs), and
+  [dictation.rs](../../src/dictation.rs); and
   `live_typing_says_when_the_desktop_cannot_use_it` in
   [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). **Not verified
   on a real compositor**: only unit tests and the build, plus the Linux Labs
