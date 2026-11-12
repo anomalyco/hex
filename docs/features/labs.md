@@ -202,7 +202,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        inside its bundle: the manifest, summary (with the bundle's path written as `.`), contact sheet,
 │                                        and keyframes, without recording.mp4/.mov, audio.wav, frames-full/, contact-sheet-full.png, the
 │                                        media and delivery markers, or an earlier copy. Stored, with no compression; the zip is renamed
-│                                        into place, and retention removes it with the bundle. macOS puts a file URL on the clipboard,
+│                                        into place, retention removes it with the bundle, and the SSH light-files copy to an agent host
+│                                        leaves it out. macOS puts a file URL on the clipboard,
 │                                        Windows CF_HDROP, Linux text/uri-list (the X11 target, or wl-copy --type text/uri-list). A failed
 │                                        build or clipboard write logs and copies the capture as before; the capsule's Paste and Send
 │                                        are unchanged, and off, the normal image and summary copy is unchanged

@@ -830,6 +830,8 @@ What a send carries                      // capture.send (router opencode::send_
 │   (the prompt says the folder may still be arriving). Credentials stay remote.
 │   An explicitly configured agentOpencode keeps the CLI and synchronous copy;
 │   without Python 3, the default path falls back to the CLI before any HTTP send
+│       The light-files tar leaves out any `*.slim.zip` and its temp file too:
+│       that copy is this Mac's clipboard attachment, not the capture
 │   └── macOS/Linux reuse the SSH connection for 60 s after its last use,
 │       through an owner-only control socket; Windows opens each connection.
 │       API reads now honor their caller's deadline over SSH too, including

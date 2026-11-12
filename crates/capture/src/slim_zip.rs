@@ -17,12 +17,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::handoff::{HEAVY_MEDIA, MEDIA_PENDING, MEDIA_SENDING};
+use crate::handoff::{
+    HEAVY_MEDIA, MEDIA_PENDING, MEDIA_SENDING, SLIM_ZIP_SUFFIX, SLIM_ZIP_TEMP_SUFFIX,
+};
 
-/// A light copy's file name ends with this, after the bundle folder's name.
-pub const SUFFIX: &str = ".slim.zip";
-/// The name a light copy is written under before its rename.
-const TEMP_SUFFIX: &str = ".slim.zip.tmp";
 /// The summary the copy rewrites for its new location.
 const SUMMARY: &str = "summary.md";
 
@@ -44,7 +42,7 @@ pub fn path_in(bundle_dir: &Path) -> Result<PathBuf> {
         .file_name()
         .and_then(|name| name.to_str())
         .context("Bundle folder has no name")?;
-    Ok(bundle_dir.join(format!("{name}{SUFFIX}")))
+    Ok(bundle_dir.join(format!("{name}{SLIM_ZIP_SUFFIX}")))
 }
 
 /// Writes `bundle_dir`'s light copy inside it, atomically, and returns its
@@ -166,8 +164,8 @@ fn excluded(name: &str) -> bool {
         || name == MEDIA_SENDING
         || name == scrawl_router::delivery::PENDING
         || name == format!("{}.tmp", scrawl_router::delivery::PENDING)
-        || name.ends_with(SUFFIX)
-        || name.ends_with(TEMP_SUFFIX)
+        || name.ends_with(SLIM_ZIP_SUFFIX)
+        || name.ends_with(SLIM_ZIP_TEMP_SUFFIX)
 }
 
 /// `path` with forward slashes and no prefix or `..`: what a zip names.
