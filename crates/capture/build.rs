@@ -66,10 +66,13 @@ fn compile_helper() {
         default_plist
     };
 
+    // The profile directory is the parent of Cargo's `build` directory in every
+    // OUT_DIR layout, including 1.100's `build/<pkg>/<hash>/out`.
     let profile_dir = out_dir
         .ancestors()
-        .nth(3)
-        .expect("Unexpected OUT_DIR layout");
+        .find(|path| path.ends_with("build"))
+        .and_then(|path| path.parent())
+        .expect("OUT_DIR is not inside a Cargo build directory");
     let arch = match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("aarch64") => "arm64",
         Ok(other) => other,
