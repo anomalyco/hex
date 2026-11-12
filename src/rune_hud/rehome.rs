@@ -14,11 +14,10 @@ pub(crate) const MAX_REPAIRS: u8 = 3;
 /// before the next check says whether it took.
 pub(crate) const REPAIR_SPACING: Duration = Duration::from_millis(150);
 
-/// Where one pump tick found the HUD's panel.
+/// Where one pump tick found the HUD's panel. A tick that finds no panel at
+/// all (Rune has not made it yet) has nothing to repair and does not get here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Located {
-    /// Rune has not made the panel yet, so there is nothing to repair.
-    Missing,
     /// Found, but not visible: Rune applies the queued show or hide later.
     Hidden,
     /// Visible on the active Space.
@@ -51,12 +50,12 @@ impl Rehome {
     /// What this tick should do. A panel visibly on another Space is re-homed
     /// at most [`MAX_REPAIRS`] times per stranding, [`REPAIR_SPACING`] apart. A
     /// panel seen on the active Space settles the stranding, so a later one
-    /// gets a fresh budget. A panel Rune has not made or shown yet leaves the
-    /// budget as it is: a hidden panel that has only been ordered out must not
-    /// reset it, or a repair that never took would loop.
+    /// gets a fresh budget. A panel Rune has not shown yet leaves the budget
+    /// as it is: a hidden panel that has only been ordered out must not reset
+    /// it, or a repair that never took would loop.
     pub(crate) fn decide(&mut self, now: Instant, located: Located) -> Repair {
         match located {
-            Located::Missing | Located::Hidden => Repair::None,
+            Located::Hidden => Repair::None,
             Located::Active => {
                 self.settle();
                 Repair::None
@@ -195,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn a_panel_rune_has_not_made_or_shown_leaves_the_budget_alone() {
+    fn a_panel_rune_has_not_shown_leaves_the_budget_alone() {
         let start = Instant::now();
         let mut rehome = Rehome::default();
         for step in 0..u32::from(MAX_REPAIRS) {
@@ -205,7 +204,6 @@ mod tests {
             );
         }
         let later = start + 4 * REPAIR_SPACING;
-        assert_eq!(rehome.decide(later, Located::Missing), Repair::None);
         assert_eq!(rehome.decide(later, Located::Hidden), Repair::None);
         assert_eq!(
             rehome.decide(later, Located::Elsewhere),
