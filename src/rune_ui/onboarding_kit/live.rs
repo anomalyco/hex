@@ -638,16 +638,16 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     s.toggle = toggle;
     live.release_microphone = release_microphone;
     if let Some(download) = s.download.as_mut() {
-    if let Some(total) = model.and_then(|m| m.download_bytes()) {
-        download.total = total;
+        if let Some(total) = model.and_then(|m| m.download_bytes()) {
+            download.total = total;
+        }
+        if choice_installed {
+            download.downloaded = download.total;
+        } else if preparing {
+            download.downloaded = downloaded_bytes.min(download.total.saturating_sub(1));
+        }
+        s.replay.show(download, now);
     }
-    if choice_installed {
-        download.downloaded = download.total;
-    } else if preparing {
-        download.downloaded = downloaded_bytes.min(download.total.saturating_sub(1));
-    }
-    s.replay.show(download, now);
-}
 
     // Hex's state arrives between frames, so the first run keeps polling;
     // a fixture shows one moment and stays still.

@@ -89,7 +89,7 @@ struct Editor {
 }
 
 impl Editor {
-    fn rebase(&mut self, current: &DictationMode) {
+    fn rebase(&mut self, current: &DictationMode, keep_drafts: bool) {
         let old = Self::of(&self.base);
         let next = Self::of(current);
         for (field, before, after) in [
@@ -97,7 +97,7 @@ impl Editor {
             (&mut self.prompt, old.prompt, next.prompt),
             (&mut self.deadline, old.deadline, next.deadline),
         ] {
-            if field.text == before.text && field.text != after.text {
+            if (!keep_drafts || field.text == before.text) && field.text != after.text {
                 *field = after;
             }
         }
@@ -106,7 +106,7 @@ impl Editor {
                 .map(|(a, b)| (a.text.clone(), b.text.clone()))
                 .collect::<Vec<_>>()
         };
-        if values(&self.replacements) == values(&old.replacements)
+        if (!keep_drafts || values(&self.replacements) == values(&old.replacements))
             && values(&self.replacements) != values(&next.replacements)
         {
             self.replacements = next.replacements;
@@ -292,17 +292,13 @@ impl ModesPane {
             }
         }
         if let Some(current) = mode(settings, self.selected) {
-            if dirty {
-                self.editor.rebase(current);
-            } else {
-                self.editor = Editor::of(current);
-            }
+            self.editor.rebase(current, dirty);
         }
     }
 
     pub(super) fn committed(&mut self, settings: &AppSettings) {
         self.editor.base.name = self.editor.name.text.trim().to_owned();
-        self.adopt(settings, true);
+        self.adopt(settings, false);
     }
 
     pub(super) fn select(&mut self, selection: Selection) {
@@ -486,13 +482,9 @@ fn delete_mode(ui: &mut Ui) {
 fn add_replacement(ui: &mut Ui) {
     if update_mode(ui, |mode| {
         mode.replacements.push(TextReplacement::default())
-    }) {
-        let mut phrase = TextEdit::default();
+    }) && let Some((phrase, _)) = ui.modes.editor.replacements.last_mut()
+    {
         phrase.focused = true;
-        ui.modes
-            .editor
-            .replacements
-            .push((phrase, TextEdit::default()));
     }
 }
 
@@ -1420,6 +1412,27 @@ mod tests {
         assert_eq!(saved.name, "Draft");
         assert_eq!(saved.post_processing.prompt, "From CLI");
         assert_eq!(saved.post_processing.deadline_seconds, 17);
+    }
+
+    #[test]
+    fn adding_a_correction_focuses_the_one_row_the_save_adopted() {
+        let mut ui = Ui::with(settings(), super::super::Service::Fixture(Vec::new()));
+        ui.modes.select_in(&ui.settings, Selection::Custom(1));
+        let before = ui.modes.editor.replacements.len();
+        add_replacement(&mut ui);
+        assert_eq!(ui.modes.editor.replacements.len(), before + 1);
+        let phrase = &mut ui.modes.editor.replacements.last_mut().unwrap().0;
+        assert!(phrase.focused);
+        phrase.text = "example".into();
+        // Adding again also commits the first row's pending text.
+        add_replacement(&mut ui);
+        assert_eq!(ui.modes.editor.replacements.len(), before + 2);
+        assert!(ui.modes.editor.replacements.last().unwrap().0.focused);
+        ui.flush_drafts();
+        assert_eq!(
+            ui.settings.dictation_processing.modes[1].replacements[before].matched_phrase,
+            "example"
+        );
     }
 
     #[test]
