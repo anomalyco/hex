@@ -116,7 +116,10 @@ On Linux                                 // capture.linux
 │   is embedded
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
-│   KDE) or shared memory
+│   KDE) or shared memory. A stream that ends or fails before its first frame
+│   ends the capture with that reason, keeping no voice; a stream with no frame
+│   yet when the person stops is saved with its voice and marks, the summary
+│   saying the stream sent no frames
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
 │   to a 2560 px long edge (1920 for a window, exact even sides padded to 16 px
 │   macroblocks and cropped in SPS) and converted on the video engine, H.264
@@ -376,10 +379,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
 │   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
 │   │   back as it stood
-│   ├── A capture written with no frames (Screen Recording turned off mid-way)
-│   │   -> sent with only the voice and marks, its summary noting "No screen:
-│   │   Screen Recording is off for Hex", no contact sheet; the helper opens
-│   │   once its capsule folds
+│   ├── A capture written with no frames -> sent with only the voice and
+│   │   marks, its summary naming the actual reason the picture is missing
+│   │   (Screen Recording is off for Hex, or the screen source failed or sent
+│   │   no frames), no contact sheet; a permission miss opens the helper once
+│   │   its capsule folds
 │   └── Story: hex://story/prototypes/capture-capsule/permission; goldens
 │       capture-capsule-permission{,-restart,-ready}
 ├── A shown recording that leaves with no outcome (a discard, from a chip or

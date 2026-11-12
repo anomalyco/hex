@@ -182,6 +182,8 @@ const FORMAT_VIDEO_FRAMERATE: u32 = 0x20004;
 const FORMAT_VIDEO_MAX_FRAMERATE: u32 = 0x20005;
 const MEDIA_TYPE_VIDEO: u32 = 2;
 const MEDIA_SUBTYPE_RAW: u32 = 1;
+/// `SPA_PARAM_BUFFERS_buffers`: how many buffers the producer keeps.
+const BUFFERS_BUFFERS: u32 = 1;
 const BUFFERS_DATA_TYPE: u32 = 6;
 const CHOICE_RANGE: u32 = 1;
 const CHOICE_ENUM: u32 = 3;
@@ -380,6 +382,19 @@ fn buffers(dmabuf: bool) -> Vec<u64> {
     };
     let mut pod = Pod::default();
     pod.object(OBJECT_PARAM_BUFFERS, PARAM_BUFFERS, |pod| {
+        // `newest_locked` holds the last buffer until the next frame arrives, so a single
+        // buffer would stall: two at least, four preferred.
+        pod.prop(BUFFERS_BUFFERS, 0);
+        pod.choice(
+            CHOICE_RANGE,
+            TYPE_INT,
+            4,
+            &[
+                &4_u32.to_ne_bytes(),
+                &2_u32.to_ne_bytes(),
+                &16_u32.to_ne_bytes(),
+            ],
+        );
         pod.prop(BUFFERS_DATA_TYPE, 0);
         pod.choice(CHOICE_FLAGS, TYPE_INT, 4, &[&(mask as u32).to_ne_bytes()]);
     });
@@ -962,6 +977,25 @@ mod tests {
             let fps_60_1 = pair(60, 1);
             assert!(bytes.windows(4).any(|w| w == max_fps_key));
             assert!(bytes.windows(8).any(|w| w == fps_60_1));
+        }
+    }
+
+    #[test]
+    fn buffers_asks_for_at_least_two_buffers_before_the_data_type() {
+        for dmabuf in [true, false] {
+            let words = buffers(dmabuf);
+            let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
+            let at = |key: u32| {
+                let key = key.to_ne_bytes();
+                bytes.windows(4).position(|w| w == key).unwrap()
+            };
+            let first = at(BUFFERS_BUFFERS);
+            let value = |index: usize| {
+                let at = first + 32 + index * 4;
+                u32::from_ne_bytes(bytes[at..at + 4].try_into().unwrap())
+            };
+            assert_eq!([value(0), value(1), value(2)], [4, 2, 16]);
+            assert!(first < at(BUFFERS_DATA_TYPE));
         }
     }
 

@@ -306,14 +306,12 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         Ok(movie) => movie,
         Err(error) => {
             scrawl_log(format!("Screen capture failed: {error:#}"));
-            // The host ends the capture: nothing more of the screen will come.
-            if !sampler.stopping.load(Ordering::Acquire) {
-                *sampler
-                    .failure
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                    Some(format!("{error:#}"));
-            }
+            // The host ends the capture only when the screen fails before the stop; at the
+            // stop this becomes the no-screen reason written with the voice and marks.
+            *sampler
+                .failure
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
             None
         }
     }
@@ -519,6 +517,7 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
             start.elapsed().as_millis()
         ));
     }
+    let ended = stream.ended();
     drop(stream);
     drop(cast);
     let movie = match encoding {
@@ -528,10 +527,17 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         }
         Encoding::Software { movie, .. } => movie,
     };
-    if first.is_none() && path.is_some() {
+    let no_frames = first.is_none();
+    if no_frames && path.is_some() {
         scrawl_log("The screen stream gave no frame to record");
     }
     let (Some(movie), Some(path), Some((_, offset_ms))) = (movie, path, first) else {
+        if no_frames {
+            match ended {
+                Some(why) => bail!("the screen sharing stream sent no frames ({why})"),
+                None => bail!("the screen sharing stream sent no frames"),
+            }
+        }
         return Ok(None);
     };
     movie.finish()?;
