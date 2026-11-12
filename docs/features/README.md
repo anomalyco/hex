@@ -841,6 +841,7 @@ Completed output                         // output
 │   └── Labs > Copy dictation only (macOS, Windows, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   ├── Last completed dictation
+│   ├── A failed paste still keeps its text (every OS, unless cancelled; dictation.md)
 │   └── macOS menu item shows the saved binding (⌥⇧V by default); unbound,
 │       modifier-only, or a mouse button -> no shortcut shown
 └── History

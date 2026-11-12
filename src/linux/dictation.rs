@@ -167,6 +167,10 @@ pub(crate) struct DictationOutput {
     pub(crate) transformations: Arc<crate::personal_commands::TransformationClient>,
 }
 
+/// How a finished dictation is pasted: its text and whether it asks for
+/// Ctrl+Shift+V. No paste at all means a printing stop.
+type Paste<'a> = &'a mut dyn FnMut(&str, bool) -> Result<()>;
+
 impl DictationOutput {
     pub(crate) fn from_settings(
         settings: &crate::app_settings::AppSettings,
@@ -191,15 +195,16 @@ impl DictationOutput {
     }
 
     /// Processes (unless raw) and pastes one transcript, or only
-    /// processes it when there is no paster (a printing stop), then records
-    /// it.
+    /// processes it when there is no paste (a printing stop), then records
+    /// it. A failed paste still becomes Paste last dictation's.
     #[allow(clippy::too_many_arguments)]
     fn deliver(
         &self,
         raw_text: String,
         flavour: crate::dictation::DictationFlavour,
         language: &str,
-        paster: Option<&mut LinuxPaster>,
+        paste: Option<Paste<'_>>,
+        last_dictation: &mut Option<String>,
         audio_ms: u64,
         inference_ms: u64,
         started: Instant,
@@ -223,7 +228,7 @@ impl DictationOutput {
                 crate::dictation::processor::Source::Dictation,
             )
         };
-        let printed = paster.is_none();
+        let printed = paste.is_none();
         // A voice prompt that deliberately asked nothing ends quietly: no
         // failure, no paste, no last dictation, and no History. A live
         // preedit for the capture is discarded rather than committed empty.
@@ -249,10 +254,18 @@ impl DictationOutput {
         if processed.text.trim().is_empty() {
             return Err(eyre!("text replacements produced empty output"));
         }
-        if let Some(paster) = paster
+        if let Some(paste) = paste
             && !inserted
         {
-            paster.paste(&processed.text, flavour.terminal_paste())?;
+            // A paste that fails (another app changed the clipboard while
+            // Hex saved it, or a format couldn't be read) keeps the text
+            // for Paste last dictation, so the dictation isn't lost;
+            // History keeps only pasted output.
+            paste(&processed.text, flavour.terminal_paste())
+                .inspect_err(|_| *last_dictation = Some(processed.text.clone()))?;
+        }
+        if !printed {
+            *last_dictation = Some(processed.text.clone());
         }
         if let Some(history) = &self.history {
             let mut draft = crate::dictation::modes::history_draft(
@@ -448,6 +461,7 @@ pub(crate) fn run(
                         job.flavour,
                         &job.language,
                         None,
+                        &mut last_dictation,
                         job.audio_ms,
                         inference_ms,
                         started,
@@ -456,11 +470,13 @@ pub(crate) fn run(
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
+                let mut paste = |text: &str, terminal: bool| paster.paste(text, terminal);
                 output_settings.deliver(
                     text,
                     job.flavour,
                     &job.language,
-                    Some(paster),
+                    Some(&mut paste),
+                    &mut last_dictation,
                     job.audio_ms,
                     inference_ms,
                     started,
@@ -481,12 +497,6 @@ pub(crate) fn run(
                 elapsed_ms = started.elapsed().as_millis(),
                 "completed Linux dictation job"
             );
-            if let Ok(text) = &result
-                && kind == OutputKind::Dictation
-                && !text.trim().is_empty()
-            {
-                last_dictation = Some(text.clone());
-            }
             if result_sender.send((kind, result)).is_err() {
                 break;
             }
@@ -1985,6 +1995,32 @@ mod tests {
         assert_eq!(active_state(false, 1), VoiceState::Transcribing);
         assert_eq!(active_state(false, 0), VoiceState::Listening);
         assert_eq!(active_state(true, 0), VoiceState::Dictating);
+    }
+
+    #[test]
+    fn a_failed_paste_keeps_the_dictation_for_paste_last() {
+        let text = "the dictation whose paste failed";
+        let output = DictationOutput::from_settings(&AppSettings::default(), None);
+        let mut last_dictation = Some("an older dictation".to_string());
+        let mut paste = |_: &str, _: bool| -> Result<()> {
+            Err(eyre!("clipboard changed while Hex was preserving it"))
+        };
+
+        let result = output.deliver(
+            text.to_string(),
+            crate::dictation::DictationFlavour::Normal,
+            "en",
+            Some(&mut paste),
+            &mut last_dictation,
+            2_000,
+            0,
+            Instant::now(),
+            None,
+            None,
+        );
+
+        assert!(result.is_err(), "the failed paste is still reported");
+        assert_eq!(last_dictation.as_deref(), Some(text));
     }
 
     #[test]

@@ -501,13 +501,34 @@ options), `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys`
 (cross-compiled only). Proof limits: no physical shortcut press on any OS, no
 real Wayland grant or X11 grab run, and no Windows hook run.
 
-### Copy Recent Dictation (Labs, macOS)
+### Paste Last After A Failed Paste (every OS)
 
-On macOS a paste that fails (another app changed the clipboard while Hex saved
-it, or a format couldn't be read) still makes that dictation Paste Last's,
-unless it was cancelled; History keeps only pasted output, so it gets no entry
-(`a_failed_paste_keeps_the_dictation_for_paste_last` in
-[parakeet.rs](../../src/parakeet.rs), issue 1437).
+A paste that fails (another app changed the clipboard while Hex saved it, or a
+format couldn't be read) still makes that dictation Paste Last's, unless its
+job was cancelled: the words aren't lost, and the failure still reports as
+before. History keeps only pasted output, so it gets no entry. Cancelled,
+printed, empty, and failed-transcription dictations never become Paste Last's,
+and neither does Voice Action output. A failed processing stage is not a failed
+dictation: mode processing is best-effort, keeps its input, and the job still
+pastes.
+
+```ts
+Dictation finishes                                // dictate.paste-last
+├── Paste or copy succeeds -> It is Paste Last's
+├── Paste or copy fails, job not cancelled -> The processed text is still
+│   Paste Last's, and the failure reports as before
+├── Cancelled, printed, empty, or failed transcription -> Paste Last unchanged
+└── Voice Action -> Never becomes Paste Last
+```
+
+Checks: `a_failed_paste_keeps_the_dictation_for_paste_last` in
+[parakeet.rs](../../src/parakeet.rs) (macOS, with a fake paster) and
+[linux/dictation.rs](../../src/linux/dictation.rs) (Linux, with a refusing
+paste). Windows cross-compiles only; its paste is
+[windows/dictation.rs](../../src/windows/dictation.rs)'s own `WindowsPaster`.
+Issue [#1437](https://github.com/anomalyco/hex/issues/1437).
+
+### Copy Recent Dictation (Labs, macOS)
 
 Paste Last Dictation reaches only the newest dictation. With Labs › Copy
 recent dictations on (`labs.recent_dictations`, off by default, issue 877):

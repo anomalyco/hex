@@ -1103,18 +1103,16 @@ fn process_dictation_job(
             let paster = paster.as_mut().map_err(|error| format!("{error:#}"))?;
             // Labs › Copy dictation only, read as the output commits:
             // dictations go to the clipboard unpasted; Paste Last still pastes.
-            if crate::labs::copy_only() {
-                paster
-                    .copy_only(&text)
-                    .map_err(|error| format!("{error:#}"))?;
+            let pasted = if crate::labs::copy_only() {
+                paster.copy_only(&text)
             } else {
-                paster
-                    .paste(&text, job.flavour.terminal_paste())
-                    .map_err(|error| format!("{error:#}"))?;
-            }
+                paster.paste(&text, job.flavour.terminal_paste())
+            };
+            // A failed paste still keeps the text for Paste Last.
             *last_dictation
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
+            pasted.map_err(|error| format!("{error:#}"))?;
         }
         if let Some(history) = history {
             let mut draft = crate::dictation::modes::history_draft(
