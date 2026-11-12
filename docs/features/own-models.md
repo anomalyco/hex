@@ -193,6 +193,9 @@ writing models/<file>.gguf.partial  // transcription::models::lock_downloads
 ├── While it waits, downloaded_bytes comes from the partial file's size, so
 │   `hex status --json`, the picker, and onboarding show that process's
 │   progress rather than 0%
+├── The lock covers the whole models folder, so the progress shown is this
+│   model's partial file; while the other process fetches a different model
+│   it stays flat
 ├── Cancel stops only the wait; the other process's download continues
 └── The lock is released -> the finished file is verified against its
     receipt and adopted, with no second download
