@@ -64,6 +64,32 @@ impl Drop for RestoredRuntime {
 }
 
 #[test]
+fn unreadable_load_cannot_overwrite_a_file_that_becomes_readable() {
+    let file = SettingsFile::new(b"{}");
+    fs::remove_file(&file.path).unwrap();
+    fs::create_dir(&file.path).unwrap();
+    let (settings, issue) = AppSettings::load_checked_from(&file.path).unwrap();
+    assert!(matches!(issue, Some(LoadIssue::Unreadable)));
+
+    fs::remove_dir(&file.path).unwrap();
+    let original = br#"{"sound_effect_volume":0.37}"#;
+    fs::write(&file.path, original).unwrap();
+    assert!(settings.write_to(&file.path).is_err());
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn unreadable_launch_shows_a_note() {
+    let _restore = RestoredRuntime;
+    let file = SettingsFile::new(b"{}");
+    fs::remove_file(&file.path).unwrap();
+    fs::create_dir(&file.path).unwrap();
+    let launch = AppSettings::load_for_launch_at(Ok(file.path.clone()));
+    assert!(matches!(launch.note, Some(LaunchNote::Failed(_))));
+}
+
+#[test]
 fn unset_retention_saves_a_shape_older_hex_can_read() {
     // The meeting field in 46c3c762 was non-optional, defaulting to Forever.
     #[derive(Deserialize)]
