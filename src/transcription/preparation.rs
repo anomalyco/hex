@@ -1,12 +1,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 
-use crate::transcription::models::{ModelRuntime, TranscriptionModelId, TranscriptionSelection};
+use crate::transcription::models::{
+    ModelPreparationStage, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
+};
 
-type Prepare = dyn Fn(&TranscriptionSelection, bool, &AtomicBool, &AtomicU64) -> Result<(), String>
+type Prepare = dyn Fn(&TranscriptionSelection, bool, &AtomicBool, &AtomicU64, &AtomicU8) -> Result<(), String>
     + Send
     + Sync;
 
@@ -18,6 +20,8 @@ pub struct TranscriptionPreparation(Rc<RefCell<State>>);
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PreparationStatus {
     pub model: Option<TranscriptionModelId>,
+    /// What the worker is doing for `model`.
+    pub stage: Option<ModelPreparationStage>,
     pub downloaded_bytes: u64,
     pub error: Option<String>,
 }
@@ -27,10 +31,22 @@ struct Request {
     installed_only: bool,
 }
 
+impl Request {
+    /// The worker's first stage: an installed-only request never downloads.
+    fn first_stage(&self) -> ModelPreparationStage {
+        if self.installed_only {
+            ModelPreparationStage::Verifying
+        } else {
+            ModelPreparationStage::Downloading
+        }
+    }
+}
+
 struct Task {
     request: Request,
     canceled: Arc<AtomicBool>,
     progress: Arc<AtomicU64>,
+    stage: Arc<AtomicU8>,
     worker: JoinHandle<Result<(), String>>,
 }
 
@@ -101,15 +117,17 @@ impl TranscriptionPreparation {
                 .filter(|task| !task.canceled.load(Ordering::Acquire))
                 .map(|task| &task.request)
         });
+        let active = state.active.as_ref().filter(|_| state.pending.is_none());
         PreparationStatus {
             model: request.map(|request| request.selection.model),
-            downloaded_bytes: if state.pending.is_none() && request.is_some() {
-                state
-                    .active
-                    .as_ref()
-                    .map_or(0, |task| task.progress.load(Ordering::Relaxed))
-            } else {
-                0
+            stage: request.map(|request| {
+                active.map_or(request.first_stage(), |task| {
+                    ModelPreparationStage::load(&task.stage)
+                })
+            }),
+            downloaded_bytes: match (request, active) {
+                (Some(_), Some(task)) => task.progress.load(Ordering::Relaxed),
+                _ => 0,
             },
             error: state.error.clone(),
         }
@@ -130,11 +148,13 @@ impl State {
         };
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
+        let stage = Arc::new(AtomicU8::new(request.first_stage() as u8));
         let prepare = self.prepare.clone();
         let selection = request.selection.clone();
         let installed_only = request.installed_only;
         let worker_canceled = canceled.clone();
         let worker_progress = progress.clone();
+        let worker_stage = stage.clone();
         match thread::Builder::new()
             .name("transcription-preparation".into())
             .spawn(move || {
@@ -143,6 +163,7 @@ impl State {
                     installed_only,
                     &worker_canceled,
                     &worker_progress,
+                    &worker_stage,
                 )
             }) {
             Ok(worker) => {
@@ -150,6 +171,7 @@ impl State {
                     request,
                     canceled,
                     progress,
+                    stage,
                     worker,
                 });
             }
@@ -171,6 +193,7 @@ fn prepare_selection(
     installed_only: bool,
     canceled: &AtomicBool,
     progress: &AtomicU64,
+    stage: &AtomicU8,
 ) -> Result<(), String> {
     let check_canceled = || {
         if canceled.load(Ordering::Acquire) {
@@ -182,13 +205,17 @@ fn prepare_selection(
         let model = crate::transcription::models::validate(selection)?;
         if matches!(model.runtime, ModelRuntime::Gguf(_)) {
             if installed_only {
+                ModelPreparationStage::Verifying.store(stage);
                 crate::transcription::models::verify_installed(model, canceled)?;
                 progress.store(model.download_bytes().unwrap_or(0), Ordering::Relaxed);
             } else {
-                crate::transcription::models::download_with_progress(model, canceled, progress)?;
+                crate::transcription::models::download_with_stage_progress(
+                    model, canceled, progress, stage,
+                )?;
             }
         }
         check_canceled()?;
+        ModelPreparationStage::Loading.store(stage);
         crate::transcription::speech_detector::prewarm();
         // macOS warms the model to prove it loads. Windows and Linux load it
         // once, when the listener restarts with the new selection.
@@ -234,7 +261,7 @@ mod tests {
         let (release, releases) = mpsc::channel();
         let releases = Mutex::new(releases);
         let preparation = TranscriptionPreparation::with_prepare(Arc::new(
-            move |selection, installed, _, progress| {
+            move |selection, installed, _, progress, _| {
                 assert!(installed);
                 progress.store(123, Ordering::Relaxed);
                 started.send(selection.model).unwrap();
@@ -277,8 +304,46 @@ mod tests {
     }
 
     #[test]
+    fn status_reports_the_worker_s_own_stage() {
+        let (stored, stores) = mpsc::channel();
+        let (release, releases) = mpsc::channel::<()>();
+        let releases = Mutex::new(releases);
+        let preparation = TranscriptionPreparation::with_prepare(Arc::new(
+            move |_, _, _, _, stage: &AtomicU8| {
+                let releases = releases.lock().unwrap();
+                releases.recv().unwrap();
+                ModelPreparationStage::Loading.store(stage);
+                stored.send(()).unwrap();
+                releases.recv().unwrap();
+                Ok(())
+            },
+        ));
+        // An installed model is never downloaded.
+        preparation.start(selection(TranscriptionModelId::ParakeetV2), true);
+        assert_eq!(
+            preparation.status().stage,
+            Some(ModelPreparationStage::Verifying)
+        );
+        release.send(()).unwrap();
+        stores.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            preparation.status().stage,
+            Some(ModelPreparationStage::Loading)
+        );
+        // A download waiting behind it starts by downloading.
+        preparation.start(selection(TranscriptionModelId::ParakeetV3), false);
+        assert_eq!(
+            preparation.status().stage,
+            Some(ModelPreparationStage::Downloading)
+        );
+        preparation.cancel();
+        assert_eq!(preparation.status().stage, None);
+        release.send(()).unwrap();
+    }
+
+    #[test]
     fn cancelling_a_completed_unpolled_preparation_never_commits_it() {
-        let preparation = TranscriptionPreparation::with_prepare(Arc::new(|_, _, _, _| Ok(())));
+        let preparation = TranscriptionPreparation::with_prepare(Arc::new(|_, _, _, _, _| Ok(())));
         preparation.start(selection(TranscriptionModelId::ParakeetV2), true);
         let deadline = Instant::now() + Duration::from_secs(3);
         while !preparation
@@ -300,14 +365,13 @@ mod tests {
 
     #[test]
     fn preparation_failure_and_worker_panic_allow_a_later_selection() {
-        let preparation =
-            TranscriptionPreparation::with_prepare(Arc::new(|selection, _, _, _| match selection
-                .model
-            {
+        let preparation = TranscriptionPreparation::with_prepare(Arc::new(
+            |selection, _, _, _, _| match selection.model {
                 TranscriptionModelId::ParakeetV2 => Err("fixture load failed".into()),
                 TranscriptionModelId::ParakeetV3 => panic!("fixture worker panic"),
                 _ => Ok(()),
-            }));
+            },
+        ));
         preparation.start(selection(TranscriptionModelId::ParakeetV2), true);
         assert_eq!(completion(&preparation).unwrap_err(), "fixture load failed");
         preparation.start(selection(TranscriptionModelId::ParakeetV3), true);
@@ -327,7 +391,7 @@ mod tests {
 
     #[test]
     fn dropping_a_settings_reference_does_not_cancel_application_preparation() {
-        let preparation = TranscriptionPreparation::with_prepare(Arc::new(|_, _, _, _| Ok(())));
+        let preparation = TranscriptionPreparation::with_prepare(Arc::new(|_, _, _, _, _| Ok(())));
         let settings_reference = preparation.clone();
         settings_reference.start(selection(TranscriptionModelId::ParakeetV2), true);
         drop(settings_reference);

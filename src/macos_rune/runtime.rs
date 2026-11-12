@@ -13,7 +13,7 @@ use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot, ListenerStatus,
 };
-use crate::transcription::models::{ModelPreparationStage, TranscriptionSelection};
+use crate::transcription::models::TranscriptionSelection;
 use crate::transcription::preparation::TranscriptionPreparation;
 
 use super::{Published, RUNTIME_TICK, Request, Shared, UPDATER, lock, update_status};
@@ -351,9 +351,7 @@ impl Runtime {
             transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: preparation.downloaded_bytes,
                 error: preparation.error.clone(),
-                preparation_stage: preparation
-                    .model
-                    .map(|_| ModelPreparationStage::Downloading),
+                preparation_stage: preparation.stage,
                 selection: self.settings.transcription.clone(),
                 preparing: preparation.model,
             },

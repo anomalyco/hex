@@ -965,7 +965,7 @@ fn status(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
@@ -979,7 +979,8 @@ mod tests {
             move |selection: &TranscriptionSelection,
                   installed_only: bool,
                   _: &AtomicBool,
-                  _: &AtomicU64| {
+                  _: &AtomicU64,
+                  _: &AtomicU8| {
                 let _ = sender.send((selection.clone(), installed_only));
                 Ok(())
             },
