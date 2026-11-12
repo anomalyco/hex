@@ -925,24 +925,6 @@ pub fn listen(
                     }
                     continue;
                 }
-                WorkerEvent::Cancelled { job_id } => {
-                    if let Some(finishing) = programmatic_results.remove(&job_id) {
-                        finish_with_result(
-                            finishing.id,
-                            finishing.owner_token,
-                            finishing.replies,
-                            Err("cancelled".into()),
-                            &mut programmatic_completions,
-                        );
-                        continue;
-                    }
-                    handle_dictation_event(
-                        WorkerEvent::Cancelled { job_id },
-                        &mut events,
-                        indicator,
-                    )?;
-                    continue;
-                }
                 event => handle_dictation_event(event, &mut events, indicator)?,
             }
         }
@@ -1716,13 +1698,6 @@ fn handle_dictation_event(
                 DictationJobStage::Processing => DictationIndicatorEvent::Processing {
                     job_id: job_id.value(),
                 },
-            });
-        }
-        WorkerEvent::Cancelled { job_id } => {
-            // A submitted job left the HUD's job set only when it completed
-            // or failed; tell both the HUD and the light that it is gone.
-            indicator.send(DictationIndicatorEvent::JobCancelled {
-                job_id: job_id.value(),
             });
         }
         WorkerEvent::ModelFailed(error) => {

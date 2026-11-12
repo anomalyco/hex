@@ -239,9 +239,7 @@ pub(crate) enum Input {
     /// The capture shortcut while the picker is open: record what it's on.
     /// Over a capture's suggestions it opens the search.
     Record,
-    /// Send to…: the list opens (or, when open,
-    /// nothing), and a closed capsule whose capture waits for a pick comes
-    /// back with it.
+    /// Send to…: the list opens (or, when open, nothing).
     OpenList,
     /// Typed into the open list's field.
     Type(String),
@@ -276,7 +274,7 @@ pub(crate) enum Input {
     /// The written capture has no words: the microphone heard no speech.
     NothingHeard,
     /// The router sent the capture, from the capsule or not
-    /// (`hex capture send`): it no longer waits for a pick.
+    /// (`hex capture send`).
     Settled,
 }
 
@@ -672,9 +670,6 @@ pub(crate) struct Flow {
     hold_floor: f64,
     /// An iPhone is cabled.
     phone: bool,
-    /// The iPhone chip asked to switch, and its new recording hasn't shown:
-    /// a failure now is that start's, not the discarded capture's save.
-    switching: bool,
     /// Sounds due, in order, for the host to play.
     cues: Vec<Cue>,
     /// The capture shown has no words.
@@ -682,13 +677,6 @@ pub(crate) struct Flow {
     /// The written capture shown was closed (dismissed, or its hold ran
     /// out); news of it leaves the capsule closed.
     closed: bool,
-    /// The latest capture's list, closed before anything was picked: kept
-    /// until a pick, a paste, a send from elsewhere (`hex capture send`), or
-    /// the next capture.
-    waiting: Option<Routed>,
-    /// The latest capture was pasted, inspected, or sent from elsewhere:
-    /// closing its capsule leaves nothing waiting.
-    settled: bool,
     /// An Undo was asked for and the router hasn't said how it ended: news
     /// of the send it takes back (it went, queued, or failed) changes
     /// nothing.
@@ -725,12 +713,9 @@ impl Flow {
             pause: None,
             hold_floor: 0.0,
             phone: false,
-            switching: false,
             cues: Vec::new(),
             silent: false,
             closed: false,
-            waiting: None,
-            settled: false,
             undoing: false,
             superseded: false,
             suggest_on_route: true,
@@ -763,8 +748,6 @@ impl Flow {
             (_, Phase::TakenBack { .. }) => Some(Cue::TakenBack),
             (Phase::Sent(_), Phase::Sent(_)) => None,
             (_, Phase::Sent(_)) => Some(Cue::Sent),
-            // Send to… bringing a taken-back capture back.
-            (Phase::Hidden | Phase::Kept { .. }, Phase::Routed(_)) => None,
             (
                 Phase::Routed(Routed {
                     taken_back: true, ..
@@ -930,7 +913,7 @@ impl Flow {
         }
         self.cue(&before, &actions);
         self.closing(&before);
-        self.left_waiting(before, &actions);
+        self.track_undo(&actions);
         let mut actions = actions;
         actions.extend(self.hold_countdown(now));
         actions
@@ -953,15 +936,13 @@ impl Flow {
             .map(|dest| dest.session.clone())
     }
 
-    /// A list closed with nothing picked waits for Send to….
-    fn left_waiting(&mut self, before: Phase, actions: &[Action]) {
-        // Taken back, it's sent nowhere again: it waits for a pick.
+    /// Follows an Undo until the router answers it.
+    fn track_undo(&mut self, actions: &[Action]) {
         if actions
             .iter()
             .any(|action| matches!(action, Action::Undo { .. }))
         {
             self.undoing = true;
-            self.settled = false;
         }
         // A pick while an Undo is unanswered: the router answers the Undo
         // first, then sends the pick, so news of the pick counts.
@@ -972,25 +953,6 @@ impl Flow {
         {
             self.undoing = false;
             self.superseded = true;
-        }
-        if actions
-            .iter()
-            .any(|action| matches!(action, Action::Paste | Action::Inspect))
-        {
-            self.settled = true;
-        }
-        if self.settled
-            || actions
-                .iter()
-                .any(|action| matches!(action, Action::Send { .. }))
-        {
-            self.waiting = None;
-            return;
-        }
-        if let Phase::Routed(routed) = before
-            && matches!(self.phase, Phase::Hidden | Phase::Kept { .. })
-        {
-            self.waiting = waits(routed);
         }
     }
 
@@ -1061,9 +1023,8 @@ impl Flow {
                 let due = !self.hovered
                     && hold_until(phase).is_some_and(|at| now >= at.max(self.hold_floor));
                 if due {
-                    let before = std::mem::replace(&mut self.phase, Phase::Hidden);
+                    self.phase = Phase::Hidden;
                     self.closed = true;
-                    self.left_waiting(before, &[]);
                     if let Some((need, asked_by)) = self.helper_next.take() {
                         self.phase = Phase::Permission {
                             need,
@@ -1848,8 +1809,9 @@ mod tests {
         assert_eq!(done(&flow, 1_000.0).text, "Sent to HOME");
 
         // Clicking away folds the list and gives Escape back to the app; the
-        // capsule leaves like any other, and Send to… still brings
-        // it back. Escape (or ✕) is the dismissal, and the bundle is kept.
+        // capsule leaves like any other, and Send to… brings the list back
+        // while it shows. Escape (or ✕) is the dismissal, and the bundle is
+        // kept.
         let hold = tuning::get().done_hold_s;
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule_of_three()), 0.0);
@@ -1859,19 +1821,15 @@ mod tests {
         let closed = done(&flow, 2.0);
         assert_eq!(closed.text, "Taken back");
         assert_eq!(closed.ask.as_deref(), Some("Send to…"));
-        let waiting = None;
-        assert_eq!(flow.keys(), waiting);
+        assert_eq!(flow.keys(), None);
         assert_eq!(flow.next_due(2.0), Some(2.0 + hold));
         assert!(!flow.tick(2.0 + hold - 0.1));
-        assert!(flow.tick(2.0 + hold));
-        assert_eq!(flow.pres(1_000.0), Pres::Hidden);
-        assert_eq!(flow.keys(), waiting);
-        flow.input(Input::OpenList, 1_000.0);
-        assert_eq!(rows(&flow, 1_000.0)[0], "HEX");
-        assert!(flow.input(Input::Escape, 1_001.0).is_empty());
-        let kept = done(&flow, 1_001.0);
+        flow.input(Input::OpenList, 2.5);
+        assert_eq!(rows(&flow, 2.5)[0], "HEX");
+        assert!(flow.input(Input::Escape, 3.0).is_empty());
+        let kept = done(&flow, 3.0);
         assert_eq!((kept.text.as_str(), kept.why.as_deref()), ("Kept", None));
-        assert!(flow.tick(1_001.0 + tuning::get().brief_hold_s));
+        assert!(flow.tick(3.0 + tuning::get().brief_hold_s));
 
         // Taken back, ✕ is the dismissal too.
         let mut flow = Flow::new();
@@ -2026,50 +1984,6 @@ mod tests {
         assert_eq!(recent.last().unwrap().why, "taken back");
     }
 
-    /// A pick taken back is sent nowhere again, even though the router
-    /// said it went: dismissed, Send to… brings it back.
-    #[test]
-    fn a_pick_taken_back_waits_for_a_pick_again() {
-        for dismiss in [Input::Dismiss, Input::ClickAway] {
-            let mut flow = Flow::new();
-            flow.input(Input::Routed(guess()), 0.0);
-            flow.input(Input::SendRow(0), 1.0);
-            flow.input(Input::Settled, 1.1);
-            flow.input(Input::Undo, 2.0);
-            // The send it took back, reported late, settles nothing.
-            flow.input(Input::Settled, 2.1);
-            flow.input(Input::Undone(Undone::TakenBack), 2.2);
-            flow.input(dismiss.clone(), 3.0);
-            flow.tick(3.0 + tuning::get().done_hold_s);
-            assert_eq!(flow.pres(100.0), Pres::Hidden, "{dismiss:?}");
-            assert_eq!(flow.keys(), None, "{dismiss:?}");
-            flow.input(Input::OpenList, 100.0);
-            assert!(done(&flow, 100.0).open.is_some(), "{dismiss:?}");
-        }
-    }
-
-    /// Send to… bringing a taken-back capture back is silent: the
-    /// take-back sounded once.
-    #[test]
-    fn reopening_a_taken_back_list_sounds_nothing() {
-        let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
-        flow.input(Input::SendRow(0), 1.0);
-        flow.input(Input::Undo, 2.0);
-        assert_eq!(flow.take_cues(), [Cue::Sent, Cue::TakenBack]);
-        flow.input(Input::Undone(Undone::TakenBack), 2.2);
-        // Kept, then back.
-        flow.input(Input::Dismiss, 3.0);
-        flow.input(Input::OpenList, 4.0);
-        assert!(done(&flow, 4.0).open.is_some());
-        // Hidden, then back.
-        flow.input(Input::Dismiss, 5.0);
-        flow.tick(5.0 + tuning::get().brief_hold_s);
-        flow.input(Input::OpenList, 20.0);
-        assert!(done(&flow, 20.0).open.is_some());
-        assert!(flow.take_cues().is_empty());
-    }
-
     /// A queued send that went on a retry can't be taken back by Hex: it
     /// says so plainly, with no Undo and no Escape.
     #[test]
@@ -2203,7 +2117,7 @@ mod tests {
         let mut flow = Flow::new();
         picked(&mut flow);
         flow.input(Input::Settled, 1.4);
-        assert!(flow.settled && !flow.undoing);
+        assert!(!flow.undoing);
         assert_eq!(done(&flow, 1.4).text, "Sent to HEX");
     }
 
@@ -2247,42 +2161,6 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 0.0);
         assert_eq!(done(&flow, 1.0).text, "Sending to SEER");
-    }
-
-    /// A switch that can't start settles the recording it discarded as
-    /// failed: the capsule says the start failed, not the save.
-    #[test]
-    fn a_switch_that_cannot_start_says_so() {
-        use super::super::surface::Id;
-        let mut flow = Flow::new();
-        flow.input(Input::Phone(true), 0.0);
-        flow.input(Input::Stage(Stage::Recording), 0.0);
-        flow.input(Input::Chips, 0.1);
-        flow.click(Id::Mode(Mode::Iphone), 0.5);
-        flow.input(Input::Failed(Failure::Save, Some("no phone".into())), 0.6);
-        assert!(matches!(
-            flow.phase,
-            Phase::Failed {
-                what: Failure::Start,
-                ..
-            }
-        ));
-
-        // Once the phone's recording shows, a later failure is a save's.
-        let mut flow = Flow::new();
-        flow.input(Input::Phone(true), 0.0);
-        flow.input(Input::Stage(Stage::Recording), 0.0);
-        flow.input(Input::Chips, 0.1);
-        flow.click(Id::Mode(Mode::Iphone), 0.5);
-        flow.input(Input::Stage(Stage::Recording), 0.6);
-        flow.input(Input::Failed(Failure::Save, None), 3.0);
-        assert!(matches!(
-            flow.phase,
-            Phase::Failed {
-                what: Failure::Save,
-                ..
-            }
-        ));
     }
 
     #[test]
@@ -2863,95 +2741,6 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), closed + 1.0);
         flow.input(Input::Routed(guess()), closed + 2.0);
         assert!(matches!(flow.pres(closed + 2.0), Pres::Done(_)));
-    }
-
-    /// Send to… after a guess opens the list while the capsule shows, and
-    /// brings it back after it closed with nothing picked, until something
-    /// settles the capture. No key is Hex's while it's closed.
-    #[test]
-    fn send_to_brings_back_a_capture_waiting_for_a_pick() {
-        use crate::capture_host::CapsuleKeys;
-        let hold = tuning::get().done_hold_s;
-        let mut flow = Flow::new();
-        flow.input(Input::Stage(Stage::Done), 0.0);
-        flow.input(Input::Routed(guess()), 0.0);
-        assert_eq!(
-            flow.keys(),
-            Some(CapsuleKeys::Suggest {
-                cycle: false,
-                search: false
-            })
-        );
-        // Its hold runs out: hidden, and no key is the capsule's.
-        assert!(flow.tick(hold + 1.0));
-        assert_eq!(flow.pres(hold + 1.0), Pres::Hidden);
-        assert_eq!(flow.keys(), None);
-        assert!(flow.input(Input::OpenList, 30.0).is_empty());
-        let (query, list) = done(&flow, 30.0).open.expect("the list is open");
-        assert_eq!(query.text, "");
-        assert_eq!(list.selected_dest().unwrap().name, "SEER");
-        assert_eq!(flow.keys(), Some(CapsuleKeys::List));
-        // Escape folds the list; it then leaves with its hold and waits again.
-        flow.input(Input::Escape, 31.0);
-        assert!(matches!(flow.pres(32.0), Pres::Done(_)));
-        flow.tick(31.0 + hold + 1.0);
-        assert_eq!(flow.pres(32.0 + hold), Pres::Hidden);
-        flow.input(Input::OpenList, 40.0);
-        assert!(done(&flow, 40.0).open.is_some());
-        // A pick settles it: no key is Hex's, Escape goes to the app.
-        assert_eq!(
-            flow.input(Input::SendRow(1), 41.0),
-            [Action::Send {
-                to: "HEX".into(),
-                always: None
-            }]
-        );
-        assert_eq!(flow.keys(), None);
-        flow.tick(41.0 + hold + 1.0);
-        assert_eq!(flow.keys(), None);
-
-        // `hex capture send` while it's closed settles it too.
-        let mut flow = Flow::new();
-        flow.input(Input::Stage(Stage::Done), 0.0);
-        flow.input(Input::Routed(guess()), 0.0);
-        flow.input(Input::Dismiss, 1.0);
-        assert_eq!(flow.keys(), None);
-        flow.input(Input::Settled, 2.0);
-        assert_eq!(flow.keys(), None);
-        flow.input(Input::OpenList, 3.0);
-        assert_eq!(flow.pres(3.0), Pres::Hidden);
-        // As it does while the capsule shows.
-        let mut flow = Flow::new();
-        flow.input(Input::Stage(Stage::Done), 0.0);
-        flow.input(Input::Routed(guess()), 0.0);
-        flow.input(Input::Settled, 1.0);
-        flow.input(Input::Dismiss, 2.0);
-        assert_eq!(flow.keys(), None);
-
-        // So do a paste and the next capture; a rule's send never waits.
-        let mut flow = Flow::new();
-        flow.input(Input::Routed(guess()), 0.0);
-        flow.click(super::super::surface::Id::Paste, 1.0);
-        assert_eq!(flow.keys(), None);
-        flow.input(Input::Routed(guess()), 2.0);
-        flow.input(Input::Dismiss, 3.0);
-        flow.input(Input::Stage(Stage::Recording), 4.0);
-        flow.input(Input::Stage(Stage::Done), 5.0);
-        assert_eq!(flow.keys(), None);
-        flow.input(Input::Routed(rule()), 5.0);
-        flow.input(Input::Settled, 8.0);
-        flow.tick(5.0 + hold + 1.0);
-        assert_eq!(flow.pres(5.0 + hold + 1.0), Pres::Hidden);
-        assert_eq!(flow.keys(), None);
-
-        // An answer that came after the capsule closed waits as well.
-        let mut flow = Flow::new();
-        flow.input(Input::Stage(Stage::Done), 0.0);
-        flow.tick(hold + 1.0);
-        flow.input(Input::Routed(guess()), hold + 2.0);
-        assert_eq!(flow.pres(hold + 2.0), Pres::Hidden);
-        flow.input(Input::OpenList, hold + 3.0);
-        assert!(done(&flow, hold + 3.0).open.is_some());
     }
 
     #[test]

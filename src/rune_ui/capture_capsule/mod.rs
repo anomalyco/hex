@@ -469,10 +469,6 @@ impl CapsuleState {
             self.replace = true;
             self.live.thumb = None;
         }
-        // Send to… bringing a closed capsule back: under the pointer.
-        if input == Input::OpenList && !self.shown {
-            self.replace = true;
-        }
         let actions = self.flow.input(input, now);
         self.dispatch(actions);
     }

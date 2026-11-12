@@ -41,20 +41,6 @@ pub(super) fn permission_lines(need: CaptureNeed, grant: Grant) -> Done {
     }
 }
 
-/// A closed list that still waits for a pick: a guess, or one offered
-/// again after an Undo; a rule's was sent, as was one too late to take
-/// back, and an unreachable one lists nothing.
-pub(super) fn waits(routed: Routed) -> Option<Routed> {
-    let (suggested, recent) = sections(&routed.route);
-    (!matches!(routed.route, Route::Rule { .. })
-        && routed.already_with.is_none()
-        && !(suggested.is_empty() && recent.is_empty()))
-    .then_some(Routed {
-        open: None,
-        ..routed
-    })
-}
-
 pub(super) fn hold_until(phase: &Phase) -> Option<f64> {
     match phase {
         Phase::Routed(r)

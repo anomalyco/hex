@@ -13,7 +13,7 @@ impl Flow {
             self.cue(&before, &actions);
         }
         self.closing(&before);
-        self.left_waiting(before, &actions);
+        self.track_undo(&actions);
         let mut actions = actions;
         actions.extend(self.hold_countdown(now));
         actions
@@ -47,7 +47,6 @@ impl Flow {
                         chips_until: None,
                         discard_until: None,
                     };
-                    self.switching = true;
                     vec![Action::Switch(mode)]
                 }
                 Mode::Area | Mode::Window => {
