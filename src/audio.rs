@@ -1318,10 +1318,12 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
 /// from (`call_input`, a device UID) when that opens, else one resolved like
 /// dictation's but keeping a Bluetooth default a call app on a headset uses;
 /// or keeps the open one named `keep` when it resolves to that again.
+/// `renegotiate_rate` marks a silence recovery's open, like dictation's.
 pub fn open_meeting_input(
     selected_device: Option<&str>,
     call_input: Option<&str>,
     keep: Option<&str>,
+    renegotiate_rate: bool,
 ) -> Result<Opened> {
     open_configured_input(&OpenRequest {
         device_override: None,
@@ -1330,7 +1332,7 @@ pub fn open_meeting_input(
         keep: keep.map(str::to_owned),
         avoids_bluetooth: false,
         call_input: call_input.map(str::to_owned),
-        renegotiate_rate: false,
+        renegotiate_rate,
     })
 }
 

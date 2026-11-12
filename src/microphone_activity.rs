@@ -237,6 +237,51 @@ pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec
     })
 }
 
+#[cfg(target_os = "macos")]
+/// The process IDs recording from the input device `uid`, read from Core
+/// Audio's process metadata: devices only, never audio samples. Hex's own
+/// process is included; a caller that records excludes itself. A failed
+/// per-process read, including a listed device's UID, fails the whole call,
+/// so a dropped pid is never mistaken for an app that stopped recording.
+pub(crate) fn input_recorders(uid: &str) -> Result<Vec<i32>> {
+    objc2::rc::autoreleasepool(|_| {
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        let mut pids = Vec::new();
+        for process_object in process_objects {
+            let recording =
+                property_value::<u32>(process_object, kAudioProcessPropertyIsRunningInput)?;
+            if recording == 0 {
+                continue;
+            }
+            let devices = property_vec_in::<AudioObjectID>(
+                process_object,
+                kAudioProcessPropertyDevices,
+                kAudioObjectPropertyScopeInput,
+            )?;
+            let mut records_uid = false;
+            for device in devices {
+                let device_uid = property_cf_string(device, kAudioDevicePropertyDeviceUID)
+                    .ok_or_else(|| {
+                        eyre!("could not read a recording process's input device uid")
+                    })?;
+                if device_uid == uid {
+                    records_uid = true;
+                    break;
+                }
+            }
+            if !records_uid {
+                continue;
+            }
+            let pid = property_value::<i32>(process_object, kAudioProcessPropertyPID)?;
+            pids.push(pid);
+        }
+        Ok(pids)
+    })
+}
+
 /// Whether the Core Audio process `bundle_id` belongs to the app
 /// `canonical_bundle_id`: the app itself or one of its helpers, such as the
 /// browser helper that holds the microphone for a Meet tab.

@@ -329,18 +329,50 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
      checked once a second; a manual recording never reopens or warns
   -> a gated or noise-suppressed microphone the call app also uses still
      counts as held, so it can trigger the reopens and warning
-  -> reopen the microphone source, at most twice in one recording, the budget
-     shared across reopened streams
+  -> reopen the microphone source, at most twice in one recording (the call
+     app holding the input and 3 s of exact zeros), the budget shared by
+     every stream it reopens; audio coming back does not restore it, because
+     each reopen changes the device's rate; macOS makes the device
+     renegotiate its sample rate first, like dictation's silence recovery
+     (#1575), which briefly interrupts every other stream on that mic, the
+     call app's and a warm dictation's
+  -> a renegotiating open spends that attempt when it runs, so a failed
+     open retries plainly instead of flipping the rate again; only a
+     deferral for dictation leaves it for a later open
   ├── still silent -> keep recording; the recording capsule says
   │     "Microphone is silent · 12:34" and the menu bar "Microphone is silent"
   │     -> manifest.microphone.warning = digital_silence is written as soon
   │        as it is raised, so a crash while recording keeps it
+  ├── still silent after the warning -> only a release runs a renegotiating
+  │     retry: the set of processes recording from the opened input shrinks,
+  │     Hex's own excluded and the call app included, read once a second from
+  │     Core Audio process metadata (device lists only, never samples)
+  │     -> at most 3 retries per silent episode; silence alone never retries
+  │     -> a release seen before the warning still counts, and one seen
+  │        before a reopen and gone after it counts too
+  │     -> the release is noted where it is seen, so a stream that fails
+  │        before its next chunk cannot lose it; the comparison made by our
+  │        own renegotiating open, and by any reopen within a second of it,
+  │        ignores a disappearing pid: the driver is restarting, not an app
+  │     -> needs macOS 14+ process audio metadata, as call-app input
+  │        detection does; older macOS warns without retrying
+  ├── a dictation captures or infers -> the quick reopens and retries wait
+  │     until it is idle; a release stays pending meanwhile, and an open
+  │     already decided under dictation opens without renegotiating: the
+  │     still-silent stream reopens once dictation is idle, without spending
+  │     another reopen or retry
+  ├── a device switch -> the old input's release and pending renegotiation
+  │     are forgotten
   ├── nonzero audio returns -> clear the live warning, including in a stream
-  │     reopened after a supervisor restart; the persisted warning stays,
-  │     because the recording means "silent at some point"
-  └── the call app leaves the input -> no further reopens or warnings, but a
-        live warning stays until nonzero audio returns; the finished meeting's
-        panel still says the microphone was silent for part of the call
+  │     reopened after a supervisor restart, and start the episode's retries
+  │     over, though the recording's two reopens stay spent and a pending
+  │     renegotiation is cleared; the persisted warning stays, because the
+  │     recording means "silent at some point"
+  ├── before a warning, the call app leaves the input -> no further quick
+  │     reopens or warnings until it reports the input again
+  └── a later episode after audio returns -> warns at once (the two reopens
+        are spent), then gets its own retries; the finished meeting's panel
+        still says the microphone was silent for part of the call
   // not verified on a live device or call app
 
 open stream stops delivering audio without an error (any OS, #1206)
@@ -401,6 +433,21 @@ values; no iPhone observed with the lid closed),
 `a_warm_silent_stream_reopens_once_unless_released`;
 [meeting/warning.rs](../../src/meeting/warning.rs):
 `a_silence_budget_is_shared_across_reopened_streams`,
+`a_warned_microphone_never_retries_without_a_release`,
+`a_release_seen_before_the_warning_retries_once_it_shows`,
+`a_release_seen_before_a_reopen_still_retries_after_it`,
+`a_release_noted_before_a_failed_source_still_retries_after_its_reopen`,
+`a_release_triggers_a_warned_retry`,
+`a_silent_episode_gets_three_release_triggered_retries`,
+`a_rebuilt_policy_keeps_the_silent_episodes_retries`,
+`a_warned_microphone_retries_after_the_call_app_lets_go`,
+`audible_audio_resets_the_episodes_retries`,
+`a_reopen_waits_while_dictation_is_active`,
+`a_spent_recording_warns_even_while_dictation_is_active`,
+`a_release_triggered_retry_waits_while_dictation_is_active`,
+`a_pending_renegotiation_reopens_once_dictation_is_idle`,
+`audible_audio_clears_a_pending_renegotiation`,
+`a_renegotiation_is_taken_once_and_dictation_defers_it`,
 `audible_audio_clears_a_warning_a_reopened_stream_inherited`,
 `a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
 `a_sticky_warning_survives_its_live_one_clearing`,
@@ -410,6 +457,9 @@ values; no iPhone observed with the lid closed),
 [meeting/capture.rs](../../src/meeting/capture.rs):
 `a_meeting_follows_the_input_its_call_app_records_from`,
 `a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times`,
+`a_process_that_stops_recording_between_reopens_is_a_release`,
+`a_release_just_after_our_own_rate_change_is_not_another_apps`,
+`a_release_belongs_only_to_the_input_that_saw_it`,
 `only_an_input_the_call_app_reports_counts_as_held`;
 [meeting/tests.rs](../../src/meeting/tests.rs):
 `a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none`
@@ -566,24 +616,54 @@ during a meeting, the microphone stream kept delivering chunks of exact 0.0
 samples for the whole call while the call app held the built-in microphone,
 so the existing stall watchdog never fired and the user's side was missing.
 A microphone stream that delivers 3 s of exact zeros now reopens like a
-failed source, at most twice in one recording, but only while the call app
-still reports recording from the same input; a manual recording, or an app
-that reports no input, never reopens or warns, and a gated or
-noise-suppressed microphone the call app also uses still counts as held so
-it can trigger the reopens and warning. If it is still silent, Hex keeps
-recording and warns in the recording capsule, the menu bar, and the finished
-meeting's detail. The manifest records `microphone.warning:
-digital_silence` as soon as it is raised, so a crash keeps it, and it means
-the microphone was silent at some point during the recording. Nonzero audio
-clears the live warning, including in a stream reopened after a supervisor
-restart; if the call app leaves the input while zeros continue, no further
-reopens or warnings happen but a live warning stays until nonzero audio
-returns. A later episode warns again without another reopen. Each gated
-episode is also logged once at info level with the opened device and the
-call app's reported inputs, so field logs can confirm the gate. The 3 s
-watch, its shared reopen budget, and its gating are unit-checked; none of it
-was observed on a live device or a call app holding the microphone with
-voice processing.
+failed source, at most twice in one recording (the call app holding the
+input and 3 s of exact zeros), but only while the call app still reports
+recording from the same input; a manual recording, or an app that reports no
+input, never reopens or warns, and a gated or noise-suppressed microphone the
+call app also uses still counts as held so it can trigger the reopens and
+warning. The budget is per recording and audio coming back does not restore
+it, because every silent reopen renegotiates the whole device's nominal rate
+and a gated or noise-suppressed mic can be silent during every listening
+stretch of the call. On macOS each of those reopens renegotiates the device's
+sample rate first, like dictation's silence recovery (#1575); that changes
+the nominal rate of the whole device, so it briefly interrupts every other
+stream on the microphone, including the call app's and a warm dictation's.
+If it is still silent, Hex keeps recording and warns in the recording
+capsule, the menu bar, and the finished meeting's detail. The manifest
+records `microphone.warning: digital_silence` as soon as it is raised, so a
+crash keeps it, and it means the microphone was silent at some point during
+the recording. Once warned, a renegotiating retry runs only when another
+process stops recording from the opened input: Hex reads Core Audio's
+process metadata (device lists, never samples) once a second, excludes its
+own process, and includes the call app, so its release also counts. The
+shared last-known set survives a supervisor reopen, so a process seen before
+one and gone after it counts as a release, a release is noted where it is
+seen so a stream that fails or stalls before its next chunk cannot lose it,
+and a release seen before the warning still counts once it shows. The
+comparison made by our own renegotiating open, and by any reopen within a
+second of it, ignores a disappearing pid: the driver is restarting its
+streams, not another app. Release detection needs macOS 14+ process audio
+metadata, as call-app input detection does, so older macOS raises the
+warning without retrying. Switching inputs forgets the old input's release
+and pending renegotiation. A renegotiating open takes the renegotiation when
+it is attempted, so a failing open retries plainly rather than flipping the
+rate on every supervisor retry, and a successful one spends a release noted
+before it. Silence alone never retries, and one silent episode gets at most 3
+such retries. A dictation capture or inference defers both the quick reopens
+and the retries until it is idle, while the warning is still raised, and a
+release stays pending meanwhile; an open already decided under dictation
+opens without renegotiating, and the still-silent stream reopens once
+dictation is idle without spending another reopen or retry, so a rate change
+never cuts a dictation. Nonzero audio clears the live warning, including in
+a stream reopened after a supervisor restart, and starts the silent
+episode's retry count over, clears a pending renegotiation, and leaves the
+recording's two quick reopens spent. A later episode warns at once, then
+gets its own retries. Each gated episode is also
+logged once at info level with the opened device and the call app's reported
+inputs, so field logs can confirm the gate. The 3 s watch, its per-recording
+reopen budget, the release-triggered retry cap, and its gating are
+unit-checked; none of it was observed on a live device or a call app holding
+the microphone with voice processing.
 
 **Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
 after a burst of overrun warnings while idle, a warm USB microphone's stream

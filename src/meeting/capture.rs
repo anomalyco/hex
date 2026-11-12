@@ -8,14 +8,15 @@
 //! Linux, and WASAPI loopback on Windows.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
-use super::warning::{SilenceAction, SilencePolicy, TrackWarnings};
+use super::warning::{SilenceAction, SilencePolicy, SilenceRecovery, TrackWarnings};
 use super::{AudioPacket, MeetingSource, SAMPLE_RATE};
 use crate::dictation::StreamingResampler;
 
@@ -77,12 +78,16 @@ impl SourceSupervisor {
         application: Option<String>,
         warnings: TrackWarnings,
     ) -> Self {
-        let reopens = Arc::new(AtomicU8::new(0));
+        let recovery = Arc::new(SilenceRecovery::default());
+        // The processes recording from the input, shared across reopens so a
+        // release between a stream failure and its replacement is still seen.
+        let recorders = Arc::new(InputRecorders::default());
         Self::spawn(sink, move || {
             MicrophoneSource::open(
                 crate::app_settings::microphone_selection(),
                 application.clone(),
-                reopens.clone(),
+                recovery.clone(),
+                recorders.clone(),
                 warnings.clone(),
             )
             .map(|source| Box::new(source) as Box<dyn LiveSource>)
@@ -275,12 +280,116 @@ fn call_app_inputs(application: &str) -> Vec<String> {
     }
 }
 
+/// The processes recording from the input, shared by every stream the
+/// supervisor opens so an app that let go between a stream failure and its
+/// reopen is still seen leaving.
+#[derive(Default)]
+struct InputRecorders {
+    seen: Mutex<SeenInput>,
+    /// When our own renegotiating open last changed the device's rate; a
+    /// recorder that disappears just after it is the driver restarting
+    /// streams, not another app letting go.
+    renegotiated: Mutex<Option<Instant>>,
+}
+
+/// The last input whose recorders were seen, and those processes.
+#[derive(Default)]
+struct SeenInput {
+    uid: Option<String>,
+    pids: Vec<i32>,
+}
+
+impl InputRecorders {
+    /// Whether the shared baseline is for `uid`.
+    fn same_input(&self, uid: Option<&str>) -> bool {
+        self.seen
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .uid
+            .as_deref()
+            == uid
+    }
+
+    /// Records `current` for `uid`, reporting whether a process known on that
+    /// same input stopped recording. A different input starts over. The
+    /// comparison made by our own renegotiating open, and by any reopen
+    /// within [`RENEGOTIATION_SETTLE`] of it, ignores a disappearing pid:
+    /// the driver is restarting its streams, not another app letting go.
+    fn update(&self, uid: Option<&str>, current: Vec<i32>, now: Instant) -> bool {
+        let mut renegotiated = self
+            .renegotiated
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let mut seen = self.seen.lock().unwrap_or_else(|error| error.into_inner());
+        let same_input = seen.uid.as_deref() == uid;
+        if !same_input {
+            // The old input's rate change means nothing to this one.
+            *renegotiated = None;
+        }
+        let settled = renegotiated.is_none_or(|at| now.duration_since(at) >= RENEGOTIATION_SETTLE);
+        let released = same_input && settled && released_processes(&seen.pids, &current);
+        seen.uid = uid.map(str::to_owned);
+        seen.pids = current;
+        released
+    }
+
+    /// Starts over on `uid` without treating its difference as a release.
+    fn reset(&self, uid: Option<&str>, current: Vec<i32>) {
+        *self.seen.lock().unwrap_or_else(|error| error.into_inner()) = SeenInput {
+            uid: uid.map(str::to_owned),
+            pids: current,
+        };
+    }
+
+    /// Notes that this open renegotiated the device's sample rate, which
+    /// restarts its other streams.
+    fn note_renegotiation(&self, now: Instant) {
+        *self
+            .renegotiated
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(now);
+    }
+}
+
+/// How long after our own rate change a recorder that disappears is taken to
+/// be the driver restarting streams rather than another app letting go.
+const RENEGOTIATION_SETTLE: Duration = Duration::from_secs(1);
+
+/// Whether any process that was recording (`known`) is gone from `current`.
+fn released_processes(known: &[i32], current: &[i32]) -> bool {
+    known.iter().any(|pid| !current.contains(pid))
+}
+
+/// The processes recording from the input `uid`, Hex's own excluded, from
+/// Core Audio's process metadata: no audio is read. None when the OS does
+/// not report them or any part of the read failed, so a failed read never
+/// looks like a release.
+fn recording_processes(uid: Option<&str>) -> Option<Vec<i32>> {
+    #[cfg(target_os = "macos")]
+    {
+        let uid = uid?;
+        let ours = i32::try_from(std::process::id()).ok();
+        match crate::microphone_activity::input_recorders(uid) {
+            Ok(pids) => Some(pids.into_iter().filter(|pid| Some(*pid) != ours).collect()),
+            Err(error) => {
+                tracing::debug!(%error, "could not read the processes recording from the meeting microphone");
+                None
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = uid;
+        None
+    }
+}
+
 struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
     /// The per-chunk digital silence decision, sharing this recording's
-    /// reopen budget with every reopened stream.
+    /// reopen budget and retry count with every reopened stream.
     silence: SilencePolicy,
     /// The controller-visible warning, shared across reopened streams.
     warnings: TrackWarnings,
@@ -299,13 +408,17 @@ struct MicrophoneSource {
     /// The UID of this stream's input.
     opened_uid: Option<String>,
     call_input_checked: Instant,
+    /// The processes recording from the input, shared across reopens.
+    recorders: Arc<InputRecorders>,
+    recorders_checked: Instant,
 }
 
 impl MicrophoneSource {
     fn open(
         (selection_revision, selected): (u64, Option<String>),
         application: Option<String>,
-        silence_reopens: Arc<AtomicU8>,
+        silence_recovery: Arc<SilenceRecovery>,
+        recorders: Arc<InputRecorders>,
         warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
@@ -314,18 +427,58 @@ impl MicrophoneSource {
             .map(call_app_inputs)
             .unwrap_or_default();
         let call_input = follow_call_input(None, call_inputs.clone());
-        let crate::audio::Opened::Input(input) =
-            crate::audio::open_meeting_input(selected.as_deref(), call_input.as_deref(), None)?
+        let renegotiate =
+            silence_recovery.take_renegotiation(crate::transcription::engine::dictation_busy());
+        if !renegotiate && silence_recovery.renegotiation_pending() {
+            // A rate change would cut the dictation. The flag stays set and
+            // the still-silent stream reopens once dictation is idle.
+            tracing::info!(
+                "dictation is active; opening the meeting microphone without renegotiating its rate"
+            );
+        }
+        let crate::audio::Opened::Input(input) = crate::audio::open_meeting_input(
+            selected.as_deref(),
+            call_input.as_deref(),
+            None,
+            renegotiate,
+        )?
         else {
             unreachable!("nothing to keep");
         };
+        // The renegotiation is taken when this open attempts it, so a failing
+        // open cannot flip the rate on every supervisor retry; only a
+        // deferral for dictation leaves it pending.
+        if renegotiate {
+            // The open already did what a retry would: a release noted before
+            // it is spent, though one this open's own comparison sees is not.
+            silence_recovery.forget_release();
+        }
         let input = *input;
         let opened_uid = input.uid.clone();
+        let now = Instant::now();
+        // A release from the old input says nothing about the new one.
+        if !recorders.same_input(opened_uid.as_deref()) {
+            silence_recovery.forget_release();
+        }
+        if application.is_some() {
+            if renegotiate {
+                recorders.note_renegotiation(now);
+            }
+            // Compare this open against the set the last stream saw, so an
+            // app that let go while the source was down still counts as a
+            // release. The shared state keeps it if this stream fails too.
+            if let Some(current) = recording_processes(opened_uid.as_deref())
+                && recorders.update(opened_uid.as_deref(), current, now)
+            {
+                silence_recovery.note_release();
+            }
+        }
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
             rate = resample.rate,
             call_input = call_input.is_some(),
+            renegotiated = renegotiate,
             "meeting microphone opened"
         );
         let mut retry = UnopenableRetry::default();
@@ -333,7 +486,7 @@ impl MicrophoneSource {
         let warning = warnings.live().is_some();
         Ok(Self {
             input,
-            silence: SilencePolicy::new(resample.rate, silence_reopens, warning),
+            silence: SilencePolicy::new(resample.rate, silence_recovery, warning),
             warnings,
             resample,
             last_audio: Instant::now(),
@@ -346,6 +499,8 @@ impl MicrophoneSource {
             call_inputs,
             opened_uid,
             call_input_checked: Instant::now(),
+            recorders,
+            recorders_checked: Instant::now(),
         })
     }
 
@@ -356,6 +511,29 @@ impl MicrophoneSource {
         call_app_reports_input(self.opened_uid.as_deref(), &self.call_inputs)
     }
 
+    /// Notes an application other than Hex stopping recording from this
+    /// stream's input since the last look, sampled at the call app's once a
+    /// second cadence from Core Audio process metadata; no audio is read. The
+    /// shared recovery keeps it, so a stream that fails before its next chunk
+    /// cannot lose it.
+    fn poll_released(&mut self, now: Instant) {
+        if self.application.is_none()
+            || now.duration_since(self.recorders_checked) < CALL_INPUT_INTERVAL
+        {
+            return;
+        }
+        self.recorders_checked = now;
+        let Some(current) = recording_processes(self.opened_uid.as_deref()) else {
+            return;
+        };
+        if self
+            .recorders
+            .update(self.opened_uid.as_deref(), current, now)
+        {
+            self.silence.note_release();
+        }
+    }
+
     /// Follows a change of the input the call app records from, of the
     /// system default or of the saved microphone in Settings, the saved
     /// microphone returning, or a due look at one that would not open, by
@@ -363,6 +541,7 @@ impl MicrophoneSource {
     /// failed open keeps the current input.
     fn follow_route(&mut self) {
         let now = Instant::now();
+        self.poll_released(now);
         let mut call_input_changed = false;
         if self.application.is_some()
             && now.duration_since(self.call_input_checked) >= CALL_INPUT_INTERVAL
@@ -396,6 +575,7 @@ impl MicrophoneSource {
             self.selected.as_deref(),
             self.call_input.as_deref(),
             Some(&self.input.device_name),
+            false,
         );
         let input = match opened {
             Ok(crate::audio::Opened::Input(input)) => *input,
@@ -430,6 +610,14 @@ impl MicrophoneSource {
         // old one stays until real audio clears it.
         self.silence.reset(input.sample_rate);
         self.opened_uid = input.uid.clone();
+        if let Some(current) = recording_processes(self.opened_uid.as_deref()) {
+            self.recorders.reset(self.opened_uid.as_deref(), current);
+        }
+        self.recorders_checked = now;
+        // A release or renegotiation from the old input says nothing about
+        // the new one.
+        self.silence.forget_release();
+        self.silence.clear_renegotiation();
         self.input = input;
         self.last_audio = Instant::now();
     }
@@ -441,14 +629,26 @@ impl LiveSource for MicrophoneSource {
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
-                let action = self.silence.observe(&samples, self.call_app_holds_device());
+                let action = self.silence.observe(
+                    &samples,
+                    self.call_app_holds_device(),
+                    crate::transcription::engine::dictation_busy,
+                );
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
                 match action {
                     SilenceAction::Reopen => {
-                        tracing::warn!(
-                            device = %self.input.device_name,
-                            "meeting microphone delivered digital silence; reopening it"
-                        );
+                        self.silence.request_renegotiation();
+                        if self.silence.retrying() {
+                            tracing::warn!(
+                                device = %self.input.device_name,
+                                "meeting microphone is still digitally silent; retrying it after an app released it"
+                            );
+                        } else {
+                            tracing::warn!(
+                                device = %self.input.device_name,
+                                "meeting microphone delivered digital silence; reopening it"
+                            );
+                        }
                         return Err("microphone delivered digital silence".into());
                     }
                     SilenceAction::Gated => {
@@ -548,6 +748,49 @@ mod tests {
         assert!(retry.due.is_none());
         retry.resolved(Selection::Unlisted, start);
         assert!(retry.due.is_none());
+    }
+
+    #[test]
+    fn a_process_that_stops_recording_between_reopens_is_a_release() {
+        let now = Instant::now();
+        // The shared set from the old stream still names a process the new
+        // stream no longer sees.
+        let recorders = InputRecorders::default();
+        assert!(!recorders.update(Some("BuiltIn"), vec![41, 42], now));
+        assert!(recorders.update(Some("BuiltIn"), vec![42], now));
+        // A different input starts over rather than reporting every old pid.
+        assert!(!recorders.update(Some("Jabra"), vec![7], now));
+        assert!(!recorders.update(Some("Jabra"), vec![7, 8], now));
+        // The same input still catches a release after the new baseline.
+        assert!(recorders.update(Some("Jabra"), vec![8], now));
+        // An empty first baseline is not a release.
+        let recorders = InputRecorders::default();
+        assert!(!recorders.update(Some("BuiltIn"), Vec::new(), now));
+        assert!(!recorders.update(Some("BuiltIn"), vec![1], now));
+        assert!(!released_processes(&[], &[1, 2]));
+        assert!(!released_processes(&[1, 2], &[1, 2]));
+        assert!(released_processes(&[1, 2], &[2]));
+    }
+
+    #[test]
+    fn a_release_just_after_our_own_rate_change_is_not_another_apps() {
+        let now = Instant::now();
+        let recorders = InputRecorders::default();
+        assert!(!recorders.update(Some("BuiltIn"), vec![41, 42], now));
+        recorders.note_renegotiation(now);
+        // The driver restarting streams drops a pid; that is our change.
+        assert!(!recorders.update(Some("BuiltIn"), vec![42], now));
+        // The baseline still moved, so a later release is seen.
+        assert!(recorders.update(Some("BuiltIn"), Vec::new(), now + RENEGOTIATION_SETTLE));
+    }
+
+    #[test]
+    fn a_release_belongs_only_to_the_input_that_saw_it() {
+        let now = Instant::now();
+        let recorders = InputRecorders::default();
+        assert!(!recorders.update(Some("BuiltIn"), vec![41], now));
+        assert!(recorders.same_input(Some("BuiltIn")));
+        assert!(!recorders.same_input(Some("Jabra")));
     }
 
     #[test]
