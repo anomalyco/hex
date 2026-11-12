@@ -169,7 +169,7 @@ skipped while a capture is unfinished or Scrawl.app runs
 ### Helper and permissions
 
 - `scrawl-helper` is built by the crate's `build.rs` beside the binary
-  (`target/<profile>`, three levels above `OUT_DIR`), and the engine looks
+  (`target/<profile>`, the parent of Cargo's `build` directory), and the engine looks
   for it beside its own executable (`helper::path`); `$SCRAWL_HELPER`
   overrides. Missing, finish keeps the 480 px candidate frames as keyframes.
   Hex's capture path uses it for movie decoding, which needs no TCC, for

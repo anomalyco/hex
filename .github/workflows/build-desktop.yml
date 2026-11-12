@@ -131,8 +131,10 @@ jobs:
       - name: Check the x86_64 CPU floor
         if: env.HEX_LINUX_ARCH == 'x86_64'
         run: |
+          mapfile -t ggml < <(find target/release/build -path '*transcribe-cpp-sys*/out/lib*' -name 'libggml*.a' -type f)
+          [ "${#ggml[@]}" -gt 0 ] || { echo "::error::no ggml archives under target/release/build" >&2; exit 1; }
           bash .github/release/check-x86-baseline.sh "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" \
-            target/release/build/transcribe-cpp-sys-*/out/lib/libggml*.a
+            "${ggml[@]}"
       - id: upload
         uses: ./.github/release/upload
         with:
@@ -225,10 +227,12 @@ jobs:
         if: env.HEX_WINDOWS_ARCH == 'x86_64'
         shell: bash
         run: |
+          mapfile -t ggml < <(find source/target/x86_64-pc-windows-msvc/release/build -path '*transcribe-cpp-sys*/out/lib*' -name 'ggml*.lib' -type f)
+          [ "${#ggml[@]}" -gt 0 ] || { echo "::error::no ggml archives under source/target/x86_64-pc-windows-msvc/release/build" >&2; exit 1; }
           OBJDUMP="$(cygpath -u "$PROGRAMFILES")/LLVM/bin/llvm-objdump.exe" \
             bash source/.github/release/check-x86-baseline.sh \
             "$(cygpath -u "$RUNNER_TEMP")/dist/hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
-            source/target/x86_64-pc-windows-msvc/release/build/transcribe-cpp-sys-*/out/lib/ggml*.lib
+            "${ggml[@]}"
       - name: Check the executables need no Visual C++ Redistributable or Vulkan loader, hex.exe is a GUI program and hex.com a console one
         shell: pwsh
         run: |
