@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::ops::Range;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -423,7 +424,8 @@ impl OfflineGgufSession {
                 .wrap_err("transcription failed");
         };
         let mut output = Vec::new();
-        for samples in samples.chunks(max_samples) {
+        for range in chunk_ranges(samples, max_samples) {
+            let samples = &samples[range];
             if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
                 return Err(eyre!("transcription was cancelled"));
             }
@@ -464,7 +466,9 @@ impl OfflineGgufSession {
         };
         let mut timed = crate::transcription::transcript::Transcript::default();
         let mut texts = Vec::new();
-        for (index, samples) in samples.chunks(max_samples).enumerate() {
+        for range in chunk_ranges(samples, max_samples) {
+            let offset = sample_offset_ms(range.start);
+            let samples = &samples[range];
             if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
                 return Err(eyre!("transcription was cancelled"));
             }
@@ -482,9 +486,9 @@ impl OfflineGgufSession {
             if !text.is_empty() {
                 texts.push(text.to_string());
             }
-            // The offset comes from where the chunk sits in the clip, never
+            // The offset comes from where the range sits in the clip, never
             // from how many chunks produced text.
-            let spans = timed_spans(transcript, chunk_offset_ms(index, max_samples));
+            let spans = timed_spans(transcript, offset);
             timed.segments.extend(spans.segments);
             timed.words.extend(spans.words);
         }
@@ -520,9 +524,73 @@ pub(crate) fn timestamp_level(kind: transcribe_cpp::TimestampKind) -> TimestampL
     }
 }
 
-/// Where one chunk starts in the clip, in whole milliseconds.
-pub(crate) fn chunk_offset_ms(index: usize, chunk_samples: usize) -> i64 {
-    i64::try_from(index.saturating_mul(chunk_samples) / 16).unwrap_or(i64::MAX)
+/// 100 ms at 16 kHz: the span a long clip is cut through.
+const QUIET_SPAN_SAMPLES: usize = 1_600;
+/// How far back from a window's end the quietest span is looked for.
+const QUIET_SEARCH_SAMPLES: usize = 5 * 16_000;
+
+/// Splits a clip into consecutive ranges of at most `max_samples`, cutting
+/// each window at the middle of the quietest 100 ms in its last five seconds
+/// (or half the window, when that is shorter), adapted from Cohere's reference
+/// processor. An exact sample cut lands mid-word, and each slice starts a
+/// fresh sentence with a capital and a closing full stop, so a long dictation
+/// reads as many sentences instead of one.
+///
+/// Every sample is covered exactly once by a non-empty range. Ties pick the
+/// latest span, so the ranges are deterministic. The search is energy-based,
+/// so continuous speech with no quieter stretch there still cuts at its
+/// quietest point, which can land inside a word.
+pub(crate) fn chunk_ranges(samples: &[f32], max_samples: usize) -> Vec<Range<usize>> {
+    let max_samples = max_samples.max(1);
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while start < samples.len() {
+        if samples.len() - start <= max_samples {
+            ranges.push(start..samples.len());
+            break;
+        }
+        let end = start + max_samples;
+        let search = QUIET_SEARCH_SAMPLES.min(max_samples / 2).max(1);
+        let span = QUIET_SPAN_SAMPLES.min(search);
+        let quiet = end - search + quietest_span(&samples[end - search..end], span);
+        let cut = quiet.max(start + 1);
+        ranges.push(start..cut);
+        start = cut;
+    }
+    ranges
+}
+
+/// The midpoint of the quietest `span` samples, the latest one on a tie.
+fn quietest_span(samples: &[f32], span: usize) -> usize {
+    if samples.is_empty() {
+        return 0;
+    }
+    let span = span.clamp(1, samples.len());
+
+    let sample_energy = |sample: f32| f64::from(sample) * f64::from(sample);
+    let mut energy = samples[..span]
+        .iter()
+        .copied()
+        .map(sample_energy)
+        .sum::<f64>();
+    let mut quietest = energy;
+    let mut quietest_start = 0;
+    for next in 1..=samples.len() - span {
+        let leaving = sample_energy(samples[next - 1]);
+        let entering = sample_energy(samples[next + span - 1]);
+        energy += entering - leaving;
+        // Ties keep the latest span.
+        if energy <= quietest {
+            quietest = energy;
+            quietest_start = next;
+        }
+    }
+    quietest_start + span / 2
+}
+
+/// Where `sample` sits in the clip, in whole milliseconds.
+pub(crate) fn sample_offset_ms(sample: usize) -> i64 {
+    i64::try_from(sample / 16).unwrap_or(i64::MAX)
 }
 
 fn timed_spans(
@@ -744,12 +812,11 @@ mod tests {
 
     #[test]
     fn a_chunks_times_move_onto_the_clips_timeline_by_sample_position() {
-        // 30 s chunks at 16 kHz, and a short final chunk: offsets come from
-        // where each chunk starts, never from how many produced text.
-        assert_eq!(chunk_offset_ms(0, 30 * 16_000), 0);
-        assert_eq!(chunk_offset_ms(1, 30 * 16_000), 30_000);
-        assert_eq!(chunk_offset_ms(2, 30 * 16_000), 60_000);
-        assert_eq!(chunk_offset_ms(3, 1_600), 300);
+        // Offsets come from where a range starts, never from how many chunks
+        // produced text.
+        assert_eq!(sample_offset_ms(0), 0);
+        assert_eq!(sample_offset_ms(2 * 30 * 16_000), 60_000);
+        assert_eq!(sample_offset_ms(1_600), 100);
 
         let shifted = timed_spans(
             transcribe_cpp::Transcript {
@@ -776,7 +843,7 @@ mod tests {
                 ],
                 ..Default::default()
             },
-            chunk_offset_ms(2, 30 * 16_000),
+            sample_offset_ms(2 * 30 * 16_000),
         );
         assert_eq!(shifted.segments.len(), 1);
         assert_eq!(
@@ -792,6 +859,68 @@ mod tests {
             (shifted.words[0].start_ms, shifted.words[0].end_ms),
             (60_010, 60_480)
         );
+    }
+
+    #[test]
+    fn long_clip_ranges_cover_every_sample_once_within_the_limit() {
+        let samples = vec![0.2_f32; 3 * 16_000 + 123];
+        let max_samples = 16_000;
+        let ranges = chunk_ranges(&samples, max_samples);
+        assert_eq!(ranges.first().map(|range| range.start), Some(0));
+        assert_eq!(ranges.last().map(|range| range.end), Some(samples.len()));
+        for pair in ranges.windows(2) {
+            assert_eq!(pair[0].end, pair[1].start, "the ranges are contiguous");
+        }
+        for range in &ranges {
+            assert!(!range.is_empty(), "{range:?}");
+            assert!(range.len() <= max_samples, "{range:?}");
+        }
+        assert_eq!(
+            ranges.iter().map(|range| range.len()).sum::<usize>(),
+            samples.len()
+        );
+    }
+
+    #[test]
+    fn a_long_clip_is_cut_inside_a_silence_near_the_window_end() {
+        // Cohere's 35 s window, and a silent second inside the 5 s a cut is
+        // searched for at the end of the first window.
+        let max_samples = 35 * 16_000;
+        let mut samples = vec![0.25_f32; 44 * 16_000];
+        let gap = 31 * 16_000..32 * 16_000;
+        samples[gap.clone()].fill(0.0);
+        let ranges = chunk_ranges(&samples, max_samples);
+        assert_eq!(ranges.len(), 2);
+        let cut = ranges[0].end;
+        assert!(gap.contains(&cut), "cut at {cut} is outside {gap:?}");
+        assert_eq!(ranges[1].start, cut);
+    }
+
+    #[test]
+    fn a_clip_without_silence_still_cuts_in_the_search_region() {
+        let max_samples = 35 * 16_000;
+        let samples = vec![0.25_f32; 40 * 16_000];
+        let ranges = chunk_ranges(&samples, max_samples);
+        assert_eq!(ranges.len(), 2);
+        let cut = ranges[0].end;
+        assert!(
+            (max_samples - QUIET_SEARCH_SAMPLES..max_samples).contains(&cut),
+            "cut at {cut} is outside the last 5 s of the first window"
+        );
+        assert_eq!(
+            cut,
+            max_samples - QUIET_SPAN_SAMPLES / 2,
+            "every span is equally quiet, so the latest one wins"
+        );
+        assert!(ranges[1].len() <= max_samples);
+    }
+
+    #[test]
+    fn a_clip_that_fits_one_window_is_not_cut() {
+        let samples = vec![0.1_f32; 16_000];
+        assert_eq!(chunk_ranges(&samples, 30 * 16_000), vec![0..16_000]);
+        assert_eq!(chunk_ranges(&samples, 16_000), vec![0..16_000]);
+        assert!(chunk_ranges(&[], 16_000).is_empty());
     }
 
     #[test]
