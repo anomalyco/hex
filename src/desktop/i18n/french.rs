@@ -15,6 +15,12 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Voice prompt", "Instruction vocale"),
+    ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Dites « rewrite this » pendant une dictée, puis une instruction ; Hex l'applique avec le modèle OpenCode du mode"),
+    ("Phrase", "Phrase"),
+    ("Use at least two words", "Utilisez au moins deux mots"),
+    ("Use at least six letters", "Utilisez au moins six lettres"),
+    ("The voice prompt asked for nothing", "L'instruction vocale ne demandait rien"),
     ("Hex picks a fast model", "Hex choisit un modèle rapide"),
     ("Follow live transcript", "Suivre la transcription en direct"),
     ("More call apps", "Plus d'apps d'appel"),

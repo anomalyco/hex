@@ -653,6 +653,18 @@ pub(super) const KEYS: &[Key] = &[
          that command, never pasted or copied, however the recording ends (macOS)",
     ),
     key(
+        "labs.voice_prompt",
+        Kind::Bool,
+        "Labs: a spoken phrase inside a dictation hands the mode's OpenCode model a one-off \
+         instruction for that dictation",
+    ),
+    key(
+        "labs.voice_prompt_phrase",
+        Kind::Text,
+        "Labs: the words that start a voice prompt, at least two words and six letters; \
+         \"rewrite this\" by default",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

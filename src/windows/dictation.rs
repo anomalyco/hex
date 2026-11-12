@@ -780,14 +780,15 @@ pub fn run(
         while let Ok(result) = results.try_recv() {
             pending = pending.saturating_sub(1);
             let job_id = job_ids.pop_front();
+            let nothing = result.result.is_ok() && result.text.as_deref() == Some("");
             if let (Some(indicator), Some(job_id)) = (&indicator, job_id) {
-                // Repaste ids were never announced, so the HUD ignores them.
-                // A failed Paste last dictation is not a failed capture, so it
-                // gets no notice either.
+                // Repaste ids were never announced; a failed Paste last gets no notice.
                 let failure = (result.kind != OutputKind::Repaste)
                     .then(|| result.result.as_ref().err().cloned())
                     .flatten();
-                indicator.send(if let Some(message) = failure {
+                indicator.send(if nothing {
+                    crate::rune_hud::HudEvent::JobCancelled { job_id }
+                } else if let Some(message) = failure {
                     crate::rune_hud::HudEvent::JobFailed {
                         job_id,
                         message: Some(message),
@@ -797,6 +798,7 @@ pub fn run(
                 });
             }
             match result.result {
+                Ok(()) if nothing => events.discarded_voice_prompt()?,
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
                     if !matches!(result.kind, OutputKind::Repaste) {
@@ -1088,6 +1090,11 @@ fn process_dictation_job(
             )
         };
         let text = processed.text.clone();
+        // A voice prompt that deliberately asked nothing ends quietly: no
+        // failure, no paste, no last dictation, and no History.
+        if processed.nothing {
+            return Ok(text);
+        }
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
@@ -1138,6 +1145,7 @@ fn process_dictation_job(
     );
     if let Some(print) = job.print.take() {
         print.send(match &result {
+            Ok(text) if text.trim().is_empty() => PrintedTranscript::NoSpeech,
             Ok(text) => PrintedTranscript::Text(text.clone()),
             Err(error) => PrintedTranscript::Failed(error.clone()),
         });
