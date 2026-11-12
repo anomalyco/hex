@@ -324,12 +324,14 @@ struct Row {
     icon: &'static Icon,
     title: &'static str,
     about: &'static str,
-    /// A line computed from this computer's state, shown instead of `about`
-    /// (the Live text card naming the models that stream).
+    /// A line computed from this computer's state, shown in addition to
+    /// `about` (the Live text card naming the models that stream, or the Live
+    /// typing card explaining this desktop has no input method it can use).
     note: Option<String>,
     on: bool,
     /// Can't be switched: on while an installed Hex Microphone driver or
-    /// the dictation model needs it, off under an organization's lock.
+    /// the dictation model needs it, off under an organization's lock, or off
+    /// because this desktop offers no input method Live typing uses.
     locked: bool,
     group: Group,
 }
@@ -1035,7 +1037,7 @@ fn live_text_note_for(
     }
     let streaming: Vec<&'static str> = MODELS
         .iter()
-        .filter(|model| model.streams && model.supports_language(language))
+        .filter(|model| model.streams && model.available() && model.supports_language(language))
         .map(|model| model.name)
         .collect();
     match *streaming.as_slice() {
@@ -1366,7 +1368,7 @@ mod tests {
         let note = live_text_note_for(TranscriptionModelId::ParakeetV3, "en", false).unwrap();
         let streaming: Vec<&str> = crate::transcription::models::MODELS
             .iter()
-            .filter(|model| model.streams && model.supports_language("en"))
+            .filter(|model| model.streams && model.available() && model.supports_language("en"))
             .map(|model| model.name)
             .collect();
         for name in streaming.iter().take(2) {

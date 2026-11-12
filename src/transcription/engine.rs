@@ -1266,6 +1266,14 @@ impl Worker {
                 .model
                 .as_ref()
                 .and_then(|model| model.gguf_selection())
+                // An imported model's catalog entry says it can't stream, but
+                // its GGUF is only checked when it loads.
+                .filter(|selection| {
+                    !matches!(
+                        selection.model,
+                        crate::transcription::models::TranscriptionModelId::Custom(_)
+                    )
+                })
                 .map(|selection| crate::transcription::models::definition(selection.model).streams);
             match loaded {
                 true => tracing::info!(

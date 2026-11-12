@@ -1236,7 +1236,7 @@ impl DictationCapture {
                 reason = engine
                     .stream_refusal()
                     .unwrap_or("no live stream is available"),
-                "no live stream yet: no provisional words will show while this capture continues, and the transcript still pastes at the end"
+                "no live stream has opened yet; provisional words show only if one opens later"
             );
         }
         recording.show_live_text = recording.stream.is_some()

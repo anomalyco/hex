@@ -125,7 +125,7 @@ fn live_typing_note() -> Option<&'static str> {
         return None;
     }
     (!crate::linux::paste::wayland_offers("zwp_input_method_manager_v2")).then_some(
-        "This desktop's compositor doesn't offer the input method Live typing needs (GNOME doesn't); dictations paste normally",
+        "This desktop doesn't offer the input method Live typing needs (GNOME doesn't), so dictations paste normally",
     )
 }
 
