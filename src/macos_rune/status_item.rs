@@ -5,7 +5,10 @@ use color_eyre::eyre::{Result, eyre};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{AnyThread, DefinedClass, MainThreadOnly, msg_send, sel};
-use objc2_app_kit::{NSEventModifierFlags, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
+use objc2_app_kit::{
+    NSCellImagePosition, NSEventModifierFlags, NSImage, NSMenu, NSMenuItem, NSStatusBar,
+    NSStatusItem, NSVariableStatusItemLength,
+};
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
@@ -466,13 +469,16 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             .expect("every row is built")
     };
 
-    let item = NSStatusBar::systemStatusBar().statusItemWithLength(-2.0);
+    // Variable, not square (`-2.0`): a recording meeting puts its elapsed
+    // time beside the mark, which a square item clips to a few stray pixels.
+    let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
     let button = item
         .button(mtm)
         .ok_or_else(|| eyre!("status item button is unavailable"))?;
     let symbol = status_bar_icon(IDLE_ICON_PNG, "Hex")?;
     let recording_symbol = status_bar_icon(RECORDING_ICON_PNG, "Hex is recording a meeting")?;
     button.setImage(Some(&symbol));
+    button.setImagePosition(NSCellImagePosition::ImageLeading);
     // SAFETY: the target answers `menuNeedsUpdate:` and outlives the menu's
     // weak delegate reference (both live in STATUS_ITEM for the app's life).
     unsafe {
