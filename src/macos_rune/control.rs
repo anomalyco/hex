@@ -462,7 +462,7 @@ impl Pump {
                 }
                 // An open window keeps the Dock icon; closing it applies this.
                 settings::Effect::DockIcon if !window_visible() => {
-                    crate::app_settings::set_dock_icon_visible(
+                    crate::macos_rune::set_dock_icon_visible(
                         crate::app_settings::dock_icon_visible(
                             change.settings.show_dock_icon,
                             crate::macos_rune::status_item::installed(),
