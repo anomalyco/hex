@@ -756,6 +756,7 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │   │   saved device returns, mid-meeting
 │   │   -> New input opens before the old drops; same track, no retry gap
 │   │      // macOS only (meetings are macOS); a failed open keeps the old input
+│   │      -> a release noted on the old input is forgotten, not carried over
 │   ├── Saved device listed but would not open -> System default stands in
 │   │   -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
 │   └── Stream delivers only exact zeros for 3 s (#1518)
@@ -785,15 +786,21 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       │      and one seen before a reopen and gone after it counts too
 │       │   -> a shrinking set of recorders, the call app included, is the
 │       │      change that can let one work
+│       │   -> the release is recorded where it is seen, so a stream that
+│       │      fails before its next chunk cannot lose it; the last set is
+│       │      shared across reopens, and a pid gone within 1 s of our own
+│       │      rate change is the driver restarting, not a release
 │       ├── A dictation captures or infers -> the quick reopens and the
 │       │   retries wait until it is idle, so a rate change never cuts a
-│       │   dictation; a release stays pending meanwhile
+│       │   dictation; a release stays pending meanwhile, and an open
+│       │   already decided under dictation opens without renegotiating and
+│       │   leaves the flag for the next open
 │       ├── Nonzero audio returns -> the live warning clears, including in a
 │       │   stream reopened after a supervisor restart; the episode's
 │       │   retries start over, but the recording's two reopens stay spent;
 │       │   the persisted warning stays
 │       ├── The call app leaves the input before a warning -> no further
-│       │   quick reopens or warnings until nonzero audio returns
+│       │   quick reopens or warnings until it reports the input again
 │       ├── Another episode after audio returns -> warns at once (the two
 │       │   reopens are spent), then gets its own retries
 │       └── Finished meeting -> its panel says the microphone was silent for
@@ -805,6 +812,7 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // a_warned_microphone_never_retries_without_a_release,
 │          // a_release_seen_before_the_warning_retries_once_it_shows,
 │          // a_release_seen_before_a_reopen_still_retries_after_it,
+│          // a_release_noted_before_a_failed_source_still_retries_after_its_reopen,
 │          // a_release_triggers_a_warned_retry,
 │          // a_silent_episode_gets_three_release_triggered_retries,
 │          // a_rebuilt_policy_keeps_the_silent_episodes_retries,
@@ -813,6 +821,8 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // a_reopen_waits_while_dictation_is_active,
 │          // a_release_triggered_retry_waits_while_dictation_is_active,
 │          // a_process_that_stops_recording_between_reopens_is_a_release,
+│          // a_release_just_after_our_own_rate_change_is_not_another_apps,
+│          // a_release_belongs_only_to_the_input_that_saw_it,
 │          // a_sticky_warning_survives_its_live_one_clearing,
 │          // a_dropped_warning_update_is_not_committed_and_is_retried,
 │          // only_an_input_the_call_app_reports_counts_as_held;
