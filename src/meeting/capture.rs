@@ -8,6 +8,7 @@
 //! Linux, and WASAPI loopback on Windows.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
@@ -78,6 +79,9 @@ impl SourceSupervisor {
         warnings: TrackWarnings,
     ) -> Self {
         let recovery = Arc::new(SilenceRecovery::default());
+        // The processes recording from the input, shared across reopens so a
+        // release between a stream failure and its replacement is still seen.
+        let recorders = Arc::new(InputRecorders::default());
         // The one open after a silence reopen makes the device renegotiate
         // its sample rate first, like dictation's.
         let renegotiate_rate = Arc::new(AtomicBool::new(false));
@@ -86,6 +90,7 @@ impl SourceSupervisor {
                 crate::app_settings::microphone_selection(),
                 application.clone(),
                 recovery.clone(),
+                recorders.clone(),
                 renegotiate_rate.clone(),
                 warnings.clone(),
             )
@@ -279,29 +284,66 @@ fn call_app_inputs(application: &str) -> Vec<String> {
     }
 }
 
+/// The processes recording from the input, shared by every stream the
+/// supervisor opens so an app that let go between a stream failure and its
+/// reopen is still seen leaving.
+#[derive(Default)]
+struct InputRecorders {
+    seen: Mutex<SeenInput>,
+}
+
+/// The last input whose recorders were seen, and those processes.
+#[derive(Default)]
+struct SeenInput {
+    uid: Option<String>,
+    pids: Vec<i32>,
+}
+
+impl InputRecorders {
+    /// Records `current` for `uid`, reporting whether a process known on that
+    /// same input stopped recording; a different input starts over.
+    fn update(&self, uid: Option<&str>, current: Vec<i32>) -> bool {
+        let mut seen = self.seen.lock().unwrap_or_else(|error| error.into_inner());
+        let released = seen.uid.as_deref() == uid && released_processes(&seen.pids, &current);
+        seen.uid = uid.map(str::to_owned);
+        seen.pids = current;
+        released
+    }
+
+    /// Starts over on `uid` without treating its difference as a release.
+    fn reset(&self, uid: Option<&str>, current: Vec<i32>) {
+        *self.seen.lock().unwrap_or_else(|error| error.into_inner()) = SeenInput {
+            uid: uid.map(str::to_owned),
+            pids: current,
+        };
+    }
+}
+
+/// Whether any process that was recording (`known`) is gone from `current`.
+fn released_processes(known: &[i32], current: &[i32]) -> bool {
+    known.iter().any(|pid| !current.contains(pid))
+}
+
 /// The processes recording from the input `uid`, Hex's own excluded, from
-/// Core Audio's process metadata: no audio is read. A set that shrinks means
-/// an app let go of the microphone, the change that can make renegotiating
-/// its sample rate succeed.
-fn recording_processes(uid: Option<&str>) -> Vec<i32> {
+/// Core Audio's process metadata: no audio is read. None when the OS does
+/// not report them, so a failed read never looks like a release.
+fn recording_processes(uid: Option<&str>) -> Option<Vec<i32>> {
     #[cfg(target_os = "macos")]
     {
-        let Some(uid) = uid else {
-            return Vec::new();
-        };
+        let uid = uid?;
         let ours = i32::try_from(std::process::id()).ok();
         match crate::microphone_activity::input_recorders(uid) {
-            Ok(pids) => pids.into_iter().filter(|pid| Some(*pid) != ours).collect(),
+            Ok(pids) => Some(pids.into_iter().filter(|pid| Some(*pid) != ours).collect()),
             Err(error) => {
                 tracing::debug!(%error, "could not read the processes recording from the meeting microphone");
-                Vec::new()
+                None
             }
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = uid;
-        Vec::new()
+        None
     }
 }
 
@@ -332,9 +374,8 @@ struct MicrophoneSource {
     /// The UID of this stream's input.
     opened_uid: Option<String>,
     call_input_checked: Instant,
-    /// The processes recording from `opened_uid` at the last look, Hex's own
-    /// excluded; a smaller set means an app released the microphone.
-    input_recorders: Vec<i32>,
+    /// The processes recording from the input, shared across reopens.
+    recorders: Arc<InputRecorders>,
     /// Another application released this stream's input; kept until the next
     /// chunk's silence decision reads it, because a poll may get no chunk.
     input_released: bool,
@@ -346,6 +387,7 @@ impl MicrophoneSource {
         (selection_revision, selected): (u64, Option<String>),
         application: Option<String>,
         silence_recovery: Arc<SilenceRecovery>,
+        recorders: Arc<InputRecorders>,
         renegotiate_rate: Arc<AtomicBool>,
         warnings: TrackWarnings,
     ) -> Result<Self> {
@@ -370,7 +412,14 @@ impl MicrophoneSource {
         renegotiate_rate.store(false, Ordering::Relaxed);
         let input = *input;
         let opened_uid = input.uid.clone();
-        let input_recorders = recording_processes(opened_uid.as_deref());
+        // Compare this open against the set the last stream saw, so an app
+        // that let go while the source was down still counts as a release.
+        let input_released = if application.is_some() {
+            recording_processes(opened_uid.as_deref())
+                .is_some_and(|current| recorders.update(opened_uid.as_deref(), current))
+        } else {
+            false
+        };
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
@@ -398,8 +447,8 @@ impl MicrophoneSource {
             call_inputs,
             opened_uid,
             call_input_checked: Instant::now(),
-            input_recorders,
-            input_released: false,
+            recorders,
+            input_released,
             recorders_checked: Instant::now(),
         })
     }
@@ -422,15 +471,12 @@ impl MicrophoneSource {
             return;
         }
         self.recorders_checked = now;
-        let current = recording_processes(self.opened_uid.as_deref());
-        if self
-            .input_recorders
-            .iter()
-            .any(|pid| !current.contains(pid))
-        {
+        let Some(current) = recording_processes(self.opened_uid.as_deref()) else {
+            return;
+        };
+        if self.recorders.update(self.opened_uid.as_deref(), current) {
             self.input_released = true;
         }
-        self.input_recorders = current;
     }
 
     /// Follows a change of the input the call app records from, of the
@@ -509,7 +555,9 @@ impl MicrophoneSource {
         // old one stays until real audio clears it.
         self.silence.reset(input.sample_rate);
         self.opened_uid = input.uid.clone();
-        self.input_recorders = recording_processes(self.opened_uid.as_deref());
+        if let Some(current) = recording_processes(self.opened_uid.as_deref()) {
+            self.recorders.reset(self.opened_uid.as_deref(), current);
+        }
         self.recorders_checked = now;
         // A release from the old input says nothing about the new one.
         self.input_released = false;
@@ -529,7 +577,7 @@ impl LiveSource for MicrophoneSource {
                     &samples,
                     self.call_app_holds_device(),
                     released,
-                    crate::transcription::engine::dictation_busy(),
+                    crate::transcription::engine::dictation_busy,
                 );
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
                 match action {
@@ -645,6 +693,27 @@ mod tests {
         assert!(retry.due.is_none());
         retry.resolved(Selection::Unlisted, start);
         assert!(retry.due.is_none());
+    }
+
+    #[test]
+    fn a_process_that_stops_recording_between_reopens_is_a_release() {
+        // The shared set from the old stream still names a process the new
+        // stream no longer sees.
+        let recorders = InputRecorders::default();
+        assert!(!recorders.update(Some("BuiltIn"), vec![41, 42]));
+        assert!(recorders.update(Some("BuiltIn"), vec![42]));
+        // A different input starts over rather than reporting every old pid.
+        assert!(!recorders.update(Some("Jabra"), vec![7]));
+        assert!(!recorders.update(Some("Jabra"), vec![7, 8]));
+        // The same input still catches a release after the new baseline.
+        assert!(recorders.update(Some("Jabra"), vec![8]));
+        // An empty first baseline is not a release.
+        let recorders = InputRecorders::default();
+        assert!(!recorders.update(Some("BuiltIn"), Vec::new()));
+        assert!(!recorders.update(Some("BuiltIn"), vec![1]));
+        assert!(!released_processes(&[], &[1, 2]));
+        assert!(!released_processes(&[1, 2], &[1, 2]));
+        assert!(released_processes(&[1, 2], &[2]));
     }
 
     #[test]

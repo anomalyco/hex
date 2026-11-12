@@ -153,18 +153,21 @@ impl SilenceWatch {
     }
 }
 
-/// One recording's shared silence recovery: its quick reopen budget and the
-/// release-triggered retry count of the current silent episode, both spent
-/// across every stream the supervisor reopens.
+/// One recording's shared silence recovery: its quick reopen budget, the
+/// release-triggered retry count, and whether another app released the input
+/// during the current silent episode. All survive the supervisor's reopens.
 #[derive(Default)]
 pub(super) struct SilenceRecovery {
     reopens: AtomicU8,
     retries: AtomicU8,
+    /// Another application released the input while the stream was silent,
+    /// even before the warning showed; a warned stream spends it as a retry.
+    released: AtomicBool,
 }
 
 impl SilenceRecovery {
-    /// Claims one of the recording's quick silence reopens; false once they
-    /// are spent, which is when a warning is raised instead.
+    /// Claims one of the silent episode's quick reopens; false once they are
+    /// spent, which is when a warning is raised instead.
     fn claim_reopen(&self) -> bool {
         self.reopens
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
@@ -183,9 +186,28 @@ impl SilenceRecovery {
             .is_ok()
     }
 
-    /// Audible audio ended the silent episode: the next one starts over.
+    /// Keeps that an application released the input, even before the
+    /// warning, so a warned stream still retries on it.
+    fn note_release(&self) {
+        self.released.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether a release is waiting for a warned stream to spend it.
+    fn has_release(&self) -> bool {
+        self.released.load(Ordering::Relaxed)
+    }
+
+    /// Takes the pending release, if any, for this chunk's retry.
+    fn take_release(&self) -> bool {
+        self.released.swap(false, Ordering::Relaxed)
+    }
+
+    /// Audible audio ended the silent episode: the next one gets its quick
+    /// reopens and retries back, and no stale release carries over.
     fn recovered(&self) {
+        self.reopens.store(0, Ordering::Relaxed);
         self.retries.store(0, Ordering::Relaxed);
+        self.released.store(false, Ordering::Relaxed);
     }
 }
 
@@ -198,10 +220,6 @@ pub(super) struct SilencePolicy {
     warning: bool,
     /// This silent episode was already reported as gated by the call app.
     gated: bool,
-    /// Another application released the input since the warning showed, so a
-    /// retry can renegotiate the rate now; kept until one runs or audio
-    /// returns.
-    pending_retry: bool,
     /// The reopen this chunk decided was a release-triggered retry, for its
     /// log.
     retrying: bool,
@@ -216,7 +234,6 @@ impl SilencePolicy {
             recovery,
             warning,
             gated: false,
-            pending_retry: false,
             retrying: false,
         }
     }
@@ -230,41 +247,47 @@ impl SilencePolicy {
     /// Decides one chunk. The quick reopens and the warning are decided only
     /// while the call app records from this input, so a microphone a call app
     /// leaves digitally silent between user speech is not mistaken for a
-    /// broken stream; a manual recording never reopens or warns. After the
-    /// warning, a renegotiating retry runs only when another application
-    /// released the input (`released`), at most [`SILENCE_RETRIES`] times per
-    /// silent episode. Both kinds of reopen wait while `dictation_active`, so
-    /// a rate change never interrupts dictation.
+    /// broken stream; a manual recording never reopens or warns. A release of
+    /// the input is kept for the whole silent episode, and after the warning
+    /// it runs a renegotiating retry, at most [`SILENCE_RETRIES`] times per
+    /// episode. Both kinds of reopen wait while dictation is active, so a
+    /// rate change never interrupts dictation; `dictation_active` is called
+    /// only on those paths.
     pub(super) fn observe(
         &mut self,
         samples: &[f32],
         call_app_holds_device: bool,
         released: bool,
-        dictation_active: bool,
+        dictation_active: impl Fn() -> bool,
     ) -> SilenceAction {
         self.retrying = false;
-        if released && self.warning {
-            self.pending_retry = true;
-        }
         let silent = self.watch.observe(samples);
         if !silent {
             self.gated = false;
             let audible = samples.iter().any(|&sample| sample != 0.0);
-            return if audible && self.warning {
+            if audible {
                 self.recovery.recovered();
-                self.pending_retry = false;
-                SilenceAction::Clear
-            } else {
-                SilenceAction::Nothing
-            };
+                return if self.warning {
+                    SilenceAction::Clear
+                } else {
+                    SilenceAction::Nothing
+                };
+            }
+        }
+        if released {
+            self.recovery.note_release();
+        }
+        if !silent {
+            return SilenceAction::Nothing;
         }
         if self.warning {
-            if self.pending_retry && !dictation_active {
-                self.pending_retry = false;
-                if self.recovery.claim_retry() {
-                    self.retrying = true;
-                    return SilenceAction::Reopen;
-                }
+            if self.recovery.has_release()
+                && !dictation_active()
+                && self.recovery.take_release()
+                && self.recovery.claim_retry()
+            {
+                self.retrying = true;
+                return SilenceAction::Reopen;
             }
             return SilenceAction::Nothing;
         }
@@ -275,7 +298,7 @@ impl SilencePolicy {
             self.gated = true;
             return SilenceAction::Gated;
         }
-        if dictation_active {
+        if dictation_active() {
             return SilenceAction::Nothing;
         }
         if self.recovery.claim_reopen() {
@@ -338,7 +361,7 @@ mod tests {
         let recovery = spent_recovery();
         let mut policy = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            policy.observe(&[0.0; 3_000], true, false, false),
+            policy.observe(&[0.0; 3_000], true, false, || false),
             SilenceAction::Warn
         );
         policy.applied(SilenceAction::Warn);
@@ -350,27 +373,27 @@ mod tests {
         let recovery = Arc::new(SilenceRecovery::default());
         let mut first = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            first.observe(&[0.0; 3_000], true, false, false),
+            first.observe(&[0.0; 3_000], true, false, || false),
             SilenceAction::Reopen
         );
         let mut second = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            second.observe(&[0.0; 3_000], true, false, false),
+            second.observe(&[0.0; 3_000], true, false, || false),
             SilenceAction::Reopen
         );
         let mut third = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            third.observe(&[0.0; 3_000], true, false, false),
+            third.observe(&[0.0; 3_000], true, false, || false),
             SilenceAction::Warn
         );
         // The warning is offered again until the controller has it.
         assert_eq!(
-            third.observe(&[0.0; 100], true, false, false),
+            third.observe(&[0.0; 100], true, false, || false),
             SilenceAction::Warn
         );
         third.applied(SilenceAction::Warn);
         assert_eq!(
-            third.observe(&[0.0; 100], true, false, false),
+            third.observe(&[0.0; 100], true, false, || false),
             SilenceAction::Nothing
         );
     }
@@ -382,7 +405,7 @@ mod tests {
         // whether or not the call app still reports the input.
         for call_app_holds_device in [true; 10].into_iter().chain([false; 10]) {
             assert_eq!(
-                policy.observe(&[0.0; 100], call_app_holds_device, false, false),
+                policy.observe(&[0.0; 100], call_app_holds_device, false, || false),
                 SilenceAction::Nothing
             );
             assert!(!policy.retrying());
@@ -395,7 +418,7 @@ mod tests {
         // Another app letting go of the opened input is the change that can
         // make a renegotiation succeed.
         assert_eq!(
-            policy.observe(&[0.0; 100], true, true, false),
+            policy.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Reopen
         );
         assert!(policy.retrying(), "logged as a retry, not a quick reopen");
@@ -406,7 +429,7 @@ mod tests {
     fn a_warned_microphone_retries_after_the_call_app_lets_go() {
         let (_, mut policy) = warned_policy();
         assert_eq!(
-            policy.observe(&[0.0; 100], false, true, false),
+            policy.observe(&[0.0; 100], false, true, || false),
             SilenceAction::Reopen
         );
         assert!(policy.retrying());
@@ -417,20 +440,20 @@ mod tests {
         let (recovery, mut policy) = warned_policy();
         for _ in 0..SILENCE_RETRIES {
             assert_eq!(
-                policy.observe(&[0.0; 100], true, true, false),
+                policy.observe(&[0.0; 100], true, true, || false),
                 SilenceAction::Reopen
             );
             policy.applied(SilenceAction::Reopen);
         }
         assert_eq!(
-            policy.observe(&[0.0; 100], true, true, false),
+            policy.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Nothing,
             "the episode's retries are spent"
         );
         // The cap is shared, so a stream the supervisor reopened gets none.
         let mut replacement = SilencePolicy::new(1_000, recovery, true);
         assert_eq!(
-            replacement.observe(&[0.0; 3_000], true, true, false),
+            replacement.observe(&[0.0; 3_000], true, true, || false),
             SilenceAction::Nothing
         );
     }
@@ -439,7 +462,7 @@ mod tests {
     fn a_rebuilt_policy_keeps_the_silent_episodes_retries() {
         let (recovery, mut first) = warned_policy();
         assert_eq!(
-            first.observe(&[0.0; 100], true, true, false),
+            first.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Reopen
         );
         first.applied(SilenceAction::Reopen);
@@ -447,11 +470,11 @@ mod tests {
         // warning, and needs its own release before another retry.
         let mut second = SilencePolicy::new(1_000, recovery, true);
         assert_eq!(
-            second.observe(&[0.0; 3_000], true, false, false),
+            second.observe(&[0.0; 3_000], true, false, || false),
             SilenceAction::Nothing
         );
         assert_eq!(
-            second.observe(&[0.0; 100], true, true, false),
+            second.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Reopen
         );
         assert!(second.retrying());
@@ -461,12 +484,12 @@ mod tests {
     fn a_reopen_waits_while_dictation_is_active() {
         let mut policy = SilencePolicy::new(1_000, Arc::new(SilenceRecovery::default()), false);
         assert_eq!(
-            policy.observe(&[0.0; 3_000], true, false, true),
+            policy.observe(&[0.0; 3_000], true, false, || true),
             SilenceAction::Nothing,
             "a quick reopen must not renegotiate under a dictation"
         );
         assert_eq!(
-            policy.observe(&[0.0; 100], true, false, false),
+            policy.observe(&[0.0; 100], true, false, || false),
             SilenceAction::Reopen
         );
     }
@@ -475,47 +498,93 @@ mod tests {
     fn a_release_triggered_retry_waits_while_dictation_is_active() {
         let (_, mut policy) = warned_policy();
         assert_eq!(
-            policy.observe(&[0.0; 100], true, true, true),
+            policy.observe(&[0.0; 100], true, true, || true),
             SilenceAction::Nothing
         );
         // The release is kept until dictation is idle.
         assert_eq!(
-            policy.observe(&[0.0; 100], true, false, false),
+            policy.observe(&[0.0; 100], true, false, || false),
             SilenceAction::Reopen
         );
         assert!(policy.retrying());
     }
 
     #[test]
-    fn audible_audio_resets_a_silent_episodes_retry_cap() {
+    fn a_release_seen_before_the_warning_retries_once_it_shows() {
+        let recovery = spent_recovery();
+        let mut policy = SilencePolicy::new(1_000, recovery, false);
+        // The release arrives while the stream is silent but before the
+        // warning: the chunk itself warns, and the release is kept.
+        assert_eq!(
+            policy.observe(&[0.0; 3_000], true, true, || false),
+            SilenceAction::Warn
+        );
+        policy.applied(SilenceAction::Warn);
+        assert_eq!(
+            policy.observe(&[0.0; 100], true, false, || false),
+            SilenceAction::Reopen
+        );
+        assert!(policy.retrying());
+    }
+
+    #[test]
+    fn a_release_seen_before_a_reopen_still_retries_after_it() {
+        let recovery = spent_recovery();
+        let mut first = SilencePolicy::new(1_000, recovery.clone(), false);
+        assert_eq!(
+            first.observe(&[0.0; 3_000], true, true, || false),
+            SilenceAction::Warn
+        );
+        first.applied(SilenceAction::Warn);
+        drop(first);
+        // The supervisor reopened the stream before the warning's next chunk.
+        let mut second = SilencePolicy::new(1_000, recovery, true);
+        assert_eq!(
+            second.observe(&[0.0; 3_000], true, false, || false),
+            SilenceAction::Reopen
+        );
+        assert!(second.retrying());
+    }
+
+    #[test]
+    fn audible_audio_resets_the_episodes_reopens_and_retries() {
         let (recovery, mut warned) = warned_policy();
         for _ in 0..SILENCE_RETRIES {
             assert_eq!(
-                warned.observe(&[0.0; 100], true, true, false),
+                warned.observe(&[0.0; 100], true, true, || false),
                 SilenceAction::Reopen
             );
         }
         assert_eq!(
-            warned.observe(&[0.0; 100], true, true, false),
+            warned.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Nothing
         );
 
-        // A reopened stream that hears audio clears the warning and the cap.
+        // A reopened stream that hears audio clears the warning, the retry
+        // cap, and the quick reopen budget.
         let mut replacement = SilencePolicy::new(1_000, recovery, true);
         assert_eq!(
-            replacement.observe(&[0.25], true, false, false),
+            replacement.observe(&[0.25], true, false, || false),
             SilenceAction::Clear
         );
         replacement.applied(SilenceAction::Clear);
-        // The next silent episode warns at once (the quick budget is spent)
-        // and its own retries start over from a release.
+        // The next silent episode gets both quick reopens again, then warns.
         assert_eq!(
-            replacement.observe(&[0.0; 3_000], true, false, false),
+            replacement.observe(&[0.0; 3_000], true, false, || false),
+            SilenceAction::Reopen
+        );
+        assert_eq!(
+            replacement.observe(&[0.0; 100], true, false, || false),
+            SilenceAction::Reopen
+        );
+        assert_eq!(
+            replacement.observe(&[0.0; 100], true, false, || false),
             SilenceAction::Warn
         );
         replacement.applied(SilenceAction::Warn);
+        // Its own release-triggered retries start over too.
         assert_eq!(
-            replacement.observe(&[0.0; 100], true, true, false),
+            replacement.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Reopen
         );
         assert!(replacement.retrying());
@@ -527,13 +596,13 @@ mod tests {
         assert!(warnings.warn());
         let mut policy = SilencePolicy::new(1_000, spent_recovery(), warnings.live().is_some());
         assert_eq!(
-            policy.observe(&[0.0, 0.25], true, false, false),
+            policy.observe(&[0.0, 0.25], true, false, || false),
             SilenceAction::Clear,
             "a fresh stream must clear a warning it did not raise"
         );
         policy.applied(SilenceAction::Clear);
         assert_eq!(
-            policy.observe(&[0.0, 0.25], true, false, false),
+            policy.observe(&[0.0, 0.25], true, false, || false),
             SilenceAction::Nothing
         );
     }
@@ -543,20 +612,20 @@ mod tests {
         let mut policy = SilencePolicy::new(1_000, Arc::new(SilenceRecovery::default()), false);
         // Reported once per episode for field logs, never reopened or warned.
         assert_eq!(
-            policy.observe(&[0.0; 3_000], false, false, false),
+            policy.observe(&[0.0; 3_000], false, false, || false),
             SilenceAction::Gated
         );
         assert_eq!(
-            policy.observe(&[0.0; 3_000], false, false, false),
+            policy.observe(&[0.0; 3_000], false, false, || false),
             SilenceAction::Nothing
         );
         // Audio returning starts a new episode, so a later one is reported.
         assert_eq!(
-            policy.observe(&[0.25], false, false, false),
+            policy.observe(&[0.25], false, false, || false),
             SilenceAction::Nothing
         );
         assert_eq!(
-            policy.observe(&[0.0; 3_000], false, false, false),
+            policy.observe(&[0.0; 3_000], false, false, || false),
             SilenceAction::Gated
         );
     }
@@ -632,15 +701,15 @@ mod tests {
         let mut policy = SilencePolicy::new(1_000, spent_recovery(), warnings.live().is_some());
         policy.reset(2_000);
         assert_eq!(
-            policy.observe(&[0.0; 1_000], true, false, false),
+            policy.observe(&[0.0; 1_000], true, false, || false),
             SilenceAction::Nothing
         );
         assert_eq!(
-            policy.observe(&[0.0; 5_000], true, false, false),
+            policy.observe(&[0.0; 5_000], true, false, || false),
             SilenceAction::Nothing
         );
         assert_eq!(
-            policy.observe(&[0.25], true, false, false),
+            policy.observe(&[0.25], true, false, || false),
             SilenceAction::Clear
         );
     }
