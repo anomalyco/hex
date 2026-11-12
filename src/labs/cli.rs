@@ -97,8 +97,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         announce_note(feature, on);
         return Ok(());
     }
+    let base = settings.clone();
     feature.set(&mut settings, on);
-    settings.save()?;
+    base.update(&settings)?;
     println!("Turned {} {state}.", feature.name());
     announce_note(feature, on);
     Ok(())

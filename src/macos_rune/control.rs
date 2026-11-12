@@ -320,9 +320,10 @@ impl Pump {
     /// an open window adopt it.
     fn edit_vocabulary(&mut self, command: &ControlCommand) -> Result<ControlReply, ControlError> {
         let mut settings = load()?;
+        let base = settings.clone();
         let reply = control::edit_vocabulary(&mut settings.vocabulary, command)?;
         if matches!(reply, ControlReply::Done { changed: true, .. }) {
-            settings.save().map_err(|error| {
+            base.update(&settings).map_err(|error| {
                 ControlError::new("internal", format!("couldn't save: {error:#}"))
             })?;
             let _ = self.runtime.send(Request::ReloadSettings);
@@ -446,20 +447,12 @@ impl Pump {
         if !change.changed(before) {
             return Ok(ControlReply::unchanged(unchanged()));
         }
-        change
-            .settings
-            .save()
+        before
+            .update(&change.settings)
             .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))?;
         let _ = self.runtime.send(Request::ReloadSettings);
         for effect in change.effects {
             match effect {
-                settings::Effect::HistoryRetention(retention) => {
-                    if let Some(history) = self.runtime.history()
-                        && let Err(error) = history.set_retention(retention)
-                    {
-                        tracing::warn!(%error, "could not apply history retention");
-                    }
-                }
                 // An open window keeps the Dock icon; closing it applies this.
                 settings::Effect::DockIcon if !window_visible() => {
                     crate::macos_rune::set_dock_icon_visible(

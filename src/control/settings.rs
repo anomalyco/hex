@@ -116,7 +116,6 @@ pub struct ShortcutRules {
 /// Something the host does beyond saving `settings.json`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
-    HistoryRetention(crate::history::HistoryRetention),
     DockIcon,
     /// Check the newly chosen channel now rather than within the hour.
     CheckForUpdates,
@@ -290,6 +289,9 @@ pub fn apply(
     let mut effects = Vec::new();
     let message = format!("Set {name}");
     match key.key {
+        "sound_effects" if candidate.sound_effects && candidate.sound_effect_volume <= 0.0 => {
+            candidate.sound_effect_volume = AppSettings::default().sound_effect_volume;
+        }
         "meetings.summaries"
             if candidate.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode
                 && crate::policy::Policy::current()
@@ -443,7 +445,6 @@ pub fn apply(
                 return Err(invalid(name, why));
             }
         }
-        "history_retention" => effects.push(Effect::HistoryRetention(candidate.history_retention)),
         "show_dock_icon" => effects.push(Effect::DockIcon),
         "updates.channel" => effects.push(Effect::CheckForUpdates),
         _ => {}
@@ -1198,11 +1199,10 @@ mod tests {
         .unwrap();
         assert_eq!(cleared.settings.meetings.audio_retention, None);
         assert_eq!(
-            history.effects,
-            vec![Effect::HistoryRetention(
-                crate::history::HistoryRetention::Month
-            )]
+            history.settings.history_retention,
+            crate::history::HistoryRetention::Month
         );
+        assert!(history.effects.is_empty());
     }
 
     /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux
@@ -1274,6 +1274,18 @@ mod tests {
         assert_eq!(languages, choices);
         let change = apply(&AppSettings::default(), "ui_language", "fr", &rules()).unwrap();
         assert_eq!(change.settings.ui_language.as_deref(), Some("fr"));
+    }
+
+    #[test]
+    fn enabling_tones_restores_a_nonzero_level() {
+        let settings = AppSettings {
+            sound_effects: false,
+            sound_effect_volume: 0.0,
+            ..Default::default()
+        };
+        let change = apply(&settings, "sound_effects", "true", &rules()).unwrap();
+        assert!(change.settings.sound_effects);
+        assert!(change.settings.sound_effect_volume > 0.0);
     }
 
     #[test]

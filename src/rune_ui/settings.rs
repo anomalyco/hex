@@ -519,7 +519,7 @@ pub(super) fn restore_default(ui: &mut Ui, target: ShortcutTarget, default: Hotk
 }
 
 pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
-    if !settings.sound_effects {
+    if !settings.sound_effects || settings.sound_effect_volume <= 0.0 {
         return 0;
     }
     SOUND_VOLUME_STEPS[1..]

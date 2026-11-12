@@ -242,6 +242,8 @@ impl RecordingAudioBehavior {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct AppSettings {
+    #[serde(skip)]
+    pub(crate) source: persistence::Source,
     /// Retired spoken-commands opt-in, kept untouched in `settings.json`.
     #[serde(
         default,
@@ -420,6 +422,7 @@ where
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            source: Default::default(),
             retired_commands_enabled: None,
             release_microphone_while_idle: false,
             sound_effects: true,
@@ -554,9 +557,14 @@ impl AppSettings {
     }
 
     pub fn save_transcription(&mut self, selection: TranscriptionSelection) -> Result<()> {
-        self.save_transcription_with(selection, Self::save)
+        crate::transcription::models::validate(&selection)?;
+        let mut candidate = self.clone();
+        candidate.remember_transcription(selection);
+        *self = self.update(&candidate)?;
+        Ok(())
     }
 
+    #[cfg(test)]
     fn save_transcription_with(
         &mut self,
         selection: TranscriptionSelection,
@@ -571,6 +579,7 @@ impl AppSettings {
     /// Persist the entire candidate before replacing the current editor value.
     /// The candidate may include unrelated debounced edits, which must survive
     /// both failed immediate changes and successful commits.
+    #[cfg(test)]
     pub(crate) fn commit_with(
         &mut self,
         candidate: Self,
@@ -587,6 +596,7 @@ impl AppSettings {
         let mut settings = Self::load_from(&path)?;
         #[cfg(hex_capture)]
         {
+            let base = settings.clone();
             let read = |path: PathBuf| fs::read(path).ok();
             let engine = read(scrawl_capture::handoff::default_config_path());
             let mut imported = false;
@@ -610,7 +620,7 @@ impl AppSettings {
             if imported
                 && path.exists()
                 && persistence::healthy_file(&path)
-                && let Err(error) = settings.write_to(&path)
+                && let Err(error) = base.update(&settings).map(|saved| settings = saved)
             {
                 tracing::warn!(%error, "could not record the Scrawl settings import");
             }
@@ -721,13 +731,6 @@ impl AppSettings {
         Ok(Self::read_from(&path()?)?.0)
     }
 
-    pub fn save(&self) -> Result<()> {
-        let path = path()?;
-        self.write_to(&path)?;
-        self.apply_runtime();
-        Ok(())
-    }
-
     fn validate_recording_duck_volume(&self) -> Result<()> {
         if !self.recording_duck_volume.is_finite()
             || !(0.0..=1.0).contains(&self.recording_duck_volume)
@@ -738,13 +741,25 @@ impl AppSettings {
     }
 
     fn apply_runtime(&self) {
+        // A read may finish publishing after a newer transaction has saved.
+        // Keep all runtime projections in the same revision order as disk.
+        static APPLIED: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+        let mut applied = APPLIED.lock().unwrap_or_else(|error| error.into_inner());
+        if self.source.revision != 0 && self.source.revision < *applied {
+            return;
+        }
+        *applied = (*applied).max(self.source.revision);
+        self.apply_runtime_values();
+    }
+
+    fn apply_runtime_values(&self) {
         // Whatever an editor holds, a managed lock keeps its switches off.
         let policy = crate::policy::Policy::current();
         if policy.any() {
             let mut managed = self.clone();
             policy.enforce(&mut managed);
             if managed != *self {
-                return managed.apply_runtime();
+                return managed.apply_runtime_values();
             }
         }
         MICROPHONE_POLICY.store(
@@ -959,8 +974,9 @@ impl AppSettings {
     #[cfg(target_os = "macos")]
     pub(crate) fn record_anomaly_identity(&mut self, path: &std::path::Path) -> Result<()> {
         if self.predates_anomaly_identity() {
-            self.migrations.push(ANOMALY_IDENTITY_MIGRATION.into());
-            self.write_to(path)?;
+            let mut candidate = self.clone();
+            candidate.migrations.push(ANOMALY_IDENTITY_MIGRATION.into());
+            *self = self.update_at(&candidate, path, crate::policy::Policy::current())?;
         }
         Ok(())
     }

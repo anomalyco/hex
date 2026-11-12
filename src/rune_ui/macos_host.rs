@@ -111,9 +111,16 @@ impl Backend {
 
     /// Saves `settings.json`, then asks the runtime to reload it. The
     /// listener follows the saved file itself.
-    pub(super) fn save(&mut self, settings: &crate::app_settings::AppSettings) -> Result<()> {
-        settings.save()?;
-        self.send(Request::ReloadSettings)
+    pub(super) fn save(
+        &mut self,
+        base: &crate::app_settings::AppSettings,
+        settings: &crate::app_settings::AppSettings,
+    ) -> Result<crate::app_settings::AppSettings> {
+        let saved = base.update(settings)?;
+        if let Err(error) = self.send(Request::ReloadSettings) {
+            tracing::warn!(%error, "settings saved but runtime reload could not be queued");
+        }
+        Ok(saved)
     }
 
     pub(super) fn quit(&mut self) {
@@ -1262,8 +1269,10 @@ fn upcoming_meeting(meeting: &crate::calendar::CalendarMeeting, now_ms: i64) -> 
 fn save_calendar_connected() -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
+    let base = settings.clone();
     settings.meetings.calendar.connected = true;
-    settings.save().map_err(|error| format!("{error:#}"))?;
+    base.update(&settings)
+        .map_err(|error| format!("{error:#}"))?;
     match crate::macos_rune::runtime() {
         Some(runtime) => runtime
             .send(Request::ReloadSettings)
@@ -1382,8 +1391,10 @@ impl ScrawlHost {
 fn save_settings(change: impl FnOnce(&mut crate::app_settings::AppSettings)) -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
+    let base = settings.clone();
     change(&mut settings);
-    settings.save().map_err(|error| format!("{error:#}"))?;
+    base.update(&settings)
+        .map_err(|error| format!("{error:#}"))?;
     if let Some(runtime) = crate::macos_rune::runtime() {
         runtime
             .send(Request::ReloadSettings)
@@ -1396,8 +1407,10 @@ fn save_settings(change: impl FnOnce(&mut crate::app_settings::AppSettings)) -> 
 fn save_meetings_folder(folder: PathBuf) -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
+    let base = settings.clone();
     settings.meetings.output_folder = Some(folder);
-    settings.save().map_err(|error| format!("{error:#}"))?;
+    base.update(&settings)
+        .map_err(|error| format!("{error:#}"))?;
     if let Some(runtime) = crate::macos_rune::runtime() {
         runtime
             .send(Request::ReloadSettings)

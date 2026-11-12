@@ -40,7 +40,7 @@ pub(crate) use self::meetings::meeting_import_failed;
 #[cfg(hex_capture)]
 mod captures;
 mod meetings_host;
-pub(crate) use meetings_host::{meeting_corner_moved, meeting_failed, meeting_provider_chosen};
+pub(crate) use meetings_host::{meeting_failed, meeting_settings_saved};
 mod model_details;
 mod model_import;
 mod models;
@@ -744,8 +744,9 @@ impl Ui {
         }
         // A mouse-button shortcut went back to its default: say so once.
         if ui.settings.mouse_shortcut_notice {
+            let base = ui.settings.clone();
             ui.settings.mouse_shortcut_notice = false;
-            if let Err(error) = ui.settings.save() {
+            if let Err(error) = base.update(&ui.settings).map(|saved| ui.settings = saved) {
                 tracing::warn!(%error, "could not clear the mouse shortcut note");
             }
             ui.error.get_or_insert_with(|| {
@@ -860,18 +861,27 @@ impl Ui {
         self.commit(candidate)
     }
 
-    fn commit(&mut self, candidate: AppSettings) -> bool {
+    fn commit(&mut self, mut candidate: AppSettings) -> bool {
+        let submitted = candidate.clone();
         match &mut self.service {
-            Service::Live(backend) => {
-                if let Err(error) = backend.save(&candidate) {
+            Service::Live(backend) => match backend.save(&self.settings, &candidate) {
+                Ok(saved) => candidate = saved,
+                Err(error) => {
                     self.error = Some(format!("{error:#}"));
                     return false;
                 }
-            }
+            },
             Service::Fixture(_) => self.saved += 1,
             Service::Pending(_) => {}
         }
         self.error = None;
+        if candidate.vocabulary != submitted.vocabulary {
+            self.vocabulary.reload(&candidate.vocabulary);
+        }
+        self.lab_store.rebase_phrase(
+            &submitted.labs.voice_prompt_phrase,
+            &candidate.labs.voice_prompt_phrase,
+        );
         self.settings = candidate;
         self.modes.committed(&self.settings);
         self.draft_since = None;
@@ -1067,7 +1077,11 @@ impl Ui {
     /// draft's save never writes back what another writer (`hex settings
     /// set`, a capture's saved rule) changed meanwhile.
     fn adopt(&mut self, service: AppSettings) -> bool {
-        if self.service_settings.as_ref() == Some(&service) {
+        if service.source.revision != 0 && service.source.revision <= self.settings.source.revision
+        {
+            return false;
+        }
+        if service.source.revision == 0 && self.service_settings.as_ref() == Some(&service) {
             return false;
         }
         let changed = service != self.settings;
@@ -1097,6 +1111,7 @@ impl Ui {
             self.settings = service.clone();
             self.settings_changed();
         }
+        self.settings.source = service.source.clone();
         self.service_settings = Some(service);
         changed
     }

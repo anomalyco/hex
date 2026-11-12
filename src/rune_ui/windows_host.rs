@@ -75,9 +75,16 @@ impl Backend {
     }
 
     /// Saves `settings.json`, then asks the runtime to reload it.
-    pub(super) fn save(&mut self, settings: &crate::app_settings::AppSettings) -> Result<()> {
-        settings.save()?;
-        self.send(Request::ReloadSettings)
+    pub(super) fn save(
+        &mut self,
+        base: &crate::app_settings::AppSettings,
+        settings: &crate::app_settings::AppSettings,
+    ) -> Result<crate::app_settings::AppSettings> {
+        let saved = base.update(settings)?;
+        if let Err(error) = self.send(Request::ReloadSettings) {
+            tracing::warn!(%error, "settings saved but runtime reload could not be queued");
+        }
+        Ok(saved)
     }
 
     /// Asks the runtime to stop the listener and end the app, as the

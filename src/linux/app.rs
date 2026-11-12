@@ -186,6 +186,7 @@ pub(crate) struct HostSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HostRequest {
     Desktop(DesktopAction),
+    ReloadSettings,
     /// Stops listening while the window records a shortcut.
     CaptureShortcutFor(ShortcutTarget),
     CancelShortcut,
@@ -258,6 +259,10 @@ impl HostHandle {
             let mut host = self.lock();
             match request {
                 HostRequest::Desktop(action) => host.dispatch(action),
+                HostRequest::ReloadSettings => {
+                    host.reload_changed_settings();
+                    Ok(())
+                }
                 HostRequest::CaptureShortcutFor(target) => {
                     host.begin_shortcut_edit(target, None);
                     Ok(())
@@ -284,12 +289,16 @@ impl HostHandle {
 
     /// Saves the window's settings, then adopts them. A failed save leaves
     /// the host's settings alone.
-    pub(crate) fn save_settings(&self, settings: AppSettings) -> Result<()> {
-        settings.save()?;
-        self.lock().adopt_settings(settings);
+    pub(crate) fn save_settings(
+        &self,
+        base: &AppSettings,
+        settings: &AppSettings,
+    ) -> Result<AppSettings> {
+        let settings = base.update(settings)?;
+        self.lock().adopt_settings(settings.clone());
         self.wake();
         self.notify();
-        Ok(())
+        Ok(settings)
     }
 
     /// The host's retained-history store; one store per process.
@@ -701,9 +710,7 @@ impl LinuxDesktopHost {
                 self.settings_error = Some(issue.reload_error());
             }
             Ok((settings, None)) => {
-                // Adopting a fixed or removed file also clears this process's
-                // stale-defaults refusal; nowhere else does.
-                AppSettings::forget_unparseable(&path);
+                // Only the adopted snapshot gains permission to save.
                 if settings != self.settings {
                     tracing::info!("settings.json changed outside Hex; applying it");
                 }
@@ -1006,10 +1013,15 @@ impl LinuxDesktopHost {
     /// Adopts settings the window saved. A running listener applies them in
     /// place, so listening never stops for a settings change.
     fn adopt_settings(&mut self, settings: AppSettings) {
+        if settings.source.revision != 0 && settings.source.revision < self.settings.source.revision
+        {
+            return;
+        }
         // A valid file clears the parse error even when it loads the settings
         // already running (a fixed file equal to what Hex had in memory).
         self.settings_error = None;
         if self.settings_valid && settings == self.settings {
+            self.settings.source = settings.source;
             return;
         }
         if self
@@ -1323,9 +1335,9 @@ fn settings_modified() -> Option<std::time::SystemTime> {
 
 fn save_with(change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings> {
     let mut settings = AppSettings::load()?;
+    let base = settings.clone();
     change(&mut settings);
-    settings.save()?;
-    Ok(settings)
+    base.update(&settings)
 }
 
 #[cfg(not(test))]

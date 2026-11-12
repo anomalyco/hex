@@ -1185,9 +1185,10 @@ fn edit_routing(
     edit: impl FnOnce(&scrawl_capture::RouterConfig) -> color_eyre::Result<scrawl_capture::RouterConfig>,
 ) -> color_eyre::Result<()> {
     let mut settings = crate::app_settings::AppSettings::load()?;
+    let base = settings.clone();
     let next = edit(settings.capture.routing.config())?;
     settings.capture.routing = next.into();
-    settings.save()?;
+    base.update(&settings)?;
     #[cfg(target_os = "macos")]
     if let Some(runtime) = crate::macos_rune::runtime() {
         let _ = runtime.send(crate::macos_rune::Request::ReloadSettings);

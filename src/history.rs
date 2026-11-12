@@ -48,6 +48,10 @@ pub enum HistoryRetention {
 }
 
 impl HistoryRetention {
+    /// Entries exactly at the cutoff remain visible. Off preserves old entries.
+    pub fn cutoff(self, now_ms: u64) -> Option<u64> {
+        self.max_age_ms().map(|age| now_ms.saturating_sub(age))
+    }
     pub const ALL: [Self; 5] = [Self::Off, Self::Day, Self::Week, Self::Month, Self::Forever];
 
     pub const fn label(self) -> &'static str {
@@ -376,11 +380,11 @@ impl HistoryStore {
     /// entry past retention is pruned in memory first, so the revision also
     /// moves when time expires one; the idle worker saves that prune.
     pub fn revision(&mut self, now_ms: u64) -> u64 {
-        if let Some(max_age) = self.retention.max_age_ms()
+        if let Some(cutoff) = self.retention.cutoff(now_ms)
             && self
                 .entries
                 .first()
-                .is_some_and(|entry| entry.timestamp_ms < now_ms.saturating_sub(max_age))
+                .is_some_and(|entry| entry.timestamp_ms < cutoff)
         {
             self.prune(now_ms);
         }
@@ -570,10 +574,7 @@ impl HistoryStore {
     /// processing profile. Newest first and bounded.
     pub fn search(&self, query: &str, now_ms: u64) -> Vec<&HistoryEntry> {
         let needle = query.trim().to_lowercase();
-        let cutoff = self
-            .retention
-            .max_age_ms()
-            .map(|max_age| now_ms.saturating_sub(max_age));
+        let cutoff = self.retention.cutoff(now_ms);
         let mut scratch = String::new();
         self.entries()
             .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
@@ -589,10 +590,7 @@ impl HistoryStore {
         if self.retention.is_off() {
             return Vec::new();
         }
-        let cutoff = self
-            .retention
-            .max_age_ms()
-            .map(|max_age| now_ms.saturating_sub(max_age));
+        let cutoff = self.retention.cutoff(now_ms);
         self.entries()
             .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
             .filter(|entry| entry.kind != HistoryKind::Printed)
@@ -622,8 +620,7 @@ impl HistoryStore {
 
     fn prune(&mut self, now_ms: u64) -> bool {
         let mut changed = false;
-        if let Some(max_age) = self.retention.max_age_ms() {
-            let cutoff = now_ms.saturating_sub(max_age);
+        if let Some(cutoff) = self.retention.cutoff(now_ms) {
             let before = self.entries.len();
             self.entries.retain(|entry| entry.timestamp_ms >= cutoff);
             changed |= self.entries.len() != before;

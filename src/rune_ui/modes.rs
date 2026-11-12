@@ -89,6 +89,31 @@ struct Editor {
 }
 
 impl Editor {
+    fn rebase(&mut self, current: &DictationMode, keep_drafts: bool) {
+        let old = Self::of(&self.base);
+        let next = Self::of(current);
+        for (field, before, after) in [
+            (&mut self.name, old.name, next.name),
+            (&mut self.prompt, old.prompt, next.prompt),
+            (&mut self.deadline, old.deadline, next.deadline),
+        ] {
+            if (!keep_drafts || field.text == before.text) && field.text != after.text {
+                *field = after;
+            }
+        }
+        let values = |rows: &[(TextEdit, TextEdit)]| {
+            rows.iter()
+                .map(|(a, b)| (a.text.clone(), b.text.clone()))
+                .collect::<Vec<_>>()
+        };
+        if (!keep_drafts || values(&self.replacements) == values(&old.replacements))
+            && values(&self.replacements) != values(&next.replacements)
+        {
+            self.replacements = next.replacements;
+        }
+        self.base = current.clone();
+    }
+
     fn of(mode: &DictationMode) -> Self {
         Self {
             base: mode.clone(),
@@ -266,15 +291,14 @@ impl ModesPane {
                 return;
             }
         }
-        if !dirty && let Some(current) = mode(settings, self.selected) {
-            self.editor = Editor::of(current);
+        if let Some(current) = mode(settings, self.selected) {
+            self.editor.rebase(current, dirty);
         }
     }
 
     pub(super) fn committed(&mut self, settings: &AppSettings) {
-        if let Some(current) = mode(settings, self.selected) {
-            self.editor.base = current.clone();
-        }
+        self.editor.base.name = self.editor.name.text.trim().to_owned();
+        self.adopt(settings, false);
     }
 
     pub(super) fn select(&mut self, selection: Selection) {
@@ -458,13 +482,9 @@ fn delete_mode(ui: &mut Ui) {
 fn add_replacement(ui: &mut Ui) {
     if update_mode(ui, |mode| {
         mode.replacements.push(TextReplacement::default())
-    }) {
-        let mut phrase = TextEdit::default();
+    }) && let Some((phrase, _)) = ui.modes.editor.replacements.last_mut()
+    {
         phrase.focused = true;
-        ui.modes
-            .editor
-            .replacements
-            .push((phrase, TextEdit::default()));
     }
 }
 
@@ -1372,6 +1392,65 @@ mod tests {
             })
             .to_vec();
         settings
+    }
+
+    #[test]
+    fn dirty_name_keeps_only_that_field_when_other_fields_change() {
+        let mut settings = settings();
+        let mut pane = ModesPane::new(&settings);
+        pane.select_in(&settings, Selection::Custom(1));
+        pane.editor.name.text = "Draft".into();
+        settings.dictation_processing.modes[1]
+            .post_processing
+            .prompt = "From CLI".into();
+        settings.dictation_processing.modes[1]
+            .post_processing
+            .deadline_seconds = 17;
+        pane.adopt(&settings, true);
+        pane.project(&mut settings);
+        let saved = &settings.dictation_processing.modes[1];
+        assert_eq!(saved.name, "Draft");
+        assert_eq!(saved.post_processing.prompt, "From CLI");
+        assert_eq!(saved.post_processing.deadline_seconds, 17);
+    }
+
+    #[test]
+    fn adding_a_correction_focuses_the_one_row_the_save_adopted() {
+        let mut ui = Ui::with(settings(), super::super::Service::Fixture(Vec::new()));
+        ui.modes.select_in(&ui.settings, Selection::Custom(1));
+        let before = ui.modes.editor.replacements.len();
+        add_replacement(&mut ui);
+        assert_eq!(ui.modes.editor.replacements.len(), before + 1);
+        let phrase = &mut ui.modes.editor.replacements.last_mut().unwrap().0;
+        assert!(phrase.focused);
+        phrase.text = "example".into();
+        // Adding again also commits the first row's pending text.
+        add_replacement(&mut ui);
+        assert_eq!(ui.modes.editor.replacements.len(), before + 2);
+        assert!(ui.modes.editor.replacements.last().unwrap().0.focused);
+        ui.flush_drafts();
+        assert_eq!(
+            ui.settings.dictation_processing.modes[1].replacements[before].matched_phrase,
+            "example"
+        );
+    }
+
+    #[test]
+    fn older_revisions_cannot_undo_a_save_and_newer_reverts_are_adopted() {
+        let mut settings = settings();
+        settings.source.revision = 1;
+        let mut ui = Ui::with(settings.clone(), super::super::Service::Fixture(Vec::new()));
+        ui.service_settings = Some(settings.clone());
+        ui.settings.sound_effect_volume = 0.37;
+        ui.settings.source.revision = 3;
+        assert!(!ui.adopt(settings.clone()));
+        assert_eq!(ui.settings.sound_effect_volume, 0.37);
+        settings.source.revision = 4;
+        assert!(ui.adopt(settings.clone()));
+        assert_eq!(
+            ui.settings.sound_effect_volume,
+            settings.sound_effect_volume
+        );
     }
 
     #[test]

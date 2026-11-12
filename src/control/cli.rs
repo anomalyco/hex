@@ -1120,7 +1120,7 @@ fn apply_offline(values: &serde_json::Map<String, serde_json::Value>) -> Control
                     "Every setting already has its value",
                 ));
             }
-            change.settings.save().map_err(|error| {
+            before.update(&change.settings).map_err(|error| {
                 super::ControlError::new("internal", format!("couldn't save: {error:#}"))
             })?;
             Ok(ControlReply::done(change.message))

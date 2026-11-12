@@ -497,13 +497,13 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             {
                 let window = window.clone();
                 move |choice| {
-                    crate::app_settings::save_meeting_provider(choice.clone());
-                    window.update(move |ui, _| crate::rune_ui::meeting_provider_chosen(ui, choice));
+                    crate::app_settings::save_meeting_provider(choice);
+                    window.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
                 }
             },
             move |corner| {
                 crate::app_settings::save_meeting_indicator_corner(corner);
-                window.update(move |ui, _| crate::rune_ui::meeting_corner_moved(ui, corner));
+                window.update(move |ui, _| crate::rune_ui::meeting_settings_saved(ui));
             },
         )
     };

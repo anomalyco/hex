@@ -1016,6 +1016,7 @@ General                                  // settings
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
 ├── Sound volume -> immediate feedback; zero suppresses tones
+│   └── A saved zero displays Off; enabling sounds through the CLI restores the default level
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
 ├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
 └── Linux / Windows -> listener card and desktop commands below the basics
@@ -1273,6 +1274,7 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
     // the old Modes editor stays in the code for its scenes, unreachable
     // Its drafts and delete confirmation follow the unique saved mode name
     // across reloads; removing, renaming or duplicating it drops the draft.
+    // A dirty field stays; untouched fields adopt the new values individually.
 
 Context retained when dictation stops -> Select processing
 ├── Matching website                     // macOS: scriptable browsers, then AXWebArea; Windows: UIA; Linux: AT-SPI

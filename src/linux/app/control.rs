@@ -122,9 +122,14 @@ impl crate::control::host::Host for LinuxControl {
         self.shortcut(ShortcutCommand::TypedText)
     }
 
-    fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
+    fn save(
+        &self,
+        base: &AppSettings,
+        settings: AppSettings,
+    ) -> std::result::Result<(), ControlError> {
         self.host
-            .save_settings(settings)
+            .save_settings(base, &settings)
+            .map(|_| ())
             .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))
     }
 

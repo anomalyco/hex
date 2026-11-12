@@ -380,7 +380,10 @@ fn run_runtime(
         let published = Arc::new(host.publish());
         let changed = {
             let mut current = lock(&shared.published);
-            let changed = current.as_deref() != Some(&published);
+            let changed = current.as_deref() != Some(&published)
+                || current.as_ref().is_some_and(|old| {
+                    old.settings.source.revision != published.settings.source.revision
+                });
             if changed {
                 *current = Some(published.clone());
             }
@@ -488,9 +491,12 @@ impl crate::control::host::Host for WindowsControl {
         self.listener(crate::windows::dictation::ListenerCommand::PasteLast)
     }
 
-    fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
-        settings
-            .save()
+    fn save(
+        &self,
+        base: &AppSettings,
+        settings: AppSettings,
+    ) -> std::result::Result<(), ControlError> {
+        base.update(&settings)
             .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))?;
         self.send(Request::ReloadSettings)
     }
