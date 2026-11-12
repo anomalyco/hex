@@ -83,7 +83,10 @@ fn mode_select(
         .into_iter()
         .filter(|choice| choice.unavailable_for(binding, modifiers_allowed).is_none())
         .collect();
-    let labels: Vec<&'static str> = available.iter().map(|choice| choice.name()).collect();
+    let labels: Vec<String> = available
+        .iter()
+        .map(|choice| choice.name().to_owned())
+        .collect();
     let selected = available
         .iter()
         .position(|choice| *choice == trigger)

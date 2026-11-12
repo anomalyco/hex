@@ -1308,14 +1308,15 @@ pub(super) fn pick_select(
         Menu::Pick(key),
         format!("{key}-control"),
         name,
-        labels,
+        labels.into_iter().map(str::to_owned).collect(),
         selected,
         pick,
         layer,
     )
 }
 
-/// [`pick_select`] for rows made at run time, opened as `menu`.
+/// [`pick_select`] for rows made at run time, opened as `menu`. Labels are
+/// owned so a card can build them from its own choices.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn quiet_select(
     ui: &Ui,
@@ -1323,24 +1324,24 @@ pub(super) fn quiet_select(
     menu: Menu,
     key: String,
     name: &str,
-    labels: Vec<&'static str>,
+    labels: Vec<String>,
     selected: usize,
     pick: impl Fn(&mut Ui, usize) + 'static,
     layer: &mut Vec<El>,
 ) -> El {
     let choices = labels.clone();
     let pick = std::rc::Rc::new(pick);
-    let current = labels.get(selected).copied().unwrap_or_default();
+    let current = labels.get(selected).cloned().unwrap_or_default();
     Select::new(key, &labels)
         .appearance(SelectAppearance::Inline)
-        .current(labels.get(selected).copied())
+        .current(labels.get(selected).map(String::as_str))
         .open(ui.open == Some(menu))
         .placement(Placement::BottomEnd)
         .on_toggle(move |ui: &mut Ui| s::toggle_menu(ui, menu))
         .on_close(|ui: &mut Ui| ui.open = None)
         .on_choose(move |ui: &mut Ui, value: &str, _: &mut rune::Tx| {
             ui.open = None;
-            if let Some(index) = choices.iter().position(|label| *label == value) {
+            if let Some(index) = choices.iter().position(|label| label == value) {
                 pick(ui, index);
             }
         })
