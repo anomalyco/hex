@@ -788,17 +788,20 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       │      change that can let one work
 │       │   -> the release is recorded where it is seen, so a stream that
 │       │      fails before its next chunk cannot lose it; the last set is
-│       │      shared across reopens, and a pid gone within 1 s of our own
-│       │      rate change is the driver restarting, not a release
+│       │      shared across reopens; a pid gone at our renegotiating
+│       │      open's own comparison, or in a poll within 1 s of it, is the
+│       │      driver restarting, not a release
 │       ├── A dictation captures or infers -> the quick reopens and the
 │       │   retries wait until it is idle, so a rate change never cuts a
 │       │   dictation; a release stays pending meanwhile, and an open
-│       │   already decided under dictation opens without renegotiating and
-│       │   leaves the flag for the next open
+│       │   already decided under dictation opens without renegotiating:
+│       │   the still-silent stream reopens once dictation is idle, without
+│       │   spending another reopen or retry
 │       ├── Nonzero audio returns -> the live warning clears, including in a
 │       │   stream reopened after a supervisor restart; the episode's
-│       │   retries start over, but the recording's two reopens stay spent;
-│       │   the persisted warning stays
+│       │   retries start over, but the recording's two reopens stay spent,
+│       │   and a pending renegotiation is cleared; the persisted warning
+│       │   stays
 │       ├── The call app leaves the input before a warning -> no further
 │       │   quick reopens or warnings until it reports the input again
 │       ├── Another episode after audio returns -> warns at once (the two
@@ -820,6 +823,8 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // audible_audio_resets_the_episodes_retries,
 │          // a_reopen_waits_while_dictation_is_active,
 │          // a_release_triggered_retry_waits_while_dictation_is_active,
+│          // a_pending_renegotiation_reopens_once_dictation_is_idle,
+│          // audible_audio_clears_a_pending_renegotiation,
 │          // a_process_that_stops_recording_between_reopens_is_a_release,
 │          // a_release_just_after_our_own_rate_change_is_not_another_apps,
 │          // a_release_belongs_only_to_the_input_that_saw_it,

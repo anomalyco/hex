@@ -82,16 +82,12 @@ impl SourceSupervisor {
         // The processes recording from the input, shared across reopens so a
         // release between a stream failure and its replacement is still seen.
         let recorders = Arc::new(InputRecorders::default());
-        // The one open after a silence reopen makes the device renegotiate
-        // its sample rate first, like dictation's.
-        let renegotiate_rate = Arc::new(AtomicBool::new(false));
         Self::spawn(sink, move || {
             MicrophoneSource::open(
                 crate::app_settings::microphone_selection(),
                 application.clone(),
                 recovery.clone(),
                 recorders.clone(),
-                renegotiate_rate.clone(),
                 warnings.clone(),
             )
             .map(|source| Box::new(source) as Box<dyn LiveSource>)
@@ -394,9 +390,6 @@ struct MicrophoneSource {
     /// The per-chunk digital silence decision, sharing this recording's
     /// reopen budget and retry count with every reopened stream.
     silence: SilencePolicy,
-    /// Set by a silence reopen; the next successful open renegotiates the
-    /// device's sample rate and clears it, so a failed open tries again.
-    renegotiate_rate: Arc<AtomicBool>,
     /// The controller-visible warning, shared across reopened streams.
     warnings: TrackWarnings,
     selected: Option<String>,
@@ -425,7 +418,6 @@ impl MicrophoneSource {
         application: Option<String>,
         silence_recovery: Arc<SilenceRecovery>,
         recorders: Arc<InputRecorders>,
-        renegotiate_rate: Arc<AtomicBool>,
         warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
@@ -434,11 +426,10 @@ impl MicrophoneSource {
             .map(call_app_inputs)
             .unwrap_or_default();
         let call_input = follow_call_input(None, call_inputs.clone());
-        let mut renegotiate = renegotiate_rate.load(Ordering::Relaxed);
+        let mut renegotiate = silence_recovery.renegotiation_pending();
         if renegotiate && crate::transcription::engine::dictation_busy() {
-            // A rate change would cut the dictation; the flag stays set so
-            // the next open can still renegotiate. This stream may stay
-            // silent, and the deferred silence decision reopens later.
+            // A rate change would cut the dictation. The flag stays set and
+            // the still-silent stream reopens once dictation is idle.
             tracing::info!(
                 "dictation is active; opening the meeting microphone without renegotiating its rate"
             );
@@ -456,7 +447,10 @@ impl MicrophoneSource {
         // Only a successful renegotiating open spends the one-shot recovery;
         // a failed open, or one deferred for dictation, leaves it set.
         if renegotiate {
-            renegotiate_rate.store(false, Ordering::Relaxed);
+            silence_recovery.clear_renegotiation();
+            // The open already did what a retry would: a release noted before
+            // it is spent, though one this open's own comparison sees is not.
+            silence_recovery.forget_release();
         }
         let input = *input;
         let opened_uid = input.uid.clone();
@@ -492,7 +486,6 @@ impl MicrophoneSource {
         Ok(Self {
             input,
             silence: SilencePolicy::new(resample.rate, silence_recovery, warning),
-            renegotiate_rate,
             warnings,
             resample,
             last_audio: Instant::now(),
@@ -641,7 +634,7 @@ impl LiveSource for MicrophoneSource {
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
                 match action {
                     SilenceAction::Reopen => {
-                        self.renegotiate_rate.store(true, Ordering::Relaxed);
+                        self.silence.request_renegotiation();
                         if self.silence.retrying() {
                             tracing::warn!(
                                 device = %self.input.device_name,

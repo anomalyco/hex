@@ -154,8 +154,9 @@ impl SilenceWatch {
 }
 
 /// One recording's shared silence recovery: its quick reopen budget, the
-/// release-triggered retry count, and whether another app released the input
-/// during the current silent episode. All survive the supervisor's reopens.
+/// release-triggered retry count, whether another app released the input
+/// during the current silent episode, and whether a decided reopen still has
+/// to renegotiate the device's rate. All survive the supervisor's reopens.
 #[derive(Default)]
 pub(super) struct SilenceRecovery {
     reopens: AtomicU8,
@@ -163,6 +164,10 @@ pub(super) struct SilenceRecovery {
     /// Another application released the input while the stream was silent,
     /// even before the warning showed; a warned stream spends it as a retry.
     released: AtomicBool,
+    /// A silence reopen was decided, but its open deferred the rate change
+    /// because dictation was active; a still-silent stream finishes it once
+    /// dictation is idle.
+    renegotiation: AtomicBool,
 }
 
 impl SilenceRecovery {
@@ -209,13 +214,31 @@ impl SilenceRecovery {
         self.released.store(false, Ordering::Relaxed);
     }
 
+    /// Marks that the next open of this recording's microphone must
+    /// renegotiate its sample rate.
+    pub(super) fn request_renegotiation(&self) {
+        self.renegotiation.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether a decided reopen still has to renegotiate the device's rate.
+    pub(super) fn renegotiation_pending(&self) -> bool {
+        self.renegotiation.load(Ordering::Relaxed)
+    }
+
+    /// Clears the renegotiation after an open made it, or once audio
+    /// returns.
+    pub(super) fn clear_renegotiation(&self) {
+        self.renegotiation.store(false, Ordering::Relaxed);
+    }
+
     /// Audible audio ended the silent episode: the next one gets its retries
-    /// back and no stale release carries over. The quick reopen budget stays
-    /// spent for the recording, because each reopen changes the whole
-    /// device's nominal sample rate.
+    /// back, and no stale release or pending renegotiation carries over. The
+    /// quick reopen budget stays spent for the recording, because each
+    /// reopen changes the whole device's nominal sample rate.
     fn recovered(&self) {
         self.retries.store(0, Ordering::Relaxed);
         self.released.store(false, Ordering::Relaxed);
+        self.renegotiation.store(false, Ordering::Relaxed);
     }
 }
 
@@ -259,9 +282,11 @@ impl SilencePolicy {
     /// records a release of the input in the shared recovery where it is
     /// detected, even before the warning; after the warning it runs a
     /// renegotiating retry, at most [`SILENCE_RETRIES`] times per episode.
-    /// Both kinds of reopen wait while dictation is active, so a rate change
-    /// never interrupts dictation; `dictation_active` is called only on
-    /// those paths.
+    /// A decided reopen whose rate change was deferred for dictation reopens
+    /// a still-silent stream once dictation is idle, without spending a
+    /// reopen or retry. Both kinds of reopen wait while dictation is active,
+    /// so a rate change never interrupts dictation; `dictation_active` is
+    /// called only on those paths.
     pub(super) fn observe(
         &mut self,
         samples: &[f32],
@@ -284,6 +309,14 @@ impl SilencePolicy {
         }
         if !silent {
             return SilenceAction::Nothing;
+        }
+        if self.recovery.renegotiation_pending() {
+            if dictation_active() {
+                return SilenceAction::Nothing;
+            }
+            // This completes a reopen already decided; it spends neither
+            // the quick budget nor a retry.
+            return SilenceAction::Reopen;
         }
         if self.warning {
             if self.recovery.has_release()
@@ -322,6 +355,12 @@ impl SilencePolicy {
     /// Keeps a release capture detected, for a retry once the warning shows.
     pub(super) fn note_release(&self) {
         self.recovery.note_release();
+    }
+
+    /// Marks that the next open of this recording's microphone must
+    /// renegotiate its sample rate.
+    pub(super) fn request_renegotiation(&self) {
+        self.recovery.request_renegotiation();
     }
 
     /// Whether the reopen the last chunk decided was a release-triggered
@@ -623,6 +662,48 @@ mod tests {
             SilenceAction::Reopen
         );
         assert!(replacement.retrying());
+    }
+
+    #[test]
+    fn a_pending_renegotiation_reopens_once_dictation_is_idle() {
+        let recovery = Arc::new(SilenceRecovery::default());
+        recovery.request_renegotiation();
+        let mut policy = SilencePolicy::new(1_000, recovery.clone(), false);
+        // Silent but dictation is active: wait, without warning or spending
+        // the quick reopen that is still available.
+        assert_eq!(
+            policy.observe(&[0.0; 3_000], true, || true),
+            SilenceAction::Nothing
+        );
+        assert_eq!(recovery.reopens.load(Ordering::Relaxed), 0);
+        assert_eq!(recovery.retries.load(Ordering::Relaxed), 0);
+        // Idle: finish the reopen already decided.
+        assert_eq!(
+            policy.observe(&[0.0; 100], true, || false),
+            SilenceAction::Reopen
+        );
+        assert!(!policy.retrying());
+        assert_eq!(recovery.reopens.load(Ordering::Relaxed), 0);
+        assert_eq!(recovery.retries.load(Ordering::Relaxed), 0);
+        // A successful renegotiating open clears it; a later silent chunk
+        // then spends a normal quick reopen.
+        recovery.clear_renegotiation();
+        assert_eq!(
+            policy.observe(&[0.0; 100], true, || false),
+            SilenceAction::Reopen
+        );
+        assert_eq!(recovery.reopens.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn audible_audio_clears_a_pending_renegotiation() {
+        let (recovery, mut warned) = warned_policy();
+        recovery.request_renegotiation();
+        assert_eq!(
+            warned.observe(&[0.25], true, || false),
+            SilenceAction::Clear
+        );
+        assert!(!recovery.renegotiation_pending());
     }
 
     #[test]
