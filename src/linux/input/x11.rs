@@ -177,7 +177,7 @@ impl Backend {
             let mouse = mouse_button(&key.key);
             let code = match mouse {
                 Some(button) => button,
-                None => keymap.keycode(keysym(&key.key)?)?,
+                None => keymap.keycode(key.keysym()?.value)?,
             };
             let mask = key.modifier_mask(&connection, &keymap)?;
             grabs
@@ -192,7 +192,7 @@ impl Backend {
                 return Err(eyre!("a mouse button can't cancel on X11"));
             }
             Ok(X11CancelKey {
-                code: keymap.keycode(keysym(&key.key)?)?,
+                code: keymap.keycode(key.keysym()?.value)?,
                 mask: key.modifier_mask(&connection, &keymap)?,
             })
         }) {
@@ -627,32 +627,6 @@ pub(super) fn grab_escape(
             }
         }
         Err(error) => Err(error).wrap_err("could not grab the Escape key"),
-    }
-}
-
-pub(super) fn keysym(key: &str) -> Result<u32> {
-    let key = key.to_ascii_lowercase();
-    match key.as_str() {
-        "space" => Ok(XK_SPACE),
-        "escape" => Ok(XK_ESCAPE),
-        "enter" | "return" => Ok(0xff0d),
-        "tab" => Ok(0xff09),
-        "backspace" => Ok(0xff08),
-        "menu" => Ok(0xff67),
-        "pause" => Ok(0xff13),
-        "scroll lock" | "scrolllock" | "scroll_lock" => Ok(0xff14),
-        // XK_section, the ISO key left of 1.
-        "§" | "section" => Ok(0xa7),
-        key if key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() => {
-            Ok(u32::from(key.as_bytes()[0]))
-        }
-        key if key.starts_with('f') => key[1..]
-            .parse::<u32>()
-            .ok()
-            .filter(|number| (1..=24).contains(number))
-            .map(|number| 0xffbd + number)
-            .ok_or_else(|| eyre!("unsupported X11 function key: {key}")),
-        _ => Err(eyre!("unsupported X11 hotkey key: {key}")),
     }
 }
 

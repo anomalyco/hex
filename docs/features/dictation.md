@@ -76,13 +76,23 @@ bypass the compositor. See the [XDG shortcut specification](https://specificatio
 
 **Fixed November 1, 2026 (issue 846):** the portal path refused navigation and
 editing keys ("unsupported shortcut key: home"), though GNOME's custom
-shortcuts took them. Both now share one named-key table
-(`gnome_shortcuts::named_keysym`): Home, End, Page Up/Down, the arrows,
-Insert, Delete, and Print reach the portal as `Home`, `End`, `Page_Up`, … ,
-alone or with modifiers. Escape stays refused by the portal, which never binds
-it (#786). Check: `navigation_keys_have_portal_triggers` in
-`linux/input.rs` (constructed bindings; no desktop portal run). X11 grabs
-don't resolve these keys yet.
+shortcuts took them. Home, End, Page Up/Down, the arrows, Insert, Delete, and
+Print reach the portal as `Home`, `End`, `Page_Up`, … , alone or with
+modifiers. Escape stays refused by the portal, which never binds it (#786).
+Check: `navigation_keys_have_portal_triggers` in `linux/input.rs`
+(constructed bindings; no desktop portal run).
+
+**Fixed November 12, 2026:** X11 grabs had their own key table without those
+keys, so `hex settings set dictation_hotkey ctrl+right` saved and then
+stopped the listener. X11 grabs, portal triggers, and GNOME's accelerators
+now read one table (`linux/input/keys.rs`, keysym name and value), and
+`hex settings set` refuses a key it lacks (and, on Wayland, one the portal
+refuses) as the window's recorder does. A shortcut change the desktop still
+refuses (a key the X11 keymap lacks, a chord another client holds) puts the
+previous shortcuts back and shows the error, instead of stopping dictation.
+Checks: `every_recorded_key_has_a_name_and_a_keysym` (`linux/input/keys.rs`),
+`a_refused_shortcut_keeps_the_previous_ones` (`linux/dictation/shortcuts.rs`);
+no X11 server run.
 
 Linux with Labs › Special keys alone on (`labs.standalone_special_keys`, off
 by default; issue 767): Menu, Pause, and Scroll Lock may be any shortcut's

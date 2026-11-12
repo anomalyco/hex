@@ -22,8 +22,11 @@ use crate::desktop::host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShort
 use crate::dictation::DictationFlavour;
 use crate::linux::session::LinuxSession;
 
+#[path = "input/keys.rs"]
+mod keys;
 #[path = "input/x11.rs"]
 mod x11;
+pub(crate) use keys::keysym;
 pub(crate) use x11::{Keymap, MouseCapture, connect_x11};
 
 /// A shortcut as X11 grabs and the portal see it: held modifiers and a
@@ -127,11 +130,20 @@ pub(crate) fn mouse_name(button: u8) -> Option<String> {
 }
 
 impl LinuxHotkey {
+    /// Whether X11 and the portal can bind this shortcut's key. Settings
+    /// and `hex settings set` both check it before saving.
     pub(crate) fn validate(&self) -> Result<()> {
         if self.key.trim().is_empty() {
             return Err(eyre!("Linux hotkeys require a non-modifier key"));
         }
+        if mouse_button(&self.key).is_none() {
+            self.keysym()?;
+        }
         Ok(())
+    }
+
+    pub(crate) fn keysym(&self) -> Result<keys::Keysym> {
+        keysym(&self.key).ok_or_else(|| eyre!("unsupported shortcut key: {}", self.key))
     }
 
     pub(crate) fn label(&self) -> String {
@@ -146,7 +158,14 @@ impl LinuxHotkey {
                 "Wayland's shortcuts portal cannot request mouse buttons; bind the hex commands in the desktop settings"
             ));
         }
-        let key = keysym_name(&self.key)?;
+        // A portal shortcut holds its key from every app, so the portal
+        // never binds Escape (#786).
+        if self.key.eq_ignore_ascii_case("escape") {
+            return Err(eyre!(
+                "the shortcuts portal can't bind Escape; it would take Escape from every app"
+            ));
+        }
+        let key = self.keysym()?.name;
         let mut parts = Vec::new();
         for (held, name) in [
             (self.control, "CTRL"),
@@ -182,57 +201,6 @@ impl LinuxHotkey {
     }
 }
 
-/// The xkb keysym name of a key Settings records.
-fn keysym_name(key: &str) -> Result<String> {
-    let key = key.to_ascii_lowercase();
-    let name = match key.as_str() {
-        "space" | " " => "space",
-        "enter" | "return" => "Return",
-        "tab" => "Tab",
-        "backspace" => "BackSpace",
-        "-" | "minus" => "minus",
-        "=" | "equal" => "equal",
-        "[" | "bracketleft" => "bracketleft",
-        "]" | "bracketright" => "bracketright",
-        ";" | "semicolon" => "semicolon",
-        "'" | "apostrophe" => "apostrophe",
-        "`" | "grave" => "grave",
-        "\\" | "backslash" => "backslash",
-        "," | "comma" => "comma",
-        "." | "period" => "period",
-        "/" | "slash" => "slash",
-        // Labs › Special keys alone; settings hold these only while it's on.
-        "menu" => "Menu",
-        "pause" => "Pause",
-        "scroll lock" | "scrolllock" | "scroll_lock" => "Scroll_Lock",
-        // The ISO key left of 1; alone only with Labs › Section key alone.
-        "§" | "section" => "section",
-        key if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() => key,
-        key if key.starts_with('f')
-            && key[1..]
-                .parse::<u32>()
-                .is_ok_and(|number| (1..=24).contains(&number)) =>
-        {
-            return Ok(key.to_ascii_uppercase());
-        }
-        // A portal shortcut holds its key from every app, so the portal
-        // never binds Escape (#786).
-        "escape" => {
-            return Err(eyre!(
-                "the shortcuts portal can't bind Escape; it would take Escape from every app"
-            ));
-        }
-        // Navigation and editing keys, named as GNOME's accelerators name
-        // them, so both Linux paths accept the same keys (#846).
-        key => match crate::linux::gnome_shortcuts::named_keysym(key) {
-            Some(name) => name,
-            None => return Err(eyre!("unsupported shortcut key: {key}")),
-        },
-    };
-    Ok(name.into())
-}
-
-const XK_SPACE: u32 = 0x20;
 const XK_ESCAPE: u32 = 0xff1b;
 pub(crate) const XK_SHIFT_L: u32 = 0xffe1;
 pub(crate) const XK_SHIFT_R: u32 = 0xffe2;
@@ -590,7 +558,11 @@ enum Shortcut {
     SecondDictation,
 }
 
+// `HeldKeys` keeps one bit per shortcut.
+const _: () = assert!(Shortcut::ALL.len() <= u8::BITS as usize);
+
 impl Shortcut {
+    /// Every shortcut, in declaration order: `index` is its place here.
     const ALL: [Self; 7] = [
         Self::Dictation,
         Self::PasteLast,
@@ -1804,6 +1776,36 @@ mod tests {
         c.destroy_window(window).unwrap().check().unwrap();
     }
 
+    /// 04.3: per-shortcut arrays and held bits index by `ALL`'s order, so
+    /// each shortcut sits at its own index.
+    #[test]
+    fn every_shortcut_sits_at_its_index() {
+        for (index, shortcut) in Shortcut::ALL.into_iter().enumerate() {
+            assert_eq!(shortcut.index(), index, "{shortcut:?}");
+        }
+    }
+
+    /// 04.1: X11 grabs every key the window records and `hex settings`
+    /// accepts, navigation keys included; an unknown key fails validation
+    /// before it is saved.
+    #[test]
+    fn validation_accepts_exactly_the_keys_x11_grabs() {
+        for key in ["right", "home", "pagedown", "delete", "f5", "v", "-"] {
+            let hotkey = LinuxHotkey {
+                control: true,
+                key: key.into(),
+                ..LinuxHotkey::default()
+            };
+            assert!(hotkey.validate().is_ok(), "{key}");
+            assert!(hotkey.keysym().is_ok(), "{key}");
+        }
+        let unknown = LinuxHotkey {
+            key: "hyper".into(),
+            ..LinuxHotkey::default()
+        };
+        assert!(unknown.validate().is_err());
+    }
+
     #[test]
     fn default_binding_is_alt_space() {
         assert_eq!(LinuxHotkey::default().label(), "Alt+Space");
@@ -1846,7 +1848,7 @@ mod tests {
             let hotkey = LinuxHotkey::from(&saved);
             assert!(hotkey.validate().is_ok());
             assert_eq!(hotkey.portal_trigger().unwrap(), portal);
-            assert_eq!(keysym(&hotkey.key).unwrap(), keysym_value);
+            assert_eq!(hotkey.keysym().unwrap().value, keysym_value);
             assert_eq!(HotkeyBinding::from(&hotkey), saved);
         }
     }
@@ -1864,7 +1866,7 @@ mod tests {
             assert!(hotkey.validate().is_ok());
             assert_eq!(hotkey.label(), "§");
             assert_eq!(hotkey.portal_trigger().unwrap(), "section");
-            assert_eq!(keysym(&hotkey.key).unwrap(), 0xa7);
+            assert_eq!(hotkey.keysym().unwrap().value, 0xa7);
             assert_eq!(HotkeyBinding::from(&hotkey), saved);
         }
     }
@@ -1893,10 +1895,7 @@ mod tests {
             let hotkey = LinuxHotkey::from(&saved);
             assert!(hotkey.validate().is_ok());
             assert_eq!(hotkey.portal_trigger().unwrap(), portal);
-            assert_eq!(
-                crate::linux::gnome_shortcuts::named_keysym(name),
-                Some(portal)
-            );
+            assert_eq!(keysym(name).unwrap().name, portal);
             assert_eq!(HotkeyBinding::from(&hotkey), saved);
             let with_control = LinuxHotkey {
                 control: true,
@@ -2694,7 +2693,7 @@ mod tests {
                 .unwrap_or_else(|error| error.into_inner());
             let (connection, root, keymap) = connect_x11().unwrap();
             let alt = keymap.keycode(XK_ALT_L).unwrap();
-            let space = keymap.keycode(XK_SPACE).unwrap();
+            let space = keymap.keycode(keysym("space").unwrap().value).unwrap();
             let escape = keymap.keycode(XK_ESCAPE).unwrap();
             Self {
                 _guard: guard,
@@ -2774,7 +2773,7 @@ mod tests {
 
     #[test]
     fn standalone_f12_resolves_to_the_x11_keysym() {
-        assert_eq!(keysym("f12").unwrap(), 0xffc9);
+        assert_eq!(keysym("f12").unwrap().value, 0xffc9);
     }
 
     #[test]
@@ -3056,7 +3055,10 @@ mod tests {
         };
         let (monitor, _commands) =
             x11_monitor(binding, HotkeyOptions::default(), Default::default());
-        let trigger = harness.keymap.keycode(keysym("f24").unwrap()).unwrap();
+        let trigger = harness
+            .keymap
+            .keycode(keysym("f24").unwrap().value)
+            .unwrap();
         harness.send_key(KEY_PRESS, trigger);
         harness.send_key(KEY_RELEASE, trigger);
 
