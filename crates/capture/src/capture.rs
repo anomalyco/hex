@@ -123,13 +123,12 @@ pub struct ScreenRecording {
     pub no_screen: Option<String>,
 }
 
-/// Why a screen capture recorded no frame: Screen Recording off for this app (by the name
-/// macOS lists it under), or the shots failed.
-pub fn no_screen_reason() -> String {
-    if screen_capture_usable(false) {
-        "the screen recorded no frames".into()
-    } else {
-        format!("Screen Recording is off for {}", host_app_name())
+/// Why a screen capture recorded no frame: what the screen source said, or the platform's reason.
+pub fn no_screen_reason(failure: Option<String>) -> String {
+    match failure {
+        Some(why) => why,
+        None if screen_capture_usable(false) => "the screen recorded no frames".into(),
+        None => format!("Screen Recording is off for {}", host_app_name()),
     }
 }
 
@@ -1010,7 +1009,7 @@ impl ScreenCaptureSession {
         );
         let frames = buffer.into_frames();
         // Never a made-up frame: the capture goes with its voice and marks alone, and says why.
-        let no_screen = frames.is_empty().then(no_screen_reason);
+        let no_screen = frames.is_empty().then(|| no_screen_reason(self.failure()));
         ScreenRecording {
             frames,
             video,
@@ -3246,6 +3245,24 @@ mod tests {
             Some((path.clone(), 120))
         );
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A capture stopped with no picture names why the screen gave nothing, not the generic one.
+    #[test]
+    fn a_capture_with_no_frames_says_why_the_screen_gave_nothing() {
+        for failure in [None, Some("the screen sharing stream sent no frames")] {
+            let expected = failure.map_or_else(|| no_screen_reason(None), str::to_owned);
+            let session = ScreenCaptureSession {
+                failure: Arc::new(Mutex::new(failure.map(str::to_owned))),
+                started_at: Instant::now(),
+                stopping: Arc::new(AtomicBool::new(false)),
+                urgent_snapshot: Arc::new(AtomicBool::new(false)),
+                frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
+                sampler_thread: None,
+                _recording: crate::retention::Recording::start(),
+            };
+            assert_eq!(session.stop().no_screen, Some(expected));
+        }
     }
 
     /// Clicks on `scrawl-helper`'s windows (the SwiftUI capsule, Settings, onboarding) are

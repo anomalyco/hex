@@ -376,10 +376,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
 │   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
 │   │   back as it stood
-│   ├── A capture written with no frames (Screen Recording turned off mid-way)
-│   │   -> sent with only the voice and marks, its summary noting "No screen:
-│   │   Screen Recording is off for Hex", no contact sheet; the helper opens
-│   │   once its capsule folds
+│   ├── A capture written with no frames -> sent with only the voice and
+│   │   marks, its summary naming the actual reason the picture is missing
+│   │   (Screen Recording is off for Hex, or the screen source failed or sent
+│   │   no frames), no contact sheet; a permission miss opens the helper once
+│   │   its capsule folds
 │   └── Story: hex://story/prototypes/capture-capsule/permission; goldens
 │       capture-capsule-permission{,-restart,-ready}
 ├── A shown recording that leaves with no outcome (a discard, from a chip or
