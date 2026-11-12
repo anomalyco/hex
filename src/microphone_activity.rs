@@ -241,8 +241,8 @@ pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec
 /// The process IDs recording from the input device `uid`, read from Core
 /// Audio's process metadata: devices only, never audio samples. Hex's own
 /// process is included; a caller that records excludes itself. A failed
-/// per-process read fails the whole call, so a dropped pid is never mistaken
-/// for an app that stopped recording.
+/// per-process read, including a listed device's UID, fails the whole call,
+/// so a dropped pid is never mistaken for an app that stopped recording.
 pub(crate) fn input_recorders(uid: &str) -> Result<Vec<i32>> {
     objc2::rc::autoreleasepool(|_| {
         let process_objects = property_vec::<AudioObjectID>(
@@ -261,9 +261,18 @@ pub(crate) fn input_recorders(uid: &str) -> Result<Vec<i32>> {
                 kAudioProcessPropertyDevices,
                 kAudioObjectPropertyScopeInput,
             )?;
-            if !devices.into_iter().any(|device| {
-                property_cf_string(device, kAudioDevicePropertyDeviceUID).as_deref() == Some(uid)
-            }) {
+            let mut records_uid = false;
+            for device in devices {
+                let device_uid = property_cf_string(device, kAudioDevicePropertyDeviceUID)
+                    .ok_or_else(|| {
+                        eyre!("could not read a recording process's input device uid")
+                    })?;
+                if device_uid == uid {
+                    records_uid = true;
+                    break;
+                }
+            }
+            if !records_uid {
                 continue;
             }
             let pid = property_value::<i32>(process_object, kAudioProcessPropertyPID)?;

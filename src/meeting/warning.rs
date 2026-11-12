@@ -225,8 +225,19 @@ impl SilenceRecovery {
         self.renegotiation.load(Ordering::Relaxed)
     }
 
-    /// Clears the renegotiation after an open made it, or once audio
-    /// returns.
+    /// Takes the pending renegotiation for an open to attempt now. It is
+    /// one-shot like dictation's: taking it spends it even if the open
+    /// fails, so a supervisor retry cannot flip the device's rate again.
+    /// Dictation defers it instead, leaving it pending for a later open.
+    pub(super) fn take_renegotiation(&self, dictation_busy: bool) -> bool {
+        if dictation_busy {
+            return false;
+        }
+        self.renegotiation.swap(false, Ordering::Relaxed)
+    }
+
+    /// Clears a pending renegotiation, such as one left on an input this
+    /// stream no longer records from.
     pub(super) fn clear_renegotiation(&self) {
         self.renegotiation.store(false, Ordering::Relaxed);
     }
@@ -361,6 +372,12 @@ impl SilencePolicy {
     /// renegotiate its sample rate.
     pub(super) fn request_renegotiation(&self) {
         self.recovery.request_renegotiation();
+    }
+
+    /// Forgets a renegotiation that belongs to an input this stream no
+    /// longer records from.
+    pub(super) fn clear_renegotiation(&self) {
+        self.recovery.clear_renegotiation();
     }
 
     /// Whether the reopen the last chunk decided was a release-triggered
@@ -685,14 +702,32 @@ mod tests {
         assert!(!policy.retrying());
         assert_eq!(recovery.reopens.load(Ordering::Relaxed), 0);
         assert_eq!(recovery.retries.load(Ordering::Relaxed), 0);
-        // A successful renegotiating open clears it; a later silent chunk
-        // then spends a normal quick reopen.
-        recovery.clear_renegotiation();
+        // The renegotiating open takes it when it is attempted; a later
+        // silent chunk then spends a normal quick reopen.
+        assert!(recovery.take_renegotiation(false));
         assert_eq!(
             policy.observe(&[0.0; 100], true, || false),
             SilenceAction::Reopen
         );
         assert_eq!(recovery.reopens.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_renegotiation_is_taken_once_and_dictation_defers_it() {
+        let recovery = SilenceRecovery::default();
+        assert!(!recovery.take_renegotiation(false), "nothing was pending");
+        recovery.request_renegotiation();
+        assert!(!recovery.take_renegotiation(true), "dictation defers it");
+        assert!(
+            recovery.renegotiation_pending(),
+            "a deferred renegotiation stays pending"
+        );
+        assert!(recovery.take_renegotiation(false), "idle takes it");
+        assert!(!recovery.renegotiation_pending());
+        assert!(
+            !recovery.take_renegotiation(false),
+            "taking it spends it, so a failed open's retry is plain"
+        );
     }
 
     #[test]

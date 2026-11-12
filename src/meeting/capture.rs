@@ -426,14 +426,14 @@ impl MicrophoneSource {
             .map(call_app_inputs)
             .unwrap_or_default();
         let call_input = follow_call_input(None, call_inputs.clone());
-        let mut renegotiate = silence_recovery.renegotiation_pending();
-        if renegotiate && crate::transcription::engine::dictation_busy() {
+        let renegotiate =
+            silence_recovery.take_renegotiation(crate::transcription::engine::dictation_busy());
+        if !renegotiate && silence_recovery.renegotiation_pending() {
             // A rate change would cut the dictation. The flag stays set and
             // the still-silent stream reopens once dictation is idle.
             tracing::info!(
                 "dictation is active; opening the meeting microphone without renegotiating its rate"
             );
-            renegotiate = false;
         }
         let crate::audio::Opened::Input(input) = crate::audio::open_meeting_input(
             selected.as_deref(),
@@ -444,10 +444,10 @@ impl MicrophoneSource {
         else {
             unreachable!("nothing to keep");
         };
-        // Only a successful renegotiating open spends the one-shot recovery;
-        // a failed open, or one deferred for dictation, leaves it set.
+        // The renegotiation is taken when this open attempts it, so a failing
+        // open cannot flip the rate on every supervisor retry; only a
+        // deferral for dictation leaves it pending.
         if renegotiate {
-            silence_recovery.clear_renegotiation();
             // The open already did what a retry would: a release noted before
             // it is spent, though one this open's own comparison sees is not.
             silence_recovery.forget_release();
@@ -613,8 +613,10 @@ impl MicrophoneSource {
             self.recorders.reset(self.opened_uid.as_deref(), current);
         }
         self.recorders_checked = now;
-        // A release from the old input says nothing about the new one.
+        // A release or renegotiation from the old input says nothing about
+        // the new one.
         self.silence.forget_release();
+        self.silence.clear_renegotiation();
         self.input = input;
         self.last_audio = Instant::now();
     }

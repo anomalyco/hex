@@ -336,6 +336,9 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
      renegotiate its sample rate first, like dictation's silence recovery
      (#1575), which briefly interrupts every other stream on that mic, the
      call app's and a warm dictation's
+  -> a renegotiating open spends that attempt when it runs, so a failed
+     open retries plainly instead of flipping the rate again; only a
+     deferral for dictation leaves it for a later open
   ├── still silent -> keep recording; the recording capsule says
   │     "Microphone is silent · 12:34" and the menu bar "Microphone is silent"
   │     -> manifest.microphone.warning = digital_silence is written as soon
@@ -348,15 +351,16 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
   │     -> a release seen before the warning still counts, and one seen
   │        before a reopen and gone after it counts too
   │     -> the release is noted where it is seen, so a stream that fails
-  │        before its next chunk cannot lose it; a pid gone at our
-  │        renegotiating open's own comparison, or in a poll within 1 s of
-  │        it, is the driver restarting, not a release
+  │        before its next chunk cannot lose it; the comparison our
+  │        renegotiating open makes, and any poll in the second after it,
+  │        ignore a pid that disappears: the driver is restarting, not an app
   ├── a dictation captures or infers -> the quick reopens and retries wait
   │     until it is idle; a release stays pending meanwhile, and an open
   │     already decided under dictation opens without renegotiating: the
   │     still-silent stream reopens once dictation is idle, without spending
   │     another reopen or retry
-  ├── a device switch -> a release noted on the old input is forgotten
+  ├── a device switch -> the old input's release and pending renegotiation
+  │     are forgotten
   ├── nonzero audio returns -> clear the live warning, including in a stream
   │     reopened after a supervisor restart, and start the episode's retries
   │     over, though the recording's two reopens stay spent and a pending
@@ -440,6 +444,7 @@ values; no iPhone observed with the lid closed),
 `a_release_triggered_retry_waits_while_dictation_is_active`,
 `a_pending_renegotiation_reopens_once_dictation_is_idle`,
 `audible_audio_clears_a_pending_renegotiation`,
+`a_renegotiation_is_taken_once_and_dictation_defers_it`,
 `audible_audio_clears_a_warning_a_reopened_stream_inherited`,
 `a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
 `a_sticky_warning_survives_its_live_one_clearing`,
@@ -631,19 +636,21 @@ own process, and includes the call app, so its release also counts. The
 shared last-known set survives a supervisor reopen, so a process seen before
 one and gone after it counts as a release, a release is noted where it is
 seen so a stream that fails or stalls before its next chunk cannot lose it,
-and a release seen before the warning still counts once it shows. A process
-that disappears at the comparison our own renegotiating open makes, or in a
-poll within a second of it, is the driver restarting its streams, not a
-release; switching inputs forgets a release from the old one, and a
-successful renegotiating open spends one noted before it. Silence alone
-never retries, and one silent episode gets at most 3 such retries. A
-dictation capture or inference defers both the quick reopens and the retries
-until it is idle, and a release stays pending meanwhile; an open already
-decided under dictation opens without renegotiating, and the still-silent
-stream reopens once dictation is idle without spending another reopen or
-retry, so a rate change never cuts a dictation. Nonzero audio clears the
-live warning, including in a stream reopened after a supervisor restart,
-and starts the silent episode's retry count over, clears a pending
+and a release seen before the warning still counts once it shows. The
+comparison our own renegotiating open makes, and any recorder poll in the
+second after it, ignore a pid that disappears: the driver is restarting its
+streams, not another app. Switching inputs forgets the old input's release
+and pending renegotiation. A renegotiating open takes the renegotiation when
+it is attempted, so a failing open retries plainly rather than flipping the
+rate on every supervisor retry, and a successful one spends a release noted
+before it. Silence alone never retries, and one silent episode gets at most 3
+such retries. A dictation capture or inference defers both the quick reopens
+and the retries until it is idle, and a release stays pending meanwhile; an
+open already decided under dictation opens without renegotiating, and the
+still-silent stream reopens once dictation is idle without spending another
+reopen or retry, so a rate change never cuts a dictation. Nonzero audio
+clears the live warning, including in a stream reopened after a supervisor
+restart, and starts the silent episode's retry count over, clears a pending
 renegotiation, and leaves the recording's two quick reopens spent. A later
 episode warns at once, then gets its own retries. Each gated episode is also
 logged once at info level with the opened device and the call app's reported

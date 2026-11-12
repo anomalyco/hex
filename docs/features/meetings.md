@@ -756,7 +756,8 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │   │   saved device returns, mid-meeting
 │   │   -> New input opens before the old drops; same track, no retry gap
 │   │      // macOS only (meetings are macOS); a failed open keeps the old input
-│   │      -> a release noted on the old input is forgotten, not carried over
+│   │      -> a release and a pending renegotiation from the old input are
+│   │         forgotten, not carried over
 │   ├── Saved device listed but would not open -> System default stands in
 │   │   -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
 │   └── Stream delivers only exact zeros for 3 s (#1518)
@@ -773,6 +774,9 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          sample rate first, like dictation's silence recovery (#1575),
 │          briefly interrupting every other stream on that mic, the call
 │          app's and a warm dictation's
+│       -> a renegotiating open spends that attempt when it runs, so a
+│          failed open retries plainly instead of flipping the rate again;
+│          only a deferral for dictation leaves it for a later open
 │       ├── Still silent -> keep recording; the capsule says
 │       │   "Microphone is silent · 12:34" and the menu bar "Microphone is
 │       │   silent"; manifest.microphone.warning is written as soon as it is
@@ -788,9 +792,9 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       │      change that can let one work
 │       │   -> the release is recorded where it is seen, so a stream that
 │       │      fails before its next chunk cannot lose it; the last set is
-│       │      shared across reopens; a pid gone at our renegotiating
-│       │      open's own comparison, or in a poll within 1 s of it, is the
-│       │      driver restarting, not a release
+│       │      shared across reopens; the comparison our renegotiating open
+│       │      makes, and any poll in the second after it, ignore a pid
+│       │      that disappears: the driver is restarting, not an app
 │       ├── A dictation captures or infers -> the quick reopens and the
 │       │   retries wait until it is idle, so a rate change never cuts a
 │       │   dictation; a release stays pending meanwhile, and an open
@@ -825,6 +829,7 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // a_release_triggered_retry_waits_while_dictation_is_active,
 │          // a_pending_renegotiation_reopens_once_dictation_is_idle,
 │          // audible_audio_clears_a_pending_renegotiation,
+│          // a_renegotiation_is_taken_once_and_dictation_defers_it,
 │          // a_process_that_stops_recording_between_reopens_is_a_release,
 │          // a_release_just_after_our_own_rate_change_is_not_another_apps,
 │          // a_release_belongs_only_to_the_input_that_saw_it,
