@@ -48,7 +48,9 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
 └── Saved import missing or changed (size, mtime, or file ID) -> the choice
     stays saved; the listener runs a downloaded fallback (the system language's
     recommendation if downloaded, else the first downloaded catalog model;
-    custom_models::runnable); General's model row names the fallback and says
+    custom_models::runnable); launch and setup wait only for that fallback
+    (onboarding::model_ready), and `hex status` names it under
+    model.fallback with its reason; General's model row names the fallback and says
     to check it again in the picker (not "can't listen until downloaded",
     while the fallback is downloaded); the card warns
 ```

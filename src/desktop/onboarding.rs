@@ -989,9 +989,16 @@ fn write_owner_only_marker(path: &Path, truncate: bool) -> color_eyre::Result<()
 }
 
 pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
-    let transcription_model = crate::transcription::models::validate(selection)
-        .is_ok_and(|model| crate::transcription::models::is_installed(model, &selection.language));
-    status_with_transcription_model(transcription_model)
+    status_with_transcription_model(model_ready(selection))
+}
+
+/// Whether the model the listener runs for the saved `selection` is
+/// installed: the saved one, or the fallback in place of an import that
+/// can't run, so a lost import never holds dictation for setup.
+pub fn model_ready(selection: &TranscriptionSelection) -> bool {
+    let selection = crate::transcription::custom_models::runnable(selection);
+    crate::transcription::models::validate(&selection)
+        .is_ok_and(|model| crate::transcription::models::is_installed(model, &selection.language))
 }
 
 #[cfg(target_os = "macos")]
@@ -1203,6 +1210,43 @@ unsafe extern "C" {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lost_import_waits_only_for_a_downloaded_fallback_and_stays_saved() {
+        use crate::transcription::custom_models::{self, CustomModelId, FallbackReason};
+        use crate::transcription::models::{self, ModelRuntime, TranscriptionModelId};
+        let directory =
+            std::env::temp_dir().join(format!("hex-lost-import-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        models::set_test_models_dir(Some(directory.clone()));
+        let id = CustomModelId::parse(&format!("custom-{}", "0f".repeat(8))).unwrap();
+        let saved = TranscriptionSelection {
+            model: TranscriptionModelId::Custom(id),
+            language: "de".into(),
+        };
+        let original = saved.clone();
+        assert_eq!(
+            custom_models::fallback_reason(&saved),
+            Some(FallbackReason::Missing)
+        );
+        // Nothing downloaded: setup waits to offer the recommendation.
+        assert!(!model_ready(&saved));
+        let fallback = custom_models::fallback();
+        let ModelRuntime::Gguf(artifact) = models::definition(fallback.model).runtime else {
+            panic!("the fallback is a download");
+        };
+        fs::File::create(directory.join(artifact.filename))
+            .unwrap()
+            .set_len(artifact.bytes)
+            .unwrap();
+        assert!(model_ready(&saved));
+        assert!(status(&saved).transcription_model);
+        assert_eq!(custom_models::runnable(&saved), fallback);
+        assert_eq!(saved, original);
+        models::set_test_models_dir(None);
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[cfg(target_os = "macos")]
     #[test]

@@ -390,7 +390,7 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
   "capture": {"state": "idle", "recording": null, "pending_jobs": 0},
   "meeting": {"state": "recording", "title": "Design sync", "elapsed_seconds": 723},
   "model": {"id": "parakeet_v3", "name": "…", "language": "en", "installed": true,
-            "preparing": null, "downloaded_bytes": 0, "error": null},
+            "preparing": null, "downloaded_bytes": 0, "error": null, "fallback": null},
   "features": {"meetings": true, "release_microphone_while_idle": false,
                "history_retention": "week"},
   "permissions": {"ready": true, "microphone": "ready", "accessibility": "ready",
@@ -408,12 +408,17 @@ listener.shortcuts  Wayland portal only: [{"name": "Dictation", "trigger": "Supe
 capture.state       idle | recording | transcribing | unknown (the listener didn't answer or stopped)
 capture.recording   dictation | service | null
 meeting.state       idle | starting | recording | transcribing
+model               the saved selection; installed is about that model
+model.fallback      {"id", "name", "language", "reason": "missing" | "changed" | "labs-off"}, the
+                    model Hex runs while the saved one can't, or null
 permissions.*       ready | needs-request | needs-settings | needs-restart
 window.pane         settings | modes | history | meetings | …
 update              current | checking | available | unavailable
 ```
 
 `memory_footprint_bytes` is the physical footprint Activity Monitor shows.
+`permissions.transcription_model` is about the model Hex runs, the fallback
+included, so a missing import with a downloaded fallback is ready.
 `labs` lists the [Labs](features/labs.md) features turned on; older Hex omits it.
 
 ### Error codes

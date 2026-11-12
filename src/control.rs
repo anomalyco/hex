@@ -678,6 +678,42 @@ pub struct ModelReport {
     pub preparing: Option<String>,
     pub downloaded_bytes: u64,
     pub error: Option<String>,
+    /// The model Hex runs in place of the saved one while that can't run.
+    #[serde(default)]
+    pub fallback: Option<FallbackReport>,
+}
+
+impl ModelReport {
+    /// The saved `selection`, and the fallback Hex runs while it can't run;
+    /// no preparation.
+    pub fn saved(selection: &crate::transcription::models::TranscriptionSelection) -> Self {
+        use crate::transcription::{custom_models, models};
+        let definition = models::definition(selection.model);
+        Self {
+            id: selection.model.as_str().into(),
+            name: definition.name.into(),
+            language: selection.language.clone(),
+            installed: models::is_installed(definition, &selection.language),
+            fallback: custom_models::fallback_reason(selection).map(|reason| {
+                let running = custom_models::fallback();
+                FallbackReport {
+                    id: running.model.as_str().into(),
+                    name: models::definition(running.model).name.into(),
+                    language: running.language,
+                    reason,
+                }
+            }),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct FallbackReport {
+    pub id: String,
+    pub name: String,
+    pub language: String,
+    pub reason: crate::transcription::custom_models::FallbackReason,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

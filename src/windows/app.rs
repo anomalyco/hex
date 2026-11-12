@@ -457,8 +457,9 @@ impl WindowsDesktopHost {
     }
 
     fn model_ready(&self) -> bool {
-        let model = crate::transcription::models::definition(self.settings.transcription.model);
-        crate::transcription::models::is_installed(model, &self.settings.transcription.language)
+        let selection = self.runtime_selection();
+        let model = crate::transcription::models::definition(selection.model);
+        crate::transcription::models::is_installed(model, &selection.language)
             && crate::transcription::models::is_verified(model)
     }
 

@@ -745,9 +745,7 @@ impl LinuxDesktopHost {
             self.status = ListenerStatus::CouldNotEnable;
             return;
         }
-        let model = crate::transcription::models::definition(self.settings.transcription.model);
-        if !crate::transcription::models::is_installed(model, &self.settings.transcription.language)
-        {
+        if !crate::desktop::onboarding::model_ready(&self.settings.transcription) {
             self.status = ListenerStatus::ModelRequired;
             return;
         }
