@@ -908,9 +908,11 @@ impl BrowserPageMemory {
 fn is_browser_application(application_lower: &str) -> bool {
     // Arc's name is too short to match as a substring.
     application_lower == "arc"
-        || ["brave", "chrome", "safari", "firefox", "edge", "vivaldi"]
-            .iter()
-            .any(|browser| application_lower.contains(browser))
+        || [
+            "brave", "chrome", "safari", "firefox", "edge", "vivaldi", "helium",
+        ]
+        .iter()
+        .any(|browser| application_lower.contains(browser))
 }
 
 fn context_matches_browser(
@@ -933,6 +935,7 @@ fn context_matches_browser(
         "com.microsoft.edgemac" => lower.contains("edge"),
         "company.thebrowser.Browser" => lower == "arc",
         "com.vivaldi.Vivaldi" => lower.contains("vivaldi"),
+        "net.imput.helium" => lower.contains("helium"),
         _ => false,
     }
 }
@@ -998,6 +1001,7 @@ const BROWSER_TITLE_SUFFIXES: &[&str] = &[
     " - Safari",
     " - Arc",
     " - Vivaldi",
+    " - Helium",
 ];
 
 const GOOGLE_MEET_TITLE_PREFIXES: [&str; 3] = ["Meet - ", "Meet – ", "Meet — "];
@@ -1871,6 +1875,15 @@ mod tests {
         .unwrap();
         assert_eq!(named_prefix.title, "Weekly Architecture");
         assert!(named_prefix.named);
+
+        let helium = candidate_from_context(&context(
+            "Helium",
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet – Weekly Architecture - Helium",
+        ))
+        .unwrap();
+        assert_eq!(helium.title, "Weekly Architecture");
+        assert!(helium.named);
     }
 
     #[test]
@@ -2053,6 +2066,37 @@ mod tests {
         assert_eq!(call.application_name.as_deref(), Some("Vivaldi"));
         assert_eq!(call.offer_title(), "Call in Vivaldi");
         assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
+    }
+
+    #[test]
+    fn helium_on_the_microphone_is_a_named_browser_call() {
+        // Helium's sandboxed audio service holds the microphone and reports
+        // its helper bundle; the main app is `net.imput.helium`.
+        let helium_helper = ActiveMicrophoneApplication {
+            pid: 6120,
+            bundle_id: "net.imput.helium.helper".into(),
+            name: "Helium Helper".into(),
+        };
+        assert!(helium_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &helium_helper,
+            &context(
+                "Helium",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - Design sync",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(meet.application.as_deref(), Some("net.imput.helium"));
+        assert_eq!(meet.application_name.as_deref(), Some("Helium"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+
+        // A page on no known call site is still a browser call, named by the
+        // browser.
+        let other = candidate_from_microphone(&helium_helper, &ContextSnapshot::default()).unwrap();
+        assert_eq!(other.source, MeetingSource::BrowserCall);
+        assert_eq!(other.offer_title(), "Call in Helium");
     }
 
     fn brave() -> ActiveMicrophoneApplication {

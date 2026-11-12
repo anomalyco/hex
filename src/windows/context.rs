@@ -22,6 +22,7 @@ const BROWSER_STEMS: &[&str] = &[
     "chrome",
     "chromium",
     "firefox",
+    "helium",
     "librewolf",
     "msedge",
     "opera",
@@ -258,6 +259,7 @@ mod tests {
     #[test]
     fn only_known_browsers_are_probed() {
         assert!(BROWSER_STEMS.contains(&"msedge"));
+        assert!(BROWSER_STEMS.contains(&"helium"));
         assert!(!BROWSER_STEMS.contains(&"code"));
         assert!(BROWSER_STEMS.is_sorted());
     }

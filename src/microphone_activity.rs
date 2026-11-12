@@ -96,6 +96,7 @@ fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "com.microsoft.edgemac"
                 | "company.thebrowser.Browser"
                 | "com.vivaldi.Vivaldi"
+                | "net.imput.helium"
         )
     )
 }
@@ -292,7 +293,7 @@ fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 43] = [
+const EXECUTABLES: [(&str, &str); 45] = [
     // Discord and its Canary and PTB builds, on Windows and Linux (the
     // Flatpak runs the same binary).
     ("discord", "com.hnc.Discord"),
@@ -332,6 +333,8 @@ const EXECUTABLES: [(&str, &str); 43] = [
     ("chromium-browser", "com.google.Chrome"),
     ("brave", "com.brave.Browser"),
     ("brave-browser", "com.brave.Browser"),
+    ("helium", "net.imput.helium"),
+    ("helium-browser", "net.imput.helium"),
     ("firefox", "org.mozilla.firefox"),
     ("firefox-bin", "org.mozilla.firefox"),
     ("firefox-esr", "org.mozilla.firefox"),
@@ -404,6 +407,7 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("com.microsoft.edgemac", "com.microsoft.edgemac"),
         ("company.thebrowser.browser", "company.thebrowser.Browser"),
         ("com.vivaldi.vivaldi", "com.vivaldi.Vivaldi"),
+        ("net.imput.helium", "net.imput.helium"),
     ]
     .iter()
     .find_map(|(prefix, canonical)| {
@@ -437,6 +441,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.microsoft.edgemac" => Some("Microsoft Edge"),
         "company.thebrowser.Browser" => Some("Arc"),
         "com.vivaldi.Vivaldi" => Some("Vivaldi"),
+        "net.imput.helium" => Some("Helium"),
         _ => None,
     }
 }
@@ -997,6 +1002,10 @@ mod tests {
             "com.google.Chrome.helper.Renderer",
             "com.google.Chrome"
         ));
+        assert!(is_process_of(
+            "net.imput.helium.helper.Renderer",
+            "net.imput.helium"
+        ));
         assert!(is_process_of("com.google.Chrome", "com.google.Chrome"));
         assert!(!is_process_of(
             "com.google.Chrome.helper",
@@ -1013,6 +1022,7 @@ mod tests {
     fn browser_bundles_include_helpers() {
         assert!(browser_bundle("com.brave.Browser.helper", None));
         assert!(browser_bundle("com.google.Chrome.helper", None));
+        assert!(browser_bundle("net.imput.helium.helper", None));
         assert!(browser_bundle(
             "com.apple.WebKit.GPU",
             Some("Safari Graphics and Media")
@@ -1085,6 +1095,19 @@ mod tests {
                 true,
             ),
             ("company.thebrowser.dia", "Dia", None, false),
+            ("net.imput.helium", "Helium", Some("net.imput.helium"), true),
+            (
+                "net.imput.helium.helper",
+                "Helium Helper",
+                Some("net.imput.helium"),
+                true,
+            ),
+            (
+                "net.imput.helium.helper.Renderer",
+                "Helium Helper (Renderer)",
+                Some("net.imput.helium"),
+                true,
+            ),
             ("anomaly.hex", "Hex", None, false),
             ("zoom", "Zoom", Some("us.zoom.xos"), false),
             (
@@ -1109,6 +1132,9 @@ mod tests {
             ),
             ("vivaldi-bin", "Vivaldi", Some("com.vivaldi.Vivaldi"), true),
             ("vivaldi.exe", "Vivaldi", Some("com.vivaldi.Vivaldi"), true),
+            ("helium", "Helium", Some("net.imput.helium"), true),
+            ("helium-browser", "Helium", Some("net.imput.helium"), true),
+            ("helium.exe", "Helium", Some("net.imput.helium"), true),
             (
                 "com.vivaldi.Vivaldi.helper",
                 "Vivaldi Helper",

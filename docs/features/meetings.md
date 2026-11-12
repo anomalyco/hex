@@ -172,9 +172,10 @@ Browser calls -> offered as "Call in <browser>": no site is read yet, so a
     call on any website (Teams on the web, a Teams web app/PWA, Meet, ...) is
     a browser call after 20 s, never the Microsoft Teams (or other service's)
     choice; Always record can't be set for it from an offer
-    └── browsers: chrome, chromium, brave, firefox, msedge, vivaldi (vivaldi-bin,
-        vivaldi-stable, vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's
-        process); others are not detected (#1105)
+    └── browsers: chrome, chromium, brave, helium (helium-browser), firefox,
+        msedge, vivaldi (vivaldi-bin, vivaldi-stable, vivaldi-snapshot; a
+        Vivaldi web app runs in Vivaldi's process); others are not detected
+        (#1105)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -319,9 +320,11 @@ rewritten as `providers` on the next load.
 
 Call detection knows Brave, Chrome, Safari, Firefox, Edge, Arc
 (`company.thebrowser.Browser`, foreground name `Arc`; its tab is read like
-Brave's), and Vivaldi (`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on
-Linux, `vivaldi.exe` on Windows). Arc was missing until #801, so its Meet
-calls were never detected; Vivaldi was missing until #1105, so its calls
+Brave's), Helium (`net.imput.helium`, helpers included; `helium` and
+`helium-browser` on Linux, `helium.exe` on Windows), and Vivaldi
+(`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on Linux, `vivaldi.exe` on
+Windows). Arc was missing until #801, so its Meet calls were never detected;
+Vivaldi was missing until #1105, so its calls
 (Teams in a Vivaldi web app included) were never offered. Checks:
 `a_google_meet_call_in_arc_records_after_about_two_seconds`,
 `vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
@@ -368,11 +371,12 @@ Checks: `more_call_apps_are_unknown_until_their_lab_is_on`,
 of these apps or websites on a real call, the Phone app's Continuity audio in
 particular.
 
-Chromium and Electron apps (Brave, Chrome, Edge, Arc, Slack, Teams) capture microphone
-audio in sandboxed `audio.mojom.AudioService` utility processes (`*.helper`) that
-do not register with `NSRunningApplication`; Zoom uses `us.zoom.CptHost`, Firefox
-uses `org.mozilla.plugincontainer`, Safari uses `com.apple.WebKit.GPU` (`Safari
-Graphics and Media`), and FaceTime uses `com.apple.avconferenced`.
+Chromium and Electron apps (Brave, Chrome, Helium, Edge, Arc, Slack, Teams)
+capture microphone audio in sandboxed `audio.mojom.AudioService` utility
+processes (`*.helper`) that do not register with `NSRunningApplication`; Zoom
+uses `us.zoom.CptHost`, Firefox uses `org.mozilla.plugincontainer`, Safari uses
+`com.apple.WebKit.GPU` (`Safari Graphics and Media`), and FaceTime uses
+`com.apple.avconferenced`.
 [microphone_activity.rs](../../src/microphone_activity.rs) attributes each input
 process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
