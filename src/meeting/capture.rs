@@ -279,15 +279,41 @@ fn call_app_inputs(application: &str) -> Vec<String> {
     }
 }
 
+/// The processes recording from the input `uid`, Hex's own excluded, from
+/// Core Audio's process metadata: no audio is read. A set that shrinks means
+/// an app let go of the microphone, the change that can make renegotiating
+/// its sample rate succeed.
+fn recording_processes(uid: Option<&str>) -> Vec<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(uid) = uid else {
+            return Vec::new();
+        };
+        let ours = i32::try_from(std::process::id()).ok();
+        match crate::microphone_activity::input_recorders(uid) {
+            Ok(pids) => pids.into_iter().filter(|pid| Some(*pid) != ours).collect(),
+            Err(error) => {
+                tracing::debug!(%error, "could not read the processes recording from the meeting microphone");
+                Vec::new()
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = uid;
+        Vec::new()
+    }
+}
+
 struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
     /// The per-chunk digital silence decision, sharing this recording's
-    /// reopen budget and retry schedule with every reopened stream.
+    /// reopen budget and retry count with every reopened stream.
     silence: SilencePolicy,
-    /// Set by a silence reopen; the next open renegotiates the device's
-    /// sample rate and clears it.
+    /// Set by a silence reopen; the next successful open renegotiates the
+    /// device's sample rate and clears it, so a failed open tries again.
     renegotiate_rate: Arc<AtomicBool>,
     /// The controller-visible warning, shared across reopened streams.
     warnings: TrackWarnings,
@@ -306,6 +332,13 @@ struct MicrophoneSource {
     /// The UID of this stream's input.
     opened_uid: Option<String>,
     call_input_checked: Instant,
+    /// The processes recording from `opened_uid` at the last look, Hex's own
+    /// excluded; a smaller set means an app released the microphone.
+    input_recorders: Vec<i32>,
+    /// Another application released this stream's input; kept until the next
+    /// chunk's silence decision reads it, because a poll may get no chunk.
+    input_released: bool,
+    recorders_checked: Instant,
 }
 
 impl MicrophoneSource {
@@ -322,22 +355,28 @@ impl MicrophoneSource {
             .map(call_app_inputs)
             .unwrap_or_default();
         let call_input = follow_call_input(None, call_inputs.clone());
+        let renegotiate = renegotiate_rate.load(Ordering::Relaxed);
         let crate::audio::Opened::Input(input) = crate::audio::open_meeting_input(
             selected.as_deref(),
             call_input.as_deref(),
             None,
-            renegotiate_rate.swap(false, Ordering::Relaxed),
+            renegotiate,
         )?
         else {
             unreachable!("nothing to keep");
         };
+        // Only a successful open spends the one-shot recovery; a failed one
+        // leaves it set for the supervisor's next attempt.
+        renegotiate_rate.store(false, Ordering::Relaxed);
         let input = *input;
         let opened_uid = input.uid.clone();
+        let input_recorders = recording_processes(opened_uid.as_deref());
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
             rate = resample.rate,
             call_input = call_input.is_some(),
+            renegotiated = renegotiate,
             "meeting microphone opened"
         );
         let mut retry = UnopenableRetry::default();
@@ -359,6 +398,9 @@ impl MicrophoneSource {
             call_inputs,
             opened_uid,
             call_input_checked: Instant::now(),
+            input_recorders,
+            input_released: false,
+            recorders_checked: Instant::now(),
         })
     }
 
@@ -369,6 +411,28 @@ impl MicrophoneSource {
         call_app_reports_input(self.opened_uid.as_deref(), &self.call_inputs)
     }
 
+    /// Notes whether an application other than Hex stopped recording from
+    /// this stream's input since the last look, sampled at the call app's
+    /// once a second cadence from Core Audio process metadata; no audio is
+    /// read. The change is kept until a chunk's silence decision reads it.
+    fn poll_released(&mut self, now: Instant) {
+        if self.application.is_none()
+            || now.duration_since(self.recorders_checked) < CALL_INPUT_INTERVAL
+        {
+            return;
+        }
+        self.recorders_checked = now;
+        let current = recording_processes(self.opened_uid.as_deref());
+        if self
+            .input_recorders
+            .iter()
+            .any(|pid| !current.contains(pid))
+        {
+            self.input_released = true;
+        }
+        self.input_recorders = current;
+    }
+
     /// Follows a change of the input the call app records from, of the
     /// system default or of the saved microphone in Settings, the saved
     /// microphone returning, or a due look at one that would not open, by
@@ -376,6 +440,7 @@ impl MicrophoneSource {
     /// failed open keeps the current input.
     fn follow_route(&mut self) {
         let now = Instant::now();
+        self.poll_released(now);
         let mut call_input_changed = false;
         if self.application.is_some()
             && now.duration_since(self.call_input_checked) >= CALL_INPUT_INTERVAL
@@ -444,6 +509,10 @@ impl MicrophoneSource {
         // old one stays until real audio clears it.
         self.silence.reset(input.sample_rate);
         self.opened_uid = input.uid.clone();
+        self.input_recorders = recording_processes(self.opened_uid.as_deref());
+        self.recorders_checked = now;
+        // A release from the old input says nothing about the new one.
+        self.input_released = false;
         self.input = input;
         self.last_audio = Instant::now();
     }
@@ -455,18 +524,21 @@ impl LiveSource for MicrophoneSource {
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
-                let action =
-                    self.silence
-                        .observe(&samples, self.call_app_holds_device(), Instant::now());
+                let released = std::mem::take(&mut self.input_released);
+                let action = self.silence.observe(
+                    &samples,
+                    self.call_app_holds_device(),
+                    released,
+                    crate::transcription::engine::dictation_busy(),
+                );
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
                 match action {
                     SilenceAction::Reopen => {
                         self.renegotiate_rate.store(true, Ordering::Relaxed);
-                        if let Some(delay) = self.silence.retry_delay() {
+                        if self.silence.retrying() {
                             tracing::warn!(
                                 device = %self.input.device_name,
-                                delay_secs = delay.as_secs(),
-                                "meeting microphone is still digitally silent; retrying it"
+                                "meeting microphone is still digitally silent; retrying it after an app released it"
                             );
                         } else {
                             tracing::warn!(

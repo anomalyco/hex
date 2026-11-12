@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,11 +27,9 @@ const SILENCE_TIMEOUT: Duration = Duration::from_secs(3);
 /// How many times one recording reopens a digitally silent microphone before
 /// keeping the stream open and warning instead.
 const SILENCE_REOPENS: u8 = 2;
-/// The delay before a warned recording first retries its still-silent
-/// microphone; each later retry doubles it up to [`SILENCE_RETRY_MAX`].
-const SILENCE_RETRY_FIRST: Duration = Duration::from_secs(10);
-/// The longest delay between a warned recording's retries.
-const SILENCE_RETRY_MAX: Duration = Duration::from_secs(120);
+/// How many release-triggered renegotiating retries one silent episode gets
+/// after its warning, reset when audible audio clears it.
+const SILENCE_RETRIES: u8 = 3;
 
 /// The microphone's warning, shared by each reopened source with the recorder
 /// that persists the final one.
@@ -109,7 +107,7 @@ pub(super) enum SilenceAction {
     /// recording from this input; logged once per episode, never acted on.
     Gated,
     /// The stream is digitally silent and is reopened: one of the recording's
-    /// quick reopens, or a warned recording's retry.
+    /// quick reopens, or a warned recording's release-triggered retry.
     Reopen,
     /// The stream is digitally silent and every quick reopen is spent: warn.
     Warn,
@@ -155,72 +153,16 @@ impl SilenceWatch {
     }
 }
 
-/// The reopen budget and warning-time retry schedule that every stream one
-/// recording's microphone opens shares.
+/// One recording's shared silence recovery: its quick reopen budget and the
+/// release-triggered retry count of the current silent episode, both spent
+/// across every stream the supervisor reopens.
 #[derive(Default)]
 pub(super) struct SilenceRecovery {
     reopens: AtomicU8,
-    retries: Mutex<RetrySchedule>,
-}
-
-/// When the next warning-time retry is due and the delay after it.
-#[derive(Clone, Copy, Default)]
-struct RetrySchedule {
-    due: Option<Instant>,
-    delay: Duration,
+    retries: AtomicU8,
 }
 
 impl SilenceRecovery {
-    /// Starts the retry schedule when a warning is raised; a warning whose
-    /// update the controller dropped is raised again without moving it.
-    fn warned(&self, now: Instant) {
-        let mut retries = self
-            .retries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if retries.due.is_none() {
-            *retries = RetrySchedule {
-                due: Some(now + SILENCE_RETRY_FIRST),
-                delay: SILENCE_RETRY_FIRST,
-            };
-        }
-    }
-
-    /// The delay of the retry due at `now`, advancing its backoff; none while
-    /// the next retry is still in the future.
-    fn retry(&self, now: Instant) -> Option<Duration> {
-        let mut retries = self
-            .retries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let delay = match retries.due {
-            Some(due) if now >= due => retries.delay,
-            Some(_) => return None,
-            // A stream reopened after its warning never raised one itself.
-            None => {
-                *retries = RetrySchedule {
-                    due: Some(now + SILENCE_RETRY_FIRST),
-                    delay: SILENCE_RETRY_FIRST,
-                };
-                return None;
-            }
-        };
-        let next = (delay * 2).min(SILENCE_RETRY_MAX);
-        *retries = RetrySchedule {
-            due: Some(now + next),
-            delay: next,
-        };
-        Some(delay)
-    }
-
-    /// Audible audio ended the silent episode: forget the retry schedule.
-    fn recovered(&self) {
-        *self
-            .retries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = RetrySchedule::default();
-    }
-
     /// Claims one of the recording's quick silence reopens; false once they
     /// are spent, which is when a warning is raised instead.
     fn claim_reopen(&self) -> bool {
@@ -230,10 +172,25 @@ impl SilenceRecovery {
             })
             .is_ok()
     }
+
+    /// Claims one release-triggered renegotiating retry; false once this
+    /// silent episode's are spent.
+    fn claim_retry(&self) -> bool {
+        self.retries
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                (used < SILENCE_RETRIES).then_some(used + 1)
+            })
+            .is_ok()
+    }
+
+    /// Audible audio ended the silent episode: the next one starts over.
+    fn recovered(&self) {
+        self.retries.store(0, Ordering::Relaxed);
+    }
 }
 
 /// The per-chunk digital silence decision, kept by each opened source but
-/// sharing one reopen budget, retry schedule, and sticky warning per recording.
+/// sharing one reopen budget, retry count, and sticky warning per recording.
 pub(super) struct SilencePolicy {
     watch: SilenceWatch,
     recovery: Arc<SilenceRecovery>,
@@ -241,8 +198,13 @@ pub(super) struct SilencePolicy {
     warning: bool,
     /// This silent episode was already reported as gated by the call app.
     gated: bool,
-    /// The delay of the warning-time retry this chunk decided, for its log.
-    retry_delay: Option<Duration>,
+    /// Another application released the input since the warning showed, so a
+    /// retry can renegotiate the rate now; kept until one runs or audio
+    /// returns.
+    pending_retry: bool,
+    /// The reopen this chunk decided was a release-triggered retry, for its
+    /// log.
+    retrying: bool,
 }
 
 impl SilencePolicy {
@@ -254,7 +216,8 @@ impl SilencePolicy {
             recovery,
             warning,
             gated: false,
-            retry_delay: None,
+            pending_retry: false,
+            retrying: false,
         }
     }
 
@@ -268,32 +231,42 @@ impl SilencePolicy {
     /// while the call app records from this input, so a microphone a call app
     /// leaves digitally silent between user speech is not mistaken for a
     /// broken stream; a manual recording never reopens or warns. After the
-    /// warning, retries continue while the microphone stays exactly silent,
-    /// whether or not the call app still holds it.
+    /// warning, a renegotiating retry runs only when another application
+    /// released the input (`released`), at most [`SILENCE_RETRIES`] times per
+    /// silent episode. Both kinds of reopen wait while `dictation_active`, so
+    /// a rate change never interrupts dictation.
     pub(super) fn observe(
         &mut self,
         samples: &[f32],
         call_app_holds_device: bool,
-        now: Instant,
+        released: bool,
+        dictation_active: bool,
     ) -> SilenceAction {
-        self.retry_delay = None;
+        self.retrying = false;
+        if released && self.warning {
+            self.pending_retry = true;
+        }
         let silent = self.watch.observe(samples);
         if !silent {
             self.gated = false;
             let audible = samples.iter().any(|&sample| sample != 0.0);
             return if audible && self.warning {
                 self.recovery.recovered();
+                self.pending_retry = false;
                 SilenceAction::Clear
             } else {
                 SilenceAction::Nothing
             };
         }
         if self.warning {
-            let Some(delay) = self.recovery.retry(now) else {
-                return SilenceAction::Nothing;
-            };
-            self.retry_delay = Some(delay);
-            return SilenceAction::Reopen;
+            if self.pending_retry && !dictation_active {
+                self.pending_retry = false;
+                if self.recovery.claim_retry() {
+                    self.retrying = true;
+                    return SilenceAction::Reopen;
+                }
+            }
+            return SilenceAction::Nothing;
         }
         if !call_app_holds_device {
             if self.gated {
@@ -302,18 +275,20 @@ impl SilencePolicy {
             self.gated = true;
             return SilenceAction::Gated;
         }
+        if dictation_active {
+            return SilenceAction::Nothing;
+        }
         if self.recovery.claim_reopen() {
             SilenceAction::Reopen
         } else {
-            self.recovery.warned(now);
             SilenceAction::Warn
         }
     }
 
-    /// The delay of the warning-time retry the last chunk decided, if the
-    /// action it returned was one.
-    pub(super) fn retry_delay(&self) -> Option<Duration> {
-        self.retry_delay
+    /// Whether the reopen the last chunk decided was a release-triggered
+    /// retry, for its log.
+    pub(super) fn retrying(&self) -> bool {
+        self.retrying
     }
 
     /// Records that `action` reached the controller, so a warning whose
@@ -358,12 +333,12 @@ mod tests {
         recovery
     }
 
-    /// A spent recording whose warning is showing, taken at `now`.
-    fn warned_policy(now: Instant) -> (Arc<SilenceRecovery>, SilencePolicy) {
+    /// A spent recording whose warning is showing.
+    fn warned_policy() -> (Arc<SilenceRecovery>, SilencePolicy) {
         let recovery = spent_recovery();
         let mut policy = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            policy.observe(&[0.0; 3_000], true, now),
+            policy.observe(&[0.0; 3_000], true, false, false),
             SilenceAction::Warn
         );
         policy.applied(SilenceAction::Warn);
@@ -372,193 +347,216 @@ mod tests {
 
     #[test]
     fn a_silence_budget_is_shared_across_reopened_streams() {
-        let now = Instant::now();
         let recovery = Arc::new(SilenceRecovery::default());
         let mut first = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            first.observe(&[0.0; 3_000], true, now),
+            first.observe(&[0.0; 3_000], true, false, false),
             SilenceAction::Reopen
         );
         let mut second = SilencePolicy::new(1_000, recovery.clone(), false);
         assert_eq!(
-            second.observe(&[0.0; 3_000], true, now),
+            second.observe(&[0.0; 3_000], true, false, false),
             SilenceAction::Reopen
         );
         let mut third = SilencePolicy::new(1_000, recovery.clone(), false);
-        assert_eq!(third.observe(&[0.0; 3_000], true, now), SilenceAction::Warn);
-        // The warning is offered again until the controller has it, without
-        // moving the first retry.
-        assert_eq!(third.observe(&[0.0; 100], true, now), SilenceAction::Warn);
+        assert_eq!(
+            third.observe(&[0.0; 3_000], true, false, false),
+            SilenceAction::Warn
+        );
+        // The warning is offered again until the controller has it.
+        assert_eq!(
+            third.observe(&[0.0; 100], true, false, false),
+            SilenceAction::Warn
+        );
         third.applied(SilenceAction::Warn);
         assert_eq!(
-            third.observe(&[0.0; 100], true, now),
+            third.observe(&[0.0; 100], true, false, false),
             SilenceAction::Nothing
-        );
-        assert_eq!(
-            third.observe(&[0.0; 100], true, now + SILENCE_RETRY_FIRST),
-            SilenceAction::Reopen,
-            "the first retry is still 10 s after the warning"
         );
     }
 
     #[test]
-    fn a_warned_microphone_retries_on_a_doubling_backoff_to_two_minutes() {
-        let start = Instant::now();
-        let (_, mut policy) = warned_policy(start);
-        assert!(
-            policy.retry_delay().is_none(),
-            "a quick reopen is not a warning-time retry"
-        );
-        let mut due = start + SILENCE_RETRY_FIRST;
-        let mut delay = SILENCE_RETRY_FIRST;
-        let mut retries = Vec::new();
-        for _ in 0..6 {
+    fn a_warned_microphone_never_retries_without_a_release() {
+        let (_, mut policy) = warned_policy();
+        // Silence alone never renegotiates, however long it lasts and
+        // whether or not the call app still reports the input.
+        for call_app_holds_device in [true; 10].into_iter().chain([false; 10]) {
             assert_eq!(
-                policy.observe(&[0.0; 100], true, due - Duration::from_millis(1)),
-                SilenceAction::Nothing,
-                "no retry before {delay:?} of further silence"
+                policy.observe(&[0.0; 100], call_app_holds_device, false, false),
+                SilenceAction::Nothing
             );
-            assert_eq!(
-                policy.observe(&[0.0; 100], true, due),
-                SilenceAction::Reopen,
-                "a retry after {delay:?}"
-            );
-            assert_eq!(policy.retry_delay(), Some(delay));
-            policy.applied(SilenceAction::Reopen);
-            retries.push(due);
-            due += (delay * 2).min(SILENCE_RETRY_MAX);
-            delay = (delay * 2).min(SILENCE_RETRY_MAX);
+            assert!(!policy.retrying());
         }
-        assert_eq!(
-            retries[0] - start,
-            SILENCE_RETRY_FIRST,
-            "the first retry is 10 s after the warning"
-        );
-        assert_eq!(
-            retries
-                .windows(2)
-                .map(|pair| pair[1] - pair[0])
-                .collect::<Vec<_>>(),
-            [20, 40, 80, 120, 120].map(Duration::from_secs),
-            "each delay doubles up to the two minute cap"
-        );
-        assert_eq!(delay, SILENCE_RETRY_MAX);
     }
 
     #[test]
-    fn a_warned_microphones_retries_survive_a_rebuilt_policy() {
-        let start = Instant::now();
-        let (recovery, mut first) = warned_policy(start);
-        let reopened = start + SILENCE_RETRY_FIRST;
+    fn a_release_triggers_a_warned_retry() {
+        let (_, mut policy) = warned_policy();
+        // Another app letting go of the opened input is the change that can
+        // make a renegotiation succeed.
         assert_eq!(
-            first.observe(&[0.0; 100], true, reopened),
+            policy.observe(&[0.0; 100], true, true, false),
             SilenceAction::Reopen
         );
-        first.applied(SilenceAction::Reopen);
-        // The supervisor reopened the stream; the replacement inherits the
-        // warning and the retry schedule with it.
-        let mut second = SilencePolicy::new(1_000, recovery, true);
-        let due = reopened + SILENCE_RETRY_FIRST * 2;
-        assert_eq!(
-            second.observe(&[0.0; 3_000], true, due - Duration::from_millis(1)),
-            SilenceAction::Nothing
-        );
-        assert_eq!(
-            second.observe(&[0.0; 100], true, due),
-            SilenceAction::Reopen
-        );
+        assert!(policy.retrying(), "logged as a retry, not a quick reopen");
+        policy.applied(SilenceAction::Reopen);
     }
 
     #[test]
     fn a_warned_microphone_retries_after_the_call_app_lets_go() {
-        let start = Instant::now();
-        let (_, mut policy) = warned_policy(start);
-        let due = start + SILENCE_RETRY_FIRST;
+        let (_, mut policy) = warned_policy();
         assert_eq!(
-            policy.observe(&[0.0; 100], false, due - Duration::from_millis(1)),
-            SilenceAction::Nothing,
-            "a release before the retry is due is not a gated episode"
+            policy.observe(&[0.0; 100], false, true, false),
+            SilenceAction::Reopen
         );
+        assert!(policy.retrying());
+    }
+
+    #[test]
+    fn a_silent_episode_gets_three_release_triggered_retries() {
+        let (recovery, mut policy) = warned_policy();
+        for _ in 0..SILENCE_RETRIES {
+            assert_eq!(
+                policy.observe(&[0.0; 100], true, true, false),
+                SilenceAction::Reopen
+            );
+            policy.applied(SilenceAction::Reopen);
+        }
         assert_eq!(
-            policy.observe(&[0.0; 100], false, due),
-            SilenceAction::Reopen,
-            "the app letting go is when the retry can succeed"
+            policy.observe(&[0.0; 100], true, true, false),
+            SilenceAction::Nothing,
+            "the episode's retries are spent"
+        );
+        // The cap is shared, so a stream the supervisor reopened gets none.
+        let mut replacement = SilencePolicy::new(1_000, recovery, true);
+        assert_eq!(
+            replacement.observe(&[0.0; 3_000], true, true, false),
+            SilenceAction::Nothing
         );
     }
 
     #[test]
-    fn audible_audio_resets_a_warned_microphones_retry_backoff() {
-        let start = Instant::now();
-        let (recovery, mut warned) = warned_policy(start);
-        let reopened = start + SILENCE_RETRY_FIRST;
+    fn a_rebuilt_policy_keeps_the_silent_episodes_retries() {
+        let (recovery, mut first) = warned_policy();
         assert_eq!(
-            warned.observe(&[0.0; 100], true, reopened),
+            first.observe(&[0.0; 100], true, true, false),
             SilenceAction::Reopen
         );
-        warned.applied(SilenceAction::Reopen);
-
-        // A reopened stream that hears audio clears the warning and the
-        // schedule, including the backoff the warned stream had grown.
-        let mut replacement = SilencePolicy::new(1_000, recovery, true);
+        first.applied(SilenceAction::Reopen);
+        // The supervisor reopened the stream; the replacement inherits the
+        // warning, and needs its own release before another retry.
+        let mut second = SilencePolicy::new(1_000, recovery, true);
         assert_eq!(
-            replacement.observe(&[0.25], true, reopened),
-            SilenceAction::Clear
-        );
-        replacement.applied(SilenceAction::Clear);
-        // Silence again warns at once (the budget is spent), then waits the
-        // first 10 s again instead of the 20 s the old schedule had reached.
-        let rewarned = reopened + Duration::from_secs(1);
-        assert_eq!(
-            replacement.observe(&[0.0; 3_000], true, rewarned),
-            SilenceAction::Warn
-        );
-        replacement.applied(SilenceAction::Warn);
-        let due = rewarned + SILENCE_RETRY_FIRST;
-        assert_eq!(
-            replacement.observe(&[0.0; 100], true, due - Duration::from_millis(1)),
+            second.observe(&[0.0; 3_000], true, false, false),
             SilenceAction::Nothing
         );
         assert_eq!(
-            replacement.observe(&[0.0; 100], true, due),
+            second.observe(&[0.0; 100], true, true, false),
             SilenceAction::Reopen
         );
+        assert!(second.retrying());
+    }
+
+    #[test]
+    fn a_reopen_waits_while_dictation_is_active() {
+        let mut policy = SilencePolicy::new(1_000, Arc::new(SilenceRecovery::default()), false);
+        assert_eq!(
+            policy.observe(&[0.0; 3_000], true, false, true),
+            SilenceAction::Nothing,
+            "a quick reopen must not renegotiate under a dictation"
+        );
+        assert_eq!(
+            policy.observe(&[0.0; 100], true, false, false),
+            SilenceAction::Reopen
+        );
+    }
+
+    #[test]
+    fn a_release_triggered_retry_waits_while_dictation_is_active() {
+        let (_, mut policy) = warned_policy();
+        assert_eq!(
+            policy.observe(&[0.0; 100], true, true, true),
+            SilenceAction::Nothing
+        );
+        // The release is kept until dictation is idle.
+        assert_eq!(
+            policy.observe(&[0.0; 100], true, false, false),
+            SilenceAction::Reopen
+        );
+        assert!(policy.retrying());
+    }
+
+    #[test]
+    fn audible_audio_resets_a_silent_episodes_retry_cap() {
+        let (recovery, mut warned) = warned_policy();
+        for _ in 0..SILENCE_RETRIES {
+            assert_eq!(
+                warned.observe(&[0.0; 100], true, true, false),
+                SilenceAction::Reopen
+            );
+        }
+        assert_eq!(
+            warned.observe(&[0.0; 100], true, true, false),
+            SilenceAction::Nothing
+        );
+
+        // A reopened stream that hears audio clears the warning and the cap.
+        let mut replacement = SilencePolicy::new(1_000, recovery, true);
+        assert_eq!(
+            replacement.observe(&[0.25], true, false, false),
+            SilenceAction::Clear
+        );
+        replacement.applied(SilenceAction::Clear);
+        // The next silent episode warns at once (the quick budget is spent)
+        // and its own retries start over from a release.
+        assert_eq!(
+            replacement.observe(&[0.0; 3_000], true, false, false),
+            SilenceAction::Warn
+        );
+        replacement.applied(SilenceAction::Warn);
+        assert_eq!(
+            replacement.observe(&[0.0; 100], true, true, false),
+            SilenceAction::Reopen
+        );
+        assert!(replacement.retrying());
     }
 
     #[test]
     fn audible_audio_clears_a_warning_a_reopened_stream_inherited() {
-        let now = Instant::now();
         let warnings = TrackWarnings::new(None);
         assert!(warnings.warn());
         let mut policy = SilencePolicy::new(1_000, spent_recovery(), warnings.live().is_some());
         assert_eq!(
-            policy.observe(&[0.0, 0.25], true, now),
+            policy.observe(&[0.0, 0.25], true, false, false),
             SilenceAction::Clear,
             "a fresh stream must clear a warning it did not raise"
         );
         policy.applied(SilenceAction::Clear);
         assert_eq!(
-            policy.observe(&[0.0, 0.25], true, now),
+            policy.observe(&[0.0, 0.25], true, false, false),
             SilenceAction::Nothing
         );
     }
 
     #[test]
     fn a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned() {
-        let now = Instant::now();
         let mut policy = SilencePolicy::new(1_000, Arc::new(SilenceRecovery::default()), false);
         // Reported once per episode for field logs, never reopened or warned.
         assert_eq!(
-            policy.observe(&[0.0; 3_000], false, now),
+            policy.observe(&[0.0; 3_000], false, false, false),
             SilenceAction::Gated
         );
         assert_eq!(
-            policy.observe(&[0.0; 3_000], false, now),
+            policy.observe(&[0.0; 3_000], false, false, false),
             SilenceAction::Nothing
         );
         // Audio returning starts a new episode, so a later one is reported.
-        assert_eq!(policy.observe(&[0.25], false, now), SilenceAction::Nothing);
         assert_eq!(
-            policy.observe(&[0.0; 3_000], false, now),
+            policy.observe(&[0.25], false, false, false),
+            SilenceAction::Nothing
+        );
+        assert_eq!(
+            policy.observe(&[0.0; 3_000], false, false, false),
             SilenceAction::Gated
         );
     }
@@ -629,19 +627,21 @@ mod tests {
 
     #[test]
     fn a_device_switch_restarts_the_zero_count_without_clearing_the_warning() {
-        let now = Instant::now();
         let warnings = TrackWarnings::new(None);
         assert!(warnings.warn());
         let mut policy = SilencePolicy::new(1_000, spent_recovery(), warnings.live().is_some());
         policy.reset(2_000);
         assert_eq!(
-            policy.observe(&[0.0; 1_000], true, now),
+            policy.observe(&[0.0; 1_000], true, false, false),
             SilenceAction::Nothing
         );
         assert_eq!(
-            policy.observe(&[0.0; 5_000], true, now),
+            policy.observe(&[0.0; 5_000], true, false, false),
             SilenceAction::Nothing
         );
-        assert_eq!(policy.observe(&[0.25], true, now), SilenceAction::Clear);
+        assert_eq!(
+            policy.observe(&[0.25], true, false, false),
+            SilenceAction::Clear
+        );
     }
 }

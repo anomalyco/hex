@@ -766,37 +766,44 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          still counts as held, so it can trigger the reopens and warning
 │       -> Reopened like a failed source, at most twice in one recording,
 │          the budget shared by every reopened stream
-│       -> macOS: every reopen after digital silence makes the device
-│          renegotiate its sample rate first, like dictation's silence
-│          recovery (#1575), so a clock the call app left stale clears
+│       -> macOS: a silence reopen makes the device renegotiate its sample
+│          rate first, like dictation's silence recovery (#1575); that
+│          briefly interrupts every other stream on the device, the call
+│          app's and a warm dictation's, so it runs only when it can help
 │       ├── Still silent -> keep recording; the capsule says
 │       │   "Microphone is silent · 12:34" and the menu bar "Microphone is
 │       │   silent"; manifest.microphone.warning is written as soon as it is
 │       │   raised, so a crash keeps it
-│       ├── Still silent after the warning -> retried for the rest of the
-│       │   meeting: 10 s after the warning, then after 20, 40, 80, 120,
-│       │   120 s more of exact zeros
-│       │   -> each retry reopens with the rate renegotiation and never
-│       │      spends the two quick reopens or re-raises the warning
-│       │   -> retries continue whether or not the call app still reports
-│       │      the input, because its release is when one can succeed
+│       ├── Still silent after the warning -> a renegotiating retry only
+│       │   when another process stops recording from the opened input,
+│       │   read once a second from Core Audio process metadata (device
+│       │   lists only, never samples), at most 3 per silent episode
+│       │   -> silence alone never retries; a shrinking set of recorders,
+│       │      the call app included, is the change that can let one work
+│       ├── A dictation captures or infers -> both the quick reopens and
+│       │   the retries wait until it is idle, so a rate change never
+│       │   interrupts dictation; a release is remembered meanwhile
 │       ├── Nonzero audio returns -> the live warning clears, including in a
-│       │   stream reopened after a supervisor restart, and the retry
-│       │   backoff starts over; the persisted warning stays
+│       │   stream reopened after a supervisor restart, and the episode's
+│       │   retry cap starts over; the persisted warning stays
 │       ├── The call app leaves the input before a warning -> no further
 │       │   quick reopens or warnings until nonzero audio returns
-│       ├── Another episode after audio returns -> warns again, then retries
-│       │   on the same backoff
+│       ├── Another episode after audio returns -> warns again, then its
+│       │   own retries start over
 │       └── Finished meeting -> its panel says the microphone was silent for
 │           part of the call; the manifest means "silent at some point", not
 │           the last moment
 │          // checks: a_silence_budget_is_shared_across_reopened_streams,
 │          // audible_audio_clears_a_warning_a_reopened_stream_inherited,
 │          // a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned,
-│          // a_warned_microphone_retries_on_a_doubling_backoff_to_two_minutes,
-│          // a_warned_microphones_retries_survive_a_rebuilt_policy,
+│          // a_warned_microphone_never_retries_without_a_release,
+│          // a_release_triggers_a_warned_retry,
+│          // a_silent_episode_gets_three_release_triggered_retries,
+│          // a_rebuilt_policy_keeps_the_silent_episodes_retries,
 │          // a_warned_microphone_retries_after_the_call_app_lets_go,
-│          // audible_audio_resets_a_warned_microphones_retry_backoff,
+│          // audible_audio_resets_a_silent_episodes_retry_cap,
+│          // a_reopen_waits_while_dictation_is_active,
+│          // a_release_triggered_retry_waits_while_dictation_is_active,
 │          // a_sticky_warning_survives_its_live_one_clearing,
 │          // a_dropped_warning_update_is_not_committed_and_is_retried,
 │          // only_an_input_the_call_app_reports_counts_as_held;
