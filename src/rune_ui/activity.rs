@@ -144,7 +144,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 .center_y()
                 .child(status_dot(if active { p.success() } else { p.muted() }))
                 .child(
-                    text(tr(state))
+                    text(tr(state.name()))
                         .key("state")
                         .font(DESCRIPTION)
                         .color(p.text()),

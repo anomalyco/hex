@@ -1204,6 +1204,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Enabling…", ["Włączanie…", "正在启用…", "有効化中…", "Wird aktiviert…", "Activando…", "Увімкнення…"]),
     ("Disabling…", ["Wyłączanie…", "正在停用…", "無効化中…", "Wird deaktiviert…", "Desactivando…", "Вимкнення…"]),
     ("Couldn't enable", ["Nie udało się włączyć", "无法启用", "有効にできませんでした", "Aktivierung fehlgeschlagen", "No se pudo activar", "Не вдалося ввімкнути"]),
+    ("Stopped", ["Zatrzymany", "已停止", "停止中", "Gestoppt", "Detenido", "Зупинено"]),
+    ("Waiting for setup", ["Czeka na konfigurację", "等待设置", "セットアップ待ち", "Wartet auf Einrichtung", "Esperando la configuración", "Очікує налаштування"]),
     ("Saving settings", ["Zapisywanie ustawień", "正在保存设置", "設定を保存中", "Einstellungen werden gespeichert", "Guardando ajustes", "Збереження налаштувань"]),
     ("Service disconnected", ["Usługa rozłączona", "服务已断开", "サービスとの接続が切れました", "Dienst getrennt", "Servicio desconectado", "Звʼязок зі службою втрачено"]),
     ("Linux can't bind both sides. Use one with a key, like Space", ["Linux nie obsługuje obu stron naraz. Użyj jednej z klawiszem, np. Spacją", "Linux 无法绑定左右两侧。请用其中一侧加一个按键，例如空格", "Linux では左右両方は登録できません。片側とキー（Space など）を使ってください", "Linux kann nicht beide Seiten belegen. Nimm eine mit einer Taste, etwa Leertaste", "Linux no puede usar ambos lados. Usa uno con una tecla, como Espacio", "Linux не прив’язує обидві сторони. Використайте одну з клавішею, як-от Пробіл"]),
@@ -1792,6 +1794,25 @@ mod tests {
                 translations
                     .iter()
                     .all(|translation| !translation.is_empty())
+            );
+        }
+    }
+
+    /// The listener card translates the status each OS's host publishes,
+    /// which is not a literal at the call.
+    #[test]
+    fn every_listener_status_has_every_language() {
+        use crate::desktop::host::ListenerStatus;
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
+        for english in ListenerStatus::ALL.into_iter().map(ListenerStatus::name) {
+            let translations = table
+                .get(english)
+                .unwrap_or_else(|| panic!("{english:?} has no translations"));
+            assert!(
+                translations
+                    .iter()
+                    .all(|translation| !translation.is_empty()),
+                "{english:?} is missing a language"
             );
         }
     }

@@ -476,13 +476,10 @@ impl Host for HexHost {
 /// looks through for clicks: the ink overlay, and the capsule's panel, which
 /// lets clicks through everywhere but its pill. Clicks on the pill never
 /// reach the engine ([`CapsulePill`]).
-fn own_windows_of(own: &[Option<u32>; 3]) -> OwnWindows {
+fn own_windows_of(own: &OwnWindowIds) -> OwnWindows {
     OwnWindows {
-        excluded: own.iter().flatten().copied().collect(),
-        passthrough: [OwnWindow::Ink, OwnWindow::Capsule]
-            .into_iter()
-            .filter_map(|role| own[role as usize])
-            .collect(),
+        excluded: own.excluded(),
+        passthrough: [own.ink, own.capsule].into_iter().flatten().collect(),
         recorded: Arc::clone(&OWN_WINDOWS_RECORDED),
     }
 }
@@ -551,7 +548,8 @@ impl CapsulePill {
         };
         let Some(window) = OWN_WINDOWS
             .lock()
-            .unwrap_or_else(|error| error.into_inner())[OwnWindow::Capsule as usize]
+            .unwrap_or_else(|error| error.into_inner())
+            .capsule
         else {
             return false;
         };
@@ -587,7 +585,31 @@ fn on_pill(origin: [f64; 2], pill: [f32; 4], x: f64, y: f64) -> bool {
 
 /// Hex's windows a capture leaves out of its recording, one per role. A
 /// capture reads them when it starts.
-static OWN_WINDOWS: Mutex<[Option<u32>; 3]> = Mutex::new([None, None, None]);
+static OWN_WINDOWS: Mutex<OwnWindowIds> = Mutex::new(OwnWindowIds {
+    capsule: None,
+    ink: None,
+    picker: None,
+});
+
+/// The window holding each [`OwnWindow`] role.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct OwnWindowIds {
+    capsule: Option<u32>,
+    ink: Option<u32>,
+    picker: Option<u32>,
+}
+
+impl OwnWindowIds {
+    /// Every window held, which a recording leaves out.
+    fn excluded(self) -> Vec<u32> {
+        let Self {
+            capsule,
+            ink,
+            picker,
+        } = self;
+        [capsule, ink, picker].into_iter().flatten().collect()
+    }
+}
 
 /// Which of Hex's windows a capture leaves out.
 #[derive(Clone, Copy, Debug)]
@@ -608,7 +630,11 @@ pub fn exclude_window(role: OwnWindow, window: u32) {
     let mut own = OWN_WINDOWS
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    own[role as usize] = Some(window);
+    *match role {
+        OwnWindow::Capsule => &mut own.capsule,
+        OwnWindow::Ink => &mut own.ink,
+        OwnWindow::Picker => &mut own.picker,
+    } = Some(window);
     let joined = own_windows_of(&own);
     drop(own);
     let Some(source) = ink_source() else { return };
@@ -3778,7 +3804,11 @@ mod tests {
             window(capsule, own, [544.0, 0.0, 640.0, 424.0], 27),
             window(app, own + 1, [0.0, 0.0, 1728.0, 1117.0], 0),
         ];
-        let roles = [Some(capsule), Some(ink), None];
+        let roles = OwnWindowIds {
+            capsule: Some(capsule),
+            ink: Some(ink),
+            picker: None,
+        };
         let OwnWindows {
             excluded,
             passthrough,

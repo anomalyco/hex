@@ -23,7 +23,7 @@ use crate::desktop::activity::DesktopActivity;
 use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
-    DesktopTranscriptionSnapshot,
+    DesktopTranscriptionSnapshot, ListenerStatus,
 };
 use crate::linux::dictation::ListenerUpdate;
 use crate::linux::input::{LinuxHotkey, ListenerCommand};
@@ -140,7 +140,7 @@ struct LinuxDesktopHost {
     activity: DesktopActivity,
     listener: Option<Listener>,
     listen_when_ready: bool,
-    status: String,
+    status: ListenerStatus,
     error: Option<String>,
     dismissed_failure_at: Option<u64>,
     /// What Hex's GNOME custom shortcuts were last written for (#781).
@@ -630,7 +630,7 @@ impl LinuxDesktopHost {
             activity,
             listener: None,
             listen_when_ready: false,
-            status: "Disabled".into(),
+            status: ListenerStatus::Disabled,
             error: None,
             dismissed_failure_at: None,
             gnome_shortcuts: None,
@@ -742,13 +742,13 @@ impl LinuxDesktopHost {
         // Defaults are only an editable recovery projection after a failed load.
         // They must never become a recording configuration until saved successfully.
         if !self.settings_valid {
-            self.status = "Couldn't enable".into();
+            self.status = ListenerStatus::CouldNotEnable;
             return;
         }
         let model = crate::transcription::models::definition(self.settings.transcription.model);
         if !crate::transcription::models::is_installed(model, &self.settings.transcription.language)
         {
-            self.status = "Model required".into();
+            self.status = ListenerStatus::ModelRequired;
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -789,7 +789,7 @@ impl LinuxDesktopHost {
             commands,
             updates,
         });
-        self.status = "Enabling…".into();
+        self.status = ListenerStatus::Enabling;
     }
 
     /// Enable and Disable also decide whether Hex listens at its next launch,
@@ -851,7 +851,7 @@ impl LinuxDesktopHost {
         }
         if let Some(listener) = &self.listener {
             listener.stop();
-            self.status = "Disabling…".into();
+            self.status = ListenerStatus::Disabling;
         }
     }
 
@@ -929,9 +929,9 @@ impl LinuxDesktopHost {
             .take_if(|listener| listener.worker.is_finished())
         {
             match listener.finish() {
-                Ok(()) => self.status = "Disabled".into(),
+                Ok(()) => self.status = ListenerStatus::Disabled,
                 Err(error) => {
-                    self.status = "Couldn't enable".into();
+                    self.status = ListenerStatus::CouldNotEnable;
                     self.error = Some(error);
                 }
             }
@@ -951,7 +951,7 @@ impl LinuxDesktopHost {
             && self.listen_when_ready
             && let Some(status) = self.activity.state_label()
         {
-            self.status = status.into();
+            self.status = status;
         }
     }
 
@@ -1369,7 +1369,7 @@ impl LinuxDesktopHost {
                 warming: self.listener.as_ref().is_some_and(|listener| {
                     matches!(listener.startup, ListenerStartup::Awaiting { .. })
                 }),
-                status: self.status.clone(),
+                status: self.status,
                 notice: crate::linux::paste::listener_warning(self.is_running()),
                 shortcuts: self
                     .listener
@@ -1628,7 +1628,7 @@ mod tests {
         assert!(host.settings_error.is_some());
         host.start();
         assert!(host.listen_when_ready);
-        assert_eq!(host.status, "Model required");
+        assert_eq!(host.status, ListenerStatus::ModelRequired);
         assert!(!host.is_running());
     }
 
@@ -1646,11 +1646,11 @@ mod tests {
         );
         host.start();
         assert!(!host.is_running());
-        assert_eq!(host.status, "Couldn't enable");
+        assert_eq!(host.status, ListenerStatus::CouldNotEnable);
         host.dispatch(DesktopAction::ClearError).unwrap();
         host.start();
         assert!(!host.is_running());
-        assert_eq!(host.status, "Couldn't enable");
+        assert_eq!(host.status, ListenerStatus::CouldNotEnable);
         assert!(!host.settings_valid);
 
         let mut recovered = host.settings.clone();
@@ -1659,7 +1659,7 @@ mod tests {
         assert!(host.settings_valid);
         assert_eq!(host.settings, recovered);
         assert!(!host.is_running());
-        assert_eq!(host.status, "Model required");
+        assert_eq!(host.status, ListenerStatus::ModelRequired);
     }
 
     #[test]
@@ -1724,9 +1724,9 @@ mod tests {
             assert_eq!(
                 host.status,
                 if expected.is_some() {
-                    "Couldn't enable"
+                    ListenerStatus::CouldNotEnable
                 } else {
-                    "Disabled"
+                    ListenerStatus::Disabled
                 }
             );
         }
@@ -1795,7 +1795,7 @@ mod tests {
             }
             Ok(())
         });
-        host.status = "Enabled".into();
+        host.status = ListenerStatus::Enabled;
         (host, received)
     }
 
@@ -1828,7 +1828,7 @@ mod tests {
         host.cancel_shortcut_edit();
         host.refresh_shortcut_edit();
         assert!(host.shortcut_edit.is_none());
-        assert_eq!(host.status, "Enabled");
+        assert_eq!(host.status, ListenerStatus::Enabled);
         let updates = received.try_iter().collect::<Vec<_>>();
         assert!(matches!(
             updates.as_slice(),
@@ -2010,7 +2010,7 @@ mod tests {
         host.dispatch(DesktopAction::StartListening).unwrap();
 
         assert!(host.listen_when_ready);
-        assert_eq!(host.status, "Disabled");
+        assert_eq!(host.status, ListenerStatus::Disabled);
         assert!(!host.is_running());
         assert!(host.listener.is_none());
         assert!(host.transcription_preparation.is_some());

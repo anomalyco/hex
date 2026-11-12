@@ -646,7 +646,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
 pub(super) fn listener_card(ui: &Ui, p: Paint) -> (String, El) {
     let running = ui.running();
     let status = match &ui.view {
-        Some(view) => tr(&view.listener.status).to_string(),
+        Some(view) => tr(view.listener.status.name()).to_string(),
         None if matches!(ui.service, Service::Fixture(_)) || ui.connection_error.is_some() => {
             tr("Service disconnected").to_string()
         }

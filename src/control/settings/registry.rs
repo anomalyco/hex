@@ -16,6 +16,8 @@ pub(super) enum Kind {
         max: u64,
     },
     Choice(&'static [&'static str]),
+    /// A choice whose values are whole numbers in settings.json.
+    NumberChoice(&'static [&'static str]),
     Text,
     Shortcut(HotkeySlot),
     Path,
@@ -28,7 +30,7 @@ impl Kind {
             Self::Bool => "bool",
             Self::Number { .. } => "number",
             Self::Integer { .. } => "integer",
-            Self::Choice(_) => "choice",
+            Self::Choice(_) | Self::NumberChoice(_) => "choice",
             Self::Text => "text",
             Self::Shortcut(_) => "shortcut",
             Self::Path => "path",
@@ -79,13 +81,6 @@ const fn read_only(key: &'static str, kind: Kind, about: &'static str, why: &'st
 
 const UNIT: Kind = Kind::Number { min: 0.0, max: 1.0 };
 const MODEL_CHANGE: &str = "change the transcription model with `hex model use`";
-
-/// Choice keys whose values are numbers in settings.json.
-pub(super) const NUMERIC_CHOICES: [&str; 3] = [
-    "meetings.calendar.lead_minutes",
-    "labs.unload_idle_minutes",
-    "labs.keep_microphone_open_seconds",
-];
 
 pub(super) const KEYS: &[Key] = &[
     key(
@@ -339,7 +334,7 @@ pub(super) const KEYS: &[Key] = &[
     ),
     key(
         "labs.unload_idle_minutes",
-        Kind::Choice(&["5", "15", "30", "60"]),
+        Kind::NumberChoice(&["5", "15", "30", "60"]),
         "Minutes unused before Labs › Unload model when idle unloads the model",
     ),
     key(
@@ -349,7 +344,7 @@ pub(super) const KEYS: &[Key] = &[
     ),
     key(
         "labs.keep_microphone_open_seconds",
-        Kind::Choice(&["30", "60", "180", "300", "1800"]),
+        Kind::NumberChoice(&["30", "60", "180", "300", "1800"]),
         "Seconds the microphone stays open after a dictation with Labs › Keep mic open after dictating on: 30 s, 1, 3, 5, or 30 minutes",
     ),
     key(
@@ -737,7 +732,7 @@ pub(super) const KEYS: &[Key] = &[
     ),
     key(
         "meetings.calendar.lead_minutes",
-        Kind::Choice(&["0", "1", "2", "5"]),
+        Kind::NumberChoice(&["0", "1", "2", "5"]),
         "Minutes before a meeting its reminder shows",
     ),
     key(

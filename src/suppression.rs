@@ -9,9 +9,11 @@ use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
 
-use crate::app_settings::{HOTKEY_MODIFIERS_MASK, HotkeyBinding, RuntimeHotkey, RuntimeHotkeys};
+#[cfg(test)]
+use crate::app_settings::HotkeyBinding;
+use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
-use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
+use crate::dictation::{BOTH_SIDES_WINDOW, DOUBLE_TAP_WINDOW, MINIMUM_HOLD_DURATION};
 
 mod hotkey;
 pub(crate) mod physical_keys;
@@ -20,7 +22,6 @@ mod tap;
 pub use hotkey::{DictationHotkey, HotkeyAction};
 use tap::*;
 
-const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
 const ESCAPE_KEY_CODE: u16 = 53;
 /// Caps Lock's key code. CoreGraphics reports it as held for as long as it is
 /// toggled on, so it never makes a keyboard non-neutral.
@@ -281,9 +282,7 @@ pub struct InputMonitor {
     pub activity: InputActivity,
     pending: PendingInputEvents,
     takes_escape: Arc<AtomicBool>,
-    takes_cancel: Arc<AtomicBool>,
-    caps_lock_cancel: Arc<AtomicBool>,
-    extra_cancel: Arc<AtomicBool>,
+    cancel: Arc<Mutex<Option<RuntimeHotkey>>>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
     /// Held only so dropping the input monitor stops the HID tracker.
@@ -335,12 +334,8 @@ impl InputMonitor {
         let tap_run_loop = run_loop.clone();
         let takes_escape = Arc::new(AtomicBool::new(false));
         let tap_takes_escape = takes_escape.clone();
-        let takes_cancel = Arc::new(AtomicBool::new(false));
-        let tap_takes_cancel = takes_cancel.clone();
-        let caps_lock_cancel = Arc::new(AtomicBool::new(false));
-        let tap_caps_lock_cancel = caps_lock_cancel.clone();
-        let extra_cancel = Arc::new(AtomicBool::new(false));
-        let tap_extra_cancel = extra_cancel.clone();
+        let cancel = Arc::new(Mutex::new(None));
+        let tap_cancel = cancel.clone();
         let pending = PendingInputEvents::default();
         let tap_pending = pending.clone();
         let worker = thread::spawn(move || {
@@ -349,9 +344,7 @@ impl InputMonitor {
                 tap_activity,
                 TapFlags {
                     takes_escape: tap_takes_escape,
-                    takes_cancel: tap_takes_cancel,
-                    caps_lock_cancel: tap_caps_lock_cancel,
-                    extra_cancel: tap_extra_cancel,
+                    cancel: tap_cancel,
                 },
                 tap_pending,
                 tap_run_loop,
@@ -370,9 +363,7 @@ impl InputMonitor {
             activity,
             pending,
             takes_escape,
-            takes_cancel,
-            caps_lock_cancel,
-            extra_cancel,
+            cancel,
             run_loop,
             worker: Some(worker),
             _physical_keys: physical_keys,
@@ -383,23 +374,13 @@ impl InputMonitor {
         self.takes_escape.store(enabled, Ordering::Release);
     }
 
-    /// Whether the tap keeps Toggle's cancel shortcut from the app in front:
-    /// only while a toggled recording runs.
-    pub fn set_takes_cancel(&self, enabled: bool) {
-        self.takes_cancel.store(enabled, Ordering::Release);
-    }
-
-    /// Whether the tap also keeps Escape from the app in front because a
-    /// Caps Lock dictation records, even in Hold mode.
-    pub fn set_caps_lock_cancel(&self, enabled: bool) {
-        self.caps_lock_cancel.store(enabled, Ordering::Release);
-    }
-
-    /// Whether the tap also keeps an extra dictation shortcut's cancel key
-    /// (its configured one, or Escape) from the app in front because that
-    /// shortcut records, even in Hold mode.
-    pub fn set_extra_cancel(&self, enabled: bool) {
-        self.extra_cancel.store(enabled, Ordering::Release);
+    /// The cancel shortcut the tap keeps from the app in front: the
+    /// recording's own, only while it records.
+    pub fn set_cancel(&self, cancel: Option<RuntimeHotkey>) {
+        *self
+            .cancel
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = cancel;
     }
 
     pub fn pending_events(&self) -> PendingInputEvents {
@@ -519,9 +500,7 @@ struct EventTapContext {
     sink: Arc<InputSink>,
     activity: InputActivity,
     takes_escape: Arc<AtomicBool>,
-    takes_cancel: Arc<AtomicBool>,
-    caps_lock_cancel: Arc<AtomicBool>,
-    extra_cancel: Arc<AtomicBool>,
+    cancel: Arc<Mutex<Option<RuntimeHotkey>>>,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -811,12 +790,10 @@ unsafe extern "C" fn event_callback(
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let mut hotkeys = crate::app_settings::runtime_hotkeys();
-    hotkeys.cancel = tap_cancel_binding(
-        hotkeys.cancel,
-        context.takes_cancel.load(Ordering::Acquire),
-        context.caps_lock_cancel.load(Ordering::Acquire),
-        context.extra_cancel.load(Ordering::Acquire),
-    );
+    hotkeys.cancel = *context
+        .cancel
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let suppress = suppression.process_all(
         input,
         hotkeys,
@@ -1090,26 +1067,6 @@ fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureI
 struct ShortcutSuppression {
     // Repeats and releases keep the original press's suppression decision.
     key_presses: HashMap<u16, bool>,
-}
-
-/// The tap's cancel binding: only while the listener arms it. A Caps Lock
-/// capture always cancels on Escape, even in Hold mode or with a different
-/// Toggle-mode cancel shortcut, so the tap keeps Escape from the app then. An
-/// extra dictation shortcut likewise cancels in its own mode: the armed
-/// binding if Toggle mode configured one, else Escape.
-fn tap_cancel_binding(
-    armed: Option<RuntimeHotkey>,
-    takes_cancel: bool,
-    caps_lock_cancel: bool,
-    extra_cancel: bool,
-) -> Option<RuntimeHotkey> {
-    if !takes_cancel {
-        None
-    } else if caps_lock_cancel || (extra_cancel && armed.is_none()) {
-        Some(HotkeyBinding::cancel_default().runtime())
-    } else {
-        armed
-    }
 }
 
 impl ShortcutSuppression {

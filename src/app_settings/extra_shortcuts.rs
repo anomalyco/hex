@@ -27,8 +27,7 @@ pub enum ExtraDictationMode {
 }
 
 impl ExtraDictationMode {
-    /// Every choice, in the order Settings shows them.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Every choice, in the order Settings shows them, the default first.
     pub const ALL: [Self; 4] = [
         Self::HoldOrDoubleTap,
         Self::Hold,
@@ -37,9 +36,8 @@ impl ExtraDictationMode {
     ];
 
     /// The shortcut machine's switches: toggle, double-tap enabled, and
-    /// double-tap only, exactly as `Trigger::apply` saves the dictation
-    /// shortcut's (`rune_ui::shortcut_mode`).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// double-tap only, which `Trigger::apply` saves for the dictation
+    /// shortcut (`rune_ui::shortcut_mode`).
     pub const fn switches(self) -> (bool, bool, bool) {
         match self {
             Self::HoldOrDoubleTap => (false, true, false),

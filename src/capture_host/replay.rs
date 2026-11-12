@@ -87,7 +87,7 @@ pub(super) struct Controller {
     #[cfg(target_os = "macos")]
     narrating: Option<NarratingReplay>,
     #[cfg(target_os = "macos")]
-    last_exclusions: Option<([Option<u32>; 3], bool)>,
+    last_exclusions: Option<(super::OwnWindowIds, bool)>,
 }
 
 #[cfg(target_os = "macos")]
@@ -199,7 +199,7 @@ impl Controller {
                     if self.last_exclusions != Some(snap) {
                         self.last_exclusions = Some(snap);
                         if let Some(worker) = &self.worker {
-                            let window_ids = snap.0.into_iter().flatten().collect();
+                            let window_ids = snap.0.excluded();
                             let _ = worker.commands.try_send(WorkerCmd::UpdateExclusions {
                                 window_ids,
                                 exclude_own_chrome: !snap.1,
@@ -638,7 +638,7 @@ fn check_screen_permission() -> Option<ControlReply> {
 }
 
 #[cfg(target_os = "macos")]
-fn current_exclusions() -> ([Option<u32>; 3], bool) {
+fn current_exclusions() -> (super::OwnWindowIds, bool) {
     let windows = *super::OWN_WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
     let recorded = super::own_windows_recorded();
     (windows, recorded)
@@ -675,7 +675,7 @@ fn run_worker(commands: Receiver<WorkerCmd>) {
     let _display_watch = sck::DisplayReconfigWatch::register(reconfig_tx);
 
     let (initial_windows, initial_recorded) = current_exclusions();
-    let mut window_ids: Vec<u32> = initial_windows.into_iter().flatten().collect();
+    let mut window_ids: Vec<u32> = initial_windows.excluded();
     let mut exclude_own_chrome = !initial_recorded;
 
     let mut session: Option<sck::ClipBufferSession> = None;

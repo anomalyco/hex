@@ -938,13 +938,14 @@ pub fn listen(
         input_monitor.set_takes_escape(claims_escape(programmatic.is_some(), capture_escape));
         // Toggle's cancel key is Hex's only while one of its shortcuts'
         // recordings runs; the listener ignores keys during a programmatic one.
-        input_monitor.set_takes_cancel(programmatic.is_none() && hotkeys.any_recording());
-        // A Caps Lock capture is hands-free in Hold mode too, so Escape
-        // keeps its Toggle-mode cancel meaning while it records.
-        input_monitor
-            .set_caps_lock_cancel(programmatic.is_none() && hotkeys.caps_lock.is_recording());
-        // An extra shortcut takes its own cancel key in its own mode too.
-        input_monitor.set_extra_cancel(programmatic.is_none() && hotkeys.extra_recording());
+        // A Caps Lock capture keeps Escape in Hold mode too, and an extra
+        // shortcut its own cancel key in its own mode.
+        input_monitor.set_cancel(
+            programmatic
+                .is_none()
+                .then(|| hotkeys.recording_cancel())
+                .flatten(),
+        );
         if received_worker_event {
             emit_engine_state(
                 &mut events,

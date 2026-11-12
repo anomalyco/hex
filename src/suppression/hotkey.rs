@@ -220,6 +220,14 @@ impl DictationHotkey {
         matches!(self.state, State::Recording { .. } | State::Locked)
     }
 
+    /// The cancel shortcut this machine acts on now: only while it records,
+    /// in Toggle mode or as an extra row.
+    pub fn recording_cancel(&self) -> Option<RuntimeHotkey> {
+        (self.is_recording() && (self.toggle || self.cancel_in_any_mode))
+            .then_some(self.cancel)
+            .flatten()
+    }
+
     /// Whether a double-tap gesture is in flight and still waiting for its
     /// second tap.
     pub fn has_pending_gesture(&self) -> bool {

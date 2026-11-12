@@ -1,6 +1,7 @@
 use crate::desktop::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState,
 };
+use crate::desktop::host::ListenerStatus;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopActivity {
@@ -21,13 +22,13 @@ impl DesktopActivity {
         *self = Self::from_events(reader.events().iter().rev());
     }
 
-    pub(crate) fn state_label(&self) -> Option<&'static str> {
+    pub(crate) fn state_label(&self) -> Option<ListenerStatus> {
         self.state.map(|state| match state {
-            VoiceState::Listening => "Enabled",
-            VoiceState::Sleeping => "Sleeping",
-            VoiceState::Dictating => "Recording",
-            VoiceState::Transcribing => "Transcribing",
-            VoiceState::Stopping => "Disabling…",
+            VoiceState::Listening => ListenerStatus::Enabled,
+            VoiceState::Sleeping => ListenerStatus::Sleeping,
+            VoiceState::Dictating => ListenerStatus::Recording,
+            VoiceState::Transcribing => ListenerStatus::Transcribing,
+            VoiceState::Stopping => ListenerStatus::Disabling,
         })
     }
 

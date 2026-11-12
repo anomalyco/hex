@@ -77,7 +77,7 @@ fn mode_select(
     layer: &mut Vec<El>,
 ) -> Option<El> {
     let menu = *MODE_MENUS.get(index)?;
-    let trigger = Trigger::from_extra(ui.settings.extra_dictation_mode(index));
+    let trigger = ui.settings.extra_dictation_mode(index);
     let modifiers_allowed = ui.settings.double_tap_modifiers_allowed();
     let available: Vec<Trigger> = Trigger::ALL
         .into_iter()
@@ -105,7 +105,7 @@ fn mode_select(
             };
             ui.update(|settings| {
                 if let Some(row) = settings.extra_dictation_hotkeys.get_mut(index) {
-                    row.mode = trigger.to_extra();
+                    row.mode = trigger;
                 }
             });
         },

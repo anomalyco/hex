@@ -473,7 +473,10 @@ fn capture(
     if audio_ms < crate::dictation::MINIMUM_HOLD_DURATION.as_millis() as u64 {
         events.dictation(DictationPhase::Discarded, "")?;
         emit_state(&events, VoiceState::Stopping, &device_name)?;
-        println!("Capture shorter than 300 ms; discarded.");
+        println!(
+            "Capture shorter than {} ms; discarded.",
+            crate::dictation::MINIMUM_HOLD_DURATION.as_millis()
+        );
         return Ok(());
     }
 

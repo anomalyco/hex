@@ -577,7 +577,7 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
                 .or(state.listener.warning.as_ref())
             {
                 Some(warning) => format!("{} ({warning})", state.listener.status),
-                None => state.listener.status.clone(),
+                None => state.listener.status.to_string(),
             },
             shortcuts: match &state.listener.shortcuts {
                 crate::desktop::host::DesktopShortcuts::Portal(granted) => granted
@@ -649,7 +649,7 @@ mod tests {
                 listener: DesktopListenerSnapshot {
                     running: true,
                     warming: false,
-                    status: "Enabled".into(),
+                    status: crate::desktop::host::ListenerStatus::Enabled,
                     warning: None,
                     notice: None,
                     last_failure: None,

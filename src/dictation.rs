@@ -93,6 +93,10 @@ impl DictationFlavour {
 }
 
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
+/// A second press of the shortcut this soon after the first's release is a
+/// double tap. Equal to the hold threshold today, but its own setting.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 /// Audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.
 pub const POST_RELEASE_TAIL: Duration = Duration::from_millis(200);
@@ -128,7 +132,7 @@ const VOICE_HISTORY_FRAMES: usize = 150;
 pub const BOTH_SIDES_WINDOW: Duration = Duration::from_millis(80);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
-const PARAKEET_SAMPLE_RATE: u32 = 16_000;
+pub(crate) const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 /// A capture whose loudest 30 ms window stays below this level is treated as
 /// empty rather than transcribed, because models hallucinate closing phrases
 /// such as "thank you" on silence. Deliberately conservative: whispered speech

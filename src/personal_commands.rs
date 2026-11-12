@@ -102,6 +102,13 @@ fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
         .find(|transformation| transformation.id == id)
 }
 
+/// The built-in transformations' ids, in the order they're listed.
+pub fn builtin_transformation_ids() -> impl Iterator<Item = &'static str> {
+    BUILTIN_TRANSFORMATIONS
+        .iter()
+        .map(|transformation| transformation.id)
+}
+
 pub fn is_builtin_transformation(id: &str) -> bool {
     builtin_transformation(id).is_some()
 }

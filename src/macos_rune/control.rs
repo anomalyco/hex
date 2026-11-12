@@ -933,7 +933,7 @@ fn status(
             status: if microphone_unavailable {
                 "No microphone".into()
             } else {
-                published.listener.status.clone()
+                published.listener.status.to_string()
             },
             shortcuts: Vec::new(),
         },
