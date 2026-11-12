@@ -21,6 +21,7 @@ pub(crate) mod spoken_symbols;
 pub(crate) mod text_replacements;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod vocabulary;
+pub(crate) mod voice_prompt;
 
 use std::collections::VecDeque;
 use std::time::Duration;

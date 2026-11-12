@@ -235,6 +235,25 @@ fn a_microphone_linger_window_from_the_choices_keeps_its_seconds() {
 }
 
 #[test]
+fn an_invalid_voice_prompt_phrase_loads_the_default_and_keeps_its_switch() {
+    let original =
+        br#"{"labs":{"voice_prompt":true,"voice_prompt_phrase":"nope","live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(
+        settings.labs.voice_prompt,
+        "the switch stays as saved; only the phrase falls back"
+    );
+    assert_eq!(
+        settings.labs.voice_prompt_phrase,
+        crate::dictation::voice_prompt::DEFAULT_PHRASE
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
 fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,

@@ -319,6 +319,28 @@ pub fn print_start() -> bool {
     PRINT_START.load(Ordering::Acquire) && Feature::PrintStart.on_this_os()
 }
 
+/// A spoken trigger phrase inside a dictation turns what follows it into a
+/// one-off instruction for the mode's OpenCode model (read as each
+/// dictation's processing starts). An organization's
+/// DisableOpenCodeProcessing lock reads as off.
+pub fn voice_prompt() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    VOICE_PROMPT.load(Ordering::Acquire)
+        && Feature::VoicePrompt.on_this_os()
+        && !crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
+}
+
+/// The words that start a voice prompt (read as each dictation's processing
+/// starts, only while [`voice_prompt`] is on).
+pub fn voice_prompt_phrase() -> String {
+    VOICE_PROMPT_PHRASE
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

@@ -707,6 +707,7 @@ pub(crate) struct Ui {
 struct Drafts {
     modes: bool,
     vocabulary: bool,
+    phrase: bool,
 }
 
 impl Ui {
@@ -885,6 +886,7 @@ impl Ui {
         let mut candidate = self.settings.clone();
         self.modes.project(&mut candidate);
         candidate.vocabulary = self.vocabulary.project();
+        self.lab_store.project_phrase(&mut candidate);
         candidate
     }
 
@@ -896,6 +898,7 @@ impl Ui {
         Drafts {
             modes: modes.dictation_processing != settings.dictation_processing,
             vocabulary: self.vocabulary.project() != settings.vocabulary,
+            phrase: self.lab_store.phrase_dirty(settings),
         }
     }
 
@@ -1069,6 +1072,12 @@ impl Ui {
             }
             if !drafts.vocabulary && service.vocabulary != self.settings.vocabulary {
                 self.vocabulary.reload(&service.vocabulary);
+            }
+            if !drafts.phrase {
+                self.lab_store.rebase_phrase(
+                    &self.settings.labs.voice_prompt_phrase,
+                    &service.labs.voice_prompt_phrase,
+                );
             }
             self.settings = service.clone();
             self.settings_changed();

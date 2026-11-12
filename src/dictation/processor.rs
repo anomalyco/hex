@@ -390,6 +390,17 @@ impl Profiles {
         let corrected = profile
             .replacements
             .replace(&self.global.replace(&prepared));
+        // Labs › Voice prompt: heard speech may carry a spoken instruction
+        // that replaces the mode's rewrite with one request of its own.
+        if source == Source::Dictation
+            && crate::labs::voice_prompt()
+            && let Some(instruction) = crate::dictation::voice_prompt::instruction(
+                &corrected,
+                &crate::labs::voice_prompt_phrase(),
+            )
+        {
+            return voice_prompt_processed(profile, &instruction, &corrected, context, cancelled);
+        }
         // A transcript of numbers alone has nothing to rewrite; a model only
         // turns it into digits and re-punctuates it (#949).
         let numbers_only = profile.ai_enabled && numbers_only(&corrected);
@@ -447,6 +458,139 @@ impl Profiles {
             observation: Some(observation),
             transformations: profile.transformations.clone(),
         }
+    }
+}
+
+/// One voice-prompt request instead of the mode's rewrite: the spoken
+/// instruction over the text before it, or what is there when one side is
+/// empty. A phrase with nothing around it asks nothing and pastes nothing.
+fn voice_prompt_processed(
+    profile: &Profile,
+    instruction: &crate::dictation::voice_prompt::Instruction,
+    corrected: &str,
+    context: &ContextSnapshot,
+    cancelled: &AtomicBool,
+) -> Processed {
+    use crate::dictation::voice_prompt::Instruction;
+    if matches!(instruction, Instruction::Nothing) {
+        tracing::info!(
+            profile = profile.name,
+            "voice prompt had nothing to ask; nothing is pasted"
+        );
+        // No request ran, and no transformation gets a chance to turn an
+        // empty result into something that would paste.
+        return Processed {
+            text: String::new(),
+            observation: None,
+            transformations: Vec::new(),
+        };
+    }
+    let request = voice_prompt_request(
+        profile,
+        instruction,
+        context,
+        &crate::dictation::vocabulary::merged(
+            &profile.vocabulary,
+            &crate::dictation::vocabulary::entries(),
+        ),
+    );
+    // A voice prompt is one request: the mode's own rewrite never runs, even
+    // while its switch is off, with its model and deadline when it names one.
+    let (text, observation) = generate_observed(
+        &request,
+        profile.model.as_ref(),
+        profile.deadline,
+        cancelled,
+        &profile.name,
+        Instant::now(),
+    );
+    match &observation.fallback {
+        None => tracing::info!(
+            profile = profile.name,
+            latency_ms = observation.latency_ms,
+            "voice prompt completed"
+        ),
+        Some(reason) => tracing::warn!(
+            profile = profile.name,
+            latency_ms = observation.latency_ms,
+            %reason,
+            "voice prompt failed; pasting what the speaker dictated"
+        ),
+    }
+    voice_prompt_answer(
+        instruction,
+        text,
+        corrected,
+        &profile.transformations,
+        Some(observation),
+    )
+}
+
+/// The result a voice prompt pastes: the model's answer when it has one, else
+/// [`voice_prompt_fallback`], then the mode's transformations as usual.
+fn voice_prompt_answer(
+    instruction: &crate::dictation::voice_prompt::Instruction,
+    generated: Option<String>,
+    corrected: &str,
+    transformations: &[String],
+    observation: Option<ProcessingObservation>,
+) -> Processed {
+    Processed {
+        text: generated.unwrap_or_else(|| voice_prompt_fallback(instruction, corrected)),
+        observation,
+        transformations: transformations.to_vec(),
+    }
+}
+
+/// The request one voice prompt makes: the protocol, the mode's instructions
+/// as background while its rewrite is on, the vocabulary and foreground
+/// context a rewrite carries, and the spoken task.
+fn voice_prompt_request(
+    profile: &Profile,
+    instruction: &crate::dictation::voice_prompt::Instruction,
+    context: &ContextSnapshot,
+    vocabulary: &[VocabularyEntry],
+) -> String {
+    use crate::dictation::voice_prompt::Instruction;
+    let application = context.application.as_deref().unwrap_or("unknown");
+    let host = context.browser_host().unwrap_or("none");
+    let background = if profile.ai_enabled {
+        format!(
+            "Background instructions for this mode (the spoken instruction overrides them when they conflict):\n{}\n\n",
+            profile.prompt
+        )
+    } else {
+        String::new()
+    };
+    let task = match instruction {
+        Instruction::Rewrite { text, prompt } => format!(
+            "The speaker dictated some text, then gave an instruction about it. Apply the spoken instruction to the dictated text and return only the result.\n\nSpoken instruction:\n<instruction>\n{prompt}\n</instruction>\n\nDictated text:\n<text>\n{text}\n</text>"
+        ),
+        Instruction::RewriteText { text } => format!(
+            "Rewrite the dictated text below so it is clear and concise. Keep its meaning, facts, numbers, and names. Return only the rewritten text.\n\nDictated text:\n<text>\n{text}\n</text>"
+        ),
+        Instruction::Write { prompt } => format!(
+            "The speaker asked you to write something. Write exactly what the spoken instruction asks for and return only that text.\n\nSpoken instruction:\n<instruction>\n{prompt}\n</instruction>"
+        ),
+        Instruction::Nothing => unreachable!("nothing is never asked"),
+    };
+    format!(
+        "{PROTOCOL_PROMPT}\n\n{background}{}Foreground application: {application}\nBrowser host: {host}\n\n{task}",
+        vocabulary_lines(vocabulary)
+    )
+}
+
+/// What a failed, empty, or timed-out voice prompt pastes: the text before
+/// the phrase, or the whole corrected transcript when there is none.
+fn voice_prompt_fallback(
+    instruction: &crate::dictation::voice_prompt::Instruction,
+    corrected: &str,
+) -> String {
+    use crate::dictation::voice_prompt::Instruction;
+    match instruction {
+        Instruction::Rewrite { text, .. } | Instruction::RewriteText { text } => text.clone(),
+        Instruction::Write { .. } => corrected.to_owned(),
+        Instruction::Nothing => String::new(),
     }
 }
 
@@ -1511,6 +1655,109 @@ mod tests {
 
         assert!(!profiles.select(&context("Slack", None)).ai_enabled);
         assert_eq!(profiles.select(&context("Zed", None)).name, "default");
+    }
+
+    fn voice_prompt(text: &str) -> crate::dictation::voice_prompt::Instruction {
+        crate::dictation::voice_prompt::instruction(text, "rewrite this")
+            .expect("the phrase is in the transcript")
+    }
+
+    #[test]
+    fn a_spoken_instruction_replaces_the_rewrite_and_carries_context() {
+        let instruction = voice_prompt("We ship Friday. rewrite this make it formal");
+        let vocabulary = [VocabularyEntry {
+            term: "Rune".into(),
+            sounds_like: vec!["roon".into()],
+        }];
+        let rewrite = Profile::new("Mode", "Keep it short.").ai_enabled(true);
+        let request = voice_prompt_request(
+            &rewrite,
+            &instruction,
+            &context("Slack", Some("https://x.com/home")),
+            &vocabulary,
+        );
+        assert!(request.contains("Keep it short."), "{request}");
+        assert!(request.contains("make it formal"), "{request}");
+        assert!(request.contains("We ship Friday"), "{request}");
+        assert!(
+            request.contains("Foreground application: Slack"),
+            "{request}"
+        );
+        assert!(request.contains("Browser host: x.com"), "{request}");
+        assert!(
+            request.contains("Rune (may be transcribed as roon)"),
+            "{request}"
+        );
+        assert!(request.contains(PROTOCOL_PROMPT), "{request}");
+
+        // A mode with its rewrite off uses the same request without its
+        // prompt as background.
+        let plain = voice_prompt_request(
+            &Profile::new("Mode", "Keep it short."),
+            &instruction,
+            &context("Slack", None),
+            &[],
+        );
+        assert!(!plain.contains("Keep it short."), "{plain}");
+        assert!(plain.contains("make it formal"), "{plain}");
+    }
+
+    #[test]
+    fn a_failed_voice_prompt_pastes_its_text_or_the_whole_transcript() {
+        let both = voice_prompt("Ship it. rewrite this make it formal");
+        assert_eq!(
+            voice_prompt_fallback(&both, "Ship it. rewrite this make it formal"),
+            "Ship it"
+        );
+        let text_only = voice_prompt("Ship it. rewrite this");
+        assert_eq!(
+            voice_prompt_fallback(&text_only, "Ship it. rewrite this"),
+            "Ship it"
+        );
+        // Nothing before the phrase: the whole corrected transcript falls back.
+        let prompt_only = voice_prompt("rewrite this an email to Bob");
+        assert_eq!(
+            voice_prompt_fallback(&prompt_only, "rewrite this an email to Bob"),
+            "rewrite this an email to Bob"
+        );
+    }
+
+    #[test]
+    fn a_voice_prompt_answer_or_its_fallback_keeps_the_modes_transformations() {
+        let both = voice_prompt("Ship it. rewrite this make it formal");
+        let transformations = vec!["lowercase".to_string()];
+        let answered = voice_prompt_answer(
+            &both,
+            Some("Make it formal.".into()),
+            "Ship it. rewrite this make it formal",
+            &transformations,
+            None,
+        );
+        assert_eq!(answered.text, "Make it formal.");
+        assert_eq!(answered.transformations, transformations);
+        let failed = voice_prompt_answer(
+            &both,
+            None,
+            "Ship it. rewrite this make it formal",
+            &transformations,
+            None,
+        );
+        assert_eq!(failed.text, "Ship it");
+        assert_eq!(failed.transformations, transformations);
+    }
+
+    #[test]
+    fn a_voice_prompt_with_nothing_to_ask_pastes_nothing_and_runs_no_transformations() {
+        let processed = voice_prompt_processed(
+            &Profile::new("Mode", "").transformations(vec!["lowercase".into()]),
+            &voice_prompt("rewrite this thanks"),
+            "rewrite this thanks",
+            &context("Zed", None),
+            &AtomicBool::new(false),
+        );
+        assert_eq!(processed.text, "");
+        assert!(processed.transformations.is_empty());
+        assert!(processed.observation.is_none());
     }
 
     #[test]

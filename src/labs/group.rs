@@ -81,7 +81,8 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps
-            | Self::PrintStart => Group::Output,
+            | Self::PrintStart
+            | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::HistoryMultiSelect

@@ -225,6 +225,14 @@ pub struct LabsSettings {
     /// `hex dictation start --print` records a dictation whose transcript
     /// goes to the command that started it, however it ends (macOS).
     pub print_start: bool,
+    /// A spoken trigger phrase inside a dictation hands the mode's OpenCode
+    /// model a one-off instruction for that dictation.
+    pub voice_prompt: bool,
+    /// The words that start a voice prompt: at least two words and six
+    /// letters, or the default. Another value fails to load, so the field
+    /// returns to its default.
+    #[serde(deserialize_with = "deserialize_voice_prompt_phrase")]
+    pub voice_prompt_phrase: String,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -270,6 +278,21 @@ where
                 .map(|seconds| seconds.to_string())
                 .join(", ")
         )))
+    }
+}
+
+/// A saved `voice_prompt_phrase` must pass
+/// [`crate::dictation::voice_prompt::phrase_problem`]; another value fails to
+/// load, so the field returns to the default with the usual launch note.
+fn deserialize_voice_prompt_phrase<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let phrase = String::deserialize(deserializer)?;
+    let phrase = phrase.trim();
+    match crate::dictation::voice_prompt::phrase_problem(phrase) {
+        Some(problem) => Err(serde::de::Error::custom(problem.message())),
+        None => Ok(phrase.to_owned()),
     }
 }
 
@@ -341,6 +364,8 @@ impl Default for LabsSettings {
             app_model_switching: false,
             pause_menu: false,
             print_start: false,
+            voice_prompt: false,
+            voice_prompt_phrase: crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned(),
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,
