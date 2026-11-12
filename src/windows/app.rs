@@ -259,15 +259,22 @@ impl WindowsDesktopHost {
         };
         crate::transcription::models::delete_set_aside();
         host.refresh_personal_commands_host();
-        // The microphone stays cold until first-run setup finishes.
+        // The microphone stays cold until first-run setup is ready.
         if host.settings.enable_on_launch {
-            if crate::desktop::onboarding::completion_recorded() {
+            if host.setup_done() {
                 host.start();
             } else {
                 host.listen_after_setup = true;
             }
         }
         host
+    }
+
+    /// Setup is ready, so the tour's practice can dictate, or the tour
+    /// finished without a model.
+    fn setup_done(&self) -> bool {
+        crate::desktop::onboarding::status(&self.settings.transcription).ready()
+            || crate::desktop::onboarding::completion_recorded()
     }
 
     /// Handles one window or tray request; returns `true` when Hex should quit.
@@ -686,7 +693,7 @@ impl WindowsDesktopHost {
         for failed in swap_failures {
             self.keep_running_model(failed);
         }
-        if self.listen_after_setup && crate::desktop::onboarding::completion_recorded() {
+        if self.listen_after_setup && self.setup_done() {
             self.listen_after_setup = false;
             self.start();
         }

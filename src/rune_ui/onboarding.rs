@@ -23,30 +23,25 @@ const ADVANCE_BEAT: Duration = Duration::from_millis(700);
 pub(super) struct Tour {
     pub(super) flow: Flow,
     advance_at: Option<Instant>,
-    completed: bool,
 }
 
 impl Tour {
-    fn new(flow: Flow, completed: bool) -> Self {
+    fn new(flow: Flow) -> Self {
         Self {
             flow,
             advance_at: None,
-            completed,
         }
     }
 
     /// The tour from Welcome, as on a new install: Run setup again.
     pub(super) fn replay(settings: &AppSettings, platform: &PlatformState) -> Tour {
         let installed = super::picker::Picker::default().selected_installed(settings);
-        Tour::new(
-            Flow::new(
-                Step::Welcome,
-                platform.setup_status(installed),
-                platform.caps.permissions,
-                platform.caps.practice_dictation,
-            ),
-            false,
-        )
+        Tour::new(Flow::new(
+            Step::Welcome,
+            platform.setup_status(installed),
+            platform.caps.permissions,
+            platform.caps.practice_dictation,
+        ))
     }
 
     /// The tour when this run still needs it.
@@ -59,15 +54,12 @@ impl Tour {
             .then(crate::desktop::onboarding::saved_step)
             .flatten();
         (resume.is_some() || (!completed && (!status.ready() || saved.is_some()))).then(|| {
-            Tour::new(
-                Flow::new(
-                    resume.or(saved).unwrap_or(Step::Welcome),
-                    status,
-                    platform.caps.permissions,
-                    platform.caps.practice_dictation,
-                ),
-                completed,
-            )
+            Tour::new(Flow::new(
+                resume.or(saved).unwrap_or(Step::Welcome),
+                status,
+                platform.caps.permissions,
+                platform.caps.practice_dictation,
+            ))
         })
     }
 }
@@ -126,7 +118,6 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     let accessibility_stale = ui
         .platform
         .stale(crate::desktop::onboarding::PermissionKind::Accessibility);
-    let live = ui.live();
     let Some(tour) = &mut ui.tour else {
         return false;
     };
@@ -141,12 +132,6 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
         tour.advance_at = None;
         if tour.flow.step() == Step::Setup {
             effect = tour.flow.on(Input::Continue);
-        }
-    }
-    if status.ready() && !tour.completed {
-        tour.completed = true;
-        if live && let Err(error) = crate::desktop::onboarding::record_completion() {
-            tracing::warn!(%error, "could not record onboarding completion");
         }
     }
     let practicing = tour.flow.step() == Step::TryIt;
@@ -213,12 +198,22 @@ fn apply(ui: &mut Ui, effect: Effect) {
             crate::desktop::onboarding::PermissionAction::ResetAndPrompt(kind),
         )),
         Effect::Relaunch => ui.ask(PlatformRequest::Relaunch),
-        Effect::Finish => {
-            ui.tour = None;
-            ui.first_run = None;
-        }
+        Effect::Finish => close(ui, true),
         Effect::None => {}
     }
+}
+
+/// Closes onboarding. Only a `finished` tour is recorded complete; until
+/// then its saved step is the record, so a relaunch resumes there.
+pub(super) fn close(ui: &mut Ui, finished: bool) {
+    if finished
+        && ui.live()
+        && let Err(error) = crate::desktop::onboarding::record_completion()
+    {
+        tracing::warn!(%error, "could not record onboarding completion");
+    }
+    ui.tour = None;
+    ui.first_run = None;
 }
 
 /// A first run at `step`, with the selected model not yet installed.
@@ -235,7 +230,7 @@ pub(super) fn fixture(ui: &mut Ui, step: Step, downloading: bool) {
     if step != Step::Welcome {
         flow.on(Input::Continue);
     }
-    ui.tour = Some(Tour::new(flow, false));
+    ui.tour = Some(Tour::new(flow));
     if downloading {
         input(ui, Input::Grant(SetupItem::Model));
         set_downloaded(ui, 62);
@@ -308,10 +303,7 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
     };
     ui.platform.permissions = fresh;
     ui.picker.installed = Some(Vec::new());
-    ui.tour = Some(Tour::new(
-        Flow::new(Step::Welcome, fresh, true, true),
-        false,
-    ));
+    ui.tour = Some(Tour::new(Flow::new(Step::Welcome, fresh, true, true)));
     // The tour starts the download as soon as it sees no model.
     poll(ui);
     input(ui, Input::Continue);
