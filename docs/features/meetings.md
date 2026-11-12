@@ -639,6 +639,10 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   so the area around it stays clickable (not verified on a real
      │   Windows machine)
      ├── In the saved recording_indicator_corner
+     ├── Follows the setting mid-recording: turning it off hides the pill and
+     │   on shows it, keeping the recording's start time, within a second
+     │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
+     │   not observed on a real Mac)
      ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
      ├── Hover -> widens toward the screen with the actions below; pointer
      │   leaving -> eases back to compact (a held press keeps it open)
@@ -661,6 +665,11 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
 
 Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
+     ├── It stands in for the recording pill while it shows
+     └── Keep recording (or another capsule replacing it) -> the recording
+         pill returns with its start time and title
+         (keep_recording_brings_back_the_recording_capsule_as_it_was; not
+         observed on a real Mac)
   -> No timeout; nothing stops automatically
 
 Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.panel-drag

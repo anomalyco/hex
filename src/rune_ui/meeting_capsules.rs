@@ -18,6 +18,10 @@
 //! The recording capsule rests as a compact pill in its corner and springs
 //! open to show its actions while the pointer is over it. Dragging it moves
 //! the window; on release it snaps to the nearest corner, which is saved.
+//! It is a function of the controller's current recording and the live
+//! Show recording indicator setting ([`PillModel`]): the call-ended prompt
+//! stands in for it until Keep recording, and turning the setting on or off
+//! mid-recording shows or hides it within a second.
 //! With Labs › Movable meeting capsules on, the panel capsules (offer,
 //! reminder, call ended, ready, recording automatically) show in that same
 //! saved corner and drag the same way; off, they stay in the top right.
@@ -112,14 +116,90 @@ enum Kind {
     AutoStarted {
         title: String,
     },
-    Recording {
-        id: String,
-        title: String,
-        started: Instant,
-        automatic: bool,
-        /// The microphone is digitally silent (#1518).
-        warning: Option<crate::meeting::TrackWarning>,
-    },
+    Recording(Recording),
+}
+
+/// The recording the controller reported, as its capsule draws it.
+#[derive(Clone)]
+struct Recording {
+    id: String,
+    title: String,
+    started: Instant,
+    automatic: bool,
+    /// The microphone is digitally silent (#1518).
+    warning: Option<crate::meeting::TrackWarning>,
+}
+
+/// What the recording capsule is a function of, besides the live Show
+/// recording indicator setting: the controller's current recording, and
+/// whether the call-ended prompt stands in for it.
+#[derive(Default)]
+struct PillModel {
+    recording: Option<Recording>,
+    /// The call-ended prompt shows instead of the pill until Keep recording,
+    /// or until another panel capsule replaces it.
+    call_ended: bool,
+    /// The recording the pill shows now.
+    shown: Option<String>,
+}
+
+impl PillModel {
+    fn apply(&mut self, event: &ControllerEvent, now: Instant) {
+        match event {
+            ControllerEvent::RecordingStarted {
+                id,
+                title,
+                automatic,
+            } => {
+                self.recording = Some(Recording {
+                    id: id.clone(),
+                    title: title.clone(),
+                    started: now,
+                    automatic: *automatic,
+                    warning: None,
+                });
+                self.call_ended = false;
+            }
+            ControllerEvent::Retitled { title } => {
+                if let Some(recording) = &mut self.recording {
+                    recording.title = title.clone();
+                }
+            }
+            ControllerEvent::SourceWarning { warning } => {
+                if let Some(recording) = &mut self.recording {
+                    recording.warning = *warning;
+                }
+            }
+            ControllerEvent::CallEnded { .. } => self.call_ended = true,
+            ControllerEvent::Offer(_) | ControllerEvent::Reminder { .. } => {
+                self.call_ended = false;
+            }
+            ControllerEvent::Starting
+            | ControllerEvent::Transcribing
+            | ControllerEvent::Finished(_)
+            | ControllerEvent::Failed { .. } => {
+                self.recording = None;
+                self.call_ended = false;
+            }
+            ControllerEvent::ReminderWithdrawn { .. }
+            | ControllerEvent::Chapters(_)
+            | ControllerEvent::OpenMeeting(_)
+            | ControllerEvent::ImportFailed { .. }
+            | ControllerEvent::NotesStarted
+            | ControllerEvent::NotesFinished(_) => {}
+        }
+    }
+
+    fn keep_recording(&mut self) {
+        self.call_ended = false;
+    }
+
+    /// The recording the pill shows with the indicator setting `indicator`.
+    fn pill(&self, indicator: bool) -> Option<&Recording> {
+        self.recording
+            .as_ref()
+            .filter(|_| indicator && !self.call_ended)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -155,6 +235,9 @@ struct Capsule {
     live: Live,
     commands: SyncSender<ControllerCommand>,
     hide: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The call-ended prompt's Keep recording brings the recording capsule
+    /// back.
+    keep_recording: Option<Arc<dyn Fn() + Send + Sync>>,
     resize: Option<Arc<dyn Fn(f32) + Send + Sync>>,
     choose: Choose,
     /// The recording capsule: the pointer is over the pill (or holding it).
@@ -216,7 +299,7 @@ impl Capsule {
     }
 
     fn press_copy_new(&mut self, tx: &mut Tx) {
-        let Some(Kind::Recording { id, .. }) = &self.kind else {
+        let Some(Kind::Recording(Recording { id, .. })) = &self.kind else {
             return;
         };
         if self.live.copying {
@@ -243,7 +326,8 @@ impl Capsule {
         tx: &mut Tx,
     ) {
         // A reply for an earlier recording leaves the shown one's copy alone.
-        if !matches!(&self.kind, Some(Kind::Recording { id: shown, .. }) if shown == id) {
+        if !matches!(&self.kind, Some(Kind::Recording(Recording { id: shown, .. })) if shown == id)
+        {
             return;
         }
         self.live.copying = false;
@@ -271,7 +355,7 @@ impl Capsule {
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
         match &self.kind {
-            Some(Kind::Recording { .. }) => recording_window_size(self.hovered),
+            Some(Kind::Recording(_)) => recording_window_size(self.hovered),
             Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
@@ -409,12 +493,114 @@ fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
 /// recording capsule in the configured corner.
 pub(crate) struct MeetingCapsules {
     panel: OverlayHandle<Capsule>,
-    recording: OverlayHandle<Capsule>,
+    pill: Pill,
     /// Bumped whenever the panel shows something new, so a stale timeout
     /// doesn't close it.
     generation: Arc<AtomicU64>,
-    /// The recording capsule's elapsed-time ticker runs while this is set.
-    ticking: Arc<Mutex<Option<String>>>,
+}
+
+/// The recording capsule, rebuilt from its [`PillModel`] and the live Show
+/// recording indicator setting whenever either may have changed: on each
+/// controller event, on Keep recording, and each second while recording.
+#[derive(Clone)]
+struct Pill {
+    handle: OverlayHandle<Capsule>,
+    model: Arc<Mutex<PillModel>>,
+}
+
+impl Pill {
+    fn apply(&self, event: &ControllerEvent) {
+        self.lock().apply(event, Instant::now());
+        self.reconcile();
+        if let ControllerEvent::RecordingStarted { id, .. } = event {
+            self.tick(id.clone());
+        }
+    }
+
+    fn keep_recording(&self) {
+        self.lock().keep_recording();
+        self.reconcile();
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, PillModel> {
+        self.model.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Shows, refreshes, or hides the pill to match the model; returns the
+    /// recording it shows.
+    fn reconcile(&self) -> Option<String> {
+        let mut model = self.lock();
+        let Some(recording) = model
+            .pill(crate::app_settings::meeting_indicator_enabled())
+            .cloned()
+        else {
+            if model.shown.take().is_some() {
+                self.handle.update(|capsule, _| capsule.kind = None);
+                self.handle.hide();
+            }
+            return None;
+        };
+        let id = recording.id.clone();
+        if model.shown.as_ref() == Some(&id) {
+            self.handle
+                .update(move |capsule, _| capsule.kind = Some(Kind::Recording(recording)));
+            return Some(id);
+        }
+        model.shown = Some(id.clone());
+        let corner = crate::app_settings::meeting_indicator_corner();
+        place_capsule(&self.handle, corner, 0.0, 0.0);
+        // Windows: a shown pill starts compact.
+        #[cfg(target_os = "windows")]
+        self.handle.resize(recording_window_size(false));
+        self.handle.update(move |capsule, tx| {
+            capsule.kind = Some(Kind::Recording(recording));
+            capsule.live = Live::default();
+            capsule.hovered = false;
+            capsule.corner = corner;
+            tx.instant();
+        });
+        float_on_xwayland(&self.handle);
+        self.handle.show();
+        Some(id)
+    }
+
+    /// While recording `id`, each second: reconciles the pill (the elapsed
+    /// time, the indicator setting) and, while it shows, reads the in-call
+    /// transcript here rather than on the main thread.
+    fn tick(&self, id: String) {
+        let pill = self.clone();
+        std::thread::spawn(move || {
+            let mut reader = meeting::TranscriptReader::default();
+            let recording = |pill: &Pill| {
+                pill.lock()
+                    .recording
+                    .as_ref()
+                    .is_some_and(|recording| recording.id == id)
+            };
+            while recording(&pill) {
+                std::thread::sleep(Duration::from_secs(1));
+                if pill.reconcile().as_ref() != Some(&id) {
+                    continue;
+                }
+                let entries = match reader.read(&id) {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        tracing::debug!(%error, "could not read the in-call transcript");
+                        continue;
+                    }
+                };
+                let pending = meeting::pending_delta_turns(&id, &entries);
+                let id = id.clone();
+                pill.handle.update(move |capsule, _| {
+                    if matches!(&capsule.kind, Some(Kind::Recording(Recording { id: shown, .. })) if *shown == id)
+                    {
+                        capsule.live.entries = entries;
+                        capsule.live.pending = pending;
+                    }
+                });
+            }
+        });
+    }
 }
 
 impl MeetingCapsules {
@@ -448,6 +634,7 @@ impl MeetingCapsules {
                     live: Live::default(),
                     commands: commands.clone(),
                     hide: None,
+                    keep_recording: None,
                     resize: None,
                     choose: choose.clone(),
                     hovered: false,
@@ -494,17 +681,24 @@ impl MeetingCapsules {
             "Hex meeting",
             (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         );
-        let recording = overlay(app, "Hex meeting recording", recording_window_size(false));
+        let pill = Pill {
+            handle: overlay(app, "Hex meeting recording", recording_window_size(false)),
+            model: Arc::default(),
+        };
+        let kept = pill.clone();
+        panel.update(move |capsule, _| {
+            capsule.keep_recording = Some(Arc::new(move || kept.keep_recording()));
+        });
         Self {
             panel,
-            recording,
+            pill,
             generation: Arc::default(),
-            ticking: Arc::default(),
         }
     }
 
     /// Shows, updates, or closes a capsule for each controller event.
     pub(crate) fn event(&mut self, event: &ControllerEvent) {
+        self.pill.apply(event);
         match event {
             ControllerEvent::Reminder { meeting, automatic } => {
                 // Unanswered, it closes without recording or snoozing
@@ -541,19 +735,11 @@ impl MeetingCapsules {
                 );
                 self.show_panel(Kind::Offer(candidate.clone()), Some(OFFER_TIMEOUT));
             }
-            ControllerEvent::Starting | ControllerEvent::Transcribing => {
-                self.close_panel();
-                self.close_recording();
-            }
+            ControllerEvent::Starting | ControllerEvent::Transcribing => self.close_panel(),
             ControllerEvent::RecordingStarted {
-                id,
-                title,
-                automatic,
+                title, automatic, ..
             } => {
-                self.close_recording();
-                if crate::app_settings::meeting_indicator_enabled() {
-                    self.show_recording(id.clone(), title.clone(), *automatic);
-                } else if *automatic {
+                if *automatic && !crate::app_settings::meeting_indicator_enabled() {
                     // Nothing else on screen would say a recording began.
                     self.show_panel(
                         Kind::AutoStarted {
@@ -563,24 +749,7 @@ impl MeetingCapsules {
                     );
                 }
             }
-            ControllerEvent::Retitled { title } => {
-                let title = title.clone();
-                self.recording.update(move |capsule, _| {
-                    if let Some(Kind::Recording { title: shown, .. }) = &mut capsule.kind {
-                        *shown = title;
-                    }
-                });
-            }
-            ControllerEvent::SourceWarning { warning } => {
-                let warning = *warning;
-                self.recording.update(move |capsule, _| {
-                    if let Some(Kind::Recording { warning: shown, .. }) = &mut capsule.kind {
-                        *shown = warning;
-                    }
-                });
-            }
             ControllerEvent::CallEnded { app, auto_stop } => {
-                self.close_recording();
                 self.show_panel(
                     Kind::CallEnded {
                         app: app.clone(),
@@ -590,7 +759,6 @@ impl MeetingCapsules {
                 );
             }
             ControllerEvent::Finished(manifest) => {
-                self.close_recording();
                 self.show_panel(Kind::Ready(manifest.clone()), Some(READY_TIMEOUT));
             }
             ControllerEvent::NotesFinished(manifest) => {
@@ -603,9 +771,11 @@ impl MeetingCapsules {
                     }
                 });
             }
-            ControllerEvent::Failed { .. } => self.close_recording(),
-            ControllerEvent::ImportFailed { .. } => {}
-            ControllerEvent::OpenMeeting(_)
+            ControllerEvent::Retitled { .. }
+            | ControllerEvent::SourceWarning { .. }
+            | ControllerEvent::Failed { .. }
+            | ControllerEvent::ImportFailed { .. }
+            | ControllerEvent::OpenMeeting(_)
             | ControllerEvent::Chapters(_)
             | ControllerEvent::NotesStarted => {}
         }
@@ -706,64 +876,6 @@ impl MeetingCapsules {
         self.panel.update(|capsule, _| capsule.kind = None);
         self.panel.hide();
     }
-
-    fn show_recording(&self, id: String, title: String, automatic: bool) {
-        let corner = crate::app_settings::meeting_indicator_corner();
-        place_capsule(&self.recording, corner, 0.0, 0.0);
-        // Windows: a new recording starts from the compact pill.
-        #[cfg(target_os = "windows")]
-        self.recording.resize(recording_window_size(false));
-        let started = Instant::now();
-        let ticker_id = id.clone();
-        self.recording.update(move |capsule, tx| {
-            capsule.kind = Some(Kind::Recording {
-                id,
-                title,
-                started,
-                automatic,
-                warning: None,
-            });
-            capsule.live = Live::default();
-            capsule.hovered = false;
-            capsule.corner = corner;
-            tx.instant();
-        });
-        float_on_xwayland(&self.recording);
-        self.recording.show();
-        *self.ticking.lock().unwrap() = Some(ticker_id.clone());
-        let (recording, ticking) = (self.recording.clone(), self.ticking.clone());
-        // Each second: the elapsed time, and the in-call transcript, read here
-        // rather than on the main thread.
-        std::thread::spawn(move || {
-            let mut reader = meeting::TranscriptReader::default();
-            while ticking.lock().unwrap().as_deref() == Some(ticker_id.as_str()) {
-                std::thread::sleep(Duration::from_secs(1));
-                let entries = match reader.read(&ticker_id) {
-                    Ok(entries) => entries,
-                    Err(error) => {
-                        tracing::debug!(%error, "could not read the in-call transcript");
-                        recording.update(|_, _| {});
-                        continue;
-                    }
-                };
-                let pending = meeting::pending_delta_turns(&ticker_id, &entries);
-                let id = ticker_id.clone();
-                recording.update(move |capsule, _| {
-                    if matches!(&capsule.kind, Some(Kind::Recording { id: shown, .. }) if *shown == id)
-                    {
-                        capsule.live.entries = entries;
-                        capsule.live.pending = pending;
-                    }
-                });
-            }
-        });
-    }
-
-    fn close_recording(&self) {
-        *self.ticking.lock().unwrap() = None;
-        self.recording.update(|capsule, _| capsule.kind = None);
-        self.recording.hide();
-    }
 }
 
 fn button(
@@ -808,14 +920,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         return row().key("empty");
     };
     let (dot, title, subtitle, actions) = match kind {
-        Kind::Recording {
-            title,
-            started,
-            automatic,
-            ..
-        } => {
-            return recording(p, capsule, title, *started, *automatic);
-        }
+        Kind::Recording(shown) => return recording(p, capsule, shown),
         Kind::AutoStarted { title } => (
             p.danger(),
             tr("Recording automatically").to_owned(),
@@ -890,6 +995,9 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
                         })
                     ) {
                         c.send(ControllerCommand::KeepRecording);
+                    }
+                    if let Some(keep_recording) = &c.keep_recording {
+                        keep_recording();
                     }
                     c.close();
                 }),
@@ -1112,19 +1220,19 @@ fn ready(
     (p.success(), title, subtitle, actions)
 }
 
-fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automatic: bool) -> El {
+fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
+    let Recording {
+        title,
+        started,
+        automatic,
+        warning,
+        ..
+    } = shown;
     let live = &capsule.live;
     let elapsed = meeting::format_duration(started.elapsed().as_millis() as u64);
-    let silent = matches!(
-        &capsule.kind,
-        Some(Kind::Recording {
-            warning: Some(_),
-            ..
-        })
-    );
-    let subtitle = if silent {
+    let subtitle = if warning.is_some() {
         tr_fill("Microphone is silent · {}", &elapsed)
-    } else if automatic && started.elapsed() < AUTOMATIC_LABEL {
+    } else if *automatic && started.elapsed() < AUTOMATIC_LABEL {
         tr_fill("Started automatically · {}", &elapsed)
     } else {
         elapsed
@@ -1163,7 +1271,7 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
         copy_new,
         copy_all,
         button(p, "open", tr("Open"), false, |c| {
-            if let Some(Kind::Recording { id, .. }) = &c.kind {
+            if let Some(Kind::Recording(Recording { id, .. })) = &c.kind {
                 c.send(ControllerCommand::Open(id.clone()));
             }
         }),
@@ -1379,6 +1487,7 @@ mod tests {
             live: Live::default(),
             commands,
             hide: None,
+            keep_recording: None,
             resize: None,
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             hovered: false,
@@ -1457,12 +1566,14 @@ mod tests {
 
     #[test]
     fn an_automatic_recording_says_so_at_first() {
-        let recording = |started| Kind::Recording {
-            id: "m".into(),
-            title: "Slack Huddle call — 2:30 PM".into(),
-            started,
-            automatic: true,
-            warning: None,
+        let recording = |started| {
+            Kind::Recording(Recording {
+                id: "m".into(),
+                title: "Slack Huddle call — 2:30 PM".into(),
+                started,
+                automatic: true,
+                warning: None,
+            })
         };
         let (rt, _, _) = runtime(recording(Instant::now()), false, true, RECORDING);
         assert!(
@@ -1478,7 +1589,7 @@ mod tests {
     #[test]
     fn a_recording_says_when_its_microphone_is_silent() {
         let mut kind = live_recording("m");
-        let Kind::Recording { warning, .. } = &mut kind else {
+        let Kind::Recording(Recording { warning, .. }) = &mut kind else {
             panic!("a recording");
         };
         *warning = Some(crate::meeting::TrackWarning::DigitalSilence);
@@ -1565,13 +1676,13 @@ mod tests {
     }
 
     fn live_recording(id: &str) -> Kind {
-        Kind::Recording {
+        Kind::Recording(Recording {
             id: id.into(),
             title: "Q4 launch sync".into(),
             started: Instant::now() - Duration::from_secs(258),
             automatic: false,
             warning: None,
-        }
+        })
     }
 
     fn call() -> Vec<TranscriptEntry> {
@@ -1983,11 +2094,106 @@ mod tests {
         ));
         assert!(rt.state.kind.is_none());
 
-        // Without the lab, Keep recording only closes the capsule.
+        // Without the lab, Keep recording sends nothing.
         let (mut rt, commands, _) = runtime(call_ended(), false, true, CALL_ENDED);
         assert!(texts(&rt).contains(&"Hex is still recording.".to_string()));
+        let kept = Arc::new(AtomicU64::new(0));
+        let counted = kept.clone();
+        rt.state.keep_recording = Some(Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+        }));
         tap(&mut rt, "keep-recording");
         assert!(commands.try_recv().is_err());
+        assert_eq!(
+            kept.load(Ordering::SeqCst),
+            1,
+            "the recording capsule returns"
+        );
+        assert!(rt.state.kind.is_none());
+    }
+
+    fn started(id: &str) -> ControllerEvent {
+        ControllerEvent::RecordingStarted {
+            id: id.into(),
+            title: "Design sync".into(),
+            automatic: false,
+        }
+    }
+
+    fn shown(model: &PillModel, indicator: bool) -> Option<(String, String, Instant)> {
+        model
+            .pill(indicator)
+            .map(|shown| (shown.id.clone(), shown.title.clone(), shown.started))
+    }
+
+    #[test]
+    fn keep_recording_brings_back_the_recording_capsule_as_it_was() {
+        let mut model = PillModel::default();
+        let start = Instant::now();
+        model.apply(&started("m"), start);
+        model.apply(
+            &ControllerEvent::CallEnded {
+                app: "Zoom".into(),
+                auto_stop: false,
+            },
+            start,
+        );
+        assert!(model.pill(true).is_none(), "the prompt stands in for it");
+        model.apply(
+            &ControllerEvent::Retitled {
+                title: "Q4 launch sync".into(),
+            },
+            start,
+        );
+        model.keep_recording();
+        assert_eq!(
+            shown(&model, true),
+            Some(("m".into(), "Q4 launch sync".into(), start))
+        );
+
+        // Another panel replacing the prompt brings it back too.
+        model.apply(
+            &ControllerEvent::CallEnded {
+                app: "Zoom".into(),
+                auto_stop: false,
+            },
+            start,
+        );
+        model.apply(&ControllerEvent::Offer(slack_huddle()), start);
+        assert!(model.pill(true).is_some());
+
+        // Stop & transcribe leaves it closed until the recording ends.
+        model.apply(
+            &ControllerEvent::CallEnded {
+                app: "Zoom".into(),
+                auto_stop: false,
+            },
+            start,
+        );
+        model.apply(&ControllerEvent::Transcribing, start);
+        assert!(model.pill(true).is_none());
+        model.keep_recording();
+        assert!(model.pill(true).is_none());
+    }
+
+    #[test]
+    fn the_recording_capsule_follows_the_indicator_setting_mid_recording() {
+        let mut model = PillModel::default();
+        let start = Instant::now();
+        model.apply(&started("m"), start);
+        assert!(model.pill(false).is_none());
+        assert_eq!(
+            shown(&model, true),
+            Some(("m".into(), "Design sync".into(), start))
+        );
+        model.apply(
+            &ControllerEvent::Failed {
+                title: "Meeting recording failed".into(),
+                error: "the microphone went away".into(),
+            },
+            start,
+        );
+        assert!(model.pill(true).is_none());
     }
 
     #[test]
@@ -2041,13 +2247,13 @@ mod tests {
             ("call-ended", call_ended(), false, CALL_ENDED),
             (
                 "recording-automatic",
-                Kind::Recording {
+                Kind::Recording(Recording {
                     id: "m".into(),
                     title: "Slack Huddle call — 2:30 PM".into(),
                     started: Instant::now() - Duration::from_secs(4),
                     automatic: true,
                     warning: None,
-                },
+                }),
                 false,
                 RECORDING,
             ),
