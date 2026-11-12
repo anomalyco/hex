@@ -503,6 +503,12 @@ real Wayland grant or X11 grab run, and no Windows hook run.
 
 ### Copy Recent Dictation (Labs, macOS)
 
+On macOS a paste that fails (another app changed the clipboard while Hex saved
+it, or a format couldn't be read) still makes that dictation Paste Last's,
+unless it was cancelled; History keeps only pasted output, so it gets no entry
+(`a_failed_paste_keeps_the_dictation_for_paste_last` in
+[parakeet.rs](../../src/parakeet.rs), issue 1437).
+
 Paste Last Dictation reaches only the newest dictation. With Labs › Copy
 recent dictations on (`labs.recent_dictations`, off by default, issue 877):
 
