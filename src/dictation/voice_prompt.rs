@@ -3,8 +3,9 @@
 //!
 //! Matching is word-aligned and case-insensitive. Apostrophes and hyphens
 //! inside a word are ignored when comparing, and punctuation otherwise
-//! separates words: "re-write this" and "Rewrite-this!" both match "rewrite
-//! this", while "write this", "overwrite this", and "this's" do not.
+//! separates words: "re-write this" matches "rewrite this", while "write
+//! this", "overwrite this", and "this's" do not. A hyphen joins a word, so
+//! "Rewrite-this" is one word and doesn't match the two-word phrase.
 
 /// The phrase Labs › Voice prompt starts with.
 pub const DEFAULT_PHRASE: &str = "rewrite this";
@@ -71,11 +72,10 @@ pub fn instruction(transcript: &str, phrase: &str) -> Option<Instruction> {
     let start = found?;
     let first = &transcript_words[start];
     let last = &transcript_words[start + phrase_words.len() - 1];
-    // The edges against the phrase lose joins such as a comma, while the
-    // text's own outer edge keeps its punctuation and quotes: it is what a
-    // failed request pastes.
-    let text = before_phrase(&transcript[..first.start]);
-    let prompt = after_phrase(&transcript[last.end..]);
+    // The edges against the phrase lose joins and marks that only set it
+    // off, while the text's own outer edge keeps its punctuation and
+    // quotes: it is what a failed request pastes.
+    let (text, prompt) = pieces(transcript, first.start, last.end);
     let prompt_words = words(prompt);
     let text = if words(text).is_empty() {
         String::new()
@@ -184,16 +184,69 @@ fn is_joining(character: char) -> bool {
     character.is_whitespace() || matches!(character, ',' | ';' | ':' | '–' | '—')
 }
 
-/// The text before the phrase with only the edge against the phrase
-/// trimmed, so its own punctuation and quotes survive.
-fn before_phrase(text: &str) -> &str {
-    text.trim_end_matches(is_joining).trim_start()
+/// The text and prompt around the phrase. Only the edges against the phrase
+/// are trimmed: joins, a quote or bracket pair that wraps it, and a lone
+/// ASCII dash separator. The pieces keep their own outer punctuation.
+fn pieces(transcript: &str, phrase_start: usize, phrase_end: usize) -> (&str, &str) {
+    let mut text = transcript[..phrase_start].trim_end_matches(is_joining);
+    let mut prompt = transcript[phrase_end..].trim_start_matches(is_joining);
+    // A quote or bracket touching the phrase on both sides goes with it,
+    // including nested pairs. It is read before any dash, so a quote that
+    // belongs to the text survives when a dash sets the phrase off.
+    while let (Some(open), Some(close)) = (text.chars().next_back(), prompt.chars().next()) {
+        if !closes(open, close) {
+            break;
+        }
+        text = text[..text.len() - open.len_utf8()].trim_end_matches(is_joining);
+        prompt = prompt[close.len_utf8()..].trim_start_matches(is_joining);
+    }
+    text = trim_spaced_dash_end(text.trim_end_matches(is_joining));
+    prompt = trim_spaced_dash_start(prompt.trim_start_matches(is_joining));
+    (text.trim_start(), prompt.trim_end())
 }
 
-/// The prompt after the phrase with only the edge against the phrase
-/// trimmed, so its own punctuation survives.
-fn after_phrase(text: &str) -> &str {
-    text.trim_start_matches(is_joining).trim_end()
+/// Whether `close` is the mark that pairs with `open`.
+fn closes(open: char, close: char) -> bool {
+    matches!(
+        (open, close),
+        ('(', ')')
+            | ('[', ']')
+            | ('{', '}')
+            | ('<', '>')
+            | ('"', '"')
+            | ('\'', '\'')
+            | ('“', '”')
+            | ('‘', '’')
+            | ('«', '»')
+    )
+}
+
+/// Removes a lone `-` or `--` separator at the end of `text`, meaning one
+/// preceded by whitespace (or the start).
+fn trim_spaced_dash_end(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    for dash in ["--", "-"] {
+        if let Some(rest) = trimmed.strip_suffix(dash)
+            && (rest.is_empty() || rest.ends_with(char::is_whitespace))
+        {
+            return rest.trim_end();
+        }
+    }
+    text
+}
+
+/// Removes a lone `-` or `--` separator at the start of `text`, meaning one
+/// followed by whitespace (or the end).
+fn trim_spaced_dash_start(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    for dash in ["--", "-"] {
+        if let Some(rest) = trimmed.strip_prefix(dash)
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            return rest.trim_start();
+        }
+    }
+    text
 }
 
 /// Whether these words say only thanks or please, or nothing at all.
@@ -326,6 +379,73 @@ mod tests {
             Some(Instruction::Rewrite {
                 text: "Ship it".into(),
                 prompt: "make it formal".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn quotes_brackets_and_dashes_that_set_the_phrase_off_leave() {
+        assert_eq!(
+            split("He said \"rewrite this\" and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
+            })
+        );
+        assert_eq!(
+            split("He said (rewrite this) and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
+            })
+        );
+        assert_eq!(
+            split("He said [rewrite this] and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
+            })
+        );
+        assert_eq!(
+            split("He said “rewrite this” and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
+            })
+        );
+        assert_eq!(
+            split("He said (\"rewrite this\") and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
+            })
+        );
+        assert_eq!(
+            split("Ship it - rewrite this - formal"),
+            Some(Instruction::Rewrite {
+                text: "Ship it".into(),
+                prompt: "formal".into(),
+            })
+        );
+        assert_eq!(
+            split("Ship it -- rewrite this -- formal"),
+            Some(Instruction::Rewrite {
+                text: "Ship it".into(),
+                prompt: "formal".into(),
+            })
+        );
+        // Quotes that don't touch the phrase stay, including one left by a
+        // dash that set the phrase off.
+        assert_eq!(
+            split("\"Hello,\" she said. rewrite this"),
+            Some(Instruction::RewriteText {
+                text: "\"Hello,\" she said.".into(),
+            })
+        );
+        assert_eq!(
+            split("\"Ship it\" - rewrite this"),
+            Some(Instruction::RewriteText {
+                text: "\"Ship it\"".into(),
             })
         );
     }

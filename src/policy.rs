@@ -272,8 +272,32 @@ mod tests {
             opencode.setting_lock("labs.voice_prompt"),
             Some(Lock::OpenCodeProcessing)
         );
+        assert_eq!(
+            opencode.setting_lock("labs.voice_prompt_phrase"),
+            Some(Lock::OpenCodeProcessing)
+        );
         let labs = Policy::default().with(Lock::Labs);
         assert_eq!(labs.labs_lock(feature), Some(Lock::Labs));
+    }
+
+    #[test]
+    fn the_opencode_lock_turns_only_the_voice_prompt_off_and_keeps_it_saved() {
+        let mut saved = AppSettings::default();
+        saved.labs.voice_prompt = true;
+        saved.labs.live_text = true;
+        let policy = Policy::default().with(Lock::OpenCodeProcessing);
+        let mut loaded = saved.clone();
+        policy.enforce(&mut loaded);
+        assert!(!loaded.labs.voice_prompt, "the locked lab reads off");
+        assert!(loaded.labs.live_text, "another lab is untouched");
+
+        let mut written = loaded.clone();
+        policy.keep_saved(&mut written, &saved);
+        assert!(
+            written.labs.voice_prompt,
+            "the saved switch is written back"
+        );
+        assert!(written.labs.live_text);
     }
 
     #[test]

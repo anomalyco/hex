@@ -1021,9 +1021,15 @@ pub(crate) fn run(
                 continue;
             }
             pending = pending.saturating_sub(1);
-            indicator.finished(result.as_ref().err().map(String::as_str));
             match result {
+                // A voice prompt that asked nothing ends as a discard: no
+                // done tone and no empty pasted transcript. The HUD closes
+                // the submitted job as cancelled in `update` below.
+                Ok(text) if text.is_empty() => {
+                    events.dictation(DictationPhase::Discarded, "")?;
+                }
                 Ok(text) => {
+                    indicator.finished(None);
                     feedback::play(Tone::DictationDone);
                     events.emit(&VoiceEvent::Transcript {
                         timestamp_ms: now_ms(),
@@ -1033,7 +1039,10 @@ pub(crate) fn run(
                     })?;
                     events.dictation(phase, text)?;
                 }
-                Err(error) => fail(&events, error)?,
+                Err(error) => {
+                    indicator.finished(Some(&error));
+                    fail(&events, error)?;
+                }
             }
             emit_state(
                 &mut events,

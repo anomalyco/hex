@@ -714,18 +714,23 @@ timed-out request pastes the text before the phrase, with the punctuation it
 was dictated with; with no such text it pastes the whole corrected transcript.
 
 An organization's DisableOpenCodeProcessing lock reads as off: the card shows it
-managed, the phrase is not split, and that mode processes as usual. While the
-lab is on, Windows and Linux read the browser host for the request even when no
-mode rule or rewrite would (`ModeRuntime::reads_page`), and macOS shows the
-Processing stage even when the mode has no rewrite or transformations.
+managed, the phrase is not split, that mode processes as usual, and
+`hex settings set labs.voice_prompt_phrase` is refused as managed. The browser
+host is read for every voice prompt: on Linux and Windows `ModeRuntime::reads_page`
+turns the page on while the lab is on even when no mode rule or rewrite would,
+and macOS's `reads_browser` does the same, which can bring up the Automation
+prompt for the browser. macOS also shows the Processing stage even when the mode
+has no rewrite or transformations.
 
 Nothing pasted really is nothing. On macOS, an empty processed result or the
 flag skips the paste, last dictation, and History in `finish_output`
 ([parakeet.rs](../../src/parakeet.rs)). The Neither outcome carries
 `Processed::nothing`, so the Windows and Linux listeners finish quietly without
-a failure, a paste, a last dictation, or History
+a failure, a paste, a last dictation, a done tone, or a `Pasted`/`Transcript
+Completed` event; their activity log records a discard and the HUD closes the
+job as cancelled, the same style as a discarded capture
 ([windows/dictation.rs](../../src/windows/dictation.rs),
-[linux/dictation.rs](../../src/linux/dictation.rs)); an ordinary empty result
+[linux/dictation.rs](../../src/linux/dictation.rs)). An ordinary empty result
 still fails there as before. A printing stop answers `no-speech` instead of an
 empty transcript. The local API's `process=global` returns an empty `processed`
 and never pastes or records
@@ -748,6 +753,7 @@ Off, processing is byte-for-byte unchanged. Checks:
 `write_this_and_overwrite_this_never_match`,
 `hyphens_and_apostrophes_inside_words_are_ignored`,
 `the_edges_keep_their_punctuation_and_quotes`,
+`quotes_brackets_and_dashes_that_set_the_phrase_off_leave`,
 `the_last_occurrence_splits_the_dictation`,
 `the_outcome_table_covers_every_piece`, and
 `a_phrase_needs_two_words_and_six_letters` in
@@ -759,7 +765,8 @@ Off, processing is byte-for-byte unchanged. Checks:
 `a_voice_prompt_that_asks_nothing_ends_through_process_cancellable`, and
 `a_voice_prompt_with_nothing_to_ask_pastes_nothing_and_runs_no_transformations`
 in [dictation/processor.rs](../../src/dictation/processor.rs);
-`a_voice_prompt_is_locked_by_opencode_processing` in
+`a_voice_prompt_is_locked_by_opencode_processing` and
+`the_opencode_lock_turns_only_the_voice_prompt_off_and_keeps_it_saved` in
 [policy.rs](../../src/policy.rs); `the_page_is_read_only_when_processing_uses_it`
 in [dictation/modes.rs](../../src/dictation/modes.rs);
 `voice_prompt_is_its_own_atomic_and_carries_its_phrase` in
