@@ -719,8 +719,8 @@ lab is on, Windows and Linux read the browser host for the request even when no
 mode rule or rewrite would (`ModeRuntime::reads_page`), and macOS shows the
 Processing stage even when the mode has no rewrite or transformations.
 
-Nothing pasted really is nothing. On macOS, an empty processed result skips the
-paste, last dictation, and History in `finish_output`
+Nothing pasted really is nothing. On macOS, an empty processed result or the
+flag skips the paste, last dictation, and History in `finish_output`
 ([parakeet.rs](../../src/parakeet.rs)). The Neither outcome carries
 `Processed::nothing`, so the Windows and Linux listeners finish quietly without
 a failure, a paste, a last dictation, or History

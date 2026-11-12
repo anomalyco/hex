@@ -47,6 +47,17 @@ struct DictationLabs {
     filler_words: bool,
 }
 
+impl DictationLabs {
+    /// The Labs switches as this process holds them now.
+    fn current() -> Self {
+        Self {
+            spoken_formatting: crate::labs::spoken_formatting(),
+            spoken_symbols: crate::labs::spoken_symbols(),
+            filler_words: crate::labs::filler_words(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Profile {
     name: String,
@@ -365,6 +376,37 @@ impl Profiles {
         profile.ai_enabled || !profile.transformations.is_empty()
     }
 
+    /// Whether processing `transcript` would run a voice prompt request: the
+    /// lab is on, this is heard speech, and the phrase is there after
+    /// preparation and replacements. The `Nothing` outcome asks nothing, so
+    /// it shows no stage either.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn voice_prompts(
+        &self,
+        transcript: &str,
+        language: &str,
+        context: &ContextSnapshot,
+        source: Source,
+    ) -> bool {
+        use crate::dictation::voice_prompt::Instruction;
+        if source != Source::Dictation {
+            return false;
+        }
+        let Some(phrase) = crate::labs::voice_prompt().then(crate::labs::voice_prompt_phrase)
+        else {
+            return false;
+        };
+        let profile = self.select(context);
+        let prepared = prepare_transcript(transcript, language, source, DictationLabs::current());
+        let corrected = profile
+            .replacements
+            .replace(&self.global.replace(&prepared));
+        matches!(
+            crate::dictation::voice_prompt::instruction(&corrected, &phrase),
+            Some(instruction) if !matches!(instruction, Instruction::Nothing)
+        )
+    }
+
     pub fn process_cancellable(
         &self,
         transcript: &str,
@@ -399,16 +441,7 @@ impl Profiles {
         // Labs › Spoken formatting, spoken symbols, and filler words only
         // make sense for speech: typed text starts from what is already
         // written and skips them.
-        let prepared = prepare_transcript(
-            transcript,
-            language,
-            source,
-            DictationLabs {
-                spoken_formatting: crate::labs::spoken_formatting(),
-                spoken_symbols: crate::labs::spoken_symbols(),
-                filler_words: crate::labs::filler_words(),
-            },
-        );
+        let prepared = prepare_transcript(transcript, language, source, DictationLabs::current());
         let corrected = profile
             .replacements
             .replace(&self.global.replace(&prepared));

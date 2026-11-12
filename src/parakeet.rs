@@ -151,6 +151,9 @@ struct JobTimings {
 
 struct CompletedTranscript {
     text: String,
+    /// Labs › Voice prompt asked for nothing: finish without output even if
+    /// some later stage left text behind.
+    nothing: bool,
     /// Corrected local transcript before mode processing.
     raw: String,
     application: Option<String>,
@@ -669,6 +672,7 @@ fn run_processor_worker(
                 target: job.target,
                 result: Box::new(Ok(CompletedTranscript {
                     text: processed.text,
+                    nothing: processed.nothing,
                     raw: job.text,
                     application: job.context.application,
                     return_to: job.return_to,
@@ -693,7 +697,14 @@ fn process_job_text(
     let profiles = profiles();
     // A voice prompt can run a request even when the mode's own rewrite and
     // transformations are off, so the HUD shows its stage too.
-    if profiles.processes(&job.context) || crate::labs::voice_prompt() {
+    if profiles.processes(&job.context)
+        || profiles.voice_prompts(
+            &job.text,
+            &job.language,
+            &job.context,
+            crate::dictation::processor::Source::Dictation,
+        )
+    {
         processing();
     }
     profiles.process_cancellable(
@@ -895,6 +906,7 @@ fn run_inference_worker(
                 let result = result.map(|text| CompletedTranscript {
                     raw: text.clone(),
                     text,
+                    nothing: false,
                     application,
                     return_to: job.return_to,
                     timings,
@@ -1047,7 +1059,7 @@ fn finish_output(
                     return Err("dictation was cancelled".into());
                 }
                 let paste_started = Instant::now();
-                if !completed.text.trim().is_empty() {
+                if !completed.nothing && !completed.text.trim().is_empty() {
                     let commit = || control.begin_output();
                     match target {
                         TranscriptionTarget::Paste
@@ -1598,6 +1610,7 @@ mod tests {
                     target,
                     result: Box::new(Ok(CompletedTranscript {
                         text: text.into(),
+                        nothing: false,
                         raw: text.into(),
                         application: Some("Call".into()),
                         return_to: None,
