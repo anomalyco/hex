@@ -61,23 +61,27 @@ pub(super) enum Selection {
     Custom(usize),
 }
 
-pub(super) fn mode(settings: &AppSettings, selection: Selection) -> &DictationMode {
+pub(super) fn mode(settings: &AppSettings, selection: Selection) -> Option<&DictationMode> {
     match selection {
-        Selection::Default => &settings.dictation_processing.default_mode,
-        Selection::Custom(index) => &settings.dictation_processing.modes[index],
+        Selection::Default => Some(&settings.dictation_processing.default_mode),
+        Selection::Custom(index) => settings.dictation_processing.modes.get(index),
     }
 }
 
-pub(super) fn mode_mut(settings: &mut AppSettings, selection: Selection) -> &mut DictationMode {
+pub(super) fn mode_mut(
+    settings: &mut AppSettings,
+    selection: Selection,
+) -> Option<&mut DictationMode> {
     match selection {
-        Selection::Default => &mut settings.dictation_processing.default_mode,
-        Selection::Custom(index) => &mut settings.dictation_processing.modes[index],
+        Selection::Default => Some(&mut settings.dictation_processing.default_mode),
+        Selection::Custom(index) => settings.dictation_processing.modes.get_mut(index),
     }
 }
 
 /// The selected mode's text fields.
 #[derive(Default)]
 struct Editor {
+    base: DictationMode,
     name: TextEdit,
     prompt: TextEdit,
     deadline: TextEdit,
@@ -87,6 +91,7 @@ struct Editor {
 impl Editor {
     fn of(mode: &DictationMode) -> Self {
         Self {
+            base: mode.clone(),
             name: TextEdit::new(mode.name.clone()),
             prompt: TextEdit::new(mode.post_processing.prompt.clone()),
             deadline: TextEdit::new(mode.post_processing.deadline_seconds.to_string()),
@@ -124,7 +129,7 @@ enum Applications {
 pub(super) struct ModesPane {
     pub(super) selected: Selection,
     editor: Editor,
-    pub(super) delete_armed: bool,
+    pub(super) delete_armed: Option<String>,
     pub(super) application_picker_open: bool,
     application_search: TextEdit,
     application_highlight: Highlight,
@@ -159,7 +164,7 @@ impl ModesPane {
         Self {
             selected: Selection::Default,
             editor: Editor::of(&settings.dictation_processing.default_mode),
-            delete_armed: false,
+            delete_armed: None,
             application_picker_open: false,
             application_search: TextEdit::default(),
             application_highlight: Highlight::default(),
@@ -216,13 +221,10 @@ impl ModesPane {
     /// The selected mode's drafts applied to `settings`.
     pub(super) fn project(&self, settings: &mut AppSettings) {
         let selection = self.selected;
-        if let Selection::Custom(index) = selection
-            && index >= settings.dictation_processing.modes.len()
-        {
+        let Some(mode) = mode_mut(settings, selection) else {
             return;
-        }
+        };
         let editor = &self.editor;
-        let mode = mode_mut(settings, selection);
         if selection != Selection::Default {
             mode.name = editor.name.text.trim().to_string();
         }
@@ -244,19 +246,40 @@ impl ModesPane {
             .max(1);
     }
 
-    /// Rebuilds the drafts from settings another client saved.
-    pub(super) fn reload(&mut self, settings: &AppSettings) {
-        if let Selection::Custom(index) = self.selected
-            && index >= settings.dictation_processing.modes.len()
-        {
-            self.selected = Selection::Default;
+    /// Saved names identify modes across external reordering. A removed,
+    /// renamed, or ambiguous name drops its draft rather than editing a sibling.
+    pub(super) fn adopt(&mut self, settings: &AppSettings, dirty: bool) {
+        if self.selected != Selection::Default {
+            let mut matches = settings
+                .dictation_processing
+                .modes
+                .iter()
+                .enumerate()
+                .filter(|(_, mode)| mode.name == self.editor.base.name);
+            let found = matches.next();
+            if let Some((index, _)) = found
+                && matches.next().is_none()
+            {
+                self.selected = Selection::Custom(index);
+            } else {
+                self.select_in(settings, Selection::Default);
+                return;
+            }
         }
-        self.editor = Editor::of(mode(settings, self.selected));
+        if !dirty && let Some(current) = mode(settings, self.selected) {
+            self.editor = Editor::of(current);
+        }
+    }
+
+    pub(super) fn committed(&mut self, settings: &AppSettings) {
+        if let Some(current) = mode(settings, self.selected) {
+            self.editor.base = current.clone();
+        }
     }
 
     pub(super) fn select(&mut self, selection: Selection) {
         self.selected = selection;
-        self.delete_armed = false;
+        self.delete_armed = None;
         self.application_picker_open = false;
         self.application_error = None;
         self.drag = None;
@@ -264,7 +287,12 @@ impl ModesPane {
 
     fn select_in(&mut self, settings: &AppSettings, selection: Selection) {
         self.select(selection);
-        self.editor = Editor::of(mode(settings, selection));
+        if let Some(current) = mode(settings, selection) {
+            self.editor = Editor::of(current);
+        } else {
+            self.select(Selection::Default);
+            self.editor = Editor::of(&settings.dictation_processing.default_mode);
+        }
     }
 
     fn application_query(&self) -> String {
@@ -382,7 +410,14 @@ fn select_mode(ui: &mut Ui, selection: Selection) {
 /// Saves one change to the selected mode.
 fn update_mode(ui: &mut Ui, change: impl FnOnce(&mut DictationMode)) -> bool {
     let selection = ui.modes.selected;
-    ui.update(|settings| change(mode_mut(settings, selection)))
+    if mode(&ui.settings, selection).is_none() {
+        return false;
+    }
+    ui.update(|settings| {
+        if let Some(mode) = mode_mut(settings, selection) {
+            change(mode);
+        }
+    })
 }
 
 fn add_mode(ui: &mut Ui) {
@@ -404,12 +439,15 @@ fn delete_mode(ui: &mut Ui) {
     let Selection::Custom(index) = ui.modes.selected else {
         return;
     };
-    if !ui.modes.delete_armed {
-        ui.modes.delete_armed = true;
+    let Some(current) = mode(&ui.settings, ui.modes.selected) else {
+        return;
+    };
+    if ui.modes.delete_armed.as_deref() != Some(&current.name) {
+        ui.modes.delete_armed = Some(current.name.clone());
         return;
     }
     // The drafts belong to the mode going away.
-    ui.modes.editor = Editor::of(mode(&ui.settings, ui.modes.selected));
+    ui.modes.editor = Editor::of(current);
     if ui.update(|settings| {
         settings.dictation_processing.modes.remove(index);
     }) {
@@ -456,7 +494,7 @@ fn add_application(ui: &mut Ui, name: String) {
         ));
         return;
     }
-    if !mode(&ui.settings, selection).applications.contains(&name)
+    if mode(&ui.settings, selection).is_some_and(|mode| !mode.applications.contains(&name))
         && update_mode(ui, |mode| {
             mode.applications.push(name);
             mode.applications.sort_by_key(|name| name.to_lowercase());
@@ -471,11 +509,11 @@ fn add_application(ui: &mut Ui, name: String) {
 
 /// Up and Down move the application search's highlight.
 fn move_application_highlight(ui: &mut Ui, event: &rune::KeyEvent) -> bool {
+    let Some(current) = mode(&ui.settings, ui.modes.selected) else {
+        return false;
+    };
     let query = ui.modes.application_query();
-    let count = ui
-        .modes
-        .application_choices(&mode(&ui.settings, ui.modes.selected).applications)
-        .len();
+    let count = ui.modes.application_choices(&current.applications).len();
     ui.modes
         .application_highlight
         .key(&event.key, &query, count)
@@ -566,9 +604,10 @@ pub(super) fn chosen_application(ui: &mut Ui, result: ChosenApplication) {
 fn drag_transformation(ui: &mut Ui, id: &str, start: usize, pitch: f32, d: &Drag) {
     match d.phase {
         Phase::Down => {
-            let committed = mode(&ui.settings, ui.modes.selected)
-                .transformations
-                .clone();
+            let Some(current) = mode(&ui.settings, ui.modes.selected) else {
+                return;
+            };
+            let committed = current.transformations.clone();
             ui.modes.drag = Some(TransformationDrag {
                 id: id.to_string(),
                 start,
@@ -709,14 +748,16 @@ fn mode_row(
 
 fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let selection = ui.modes.selected;
-    let current = mode(&ui.settings, selection);
+    let Some(current) = mode(&ui.settings, selection) else {
+        return el();
+    };
     let mut content = page("mode-detail-content");
     content = content.child(basics(ui, p, selection, current, layer));
     content = content.child(corrections(ui, p));
     content = content.child(processing(ui, p, selection, current, layer));
     content = content.child(transformations(ui, p, current, layer));
     if selection != Selection::Default {
-        let action = if ui.modes.delete_armed {
+        let action = if ui.modes.delete_armed.as_deref() == Some(&current.name) {
             row()
                 .key("delete-actions")
                 .gap(8.0)
@@ -725,7 +766,7 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                     "cancel-delete-mode",
                     tr("Cancel"),
                     ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ui.modes.delete_armed = false,
+                    |ui: &mut Ui, _| ui.modes.delete_armed = None,
                 ))
                 .child(button(
                     p,
@@ -907,7 +948,10 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
         })
         .on_submit(|ui: &mut Ui, _: &mut Tx| {
             let picked = {
-                let selected = &mode(&ui.settings, ui.modes.selected).applications;
+                let Some(current) = mode(&ui.settings, ui.modes.selected) else {
+                    return;
+                };
+                let selected = &current.applications;
                 let query = ui.modes.application_query();
                 let choices = ui.modes.application_choices(selected);
                 ui.modes
@@ -1144,9 +1188,10 @@ fn processing(
     let toggle = Switch::new(enabled)
         .disabled(!can_toggle)
         .on_toggle(|ui: &mut Ui| {
-            let enabled = !mode(&ui.settings, ui.modes.selected)
-                .post_processing
-                .enabled;
+            let Some(current) = mode(&ui.settings, ui.modes.selected) else {
+                return;
+            };
+            let enabled = !current.post_processing.enabled;
             update_mode(ui, |mode| mode.post_processing.enabled = enabled);
         })
         .build(p.k)
@@ -1316,7 +1361,61 @@ fn fixture_icon(rgb: [u8; 3]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::reorder_transformation;
+    use super::*;
+
+    fn settings() -> AppSettings {
+        let mut settings = AppSettings::default();
+        settings.dictation_processing.modes = ["First", "Second"]
+            .map(|name| DictationMode {
+                name: name.into(),
+                ..Default::default()
+            })
+            .to_vec();
+        settings
+    }
+
+    #[test]
+    fn removed_mode_discards_its_dirty_editor_and_confirmation() {
+        let mut settings = settings();
+        let mut pane = ModesPane::new(&settings);
+        pane.select_in(&settings, Selection::Custom(1));
+        pane.editor.name.text = "Draft".into();
+        pane.delete_armed = Some("Second".into());
+        settings.dictation_processing.modes.pop();
+        pane.adopt(&settings, true);
+        assert_eq!(pane.selected, Selection::Default);
+        assert!(pane.delete_armed.is_none());
+        pane.project(&mut settings);
+        assert_eq!(settings.dictation_processing.modes[0].name, "First");
+        assert!(mode(&settings, Selection::Custom(1)).is_none());
+        assert!(mode_mut(&mut settings, Selection::Custom(1)).is_none());
+    }
+
+    #[test]
+    fn reordered_modes_keep_drafts_and_confirmation_on_the_saved_name() {
+        let mut settings = settings();
+        let mut pane = ModesPane::new(&settings);
+        pane.select_in(&settings, Selection::Custom(1));
+        pane.editor.name.text = "Draft".into();
+        pane.delete_armed = Some("Second".into());
+        settings.dictation_processing.modes.swap(0, 1);
+        pane.adopt(&settings, true);
+        assert_eq!(pane.selected, Selection::Custom(0));
+        assert_eq!(pane.delete_armed.as_deref(), Some("Second"));
+        pane.project(&mut settings);
+        assert_eq!(settings.dictation_processing.modes[0].name, "Draft");
+        assert_eq!(settings.dictation_processing.modes[1].name, "First");
+    }
+
+    #[test]
+    fn ambiguous_names_never_retarget_a_draft() {
+        let mut settings = settings();
+        let mut pane = ModesPane::new(&settings);
+        pane.select_in(&settings, Selection::Custom(1));
+        settings.dictation_processing.modes[0].name = "Second".into();
+        pane.adopt(&settings, true);
+        assert_eq!(pane.selected, Selection::Default);
+    }
 
     #[test]
     fn transformations_reorder_in_both_directions() {

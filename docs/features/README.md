@@ -1261,6 +1261,8 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
 │   selection, and replaces it (labs.md, dictation.md)
 └── In some apps -> Each mode's apps and its steps (Only: …), opens to list them
     // the old Modes editor stays in the code for its scenes, unreachable
+    // Its drafts and delete confirmation follow the unique saved mode name
+    // across reloads; removing, renaming or duplicating it drops the draft.
 
 Foreground context -> Select processing
 ├── Matching website                     // macOS: scriptable browsers, then AXWebArea; Windows: UIA; Linux: AT-SPI
