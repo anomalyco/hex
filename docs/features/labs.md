@@ -307,27 +307,39 @@ Screen vocabulary (`screen-vocabulary`, macOS): while on, each dictation
 reads the focused window's visible text once, on a background thread, as the
 capture becomes real: the same point the page refresh is asked for (a hold
 past its threshold, a control start, or a released microphone opening). The
-read is bounded to 1,500 elements, 40 levels below the window, 32 KB, and
-150 ms, with the existing 0.25 s messaging timeout; `AXSecureTextField`
-elements and their subtrees are skipped, and Hex's own process is never read
-(`accessibility::focused_window_text`). `dictation::screen_vocabulary`
-extracts at most 24 names or technical terms: mixed-case and CamelCase words,
-letters with digits, 2–6 letter acronyms, and capitalized words away from a
-sentence's start; plain lowercase words, sentence-start capitals, and terms
-already in the vocabulary are dropped, then frequency and first appearance
-order them. The terms attach to that capture's context
+read is bounded to 1,500 elements, 40 levels below the window, 32 KB, and a
+soft 150 ms deadline checked between elements, with the existing 0.25 s
+messaging timeout; each value is capped at 4 KB, and a text value over that
+reads only its `AXVisibleCharacterRange` (or is skipped when the app names
+none), so a document or a terminal's scrollback never fills the budget.
+`AXSecureTextField` elements and their subtrees are skipped, and Hex's own
+process is never read (`accessibility::focused_window_text`).
+`dictation::screen_vocabulary` extracts at most 24 names or technical terms:
+mixed-case and CamelCase words, letters with digits, 2–6 letter acronyms, and
+capitalized words away from a sentence's start; plain lowercase words,
+sentence-start capitals, common window labels, hexadecimal ids, ordinals,
+times, units, and random-looking tokens are dropped, then frequency and first
+appearance order them. The terms attach to that capture's context
 (`ContextSnapshot::screen_terms`) and join its transcription vocabulary after
 the mode's own terms and the shared list, inside the existing 64-term bias cap
-and prompt character budgets (`dictation::vocabulary::for_capture`); a model
-that takes no vocabulary and a run without the bias never read them. A
-capture with terms takes its whole clip after release rather than a live
-stream's text, because a stream fixes its vocabulary when it starts. Meetings,
-the local API, and OpenCode rewriting never see them, and nothing is saved or
-logged (a count may be). Off, no Accessibility read or thread starts. Checks:
-`dictation::screen_vocabulary::tests` (the Qdrant example, sentence-start
-exclusion, internal punctuation, the 24-term cap, dedup against the saved
-list), `a_captures_screen_terms_come_last_and_leave_with_it` in
+and prompt character budgets (`dictation::vocabulary::for_capture`). Parakeet
+reads them only with Labs › Vocabulary biasing on and a boost other than Off;
+Whisper and Qwen3-ASR read them as a prompt; Apple Speech and other models
+that take no vocabulary never read them. A capture with terms for a model
+that reads them takes its whole clip after release rather than a live stream's
+text, because a stream fixes its vocabulary when it starts; that costs a
+little latency. Meetings, the local API, and OpenCode rewriting never see the
+terms, and nothing is saved or logged except the term count and read time at
+debug level. Off, or for a model that ignores the terms, no Accessibility
+read or thread starts. Checks: `dictation::screen_vocabulary::tests` (the
+Qdrant example, sentence-start exclusion, acronyms, stoplist, hashes,
+ordinals, times, units, random tokens, the 24-term cap, dedup against the
+saved list), `a_captures_screen_terms_come_last_and_leave_with_it` and
+`parakeet_terms_need_the_biasing_lab_and_a_boost` in
 [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
+`a_cancelled_capture_leaves_no_stale_screen_terms` and
+`one_screen_read_runs_at_a_time` in
+[dictation/screen_vocabulary.rs](../../src/dictation/screen_vocabulary.rs),
 `screen_vocabulary_is_its_own_switch_and_macos_only` in
 [labs.rs](../../src/labs.rs), and `a_missing_attribute_is_none` and
 `hex_never_reads_its_own_accessibility_tree` in
@@ -2850,6 +2862,15 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `dictation::vocabulary::transcription_bias` returns nothing, so no run or stream takes
   the list; rewriting and search still use it, and the Vocabulary sheet says
   so.
+- Screen vocabulary (macOS): each dictation may read the focused window's
+  visible text through Accessibility as temporary vocabulary. Off by default
+  (`labs.screen_vocabulary`). Parakeet reads the terms only with Vocabulary
+  biasing on and a boost other than Off; Whisper and Qwen3-ASR read them as a
+  prompt; Apple Speech and models that take no vocabulary read nothing. A
+  capture with terms for such a model uses its whole-clip run rather than a
+  live stream's text, so the text arrives after release with a little more
+  latency. Its read bounds and extraction are above, under "Screen
+  vocabulary".
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
   apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
   shared `paste_with_shift`; Linux keeps it as a General › Advanced row.

@@ -68,6 +68,11 @@ impl CaptureRefresh {
         self.ticket
     }
 
+    /// Whether a capture started and has not finished or been cancelled.
+    pub(crate) fn pending(&self) -> bool {
+        self.pending
+    }
+
     /// The capture ended without transcribing: nothing waits for its page.
     pub(crate) fn cancel(&mut self) {
         self.pending = false;

@@ -3,13 +3,13 @@
 //! for it briefly instead of using the previous dictation's page.
 
 use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 use crate::dictation::context::{CaptureRefresh, ContextMonitor, ContextSnapshot};
+use crate::dictation::screen_vocabulary::ScreenVocabulary;
 use crate::suppression::InputActivity;
 
 /// How long a finished shortcut waits for the page its capture asked to
@@ -28,50 +28,6 @@ pub(super) struct ContextWatch {
     capture: CaptureRefresh,
     /// Labs › Screen vocabulary's one read, for this capture.
     screen: ScreenVocabulary,
-}
-
-/// One capture's screen vocabulary: a background read of the focused window,
-/// started as the capture becomes real and taken only if it finished in time.
-#[derive(Default)]
-struct ScreenVocabulary {
-    read: Option<mpsc::Receiver<Vec<String>>>,
-}
-
-impl ScreenVocabulary {
-    /// Starts this capture's one read, if Labs › Screen vocabulary is on.
-    /// Off, nothing reads Accessibility at all.
-    fn start(&mut self) {
-        if self.read.is_some() || !crate::labs::screen_vocabulary() {
-            return;
-        }
-        let (sender, read) = mpsc::channel();
-        self.read = Some(read);
-        let spawned = thread::Builder::new()
-            .name("screen-vocabulary".into())
-            .spawn(move || {
-                if let Some(terms) = crate::dictation::screen_vocabulary::from_focused_window() {
-                    let _ = sender.send(terms);
-                }
-            });
-        if let Err(error) = spawned {
-            tracing::warn!(%error, "could not start the screen vocabulary reader");
-            self.read = None;
-        }
-    }
-
-    /// This capture's terms, if the read finished before its run.
-    fn take(&mut self) -> Vec<String> {
-        self.read
-            .take()
-            .and_then(|read| read.try_recv().ok())
-            .unwrap_or_default()
-    }
-
-    /// The capture ended without transcribing, or a new one started: a late
-    /// read is discarded instead of reaching another dictation.
-    fn cancel(&mut self) {
-        self.read = None;
-    }
 }
 
 impl ContextWatch {
@@ -118,9 +74,11 @@ impl ContextWatch {
 
     /// The capture became real: a control start (no hold to judge), a hold
     /// past its threshold, or a released microphone finally opening. Ask for
-    /// its page and its screen's vocabulary now, once per capture.
+    /// its page and its screen's vocabulary now, once per capture, and never
+    /// for an intend without a pending capture.
     pub(super) fn intend(&mut self) {
-        self.screen.start();
+        let pending = self.capture.pending();
+        self.screen.start(pending);
         let monitor = &self.monitor;
         self.capture.intend(|| monitor.request_refresh());
     }
