@@ -707,7 +707,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("The config could not be created.", "Не удалось создать конфигурацию."),
     ("Thinking", "Рассуждение"),
     ("Hold or double-tap", "Удерживать или дважды нажать"),
-    ("Tap", "Нажатие"),
+    ("Tap", "Нажать"),
     ("Double-tap", "Двойное нажатие"),
     ("Hold to talk, or double-tap to talk hands-free", "Удерживайте, чтобы говорить, или нажмите дважды, чтобы говорить без рук"),
     ("Hold to talk, let go to paste", "Удерживайте, чтобы говорить, отпустите, чтобы вставить"),

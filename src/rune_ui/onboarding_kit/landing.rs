@@ -165,10 +165,12 @@ impl Home {
 /// Final `"Hex is ready"` landing: the Hex logo builds outside in (its
 /// outline arriving from the top pill when `matched`), followed by
 /// staggered copy and where Hex lives. `age`: seconds since the page
-/// appeared.
+/// appeared; `toggle`: the shortcut taps to start rather than holds.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn ready(
     p: Paint,
     caps: &[String],
+    toggle: bool,
     matched: Option<&str>,
     age: f64,
     reduced: bool,
@@ -197,7 +199,7 @@ pub(crate) fn ready(
                             .font(title_font(p))
                             .color(p.text()),
                     )
-                    .child(hold_anywhere(p, caps)),
+                    .child(hold_anywhere(p, caps, toggle)),
                 1.0,
                 8.0,
             ),
@@ -205,13 +207,18 @@ pub(crate) fn ready(
         .child(motion.staggered(menubar_hint(p, home), 2.0, 8.0))
 }
 
-/// `"Hold [⌥] anywhere, then talk."`
-pub(crate) fn hold_anywhere(p: Paint, caps: &[String]) -> El {
+/// `"Hold [⌥] anywhere, then talk."`, or `"Tap"` when the shortcut taps.
+pub(crate) fn hold_anywhere(p: Paint, caps: &[String], toggle: bool) -> El {
     row()
         .key("hold-anywhere")
         .gap(8.0)
         .center_y()
-        .child(text(tr("Hold")).key("hold").font(LEAD).color(p.muted()))
+        .child(
+            text(gesture(toggle))
+                .key("hold")
+                .font(LEAD)
+                .color(p.muted()),
+        )
         .child(keys(p, "keys", caps, false))
         .child(
             text(tr("anywhere, then talk."))
@@ -219,6 +226,12 @@ pub(crate) fn hold_anywhere(p: Paint, caps: &[String]) -> El {
                 .font(LEAD)
                 .color(p.muted()),
         )
+}
+
+/// The shortcut's gesture before its keycaps, as the saved trigger mode
+/// (General's Hold or Tap) names it.
+pub(crate) fn gesture(toggle: bool) -> &'static str {
+    if toggle { tr("Tap") } else { tr("Hold") }
 }
 
 /// Quiet capsule previewing the single-hexagon icon where Hex lives: the

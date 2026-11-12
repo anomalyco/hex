@@ -299,6 +299,7 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
     let core = ready(
         p,
         &s.caps,
+        s.toggle,
         (!s.had_model).then_some(PILL),
         s.ready_age(),
         s.reduced.get(),
@@ -313,8 +314,16 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
             .items_center()
             .child(core)
             .children(
-                login_ask(p, &s.login, s.now, s.reduced.get(), false, login::toggle)
-                    .map(|ask| ask.transition(arrives())),
+                login_ask(
+                    p,
+                    &s.login,
+                    s.now,
+                    s.reduced.get(),
+                    false,
+                    s.toggle,
+                    login::toggle,
+                )
+                .map(|ask| ask.transition(arrives())),
             )
             .child(
                 row()
@@ -345,6 +354,7 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
         s.now,
         s.reduced.get(),
         true,
+        s.toggle,
         |s: &mut Onboard| {
             let next = if s.login.login == Login::On {
                 Login::Off
@@ -422,7 +432,12 @@ fn hold(p: Paint, s: &Onboard, rest: &str, down: bool) -> El {
         .gap(8.0)
         .center_y()
         .transition(Transition::opacity())
-        .child(text(tr("Hold")).key("hold").font(LEAD).color(p.muted()))
+        .child(
+            text(super::landing::gesture(s.toggle))
+                .key("hold")
+                .font(LEAD)
+                .color(p.muted()),
+        )
         .child(keys(p, "keys", &s.caps, down))
         .child(text(rest).key("rest").font(LEAD).color(p.muted()))
 }

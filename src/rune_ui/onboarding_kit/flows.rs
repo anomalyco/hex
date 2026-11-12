@@ -160,6 +160,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             middle().pb(TOP_BAR).child(ready(
                 p,
                 &s.caps,
+                s.toggle,
                 None,
                 s.ready_age(),
                 s.reduced.get(),
@@ -258,6 +259,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             middle().pb(TOP_BAR).child(ready(
                 p,
                 &s.caps,
+                s.toggle,
                 Some(PILL),
                 s.ready_age(),
                 s.reduced.get(),
@@ -376,6 +378,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         Step::Ready => ready(
             p,
             &s.caps,
+            s.toggle,
             None,
             s.ready_age(),
             s.reduced.get(),
