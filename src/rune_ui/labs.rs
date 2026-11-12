@@ -6,6 +6,7 @@
 //! Voice Filter, Playground) joins the main sidebar while on and is hidden
 //! while off.
 
+mod browser_access;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 mod screenshots;
@@ -212,6 +213,11 @@ pub(super) struct Store {
     pub(super) phrase: TextEdit,
     /// Whether `phrase` started from the saved phrase.
     pub(super) phrase_synced: bool,
+    /// Labs › Browser access to the local API's origins while it's on: a
+    /// draft, saved as the comma-separated field shows it.
+    pub(super) origins: TextEdit,
+    /// Whether `origins` started from the saved origins.
+    pub(super) origins_synced: bool,
 }
 
 impl Store {
@@ -251,6 +257,47 @@ impl Store {
         let draft = self.phrase.text.trim();
         !draft.is_empty() && draft != settings.labs.voice_prompt_phrase
     }
+
+    /// Starts the origins field at the saved origins, normalized.
+    pub(super) fn sync_origins(&mut self, saved: &[String]) {
+        self.origins = TextEdit::new(origins_text(saved));
+        self.origins_synced = true;
+    }
+
+    /// Adopts origins another writer saved, unless the field holds an unsaved
+    /// draft.
+    pub(super) fn rebase_origins(&mut self, before: &[String], after: &[String]) {
+        let draft = crate::app_settings::parse_browser_origins(&self.origins.text);
+        if !self.origins_synced || draft == crate::app_settings::normalize_browser_origins(before) {
+            self.sync_origins(after);
+        }
+    }
+
+    /// The origins `settings` should hold: the field's entries, ignoring
+    /// anything that isn't an `http://` or `https://` origin. A lab that's
+    /// off, or a field this window never opened, leaves its saved list alone.
+    pub(super) fn project_origins(&self, settings: &mut crate::app_settings::AppSettings) {
+        if !settings.labs.api_browser_access || !self.origins_synced {
+            return;
+        }
+        settings.labs.api_browser_origins =
+            crate::app_settings::parse_browser_origins(&self.origins.text);
+    }
+
+    /// Whether the origins field holds typing the saved origins don't have.
+    /// A lab that's off, or a field this window never opened, has no draft.
+    pub(super) fn origins_dirty(&self, settings: &crate::app_settings::AppSettings) -> bool {
+        if !settings.labs.api_browser_access || !self.origins_synced {
+            return false;
+        }
+        crate::app_settings::parse_browser_origins(&self.origins.text)
+            != crate::app_settings::normalize_browser_origins(&settings.labs.api_browser_origins)
+    }
+}
+
+/// The saved origins as the card's comma-separated field shows them.
+fn origins_text(origins: &[String]) -> String {
+    crate::app_settings::normalize_browser_origins(origins).join(", ")
 }
 
 /// What a `hex://labs` link asks the store to show.
@@ -310,6 +357,8 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
     ui.lab_store = Store::default();
     ui.lab_store
         .sync_phrase(&ui.settings.labs.voice_prompt_phrase);
+    ui.lab_store
+        .sync_origins(&ui.settings.labs.api_browser_origins);
     tx.settle();
 }
 
@@ -899,6 +948,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Apps can ask Hex's local API for each segment's or word's start and end times."),
     ));
     rows.push(row(
+        Feature::ApiBrowserAccess,
+        Some(&GLOBE),
+        tr("Browser access to the local API"),
+        tr("Let web pages from these origins call Hex's local API. Requests still need the API token."),
+    ));
+    rows.push(row(
         Feature::SpeakersOnly,
         None,
         tr("Only on speakers"),
@@ -1134,6 +1189,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::TranscribeFiles => "lab-transcribe-files",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
+        Feature::ApiBrowserAccess => "lab-api-browser-access",
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
         Feature::PrintStart => "lab-print-start",
@@ -1178,6 +1234,11 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::VoicePrompt => {
             let saved = ui.settings.labs.voice_prompt_phrase.clone();
             ui.lab_store.sync_phrase(&saved);
+        }
+        // Its origins field starts at (and shows) the saved origins.
+        Feature::ApiBrowserAccess => {
+            let saved = ui.settings.labs.api_browser_origins.clone();
+            ui.lab_store.sync_origins(&saved);
         }
         // A notice already on screen leaves with its lab.
         Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
@@ -1253,6 +1314,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                 .child(appearance_theme(ui, p)),
         ),
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
+        Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

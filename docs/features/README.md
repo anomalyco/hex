@@ -2467,6 +2467,9 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
+├── A web page's fetch -> Labs › Browser access to the local API
+│   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
+│   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
@@ -2532,6 +2535,21 @@ response unchanged; off, a timed request is `403 timestamps-disabled`, and a
 model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
+
+Browser access (Labs › Browser access to the local API, off by default) lets a
+web page served from an origin listed in `labs.api_browser_origins` call this
+API with `fetch`. A browser sends its `OPTIONS` preflight without the bearer
+token, so Hex answers `204` for an allowed `Origin` before authentication, with
+`Access-Control-Allow-Origin` naming that origin, `GET, POST`, the four request
+headers, a 10-minute cache, and private-network permission only when the
+browser asked for it. Every other response, `401`, `404`, and SSE streams
+included, carries the same origin and `Vary: Origin`; the token is still
+required for every request. An origin that isn't listed, a missing `Origin`,
+and the lab off answer exactly as before (`OPTIONS` is `401`, with no CORS
+headers), and nothing allows credentials or `*`. Saved entries are normalized
+to `http://` or `https://` `scheme://host[:port]`; `*`, `null`, paths, queries,
+fragments, and userinfo are ignored. Route tests inject the gate
+(`cors::Cors::gated`); nothing was observed from a real browser page.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

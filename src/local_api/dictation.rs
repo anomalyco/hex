@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use super::cors::CorsOrigin;
 use super::{
     DEVELOPER_CONTROL_TIMEOUT, DictationAction, HttpContext, HttpResponse,
     MAX_DICTATION_SOURCE_BYTES, body_read_response, generate_token, read_body_bounded,
@@ -219,11 +220,13 @@ pub(in crate::local_api) fn handle(
     owner_token: String,
     action: DictationAction,
     context: &HttpContext,
+    cors: Option<&CorsOrigin>,
 ) {
     let Some(controls) = &context.dictations.control else {
         let _ = write_response(
             stream,
             HttpResponse::code(404, "service-capture-unavailable"),
+            cors,
         );
         return;
     };
@@ -234,6 +237,7 @@ pub(in crate::local_api) fn handle(
                 stream,
                 levels,
                 context,
+                cors,
                 |level| serde_json::json!({ "rmsDb": level.rms_db, "peakDb": level.peak_db }),
             );
         }
@@ -243,17 +247,18 @@ pub(in crate::local_api) fn handle(
                 stream,
                 partials,
                 context,
+                cors,
                 |partial| serde_json::json!({ "stable": partial.stable, "tentative": partial.tentative }),
             );
         }
         DictationAction::Audio => {
-            return stream_dictation_audio(stream, id, owner_token, controls, context);
+            return stream_dictation_audio(stream, id, owner_token, controls, context, cors);
         }
         DictationAction::Finish => dictation_finish(id, owner_token, controls),
         DictationAction::Cancel => dictation_cancel(id, owner_token, controls, context),
         DictationAction::Heartbeat => dictation_heartbeat(id, owner_token, controls),
     };
-    if let Err(error) = write_response(stream, response) {
+    if let Err(error) = write_response(stream, response, cors) {
         tracing::debug!(%error, "dictation client disconnected");
     }
 }
@@ -327,13 +332,14 @@ fn stream_observations<T>(
     stream: &mut TcpStream,
     observations: Option<Receiver<T>>,
     context: &HttpContext,
+    cors: Option<&CorsOrigin>,
     event: impl Fn(T) -> serde_json::Value,
 ) {
     let Some(observations) = observations else {
-        let _ = write_response(stream, HttpResponse::code(404, "dictation-not-found"));
+        let _ = write_response(stream, HttpResponse::code(404, "dictation-not-found"), cors);
         return;
     };
-    if write_sse_headers(stream).is_err() {
+    if write_sse_headers(stream, cors).is_err() {
         return;
     }
     while !context.shutdown.load(Ordering::Acquire) {
@@ -355,6 +361,7 @@ fn stream_dictation_audio(
     owner_token: String,
     controls: &Control,
     context: &HttpContext,
+    cors: Option<&CorsOrigin>,
 ) {
     let (audio, chunks) = mpsc::sync_channel(4);
     if let Err(response) = call_recognition(
@@ -368,10 +375,10 @@ fn stream_dictation_audio(
             reply,
         },
     ) {
-        let _ = write_response(stream, response);
+        let _ = write_response(stream, response, cors);
         return;
     }
-    if write_stream_headers(stream, "application/octet-stream").is_err() {
+    if write_stream_headers(stream, "application/octet-stream", cors).is_err() {
         return;
     }
     while !context.shutdown.load(Ordering::Acquire) {

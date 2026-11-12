@@ -82,6 +82,7 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps
+            | Self::ApiBrowserAccess
             | Self::PrintStart
             | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings

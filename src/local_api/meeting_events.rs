@@ -11,6 +11,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
+use super::cors::CorsOrigin;
 use super::{HttpContext, HttpRequest, HttpResponse, RequestAction, write_sse, write_sse_headers};
 use crate::meeting::finished_events::{Hub, Subscription};
 
@@ -51,8 +52,13 @@ pub(super) fn action(request: &HttpRequest, context: &HttpContext) -> RequestAct
 
 /// Streams finished meetings until shutdown, the toggle turning off, or the
 /// client leaving; the subscription's drop frees the slot.
-pub(super) fn stream(stream: &mut TcpStream, subscription: Subscription, context: &HttpContext) {
-    if let Err(error) = write_sse_headers(stream) {
+pub(super) fn stream(
+    stream: &mut TcpStream,
+    subscription: Subscription,
+    context: &HttpContext,
+    cors: Option<&CorsOrigin>,
+) {
+    if let Err(error) = write_sse_headers(stream, cors) {
         tracing::debug!(%error, "meeting events client disconnected before streaming");
         return;
     }

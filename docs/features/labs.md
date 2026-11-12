@@ -112,6 +112,25 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
 │                                        // clamping, empty arrays), transcription::service (the 422 decision), and
 │                                        // gguf_session (chunk offsets); no real-model transcript with times
+├── Browser access to the local API no labs.api_browser_access + labs.api_browser_origins (every OS)
+│                                        a web page served from one of the listed origins can call Hex's local API with
+│                                        fetch: its unauthenticated OPTIONS preflight for that exact origin answers 204
+│                                        with Access-Control-Allow-Origin, the methods and headers, and a 10-minute
+│                                        preflight cache, and every response (401, 404, and SSE streams included) carries
+│                                        Access-Control-Allow-Origin and Vary: Origin. Requests still need the API
+│                                        token, and no response allows credentials or `*`. Off, an origin not listed,
+│                                        or no Origin header answers exactly as before (OPTIONS is 401, no CORS headers).
+│                                        Entries are scheme://host[:port] only: *, null, paths, queries, fragments,
+│                                        and userinfo are ignored, a single trailing / and a default port are dropped,
+│                                        and scheme and host are lowercased
+│                                        // checks: local_api::browser_access_is_off_unless_the_lab_lists_the_origin,
+│                                        // an_allowed_origin_gets_its_preflight_without_a_token,
+│                                        // authenticated_responses_carry_only_the_allowed_origin,
+│                                        // a_streams_events_response_carries_the_allowed_origin;
+│                                        // app_settings::browser_origins normalization tests;
+│                                        // api_browser_access_is_its_own_switch_and_keeps_normalized_origins (labs.rs);
+│                                        // browser_access_shows_its_origins_on_its_card_while_on (rune_ui); not observed
+│                                        // from a real browser page, and no live macOS or Windows request
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
