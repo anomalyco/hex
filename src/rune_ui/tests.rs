@@ -2232,7 +2232,7 @@ fn modes_add_select_and_delete() {
         "Mode 3"
     );
     tap(&mut rt, "delete-mode");
-    assert!(rt.state.modes.delete_armed);
+    assert!(rt.state.modes.delete_armed.is_some());
     tap(&mut rt, "confirm-delete-mode");
     assert_eq!(rt.state.settings.dictation_processing.modes.len(), 2);
     assert_eq!(rt.state.modes.selected, modes::Selection::Default);

@@ -868,6 +868,7 @@ impl Ui {
         }
         self.error = None;
         self.settings = candidate;
+        self.modes.committed(&self.settings);
         self.draft_since = None;
         self.settings_changed();
         true
@@ -1067,8 +1068,9 @@ impl Ui {
         let changed = service != self.settings;
         if changed {
             let drafts = self.drafts();
-            if !drafts.modes && service.dictation_processing != self.settings.dictation_processing {
-                self.modes.reload(&service);
+            self.modes.adopt(&service, drafts.modes);
+            if service.dictation_processing != self.settings.dictation_processing {
+                self.open = None;
             }
             if !drafts.vocabulary && service.vocabulary != self.settings.vocabulary {
                 self.vocabulary.reload(&service.vocabulary);

@@ -202,7 +202,10 @@ impl Models {
 fn selected(settings: &AppSettings, target: Target) -> (Option<&str>, Option<&str>) {
     match target {
         Target::Mode(selection) => {
-            let processing = &super::modes::mode(settings, selection).post_processing;
+            let Some(mode) = super::modes::mode(settings, selection) else {
+                return (None, None);
+            };
+            let processing = &mode.post_processing;
             (processing.model.as_deref(), processing.variant.as_deref())
         }
         Target::MeetingSummary => (
@@ -224,7 +227,10 @@ fn set_model(
 ) {
     match target {
         Target::Mode(selection) => {
-            let processing = &mut super::modes::mode_mut(settings, selection).post_processing;
+            let Some(mode) = super::modes::mode_mut(settings, selection) else {
+                return;
+            };
+            let processing = &mut mode.post_processing;
             processing.model = model;
             processing.variant = variant;
         }
