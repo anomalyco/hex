@@ -2060,12 +2060,14 @@ the pump (`rune_hud::rehome`, `rune_hud::macos`):
   attempts, at least 150 ms apart, and the budget resets when the panel is seen
   on the active Space or the HUD hides, so a repair that did not take cannot
   loop.
-- Every Dock-icon change (the activation policy follows Settings; an open
-  Settings window forces the icon on) marks the panel for one repair. On the
-  next pump turn a hidden panel only gets the mask written again, so a queued
-  hide is not undone; a shown one is ordered out, written, and ordered back in
-  whatever AppKit reports. A change that arrives before Rune has made the panel
-  waits for it.
+- Every change of the Dock icon's activation policy (the policy follows
+  Settings; an open Settings window forces the icon on) marks the panel for one
+  repair. A call that leaves the policy as it was, which is the usual case when
+  the icon stays on, does not. On the next pump turn a hidden panel only gets
+  the mask written again, so a queued hide is not undone and no repair attempt
+  is spent; a shown one is ordered out, written, and ordered back in whatever
+  AppKit reports. A change that arrives before Rune has made the panel waits
+  for it.
 
 The live-text plate beside the HUD is a separate panel and does not get this
 repair yet. Not yet observed on hardware; only the macOS compile and the pure

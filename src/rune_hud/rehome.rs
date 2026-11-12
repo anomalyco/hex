@@ -71,15 +71,15 @@ impl Rehome {
     /// An activation-policy change: repair now, on a fresh budget, whether or
     /// not AppKit reports the panel on the active Space, since the change can
     /// leave that report wrong (#1725). A panel that is not visible only gets
-    /// its behaviors re-applied; ordering it in would undo Rune's hide.
+    /// its behaviors re-applied, so it spends no attempt; ordering it in would
+    /// undo Rune's hide.
     pub(crate) fn reassert(&mut self, now: Instant, visible: bool) -> Repair {
         self.settle();
-        self.count(now);
-        if visible {
-            Repair::Rehome
-        } else {
-            Repair::Mask
+        if !visible {
+            return Repair::Mask;
         }
+        self.count(now);
+        Repair::Rehome
     }
 
     /// The HUD hid: its next show starts a fresh budget.
@@ -237,5 +237,21 @@ mod tests {
         );
         // A hidden panel is only re-applied; ordering it in would undo a hide.
         assert_eq!(rehome.reassert(changed, false), Repair::Mask);
+    }
+
+    #[test]
+    fn a_hidden_panels_reassert_spends_no_attempt() {
+        let start = Instant::now();
+        let mut rehome = Rehome::default();
+        for _ in 0..MAX_REPAIRS + 2 {
+            assert_eq!(rehome.reassert(start, false), Repair::Mask);
+        }
+        // Re-applying a hidden panel's mask moves nothing, so it must not use
+        // up the budget a later stranding needs.
+        assert_eq!(
+            rehome.decide(start, Located::Elsewhere),
+            Repair::Rehome,
+            "only a reorder counts as a repair attempt"
+        );
     }
 }

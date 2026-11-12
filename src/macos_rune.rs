@@ -222,12 +222,15 @@ pub(crate) fn quit() {
     }
 }
 
-/// Shows or hides the Dock icon, and marks the HUD's panel for a repair:
-/// changing the activation policy can tie Rune's panel to one Space while
-/// AppKit still reports every Space (#1725).
+/// Shows or hides the Dock icon, and marks the HUD's panel for a repair only
+/// when the activation policy actually changed: that can tie Rune's panel to
+/// one Space while AppKit still reports every Space (#1725), but a call that
+/// leaves the policy as it was changes nothing for the window server and must
+/// not reorder a shown HUD.
 pub(crate) fn set_dock_icon_visible(visible: bool) {
-    crate::app_settings::set_dock_icon_visible(visible);
-    crate::rune_hud::activation_policy_changed();
+    if crate::app_settings::set_dock_icon_visible(visible) {
+        crate::rune_hud::activation_policy_changed();
+    }
 }
 
 /// The window closed (hidden): the Dock follows the saved preference again.

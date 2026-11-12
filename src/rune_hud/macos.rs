@@ -245,10 +245,11 @@ impl DictationIndicatorUi {
 
     /// Re-asserts the HUD panel's collection behaviors after a Dock-icon
     /// (activation policy) change, once per change. A hidden panel only gets
-    /// them written again, so a hide Rune has queued is not undone; a shown
-    /// one is ordered out, written, and ordered back in whatever AppKit says
-    /// about the active Space, since the change can leave that answer wrong
-    /// (#1725). A change with no panel yet waits for the first one.
+    /// them written again, so a hide Rune has queued is not undone, and that
+    /// spends no repair attempt; a shown one is ordered out, written, and
+    /// ordered back in whatever AppKit says about the active Space, since the
+    /// change can leave that answer wrong (#1725). A change with no panel yet
+    /// waits for the first one.
     pub(crate) fn reassert_after_activation_policy_change(&mut self) {
         if !take_activation_policy_changed() {
             return;
