@@ -764,9 +764,10 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          reopens or warns, and neither does an app that reports no input
 │       -> a gated or noise-suppressed microphone the call app also uses
 │          still counts as held, so it can trigger the reopens and warning
-│       -> Reopened like a failed source, at most twice per silent episode
+│       -> Reopened like a failed source, at most twice in one recording
 │          (the call app holding the input and 3 s of exact zeros), the
-│          budget shared by every stream reopened within it
+│          budget shared by every stream it reopens; audio coming back does
+│          not restore it, because each reopen changes the device's rate
 │       -> macOS: every silence reopen makes the device renegotiate its
 │          sample rate first, like dictation's silence recovery (#1575),
 │          briefly interrupting every other stream on that mic, the call
@@ -789,11 +790,12 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       │   dictation; a release stays pending meanwhile
 │       ├── Nonzero audio returns -> the live warning clears, including in a
 │       │   stream reopened after a supervisor restart; the episode's
-│       │   reopens and retries start over; the persisted warning stays
+│       │   retries start over, but the recording's two reopens stay spent;
+│       │   the persisted warning stays
 │       ├── The call app leaves the input before a warning -> no further
 │       │   quick reopens or warnings until nonzero audio returns
-│       ├── Another episode after audio returns -> gets its two quick
-│       │   reopens again, then warns again, then its own retries
+│       ├── Another episode after audio returns -> warns at once (the two
+│       │   reopens are spent), then gets its own retries
 │       └── Finished meeting -> its panel says the microphone was silent for
 │           part of the call; the manifest means "silent at some point", not
 │           the last moment
@@ -807,7 +809,7 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          // a_silent_episode_gets_three_release_triggered_retries,
 │          // a_rebuilt_policy_keeps_the_silent_episodes_retries,
 │          // a_warned_microphone_retries_after_the_call_app_lets_go,
-│          // audible_audio_resets_the_episodes_reopens_and_retries,
+│          // audible_audio_resets_the_episodes_retries,
 │          // a_reopen_waits_while_dictation_is_active,
 │          // a_release_triggered_retry_waits_while_dictation_is_active,
 │          // a_process_that_stops_recording_between_reopens_is_a_release,

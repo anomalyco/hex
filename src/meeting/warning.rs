@@ -166,7 +166,7 @@ pub(super) struct SilenceRecovery {
 }
 
 impl SilenceRecovery {
-    /// Claims one of the silent episode's quick reopens; false once they are
+    /// Claims one of the recording's quick reopens; false once they are
     /// spent, which is when a warning is raised instead.
     fn claim_reopen(&self) -> bool {
         self.reopens
@@ -202,10 +202,11 @@ impl SilenceRecovery {
         self.released.swap(false, Ordering::Relaxed)
     }
 
-    /// Audible audio ended the silent episode: the next one gets its quick
-    /// reopens and retries back, and no stale release carries over.
+    /// Audible audio ended the silent episode: the next one gets its retries
+    /// back and no stale release carries over. The quick reopen budget stays
+    /// spent for the recording, because each reopen changes the whole
+    /// device's nominal sample rate.
     fn recovered(&self) {
-        self.reopens.store(0, Ordering::Relaxed);
         self.retries.store(0, Ordering::Relaxed);
         self.released.store(false, Ordering::Relaxed);
     }
@@ -547,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn audible_audio_resets_the_episodes_reopens_and_retries() {
+    fn audible_audio_resets_the_episodes_retries() {
         let (recovery, mut warned) = warned_policy();
         for _ in 0..SILENCE_RETRIES {
             assert_eq!(
@@ -560,29 +561,20 @@ mod tests {
             SilenceAction::Nothing
         );
 
-        // A reopened stream that hears audio clears the warning, the retry
-        // cap, and the quick reopen budget.
+        // A reopened stream that hears audio clears the warning and the retry
+        // cap, but the recording's two quick reopens stay spent.
         let mut replacement = SilencePolicy::new(1_000, recovery, true);
         assert_eq!(
             replacement.observe(&[0.25], true, false, || false),
             SilenceAction::Clear
         );
         replacement.applied(SilenceAction::Clear);
-        // The next silent episode gets both quick reopens again, then warns.
+        // The next silent episode warns at once, then gets its own retries.
         assert_eq!(
             replacement.observe(&[0.0; 3_000], true, false, || false),
-            SilenceAction::Reopen
-        );
-        assert_eq!(
-            replacement.observe(&[0.0; 100], true, false, || false),
-            SilenceAction::Reopen
-        );
-        assert_eq!(
-            replacement.observe(&[0.0; 100], true, false, || false),
             SilenceAction::Warn
         );
         replacement.applied(SilenceAction::Warn);
-        // Its own release-triggered retries start over too.
         assert_eq!(
             replacement.observe(&[0.0; 100], true, true, || false),
             SilenceAction::Reopen
