@@ -266,10 +266,8 @@ impl ModesPane {
                 return;
             }
         }
-        if let Some(current) = mode(settings, self.selected) {
-            if !dirty {
-                self.editor = Editor::of(current);
-            }
+        if !dirty && let Some(current) = mode(settings, self.selected) {
+            self.editor = Editor::of(current);
         }
     }
 
