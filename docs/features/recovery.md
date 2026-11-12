@@ -330,17 +330,28 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
   -> a gated or noise-suppressed microphone the call app also uses still
      counts as held, so it can trigger the reopens and warning
   -> reopen the microphone source, at most twice in one recording, the budget
-     shared across reopened streams
+     shared across reopened streams; macOS makes the device renegotiate its
+     sample rate first, like dictation's silence recovery (#1575)
   ├── still silent -> keep recording; the recording capsule says
   │     "Microphone is silent · 12:34" and the menu bar "Microphone is silent"
   │     -> manifest.microphone.warning = digital_silence is written as soon
   │        as it is raised, so a crash while recording keeps it
+  ├── still silent after the warning -> retried 10 s later, then after 20, 40,
+  │     80, 120, 120 s more of exact zeros for the rest of the meeting
+  │     -> each retry reopens with the rate renegotiation and neither spends
+  │        the two quick reopens nor raises the warning again
+  │     -> retries ignore whether the call app still reports the input,
+  │        because the app letting go is when a retry can recover audio
   ├── nonzero audio returns -> clear the live warning, including in a stream
-  │     reopened after a supervisor restart; the persisted warning stays,
-  │     because the recording means "silent at some point"
-  └── the call app leaves the input -> no further reopens or warnings, but a
-        live warning stays until nonzero audio returns; the finished meeting's
-        panel still says the microphone was silent for part of the call
+  │     reopened after a supervisor restart, and start the retry backoff over;
+  │     the persisted warning stays, because the recording means "silent at
+  │     some point"
+  ├── before a warning, the call app leaves the input -> no further quick
+  │     reopens or warnings, but a live warning stays until nonzero audio
+  │     returns
+  └── a later episode after audio returns -> warns again, then retries on the
+        same backoff; the finished meeting's panel still says the microphone
+        was silent for part of the call
   // not verified on a live device or call app
 
 open stream stops delivering audio without an error (any OS, #1206)
@@ -401,6 +412,10 @@ values; no iPhone observed with the lid closed),
 `a_warm_silent_stream_reopens_once_unless_released`;
 [meeting/warning.rs](../../src/meeting/warning.rs):
 `a_silence_budget_is_shared_across_reopened_streams`,
+`a_warned_microphone_retries_on_a_doubling_backoff_to_two_minutes`,
+`a_warned_microphones_retries_survive_a_rebuilt_policy`,
+`a_warned_microphone_retries_after_the_call_app_lets_go`,
+`audible_audio_resets_a_warned_microphones_retry_backoff`,
 `audible_audio_clears_a_warning_a_reopened_stream_inherited`,
 `a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
 `a_sticky_warning_survives_its_live_one_clearing`,
@@ -570,19 +585,25 @@ failed source, at most twice in one recording, but only while the call app
 still reports recording from the same input; a manual recording, or an app
 that reports no input, never reopens or warns, and a gated or
 noise-suppressed microphone the call app also uses still counts as held so
-it can trigger the reopens and warning. If it is still silent, Hex keeps
-recording and warns in the recording capsule, the menu bar, and the finished
-meeting's detail. The manifest records `microphone.warning:
-digital_silence` as soon as it is raised, so a crash keeps it, and it means
-the microphone was silent at some point during the recording. Nonzero audio
-clears the live warning, including in a stream reopened after a supervisor
-restart; if the call app leaves the input while zeros continue, no further
-reopens or warnings happen but a live warning stays until nonzero audio
-returns. A later episode warns again without another reopen. Each gated
-episode is also logged once at info level with the opened device and the
-call app's reported inputs, so field logs can confirm the gate. The 3 s
-watch, its shared reopen budget, and its gating are unit-checked; none of it
-was observed on a live device or a call app holding the microphone with
+it can trigger the reopens and warning. On macOS each of those reopens
+renegotiates the device's sample rate first, like dictation's silence
+recovery (#1575). If it is still silent, Hex keeps recording and warns in the
+recording capsule, the menu bar, and the finished meeting's detail. The
+manifest records `microphone.warning: digital_silence` as soon as it is
+raised, so a crash keeps it, and it means the microphone was silent at some
+point during the recording. Once warned, Hex keeps retrying while the
+microphone stays exactly silent: 10 seconds after the warning, then after
+20, 40, 80, 120, and 120 seconds more, for the rest of the meeting. Each
+retry reopens with the rate renegotiation and neither spends the two quick
+reopens nor raises the warning again. Retries continue whether or not the
+call app still reports the input, because its release is when one can
+succeed. Nonzero audio clears the live warning, including in a stream
+reopened after a supervisor restart, and starts the backoff over. A later
+episode warns again, then retries on the same schedule. Each gated episode
+is also logged once at info level with the opened device and the call app's
+reported inputs, so field logs can confirm the gate. The 3 s watch, its
+shared reopen budget, retry schedule, and gating are unit-checked; none of
+it was observed on a live device or a call app holding the microphone with
 voice processing.
 
 **Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**

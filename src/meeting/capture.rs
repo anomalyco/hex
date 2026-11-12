@@ -8,14 +8,14 @@
 //! Linux, and WASAPI loopback on Windows.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
-use super::warning::{SilenceAction, SilencePolicy, TrackWarnings};
+use super::warning::{SilenceAction, SilencePolicy, SilenceRecovery, TrackWarnings};
 use super::{AudioPacket, MeetingSource, SAMPLE_RATE};
 use crate::dictation::StreamingResampler;
 
@@ -77,12 +77,16 @@ impl SourceSupervisor {
         application: Option<String>,
         warnings: TrackWarnings,
     ) -> Self {
-        let reopens = Arc::new(AtomicU8::new(0));
+        let recovery = Arc::new(SilenceRecovery::default());
+        // The one open after a silence reopen makes the device renegotiate
+        // its sample rate first, like dictation's.
+        let renegotiate_rate = Arc::new(AtomicBool::new(false));
         Self::spawn(sink, move || {
             MicrophoneSource::open(
                 crate::app_settings::microphone_selection(),
                 application.clone(),
-                reopens.clone(),
+                recovery.clone(),
+                renegotiate_rate.clone(),
                 warnings.clone(),
             )
             .map(|source| Box::new(source) as Box<dyn LiveSource>)
@@ -280,8 +284,11 @@ struct MicrophoneSource {
     resample: To16k,
     last_audio: Instant,
     /// The per-chunk digital silence decision, sharing this recording's
-    /// reopen budget with every reopened stream.
+    /// reopen budget and retry schedule with every reopened stream.
     silence: SilencePolicy,
+    /// Set by a silence reopen; the next open renegotiates the device's
+    /// sample rate and clears it.
+    renegotiate_rate: Arc<AtomicBool>,
     /// The controller-visible warning, shared across reopened streams.
     warnings: TrackWarnings,
     selected: Option<String>,
@@ -305,7 +312,8 @@ impl MicrophoneSource {
     fn open(
         (selection_revision, selected): (u64, Option<String>),
         application: Option<String>,
-        silence_reopens: Arc<AtomicU8>,
+        silence_recovery: Arc<SilenceRecovery>,
+        renegotiate_rate: Arc<AtomicBool>,
         warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
@@ -314,8 +322,12 @@ impl MicrophoneSource {
             .map(call_app_inputs)
             .unwrap_or_default();
         let call_input = follow_call_input(None, call_inputs.clone());
-        let crate::audio::Opened::Input(input) =
-            crate::audio::open_meeting_input(selected.as_deref(), call_input.as_deref(), None)?
+        let crate::audio::Opened::Input(input) = crate::audio::open_meeting_input(
+            selected.as_deref(),
+            call_input.as_deref(),
+            None,
+            renegotiate_rate.swap(false, Ordering::Relaxed),
+        )?
         else {
             unreachable!("nothing to keep");
         };
@@ -333,7 +345,8 @@ impl MicrophoneSource {
         let warning = warnings.live().is_some();
         Ok(Self {
             input,
-            silence: SilencePolicy::new(resample.rate, silence_reopens, warning),
+            silence: SilencePolicy::new(resample.rate, silence_recovery, warning),
+            renegotiate_rate,
             warnings,
             resample,
             last_audio: Instant::now(),
@@ -396,6 +409,7 @@ impl MicrophoneSource {
             self.selected.as_deref(),
             self.call_input.as_deref(),
             Some(&self.input.device_name),
+            false,
         );
         let input = match opened {
             Ok(crate::audio::Opened::Input(input)) => *input,
@@ -441,14 +455,25 @@ impl LiveSource for MicrophoneSource {
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
-                let action = self.silence.observe(&samples, self.call_app_holds_device());
+                let action =
+                    self.silence
+                        .observe(&samples, self.call_app_holds_device(), Instant::now());
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
                 match action {
                     SilenceAction::Reopen => {
-                        tracing::warn!(
-                            device = %self.input.device_name,
-                            "meeting microphone delivered digital silence; reopening it"
-                        );
+                        self.renegotiate_rate.store(true, Ordering::Relaxed);
+                        if let Some(delay) = self.silence.retry_delay() {
+                            tracing::warn!(
+                                device = %self.input.device_name,
+                                delay_secs = delay.as_secs(),
+                                "meeting microphone is still digitally silent; retrying it"
+                            );
+                        } else {
+                            tracing::warn!(
+                                device = %self.input.device_name,
+                                "meeting microphone delivered digital silence; reopening it"
+                            );
+                        }
                         return Err("microphone delivered digital silence".into());
                     }
                     SilenceAction::Gated => {

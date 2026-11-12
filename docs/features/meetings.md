@@ -766,22 +766,37 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          still counts as held, so it can trigger the reopens and warning
 │       -> Reopened like a failed source, at most twice in one recording,
 │          the budget shared by every reopened stream
+│       -> macOS: every reopen after digital silence makes the device
+│          renegotiate its sample rate first, like dictation's silence
+│          recovery (#1575), so a clock the call app left stale clears
 │       ├── Still silent -> keep recording; the capsule says
 │       │   "Microphone is silent · 12:34" and the menu bar "Microphone is
 │       │   silent"; manifest.microphone.warning is written as soon as it is
 │       │   raised, so a crash keeps it
+│       ├── Still silent after the warning -> retried for the rest of the
+│       │   meeting: 10 s after the warning, then after 20, 40, 80, 120,
+│       │   120 s more of exact zeros
+│       │   -> each retry reopens with the rate renegotiation and never
+│       │      spends the two quick reopens or re-raises the warning
+│       │   -> retries continue whether or not the call app still reports
+│       │      the input, because its release is when one can succeed
 │       ├── Nonzero audio returns -> the live warning clears, including in a
-│       │   stream reopened after a supervisor restart; the persisted warning
-│       │   stays
-│       ├── The call app leaves the input -> no further reopens or warnings;
-│       │   a live warning stays until nonzero audio returns
-│       ├── Another episode after audio returns -> warns again, never reopens
+│       │   stream reopened after a supervisor restart, and the retry
+│       │   backoff starts over; the persisted warning stays
+│       ├── The call app leaves the input before a warning -> no further
+│       │   quick reopens or warnings until nonzero audio returns
+│       ├── Another episode after audio returns -> warns again, then retries
+│       │   on the same backoff
 │       └── Finished meeting -> its panel says the microphone was silent for
 │           part of the call; the manifest means "silent at some point", not
 │           the last moment
 │          // checks: a_silence_budget_is_shared_across_reopened_streams,
 │          // audible_audio_clears_a_warning_a_reopened_stream_inherited,
 │          // a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned,
+│          // a_warned_microphone_retries_on_a_doubling_backoff_to_two_minutes,
+│          // a_warned_microphones_retries_survive_a_rebuilt_policy,
+│          // a_warned_microphone_retries_after_the_call_app_lets_go,
+│          // audible_audio_resets_a_warned_microphones_retry_backoff,
 │          // a_sticky_warning_survives_its_live_one_clearing,
 │          // a_dropped_warning_update_is_not_committed_and_is_retried,
 │          // only_an_input_the_call_app_reports_counts_as_held;
