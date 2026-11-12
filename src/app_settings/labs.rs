@@ -187,6 +187,9 @@ pub struct LabsSettings {
     /// The screenshot shortcut takes an area or a window (macOS); its
     /// shortcut and folder are `screenshots.*`.
     pub screenshots: bool,
+    /// A written Annotate capture copies as one light zip file (macOS,
+    /// Linux, and Windows).
+    pub copy_capture_zip: bool,
     /// A recording meeting's transcript scrolls to its newest line, until scrolled up (issue 1332).
     pub follow_live_transcript: bool,
     /// Meetings offers Import audio…: a local audio file becomes a meeting (macOS).
@@ -373,6 +376,7 @@ impl Default for LabsSettings {
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,
+            copy_capture_zip: false,
             follow_live_transcript: false,
             meeting_import: false,
             meeting_descriptive_filenames: false,

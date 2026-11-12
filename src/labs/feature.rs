@@ -82,10 +82,11 @@ pub enum Feature {
     PauseMenu,
     PrintStart,
     VoicePrompt,
+    CopyCaptureZip,
 }
 
 impl Feature {
-    pub const ALL: [Self; 77] = [
+    pub const ALL: [Self; 78] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -163,5 +164,6 @@ impl Feature {
         Self::PauseMenu,
         Self::PrintStart,
         Self::VoicePrompt,
+        Self::CopyCaptureZip,
     ];
 }

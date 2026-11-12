@@ -16,6 +16,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Voice prompt", "Голосовая инструкция"),
+    ("Copy captures as a zip", "Копировать записи как zip"),
+    ("A finished capture copies as one zip file, without video or audio.", "Готовая запись копируется одним zip-файлом, без видео и звука"),
     ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Скажите «rewrite this» во время диктовки, а затем инструкцию; Hex применит её моделью OpenCode режима"),
     ("Phrase", "Фраза"),
     ("Use at least two words", "Используйте как минимум два слова"),

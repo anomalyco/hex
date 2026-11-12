@@ -102,7 +102,10 @@ impl Feature {
             | Self::MeetingDescriptiveFilenames
             | Self::MeetingNotesFile
             | Self::ExpireMeetingAudio => Group::Meetings,
-            Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
+            Self::Screenshots
+            | Self::AnnotateReplay
+            | Self::GnomeAnnotate
+            | Self::CopyCaptureZip => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
             | Self::MoreDictationShortcuts

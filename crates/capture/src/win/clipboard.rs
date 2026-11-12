@@ -2,17 +2,19 @@
 //! browsers, Electron apps and Office read, alpha intact) and `CF_DIBV5` (what everything else
 //! reads; Windows derives `CF_DIB` and `CF_BITMAP` from it).
 
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, POINT};
 use windows::Win32::Graphics::Gdi::{BI_BITFIELDS, BITMAPV5HEADER};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
-use windows::Win32::System::Ole::{CF_DIBV5, CF_UNICODETEXT};
-use windows::core::PCWSTR;
+use windows::Win32::System::Ole::{CF_DIBV5, CF_HDROP, CF_UNICODETEXT};
+use windows::Win32::UI::Shell::DROPFILES;
+use windows::core::{BOOL, PCWSTR};
 
 use super::wide;
 
@@ -78,6 +80,39 @@ pub fn set_text(text: &str) -> Result<()> {
     let _open = Open::new()?;
     unsafe { EmptyClipboard() }.context("Could not clear the clipboard")?;
     put(u32::from(CF_UNICODETEXT.0), &unicode_text(text))
+}
+
+/// `path` alone on the clipboard as `CF_HDROP`, so Explorer, a chat, or an
+/// agent that takes files gets one file to paste.
+pub fn set_file(path: &Path) -> Result<()> {
+    // `DROPFILES` is four 4-byte fields, and its `pFiles` names the list's
+    // offset; `fWide` makes the list UTF-16.
+    const _: () = assert!(std::mem::size_of::<DROPFILES>() == 20);
+    let header = DROPFILES {
+        pFiles: std::mem::size_of::<DROPFILES>() as u32,
+        pt: POINT { x: 0, y: 0 },
+        fNC: BOOL(0),
+        fWide: BOOL(1),
+    };
+    let header_bytes = unsafe {
+        std::slice::from_raw_parts(
+            (&raw const header).cast::<u8>(),
+            std::mem::size_of::<DROPFILES>(),
+        )
+    };
+    use std::os::windows::ffi::OsStrExt as _;
+    // A file name Windows can't read as text still reaches the clipboard.
+    let mut list: Vec<u16> = path.as_os_str().encode_wide().collect();
+    // Two NULs end the list.
+    list.push(0);
+    let mut bytes = Vec::with_capacity(header_bytes.len() + list.len() * 2);
+    bytes.extend_from_slice(header_bytes);
+    for unit in list {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    let _open = Open::new()?;
+    unsafe { EmptyClipboard() }.context("Could not clear the clipboard")?;
+    put(u32::from(CF_HDROP.0), &bytes)
 }
 
 /// A top-down 32-bit BGRA `BITMAPV5HEADER` DIB of an RGBA image.

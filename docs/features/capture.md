@@ -163,7 +163,8 @@ On Linux                                 // capture.linux
 │   open for the capture
 ├── Words -> one foreground job on the listener's engine (its loaded model)
 ├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
-│   X11 clipboard), as the Mac copies it
+│   X11 clipboard), as the Mac copies it; Labs › Copy captures as a zip puts
+│   `<stem>.scrawl.slim.zip` there instead, as a `text/uri-list` file
 ├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
@@ -222,7 +223,8 @@ On Windows                               // capture.windows
 ├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
 ├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
-│   contact sheet, then the summary
+│   contact sheet, then the summary; with Labs › Copy captures as a zip, the
+│   copy is the light zip as CF_HDROP instead
 ├── Pane -> no Screen Recording row, no transcriber choice
 └── Gaps: no `hex annotate` (Windows has no control transport yet), no
     iPhone, keys pressed in the app are not logged. Checked only by
@@ -772,8 +774,46 @@ hex capture stop                         // capture.stop
     │   language. Check: scrawl-capture keyframes
     │   spoken_cues_count_in_other_languages
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
-    ├── Written -> image and text copied to the clipboard (Scrawl's handoff)
+    ├── Written -> image and text copied to the clipboard (Scrawl's handoff),
+    │   or the light zip alone with Labs › Copy captures as a zip (capture.copy)
     └── Sent -> the capture-route thread (capture.route)
+
+Copying a written capture                 // capture.copy; Labs › Copy captures as a zip
+├── Off (default) -> the bundle's summary text on the clipboard, as before:
+│   macOS and Windows through Scrawl's handoff (Windows may also put the
+│   contact sheet PNG when the clipboardImage experiment is on), Linux the
+│   summary text through Hex's paster
+├── On -> crates/capture/src/slim_zip.rs writes <stem>.scrawl.slim.zip inside
+│   the bundle (a temp name, then rename) and puts only that file on the
+│   clipboard: macOS a file URL through handoff::copy_file_to_clipboard (the
+│   screenshot card's file copy uses it too), Windows CF_HDROP (a DROPFILES
+│   header and a double-NUL-terminal UTF-16 path list), Linux text/uri-list
+│   (the X11 `text/uri-list` target, or wl-copy --type text/uri-list)
+│   ├── Contents: the bundle's files recursively, paths relative to its root,
+│   │   STORED (no compression), UTF-8 names, a DOS timestamp
+│   ├── Left out: HEAVY_MEDIA (recording.mp4, recording.mov, audio.wav,
+│   │   frames-full/, contact-sheet-full.png), .media-pending, .media-sending,
+│   │   .deliver.json and its .tmp, and any earlier *.slim.zip or temp file;
+│   │   symlinks are skipped
+│   ├── summary.md inside the zip is generated with the bundle folder as `.`,
+│   │   so its header reads anywhere it is unzipped; the summary.md on disk
+│   │   is unchanged
+│   ├── A failed build or clipboard write is logged, and the capture copies
+│   │   as it did before
+│   ├── Refused rather than written as ZIP64 at 0xFFFF files or 0xFFFFFFFF
+│   │   bytes
+│   ├── A terminal paste gets no text: the clipboard holds only the file
+│   ├── scrawl.json and summary.md still name media the zip leaves out
+│   │   (recording.mp4, audio.wav, frames-full/), because they describe the
+│   │   whole capture
+│   └── The capsule's Paste, Inspect, Send to…, routing, and retention still
+│       see the same bundle; the zip goes when the bundle does
+│       // checks: `cargo test --manifest-path crates/capture/Cargo.toml --lib slim_zip`
+│       // (CRC-32 vector, central-directory read-back, excludes, header path,
+│       // a second copy); a_file_is_one_percent_encoded_uri_list_line (linux/paste.rs);
+│       // copy_capture_zip_is_its_own_switch_and_everywhere (labs.rs)
+│       // not verified: pasting the zip into a real chat or agent app on any OS,
+│       // and the Windows clipboard write (cross-compiled only)
 
 What a send carries                      // capture.send (router opencode::send_bundle)
 ├── One prompt: the summary (transcript, marks, notes) as text, then the
@@ -794,6 +834,8 @@ What a send carries                      // capture.send (router opencode::send_
 │   (the prompt says the folder may still be arriving). Credentials stay remote.
 │   An explicitly configured agentOpencode keeps the CLI and synchronous copy;
 │   without Python 3, the default path falls back to the CLI before any HTTP send
+│       The light-files tar leaves out any `*.slim.zip` and its temp file too:
+│       that copy is this Mac's clipboard attachment, not the capture
 │   └── macOS/Linux reuse the SSH connection for 60 s after its last use,
 │       through an owner-only control socket; Windows opens each connection.
 │       API reads now honor their caller's deadline over SSH too, including

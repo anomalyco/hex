@@ -24,6 +24,8 @@ mod calendar;
 mod caps_lock_dictation;
 #[cfg(hex_capture)]
 mod capture_host;
+#[cfg(hex_capture)]
+mod capture_zip;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
 mod desktop;

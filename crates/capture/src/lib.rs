@@ -40,6 +40,7 @@ pub mod render;
 pub mod retention;
 pub mod screens;
 pub mod sketch;
+pub mod slim_zip;
 pub mod speech_model;
 pub mod transcribe;
 pub mod web;
