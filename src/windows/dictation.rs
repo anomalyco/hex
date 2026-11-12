@@ -798,7 +798,7 @@ pub fn run(
                 });
             }
             match result.result {
-                Ok(()) if nothing => events.dictation(DictationPhase::Discarded, "")?,
+                Ok(()) if nothing => events.discarded_voice_prompt()?,
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
                     if !matches!(result.kind, OutputKind::Repaste) {

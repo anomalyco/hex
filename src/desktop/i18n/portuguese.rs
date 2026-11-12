@@ -20,6 +20,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Phrase", "Frase"),
     ("Use at least two words", "Use pelo menos duas palavras"),
     ("Use at least six letters", "Use pelo menos seis letras"),
+    ("The voice prompt asked for nothing", "A instrução por voz não pedia nada"),
     ("Hex picks a fast model", "O Hex escolhe um modelo rápido"),
     ("Follow live transcript", "Acompanhar a transcrição ao vivo"),
     ("More call apps", "Mais apps de chamada"),

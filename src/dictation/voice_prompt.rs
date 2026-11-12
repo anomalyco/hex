@@ -188,21 +188,50 @@ fn is_joining(character: char) -> bool {
 /// are trimmed: joins, a quote or bracket pair that wraps it, and a lone
 /// ASCII dash separator. The pieces keep their own outer punctuation.
 fn pieces(transcript: &str, phrase_start: usize, phrase_end: usize) -> (&str, &str) {
-    let mut text = transcript[..phrase_start].trim_end_matches(is_joining);
-    let mut prompt = transcript[phrase_end..].trim_start_matches(is_joining);
-    // A quote or bracket touching the phrase on both sides goes with it,
-    // including nested pairs. It is read before any dash, so a quote that
-    // belongs to the text survives when a dash sets the phrase off.
-    while let (Some(open), Some(close)) = (text.chars().next_back(), prompt.chars().next()) {
-        if !closes(open, close) {
+    let mut text = &transcript[..phrase_start];
+    let mut prompt = &transcript[phrase_end..];
+    // Strip a pair only while its opening mark sits directly before the
+    // phrase and its closing mark follows it, possibly after the pair's own
+    // joining marks and terminal punctuation. Whitespace is not skipped
+    // first: `"Ship it" rewrite this "formal"` keeps both quotes.
+    while strip_pair(&mut text, &mut prompt) {}
+    let text = trim_spaced_dash_end(text.trim_end_matches(is_joining));
+    let prompt = trim_spaced_dash_start(prompt.trim_start_matches(is_joining));
+    (text.trim_start(), prompt.trim_end())
+}
+
+/// Strips one quote or bracket directly touching the phrase from both sides.
+/// `false` leaves both pieces as they were.
+fn strip_pair<'a>(text: &mut &'a str, prompt: &mut &'a str) -> bool {
+    let Some(open) = text.chars().next_back() else {
+        return false;
+    };
+    let mut close = None;
+    for (index, character) in prompt.char_indices() {
+        if closes(open, character) {
+            close = Some((index, character.len_utf8()));
             break;
         }
-        text = text[..text.len() - open.len_utf8()].trim_end_matches(is_joining);
-        prompt = prompt[close.len_utf8()..].trim_start_matches(is_joining);
+        if !is_inside_pair(character) {
+            return false;
+        }
     }
-    text = trim_spaced_dash_end(text.trim_end_matches(is_joining));
-    prompt = trim_spaced_dash_start(prompt.trim_start_matches(is_joining));
-    (text.trim_start(), prompt.trim_end())
+    let Some((close_start, close_len)) = close else {
+        return false;
+    };
+    *text = &text[..text.len() - open.len_utf8()];
+    *prompt = &prompt[close_start + close_len..];
+    true
+}
+
+/// What may sit inside a quote or bracket pair after the phrase before its
+/// closing mark: joins and terminal punctuation.
+fn is_inside_pair(character: char) -> bool {
+    character.is_whitespace()
+        || matches!(
+            character,
+            ',' | ';' | ':' | '–' | '—' | '.' | '?' | '!' | '…'
+        )
 }
 
 /// Whether `close` is the mark that pairs with `open`.
@@ -225,7 +254,7 @@ fn closes(open: char, close: char) -> bool {
 /// preceded by whitespace (or the start).
 fn trim_spaced_dash_end(text: &str) -> &str {
     let trimmed = text.trim_end();
-    for dash in ["--", "-"] {
+    for dash in ["---", "--", "-"] {
         if let Some(rest) = trimmed.strip_suffix(dash)
             && (rest.is_empty() || rest.ends_with(char::is_whitespace))
         {
@@ -239,7 +268,7 @@ fn trim_spaced_dash_end(text: &str) -> &str {
 /// followed by whitespace (or the end).
 fn trim_spaced_dash_start(text: &str) -> &str {
     let trimmed = text.trim_start();
-    for dash in ["--", "-"] {
+    for dash in ["---", "--", "-"] {
         if let Some(rest) = trimmed.strip_prefix(dash)
             && (rest.is_empty() || rest.starts_with(char::is_whitespace))
         {
@@ -432,6 +461,50 @@ mod tests {
             Some(Instruction::Rewrite {
                 text: "Ship it".into(),
                 prompt: "formal".into(),
+            })
+        );
+        assert_eq!(
+            split("Ship it --- rewrite this --- formal"),
+            Some(Instruction::Rewrite {
+                text: "Ship it".into(),
+                prompt: "formal".into(),
+            })
+        );
+        // A pair wraps the phrase only when its opening mark touches it.
+        assert_eq!(
+            split("\"Ship it\" rewrite this \"formal\""),
+            Some(Instruction::Rewrite {
+                text: "\"Ship it\"".into(),
+                prompt: "\"formal\"".into(),
+            })
+        );
+        assert_eq!(
+            split("\"Ship it\" \"rewrite this\" \"formal\""),
+            Some(Instruction::Rewrite {
+                text: "\"Ship it\"".into(),
+                prompt: "\"formal\"".into(),
+            })
+        );
+        assert_eq!(
+            split("Ship it.\" rewrite this \"make it formal"),
+            Some(Instruction::Rewrite {
+                text: "Ship it.\"".into(),
+                prompt: "\"make it formal".into(),
+            })
+        );
+        // Joining and terminal punctuation may sit inside the pair.
+        assert_eq!(
+            split("He said \"rewrite this,\" and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
+            })
+        );
+        assert_eq!(
+            split("He said \"rewrite this.\" and left"),
+            Some(Instruction::Rewrite {
+                text: "He said".into(),
+                prompt: "and left".into(),
             })
         );
         // Quotes that don't touch the phrase stay, including one left by a

@@ -95,4 +95,5 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Phrase", ["Fraza", "短语", "フレーズ", "Phrase", "Frase", "Фраза"]),
     ("Use at least two words", ["Użyj co najmniej dwóch słów", "请至少使用两个词", "2 語以上にしてください", "Mindestens zwei Wörter verwenden", "Usa al menos dos palabras", "Використайте щонайменше два слова"]),
     ("Use at least six letters", ["Użyj co najmniej sześciu liter", "请至少使用六个字母", "6 文字以上にしてください", "Mindestens sechs Buchstaben verwenden", "Usa al menos seis letras", "Використайте щонайменше шість літер"]),
+    ("The voice prompt asked for nothing", ["Polecenie głosowe nie zawierało prośby", "语音指令没有提出任何请求", "音声プロンプトに指示がありませんでした", "Die Sprachanweisung enthielt keinen Auftrag", "La instrucción de voz no pedía nada", "Голосова інструкція не містила прохання"]),
 ];

@@ -1026,7 +1026,8 @@ pub(crate) fn run(
                 // done tone and no empty pasted transcript. The HUD closes
                 // the submitted job as cancelled in `update` below.
                 Ok(text) if text.is_empty() => {
-                    events.dictation(DictationPhase::Discarded, "")?;
+                    indicator.discarded();
+                    events.discarded_voice_prompt()?;
                 }
                 Ok(text) => {
                     indicator.finished(None);

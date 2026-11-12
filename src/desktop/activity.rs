@@ -156,10 +156,17 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
             phase,
             text,
             processing,
+            reason,
             ..
         } => {
             let description = match phase {
                 DictationPhase::Started => "Dictation started".into(),
+                DictationPhase::Discarded
+                    if reason.as_deref()
+                        == Some(crate::desktop::events::VOICE_PROMPT_NOTHING_REASON) =>
+                {
+                    crate::desktop::i18n::tr("The voice prompt asked for nothing").to_owned()
+                }
                 DictationPhase::Discarded => "A brief dictation was discarded".into(),
                 DictationPhase::Cancelled => "Dictation was cancelled".into(),
                 DictationPhase::Transcribing => "Dictation is being transcribed".into(),
@@ -216,6 +223,21 @@ fn text_or(prefix: &str, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_voice_prompt_nothing_discard_says_so() {
+        let event = VoiceEvent::Dictation {
+            timestamp_ms: 1,
+            phase: DictationPhase::Discarded,
+            text: String::new(),
+            processing: None,
+            reason: Some(crate::desktop::events::VOICE_PROMPT_NOTHING_REASON.into()),
+        };
+        assert_eq!(
+            event_summary(&event),
+            crate::desktop::i18n::tr("The voice prompt asked for nothing")
+        );
+    }
 
     #[test]
     fn projects_latest_state_and_device() {

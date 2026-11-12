@@ -12,6 +12,9 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
+/// The reason a deliberately empty voice prompt records on its discard.
+pub const VOICE_PROMPT_NOTHING_REASON: &str = "voice prompt asked nothing";
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VoiceEvent {
@@ -322,6 +325,11 @@ impl EventLog {
             processing: None,
             reason: reason.map(Into::into),
         })
+    }
+
+    /// A voice prompt that deliberately asked nothing.
+    pub fn discarded_voice_prompt(&self) -> io::Result<()> {
+        self.discarded_dictation(Some(VOICE_PROMPT_NOTHING_REASON))
     }
 
     /// A recording shortcut whose microphone failed kept the audio delivered
