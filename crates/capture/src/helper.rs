@@ -20,13 +20,20 @@ pub fn path() -> Result<PathBuf> {
     }
     let raw_exe = std::env::current_exe().context("Could not locate scrawl")?;
     let exe = std::fs::canonicalize(&raw_exe).unwrap_or(raw_exe);
-    // Beside the app binary, or one level up from `target/*/deps` for tests.
-    exe.ancestors()
-        .skip(1)
-        .take(2)
+    helper_dirs(&exe)
         .map(|dir| dir.join("scrawl-helper"))
         .find(|path| path.is_file())
         .context("scrawl-helper is missing; rebuild Scrawl")
+}
+
+/// Where a helper can sit: beside the executable, one level up from `target/*/deps` for tests,
+/// and the profile directory for cargo 1.100's `build/<package>/<hash>/out` test binaries.
+fn helper_dirs(exe: &Path) -> impl Iterator<Item = &Path> {
+    let profile = exe
+        .ancestors()
+        .find(|path| path.ends_with("build"))
+        .and_then(Path::parent);
+    exe.ancestors().skip(1).take(2).chain(profile)
 }
 
 pub fn ui_path() -> Result<PathBuf> {
@@ -43,9 +50,7 @@ pub fn ui_path() -> Result<PathBuf> {
     }
     let raw_exe = std::env::current_exe().context("Could not locate scrawl")?;
     let exe = std::fs::canonicalize(&raw_exe).unwrap_or(raw_exe);
-    exe.ancestors()
-        .skip(1)
-        .take(2)
+    helper_dirs(&exe)
         .map(|dir| dir.join("scrawl-ui-helper"))
         .find(|path| path.is_file())
         .context("scrawl-ui-helper is missing; rebuild Scrawl")
