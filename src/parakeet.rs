@@ -446,7 +446,13 @@ impl DictationWorker {
         let language = selection.language.clone();
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
-        let stream = clip.take_stream();
+        // Labs › Screen vocabulary: this capture's terms belong to its
+        // whole-clip run and no other job. Only a model that reads the terms
+        // gives up its live stream, whose vocabulary is fixed when it starts
+        // (before the window was read); a model that ignores them keeps it.
+        let screen_terms = context.screen_terms.clone();
+        let keeps_stream = screen_terms.is_empty() || !crate::dictation::vocabulary::uses_terms();
+        let stream = clip.take_stream().filter(|_| keeps_stream);
         let _capture = clip.take_capture_marker();
         let samples = clip.into_transcription_samples();
         crate::dictation::diagnostics::persist(&samples);
@@ -465,9 +471,10 @@ impl DictationWorker {
                 let transcriber = model
                     .activate(&selection)
                     .map_err(|error| error.to_string())?;
-                transcriber
-                    .transcribe(samples)
-                    .map_err(|error| error.to_string())
+                crate::dictation::vocabulary::for_capture(&screen_terms, || {
+                    transcriber.transcribe(samples)
+                })
+                .map_err(|error| error.to_string())
             })
         };
         let transcript = engine

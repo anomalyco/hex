@@ -69,6 +69,7 @@ pub(crate) fn capture(read_page: bool) -> ContextSnapshot {
             .and_then(|accessible| accessible.url),
         window_title: window.title,
         input_revision: None,
+        screen_terms: Vec::new(),
     }
 }
 

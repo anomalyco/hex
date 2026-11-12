@@ -1105,6 +1105,7 @@ mod tests {
             browser_url: url.map(|url| Url::parse(url).unwrap()),
             window_title: Some(title.into()),
             input_revision: None,
+            screen_terms: Vec::new(),
         }
     }
 

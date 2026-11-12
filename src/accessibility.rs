@@ -1,5 +1,7 @@
+use std::collections::VecDeque;
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
+use std::time::{Duration, Instant};
 
 type CfTypeRef = *const c_void;
 type CfStringRef = *const c_void;
@@ -36,6 +38,9 @@ unsafe extern "C" {
 /// `kAXValueTypeCFRange`.
 const AX_VALUE_CF_RANGE: u32 = 4;
 
+/// `kCFNumberSInt64Type`.
+const CF_NUMBER_SINT64_TYPE: isize = 4;
+
 /// Core Foundation's `CFRange`, in UTF-16 code units.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -47,6 +52,8 @@ struct CfRange {
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     fn CFGetTypeID(value: CfTypeRef) -> usize;
+    fn CFNumberGetTypeID() -> usize;
+    fn CFNumberGetValue(number: CfTypeRef, kind: isize, value: *mut c_void) -> u8;
     fn CFStringGetTypeID() -> usize;
     fn CFStringGetLength(value: CfStringRef) -> isize;
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
@@ -76,6 +83,156 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
     let application = foreign_application(pid)?;
     let window = copy_element(&application, c"AXFocusedWindow")?;
     copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
+}
+
+/// How much of a focused window Labs › Screen vocabulary reads: elements
+/// walked, depth below the window, bytes collected, characters per value,
+/// and wall-clock time.
+const MAX_TEXT_NODES: usize = 1_500;
+const MAX_TEXT_DEPTH: usize = 40;
+const MAX_TEXT_BYTES: usize = 32 * 1024;
+const MAX_VALUE_CHARS: usize = 4 * 1024;
+const TEXT_DEADLINE: Duration = Duration::from_millis(150);
+
+/// The visible text of another process's focused window, for Labs › Screen
+/// vocabulary: each element's visible value, title, and description,
+/// breadth-first, bounded by elements, depth, bytes, and per-value size. The
+/// 150 ms deadline is soft, checked between elements. A text value over 4 KB
+/// contributes only its `AXVisibleCharacterRange`, and is skipped when the app
+/// names none, so a document or a terminal's scrollback never fills the
+/// budget. Secure text fields and their subtrees are skipped, so a password
+/// never leaves the app. `None` for Hex's own window or when the tree has no
+/// text.
+pub fn focused_window_text(pid: i32) -> Option<String> {
+    let application = foreign_application(pid)?;
+    let window = copy_element(&application, c"AXFocusedWindow")?;
+    let started = Instant::now();
+    let mut text = String::new();
+    let mut queue = VecDeque::from([(window, 0_usize)]);
+    let mut visited = 0_usize;
+    while let Some((element, depth)) = queue.pop_front() {
+        if visited >= MAX_TEXT_NODES
+            || started.elapsed() >= TEXT_DEADLINE
+            || text.len() >= MAX_TEXT_BYTES
+        {
+            break;
+        }
+        visited += 1;
+        if is_secure_text_field(&element) {
+            continue;
+        }
+        let mut full = false;
+        if let Some(value) = element_value(&element) {
+            full = !append_text(&mut text, &value);
+        }
+        if !full {
+            for name in [c"AXTitle", c"AXDescription"] {
+                let Some(value) = copy_string_capped(&element, name, MAX_VALUE_CHARS) else {
+                    continue;
+                };
+                if !append_text(&mut text, &value) {
+                    full = true;
+                    break;
+                }
+            }
+        }
+        if full {
+            break;
+        }
+        if depth >= MAX_TEXT_DEPTH || visited + queue.len() >= MAX_TEXT_NODES {
+            continue;
+        }
+        let room = MAX_TEXT_NODES - visited - queue.len();
+        for child in copy_elements_up_to(&element, c"AXChildren", room) {
+            queue.push_back((child, depth + 1));
+        }
+    }
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// Whether an element holds a password. macOS marks most secure fields with
+/// the `AXSecureTextField` subrole, and some apps use it as the role.
+fn is_secure_text_field(element: &CfObject) -> bool {
+    [c"AXRole", c"AXSubrole"]
+        .into_iter()
+        .any(|name| copy_string(element, name).as_deref() == Some("AXSecureTextField"))
+}
+
+/// An element's `AXValue`. A text area can expose its whole document or a
+/// terminal's scrollback there, so a value over [`MAX_VALUE_CHARS`] reads only
+/// the visible character range, and is skipped when the app names none.
+fn element_value(element: &CfObject) -> Option<String> {
+    if let Some(characters) = copy_number(element, c"AXNumberOfCharacters")
+        && characters > MAX_VALUE_CHARS as i64
+    {
+        let range = copy_range(element, c"AXVisibleCharacterRange")?;
+        let length = range.length.clamp(0, MAX_VALUE_CHARS as isize);
+        if range.location < 0 || length == 0 {
+            return None;
+        }
+        return copy_string_for_range(
+            element,
+            CfRange {
+                location: range.location,
+                length,
+            },
+        );
+    }
+    copy_string_capped(element, c"AXValue", MAX_VALUE_CHARS)
+}
+
+/// Appends one element's text within the total byte budget. Returns whether
+/// there is room for more after it.
+fn append_text(text: &mut String, value: &str) -> bool {
+    let room = MAX_TEXT_BYTES.saturating_sub(text.len() + 1);
+    if room == 0 {
+        return false;
+    }
+    let end = char_boundary(value, value.len().min(room));
+    text.push_str(&value[..end]);
+    text.push('\n');
+    end == value.len() && text.len() < MAX_TEXT_BYTES
+}
+
+/// An integer attribute such as `AXNumberOfCharacters`.
+fn copy_number(element: &CfObject, name: &CStr) -> Option<i64> {
+    let value = copy_attribute(element, name)?;
+    if unsafe { CFGetTypeID(value.0) } != unsafe { CFNumberGetTypeID() } {
+        return None;
+    }
+    let mut number = 0_i64;
+    // SAFETY: `value` is a CFNumber, and `number` is an SInt64 for the type
+    // asked.
+    let read = unsafe {
+        CFNumberGetValue(
+            value.0,
+            CF_NUMBER_SINT64_TYPE,
+            (&mut number as *mut i64).cast(),
+        )
+    };
+    (read != 0).then_some(number)
+}
+
+/// A string attribute no longer than `max_chars`, checked before converting
+/// it so a large document is never copied.
+fn copy_string_capped(element: &CfObject, name: &CStr, max_chars: usize) -> Option<String> {
+    let value = copy_attribute(element, name)?;
+    if unsafe { CFGetTypeID(value.0) } != unsafe { CFStringGetTypeID() } {
+        return None;
+    }
+    let length = unsafe { CFStringGetLength(value.0) };
+    if length < 0 || length as usize > max_chars {
+        return None;
+    }
+    cf_string(value.0)
+}
+
+/// The largest boundary of `text` at or below `at`.
+fn char_boundary(text: &str, mut at: usize) -> usize {
+    while at > 0 && !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }
 
 /// The page address of the web area holding the application's focused
@@ -187,13 +344,21 @@ impl crate::dictation::browser_page::AxNode for Element {
 
 /// An attribute holding elements (`AXWindows`, `AXChildren`), each bounded.
 fn copy_elements(element: &CfObject, name: &CStr) -> Vec<CfObject> {
+    copy_elements_up_to(element, name, usize::MAX)
+}
+
+/// The first `limit` elements of an attribute, each bounded like
+/// [`copy_elements`], so a window with a huge child array cannot cost more
+/// than the caller's node budget.
+fn copy_elements_up_to(element: &CfObject, name: &CStr, limit: usize) -> Vec<CfObject> {
     let Some(array) = copy_attribute(element, name) else {
         return Vec::new();
     };
     if unsafe { CFGetTypeID(array.0) } != unsafe { CFArrayGetTypeID() } {
         return Vec::new();
     }
-    let count = unsafe { CFArrayGetCount(array.0) };
+    let limit = isize::try_from(limit).unwrap_or(isize::MAX);
+    let count = unsafe { CFArrayGetCount(array.0) }.min(limit);
     (0..count)
         .filter_map(|index| {
             // SAFETY: Get rule: the array owns the item, so it is retained
@@ -363,6 +528,7 @@ mod tests {
     #[test]
     fn a_missing_attribute_is_none() {
         assert_eq!(focused_window_title(i32::MAX), None);
+        assert_eq!(focused_window_text(i32::MAX), None);
         assert_eq!(focused_web_url(i32::MAX), None);
         assert_eq!(char_before_caret(i32::MAX), None);
     }
@@ -375,6 +541,7 @@ mod tests {
         let own_pid = std::process::id() as i32;
         assert!(foreign_application(own_pid).is_none());
         assert_eq!(focused_window_title(own_pid), None);
+        assert_eq!(focused_window_text(own_pid), None);
         assert_eq!(focused_web_url(own_pid), None);
         assert_eq!(char_before_caret(own_pid), None);
         assert!(browser_pages(own_pid).urls.is_empty());

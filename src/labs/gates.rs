@@ -38,6 +38,18 @@ pub fn vocabulary_biasing() -> bool {
     on(VOCABULARY_BIASING)
 }
 
+/// Names and terms visible in the focused window join one dictation's
+/// vocabulary, read once as the capture becomes real (macOS; read by the
+/// listener at its hold threshold, its control start, or the released
+/// microphone opening).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn screen_vocabulary() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    SCREEN_VOCABULARY.load(Ordering::Acquire) && Feature::ScreenVocabulary.on_this_os()
+}
+
 /// Mouse buttons may be recorded as shortcuts (macOS).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mouse_shortcuts() -> bool {

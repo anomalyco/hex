@@ -13,6 +13,7 @@ pub enum Feature {
     LiveTyping,
     LiveChapters,
     VocabularyBiasing,
+    ScreenVocabulary,
     TerminalPaste,
     KeyboardModelSwitching,
     AppModelSwitching,
@@ -84,7 +85,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 76] = [
+    pub const ALL: [Self; 77] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -93,6 +94,7 @@ impl Feature {
         Self::LiveTyping,
         Self::LiveChapters,
         Self::VocabularyBiasing,
+        Self::ScreenVocabulary,
         Self::TerminalPaste,
         Self::KeyboardModelSwitching,
         Self::AppModelSwitching,

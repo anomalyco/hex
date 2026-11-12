@@ -22,6 +22,9 @@ impl Feature {
             Self::VocabularyBiasing => {
                 "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
             }
+            Self::ScreenVocabulary => {
+                "Window names and terms become temporary vocabulary. Read locally, never saved. Parakeet needs Vocabulary biasing, and a dictation with terms runs after release instead of from the live stream."
+            }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V, for apps that ignore Ctrl+V",
             Self::KeyboardModelSwitching => {
                 "Changing the keyboard language switches the speech model and language"

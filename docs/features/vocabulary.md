@@ -85,6 +85,40 @@ Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // 
 │   both models return it on silence or noise (README.md#get-ready)
 └── "Sounds like" spellings are not sent; rewriting and search use them
 
+Screen vocabulary (Labs › Screen vocabulary, macOS)  // vocabulary.screen
+├── Off by default; off, or for a model that ignores vocabulary, no
+│   Accessibility read happens for a dictation
+├── On, as a capture becomes real: one background read of the focused
+│   window's text, bounded to 1,500 elements, 40 levels, 32 KB, a soft 150 ms
+│   deadline checked between elements, and 4 KB per value; a larger text value
+│   reads only its AXVisibleCharacterRange, or is skipped when none is named
+├── At most 24 terms: mixed-case and CamelCase words, letters with digits,
+│   2–6 letter all-caps acronyms, and capitalized words away from a sentence's
+│   start; plain lowercase words, sentence-start capitals, common window
+│   labels, hex ids, ordinals, times, units, and random-looking tokens are
+│   dropped
+├── Joins that dictation after the mode's terms and the shared list, inside
+│   the same 64-term/character budgets; a model with VocabularyUse::None gets
+│   nothing
+├── Parakeet reads them only with Labs › Vocabulary biasing on and a boost
+│   other than Off; Whisper and Qwen3-ASR read them as a prompt
+├── A capture with terms for a model that reads them uses its whole-clip run
+│   rather than a live stream's text: a stream fixes its vocabulary when it
+│   starts, so the text arrives after release with a little more latency
+├── Only that capture: meetings, the local API, and OpenCode rewriting never
+│   see the terms, and only the term count and read time are logged, at debug
+├── One reader runs at a time; an intend with no pending capture reads nothing
+└── Password fields and their subtrees are skipped; Hex's own window is never
+    read
+    // checks: dictation::screen_vocabulary::tests (Qdrant, sentence starts,
+    // acronyms, long all-caps words, stoplist and log levels, hashes, ordinals,
+    // times, units, random tokens, the 24-term cap, dedup against the saved
+    // list), a_captures_screen_terms_come_last_and_leave_with_it and
+    // parakeet_terms_need_the_biasing_lab_and_a_boost in vocabulary.rs,
+    // a_cancelled_capture_leaves_no_stale_screen_terms and
+    // one_screen_read_runs_at_a_time in screen_vocabulary.rs; not observed on
+    // a real Mac
+
 Recognition hints, folded in                // vocabulary.hints
 ├── Loading settings.json -> `recognition_hints` of the selected model and the
 │   recent models (newest first), split on commas, semicolons, and line

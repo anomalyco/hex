@@ -30,6 +30,10 @@ pub struct ContextSnapshot {
     pub browser_url: Option<Url>,
     pub window_title: Option<String>,
     pub input_revision: Option<u64>,
+    /// Labs › Screen vocabulary: names and terms read from the focused window
+    /// as this capture became real. Set only on the snapshot a capture
+    /// finishes with, so they never reach another dictation or a meeting.
+    pub screen_terms: Vec<String>,
 }
 
 /// The page refresh one capture owes. A shortcut's press starts it
@@ -62,6 +66,11 @@ impl CaptureRefresh {
             self.ticket = Some(request());
         }
         self.ticket
+    }
+
+    /// Whether a capture started and has not finished or been cancelled.
+    pub(crate) fn pending(&self) -> bool {
+        self.pending
     }
 
     /// The capture ended without transcribing: nothing waits for its page.
@@ -259,6 +268,7 @@ fn snapshot_of(front: &Frontmost, page: Option<Url>) -> ContextSnapshot {
         browser_url: page.or_else(|| front.page.clone()),
         window_title: front.window_title.clone(),
         input_revision: None,
+        screen_terms: Vec::new(),
     }
 }
 
@@ -307,6 +317,7 @@ impl ContextSnapshot {
                         browser_url: Some(browser_url),
                         window_title,
                         input_revision: None,
+                        screen_terms: Vec::new(),
                     });
                 }
                 Ok(None) => {}
@@ -349,6 +360,7 @@ impl ContextSnapshot {
                     browser_url: url,
                     window_title: title,
                     input_revision: None,
+                    screen_terms: Vec::new(),
                 });
             }
         }
