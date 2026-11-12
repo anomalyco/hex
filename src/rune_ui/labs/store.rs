@@ -56,7 +56,7 @@ pub(in crate::rune_ui) fn tabs(ui: &Ui, p: Paint) -> El {
 }
 
 /// The page under the title bar: the chips, then the scrolling cards.
-pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
+pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let rows = shown(ui);
     let store = &ui.lab_store;
     let query = store.query();
@@ -78,7 +78,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
                     "featured",
                     featured
                         .into_iter()
-                        .map(|row| card(ui, p, row, true, true))
+                        .map(|row| card(ui, p, row, true, true, layer))
                         .collect(),
                 ));
         }
@@ -125,7 +125,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
                         &format!("grid-row{index}"),
                         pair_rows
                             .iter()
-                            .map(|row| card(ui, p, row, is_new(row), false))
+                            .map(|row| card(ui, p, row, is_new(row), false, layer))
                             .collect(),
                     ));
                 }
@@ -316,7 +316,7 @@ fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
 /// One lab as a card: tile, name and tags on one line, up to two lines of
 /// description, its switch, and while on any settings of its own.
 /// `featured` cards sit under New in Labs, so they carry no New tag.
-fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool) -> El {
+fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut Vec<El>) -> El {
     let c = &p.k.c;
     let lab = entry.lab;
     let mut tags = Vec::new();
@@ -358,7 +358,7 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool) -> El {
                 .color(p.muted())
                 .max_lines(2),
         );
-    if let Some(extras) = extras(ui, p, entry) {
+    if let Some(extras) = extras(ui, p, entry, layer) {
         copy = copy.child(extras.mt(8.0));
     }
     let key = if featured {

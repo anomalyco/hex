@@ -240,12 +240,12 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled
 ├── A lab's own settings show on its card while it's on -> Unload model when idle: Unload after (5/15/30/60 min);
-│   Keep mic open after dictating: Keep open for (30 s, 1/3/5/30 min);
+│   Keep mic open after dictating: Keep open for (30 s, 1/3/5/30 min, in an inline menu);
 │   Appearance: Theme (System, Light mode, Dark mode);
 │   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
 │   Annotate 15 s replay's shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
-│   // keep_microphone_open_shows_its_window_on_its_card_while_on,
+│   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
 │   // appearance_shows_its_theme_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
 │   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one). It never turns a lab on. An unknown
@@ -392,8 +392,11 @@ next. Check: `unload_idle_carries_its_minutes` in [labs.rs](../../src/labs.rs);
 start and its first job. The unload itself has no automated check.
 
 Keep mic open after dictating (`keep-microphone-open`): while on, its
-card shows "Keep open for" (30 s, 1, 3, 5, or 30 minutes; default 1 minute).
-It applies only while General's Turn off the mic when not dictating
+card shows "Keep open for" (30 s, 1, 3, 5, or 30 minutes; default 1 minute)
+in an inline menu, the same control General's rows use: five segments needed
+about 332 points inside the card's 273-point copy column, so 30 min ran past
+the card's edge. The values and the saved setting are unchanged. It applies
+only while General's Turn off the mic when not dictating
 (`release_microphone_while_idle`) is on: with that off the microphone is
 always open, so the lab has nothing to do. When both are on, a capture that
 finishes or is cancelled no longer closes the microphone at once. One

@@ -1014,6 +1014,8 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::KeyboardModelSwitching => ui.open = None,
         // Its selects live only in the Modes pane, and they close with it.
         Feature::AppModelSwitching => ui.open = None,
+        // The card's duration menu closes when its lab does.
+        Feature::KeepMicrophoneOpen => ui.open = None,
         // A notice already on screen leaves with its lab.
         Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
         // Hex hears the browser through System Audio Recording.
@@ -1026,7 +1028,7 @@ fn flip(ui: &mut Ui, lab: Lab) {
 
 /// A lab's own settings, on its card while it's on: how long the model sits
 /// unused before it unloads, or the screenshot shortcut and folder.
-fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
+fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
     if !entry.on {
         return None;
     }
@@ -1057,7 +1059,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
                         .font(controls::DESCRIPTION)
                         .color(p.muted()),
                 )
-                .child(keep_microphone_open_for(ui, p)),
+                .child(keep_microphone_open_for(ui, p, layer)),
         ),
         Lab::Feature(Feature::CapsLockDictation) => Some(
             row()
@@ -1150,8 +1152,9 @@ fn unload_after(ui: &Ui, p: Paint) -> El {
 }
 
 /// How long the microphone stays open after a dictation before it is
-/// released.
-fn keep_microphone_open_for(ui: &Ui, p: Paint) -> El {
+/// released. Five choices no longer fit a segmented control on a half-width
+/// card, so the choice opens in a menu.
+fn keep_microphone_open_for(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     use crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS;
     let labels: Vec<String> = KEEP_MICROPHONE_OPEN_SECONDS
         .iter()
@@ -1163,19 +1166,22 @@ fn keep_microphone_open_for(ui: &Ui, p: Paint) -> El {
             }
         })
         .collect();
-    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     let selected = KEEP_MICROPHONE_OPEN_SECONDS
         .iter()
         .position(|seconds| *seconds == ui.settings.labs.keep_microphone_open_seconds)
         .unwrap_or(1);
-    controls::segmented(
+    super::general::quiet_select(
+        ui,
         p,
-        "keep-microphone-open-seconds",
-        &labels,
+        super::Menu::Pick("keep-microphone-open"),
+        "keep-microphone-open-seconds".to_owned(),
+        tr("Keep open for"),
+        labels,
         selected,
         |ui, index| {
             let seconds = KEEP_MICROPHONE_OPEN_SECONDS[index];
             ui.update(|settings| settings.labs.keep_microphone_open_seconds = seconds);
         },
+        layer,
     )
 }

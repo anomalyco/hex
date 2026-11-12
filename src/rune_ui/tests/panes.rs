@@ -2230,19 +2230,35 @@ fn keep_microphone_open_shows_its_window_on_its_card_while_on() {
     rt.update(|ui, _| ui.lab_store.group = Some(Feature::KeepMicrophoneOpen.group()));
     settle(&mut rt);
     assert!(
-        rt.find("keep-microphone-open-seconds").is_none(),
+        rt.find("keep-microphone-open-seconds-trigger").is_none(),
         "hidden while off"
     );
     tap(&mut rt, "lab-keep-microphone-open");
     assert!(rt.state.settings.labs.keep_microphone_open);
-    assert!(rt.find("keep-microphone-open-seconds").is_some());
+    let (control, _) = rt
+        .presented("keep-microphone-open-seconds-trigger")
+        .expect("the window's control");
+    let (card, _) = rt
+        .presented("lab-card-keep-microphone-open")
+        .expect("its card");
+    assert!(
+        control[0] + control[2] <= card[0] + card[2],
+        "the window's control stays inside its card"
+    );
     assert_eq!(
         rt.state.settings.labs.keep_microphone_open_seconds,
         crate::app_settings::LabsSettings::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS
     );
+    // The last choice is reachable from the menu.
+    tap(&mut rt, "keep-microphone-open-seconds-trigger");
+    tap(&mut rt, "option4");
+    assert_eq!(
+        rt.state.settings.labs.keep_microphone_open_seconds,
+        crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS[4]
+    );
     tap(&mut rt, "lab-keep-microphone-open");
     assert!(!rt.state.settings.labs.keep_microphone_open);
-    assert!(rt.find("keep-microphone-open-seconds").is_none());
+    assert!(rt.find("keep-microphone-open-seconds-trigger").is_none());
 }
 
 #[test]

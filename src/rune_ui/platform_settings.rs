@@ -605,11 +605,11 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// (Labs › Expire meeting audio separately). Unchosen follows Keep meetings.
 fn audio_retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let chosen = ui.settings.meetings.audio_retention;
-    let mut labels = vec![tr("Follow Keep meetings")];
+    let mut labels = vec![tr("Follow Keep meetings").to_owned()];
     labels.extend(
         MeetingRetention::ALL
             .iter()
-            .map(|retention| tr(retention.label())),
+            .map(|retention| tr(retention.label()).to_owned()),
     );
     let selected = chosen
         .and_then(|chosen| {
@@ -947,7 +947,7 @@ fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 Menu::Call(index),
                 format!("call{index}-policy-control"),
                 &shown,
-                labels.to_vec(),
+                labels.iter().map(|label| (*label).to_owned()).collect(),
                 selected.unwrap_or(0),
                 move |ui, index| {
                     let choice = MeetingProviderChoice {
