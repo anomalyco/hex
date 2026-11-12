@@ -346,9 +346,10 @@ little latency. Meetings, the local API, and OpenCode rewriting never see the
 terms, and nothing is saved or logged except the term count and read time at
 debug level. Off, or for a model that ignores the terms, no Accessibility
 read or thread starts. Checks: `dictation::screen_vocabulary::tests` (the
-Qdrant example, sentence-start exclusion, acronyms, stoplist, hashes,
-ordinals, times, units, random tokens, the 24-term cap, dedup against the
-saved list), `a_captures_screen_terms_come_last_and_leave_with_it` and
+Qdrant example, sentence-start exclusion, acronyms, long all-caps words,
+stoplist and log levels, hashes, ordinals, times, units, random tokens, the
+24-term cap, dedup against the saved list),
+`a_captures_screen_terms_come_last_and_leave_with_it` and
 `parakeet_terms_need_the_biasing_lab_and_a_boost` in
 [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
 `a_cancelled_capture_leaves_no_stale_screen_terms` and

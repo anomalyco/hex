@@ -111,12 +111,13 @@ Screen vocabulary (Labs › Screen vocabulary, macOS)  // vocabulary.screen
 └── Password fields and their subtrees are skipped; Hex's own window is never
     read
     // checks: dictation::screen_vocabulary::tests (Qdrant, sentence starts,
-    // acronyms, stoplist, hashes, ordinals, times, units, random tokens, the
-    // 24-term cap, dedup against the saved list),
-    // a_captures_screen_terms_come_last_and_leave_with_it and
+    // acronyms, long all-caps words, stoplist and log levels, hashes, ordinals,
+    // times, units, random tokens, the 24-term cap, dedup against the saved
+    // list), a_captures_screen_terms_come_last_and_leave_with_it and
     // parakeet_terms_need_the_biasing_lab_and_a_boost in vocabulary.rs,
-    // a_cancelled_capture_leaves_no_stale_screen_terms in
-    // screen_vocabulary.rs; not observed on a real Mac
+    // a_cancelled_capture_leaves_no_stale_screen_terms and
+    // one_screen_read_runs_at_a_time in screen_vocabulary.rs; not observed on
+    // a real Mac
 
 Recognition hints, folded in                // vocabulary.hints
 ├── Loading settings.json -> `recognition_hints` of the selected model and the

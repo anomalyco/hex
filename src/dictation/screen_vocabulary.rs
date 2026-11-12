@@ -22,10 +22,12 @@ const MAX_CHARS: usize = 32;
 /// Shortest and longest all-caps acronym kept: AI, UI, API, GPT, NVIDIA.
 const MIN_ACRONYM_CHARS: usize = 2;
 const MAX_ACRONYM_CHARS: usize = 6;
-/// Common window words that are capitalized only because they are labels.
-const STOPLIST: [&str; 17] = [
+/// Common window words and log levels that are capitalized only because they
+/// are labels.
+const STOPLIST: [&str; 25] = [
     "Recent", "Sidebar", "Settings", "Search", "Home", "File", "Edit", "View", "Window", "Help",
-    "New", "Open", "Save", "Close", "Share", "More", "Today",
+    "New", "Open", "Save", "Close", "Share", "More", "Today", "INFO", "DEBUG", "ERROR", "WARN",
+    "TODO", "FIXME", "NOTE", "TRACE",
 ];
 /// Unit suffixes that make a digit token a measurement, not a name: 100ms,
 /// 1080p, 30x.
@@ -293,6 +295,14 @@ fn looks_like_a_term(token: &Token<'_>) -> bool {
     if acronym(token.text) {
         return true;
     }
+    let uppercase = characters
+        .iter()
+        .filter(|character| character.is_uppercase())
+        .count();
+    // WARNING, DEPRECATED, CHANGELOG: all caps, but not an allowed acronym.
+    if uppercase == letters {
+        return false;
+    }
     // PostgreSQL, OpenCode, iPhone.
     if characters
         .iter()
@@ -429,6 +439,20 @@ mod tests {
                 "Open the Settings window and search Recent files. File Edit View Help. New Save Close Share More Today Home Sidebar."
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn log_levels_and_markers_are_not_terms() {
+        assert!(terms("Use INFO, DEBUG, ERROR, WARN, TODO, FIXME, NOTE, TRACE.").is_empty());
+    }
+
+    #[test]
+    fn long_all_caps_words_are_not_terms() {
+        assert!(terms("Use WARNING here. Then DEPRECATED and CHANGELOG follow.").is_empty());
+        assert_eq!(
+            terms("Use NVIDIA with PostgreSQL."),
+            ["NVIDIA", "PostgreSQL"]
         );
     }
 
