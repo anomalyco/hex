@@ -39,7 +39,7 @@ unsafe extern "C" {
 const AX_VALUE_CF_RANGE: u32 = 4;
 
 /// `kCFNumberSInt64Type`.
-const CF_NUMBER_SINT64_TYPE: u32 = 4;
+const CF_NUMBER_SINT64_TYPE: isize = 4;
 
 /// Core Foundation's `CFRange`, in UTF-16 code units.
 #[repr(C)]
@@ -53,7 +53,7 @@ struct CfRange {
 unsafe extern "C" {
     fn CFGetTypeID(value: CfTypeRef) -> usize;
     fn CFNumberGetTypeID() -> usize;
-    fn CFNumberGetValue(number: CfTypeRef, the_type: u32, value: *mut c_void) -> u8;
+    fn CFNumberGetValue(number: CfTypeRef, kind: isize, value: *mut c_void) -> u8;
     fn CFStringGetTypeID() -> usize;
     fn CFStringGetLength(value: CfStringRef) -> isize;
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
