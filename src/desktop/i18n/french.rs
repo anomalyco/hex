@@ -1283,6 +1283,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Delete {} dictations", "Supprimer {} dictées"),
     ("Print-only CLI dictation", "Dictée CLI pour impression uniquement"),
     ("Let hex dictation start --print answer with the transcript when it ends", "Permet à hex dictation start --print de recevoir la transcription à la fin"),
+    ("This desktop doesn't offer the input method Live typing needs (GNOME doesn't), so dictations paste normally", "Ce bureau n'offre pas la méthode de saisie dont la Saisie en direct a besoin (GNOME non plus), donc les dictées sont collées normalement"),
+    ("Live words need the GPU, and Speech engine is set to CPU", "Les mots en direct nécessitent le GPU, et le Moteur vocal est réglé sur CPU"),
+    ("This speech model doesn't show live words; pick {first} or {second}", "Ce modèle vocal n'affiche pas de mots en direct ; choisissez {first} ou {second}"),
+    ("This speech model doesn't show live words; pick {}", "Ce modèle vocal n'affiche pas de mots en direct ; choisissez {}"),
+    ("The selected speech model doesn't show live words", "Le modèle vocal sélectionné n'affiche pas de mots en direct"),
 ];
 
 #[cfg(test)]

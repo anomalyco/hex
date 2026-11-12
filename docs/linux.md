@@ -36,7 +36,12 @@ does not offer the protocol, another input method (fcitx, ibus) holds the
 seat, the focused field has no active text input, the final text is
 multi-line, or the compositor does not answer in time. A CPU engine or a
 model that cannot stream shows no provisional words while speaking, but the
-final text still goes in through the input method. It has **not** been
+final text still goes in through the input method. Hex checks the
+compositor's registry when the window loads: on a Wayland desktop without the
+protocol (GNOME) Settings › Labs keeps its card, disabled while off, with a
+note that this desktop offers no input method Live typing needs, and `hex labs`
+prints the same note in its list and after `hex labs on live-typing`. The
+toggle is not refused, and dictations paste normally. It has **not** been
 verified on a real compositor yet; only its unit tests and the build ran.
 
 With **Labs › Transform typed text** on (`labs.typed_text`, off by default),

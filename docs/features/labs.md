@@ -27,9 +27,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Voice Filter (Dev) yes experimental.hex_microphone (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
-├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating; its card says when the selected speech model can't stream (Linux: or Speech engine is CPU), so no words would show
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
-├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
+├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the onboarding HUD preview and the Sounds sheet's HUD replay inside the window, and every overlay window, keep following the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
@@ -2760,12 +2760,32 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   feeds, and no host adds the line's overlay. Each dictation's `finished
   live stream` line in process.log counts its text changes (`partials`);
   `RUST_LOG=hex=debug` adds a `live text` line per change with the audio
-  fed and the word counts, never the words. Checks:
+  fed and the word counts, never the words. Under its description, its card
+  adds a line when no words can show: the selected model's catalog
+  `ModelDefinition::streams` is false (the line names the streaming models
+  from the catalog that take the saved language, and with none for it says
+  only that the model doesn't show live words), or, on Linux, Speech engine
+  is explicitly CPU (which never streams). An imported model gets no line:
+  its catalog entry says it can't stream, but its GGUF is only checked when it
+  loads. A resolved CPU on Auto (#856's slow-iGPU verdict) isn't known to the
+  window, so that case has no card line. When a capture wants live text and
+  no stream opens yet, process.log names the reason once per capture (the
+  model doesn't stream, it isn't streaming on this device, or no streaming
+  speech model is loaded), and a stream begun while the loaded model can't
+  stream logs `a live stream was requested but this model can't stream on its
+  device`, or says no speech model is loaded when none could load.
+  Checks:
   `a_dictation_stream_publishes_its_text_after_each_feed_with_live_text`,
   `without_live_text_a_dictation_stream_publishes_nothing`,
   `each_dictation_stream_has_its_own_text`, and
   `a_failed_feed_clears_the_text_and_stops_publishing` in
-  [transcription/engine.rs](../../src/transcription/engine.rs);
+  [transcription/engine.rs](../../src/transcription/engine.rs), and
+  `a_stream_refusal_names_the_model_or_the_device` there;
+  `live_text_says_which_models_show_live_words`,
+  `live_text_suggests_no_model_for_another_language`,
+  `live_text_never_judges_an_imported_model`, and
+  `live_text_says_when_the_cpu_engine_stops_the_words` in
+  [rune_ui/labs.rs](../../src/rune_ui/labs.rs);
   `live_text_follows_the_recording_and_never_outlives_it` in
   [dictation.rs](../../src/dictation.rs); the three tests in
   [dictation/live_text.rs](../../src/dictation/live_text.rs) (a recording's end clears only its
@@ -2807,8 +2827,15 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   text field, replaced on each update, and its final text is committed
   through `zwp_input_method_v2` instead of the clipboard paste
   (`labs.live-typing`; the toggle is `labs.live_typing`, off by default, Linux
-  only, and its card is hidden in an X11 session). It is read at the hold
-  threshold, or at the Toggle press, never for a Local API
+  only, and its card is hidden in an X11 session). On Wayland, the card asks
+  the compositor's registry once at window load
+  (`linux::paste::wayland_offers("zwp_input_method_manager_v2")`); without
+  that global (GNOME) it stays listed, disabled while off, with a line under
+  its description that this desktop offers no input method it needs and
+  dictations paste normally, and `hex labs` prints the same note in its list
+  and after `hex labs on live-typing` (never refusing the toggle). An
+  organization's managed lock keeps its own note, and the CLI adds none. It is
+  read at the hold threshold, or at the Toggle press, never for a Local API
   dictation, `/streams`, or Voice Action; the final text still goes through
   Output's processing, and History and Paste Last update as they do for a
   paste. Hex creates the input method when the capture becomes intentional
@@ -2857,7 +2884,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
   [dictation/live_text.rs](../../src/dictation/live_text.rs); and
   `the_plate_follows_the_decision_made_when_the_stream_opened` in
-  [dictation.rs](../../src/dictation.rs). **Not verified
+  [dictation.rs](../../src/dictation.rs); and
+  `live_typing_says_when_the_desktop_cannot_use_it` in
+  [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). **Not verified
   on a real compositor**: only unit tests and the build, plus the Linux Labs
   golden's new card.
 - Playground: Rune's playground in the window (every OS), `labs.playground`

@@ -86,6 +86,7 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
             crate::control::ControlReply::Error { message, .. } => Err(eyre!("{message}")),
             _ => {
                 println!("Turned {} {state}.", feature.name());
+                announce_note(feature, on);
                 Ok(())
             }
         };
@@ -93,12 +94,44 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
     let mut settings = AppSettings::load()?;
     if feature.on(&settings) == on {
         println!("{} is already {state}.", feature.name());
+        announce_note(feature, on);
         return Ok(());
     }
     feature.set(&mut settings, on);
     settings.save()?;
     println!("Turned {} {state}.", feature.name());
+    announce_note(feature, on);
     Ok(())
+}
+
+/// Says why a lab just turned on can't work in this session (Labs › Live
+/// typing on a compositor that offers no input method).
+fn announce_note(feature: Feature, on: bool) {
+    if on
+        && feature == Feature::LiveTyping
+        && feature.managed().is_none()
+        && let Some(note) = live_typing_note()
+    {
+        println!("Note: {note}.");
+    }
+}
+
+/// Why Labs › Live typing can't work here, on this Wayland compositor: it
+/// offers no input method Hex can use (GNOME). `None` when it can work, off
+/// Wayland, and on every other OS.
+#[cfg(target_os = "linux")]
+fn live_typing_note() -> Option<&'static str> {
+    if !crate::linux::session::LinuxSession::detect().is_wayland() {
+        return None;
+    }
+    (!crate::linux::paste::wayland_offers("zwp_input_method_manager_v2")).then_some(
+        "This desktop doesn't offer the input method Live typing needs (GNOME doesn't), so dictations paste normally",
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn live_typing_note() -> Option<&'static str> {
+    None
 }
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
@@ -141,8 +174,13 @@ fn list(settings: &AppSettings) -> String {
         let on = feature.on(settings)
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
+        let note = (feature == Feature::LiveTyping && feature.managed().is_none())
+            .then(live_typing_note)
+            .flatten()
+            .map(|note| format!(" ({note})"))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "{:<width$}  {:<7}  {:<8}  {} (hex settings {})\n",
+            "{:<width$}  {:<7}  {:<8}  {}{note} (hex settings {})\n",
             feature.name(),
             if feature.managed().is_some() {
                 "managed"

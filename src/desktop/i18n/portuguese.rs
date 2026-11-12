@@ -1280,6 +1280,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Delete {} dictations", "Excluir {} ditados"),
     ("Print-only CLI dictation", "Ditado de CLI só para impressão"),
     ("Let hex dictation start --print answer with the transcript when it ends", "Permite que hex dictation start --print receba a transcrição ao terminar"),
+    ("This desktop doesn't offer the input method Live typing needs (GNOME doesn't), so dictations paste normally", "Esta área de trabalho não oferece o método de entrada de que a Digitação ao vivo precisa (o GNOME não oferece), então os ditados são colados normalmente"),
+    ("Live words need the GPU, and Speech engine is set to CPU", "Palavras ao vivo precisam da GPU, e o Mecanismo de voz está definido como CPU"),
+    ("This speech model doesn't show live words; pick {first} or {second}", "Este modelo de fala não mostra palavras ao vivo; escolha {first} ou {second}"),
+    ("This speech model doesn't show live words; pick {}", "Este modelo de fala não mostra palavras ao vivo; escolha {}"),
+    ("The selected speech model doesn't show live words", "O modelo de fala selecionado não mostra palavras ao vivo"),
 ];
 
 #[cfg(test)]

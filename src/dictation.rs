@@ -686,6 +686,9 @@ struct Recording {
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
+    /// This capture already logged why it has no live stream, so the retry
+    /// on every audio chunk never repeats it.
+    stream_refusal_logged: bool,
     /// Whether this recording's stream should show the live text plate,
     /// decided once when the stream opens so toggling Labs › Live text
     /// mid-capture changes nothing.
@@ -763,6 +766,7 @@ impl Recording {
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             stream: None,
+            stream_refusal_logged: false,
             show_live_text: false,
             voice: VoiceTrack::default(),
             live_text: None,
@@ -1217,12 +1221,27 @@ impl DictationCapture {
         let Some(recording) = &mut self.recording else {
             return;
         };
-        if recording.stream.is_none() {
-            recording.stream = engine.begin();
-            recording.show_live_text = recording.stream.is_some()
-                && (crate::labs::live_text() || crate::dictation::live_text::board_demanded());
-            recording.feed_stream();
+        if recording.stream.is_some() {
+            return;
         }
+        recording.stream = engine.begin();
+        // The capture retries the stream on each audio chunk; say once, and
+        // only when it would have shown live words, why there is none.
+        if recording.stream.is_none()
+            && !recording.stream_refusal_logged
+            && (crate::labs::live_text() || crate::dictation::live_text::demanded())
+        {
+            recording.stream_refusal_logged = true;
+            tracing::info!(
+                reason = engine
+                    .stream_refusal()
+                    .unwrap_or("no live stream is available"),
+                "no live stream has opened yet; provisional words show only if one opens later"
+            );
+        }
+        recording.show_live_text = recording.stream.is_some()
+            && (crate::labs::live_text() || crate::dictation::live_text::board_demanded());
+        recording.feed_stream();
     }
 
     #[cfg(test)]

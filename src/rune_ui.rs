@@ -730,12 +730,17 @@ impl Ui {
         #[cfg(target_os = "linux")]
         let clipboard_unrestorable =
             connect.is_some() && crate::linux::clipboard::wayland_without_data_control();
+        #[cfg(target_os = "linux")]
+        let live_typing_unsupported = connect.is_some()
+            && crate::linux::session::LinuxSession::detect().is_wayland()
+            && !crate::linux::paste::wayland_offers("zwp_input_method_manager_v2");
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
         #[cfg(target_os = "linux")]
         {
             ui.platform.paste = paste;
             ui.platform.clipboard_unrestorable = clipboard_unrestorable;
+            ui.platform.live_typing_unsupported = live_typing_unsupported;
         }
         // A mouse-button shortcut went back to its default: say so once.
         if ui.settings.mouse_shortcut_notice {

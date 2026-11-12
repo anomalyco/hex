@@ -145,8 +145,9 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 
 /// Whether `row` matches a lowercase search.
 fn matches(row: &Row, query: &str) -> bool {
+    let note = row.note.as_deref().unwrap_or("");
     query.is_empty()
-        || [row.title, row.about, group::name(row.group)]
+        || [row.title, row.about, note, group::name(row.group)]
             .iter()
             .any(|copy| copy.to_lowercase().contains(query))
 }
@@ -358,6 +359,15 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut V
                 .color(p.muted())
                 .max_lines(2),
         );
+    if let Some(note) = &entry.note {
+        copy = copy.child(
+            text(note.clone())
+                .key("note")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .max_lines(2),
+        );
+    }
     if let Some(extras) = extras(ui, p, entry, layer) {
         copy = copy.child(extras.mt(8.0));
     }
