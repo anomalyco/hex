@@ -53,11 +53,11 @@ Launch -> read settings.json
 ├── Invalid JSON / not a JSON object -> log why -> defaults in memory
 │   └── launch says so; invalid JSON names serde's line and column
 ├── Unreadable file -> log why -> defaults in memory
-│   └── no launch note; a save fails rather than overwrite it
+│   └── launch says so; saves remain refused even once the file is readable
 └── Save
     ├── Invalid JSON / not an object on disk -> save refused
     │   └── fix or remove the file; original stays exactly as it was
-    ├── This process loaded a file that wasn't an object -> save refused
+    ├── This process couldn't read a settings object -> save refused
     │   └── even after the file is fixed; a restart (or the Linux poll) clears it
     └── Invalid fields -> preserve exact original first
         ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once

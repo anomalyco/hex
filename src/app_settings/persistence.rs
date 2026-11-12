@@ -22,7 +22,7 @@ use crate::policy::Policy;
 // A settings editor and a background migration may save at the same time.
 static WRITER: Mutex<()> = Mutex::new(());
 
-/// Paths whose last read found something other than a JSON object. While one
+/// Paths whose read failed or found something other than a JSON object. While one
 /// is here, a save refuses to write the defaults that read used, even after
 /// the file is fixed, until a fresh read (a control command, the Linux poll,
 /// or a restart) clears it. Keyed by path so tests in one process do not
@@ -65,7 +65,10 @@ impl AppSettings {
                     Some(LoadIssue::Unparseable(reason)) => {
                         Some(LaunchNote::Unparseable(reason.launch_note()))
                     }
-                    Some(LoadIssue::Unreadable) | None => None,
+                    Some(LoadIssue::Unreadable) => Some(LaunchNote::Failed(
+                        "Hex couldn't read settings.json and started with defaults. Your file wasn't changed; restart Hex once it can be read.".into(),
+                    )),
+                    None => None,
                 };
                 LaunchLoad { settings, note }
             }
@@ -135,6 +138,7 @@ impl AppSettings {
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "could not read settings; using defaults without changing the file");
+                remember_unparseable(path, true);
                 return Ok((Self::default(), false, Some(LoadIssue::Unreadable)));
             }
         };
