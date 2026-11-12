@@ -3247,12 +3247,12 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
-    /// A capture stopped with no picture names why the screen gave nothing, not the generic one.
+    /// A capture stopped with no picture names the screen source's failure when it gave one, and
+    /// otherwise the platform's reason, never that failure string.
     #[test]
     fn a_capture_with_no_frames_says_why_the_screen_gave_nothing() {
-        for failure in [None, Some("the screen sharing stream sent no frames")] {
-            let expected = failure.map_or_else(|| no_screen_reason(None), str::to_owned);
-            let session = ScreenCaptureSession {
+        let stop_with = |failure: Option<&str>| {
+            ScreenCaptureSession {
                 failure: Arc::new(Mutex::new(failure.map(str::to_owned))),
                 started_at: Instant::now(),
                 stopping: Arc::new(AtomicBool::new(false)),
@@ -3260,9 +3260,16 @@ mod tests {
                 frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
                 sampler_thread: None,
                 _recording: crate::retention::Recording::start(),
-            };
-            assert_eq!(session.stop().no_screen, Some(expected));
-        }
+            }
+            .stop()
+            .no_screen
+        };
+        let failure = "the screen sharing stream sent no frames";
+        assert_eq!(stop_with(Some(failure)).as_deref(), Some(failure));
+        let reason = stop_with(None).expect("a stopped capture with no frame still says why");
+        assert_ne!(reason, failure);
+        #[cfg(target_os = "linux")]
+        assert_eq!(reason, "the screen recorded no frames");
     }
 
     /// Clicks on `scrawl-helper`'s windows (the SwiftUI capsule, Settings, onboarding) are

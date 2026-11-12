@@ -634,9 +634,6 @@ fn record_x11(sampler: &Sampler) -> Result<Option<super::Movie>> {
         "Recorded {grabs} frames in {} ms (X11)",
         start.elapsed().as_millis()
     ));
-    if grabs == 0 {
-        bail!("the X server sent no frames");
-    }
     let Some(movie) = movie else {
         return Ok(None);
     };

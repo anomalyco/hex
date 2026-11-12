@@ -116,7 +116,10 @@ On Linux                                 // capture.linux
 │   is embedded
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
-│   KDE) or shared memory
+│   KDE) or shared memory. A stream that ends or fails before its first frame
+│   ends the capture with that reason, keeping no voice; a stream with no frame
+│   yet when the person stops is saved with its voice and marks, the summary
+│   saying the stream sent no frames
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
 │   to a 2560 px long edge (1920 for a window, exact even sides padded to 16 px
 │   macroblocks and cropped in SPS) and converted on the video engine, H.264
