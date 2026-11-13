@@ -10,31 +10,29 @@
 //! The listener calls [`started`], [`claim`], and [`ended`] from its own
 //! thread at the dictation's start, finish, and discard or cancel.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::rune_ui::screenshot_thumbnail::editor;
 use editor::{Listen, Talk};
 
 /// Whether the dictation now recording talks over the open shot.
-static OVER: AtomicBool = AtomicBool::new(false);
+static OVER: Mutex<Option<Arc<editor::Narration>>> = Mutex::new(None);
 
 /// A dictation started: with the Lab on and a shot's editor open, it talks
 /// over that shot.
 pub(crate) fn started() {
-    let talking = crate::labs::screenshots() && editor::is_open();
-    let before = OVER.swap(talking, Ordering::SeqCst);
-    if talking {
-        editor::listen(Listen::Recording);
-    } else if before {
-        editor::listen(Listen::Idle);
+    let request = crate::labs::screenshots().then(editor::narration).flatten();
+    *OVER.lock().unwrap_or_else(|e| e.into_inner()) = request.clone();
+    if let Some(request) = request {
+        editor::listen(request, Listen::Recording);
     }
 }
 
 /// The dictation was discarded or cancelled: nothing lands.
 pub(crate) fn ended() {
-    if OVER.swap(false, Ordering::SeqCst) {
-        editor::listen(Listen::Idle);
+    if let Some(request) = OVER.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        editor::listen(request, Listen::Idle);
     }
 }
 
@@ -42,11 +40,13 @@ pub(crate) fn ended() {
 /// shot, or `None` to paste them as usual. A dropped reply (a short, silent,
 /// cancelled, or failed clip) lands nothing.
 pub(crate) fn claim() -> Option<PrintReply> {
-    if !OVER.swap(false, Ordering::SeqCst) {
+    let request = OVER.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+    if !editor::can_claim(&request) {
         return None;
     }
-    editor::listen(Listen::Transcribing);
+    editor::listen(request.clone(), Listen::Transcribing);
     let (reply, printed) = PrintReply::channel();
+    let receiving = request.clone();
     let spawned = std::thread::Builder::new()
         .name("hex-screenshot-narration".into())
         .spawn(move || {
@@ -58,12 +58,13 @@ pub(crate) fn claim() -> Option<PrintReply> {
                 }
                 _ => None,
             };
-            editor::heard(words);
+            editor::heard(receiving, words);
         });
     match spawned {
         Ok(_) => Some(reply),
         Err(error) => {
             tracing::warn!(%error, "could not wait for the words over the screenshot");
+            editor::listen(request, Listen::Idle);
             None
         }
     }

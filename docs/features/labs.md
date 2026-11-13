@@ -2093,7 +2093,8 @@ shortcut uses) opens a second copy of Annotate's capture picker
 ├── Space      -> window mode: a camera replaces the pointer and the window under it highlights;
 │                 Space again -> area
 ├── Click      -> the whole display ("Full screen · Click to capture")
-├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
+├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut;
+│                 a permission reply for that opening cannot reopen it or change a later pick
 └── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
                   the picker, and the pointer left out
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
@@ -2159,8 +2160,14 @@ The list reads an owner-only index in Application Support
 (`captures/index.json`, 0600 in a 0700 folder) with a 240 px PNG thumbnail
 per entry beside it ([history/captures.rs](../../src/history/captures.rs)),
 never the files themselves. A shot is remembered as it saves, a recording
-once its movie is saved, and words said over a shot in the editor replace
-its entry's words. Entries past 30 days or past 500 entries drop with
+once its movie is saved, and each accepted dictation over a shot appends to
+that shot's entry. Closing or replacing its editor before release returns
+the dictation to ordinary paste. After release, its words stay attached to
+the original shot even if the editor closes; they never land on a different
+shot or finish a newer dictation. Escape cancels only that narration request.
+Pure request tests live in `screenshot_thumbnail/editor/narration.rs` and
+`screenshots/picker.rs`; these are not native shortcut or permission proof.
+Entries past 30 days or past 500 entries drop with
 their thumbnails the next time one is added; each keeps at most 4 KiB of
 words. Move to Trash (a card's or the pane's) forgets the entry. The
 editor's Save makes a new file that isn't listed. Writes are atomic, and a

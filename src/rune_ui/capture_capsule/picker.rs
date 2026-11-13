@@ -985,6 +985,15 @@ impl PickerOverlay {
 
     /// Shows the picker for `mode`, or closes it; safe from any thread.
     pub(crate) fn set(&self, mode: Option<Mode>) {
+        self.set_if(mode, || true);
+    }
+
+    /// Check request ownership when the queued update reaches the UI too.
+    pub(crate) fn set_if(
+        &self,
+        mode: Option<Mode>,
+        current: impl FnOnce() -> bool + Send + 'static,
+    ) {
         // Wayland lists no windows to pick from: the portal's picker does.
         #[cfg(target_os = "linux")]
         if mode == Some(Mode::Window) {
@@ -1000,6 +1009,9 @@ impl PickerOverlay {
                 .set_xwayland_input(crate::linux::annotate_overlays::on_xwayland());
         }
         self.overlay.update(move |s, tx| {
+            if !current() {
+                return;
+            }
             s.want = mode;
             tx.wake_after(Duration::ZERO);
         });
