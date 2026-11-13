@@ -23,7 +23,7 @@ use cpal::{SampleFormat, SizedSample, StreamConfig};
 use windows::Win32::Media::Audio::{eCapture, eRender};
 
 use super::SAMPLE_RATE;
-use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, To16k};
+use super::capture::{LiveSource, MIX_HOLD, POLL_INTERVAL, PacketSink, To16k, mix};
 use super::loopback_route::{self, Choice};
 use crate::microphone_activity::{
     EndpointSessions, active_endpoint_sessions, process_canonical_bundle_id,
@@ -32,9 +32,6 @@ use crate::microphone_activity::{
 const QUEUE_CAPACITY: usize = 256;
 /// How often the source checks that the outputs to hear have not changed.
 const ROUTE_CHECK: Duration = Duration::from_secs(2);
-/// 16 kHz samples each output's audio is held back before mixing, so two
-/// outputs playing at once line up instead of following each other.
-const MIX_HOLD: usize = SAMPLE_RATE as usize / 20;
 
 /// Windows needs no consent to hear the outputs.
 pub(super) fn ensure_system_audio() -> Result<()> {
@@ -363,29 +360,6 @@ fn open_output(
     Ok((stream, config.sample_rate))
 }
 
-/// Mixes each output's pending audio up to the latest output's position less
-/// `hold`, leaving the rest for the next call. An output that delivered
-/// nothing (nothing plays on it) adds nothing.
-fn mix(pending: &mut [&mut Vec<f32>], hold: usize) -> Vec<f32> {
-    let length = pending
-        .iter()
-        .map(|samples| samples.len())
-        .max()
-        .unwrap_or(0)
-        .saturating_sub(hold);
-    let mut mixed = vec![0.0f32; length];
-    for samples in pending.iter_mut() {
-        let take = samples.len().min(length);
-        for (out, sample) in mixed.iter_mut().zip(samples.drain(..take)) {
-            *out += sample;
-        }
-    }
-    for sample in &mut mixed {
-        *sample = sample.clamp(-1.0, 1.0);
-    }
-    mixed
-}
-
 fn loopback<T: SizedSample + Send + 'static>(
     device: &cpal::Device,
     config: &StreamConfig,
@@ -541,30 +515,4 @@ pub(super) fn move_to_trash(path: &Path) -> Result<()> {
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::mix;
-
-    #[test]
-    fn audio_on_any_output_reaches_the_system_track() {
-        // Only the headset plays (#1221): its audio is kept, less the hold.
-        let mut speakers = Vec::new();
-        let mut headset = vec![0.25; 10];
-        let mixed = mix(&mut [&mut speakers, &mut headset], 4);
-        assert_eq!(mixed, vec![0.25; 6]);
-        assert_eq!(headset.len(), 4);
-
-        // Both play: their audio adds up sample by sample, clamped.
-        let mut speakers = vec![0.5; 8];
-        let mut headset = vec![0.75; 6];
-        let mixed = mix(&mut [&mut speakers, &mut headset], 2);
-        assert_eq!(mixed, vec![1.0; 6]);
-        assert_eq!((speakers.len(), headset.len()), (2, 0));
-
-        // Nothing plays: nothing is sent.
-        let mut idle = Vec::new();
-        assert!(mix(&mut [&mut idle], 2).is_empty());
-    }
 }

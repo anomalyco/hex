@@ -148,7 +148,7 @@ pub(crate) fn default_output_route() -> OutputRoute {
 /// A sound server sink, as `pactl -f json list sinks` reports it.
 #[cfg(any(target_os = "linux", test))]
 #[derive(serde::Deserialize)]
-struct Sink {
+pub(crate) struct Sink {
     name: String,
     // One non-string value must not hide the rest, so values stay JSON and
     // only strings are read.
@@ -183,6 +183,50 @@ fn classify_sink(default: &str, sinks: &[Sink]) -> OutputRoute {
     }
 }
 
+/// The sinks the sound server lists now, as `pactl -f json list sinks`
+/// describes them, or `None` when it cannot be read.
+#[cfg(target_os = "linux")]
+fn listed_sinks() -> Option<Vec<Sink>> {
+    use crate::linux::input_route;
+
+    let json = input_route::pactl(&["-f", "json", "list", "sinks"])?;
+    serde_json::from_str(&json)
+        .inspect_err(|error| tracing::debug!(%error, "could not read the sound server's sinks"))
+        .ok()
+}
+
+/// The sinks a meeting's system track captures: the default first, then every
+/// other listed sink, so audio playing on an output that is not the default is
+/// still heard (#1801). Each sink appears once. An empty default is skipped;
+/// a default the server does not list is still captured first, as the
+/// default-only capture always did.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn capture_sinks(default: &str, sinks: &[Sink]) -> Vec<String> {
+    let default = default.trim();
+    let mut names: Vec<String> = Vec::with_capacity(sinks.len() + 1);
+    if !default.is_empty() {
+        names.push(default.to_owned());
+    }
+    for sink in sinks {
+        if !names.iter().any(|name| name == &sink.name) {
+            names.push(sink.name.clone());
+        }
+    }
+    names
+}
+
+/// The sinks a meeting's system track captures, default first, or `None` when
+/// the sound server cannot be read or lists nothing, which keeps the caller on
+/// its one untargeted capture of the default output.
+#[cfg(target_os = "linux")]
+pub(crate) fn meeting_sinks() -> Option<Vec<String>> {
+    use crate::linux::input_route;
+
+    let default = input_route::pactl(&["get-default-sink"])?;
+    let sinks = capture_sinks(&default, &listed_sinks()?);
+    (!sinks.is_empty()).then_some(sinks)
+}
+
 /// The route of the sound server's default sink now: `pactl` names it and
 /// describes every sink. A session with only `wpctl`, an older `pactl`
 /// without `get-default-sink`, or JSON Hex can't read is unknown.
@@ -193,15 +237,8 @@ pub(crate) fn default_output_route() -> OutputRoute {
     let Some(default) = input_route::pactl(&["get-default-sink"]) else {
         return OutputRoute::Unknown;
     };
-    let Some(json) = input_route::pactl(&["-f", "json", "list", "sinks"]) else {
+    let Some(sinks) = listed_sinks() else {
         return OutputRoute::Unknown;
-    };
-    let sinks: Vec<Sink> = match serde_json::from_str(&json) {
-        Ok(sinks) => sinks,
-        Err(error) => {
-            tracing::debug!(%error, "could not read the sound server's sinks");
-            return OutputRoute::Unknown;
-        }
     };
     classify_sink(default.trim(), &sinks)
 }
@@ -469,5 +506,70 @@ mod tests {
         assert_eq!(classify_device(DeviceType::Speaker), OutputRoute::Speakers);
         assert_eq!(classify_device(DeviceType::Dock), OutputRoute::Unknown);
         assert_eq!(classify_device(DeviceType::Unknown), OutputRoute::Unknown);
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    #[test]
+    fn every_output_is_captured_with_the_default_first() {
+        // The default sink is captured first, then the others in the sound
+        // server's order, so a call playing on the USB headset is heard
+        // while the built-in speakers stay the default.
+        assert_eq!(
+            capture_sinks("alsa_output.usb-USB_Audio-00.analog-stereo", &sinks()),
+            [
+                "alsa_output.usb-USB_Audio-00.analog-stereo",
+                "alsa_output.pci-0000_00_1f.3.analog-stereo",
+                "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
+                "bluez_output.AA_BB_CC_DD_EE_FF.1",
+                "bluez_output.11_22_33_44_55_66.1",
+            ]
+        );
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    #[test]
+    fn a_default_the_server_does_not_list_is_still_captured_first() {
+        // The default can change between the two `pactl` calls; the capture
+        // it names keeps working, and the listed sinks follow without it
+        // appearing twice.
+        let names = capture_sinks("alsa_output.pci-0000_00_1f.3.analog-stereo.2", &sinks());
+        assert_eq!(
+            names,
+            [
+                "alsa_output.pci-0000_00_1f.3.analog-stereo.2",
+                "alsa_output.pci-0000_00_1f.3.analog-stereo",
+                "alsa_output.usb-USB_Audio-00.analog-stereo",
+                "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
+                "bluez_output.AA_BB_CC_DD_EE_FF.1",
+                "bluez_output.11_22_33_44_55_66.1",
+            ]
+        );
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    #[test]
+    fn a_sink_listed_twice_is_captured_once() {
+        let sinks: Vec<Sink> = serde_json::from_str(
+            r#"[{"name": "alsa_output.pci-0000_00_1f.3.analog-stereo", "properties": {}},
+                {"name": "alsa_output.pci-0000_00_1f.3.analog-stereo", "properties": {}},
+                {"name": "bluez_output.AA_BB_CC_DD_EE_FF.1", "properties": {}}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            capture_sinks("alsa_output.pci-0000_00_1f.3.analog-stereo", &sinks),
+            [
+                "alsa_output.pci-0000_00_1f.3.analog-stereo",
+                "bluez_output.AA_BB_CC_DD_EE_FF.1",
+            ]
+        );
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    #[test]
+    fn nothing_listed_and_no_default_captures_nothing() {
+        // The caller then keeps its one untargeted capture of the default
+        // output rather than starting no monitor at all.
+        assert!(capture_sinks("", &[]).is_empty());
+        assert!(capture_sinks("  \n", &[]).is_empty());
     }
 }

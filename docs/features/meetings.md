@@ -129,11 +129,33 @@ adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
 
 ```ts
 System audio                                      // meetings.system-audio
-├── Linux -> pw-record of the default output's monitor (stream.capture.sink);
-│   the session manager follows a changed default; no pw-record -> recording
-│   refuses with "Install PipeWire's pw-record"; --raw only where its help
-│   lists it (PipeWire 1.3.81+), since 1.2 and older reject it and already
-│   pipe raw audio on -
+├── Linux -> one pw-record per sink, each capturing that output's monitor
+│   (stream.capture.sink with target.object = "<sink>"), mixed into the one
+│   system track (#1801), so a call playing on a headset or dock that isn't
+│   the default output is recorded. Sinks come from `pactl get-default-sink`
+│   and `pactl -f json list sinks`: the default first, then the rest, each
+│   once, and a name that would change pw-record's property string (a quote,
+│   brace, backslash, or whitespace) is skipped. A capture that ends is
+│   dropped while the others keep recording; the source fails only when none
+│   is left, or when no monitor delivered audio for 3 s. A route check every
+│   2 s re-reads the sink list and reopens the source when the set changed,
+│   keeping the open captures when the sound server can't be read or lists
+│   nothing (a changed default alone does not reopen). When that read fails
+│   or lists nothing, one untargeted pw-record follows the default output as
+│   before. No pw-record -> recording refuses with "Install PipeWire's
+│   pw-record"; --raw only where its help lists it (PipeWire 1.3.81+), since
+│   1.2 and older reject it and already pipe raw audio on -
+│   // checks: every_output_is_captured_with_the_default_first,
+│   // a_default_the_server_does_not_list_is_still_captured_first,
+│   // a_sink_listed_twice_is_captured_once,
+│   // nothing_listed_and_no_default_captures_nothing (audio/output_route.rs);
+│   // a_capture_targets_its_own_sink_and_the_fallback_keeps_the_default,
+│   // a_sink_name_that_would_change_the_property_string_is_skipped, and
+│   // a_reordered_sink_list_is_not_a_change (meeting/linux.rs); the mix by
+│   // audio_on_any_output_reaches_the_system_track (meeting/capture.rs, now
+│   // run on every platform); NOT verified by hand: no multi-sink capture has
+│   // been recorded on a real PipeWire session, and whether target.object
+│   // links each pw-record to that sink's monitor is unconfirmed
 └── Windows -> WASAPI loopback (cpal) of the outputs the call app plays on,
     mixed into the one system track, so a call playing on a headset that
     isn't the default output is recorded (#1221). A call recording prefers
@@ -172,7 +194,8 @@ System audio                                      // meetings.system-audio
     // an_app_set_that_grows_beyond_an_app_set_reopens,
     // an_app_set_equal_to_the_microphone_holder_s_does_not_reopen,
     // every_output_keeps_what_is_open; the mix still by
-    // audio_on_any_output_reaches_the_system_track (meeting/windows.rs);
+    // audio_on_any_output_reaches_the_system_track (meeting/capture.rs, shared
+    // with Linux);
     // unverified on real hardware
 Call detection                                    // meetings.detect
 ├── Linux -> one pw-dump --monitor: running Stream/Input/Audio nodes that are
@@ -242,10 +265,12 @@ Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
 Copy section from the tray, dragging the recording capsule to another corner,
 the `hex meetings` and `hex mcp` commands (shared-control), and website names
 for browser calls. Verified: Linux and Windows x64 build and lint
-(`cargo clippy`, `cargo xwin clippy`); the PipeWire monitor capture and
-pw-dump parsing were checked by hand on Arch/niri. Not verified: a recorded
-call end to end on either OS, Windows loopback and session detection on
-hardware.
+(`cargo clippy`, `cargo xwin clippy`); the single default-output PipeWire
+monitor capture and the pw-dump parsing were checked by hand on Arch/niri
+before #1801. Not verified: the multi-sink capture #1801 added has not been
+run against a real PipeWire session (neither has `target.object` been shown to
+link each `pw-record` to that sink's monitor), a recorded call end to end on
+either OS, Windows loopback and session detection on hardware.
 
 ## Sub-features
 
