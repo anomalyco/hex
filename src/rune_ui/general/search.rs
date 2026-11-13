@@ -102,7 +102,11 @@ fn search_row(ui: &Ui, p: Paint) -> El {
         .on_edit(|ui: &mut Ui| &mut ui.general_search)
         .on_change(|ui: &mut Ui, _: &mut Tx| ui.open = None);
     if !ui.general_search.text.is_empty() {
-        field = field.clear_button();
+        field = field.clear_button().on_action(|ui: &mut Ui, tx: &mut Tx| {
+            tx.settle();
+            ui.open = None;
+            ui.general_search.clear();
+        });
     }
     row()
         .key("settings-search-row")

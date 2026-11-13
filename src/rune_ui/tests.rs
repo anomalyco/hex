@@ -433,6 +433,27 @@ fn settings_search_shows_with_its_lab_and_filters_general() {
 }
 
 #[test]
+fn the_settings_search_clear_button_empties_the_field_and_restores_the_pane() {
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    rt.state.settings.labs.settings_search = true;
+    rt.invalidate();
+    settle(&mut rt);
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("microphone"));
+    settle(&mut rt);
+    assert!(rt.find("microphone").is_some());
+    assert!(rt.find("transcription").is_none());
+    tap(&mut rt, "settings-search/action");
+    assert!(
+        rt.state.general_search.text.is_empty(),
+        "the clear button empties the field"
+    );
+    assert!(
+        rt.find("transcription").is_some(),
+        "and the rest of the pane comes back"
+    );
+}
+
+#[test]
 fn settings_search_matches_descriptions() {
     let mut rt = runtime("mac-settings", true, TALL_SIZE);
     rt.state.settings.labs.settings_search = true;

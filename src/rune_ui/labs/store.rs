@@ -25,7 +25,10 @@ pub(in crate::rune_ui) fn search_field(ui: &Ui, p: Paint) -> El {
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.lab_store.search);
     if !ui.lab_store.search.text.is_empty() {
-        field = field.clear_button();
+        field = field.clear_button().on_action(|ui: &mut Ui, tx: &mut Tx| {
+            tx.settle();
+            ui.lab_store.search.clear();
+        });
     }
     field.build(p.k).key("labs-search")
 }
