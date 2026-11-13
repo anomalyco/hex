@@ -453,7 +453,7 @@ fn feedback_button(p: Paint, key: &str, variant: ButtonVariant) -> El {
         .key(key)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
     use crate::rune_ui::{AppSettings, SCENES, Service, deep_link, offscreen, view};

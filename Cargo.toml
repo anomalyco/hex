@@ -55,11 +55,12 @@ transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev 
 # The crates Rune patches in its own workspace (Rune's README, "Depending on
 # Rune"): a dependency's `[patch]` never reaches the workspace that depends on
 # it, and without these Hex builds against stock winit, parley_engine,
-# wgpu-hal and accesskit_windows. Bump the rev with the rune pin above.
+# wgpu-hal, accesskit_windows and tiny-skia-path. Bump the rev with the rune pin above.
 winit = { git = "https://github.com/anomalyco/rune.git", rev = "8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08" }
 parley_engine = { git = "https://github.com/anomalyco/rune.git", rev = "8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08" }
 wgpu-hal = { git = "https://github.com/anomalyco/rune.git", rev = "8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08" }
 accesskit_windows = { git = "https://github.com/anomalyco/rune.git", rev = "8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08" }
+tiny-skia-path = { git = "https://github.com/anomalyco/rune.git", rev = "8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08" }
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }

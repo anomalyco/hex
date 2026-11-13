@@ -5124,7 +5124,7 @@ dependencies = [
  "swash",
  "symphonia",
  "taffy",
- "tiny-skia-path 0.11.4 (git+https://github.com/anomalyco/rune.git?rev=8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08)",
+ "tiny-skia-path",
  "tokio",
  "unicode-segmentation",
  "wasm-bindgen",
@@ -6301,18 +6301,7 @@ dependencies = [
  "cfg-if",
  "log",
  "png 0.17.16",
- "tiny-skia-path 0.11.4 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "tiny-skia-path"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c9e7fc0c2e86a30b117d0462aa261b72b7a99b7ebd7deb3a14ceda95c5bdc93"
-dependencies = [
- "arrayref",
- "bytemuck",
- "strict-num",
+ "tiny-skia-path",
 ]
 
 [[package]]
@@ -6698,7 +6687,7 @@ dependencies = [
  "siphasher",
  "strict-num",
  "svgtypes",
- "tiny-skia-path 0.11.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tiny-skia-path",
  "xmlwriter",
 ]
 
