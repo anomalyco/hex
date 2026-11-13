@@ -15,8 +15,8 @@ use color_eyre::eyre::{Result, eyre};
 use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
-    AutoStop, BrowserCall, BrowserPageMemory, CallPresence, Detection, MeetingCandidate,
-    MeetingDetector, PageWatch, candidate_from_microphone,
+    BrowserCall, BrowserPageMemory, CallEnded, Detection, MeetingCandidate, MeetingDetector,
+    PageWatch, candidate_from_microphone, context_matches_browser,
 };
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
@@ -104,16 +104,15 @@ struct ActiveRecording {
     application: Option<String>,
     app_label: String,
     automatic: bool,
-    presence: CallPresence,
-    /// The browser page this recording was started from, for a browser call
-    /// set to Always record: another meeting on that page ends it. `None` for
-    /// native apps, calendar and manual recordings.
+    /// Whether the call is present, and the automatic stop's grace.
+    call: CallEnded,
+    /// The browser call this recording was started from, for a browser call
+    /// set to Always record with its own meeting id: another call read on that
+    /// page ends it. `None` for native apps, calendar, manual recordings, and
+    /// host-only call sites, which name no call.
     page: Option<PageWatch>,
-    /// The page named another call: the detector's snooze was cleared once so
-    /// the new call gets its own recording.
+    /// The page's evidence ended this call once, for the log.
     switched: bool,
-    /// Labs › Stop when the call ends, armed while the call is over.
-    auto_stop: AutoStop,
     stop: Arc<AtomicBool>,
     updates: Receiver<meeting::RecordingUpdate>,
     reported_started: bool,
@@ -450,17 +449,30 @@ fn handle_command(
             if let Some(active) = recording.as_ref()
                 && !active.stop.swap(true, Ordering::Relaxed)
             {
-                // Stopped by hand: the next call in the same app is offered
-                // once this one has left the microphone for a few seconds.
-                detector.recording_stopped();
+                if active.page.as_ref().is_some_and(PageWatch::is_over) {
+                    // Stopped during the switch the page showed: the call the
+                    // page names is not this one, so it gets its own
+                    // recording rather than staying snoozed as the same call.
+                    detector.forget_offered_call();
+                } else {
+                    // Stopped by hand: the next call in the same app is
+                    // offered once this one has left the microphone for a
+                    // few seconds.
+                    detector.recording_stopped();
+                }
                 let _ = events.send(ControllerEvent::Transcribing);
             }
         }
         ControllerCommand::KeepRecording => {
-            if let Some(active) = recording.as_mut()
-                && active.auto_stop.disarm()
-            {
-                tracing::info!("kept recording after the call ended");
+            if let Some(active) = recording.as_mut() {
+                if active.call.keep_recording() {
+                    tracing::info!("kept recording after the call ended");
+                }
+                // Keeping it keeps it as this call: the page has to read this
+                // call again before another one counts.
+                if let Some(page) = active.page.as_mut() {
+                    page.keep_recording();
+                }
             }
         }
         ControllerCommand::Summarize(id) => start_notes(id, events),
@@ -797,10 +809,9 @@ fn start_recording(
         application,
         app_label: start.app_label,
         automatic,
-        presence: CallPresence::default(),
+        call: CallEnded::default(),
         page,
         switched: false,
-        auto_stop: AutoStop::default(),
         stop,
         updates,
         reported_started: false,
@@ -911,49 +922,55 @@ fn poll_recording(
             }
         };
         // A browser keeps the microphone and its output through a switch to
-        // another meeting, so the page it shows decides: another call named
-        // there after this one went unseen ends this recording.
-        let switched = match (auto_stop, active.page.as_mut(), browser_app.as_ref()) {
-            (true, Some(page), Some(browser)) => {
-                let page_now = browser_watch.context(Some(browser), |_| false);
-                page.observe(&page_now, crate::labs::more_call_apps(), Instant::now())
-            }
-            _ => false,
-        };
+        // another meeting, so the page it shows decides: another call's id
+        // read afresh, after this one was last read, ends this recording. A
+        // latched switch stands even when the browser drops off the
+        // microphone list, so the alert and its grace are not restarted.
+        let switched = auto_stop
+            && page_ended(
+                active.page.as_mut(),
+                browser_app.as_ref(),
+                |browser| browser_watch.page(Some(browser), |_| false),
+                crate::labs::more_call_apps(),
+                Instant::now(),
+            );
         if switched && !active.switched {
             active.switched = true;
-            // The call the page names is not the one this snooze covers.
-            detector.forget_offered_call();
             tracing::info!(application, "the browser's page moved to another meeting");
         }
         // Muting keeps a call on the microphone in some apps and off it in
         // others, but its audio output stays open until it hangs up (#835).
-        let present = (on_microphone || (auto_stop && call_app_playing(&application))) && !switched;
+        let present = call_is_present(
+            on_microphone,
+            auto_stop && call_app_playing(&application),
+            switched,
+        );
         if present {
             detector.keep_snooze_alive();
         }
-        if present || !auto_stop {
-            active.auto_stop.disarm();
-        }
-        if active.presence.observe(present) {
+        let call_end = active.call.observe(present, auto_stop);
+        if call_end.ended {
             tracing::info!(
                 application,
                 auto_stop,
                 "meeting application released the microphone"
             );
-            if auto_stop {
-                active.auto_stop.arm();
-            }
             let _ = events.send(ControllerEvent::CallEnded {
                 app: active.app_label.clone(),
                 auto_stop,
             });
         }
-        if active.auto_stop.due() {
+        if call_end.stop {
             tracing::info!(
                 application,
                 "meeting recording stopped automatically after its call ended"
             );
+            if active.page.as_ref().is_some_and(PageWatch::is_over) {
+                // The recording ended because the browser had already moved
+                // on: the call its page names is not this one, so it gets its
+                // own recording rather than staying snoozed as the same call.
+                detector.forget_offered_call();
+            }
             if !active.stop.swap(true, Ordering::Relaxed) {
                 let _ = events.send(ControllerEvent::Transcribing);
             }
@@ -978,6 +995,33 @@ fn recording_reads_browser(recording: &Option<ActiveRecording>) -> bool {
             && !active.stop.load(Ordering::Relaxed)
             && stops_when_call_ends(active.automatic, crate::labs::stop_when_call_ends())
     })
+}
+
+/// Whether the browser's page has ended this recording. A new page is read
+/// only while the browser is the call app on the microphone; once the
+/// evidence latched, it stands even if the app drops off that list (a failed
+/// query, or a browser that released the microphone).
+fn page_ended(
+    page: Option<&mut PageWatch>,
+    browser: Option<&ActiveMicrophoneApplication>,
+    read: impl FnOnce(&ActiveMicrophoneApplication) -> PageAnswer,
+    more_call_apps: bool,
+    now: Instant,
+) -> bool {
+    match (page, browser) {
+        (Some(page), Some(browser)) => {
+            let answer = read(browser);
+            page.observe(&answer.page, answer.fresh, more_call_apps, now)
+        }
+        (Some(page), None) => page.is_over(),
+        (None, _) => false,
+    }
+}
+
+/// Whether the recording's call is present: its app on the microphone, or
+/// still playing output with the lab on, unless the browser's page ended it.
+fn call_is_present(on_microphone: bool, playing: bool, switched: bool) -> bool {
+    (on_microphone || playing) && !switched
 }
 
 /// Whether the call app still plays audio; a failed read counts as playing,
@@ -1153,6 +1197,13 @@ struct BrowserWatch {
     memory: BrowserPageMemory,
 }
 
+/// A browser's page and whether the browser answered it just now, rather than
+/// it being the page remembered from an earlier answer.
+struct PageAnswer {
+    page: ContextSnapshot,
+    fresh: bool,
+}
+
 impl BrowserWatch {
     fn new(query: TabQuery) -> Self {
         Self {
@@ -1171,20 +1222,39 @@ impl BrowserWatch {
         application: Option<&ActiveMicrophoneApplication>,
         snoozed: impl Fn(&str) -> bool,
     ) -> ContextSnapshot {
+        self.page(application, snoozed).page
+    }
+
+    fn page(
+        &mut self,
+        application: Option<&ActiveMicrophoneApplication>,
+        snoozed: impl Fn(&str) -> bool,
+    ) -> PageAnswer {
+        let absorbed = PageAnswer {
+            page: ContextSnapshot::default(),
+            fresh: false,
+        };
         let browser = application.filter(|application| application.is_browser());
         let Some((application, bundle_id)) =
             browser.and_then(|application| Some((application, application.canonical_bundle_id()?)))
         else {
             self.reset();
-            return ContextSnapshot::default();
+            return absorbed;
         };
         if snoozed(bundle_id) {
             self.reset();
-            return ContextSnapshot::default();
+            return absorbed;
         }
         let now = Instant::now();
-        let page = self.probe.page(bundle_id, now);
-        self.memory.recall(application, page, now)
+        let read = self.probe.page(bundle_id, now);
+        // The browser answered this pass, rather than the read being empty or
+        // one of another browser's.
+        let fresh = context_matches_browser(bundle_id, &application.name, &read)
+            && (read.browser_url.is_some() || read.window_title.is_some());
+        PageAnswer {
+            page: self.memory.recall(application, read, now),
+            fresh,
+        }
     }
 }
 
@@ -1285,27 +1355,32 @@ mod tests {
         assert!(!stops_when_call_ends(false, false));
     }
 
-    #[test]
-    fn keep_recording_disarms_a_pending_automatic_stop() {
-        let (events, _received) = mpsc::sync_channel(4);
-        let (_update_sender, updates) = mpsc::sync_channel(1);
-        let mut recording = Some(ActiveRecording {
-            title: "WhatsApp call".into(),
-            application: Some("net.whatsapp.WhatsApp".into()),
-            app_label: "WhatsApp".into(),
-            automatic: true,
-            presence: CallPresence::default(),
+    fn test_recording(application: Option<&str>, automatic: bool) -> ActiveRecording {
+        let (_sender, updates) = mpsc::sync_channel(1);
+        ActiveRecording {
+            title: "Call".into(),
+            application: application.map(Into::into),
+            app_label: "Call".into(),
+            automatic,
+            call: CallEnded::default(),
             page: None,
             switched: false,
-            auto_stop: AutoStop::default(),
             stop: Arc::new(AtomicBool::new(false)),
             updates,
             reported_started: true,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
-        });
-        if let Some(active) = recording.as_mut() {
-            active.auto_stop.arm();
         }
+    }
+
+    #[test]
+    fn keep_recording_disarms_a_pending_automatic_stop() {
+        let (events, _received) = mpsc::sync_channel(4);
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut recording = Some(test_recording(Some("net.whatsapp.WhatsApp"), true));
+        let active = recording.as_mut().unwrap();
+        assert!(!active.call.observe_at(false, true, at(0)).ended);
+        assert!(active.call.observe_at(false, true, at(3_000)).ended);
         handle_command(
             &mut recording,
             &mut None,
@@ -1316,28 +1391,154 @@ mod tests {
             &events,
         );
         let active = recording.as_mut().unwrap();
-        assert!(!active.auto_stop.disarm(), "nothing is left to stop");
         assert!(!active.stop.load(Ordering::Relaxed));
+        assert!(
+            !active.call.observe_at(false, true, at(60_000)).stop,
+            "a kept recording stopped after its absence"
+        );
+        assert!(!active.call.keep_recording(), "nothing is left to stop");
+    }
+
+    /// A Brave tab on a Meet call.
+    fn meet_tab(code: &str) -> ContextSnapshot {
+        ContextSnapshot {
+            application: Some("Brave Browser".into()),
+            browser_url: Some(url::Url::parse(&format!("https://meet.google.com/{code}")).unwrap()),
+            window_title: Some("Meet - Design sync".into()),
+            ..ContextSnapshot::default()
+        }
+    }
+
+    fn meet_page_watch() -> PageWatch {
+        let meet = candidate_from_microphone(&brave(), &meet_tab("abc-defg-hij"), false).unwrap();
+        PageWatch::new(meet.browser_call().expect("a Meet call keeps its code"))
+    }
+
+    #[test]
+    fn a_latched_browser_switch_survives_the_browser_leaving_the_microphone_list() {
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut page = meet_page_watch();
+        assert!(!page.observe(&meet_tab("abc-defg-hij"), true, false, at(0)));
+        assert!(!page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(31_000)));
+        assert!(page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(52_000)));
+
+        // The browser is not in the microphone list this pass (a failed
+        // query, or a released microphone): the latched switch still stands,
+        // so the alert and its grace are not restarted.
+        let ended = page_ended(
+            Some(&mut page),
+            None,
+            |_| panic!("a page is read without the browser on the microphone"),
+            false,
+            at(53_000),
+        );
+        assert!(ended);
+        assert!(!call_is_present(false, false, ended));
+        assert!(!call_is_present(true, false, ended));
+        assert!(call_is_present(true, false, false));
+        assert!(call_is_present(false, true, false));
+    }
+
+    #[test]
+    fn a_kept_then_stopped_switched_recording_keeps_its_call_snoozed() {
+        let (events, _received) = mpsc::sync_channel(8);
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let meet = candidate_from_microphone(&brave(), &meet_tab("abc-defg-hij"), false).unwrap();
+
+        // Detection offered this call, so its app is snoozed on it.
+        let mut detector = MeetingDetector::default();
+        assert!(
+            detector
+                .detect_at(Some(meet.clone()), &[], at(0), 0)
+                .is_none()
+        );
+        assert_eq!(
+            detector.detect_at(Some(meet.clone()), &[], at(3_000), 0),
+            Some(Detection::Offer(meet.clone()))
+        );
+
+        let mut recording = Some(test_recording(Some("com.brave.Browser"), true));
+        {
+            let active = recording.as_mut().unwrap();
+            let mut page = meet_page_watch();
+            assert!(!page.observe(&meet_tab("abc-defg-hij"), true, false, at(0)));
+            assert!(!page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(31_000)));
+            assert!(page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(52_000)));
+            active.page = Some(page);
+            active.switched = true;
+        }
+
+        // Keep recording keeps it as this call, so the hand stop is the
+        // ordinary one: this call stays snoozed and is not recorded again.
+        for command in [ControllerCommand::KeepRecording, ControllerCommand::Stop] {
+            handle_command(
+                &mut recording,
+                &mut None,
+                &mut detector,
+                &mut Reminders::default(),
+                command,
+                true,
+                &events,
+            );
+        }
+        assert!(detector.snoozes(&meet), "call A stays snoozed");
+        assert!(
+            detector
+                .detect_at(Some(meet.clone()), &[], at(60_000), 0)
+                .is_none()
+        );
+        assert!(recording.as_ref().unwrap().stop.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn keeping_a_switched_recording_keeps_it_as_this_call() {
+        let (events, _received) = mpsc::sync_channel(4);
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut recording = Some(test_recording(Some("com.brave.Browser"), true));
+
+        let mut page = meet_page_watch();
+        assert!(!page.observe(&meet_tab("abc-defg-hij"), true, false, at(0)));
+        assert!(!page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(31_000)));
+        assert!(page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(52_000)));
+        let active = recording.as_mut().unwrap();
+        active.page = Some(page);
+        active.switched = true;
+        assert!(!active.call.observe_at(false, true, at(52_000)).ended);
+        assert!(active.call.observe_at(false, true, at(55_000)).ended);
+
+        handle_command(
+            &mut recording,
+            &mut None,
+            &mut MeetingDetector::default(),
+            &mut Reminders::default(),
+            ControllerCommand::KeepRecording,
+            true,
+            &events,
+        );
+
+        let active = recording.as_mut().unwrap();
+        assert!(!active.stop.load(Ordering::Relaxed));
+        {
+            let page = active.page.as_mut().unwrap();
+            assert!(!page.is_over());
+            // The page still names the other call, but this absence was kept.
+            assert!(!page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(60_000)));
+        }
+        assert!(!active.call.observe_at(false, true, at(60_000)).stop);
+        // Reading this call again is what lets a later switch count.
+        let page = active.page.as_mut().unwrap();
+        assert!(!page.observe(&meet_tab("abc-defg-hij"), true, false, at(70_000)));
+        assert!(!page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(71_000)));
+        assert!(page.observe(&meet_tab("xyz-wxyz-xyz"), true, false, at(92_000)));
     }
 
     #[test]
     fn an_import_is_refused_while_a_recording_runs_or_another_import_does() {
         let (events, received) = mpsc::sync_channel(4);
-        let (_update_sender, updates) = mpsc::sync_channel(1);
-        let mut recording = Some(ActiveRecording {
-            title: "Zoom call".into(),
-            application: None,
-            app_label: "Zoom".into(),
-            automatic: false,
-            presence: CallPresence::default(),
-            page: None,
-            switched: false,
-            auto_stop: AutoStop::default(),
-            stop: Arc::new(AtomicBool::new(false)),
-            updates,
-            reported_started: true,
-            worker: thread::spawn(|| Err(eyre!("not recording"))),
-        });
+        let mut recording = Some(test_recording(None, false));
         start_import(
             &mut recording,
             &mut None,
@@ -1399,7 +1600,7 @@ mod tests {
             .browser
             .expect("a browser call recording keeps its page");
         assert_eq!(page.site, "meet.google.com");
-        assert_eq!(page.call.as_deref(), Some("abc-defg-hij"));
+        assert_eq!(page.call, "abc-defg-hij");
 
         let zoom = candidate_from_microphone(
             &ActiveMicrophoneApplication {

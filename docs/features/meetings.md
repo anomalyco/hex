@@ -306,11 +306,18 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          a gap included (sleep, Meetings off, a recording): an app that left
          the microphone during a recording is not snoozed for another minute
      ├── A call whose page names a meeting code (Google Meet's, from the
-     │   address or a code-only tab title) is snoozed by that code: another
-     │   code in the same browser is a new call and is offered or recorded;
-     │   a `/meet/<code>` address (Arc opening a Calendar link) resolves to
-     │   its code, and a page without a code still counts as the snoozed
-     │   call (#1113)
+     │   address or a code-only tab title, or a Teams `/meet/<id>` /
+     │   `#/meet/<id>`) is snoozed by that code: another code in the same
+     │   browser is a new call and is offered or recorded; a `/meet/<code>`
+     │   address (Arc opening a Calendar link) resolves to its code
+     │   ├── An id tells services apart too: a snoozed Meet call no longer
+     │   │   covers a Teams join page in that browser (nor a Teams meeting a
+     │   │   Meet one), while other Teams pages name no id and stay snoozed
+     │   │   by the app. Checks:
+     │   │   `a_teams_join_page_is_not_snoozed_by_a_meet_call_in_the_same_browser`,
+     │   │   `only_a_call_with_its_own_id_is_another_meeting`,
+     │   │   `teams_addresses_name_their_meeting_id`
+     │   └── A page without a code still counts as the snoozed call (#1113)
      └── Stopped by hand -> the snooze ends once the call app has been off
          the microphone for 3 s (seen while transcribing too), so the next
          call in the same app is offered; a dismissed offer keeps the minute
@@ -430,11 +437,12 @@ limit) never holds up the loop. A browser that just started holding the
 microphone is queried once a second for 30 s, enough to name the call before
 the 20 s unknown-page threshold; after that it is queried every 30 s, and the
 page remembered from the last answer names the call in between. Answers and
-the remembered page are dropped
-while Hex records, Meetings is off, the browser is snoozed for a call without
-a meeting code, or no browser holds
-the microphone; a query in flight at that moment is not repeated beside itself,
-and its answer is discarded. When a browser's page is found for a run already
+the remembered page are dropped while Meetings is off, the browser is
+snoozed for a call without a meeting code, or no browser holds
+the microphone, and while Hex records — except an automatic browser recording
+with Labs › Stop when the call ends on, which keeps reading the page it was
+started from (see [meetings.auto-stop](#record)); a query in flight at that
+moment is not repeated beside itself, and its answer is discarded. When a browser's page is found for a run already
 under way (the first pass had no answer yet), the run keeps counting, now
 toward the known service's 2 s. When no answer names a page, the last page a browser showed while
 it held the microphone names the call for 60 s (`BrowserPageMemory`), so the
@@ -732,32 +740,67 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      its Core Audio processes plays output (WhatsApp keeps the microphone
      while muted; its output stays open until hang-up)
   -> A browser keeps both through a switch to another meeting, so its page
-     decides too: a page that keeps naming another call (another Meet code,
-     another call site) after this recording's own went unseen for about
-     20 s counts as the call ended, and the new call is detected and
-     recorded as its own rather than staying snoozed as the old one
-     ├── A page naming no call (another tab) or one that can't be read is no
-     │   evidence: switching tabs never stops a recording
-     ├── Ignored for the first 30 s of a recording, while a Meet link
-     │   redirects to the meeting's own address
-     └── Only a recording started from a browser's page; native apps and
-         calendar recordings are judged by microphone and output alone
+     decides too: the page must name another call with an id of its own
+     (another Meet code, a Teams `/meet/<id>` or `#/meet/<id>`), the same id
+     read fresh twice at least 20 s apart with no page naming no call
+     between, before this recording counts as ended
+     ├── Then the new call is detected and recorded as its own rather than
+     │   staying snoozed as the old one; the stop arms as below
+     ├── A remembered page is no evidence: the two reads must be answers the
+     │   browser gave (its tab query runs 1 s apart for 30 s, then every
+     │   30 s, so a switch is noticed within about a minute)
+     ├── Another tab, a page naming no call, a host-only call site (Teams'
+     │   root page, WhatsApp, Gather, Messenger, Google Voice) and a page
+     │   that can't be read leave the verdict as it is once it latched, and
+     │   a named page read afresh before then starts the run over: switching
+     │   tabs never stops a recording
+     ├── Once the two reads hold, only a fresh read of the recorded call
+     │   cancels it; the alert and Keep recording behave as below
+     ├── The first 30 s take a same-site redirect as the recording's own
+     │   identity, and only before this call was ever read and only when the
+     │   recorded id is not a real meeting id (a Meet `/lookup/<…>` link's
+     │   `lookup`), never for a code or a Teams id
+     └── Only a recording started from a browser call with its own id;
+         native apps, calendar recordings, and host-only sites are judged by
+         microphone and output alone
   -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
      unless you keep recording."
      ├── App back on the microphone or output within 30 s -> nothing stops
-     ├── Keep recording -> nothing stops for this absence; leaving again re-arms
-     │   (a page still naming another call keeps the absence going, so the
-     │   kept recording does not re-arm while that lasts)
+     ├── Keep recording -> keeps this recording as this call: nothing stops
+     │   for this absence, its snooze stays, and a later hand stop snoozes
+     │   this call; the page must read this call again before another
+     │   switch counts
      ├── Stop & transcribe -> stops now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
          "meeting recording stopped automatically after its call ended"
+  -> A latched switch stands when the browser drops off the microphone list
+     (a failed query, a released microphone): the alert and its grace are not
+     restarted
   -> Off -> exactly as above: microphone only, nothing stops
-  Checks: another_meeting_in_the_same_browser_ends_a_recorded_call,
-  another_call_ends_a_browser_recording_only_after_its_own_went_unseen,
+  Limits: a Meet tab that keeps the same code on its Rejoin screen, and a
+  call whose page names no id (host-only sites), are not detected as a
+  switch and fall back to the old behaviour; a Teams call whose address drops
+  its id after joining can't be re-confirmed after Keep Recording; the
+  identity a Meet `/lookup/…` link redirects to is never adopted once the
+  call was read; not observed on a real browser call
+  Checks: only_a_call_with_its_own_id_is_another_meeting,
+  teams_addresses_name_their_meeting_id,
+  a_call_without_its_own_id_keeps_no_page,
+  another_call_ends_a_browser_recording_only_after_two_fresh_reads,
+  another_call_needs_the_same_id_between_its_two_reads,
+  a_sustained_switch_stays_over_until_the_recorded_call_is_read_again,
   a_page_naming_no_call_never_ends_a_browser_recording,
+  a_meet_lookup_address_becomes_the_recording_s_identity,
+  a_read_of_the_recorded_call_stops_the_redirect_from_adopting,
+  a_brief_other_meeting_never_replaces_a_recorded_call_s_identity,
+  a_teams_join_page_is_not_snoozed_by_a_meet_call_in_the_same_browser,
+  a_switched_recording_alerts_then_stops_after_the_grace_unless_kept,
+  a_hand_stop_after_keeping_a_switched_recording_keeps_its_call_snoozed,
+  a_kept_then_stopped_switched_recording_keeps_its_call_snoozed,
+  a_latched_browser_switch_survives_the_browser_leaving_the_microphone_list,
   a_switched_browser_call_is_recorded_again_without_the_minute,
-  a_browser_call_recording_keeps_its_page_and_a_zoom_one_does_not;
-  not observed on a real browser call
+  keeping_a_switched_recording_keeps_it_as_this_call,
+  a_browser_call_recording_keeps_its_page_and_a_zoom_one_does_not
 
 ### Import Audio (Labs)
 

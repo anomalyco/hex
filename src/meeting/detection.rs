@@ -324,18 +324,13 @@ impl MeetingCandidate {
 
 /// Notices when the call application behind a recording stops using the
 /// microphone, so the user can choose to stop. It never stops anything.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct CallPresence {
     absent: Option<Run>,
     prompted: bool,
 }
 
 impl CallPresence {
-    /// Returns true once per absence that lasts long enough.
-    pub fn observe(&mut self, present: bool) -> bool {
-        self.observe_at(present, Instant::now())
-    }
-
     fn observe_at(&mut self, present: bool, now: Instant) -> bool {
         if present {
             self.absent = None;
@@ -359,17 +354,12 @@ pub const AUTO_STOP_GRACE: Duration = Duration::from_secs(30);
 /// started on its own stops, armed when [`CallPresence`] reports the call
 /// ended and dropped when the call app comes back or the user keeps
 /// recording.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AutoStop {
     deadline: Option<Instant>,
 }
 
 impl AutoStop {
-    /// The call ended: stop after the grace.
-    pub fn arm(&mut self) {
-        self.arm_at(Instant::now());
-    }
-
     fn arm_at(&mut self, now: Instant) {
         self.deadline = Some(now + AUTO_STOP_GRACE);
     }
@@ -378,11 +368,6 @@ impl AutoStop {
     /// off: nothing stops. Returns whether a stop was pending.
     pub fn disarm(&mut self) -> bool {
         self.deadline.take().is_some()
-    }
-
-    /// Whether the grace has run out; true once, then disarmed.
-    pub fn due(&mut self) -> bool {
-        self.due_at(Instant::now())
     }
 
     fn due_at(&mut self, now: Instant) -> bool {
@@ -395,118 +380,273 @@ impl AutoStop {
 }
 
 /// How long after a browser recording starts its page is read before another
-/// call on it can end the recording: a Meet link redirects from a lookup
-/// address to the meeting's own, which would otherwise look like a switch.
+/// call on it can end the recording: a Meet link resolves from a lookup
+/// address to the meeting's own code right after the call is joined, and that
+/// redirect must not read as a switch.
 const IDENTITY_SETTLE: Duration = Duration::from_secs(30);
 
-/// The browser page a recording was started from (a browser call set to Always
-/// record): its website and meeting code, so a page naming another call can
-/// end it (#1594).
+/// The browser call a recording was started from (a browser call set to Always
+/// record): its website and own meeting id, so a page naming another call can
+/// end it (#1774). Only a page whose call has its own id can be compared; a
+/// host-only call site (Teams' root page, WhatsApp, Gather) names no call.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserCall {
     /// The website host that names the call.
     pub site: String,
-    /// The call's own meeting code when its page names one (a Google Meet
-    /// code), so two Meet calls in one browser are told apart.
-    pub call: Option<String>,
+    /// The call's own id: a Google Meet code, or a Teams meeting id.
+    pub call: String,
 }
 
 /// What a browser recording's page says about its call.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum PageCall {
-    /// The page still names the recording's call.
+    /// The page names the recording's own call.
     Same,
-    /// The page names another call: another Meet code, or another call site.
-    Other,
-    /// The page is readable but names no call: the person may be on another
-    /// tab, so this is no evidence either way.
+    /// The page names another call, with an id of its own.
+    Other(BrowserCall),
+    /// The page was read but names no call with its own id: another tab, or a
+    /// host-only call site such as Teams' root page.
     NoCallNamed,
-    /// Nothing could be read this pass.
+    /// Nothing could be read.
     Unreadable,
 }
 
 impl BrowserCall {
-    /// What `page` says about this call. A page that names no call, or one
-    /// that could not be read, says nothing.
-    fn page_call(&self, page: &ContextSnapshot, more_call_apps: bool) -> PageCall {
+    /// The call `page` names with its own id, when it names one. A page that
+    /// names no call, a host-only call site, a native application's title, and
+    /// a page that answered nothing all name none.
+    fn named(page: &ContextSnapshot, more_call_apps: bool) -> Option<Self> {
         if page.application.is_none() && page.browser_url.is_none() && page.window_title.is_none() {
-            return PageCall::Unreadable;
+            return None;
         }
-        let Some(candidate) = candidate_from_context(page, more_call_apps) else {
-            return PageCall::NoCallNamed;
-        };
+        let candidate = candidate_from_context(page, more_call_apps)?;
         // A call site's candidate names no site of its own (the watcher's
         // microphone candidate adds it), so the page's address supplies it.
-        let site = candidate.site.clone().or_else(|| {
+        let site = candidate.site.or_else(|| {
             page.browser_host()
                 .map(|host| call_site_host(host, more_call_apps))
-        });
-        match site.as_deref() {
-            // A native application's title says nothing about the browser's
-            // call.
+        })?;
+        Some(Self {
+            site,
+            call: candidate.call?,
+        })
+    }
+
+    /// Whether `call` is a real meeting id for its site, rather than a path
+    /// segment recorded before the call's own address resolved (the `lookup`
+    /// in a Meet `/lookup/…` link, or a nickname path).
+    fn has_meeting_id(&self) -> bool {
+        self.site != GOOGLE_MEET_SITE || is_google_meet_code(&self.call)
+    }
+
+    /// What `page` says about this call. Ids are compared, never hosts: a
+    /// browser on another call site's root page names no call of its own.
+    fn page_call(&self, page: &ContextSnapshot, more_call_apps: bool) -> PageCall {
+        match Self::named(page, more_call_apps) {
+            Some(named) if named.call == self.call => PageCall::Same,
+            Some(named) => PageCall::Other(named),
+            None if page.application.is_some()
+                || page.browser_url.is_some()
+                || page.window_title.is_some() =>
+            {
+                PageCall::NoCallNamed
+            }
             None => PageCall::Unreadable,
-            Some(site) if site != self.site => PageCall::Other,
-            Some(_) => match (&self.call, &candidate.call) {
-                (Some(mine), Some(theirs)) if mine != theirs => PageCall::Other,
-                _ => PageCall::Same,
-            },
         }
     }
 }
 
 impl MeetingCandidate {
-    /// The browser page this call was detected on; `None` for a native app,
-    /// and for a browser whose page names no site.
+    /// The browser call this candidate is, when its page names the call's own
+    /// id; `None` for a native app, a host-only call site, and a browser whose
+    /// page names no site. A recording without an id is never ended by a page.
     pub fn browser_call(&self) -> Option<BrowserCall> {
         Some(BrowserCall {
             site: self.site.clone()?,
-            call: self.call.clone(),
+            call: self.call.clone()?,
         })
     }
 }
 
 /// Watches the page of a browser recording (Labs › Stop when the call ends). A
 /// browser that keeps the microphone and its output through a switch to
-/// another meeting reads as present, so only a page that names another call,
-/// after the recording's own went unseen for [`BROWSER_STABLE_FOR`], counts as
-/// over. A page naming no call, or one that can't be read, changes nothing.
+/// another meeting reads as present, so the page it shows decides: another
+/// call's id has to be read afresh twice, [`BROWSER_STABLE_FOR`] apart, with
+/// the recording's own call never read between them. A remembered page, a
+/// page naming no call, and silence are no evidence. Once that evidence holds,
+/// only a fresh read of the recording's own call cancels it.
 #[derive(Debug)]
 pub struct PageWatch {
     identity: BrowserCall,
-    /// Whether an answer has been read yet: the settle window and the absence
-    /// run count from the first.
+    /// Whether a page has been read yet: the settle window counts from here.
     watching: bool,
     started: Instant,
-    /// When this call was last named on the page.
-    last_same: Instant,
+    /// The first fresh read of another call since this one was last read,
+    /// with that call's id: both reads must name the same meeting.
+    other: Option<(String, Instant)>,
+    /// The sustained evidence held; only a fresh read of this call clears it.
+    over: bool,
+    /// Keep recording covered an absence: another call's page says nothing
+    /// more until this call is read again (as an app that comes back and
+    /// leaves again re-arms).
+    kept: bool,
+    /// This call was read on the page, so a redirect can no longer replace
+    /// its recorded identity.
+    seen_recorded: bool,
 }
 
 impl PageWatch {
     pub fn new(identity: BrowserCall) -> Self {
-        let now = Instant::now();
         Self {
             identity,
             watching: false,
-            started: now,
-            last_same: now,
+            started: Instant::now(),
+            other: None,
+            over: false,
+            kept: false,
+            seen_recorded: false,
         }
     }
 
     /// Whether this recording's call is over, by what its page shows.
-    pub fn observe(&mut self, page: &ContextSnapshot, more_call_apps: bool, now: Instant) -> bool {
-        let call = self.identity.page_call(page, more_call_apps);
+    /// `fresh` says the browser answered this pass, rather than the page being
+    /// one remembered from an earlier answer.
+    pub fn observe(
+        &mut self,
+        page: &ContextSnapshot,
+        fresh: bool,
+        more_call_apps: bool,
+        now: Instant,
+    ) -> bool {
         if !self.watching {
             self.watching = true;
             self.started = now;
-            self.last_same = now;
         }
-        if call == PageCall::Same {
-            self.last_same = now;
-            return false;
+        // Nothing was read this pass: a remembered page is no evidence, so it
+        // neither builds nor cancels a switch.
+        if !fresh {
+            return self.over;
         }
-        call == PageCall::Other
-            && now.saturating_duration_since(self.started) >= IDENTITY_SETTLE
-            && now.saturating_duration_since(self.last_same) >= BROWSER_STABLE_FOR
+        match self.identity.page_call(page, more_call_apps) {
+            // A page that could not be read changes nothing either.
+            PageCall::Unreadable => self.over,
+            PageCall::NoCallNamed => {
+                // A page read afresh that names no call says the other call
+                // is not there, so a switch still being built starts over. A
+                // latched one stays latched.
+                if !self.over {
+                    self.other = None;
+                }
+                self.over
+            }
+            PageCall::Same => {
+                self.other = None;
+                self.over = false;
+                self.kept = false;
+                self.seen_recorded = true;
+                false
+            }
+            PageCall::Other(named) => {
+                if self.kept {
+                    return false;
+                }
+                // The call's own address resolving to its code right after
+                // the recording started: take that page as this call rather
+                // than another one. Only while this call was never read
+                // (nothing to compare against yet) and its recorded id was a
+                // path the address had not resolved past (a Meet `/lookup/…`
+                // link's `lookup`), so a glance at another same-site meeting
+                // can never replace a real id.
+                if now.saturating_duration_since(self.started) < IDENTITY_SETTLE {
+                    if !self.seen_recorded
+                        && !self.identity.has_meeting_id()
+                        && named.site == self.identity.site
+                    {
+                        self.identity = named;
+                        self.seen_recorded = true;
+                        self.other = None;
+                    }
+                    return false;
+                }
+                if self.over {
+                    return true;
+                }
+                match &self.other {
+                    Some((id, first)) if *id == named.call => {
+                        self.over = now.saturating_duration_since(*first) >= BROWSER_STABLE_FOR;
+                        self.over
+                    }
+                    // Another call's id starts the run over: two reads of the
+                    // same meeting, not two reads of any.
+                    _ => {
+                        self.other = Some((named.call, now));
+                        false
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether the sustained evidence holds, so the recording's stop should
+    /// let the call the page names start its own.
+    pub fn is_over(&self) -> bool {
+        self.over
+    }
+
+    /// Keep recording on the call-ended capsule: this absence never ends it,
+    /// and the page has to read this call again before another one counts.
+    pub fn keep_recording(&mut self) {
+        self.kept = true;
+        self.other = None;
+        self.over = false;
+    }
+}
+
+/// A recording's call-ended state: the presence run that raises the alert
+/// once per absence, and the automatic stop's grace after it (Labs › Stop when
+/// the call ends).
+#[derive(Default, Debug)]
+pub struct CallEnded {
+    presence: CallPresence,
+    auto_stop: AutoStop,
+}
+
+/// What one pass of [`CallEnded::observe_at`] decided.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CallEnd {
+    /// The call has been absent long enough: raise the capsule once per
+    /// absence and, with the lab on, arm the automatic stop.
+    pub ended: bool,
+    /// The grace ran out: stop now.
+    pub stop: bool,
+}
+
+impl CallEnded {
+    pub fn observe(&mut self, present: bool, auto_stop: bool) -> CallEnd {
+        self.observe_at(present, auto_stop, Instant::now())
+    }
+
+    /// `present` is false while the call app is off the microphone and its
+    /// output, and while the browser's page names another call during one Hex
+    /// started on its own.
+    pub fn observe_at(&mut self, present: bool, auto_stop: bool, now: Instant) -> CallEnd {
+        if present || !auto_stop {
+            self.auto_stop.disarm();
+        }
+        let ended = self.presence.observe_at(present, now);
+        if ended && auto_stop {
+            self.auto_stop.arm_at(now);
+        }
+        CallEnd {
+            ended,
+            stop: self.auto_stop.due_at(now),
+        }
+    }
+
+    /// Keep recording on the call-ended capsule: this absence never stops the
+    /// recording. Leaving again arms it anew.
+    pub fn keep_recording(&mut self) -> bool {
+        self.auto_stop.disarm()
     }
 }
 
@@ -695,7 +835,7 @@ impl MeetingDetector {
 
     /// Whether `candidate` is the offered call: the same key, or the same
     /// app unless both name different meeting codes.
-    fn snoozes(&self, candidate: &MeetingCandidate) -> bool {
+    pub(crate) fn snoozes(&self, candidate: &MeetingCandidate) -> bool {
         if self.offered.as_deref() == Some(&candidate.key) {
             return true;
         }
@@ -749,7 +889,7 @@ impl MeetingDetector {
         )
     }
 
-    fn detect_at(
+    pub(crate) fn detect_at(
         &mut self,
         candidate: Option<MeetingCandidate>,
         choices: &[MeetingProviderChoice],
@@ -891,7 +1031,13 @@ pub fn candidate_from_context(
         && let Some(host) = context.browser_host()
         && let Some(source) = call_site_source(host, more_call_apps)
     {
-        return Some(candidate(source, &call_site_host(host, more_call_apps), ""));
+        let mut call = candidate(source, &call_site_host(host, more_call_apps), "");
+        // A Teams page's id tells two meetings apart; every other call site
+        // here is host-only, so its page names no call of its own.
+        if source == MeetingSource::Teams {
+            call.call = context.browser_url.as_ref().and_then(teams_meeting_id);
+        }
+        return Some(call);
     }
     if application_lower.contains("zoom")
         && (title_lower.contains("meeting") || title_lower.contains("webinar"))
@@ -1076,7 +1222,10 @@ fn is_browser_application(application_lower: &str) -> bool {
         .any(|browser| application_lower.contains(browser))
 }
 
-fn context_matches_browser(
+/// Whether a page read is the given browser's own: the frontmost application
+/// it names is that browser (a page read for a browser behind another app
+/// still reports the browser).
+pub(crate) fn context_matches_browser(
     canonical_bundle: &str,
     application_name: &str,
     context: &ContextSnapshot,
@@ -1212,6 +1361,22 @@ fn google_meet_url_code(url: &Url) -> Option<String> {
         fallback.get_or_insert(segment);
     }
     fallback
+}
+
+/// A Teams meeting's id from its address: the segment after `/meet/`, in the
+/// path or in the route a Teams web app keeps after the `#`
+/// (`https://teams.microsoft.com/v2/?meetingjoin=true#/meet/123?anon=true`).
+fn teams_meeting_id(url: &Url) -> Option<String> {
+    let mut segments = url
+        .path_segments()?
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    if let Some(fragment) = url.fragment() {
+        let route = fragment.split('?').next().unwrap_or(fragment);
+        segments.extend(route.split('/').map(str::to_ascii_lowercase));
+    }
+    let meet = segments.iter().position(|segment| segment == "meet")?;
+    segments.get(meet + 1).filter(|id| !id.is_empty()).cloned()
 }
 
 /// A Meet call's code from a tab title that shows only the code
@@ -2234,14 +2399,22 @@ mod tests {
     fn meet_recording() -> BrowserCall {
         meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync")
             .browser_call()
-            .expect("a browser call keeps its page")
+            .expect("a Meet call keeps its code")
+    }
+
+    /// The id of the other call `page` names, when it names one.
+    fn other_call(recorded: &BrowserCall, page: &ContextSnapshot) -> Option<String> {
+        match recorded.page_call(page, false) {
+            PageCall::Other(other) => Some(other.call),
+            _ => None,
+        }
     }
 
     #[test]
-    fn another_meeting_in_the_same_browser_ends_a_recorded_call() {
+    fn only_a_call_with_its_own_id_is_another_meeting() {
         let recorded = meet_recording();
         assert_eq!(recorded.site, "meet.google.com");
-        assert_eq!(recorded.call.as_deref(), Some("abc-defg-hij"));
+        assert_eq!(recorded.call, "abc-defg-hij");
 
         // The same call under another account or address is still it.
         for same in [
@@ -2254,26 +2427,47 @@ mod tests {
                 "{same}"
             );
         }
-        // Another Meet code, or another service's call, is another call.
-        for (url, title) in [
-            ("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup"),
+        // Another Meet code, and a Teams meeting with an id of its own, are
+        // another call, named by that id.
+        for (url, title, id) in [
+            (
+                "https://meet.google.com/xyz-wxyz-xyz",
+                "Meet - Standup",
+                "xyz-wxyz-xyz",
+            ),
             (
                 "https://teams.microsoft.com/meet/123",
                 "Meeting | Microsoft Teams",
+                "123",
+            ),
+            (
+                "https://teams.microsoft.com/v2/?meetingjoin=true#/meet/456?anon=true",
+                "Meeting | Microsoft Teams",
+                "456",
             ),
         ] {
             assert_eq!(
-                recorded.page_call(&tab(Some(url), title), false),
-                PageCall::Other,
+                other_call(&recorded, &tab(Some(url), title)).as_deref(),
+                Some(id),
                 "{url}"
             );
         }
-        // A page that names no call, and one that can't be read, are no
-        // evidence: people switch to other tabs mid-call.
-        assert_eq!(
-            recorded.page_call(&tab(Some("https://mail.google.com/"), "Inbox"), false),
-            PageCall::NoCallNamed
-        );
+        // Host-only call sites, another tab, and an unreadable page name no
+        // call of their own: no evidence either way.
+        for (url, title) in [
+            ("https://teams.microsoft.com/", "Microsoft Teams"),
+            ("https://web.whatsapp.com/", "WhatsApp"),
+            ("https://app.gather.town/", "Gather"),
+            ("https://us04web.zoom.us/j/123", "Zoom"),
+            ("https://mail.google.com/", "Inbox"),
+            ("https://meet.google.com/landing", "Google Meet"),
+        ] {
+            assert_eq!(
+                recorded.page_call(&tab(Some(url), title), false),
+                PageCall::NoCallNamed,
+                "{url}"
+            );
+        }
         assert_eq!(
             recorded.page_call(&tab(None, "Some other page"), false),
             PageCall::NoCallNamed
@@ -2282,30 +2476,136 @@ mod tests {
             recorded.page_call(&ContextSnapshot::default(), false),
             PageCall::Unreadable
         );
-
-        // A recording started from a code-only tab title has no code to
-        // compare; the site still names it, and a code it gains is no
-        // evidence of a switch.
-        let named = candidate_from_microphone(&brave(), &tab(None, "Meet - Design sync"))
-            .unwrap()
-            .browser_call()
-            .unwrap();
-        assert_eq!(named.site, "meet.google.com");
-        assert_eq!(named.call, None);
-        assert_eq!(
-            named.page_call(
-                &tab(
-                    Some("https://meet.google.com/abc-defg-hij"),
-                    "Meet - Design sync"
-                ),
-                false
-            ),
-            PageCall::Same
-        );
     }
 
     #[test]
-    fn another_call_ends_a_browser_recording_only_after_its_own_went_unseen() {
+    fn a_brief_other_meeting_never_replaces_a_recorded_call_s_identity() {
+        let a = tab(
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet - Design sync",
+        );
+        let b = tab(
+            Some("https://meet.google.com/xyz-wxyz-xyz"),
+            "Meet - Standup",
+        );
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut watch = PageWatch::new(meet_recording());
+        // The recorded call read once: its identity can no longer change.
+        assert!(!watch.observe(&a, true, false, at(1_000)));
+        // A glance at another same-site meeting inside the settle window is
+        // not the call's own redirect.
+        assert!(!watch.observe(&b, true, false, at(5_000)));
+        // Back on the recorded call after the window: never ended.
+        assert!(!watch.observe(&a, true, false, at(31_000)));
+        // The other meeting is still the other one: two reads 20 s apart,
+        // with no read of this call between, are what end the recording.
+        assert!(!watch.observe(&b, true, false, at(33_000)));
+        assert!(!watch.observe(&b, true, false, at(40_000)));
+        assert!(watch.observe(&b, true, false, at(54_000)));
+    }
+
+    #[test]
+    fn a_read_of_the_recorded_call_stops_the_redirect_from_adopting() {
+        // The call's own page (`/lookup/abc`) read once: a later same-site
+        // meeting inside the window is not taken as its redirect.
+        let lookup = tab(Some("https://meet.google.com/lookup/abc"), "Meet");
+        let other = tab(
+            Some("https://meet.google.com/xyz-wxyz-xyz"),
+            "Meet - Standup",
+        );
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let recorded = meet_in_brave("https://meet.google.com/lookup/abc", "Meet")
+            .browser_call()
+            .unwrap();
+        assert_eq!(recorded.call, "lookup");
+        let mut watch = PageWatch::new(recorded);
+        assert!(!watch.observe(&lookup, true, false, at(1_000)));
+        assert!(!watch.observe(&other, true, false, at(5_000)));
+        assert!(!watch.observe(&lookup, true, false, at(31_000)));
+        // Sustained after the window, the other meeting does end it.
+        assert!(!watch.observe(&other, true, false, at(33_000)));
+        assert!(watch.observe(&other, true, false, at(54_000)));
+    }
+
+    #[test]
+    fn another_call_needs_the_same_id_between_its_two_reads() {
+        let a = tab(
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet - Design sync",
+        );
+        let b = tab(
+            Some("https://meet.google.com/xyz-wxyz-xyz"),
+            "Meet - Standup",
+        );
+        let c = tab(Some("https://meet.google.com/pqr-stuv-wxy"), "Meet - Retro");
+        let quiet = tab(Some("https://mail.google.com/"), "Inbox");
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+
+        // A fresh page that names no call between the two reads starts the
+        // run over.
+        let mut watch = PageWatch::new(meet_recording());
+        assert!(!watch.observe(&a, true, false, at(0)));
+        assert!(!watch.observe(&b, true, false, at(31_000)));
+        assert!(!watch.observe(&quiet, true, false, at(35_000)));
+        assert!(!watch.observe(&b, true, false, at(45_000)));
+        assert!(!watch.observe(&b, true, false, at(56_000)));
+        assert!(watch.observe(&b, true, false, at(66_000)));
+
+        // Another meeting's id between them starts it over too: it takes two
+        // reads of the same other meeting.
+        let mut watch = PageWatch::new(meet_recording());
+        assert!(!watch.observe(&a, true, false, at(0)));
+        assert!(!watch.observe(&b, true, false, at(31_000)));
+        assert!(!watch.observe(&c, true, false, at(52_000)));
+        assert!(!watch.observe(&c, true, false, at(60_000)));
+        assert!(watch.observe(&c, true, false, at(81_000)));
+    }
+
+    #[test]
+    fn teams_addresses_name_their_meeting_id() {
+        for (address, id) in [
+            ("https://teams.microsoft.com/meet/123?p=abc", Some("123")),
+            (
+                "https://teams.microsoft.com/v2/?meetingjoin=true#/meet/456?anon=true",
+                Some("456"),
+            ),
+            ("https://teams.live.com/meet/789", Some("789")),
+            ("https://teams.microsoft.com/", None),
+            ("https://teams.microsoft.com/v2/", None),
+            ("https://teams.microsoft.com/meet/", None),
+        ] {
+            assert_eq!(
+                teams_meeting_id(&Url::parse(address).unwrap()).as_deref(),
+                id,
+                "{address}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_call_without_its_own_id_keeps_no_page() {
+        // A host-only call site, and a Meet tab whose title is the call's name
+        // rather than its code, name no call to compare another page against.
+        for (url, title) in [
+            ("https://teams.microsoft.com/", "Microsoft Teams"),
+            ("https://web.whatsapp.com/", "WhatsApp"),
+            ("https://app.gather.town/", "Gather"),
+        ] {
+            let call = candidate_from_microphone(&brave(), &tab(Some(url), title)).unwrap();
+            assert!(call.call.is_none(), "{url}");
+            assert!(call.browser_call().is_none(), "{url}");
+        }
+        let title_only =
+            candidate_from_microphone(&brave(), &tab(None, "Meet - Design sync")).unwrap();
+        assert_eq!(title_only.call, None);
+        assert!(title_only.browser_call().is_none());
+    }
+
+    #[test]
+    fn another_call_ends_a_browser_recording_only_after_two_fresh_reads() {
         let same = tab(
             Some("https://meet.google.com/abc-defg-hij"),
             "Meet - Design sync",
@@ -2318,37 +2618,205 @@ mod tests {
         let at = |ms: u64| base + Duration::from_millis(ms);
         let mut watch = PageWatch::new(meet_recording());
 
-        // A Meet link redirects to the meeting's own address right after a
-        // recording starts: the settle window ignores another call.
-        assert!(!watch.observe(&other, false, at(0)));
-        assert!(!watch.observe(&other, false, at(10_000)));
-        // Seen again: the absence run starts from here.
-        assert!(!watch.observe(&same, false, at(29_000)));
-        assert!(!watch.observe(&other, false, at(35_000)));
-        // Unseen for BROWSER_STABLE_FOR while another call is named: over.
-        assert!(watch.observe(&other, false, at(49_000)));
-        // The recording's own call back on the page: not over.
-        assert!(!watch.observe(&same, false, at(50_000)));
-        assert!(!watch.observe(&other, false, at(60_000)));
-        assert!(watch.observe(&other, false, at(70_000)));
+        // The settle window counts from the first page read.
+        assert!(!watch.observe(&same, true, false, at(0)));
+        assert!(!watch.observe(&same, true, false, at(30_000)));
+        // One fresh read of another call is not enough.
+        assert!(!watch.observe(&other, true, false, at(31_000)));
+        // The next 25 s are remembered pages, which are no evidence.
+        for second in 1..=25 {
+            assert!(!watch.observe(&other, false, false, at(31_000 + second * 1_000)));
+        }
+        // The next fresh read, more than BROWSER_STABLE_FOR later, ends it.
+        assert!(watch.observe(&other, true, false, at(57_000)));
+    }
+
+    #[test]
+    fn a_sustained_switch_stays_over_until_the_recorded_call_is_read_again() {
+        let same = tab(
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet - Design sync",
+        );
+        let other = tab(
+            Some("https://meet.google.com/xyz-wxyz-xyz"),
+            "Meet - Standup",
+        );
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut watch = PageWatch::new(meet_recording());
+        assert!(!watch.observe(&same, true, false, at(0)));
+        assert!(!watch.observe(&other, true, false, at(31_000)));
+        assert!(watch.observe(&other, true, false, at(52_000)));
+        // A page naming no call, and one that can't be read, leave the verdict
+        // as it is; a remembered page is no evidence either.
+        assert!(watch.observe(
+            &tab(Some("https://mail.google.com/"), "Inbox"),
+            true,
+            false,
+            at(53_000)
+        ));
+        assert!(watch.observe(&ContextSnapshot::default(), true, false, at(54_000)));
+        assert!(watch.observe(&other, false, false, at(55_000)));
+        // The recording's own call read again cancels it.
+        assert!(!watch.observe(&same, true, false, at(56_000)));
+        // And another switch needs its own two fresh reads.
+        assert!(!watch.observe(&other, true, false, at(57_000)));
+        assert!(watch.observe(&other, true, false, at(78_000)));
     }
 
     #[test]
     fn a_page_naming_no_call_never_ends_a_browser_recording() {
-        let mail = tab(Some("https://mail.google.com/"), "Inbox");
+        let other_tab = tab(Some("https://mail.google.com/"), "Inbox");
+        // A second browser window in front showing a host-only call site.
+        let host_only = tab(Some("https://teams.microsoft.com/"), "Microsoft Teams");
         let base = Instant::now();
         let mut watch = PageWatch::new(meet_recording());
-        // Ten minutes on another tab, and unreadable pages between: nothing
-        // ends the recording.
+        // Ten minutes of another tab, that second window, and unreadable
+        // pages: nothing ends the recording, however fresh the reads.
         for minute in 0..10u64 {
             let at = base + Duration::from_secs(minute * 60);
-            assert!(!watch.observe(&mail, false, at));
+            assert!(!watch.observe(&other_tab, true, false, at));
+            assert!(!watch.observe(&host_only, true, false, at + Duration::from_secs(20)));
             assert!(!watch.observe(
                 &ContextSnapshot::default(),
                 false,
-                at + Duration::from_secs(30)
+                false,
+                at + Duration::from_secs(40)
             ));
         }
+    }
+
+    #[test]
+    fn a_meet_lookup_address_becomes_the_recording_s_identity() {
+        // A Calendar link opens as `/lookup/<…>`, which `google_meet_url_code`
+        // records as the id "lookup"; the meeting's own address follows.
+        let recorded = meet_in_brave("https://meet.google.com/lookup/abc", "Meet")
+            .browser_call()
+            .unwrap();
+        assert_eq!(recorded.call, "lookup");
+        let redirected = tab(
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet - Design sync",
+        );
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut watch = PageWatch::new(recorded);
+        // Inside the settle window the redirect becomes this recording's own
+        // identity instead of counting as a switch.
+        assert!(!watch.observe(&redirected, true, false, at(0)));
+        assert!(!watch.observe(&redirected, true, false, at(5_000)));
+        // From then on that address is this call, not another one.
+        assert!(!watch.observe(&redirected, true, false, at(60_000)));
+        let other = tab(
+            Some("https://meet.google.com/xyz-wxyz-xyz"),
+            "Meet - Standup",
+        );
+        assert!(!watch.observe(&other, true, false, at(61_000)));
+        assert!(watch.observe(&other, true, false, at(82_000)));
+    }
+
+    #[test]
+    fn a_switched_recording_alerts_then_stops_after_the_grace_unless_kept() {
+        let base = Instant::now();
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let grace = AUTO_STOP_GRACE.as_millis() as u64;
+        let idle = CallEnd {
+            ended: false,
+            stop: false,
+        };
+
+        // The page switched: the call reads absent from here on.
+        let mut call = CallEnded::default();
+        assert_eq!(call.observe_at(false, true, at(0)), idle);
+        assert_eq!(
+            call.observe_at(false, true, at(3_000)),
+            CallEnd {
+                ended: true,
+                stop: false
+            }
+        );
+        // The alert is raised once per absence; the stop comes after the grace.
+        assert_eq!(call.observe_at(false, true, at(3_500)), idle);
+        assert_eq!(
+            call.observe_at(false, true, at(3_000 + grace)),
+            CallEnd {
+                ended: false,
+                stop: true
+            }
+        );
+        assert_eq!(call.observe_at(false, true, at(3_000 + grace + 500)), idle);
+
+        // Keep recording: nothing stops for this absence.
+        let mut call = CallEnded::default();
+        assert!(!call.observe_at(false, true, at(0)).ended);
+        assert!(call.observe_at(false, true, at(3_000)).ended);
+        assert!(call.keep_recording());
+        assert_eq!(call.observe_at(false, true, at(3_000 + grace + 500)), idle);
+
+        // The call comes back and leaves again: a new alert and a new stop.
+        assert_eq!(call.observe_at(true, true, at(3_000 + grace + 1_000)), idle);
+        assert!(
+            !call
+                .observe_at(false, true, at(3_000 + grace + 1_500))
+                .ended
+        );
+        assert!(
+            call.observe_at(false, true, at(3_000 + grace + 4_500))
+                .ended
+        );
+        assert!(
+            call.observe_at(false, true, at(3_000 + grace * 2 + 4_500))
+                .stop
+        );
+    }
+
+    #[test]
+    fn a_hand_stop_after_keeping_a_switched_recording_keeps_its_call_snoozed() {
+        let call = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&call, &[]),
+            Some(Detection::Offer(call.clone()))
+        );
+
+        // Keep recording, then stop by hand: the recording is still this call,
+        // so the ordinary hand stop snoozes it rather than letting a second
+        // recording of it start.
+        watch.detector.recording_stopped();
+        assert!(watch.detector.snoozes(&call));
+        assert!(watch.run(Some(&call), &[], 5_000).is_empty());
+
+        // A stop after the page had switched clears the snooze instead: the
+        // call the page names is its own recording.
+        watch.detector.forget_offered_call();
+        assert!(!watch.detector.snoozes(&call));
+        assert_eq!(watch.stable(&call, &[]), Some(Detection::Offer(call)));
+    }
+
+    #[test]
+    fn a_teams_join_page_is_not_snoozed_by_a_meet_call_in_the_same_browser() {
+        let meet = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let teams = candidate_from_microphone(
+            &brave(),
+            &tab(
+                Some("https://teams.microsoft.com/meet/123"),
+                "Meeting | Microsoft Teams",
+            ),
+        )
+        .unwrap();
+        assert_eq!(teams.call.as_deref(), Some("123"));
+
+        let mut watch = Watch::new();
+        assert!(watch.stable(&meet, &[]).is_some());
+        // The join page names an id of its own: another call, not this one.
+        assert!(!watch.detector.snoozes(&teams));
+        // A Teams page without an id stays the snoozed browser's call.
+        let teams_root = candidate_from_microphone(
+            &brave(),
+            &tab(Some("https://teams.microsoft.com/"), "Microsoft Teams"),
+        )
+        .unwrap();
+        assert!(watch.detector.snoozes(&teams_root));
     }
 
     #[test]
@@ -2372,10 +2840,13 @@ mod tests {
             watch.stable(&first, &[]),
             Some(Detection::Offer(first.clone()))
         );
-        // The browser alone would keep the new call snoozed as the same one.
-        assert!(watch.detector.snoozes(&teams));
+        // The recording's own call stays snoozed by its app until the app
+        // leaves the microphone.
+        assert!(watch.detector.snoozes(&first));
+        // A stop after the page had switched clears that, so the call the
+        // page now names gets its own recording at once.
         watch.detector.forget_offered_call();
-        assert!(!watch.detector.snoozes(&teams));
+        assert!(!watch.detector.snoozes(&first));
         assert!(matches!(
             watch.stable(&teams, &always),
             Some(Detection::Record(_))
