@@ -139,6 +139,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // from a real browser page, and no live macOS or Windows request
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
+├── Smaller model files no labs.k_quant_models         (macOS) adding a model file also accepts Q6_K, Q5_K, and Q4_K weights, smaller than Q8_0 and unverified
+│                                        // checks: k_quants_are_known_only_where_the_caller_runs_them,
+│                                        // k_quant_tensors_are_measured_in_their_ggml_block_sizes (gguf_header);
+│                                        // a_k_quant_import_needs_the_lab_and_falls_back_without_it (custom_models);
+│                                        // smaller_model_files_is_its_own_switch_and_macos_only (labs.rs); not observed on Metal
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Transcribe files no   labs.transcribe_files        (every OS) `hex transcribe <file>` prints a saved WAV recording's transcript
 │                                        from the selected model (or --model); any length is read in ≤30 s pieces and their text
@@ -1872,6 +1877,29 @@ in [transcription/custom_models.rs](../../src/transcription/custom_models.rs);
 [labs.rs](../../src/labs.rs). Not yet observed: a real window or a second
 macOS account; the Labs page goldens need regenerating on Linux with the new
 row.
+
+Smaller model files (`k-quant-models`, macOS): for an imported speech model
+quantized smaller than Q8_0. While on, "Add model file…" and "Use model file
+where it is…" accept Q6_K, Q5_K, and Q4_K tensors too, through the one header
+check (`custom_models::profile`, given the types this build can run:
+`gguf_header::TensorTypes`). The import's manifest records `k_quants`, and a
+saved choice of one while the lab is off stays saved while the listener runs
+the default model, with `hex status` saying "its Labs toggle is off"
+(`FallbackReason::LabsOff`, the path Parakeet Ultra uses); `hex model use` on
+one is refused and names `hex labs on k-quant-models`. Off, the rule and its
+message are exactly F32, F16, and Q8_0. Linux and Windows never run these
+files: their Vulkan builds embed shaders only for the catalog's types, so the
+lab is not listed there and the check refuses the file either way. The tensor
+sizes the header check uses come from ggml's block sizes (256 values in 144,
+176, and 210 bytes), so a cut-short file is still refused. Checks:
+`k_quants_are_known_only_where_the_caller_runs_them`,
+`k_quant_tensors_are_measured_in_their_ggml_block_sizes` in
+[gguf_header.rs](../../src/transcription/gguf_header.rs),
+`a_k_quant_import_needs_the_lab_and_falls_back_without_it` in
+[custom_models.rs](../../src/transcription/custom_models.rs), and
+`smaller_model_files_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real K-quant file transcribed
+on Metal (macOS), or the row in a real window.
 
 Downloaded models only (`picker-downloaded`, issue 1018, every OS): for
 seeing which speech models take disk space and deleting unused ones. While

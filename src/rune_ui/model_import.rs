@@ -241,13 +241,15 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     changed
 }
 
-/// Why an import can't be used now, for its card and General's model row.
+/// Why an import can't be used now, for the note under its card.
 pub(super) fn status_note(model: &ModelDefinition) -> Option<String> {
     let TranscriptionModelId::Custom(id) = model.id else {
         return None;
     };
     match custom_models::status(id) {
-        Status::Ready => None,
+        // Missing or changed wins: fixing the file is the first thing to do.
+        Status::Ready => (custom_models::uses_k_quants(id) && !crate::labs::k_quant_models())
+            .then(|| tr("Turn on Labs › Smaller model files to use it.").into()),
         Status::Missing => Some(tr("Its file is missing. Import it again, or remove it.").into()),
         Status::Changed => Some(
             tr("Its file changed since it was imported. Check it again, import it again, or remove it.").into(),
@@ -274,7 +276,12 @@ pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
     } else {
         tr("The imported model")
     };
+    // The same order fallback_reason uses: a file to fix is named first, and
+    // only a ready import can be waiting on its Labs toggle.
     let notice = match custom_models::status(id) {
+        Status::Ready if custom_models::uses_k_quants(id) && !crate::labs::k_quant_models() => {
+            "{model} needs Labs › Smaller model files, so Hex uses {fallback} until you turn it on or choose another model"
+        }
         Status::Ready => return None,
         Status::Missing => {
             "{model} is missing, so Hex uses {fallback} until you import it again or choose another model"

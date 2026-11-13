@@ -413,6 +413,16 @@ pub fn api_browser_origins() -> Vec<String> {
         .clone()
 }
 
+/// Labs › Smaller model files: your own speech model imports may use Q6_K,
+/// Q5_K, or Q4_K weights (macOS, where Metal has their kernels; read where an
+/// import's header is checked and where a saved selection loads).
+pub fn k_quant_models() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).

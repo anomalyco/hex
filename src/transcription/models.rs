@@ -250,10 +250,17 @@ impl GgufArtifact {
 impl ModelDefinition {
     /// A catalog GGUF model, or an import that is on, present, and unchanged.
     pub fn available(&self) -> bool {
+        self.available_where(crate::labs::k_quant_models())
+    }
+
+    /// [`available`] against `k_quants` rather than this process's Labs
+    /// switch, so a test can run either side of Labs › Smaller model files.
+    pub(crate) fn available_where(&self, k_quants: bool) -> bool {
         match (self.runtime, self.id) {
             (ModelRuntime::AppleSpeech, _) => false,
             (ModelRuntime::Gguf(_), TranscriptionModelId::Custom(id)) => {
                 super::custom_models::usable(id)
+                    && (!super::custom_models::uses_k_quants(id) || k_quants)
             }
             (ModelRuntime::Gguf(_), TranscriptionModelId::ParakeetUltra) => {
                 crate::labs::parakeet_ultra()
@@ -820,11 +827,20 @@ pub fn validate_saved(selection: &TranscriptionSelection) -> Result<()> {
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
+    validate_where(selection, crate::labs::k_quant_models())
+}
+
+/// [`validate`] against `k_quants` rather than this process's Labs switch, so
+/// a test can run either side of Labs › Smaller model files.
+pub(crate) fn validate_where(
+    selection: &TranscriptionSelection,
+    k_quants: bool,
+) -> Result<&'static ModelDefinition> {
     if !is_known_language(&selection.language) {
         bail!("unsupported transcription language: {}", selection.language);
     }
     let model = definition(selection.model);
-    if !model.available() {
+    if !model.available_where(k_quants) {
         bail!("{} is unavailable", model.name);
     }
     if !model.supports_language(&selection.language) {

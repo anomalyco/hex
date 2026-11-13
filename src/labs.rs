@@ -137,6 +137,7 @@ impl Feature {
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
+            | Self::KQuantModels
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
             | Self::KeepRecordings
@@ -255,6 +256,7 @@ impl Feature {
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
+            Self::KQuantModels => 20261113,
         }
     }
 
@@ -306,6 +308,7 @@ impl Feature {
             | Self::SubtitleExport
             | Self::StopWhenCallEnds
             | Self::MovableMeetingCapsules
+            | Self::KQuantModels
             | Self::MeetingImport => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => {
@@ -438,6 +441,7 @@ impl Feature {
             Self::OutputFixes => "output-fixes",
             Self::PickerActiveFirst => "picker-active-first",
             Self::ModelInPlace => "model-in-place",
+            Self::KQuantModels => "k-quant-models",
             Self::PickerDownloaded => "picker-downloaded",
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
@@ -523,6 +527,7 @@ impl Feature {
             Self::OutputFixes => "labs.output_fixes",
             Self::PickerActiveFirst => "labs.picker_active_first",
             Self::ModelInPlace => "labs.model_in_place",
+            Self::KQuantModels => "labs.k_quant_models",
             Self::PickerDownloaded => "labs.picker_downloaded",
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
@@ -612,6 +617,7 @@ impl Feature {
             Self::OutputFixes => settings.labs.output_fixes,
             Self::PickerActiveFirst => settings.labs.picker_active_first,
             Self::ModelInPlace => settings.labs.model_in_place,
+            Self::KQuantModels => settings.labs.k_quant_models,
             Self::PickerDownloaded => settings.labs.picker_downloaded,
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
@@ -698,6 +704,7 @@ impl Feature {
             &mut labs.output_fixes,
             &mut labs.picker_active_first,
             &mut labs.model_in_place,
+            &mut labs.k_quant_models,
             &mut labs.picker_downloaded,
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
@@ -792,6 +799,7 @@ impl Feature {
             Self::OutputFixes => settings.labs.output_fixes = on,
             Self::PickerActiveFirst => settings.labs.picker_active_first = on,
             Self::ModelInPlace => settings.labs.model_in_place = on,
+            Self::KQuantModels => settings.labs.k_quant_models = on,
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::SettingsSearch => settings.labs.settings_search = on,
@@ -969,6 +977,11 @@ static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 /// atomic, written by [`state`] and [`apply`].
 static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Smaller model files' switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
+
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
 /// and empty while the lab is off.
@@ -1000,6 +1013,7 @@ fn state() -> u64 {
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
+                K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
@@ -1044,6 +1058,14 @@ fn copy_capture_zip_enabled(settings: &LabsSettings) -> bool {
     settings.copy_capture_zip
         && Feature::CopyCaptureZip.shipped()
         && Feature::CopyCaptureZip.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Smaller model files in this build,
+/// before its managed lock; the state word has no bit for it.
+fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
+    settings.k_quant_models
+        && Feature::KQuantModels.shipped()
+        && Feature::KQuantModels.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Browser access to the local API in this
@@ -1106,6 +1128,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
+    K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -2191,6 +2214,28 @@ mod tests {
             "labs.copy_capture_zip"
         );
         assert_eq!(Feature::CopyCaptureZip.name(), "copy-capture-zip");
+    }
+
+    #[test]
+    fn smaller_model_files_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!k_quant_models_enabled(&labs));
+        labs.k_quant_models = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(k_quant_models_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::KQuantModels.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::KQuantModels.added(), 20261113);
+        assert_eq!(Feature::KQuantModels.audience(), Audience::Everyone);
+        assert_eq!(Feature::KQuantModels.group(), Group::Models);
+        assert_eq!(Feature::KQuantModels.settings_key(), "labs.k_quant_models");
+        assert_eq!(Feature::KQuantModels.name(), "k-quant-models");
     }
 
     #[test]

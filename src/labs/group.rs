@@ -127,6 +127,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::PickerActiveFirst
             | Self::ModelInPlace
+            | Self::KQuantModels
             | Self::PickerDownloaded
             | Self::ParakeetUltra
             | Self::TranscribeFiles => Group::Models,

@@ -929,6 +929,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Use model files where they are"),
         tr("Add a speech model file without copying it, so several accounts can share one file"),
     ));
+    // Metal has the K-quant kernels; the Vulkan builds embed shaders only for
+    // the catalog's types.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(
+            Feature::KQuantModels,
+            None,
+            tr("Smaller model files"),
+            tr("Add your own speech model files that use Q6_K, Q5_K, or Q4_K weights. They are smaller than Q8_0 but Hex hasn't verified them, so accuracy may vary."),
+        ));
+    }
     rows.push(row(
         Feature::PickerDownloaded,
         None,
@@ -1163,6 +1173,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::OutputFixes => "lab-output-fixes",
         Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
+        Feature::KQuantModels => "lab-k-quant-models",
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
         Feature::KeepRecordings => "lab-keep-recordings",
