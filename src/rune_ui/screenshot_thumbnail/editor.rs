@@ -14,11 +14,12 @@
 pub(crate) mod clip;
 mod export;
 pub(crate) mod marks;
+mod narration;
 mod view;
 
 use std::borrow::Cow;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -29,6 +30,10 @@ use self::export::{Export, deliver, load_sessions};
 use self::marks::{Mark, Rect, Tool};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::rune_ui::capture_capsule::surface::CHIP_H;
+pub(crate) use narration::Narration;
+use narration::{GENERATION, OPEN};
+#[cfg(target_os = "macos")]
+pub(crate) use narration::{can_claim, heard, listen, narration};
 
 /// Around the shot and the toolbar, inside the panel.
 const PAD: f32 = 8.0;
@@ -123,6 +128,8 @@ pub(crate) struct Editor {
     /// What was said over the shot, every dictation's words joined.
     words: String,
     listen: Listen,
+    generation: u64,
+    narration: Option<Arc<Narration>>,
     /// A send picked while a dictation was still going: it goes once the
     /// words land, and never if Escape cancels them.
     waiting: Option<Dest>,
@@ -256,7 +263,7 @@ impl Editor {
 
     fn close(&mut self, tx: &mut Tx) {
         if self.on {
-            OPEN.store(false, Ordering::Release);
+            *OPEN.lock().unwrap_or_else(|e| e.into_inner()) = None;
             self.on = false;
             self.send = None;
             self.waiting = None;
@@ -391,10 +398,6 @@ impl Editor {
                 self.words.push(' ');
             }
             self.words.push_str(words);
-            #[cfg(target_os = "macos")]
-            if let Some(file) = &self.file {
-                crate::screenshots::remember_words(file.clone(), self.words.clone());
-            }
         }
         self.listen(Listen::Idle, tx);
     }
@@ -406,6 +409,9 @@ impl Editor {
             return false;
         }
         self.listen = Listen::Idle;
+        if let Some(request) = self.narration.take() {
+            request.cancelled.store(true, Ordering::Release);
+        }
         self.waiting = None;
         true
     }
@@ -650,8 +656,6 @@ fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
 // ─── Opening, exporting, sending ─────────────────────────────────────────────
 
 static EDITOR: OnceLock<OverlayHandle<Editor>> = OnceLock::new();
-/// Whether a shot is open, for the listener's thread.
-static OPEN: AtomicBool = AtomicBool::new(false);
 
 /// What the microphone chip and Escape ask of the listener.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -667,35 +671,6 @@ fn talk(talk: Talk) {
     crate::screenshots::narration::talk(talk);
     #[cfg(not(target_os = "macos"))]
     let _ = talk;
-}
-
-/// Whether a shot is open in the editor. Safe from any thread.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn is_open() -> bool {
-    OPEN.load(Ordering::Acquire)
-}
-
-/// A dictation over the open shot is now `listen`. Safe from any thread.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn listen(listen: Listen) {
-    if let Some(overlay) = EDITOR.get() {
-        overlay.update(move |s, tx| {
-            s.listen(listen, tx);
-            tx.animated();
-        });
-    }
-}
-
-/// A dictation over the open shot ended with `words`, or none. Safe from
-/// any thread.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn heard(words: Option<String>) {
-    if let Some(overlay) = EDITOR.get() {
-        overlay.update(move |s, tx| {
-            s.heard(words, tx);
-            tx.animated();
-        });
-    }
 }
 
 /// Adds the editor's overlay, hidden. Hidden, it holds no GPU surface.
@@ -751,7 +726,7 @@ pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
             let handle = overlay.clone();
             overlay.update(move |s, tx| {
                 // Dictation stays dictation: nothing talks over a recording.
-                OPEN.store(false, Ordering::Release);
+                *OPEN.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 s.load_clip(clip, screen);
                 handle.show();
                 handle.request_keys();
@@ -787,7 +762,9 @@ pub(crate) fn open_with(path: PathBuf, words: String) {
                 s.words = words;
                 s.listen = Listen::Idle;
                 s.waiting = None;
-                OPEN.store(true, Ordering::Release);
+                s.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
+                *OPEN.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((s.generation, s.file.clone().unwrap()));
                 handle.show();
                 handle.request_keys();
                 tx.animated();

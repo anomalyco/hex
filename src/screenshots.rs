@@ -13,12 +13,13 @@
 //! recording then lands on the same card ([`recording`]).
 
 pub(crate) mod narration;
+mod picker;
 mod recording;
 pub(crate) mod save;
 pub(crate) mod system_shortcut;
 
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::app_settings::RuntimeHotkey;
 use crate::capture_host::{CaptureNeed, CaptureTarget};
@@ -34,11 +35,7 @@ struct Overlays {
 
 static OVERLAYS: OnceLock<Overlays> = OnceLock::new();
 /// While the picker shows, the tap hands it Escape and Space.
-static PICKING: AtomicBool = AtomicBool::new(false);
-/// Whether it picks a window rather than an area.
-static WINDOW_MODE: AtomicBool = AtomicBool::new(false);
-/// Whether the open picker records what it picks rather than shooting it.
-static RECORDING: AtomicBool = AtomicBool::new(false);
+static PICKER: Mutex<picker::Picker> = Mutex::new(picker::Picker::new());
 /// The picker's window, left out of the shot; 0 before it's made.
 static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
 
@@ -95,24 +92,24 @@ pub(crate) fn open(record: bool) -> bool {
     if !crate::labs::screenshots() || OVERLAYS.get().is_none() {
         return false;
     }
-    if PICKING.swap(true, Ordering::AcqRel) {
+    let Some(id) = PICKER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .begin(record)
+    else {
         return false;
-    }
-    WINDOW_MODE.store(false, Ordering::Release);
-    RECORDING.store(record, Ordering::Release);
-    if let Some(overlays) = OVERLAYS.get() {
-        overlays.picker.set_screen_label(if record {
-            crate::desktop::i18n::tr("Full screen · Click to record")
-        } else {
-            crate::desktop::i18n::tr("Full screen · Click to capture")
-        });
-    }
+    };
     // Off the tap's thread: a fresh Screen Recording read may take a moment.
     let spawned = std::thread::Builder::new()
         .name("hex-screenshot-open".into())
         .spawn(move || {
-            if crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_some() {
-                PICKING.store(false, Ordering::Release);
+            let allowed =
+                crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_none();
+            let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
+            if !picker.permission(id, allowed) {
+                return;
+            }
+            if !allowed {
                 tracing::info!("screenshot needs Screen Recording");
                 // The helper returns here, to the picker, once it's granted:
                 // never to Annotate's whole-screen recording.
@@ -122,10 +119,20 @@ pub(crate) fn open(record: bool) -> bool {
                 );
                 return;
             }
-            show(Some(Mode::Area));
+            if let Some(overlays) = OVERLAYS.get() {
+                overlays.picker.set_screen_label(if record {
+                    crate::desktop::i18n::tr("Full screen · Click to record")
+                } else {
+                    crate::desktop::i18n::tr("Full screen · Click to capture")
+                });
+            }
+            show(id, Some(Mode::Area));
         });
     if spawned.is_err() {
-        PICKING.store(false, Ordering::Release);
+        PICKER
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .permission(id, false);
     }
     spawned.is_ok()
 }
@@ -147,23 +154,48 @@ pub(crate) fn can_restore() -> bool {
 
 /// Closes the picker without a shot.
 pub(crate) fn cancel() {
-    PICKING.store(false, Ordering::Release);
-    show(None);
+    let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pick) = picker.active.take() {
+        show(pick.id, None);
+    }
 }
 
 /// Switches the open picker between an area and a window.
 fn toggle() {
-    let window = !WINDOW_MODE.fetch_xor(true, Ordering::AcqRel);
-    show(Some(if window { Mode::Window } else { Mode::Area }));
+    let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pick) = picker.active.as_mut().filter(|pick| pick.ready) {
+        pick.window = !pick.window;
+        show(
+            pick.id,
+            Some(if pick.window {
+                Mode::Window
+            } else {
+                Mode::Area
+            }),
+        );
+    }
 }
 
 pub(crate) fn picking() -> bool {
-    PICKING.load(Ordering::Acquire)
+    PICKER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .active
+        .is_some()
 }
 
-fn show(mode: Option<Mode>) {
+fn show(id: u64, mode: Option<Mode>) {
     if let Some(overlays) = OVERLAYS.get() {
-        overlays.picker.set(mode);
+        overlays.picker.set_if(mode, move || {
+            let picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
+            if mode.is_some() {
+                picker.current(id)
+            } else {
+                // Hide is enqueued under the same lock as every show, before
+                // a later opening can queue its show (even while it waits for permission).
+                true
+            }
+        });
     }
 }
 
@@ -173,8 +205,16 @@ fn picked(action: Action) {
     let Action::Start(target) = action else {
         return;
     };
-    cancel();
-    if RECORDING.swap(false, Ordering::AcqRel) {
+    let record = {
+        let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
+        if !picker.active.as_ref().is_some_and(|pick| pick.ready) {
+            return;
+        }
+        let pick = picker.active.take().unwrap();
+        show(pick.id, None);
+        pick.record
+    };
+    if record {
         let clip = crate::capture_host::CaptureControl::Command(
             crate::capture_host::CaptureCommand::Clip(target),
         );
@@ -286,11 +326,30 @@ fn remember(capture: Remembered, (width, height, rgba): (u32, u32, &[u8])) {
 
 /// What was said over the shot saved at `file` in the editor, for
 /// Captures' search. Off the caller's thread.
-pub(crate) fn remember_words(file: std::path::PathBuf, words: String) {
-    let spawned = std::thread::Builder::new()
-        .name("hex-capture-words".into())
-        .spawn(move || captures::set_words(&file, &words));
-    if let Err(error) = spawned {
+pub(crate) fn append_words(file: std::path::PathBuf, words: String) {
+    use std::sync::mpsc::{SyncSender, sync_channel};
+    type Words = (std::path::PathBuf, String);
+    static WRITER: OnceLock<Option<SyncSender<Words>>> = OnceLock::new();
+    let writer = WRITER.get_or_init(|| {
+        let (send, receive) = sync_channel::<Words>(32);
+        match std::thread::Builder::new()
+            .name("hex-capture-words".into())
+            .spawn(move || {
+                // Preserve the UI's append order without doing disk I/O there.
+                for (file, words) in receive {
+                    captures::append_words(&file, &words);
+                }
+            }) {
+            Ok(_) => Some(send),
+            Err(error) => {
+                tracing::warn!(%error, "could not start the capture words writer");
+                None
+            }
+        }
+    });
+    if let Some(writer) = writer
+        && let Err(error) = writer.try_send((file, words))
+    {
         tracing::warn!(%error, "could not keep the words said over the shot");
     }
 }

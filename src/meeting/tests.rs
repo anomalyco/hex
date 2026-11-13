@@ -966,6 +966,30 @@ fn retention_expires_meetings_by_when_they_ended_and_skips_active_ones() {
     let pending = vec!["pending".to_string()];
 
     let chosen = Some(MeetingRetention::Day);
+    let readable = meetings
+        .iter()
+        .filter(|meeting| {
+            retention::readable(
+                meeting,
+                meeting.status,
+                pending.contains(&meeting.id),
+                chosen,
+                now,
+            )
+        })
+        .map(|meeting| meeting.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        readable,
+        [
+            "long-call",
+            "recent-start",
+            "recording",
+            "transcribing",
+            "pending",
+            "edge"
+        ]
+    );
     assert_eq!(
         expired_meetings(&meetings, chosen, &pending, now),
         ["old", "no-end"]

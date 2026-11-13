@@ -574,6 +574,70 @@ fn queries_never_write_to_the_meetings_folder() {
 }
 
 #[test]
+fn incomplete_final_publication_stays_a_draft_until_explicit_recovery() {
+    let root = std::env::temp_dir().join(format!("hex-publication-{}", std::process::id()));
+    let directory = root.join(STANDUP);
+    fs::create_dir_all(&directory).unwrap();
+    for entry in fs::read_dir(fixtures().join(STANDUP)).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, directory.join(path.file_name().unwrap())).unwrap();
+    }
+    fs::copy(
+        fixtures().join(WEEKLY).join("transcript.ndjson"),
+        directory.join("transcript.ndjson"),
+    )
+    .unwrap();
+    let library = Library::new(&root);
+    let draft = library.meeting(STANDUP).unwrap();
+    assert_eq!(draft.source, TranscriptSource::Rolling);
+    assert_eq!(draft.status, MeetingStatus::Interrupted);
+    assert!(!super::super::final_transcript_exists(&directory));
+
+    fs::write(directory.join("transcript.md.tmp"), "# Ready to publish\n").unwrap();
+    let before = snapshot(&root);
+    assert_eq!(
+        library.meeting(STANDUP).unwrap().source,
+        TranscriptSource::Rolling
+    );
+    assert_eq!(before, snapshot(&root), "queries must not recover files");
+    super::super::recover_final_publication(&directory).unwrap();
+    assert!(super::super::final_transcript_exists(&directory));
+    assert_eq!(
+        library.meeting(STANDUP).unwrap().source,
+        TranscriptSource::Final
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn pending_final_keeps_an_expired_draft_visible_even_in_a_warm_query_cache() {
+    let root = std::env::temp_dir().join(format!("hex-read-admission-{}", std::process::id()));
+    let directory = root.join(STANDUP);
+    fs::create_dir_all(&directory).unwrap();
+    for entry in fs::read_dir(fixtures().join(STANDUP)).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, directory.join(path.file_name().unwrap())).unwrap();
+    }
+    let path = directory.join("manifest.json");
+    let mut manifest: MeetingManifest = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest.retention_applies = true;
+    manifest.created_at_ms = 1;
+    manifest.ended_at_ms = Some(2);
+    fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let library = Library::new(&root);
+    assert!(library.scan().unwrap().meetings.is_empty());
+    let pending = directory.join(super::super::FINAL_PENDING_FILE);
+    fs::write(&pending, "").unwrap();
+    assert_eq!(
+        library.meeting(STANDUP).unwrap().source,
+        TranscriptSource::Rolling
+    );
+    fs::remove_file(pending).unwrap();
+    assert!(library.scan().unwrap().meetings.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn markdown_has_metadata_notes_and_turns() {
     let markdown = library()
         .markdown(WEEKLY, OffsetRange::default(), NOW)

@@ -309,6 +309,15 @@ mod tests {
             .map(|entry| serde_json::to_string(entry).unwrap() + "\n")
             .collect::<String>();
         std::fs::write(directory.join("transcript.ndjson"), ndjson).unwrap();
+        // A final publication includes both files, even though chapter
+        // queries render their own Markdown from the structured entries.
+        std::fs::write(
+            directory.join("transcript.md"),
+            "# Team sync\n\n**You** · 03:01\nNext, the motion lint.\n\n\
+             **You** · 06:26\nThat settles the lint.\n\n\
+             **You** · 06:30\nLast thing: a name for the chat app.\n",
+        )
+        .unwrap();
 
         let library = crate::meeting::query::Library::new(&root);
         let meeting = library.meeting(id).unwrap();

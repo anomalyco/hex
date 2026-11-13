@@ -10,6 +10,17 @@ lists where they differ.
 
 Linked checks are locators unless an executed result is recorded below.
 
+Every reader (pane, CLI, MCP, Copy Last and delta paste) uses the same
+retention admission: expired finished meetings are hidden even before a
+Trash sweep succeeds, while `final.pending` drafts remain readable. The
+sweep still enumerates hidden folders so a failed Trash operation can retry.
+Final transcript reads require both published NDJSON and Markdown. With
+only NDJSON, readers use the rolling draft; read-only queries never rename
+the Markdown temporary file. Explicit recovery can finish that publication.
+Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
+`pending_final_keeps_an_expired_draft_visible_even_in_a_warm_query_cache`, and
+`incomplete_final_publication_stays_a_draft_until_explicit_recovery`.
+
 ## How To Get To It
 
 ```ts

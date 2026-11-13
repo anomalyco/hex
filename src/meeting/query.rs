@@ -335,7 +335,16 @@ impl Library {
         let retention = crate::app_settings::meeting_retention();
         let now_ms = crate::desktop::events::now_ms();
         meetings.retain(|meeting| {
-            !super::expired(&meeting.manifest, meeting.status, retention, now_ms)
+            super::retention::readable(
+                &meeting.manifest,
+                meeting.status,
+                self.root
+                    .join(&meeting.id)
+                    .join(super::FINAL_PENDING_FILE)
+                    .exists(),
+                retention,
+                now_ms,
+            )
         });
         meetings.sort_by_key(|meeting| std::cmp::Reverse(meeting.start_ms()));
         skipped.sort_by(|left, right| left.id.cmp(&right.id));
@@ -720,13 +729,9 @@ fn load(directory: &Path, id: &str, in_progress: bool) -> Result<Meeting> {
             .ok()
             .map(|error| error.trim().to_string());
     let final_path = directory.join("transcript.ndjson");
-    // A recorder publishes the final NDJSON before the Markdown; without one,
-    // the NDJSON alone is the finished publication.
-    let final_ready = if in_progress {
-        final_path.exists() && directory.join("transcript.md").exists()
-    } else {
-        final_path.exists()
-    };
+    // Read-only readers never repair the second publication rename. Until
+    // both files exist, every reader uses the retained rolling transcript.
+    let final_ready = super::final_transcript_exists(directory);
     let status = if in_progress {
         manifest.status
     } else {

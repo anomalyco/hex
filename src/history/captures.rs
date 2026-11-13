@@ -206,9 +206,8 @@ impl CaptureStore {
         self.persist().map(|()| true)
     }
 
-    /// What was said over the shot saved at `file`, in place of what was.
-    pub fn set_words(&mut self, file: &Path, words: &str) -> io::Result<bool> {
-        let words = truncated(words, MAX_WORDS_BYTES);
+    /// Append one accepted dictation to its shot, even after its editor closes.
+    pub fn append_words(&mut self, file: &Path, words: &str) -> io::Result<bool> {
         let Some(entry) = self
             .entries
             .iter_mut()
@@ -217,10 +216,16 @@ impl CaptureStore {
         else {
             return Ok(false);
         };
-        if entry.words == words {
+        let words = words.trim();
+        if words.is_empty() {
             return Ok(false);
         }
-        entry.words = words;
+        let joined = if entry.words.is_empty() {
+            words.to_owned()
+        } else {
+            format!("{} {words}", entry.words)
+        };
+        entry.words = truncated(&joined, MAX_WORDS_BYTES);
         self.persist().map(|()| true)
     }
 
@@ -319,10 +324,10 @@ pub fn forget(file: &Path) {
     }
 }
 
-/// [`CaptureStore::set_words`] on the shared store.
-pub fn set_words(file: &Path, words: &str) {
+/// [`CaptureStore::append_words`] on the shared store.
+pub fn append_words(file: &Path, words: &str) {
     if let Some(mut store) = shared()
-        && let Err(error) = store.set_words(file, words)
+        && let Err(error) = store.append_words(file, words)
     {
         tracing::warn!(%error, "could not keep the words said over the capture");
     }
@@ -433,8 +438,13 @@ mod tests {
         let mut store = CaptureStore::open(saved.join("captures"));
         let id = store.record(draft(&saved, "a", ""), DAY).unwrap();
         let file = saved.join("a.png");
-        assert!(store.set_words(&file, "  what I said  ").unwrap());
+        assert!(store.append_words(&file, "  what I said  ").unwrap());
         assert_eq!(store.list("said", DAY)[0].id, id);
+        assert!(store.append_words(&file, "after closing").unwrap());
+        assert_eq!(
+            store.list("said", DAY)[0].words,
+            "what I said after closing"
+        );
         assert!(store.forget(&file).unwrap());
         assert!(store.list("", DAY).is_empty());
         assert!(!store.thumbnail(id).exists());
