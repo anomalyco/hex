@@ -534,14 +534,34 @@ fn parent_directory(source: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-/// Whether `path` is `directory` or below it, resolving symlinks where both
-/// exist (`/var` and `/private/var` name the same temp folder on macOS).
+/// Whether `path` is `directory` or below it, resolving symlinks through the
+/// longest part of each that exists (`/tmp` and `/private/tmp` name the same
+/// temp folder on macOS, though a dropped file's own folder may not exist yet).
 fn inside(path: &Path, directory: &Path) -> bool {
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let directory = directory
-        .canonicalize()
-        .unwrap_or_else(|_| directory.to_path_buf());
-    path.starts_with(directory)
+    resolve(path).starts_with(resolve(directory))
+}
+
+/// `path` with its longest existing prefix resolved through symlinks and the
+/// rest kept as it is.
+fn resolve(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = existing.canonicalize() {
+            let mut resolved = resolved;
+            for name in rest.iter().rev() {
+                resolved.push(name);
+            }
+            return resolved;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// Whether a transcript may be written into `directory`: a probe file is
@@ -714,6 +734,34 @@ mod tests {
                 "{source}"
             );
         }
+    }
+
+    /// macOS names its temp folder `/tmp` but canonicalizes it to
+    /// `/private/tmp`, so a file below it is found there even when its own
+    /// folder has not been made yet.
+    #[cfg(unix)]
+    #[test]
+    fn a_temp_folder_reached_through_a_symlink_still_sends_the_transcript_to_downloads() {
+        let root = temp_directory("symlinked-temp");
+        let real = root.join("real");
+        fs::create_dir_all(&real).unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let downloads = Path::new("/home/a/Downloads");
+        assert_eq!(
+            transcript_directory(&real.join("talk.wav"), &alias, downloads, true),
+            downloads
+        );
+        assert_eq!(
+            transcript_directory(
+                &alias.join("gone").join("talk.mp3"),
+                &alias,
+                downloads,
+                true
+            ),
+            downloads
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
