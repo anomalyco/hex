@@ -216,6 +216,9 @@ pub struct LabsSettings {
     /// `hex transcribe <file>` turns a WAV recording into text with the
     /// dictation model.
     pub transcribe_files: bool,
+    /// A WAV or MP3 file dropped on the window is transcribed and saved as a
+    /// text file beside it.
+    pub drop_transcribe: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -375,6 +378,7 @@ impl Default for LabsSettings {
             more_call_apps: false,
             opencode_in_wsl: false,
             transcribe_files: false,
+            drop_transcribe: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,

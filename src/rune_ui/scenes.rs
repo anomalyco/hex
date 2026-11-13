@@ -729,6 +729,28 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.screenshots = true;
         ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
+    // Labs › Transcribe dropped audio: a file Hex reads held over the window,
+    // and one file at 42% with two behind it.
+    ("drop-hover", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.drop_transcribe = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.drop =
+            drop_transcribe::DropTranscribe::fixture_dragging(drop_transcribe::Drag::Accepted);
+    }),
+    ("drop-running", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.drop_transcribe = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.drop = drop_transcribe::DropTranscribe::fixture_running();
+    }),
+    // Its own card while on: the button that opens the file dialog, for the
+    // desktops that report no file drags.
+    ("mac-labs-drop-transcribe", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.drop_transcribe = true;
+        ui.lab_store.group = Some(crate::labs::Feature::DropTranscribe.group());
+    }),
     // Labs on Windows and Linux: only their OS's labs, groups holding a
     // lab that's on open.
     ("windows-labs", |ui| {

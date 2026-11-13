@@ -173,6 +173,7 @@ impl Feature {
             | Self::PrintStart
             | Self::VoicePrompt
             | Self::CopyCaptureZip
+            | Self::DropTranscribe
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -256,7 +257,7 @@ impl Feature {
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
-            Self::KQuantModels => 20261113,
+            Self::KQuantModels | Self::DropTranscribe => 20261113,
         }
     }
 
@@ -391,6 +392,7 @@ impl Feature {
             | Self::ApiBrowserAccess
             | Self::VoicePrompt
             | Self::CopyCaptureZip
+            | Self::DropTranscribe
             | Self::SpeakersOnly => true,
         }
     }
@@ -477,6 +479,7 @@ impl Feature {
             Self::PrintStart => "print-start",
             Self::VoicePrompt => "voice-prompt",
             Self::CopyCaptureZip => "copy-capture-zip",
+            Self::DropTranscribe => "drop-transcribe",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -563,6 +566,7 @@ impl Feature {
             Self::PrintStart => "labs.print_start",
             Self::VoicePrompt => "labs.voice_prompt",
             Self::CopyCaptureZip => "labs.copy_capture_zip",
+            Self::DropTranscribe => "labs.drop_transcribe",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -653,6 +657,7 @@ impl Feature {
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
+            Self::DropTranscribe => settings.labs.drop_transcribe,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -741,6 +746,7 @@ impl Feature {
             &mut labs.print_start,
             &mut labs.voice_prompt,
             &mut labs.copy_capture_zip,
+            &mut labs.drop_transcribe,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -834,6 +840,7 @@ impl Feature {
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
+            Self::DropTranscribe => settings.labs.drop_transcribe = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -982,6 +989,11 @@ static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 /// written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Transcribe dropped audio's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static DROP_TRANSCRIBE: AtomicBool = AtomicBool::new(false);
+
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
 /// and empty while the lab is off.
@@ -1014,6 +1026,7 @@ fn state() -> u64 {
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
+                DROP_TRANSCRIBE.store(drop_transcribe_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
@@ -1066,6 +1079,14 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
     settings.k_quant_models
         && Feature::KQuantModels.shipped()
         && Feature::KQuantModels.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Transcribe dropped audio in this build,
+/// before its managed lock; the state word has no bit for it.
+fn drop_transcribe_enabled(settings: &LabsSettings) -> bool {
+    settings.drop_transcribe
+        && Feature::DropTranscribe.shipped()
+        && Feature::DropTranscribe.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Browser access to the local API in this
@@ -1129,6 +1150,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
+    DROP_TRANSCRIBE.store(drop_transcribe_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -2236,6 +2258,31 @@ mod tests {
         assert_eq!(Feature::KQuantModels.group(), Group::Models);
         assert_eq!(Feature::KQuantModels.settings_key(), "labs.k_quant_models");
         assert_eq!(Feature::KQuantModels.name(), "k-quant-models");
+    }
+
+    #[test]
+    fn drop_transcribe_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!drop_transcribe_enabled(&labs));
+        labs.drop_transcribe = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(drop_transcribe_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(
+            Feature::DropTranscribe.on_this_os(),
+            "the window exists on every OS"
+        );
+        assert_eq!(Feature::DropTranscribe.added(), 20261113);
+        assert_eq!(Feature::DropTranscribe.audience(), Audience::Everyone);
+        assert_eq!(Feature::DropTranscribe.group(), Group::Models);
+        assert_eq!(
+            Feature::DropTranscribe.settings_key(),
+            "labs.drop_transcribe"
+        );
+        assert_eq!(Feature::DropTranscribe.name(), "drop-transcribe");
     }
 
     #[test]

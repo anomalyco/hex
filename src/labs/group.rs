@@ -130,7 +130,8 @@ impl Feature {
             | Self::KQuantModels
             | Self::PickerDownloaded
             | Self::ParakeetUltra
-            | Self::TranscribeFiles => Group::Models,
+            | Self::TranscribeFiles
+            | Self::DropTranscribe => Group::Models,
         }
     }
 }

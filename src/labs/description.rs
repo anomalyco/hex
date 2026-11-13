@@ -202,6 +202,9 @@ impl Feature {
             Self::TranscribeFiles => {
                 "Turn a WAV recording into text with hex transcribe <file> and your dictation model"
             }
+            Self::DropTranscribe => {
+                "Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it"
+            }
             Self::ApiProcessing => {
                 "Let apps using Hex's local API ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"
             }

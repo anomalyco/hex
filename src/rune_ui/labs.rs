@@ -952,6 +952,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model."),
     ));
     rows.push(row(
+        Feature::DropTranscribe,
+        Some(&WAVE),
+        tr("Transcribe dropped audio"),
+        tr("Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it."),
+    ));
+    rows.push(row(
         Feature::ApiProcessing,
         None,
         tr("Process API transcripts"),
@@ -1204,6 +1210,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::TranscribeFiles => "lab-transcribe-files",
+        Feature::DropTranscribe => "lab-drop-transcribe",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::ApiBrowserAccess => "lab-api-browser-access",
@@ -1332,6 +1339,8 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         ),
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
+        // Wayland reports no file drags, so its card offers the file dialog.
+        Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

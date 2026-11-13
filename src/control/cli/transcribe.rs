@@ -2,13 +2,11 @@
 //! the running Hex's local API, or in this process on Linux and Windows when
 //! Hex is stopped. Nothing is pasted, saved to History, or processed.
 //!
-//! A file of any length is read in pieces of at most 30 s ([`pieces`]) and
-//! their text is joined with one space: a piece that short can run on the
-//! running Hex's dictation engine's loaded copy when it holds the model,
-//! instead of its service loading a second one, and Hex keeps one piece
-//! rather than the whole file in memory.
-
-mod pieces;
+//! A file of any length is read in pieces of at most 30 s
+//! ([`crate::transcription::pieces`]) and their text is joined with one
+//! space: a piece that short can run on the running Hex's dictation engine's
+//! loaded copy when it holds the model, instead of its service loading a
+//! second one, and Hex keeps one piece rather than the whole file in memory.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,8 +17,8 @@ use super::{Output, print};
 use crate::control::{ControlReply, model_selection};
 use crate::labs::Feature;
 use crate::transcription::models::TranscriptionSelection;
+use crate::transcription::pieces::{PieceError, Pieces, next_speechful, wav_bytes};
 use crate::transcription::service::AudioError;
-use pieces::{PieceError, Pieces};
 
 /// One piece waits for a cold model behind it and for its own transcription.
 const TIMEOUT: Duration = Duration::from_secs(600);
@@ -170,7 +168,7 @@ fn in_running_hex(job: &Job) -> ControlReply {
             Ok(None) => break,
             Err(error) => return refused(&job.file, error),
         };
-        let wav = match pieces::wav_bytes(&samples) {
+        let wav = match wav_bytes(&samples) {
             Ok(wav) => wav,
             Err(error) => return refused(&job.file, error),
         };
@@ -190,37 +188,6 @@ fn in_running_hex(job: &Job) -> ControlReply {
         }
     }
     joined(texts)
-}
-
-/// The next piece that may hold speech, skipping pieces of only silence as a
-/// long GGUF clip's silent chunks are skipped: models invent text for silence
-/// (#1194) or run to their generation cap (#968).
-///
-/// The check runs only when the speech detector is already installed: a
-/// one-shot command must not start its background model download.
-fn next_speechful(pieces: &mut Pieces) -> std::result::Result<Option<Vec<f32>>, PieceError> {
-    let detector = crate::transcription::models::speech_detector_installed();
-    next_speechful_with(pieces, detector)
-}
-
-/// [`next_speechful`] with the detector's availability passed in, so a test
-/// needs no installed model.
-fn next_speechful_with(
-    pieces: &mut Pieces,
-    detector: bool,
-) -> std::result::Result<Option<Vec<f32>>, PieceError> {
-    loop {
-        match pieces.next()? {
-            Some(samples) if !keeps_piece(&samples, detector) => continue,
-            piece => return Ok(piece),
-        }
-    }
-}
-
-/// Whether a piece goes to the model: only silence is skipped, and only when
-/// the detector is installed and hears none in it.
-fn keeps_piece(samples: &[f32], detector: bool) -> bool {
-    !detector || crate::transcription::gguf_session::chunk_may_hold_speech(samples)
 }
 
 /// One piece's transcript, trimmed, or the refusal for an answer Hex cannot
@@ -503,35 +470,6 @@ mod tests {
         let (code, message) = error(reply);
         assert_eq!(code, "unsupported");
         assert!(message.contains("truncated or corrupt"), "{message}");
-    }
-
-    #[test]
-    fn a_piece_is_kept_without_the_detector_and_it_is_not_consulted() {
-        let path = wav_at("silent", 1.0);
-        let mut pieces = open(&path).unwrap();
-        {
-            // The override says "no speech": a kept piece proves the check did
-            // not run, so the detector cannot have started its download.
-            let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
-            assert!(next_speechful_with(&mut pieces, false).unwrap().is_some());
-        }
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn an_installed_detector_skips_a_piece_it_hears_nothing_in() {
-        let path = wav_at("kept", 1.0);
-        {
-            let mut pieces = open(&path).unwrap();
-            let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
-            assert!(next_speechful_with(&mut pieces, true).unwrap().is_none());
-        }
-        {
-            let mut pieces = open(&path).unwrap();
-            let _speech = crate::transcription::speech_detector::override_for_test(Some(true));
-            assert!(next_speechful_with(&mut pieces, true).unwrap().is_some());
-        }
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

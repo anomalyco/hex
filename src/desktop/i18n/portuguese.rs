@@ -1257,6 +1257,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL.", "Usa um serviço do OpenCode rodando na sua distribuição WSL padrão para a reescrita de Modos e o seletor de modelos de Modos. Procurá-lo pode iniciar o WSL."),
     ("Transcribe files", "Transcrever arquivos"),
     ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Adiciona hex transcribe <file> para transformar uma gravação WAV em texto com seu modelo de ditado."),
+    ("Transcribe dropped audio", "Transcrever áudio arrastado"),
+    ("Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it.", "Arraste um arquivo WAV ou MP3 para a janela do Hex para salvar a transcrição como um arquivo de texto ao lado dele."),
     ("Process API transcripts", "Processar transcrições da API"),
     ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Apps podem pedir à API local do Hex transcrições com o processamento do modo Global aplicado"),
     ("Timestamps in API transcripts", "Marcas de tempo nas transcrições da API"),
@@ -1328,6 +1330,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It'll be there before your coffee is.", "Vai estar pronto antes do seu café."),
     ("Allow in Login Items", "Permitir em Itens de Início"),
     ("macOS wants your OK first. It's very protective.", "O macOS quer seu OK primeiro. Ele é muito protetor."),
+    ("Transcribe a file…", "Transcrever um arquivo…"),
+    ("Transcribe a file", "Transcrever um arquivo"),
+    ("Drop to save a transcript", "Solte para salvar uma transcrição"),
+    ("WAV and MP3", "WAV e MP3"),
+    ("WAV, MP3, M4A, AIFF, and CAF", "WAV, MP3, M4A, AIFF e CAF"),
+    ("Hex can transcribe {} files", "O Hex transcreve arquivos {}"),
+    ("Transcribing… {}%", "Transcrevendo… {}%"),
+    ("{} more queued", "Mais {} na fila"),
+    ("Saved {}", "Salvo {}"),
+    ("Show in folder", "Mostrar na pasta"),
+    ("Could not transcribe {}", "Não foi possível transcrever {}"),
+    ("A file could not be chosen.", "Não foi possível escolher um arquivo."),
 ];
 
 #[cfg(test)]

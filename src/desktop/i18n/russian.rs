@@ -1260,6 +1260,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL.", "Использует службу OpenCode, запущенную в вашем дистрибутиве WSL по умолчанию, для переписывания в режимах и выбора моделей в режимах. Её поиск может запустить WSL."),
     ("Transcribe files", "Транскрипция файлов"),
     ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Добавляет hex transcribe <file>: запись WAV превращается в текст с помощью вашей модели диктовки."),
+    ("Transcribe dropped audio", "Транскрипция перетаскиваемого аудио"),
+    ("Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it.", "Перетащите файл WAV или MP3 в окно Hex, чтобы сохранить его транскрипт как текстовый файл рядом."),
     ("Process API transcripts", "Обрабатывать транскрипты API"),
     ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Приложения могут запрашивать у локального API Hex транскрипты с обработкой глобального режима"),
     ("Timestamps in API transcripts", "Метки времени в транскриптах API"),
@@ -1331,6 +1333,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It'll be there before your coffee is.", "Он будет готов раньше вашего кофе."),
     ("Allow in Login Items", "Разрешить в Объектах входа"),
     ("macOS wants your OK first. It's very protective.", "macOS сначала хочет вашего согласия. Он очень заботливый."),
+    ("Transcribe a file…", "Распознать файл…"),
+    ("Transcribe a file", "Распознать файл"),
+    ("Drop to save a transcript", "Перетащите, чтобы сохранить транскрипт"),
+    ("WAV and MP3", "WAV и MP3"),
+    ("WAV, MP3, M4A, AIFF, and CAF", "WAV, MP3, M4A, AIFF и CAF"),
+    ("Hex can transcribe {} files", "Hex распознаёт файлы {}"),
+    ("Transcribing… {}%", "Распознавание… {}%"),
+    ("{} more queued", "Ещё {} в очереди"),
+    ("Saved {}", "{} сохранён"),
+    ("Show in folder", "Показать в папке"),
+    ("Could not transcribe {}", "Не удалось распознать {}"),
+    ("A file could not be chosen.", "Не удалось выбрать файл."),
 ];
 
 #[cfg(test)]
