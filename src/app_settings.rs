@@ -74,7 +74,7 @@ static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new(
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
 static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
-static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
+static CUSTOM_TRANSFORMATIONS_SELECTED: AtomicBool = AtomicBool::new(false);
 static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
 static HOTKEYS: OnceLock<RwLock<AppliedHotkeys>> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -769,9 +769,8 @@ impl AppSettings {
             Ordering::Release,
         );
         crate::audio::set_avoid_bluetooth_microphone(self.avoid_bluetooth_microphone);
-        CUSTOM_TRANSFORMATIONS_ENABLED.store(
-            transformations_used(&self.dictation_processing)
-                && !policy.locks(crate::policy::Lock::Transforms),
+        CUSTOM_TRANSFORMATIONS_SELECTED.store(
+            crate::personal_commands::custom_transformations_selected(&self.dictation_processing),
             Ordering::Release,
         );
         crate::feedback::set_enabled(self.sound_effects);
@@ -1294,15 +1293,6 @@ pub fn microphone_policy() -> MicrophonePolicy {
     }
 }
 
-/// Whether the global mode or any mode runs a transformation.
-pub fn transformations_used(processing: &DictationProcessingSettings) -> bool {
-    !processing.default_mode.transformations.is_empty()
-        || processing
-            .modes
-            .iter()
-            .any(|mode| !mode.transformations.is_empty())
-}
-
 /// Where the recording HUD appears, as last saved.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn indicator_position() -> IndicatorPosition {
@@ -1313,8 +1303,8 @@ pub fn indicator_position() -> IndicatorPosition {
     }
 }
 
-pub fn custom_transformations_enabled() -> bool {
-    CUSTOM_TRANSFORMATIONS_ENABLED.load(Ordering::Acquire)
+pub fn custom_transformations_selected() -> bool {
+    CUSTOM_TRANSFORMATIONS_SELECTED.load(Ordering::Acquire)
 }
 
 pub fn double_tap_lock() -> bool {

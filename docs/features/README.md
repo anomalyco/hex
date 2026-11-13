@@ -1321,6 +1321,20 @@ under its own `timeout` (1 s by default, 30 s when the config uses host APIs,
 context to the configured provider; speech transcription stays local.
 
 ```ts
+Discover custom transformations           // personal_commands::host_needed; every OS
+├── A config exists (Set up, hex commands init, or a manual file) -> start the host
+├── A custom transformation is selected -> start, even if its config is missing
+├── Only built-ins selected, no config -> native transforms only, no script host
+└── DisableTransforms policy -> no host, regardless of config or selection
+```
+
+The macOS listener rechecks discovery every 250 ms; Linux and Windows use
+their host's refresh. `host_startup_discovers_a_config_without_selecting_a_transformation`
+in [personal_commands.rs](../../src/personal_commands.rs) covers the shared
+decision, policy denial, built-ins, and custom selection in global and other
+modes. This is a pure decision check, not a live Set up walkthrough.
+
+```ts
 Transform host APIs                      // personal_commands/{io,fetch,process,trust}.rs
 ├── fetch(url, { method, headers, body, signal }) -> Response (ureq, platform TLS)
 ├── node:child_process execFile / exec (+ node:util promisify, input option)

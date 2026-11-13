@@ -642,12 +642,13 @@ impl WindowsDesktopHost {
         self.preparation.set_error(Some(failed.error));
     }
 
-    /// Hosts the personal transformations workspace while any mode uses a
-    /// transformation or the workspace exists.
+    /// Hosts the personal transformations workspace under the shared policy.
     fn refresh_personal_commands_host(&mut self) {
-        let enabled =
-            crate::app_settings::transformations_used(&self.settings.dictation_processing)
-                || crate::personal_commands::workspace_configured();
+        let enabled = crate::personal_commands::host_needed(
+            crate::personal_commands::custom_transformations_selected(
+                &self.settings.dictation_processing,
+            ),
+        );
         match (enabled, self.personal_commands.is_some()) {
             (true, false) => {
                 self.personal_commands =

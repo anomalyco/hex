@@ -7,6 +7,9 @@ Agent or terminal                                  // control.cli; every OS
 ├── hex status [--json] -> Listener, capture, meeting, model, features,
 │   permissions, window, update, version, pid, memory
 │   ├── Wayland listener -> its warning names a missing wl-copy before paste fails
+│   ├── Capture -> listener query: shortcut/CLI or SDK recording, including a
+│   │   pending microphone start and release tail, plus accepted output jobs
+│   │   └── Listener does not answer -> capture unknown, never inferred idle from logs
 │   └── Hex not running -> exit 3, "Hex is not running; run `hex start`"
 ├── hex start -> Already running: nothing | else open Hex.app (Linux and
 │   Windows: a detached `hex app --hidden`), wait ≤ 20 s
@@ -18,6 +21,10 @@ Agent or terminal                                  // control.cli; every OS
 │       Linux unit -> systemctl restart; else waits for the drain, then start
 ├── hex dictation start|stop|toggle|cancel
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
+│   │   ├── Windows CLI/tray start -> hook adopts the accepted capture; first
+│   │   │   press of its shortcut finishes it, in Hold and Toggle alike
+│   │   └── SDK /dictations capture -> only its owner or lease ends it;
+│   │       ordinary commands and physical keys leave it alone
 │   ├── start -> intentional at once: tone once the mic is open, recording
 │   │   behavior, live stream
 │   ├── stop -> done only when the clip went to transcription;
@@ -175,6 +182,13 @@ bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands
 covers parsing next to `history` and `meetings`; `control::host::tests` cover
 the quit refusal, printing stops (and Linux's and Windows' `unsupported` for a
 printing start), and runtime `unsupported` replies;
+`quit_and_status_use_the_owner_even_without_dictating_log_events` covers SDK
+capture, pending jobs, and an unanswered listener. `dictation::service::tests`
+cover the recording query through SDK opening, capture, and completion, and
+timeout recovery. Windows input's `command_capture_*` and `command_stop_*`
+tests cover command-to-key handoff, raw ownership, Toggle cancel, and a CLI
+stop during a physical hold. These are owner/transition tests, not a physical
+Windows keyboard or live SDK recording smoke test.
 `linux::tests` parse the shared tree beside Linux's own commands;
 `rune_ui::platform::parity_tests` fail when a capability differs across OSes
 without a recorded reason; `settings_name_real_capabilities_and_keys` checks

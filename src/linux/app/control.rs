@@ -14,6 +14,7 @@ use crate::linux::service::{self as linux_service, Control, Published, ShortcutR
 use super::{HostHandle, HostRequest};
 
 pub(super) struct LinuxControl {
+    pub(super) dictations: crate::dictation::service::DictationQueue,
     pub(super) host: HostHandle,
     pub(super) published: std::sync::Weak<Published>,
     pub(super) window: mpsc::SyncSender<Control>,
@@ -68,13 +69,20 @@ impl crate::control::host::Host for LinuxControl {
             listener.warning = status.desktop.operation_error.clone();
         }
         Ok(crate::control::host::HostState {
-            capture: crate::control::host::capture_from_state(status.desktop.activity.state),
             listener,
             transcription: status.desktop.transcription,
             update: status.desktop.update_status,
             settings: status.settings,
             window_open: status.window_open,
         })
+    }
+
+    fn capture(&self) -> std::result::Result<crate::control::CaptureSnapshot, ControlError> {
+        if self.state()?.listener.running {
+            self.dictations.snapshot(|| {})
+        } else {
+            Ok(Default::default())
+        }
     }
 
     fn dictation(

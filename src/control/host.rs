@@ -27,7 +27,6 @@ pub(crate) struct HostState {
     pub(crate) listener: DesktopListenerSnapshot,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update: DesktopUpdateStatus,
-    pub(crate) capture: CaptureSnapshot,
     pub(crate) window_open: bool,
 }
 
@@ -35,6 +34,8 @@ pub(crate) struct HostState {
 /// waiting on the transport's worker thread.
 pub(crate) trait Host {
     fn state(&self) -> Result<HostState, ControlError>;
+    /// Queries the listener owner; a missing answer is never an idle capture.
+    fn capture(&self) -> Result<CaptureSnapshot, ControlError>;
     /// Hands a dictation command to the listener's own queue, as its
     /// shortcut would; `print` rides along with a printing stop, and `raw`
     /// with a start that skips processing.
@@ -125,7 +126,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
         ControlCommand::Quit { force } | ControlCommand::Restart { force } => {
             let restart = matches!(command, ControlCommand::Restart { .. });
             reply(
-                super::check_quit(&meeting_report(), capture(host), force)
+                super::check_quit(&meeting_report(), host.capture(), force)
                     .and_then(|()| host.quit(restart))
                     .map(|()| {
                         ControlReply::done(if restart {
@@ -355,10 +356,6 @@ fn meeting(stop: bool, title: Option<String>) -> ControlReply {
     })
 }
 
-fn capture(host: &dyn Host) -> Result<CaptureSnapshot, ControlError> {
-    host.state().map(|state| state.capture)
-}
-
 fn load() -> Result<AppSettings, ControlError> {
     AppSettings::load().map_err(|error| {
         ControlError::new("internal", format!("couldn't read settings: {error:#}"))
@@ -531,25 +528,18 @@ fn launch_at_login(host: &dyn Host, enabled: Option<bool>) -> ControlReply {
     }
 }
 
-/// What the listener is doing, from the event log's latest state.
-pub(crate) fn capture_from_state(
-    state: Option<crate::desktop::events::VoiceState>,
-) -> CaptureSnapshot {
-    use crate::desktop::events::VoiceState;
-    CaptureSnapshot {
-        recording: matches!(state, Some(VoiceState::Dictating))
-            .then_some(super::CaptureKind::Dictation),
-        pending_jobs: usize::from(matches!(state, Some(VoiceState::Transcribing))),
-        microphone_unavailable: false,
-    }
-}
-
 fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
     let state = host.state()?;
     let settings = &state.settings;
     let ready = crate::desktop::onboarding::model_ready(&settings.transcription);
     let capture = if state.listener.running {
-        CaptureReport::from(state.capture)
+        match host.capture() {
+            Ok(snapshot) => CaptureReport::from(snapshot),
+            Err(_) => CaptureReport {
+                state: CaptureState::Unknown,
+                ..Default::default()
+            },
+        }
     } else {
         CaptureReport {
             state: CaptureState::Idle,
@@ -627,6 +617,9 @@ mod tests {
     #[derive(Default)]
     struct FakeHost {
         recording: bool,
+        service: bool,
+        pending_jobs: usize,
+        unresponsive: bool,
         quits: Mutex<Vec<bool>>,
         dictations: Mutex<Vec<CaptureAction>>,
     }
@@ -653,11 +646,22 @@ mod tests {
                     preparing: None,
                 },
                 update: DesktopUpdateStatus::Current,
-                capture: capture_from_state(
-                    self.recording
-                        .then_some(crate::desktop::events::VoiceState::Dictating),
-                ),
                 window_open: false,
+            })
+        }
+        fn capture(&self) -> Result<CaptureSnapshot, ControlError> {
+            if self.unresponsive {
+                return Err(ControlError::new("unavailable", "listener didn't answer"));
+            }
+            Ok(CaptureSnapshot {
+                recording: if self.service {
+                    Some(super::super::CaptureKind::Service)
+                } else {
+                    self.recording
+                        .then_some(super::super::CaptureKind::Dictation)
+                },
+                pending_jobs: self.pending_jobs,
+                ..Default::default()
             })
         }
         fn dictation(
@@ -739,6 +743,48 @@ mod tests {
             "ok"
         );
         assert_eq!(*host.quits.lock().unwrap(), [true]);
+    }
+
+    #[test]
+    fn quit_and_status_use_the_owner_even_without_dictating_log_events() {
+        for (host, expected) in [
+            (
+                FakeHost {
+                    service: true,
+                    ..Default::default()
+                },
+                CaptureState::Recording,
+            ),
+            (
+                FakeHost {
+                    pending_jobs: 2,
+                    ..Default::default()
+                },
+                CaptureState::Transcribing,
+            ),
+            (
+                FakeHost {
+                    unresponsive: true,
+                    ..Default::default()
+                },
+                CaptureState::Unknown,
+            ),
+        ] {
+            assert_eq!(
+                code(&ask(&host, ControlCommand::Quit { force: false })),
+                "busy"
+            );
+            assert!(host.quits.lock().unwrap().is_empty());
+            let ControlReply::Status(status) = ask(&host, ControlCommand::Status) else {
+                panic!("expected status");
+            };
+            assert_eq!(status.capture.state, expected);
+            assert_eq!(status.capture.pending_jobs, host.pending_jobs);
+            assert_eq!(
+                code(&ask(&host, ControlCommand::Quit { force: true })),
+                "ok"
+            );
+        }
     }
 
     #[test]
