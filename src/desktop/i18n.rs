@@ -304,6 +304,7 @@ pub(crate) fn tr(english: &str) -> &str {
 
 /// Whether the interface is in English, for labels whose English form
 /// differs from the translated key (macOS menus' title case).
+#[cfg(target_os = "macos")]
 pub(crate) fn english() -> bool {
     current() == ENGLISH
 }
