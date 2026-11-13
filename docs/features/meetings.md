@@ -347,8 +347,8 @@ Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
 `teams.live.com`) are known call sites without the lab: a browser on one is a
 Microsoft Teams call after 2 s. They use the Microsoft Teams app's
 `com.microsoft.teams2` choice, so Always record set for the app covers its
-website too; a `teams.live.com` choice saved earlier from an offer's "…" still
-applies to that host. Check:
+website too; a choice other than Ask saved earlier for a Teams page's own
+address still applies to that host. Check:
 `teams_web_calls_are_the_teams_service_outside_the_lab`; not observed on a
 real browser Teams call.
 

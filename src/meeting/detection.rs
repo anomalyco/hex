@@ -276,8 +276,8 @@ impl MeetingCandidate {
 
     /// The user's choice for this call: the website's when it has one, else
     /// the app's (a browser's choice covers its other sites), else Ask. A
-    /// Teams page checks its own saved host choice first, so one saved before
-    /// pages used the Teams app's key still applies.
+    /// Teams page keeps a choice other than Ask saved for its own earlier
+    /// host key; an Ask there no longer shadows the Teams app's choice.
     pub fn policy(&self, choices: &[MeetingProviderChoice]) -> MeetingPolicy {
         let chosen = |key: Option<&str>| {
             let key = key?;
@@ -286,8 +286,16 @@ impl MeetingCandidate {
                 .find(|choice| choice.key == key)
                 .map(|choice| choice.policy)
         };
-        let site = self.site.as_deref().map(provider_key_for_site);
-        chosen(self.site.as_deref())
+        let raw = self.site.as_deref();
+        let site = raw.map(provider_key_for_site);
+        let legacy = if site == raw {
+            chosen(raw)
+        } else {
+            // Ask is stored as a real entry, so an older host row left on Ask
+            // must not shadow a newer choice under the mapped key.
+            chosen(raw).filter(|policy| *policy != MeetingPolicy::Ask)
+        };
+        legacy
             .or_else(|| chosen(site))
             .or_else(|| chosen(self.application.as_deref()))
             .unwrap_or_default()
@@ -1652,8 +1660,8 @@ mod tests {
             teams.policy(std::slice::from_ref(&app)),
             MeetingPolicy::AlwaysRecord
         );
-        // A choice saved for the page's own host before pages shared the
-        // app's key still applies, and wins over the app's.
+        // A choice other than Ask saved for the page's own host before pages
+        // shared the app's key still applies, and wins over the app's.
         let web = MeetingProviderChoice {
             key: "teams.live.com".into(),
             label: "Teams (web)".into(),
@@ -1664,10 +1672,18 @@ mod tests {
             MeetingPolicy::NeverOffer
         );
         assert_eq!(
-            teams.policy(&[app, web]),
+            teams.policy(&[app.clone(), web]),
             MeetingPolicy::NeverOffer,
             "the page's own saved choice wins"
         );
+        // Ask is stored as a real entry; an older host row left on Ask does
+        // not shadow the app's choice.
+        let asked_web = MeetingProviderChoice {
+            key: "teams.live.com".into(),
+            label: "Teams (web)".into(),
+            policy: MeetingPolicy::Ask,
+        };
+        assert_eq!(teams.policy(&[app, asked_web]), MeetingPolicy::AlwaysRecord);
 
         let facetime = super::candidate_from_microphone(
             &brave(),
