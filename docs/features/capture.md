@@ -790,14 +790,16 @@ hex capture stop                         // capture.stop
 │   written beside it; only the steps that read the movie wait for it, and it
 │   starts where its first frame was shown (video_offset_ms)
 └── In the background, on one capture-finish thread, one capture at a time:
-    ├── 16 kHz audio with its start offset and gaps -> SealedCapture::finish
-    ├── Words: 30 s chunks, each a foreground job on the dictation engine's model,
-    │   after queued dictation, before meeting chunks; waits while dictation records
-    │   or transcribes; never interrupts a live stream
+    ├── 16 kHz audio streamed to audio.wav as it records: leading start offset
+    │   and gaps written as silence, so WAV time stays capture time
+    ├── Words: audio.wav read in 30 s pieces, each a foreground job on the
+    │   dictation engine's model, after queued dictation, before meeting chunks;
+    │   waits while dictation records or transcribes; never interrupts a live stream
     ├── Word times moved earlier by the model's measured lag (Parakeet Unified
     │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
     │   other models and Apple keep their own times
-    ├── Past 20 min -> audio kept to 20 min, the rest one gap
+    ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
+    │   guard, never a memory bound
     ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
     │   summary.md; then every file 0600 and folder 0700
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
@@ -1070,12 +1072,18 @@ Checks:
   `scrawls_engine_claims_nothing_machine_wide`,
   `the_timeline_resamples_pads_gaps_and_ends_at_the_stop`,
   `a_pending_gap_and_a_stalled_tail_come_back_from_the_closed_sink`,
-  `padding_past_the_length_limit_stays_bounded`,
+  `a_gap_is_digital_silence_where_it_happened`,
+  `a_capture_longer_than_twenty_minutes_keeps_all_of_its_audio`,
+  `past_the_guard_the_file_stops_and_the_rest_is_one_gap`,
   `captures_finish_one_at_a_time_and_starts_wait_for_room`,
   `a_capture_queued_behind_a_slow_finish_has_already_stopped`,
   `a_failed_start_raced_by_stop_never_wedges_later_starts`,
   `the_engine_config_comes_from_hex`, and
   `shutdown_cancels_the_recording_capture_and_waits_for_its_cleanup`.
+  In capture_host/wav_file.rs: `a_finished_file_reads_back_and_can_be_trimmed`,
+  `a_keep_past_the_written_samples_keeps_them_all`, and
+  `the_file_is_owner_only`.
+  In capture_host/words.rs: `pieces_past_the_first_window_keep_their_place_on_the_clock`.
 - Shortcut and input, in capture_host.rs: `the_host_is_absent_while_captures_are_off`,
   `the_shortcut_starts_and_a_later_press_stops`,
   `input_reaches_only_the_capture_that_is_recording`, `tap_flags_become_modifiers`,

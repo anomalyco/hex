@@ -1,6 +1,7 @@
 //! A saved recording read as pieces: streaming decode, downmix, 16 kHz
 //! resampling, and the quiet-point cut the GGUF adapters use for a long clip,
-//! so `hex transcribe` holds about one 30 s piece instead of the whole file.
+//! so a caller holds about one 30 s piece instead of the whole file. `hex
+//! transcribe` and a finished capture's transcription share it.
 //!
 //! WAV reads through Hound, as the local API reads an upload; every other
 //! container (MP4/M4A/MOV, CAF, AIFF, MP3, FLAC, Ogg, WebM/Matroska) through
@@ -22,14 +23,14 @@ use crate::transcription::service::{AudioError, WavFormat, validate_wav_input, w
 /// 30 s at 16 kHz: the longest piece, the longest clip the local API runs
 /// on the running Hex's dictation engine's loaded copy when it holds the
 /// model, instead of its service loading a second copy.
-pub(super) const PIECE_SAMPLES: usize = crate::transcription::service::SHARED_MAX_SAMPLES;
+pub(crate) const PIECE_SAMPLES: usize = crate::transcription::service::SHARED_MAX_SAMPLES;
 /// Frames decoded per WAV read: 85 ms at 48 kHz, so a piece is cut near its
 /// end without holding much more than one piece.
 const BLOCK_FRAMES: usize = 4_096;
 
 /// Why a recording could not be read into pieces.
 #[derive(Debug)]
-pub(super) enum PieceError {
+pub(crate) enum PieceError {
     /// The file could not be opened or read at all.
     Io(std::io::Error),
     /// A WAV whose rate or channels this build does not take.
@@ -53,7 +54,7 @@ pub(super) enum PieceError {
 }
 
 /// The 16 kHz samples of one recording, one piece at a time.
-pub(super) struct Pieces {
+pub(crate) struct Pieces {
     source: Source,
     /// `None` once the input ended and its tail was flushed.
     resampler: Option<StreamingResampler>,
@@ -94,7 +95,7 @@ impl Pieces {
     /// Opens `path`, picks its audio, and decodes its first block, so a file
     /// Hex cannot read is refused before any model is loaded, downloaded, or
     /// Hex is asked.
-    pub(super) fn open(path: &Path) -> Result<Self, PieceError> {
+    pub(crate) fn open(path: &Path) -> Result<Self, PieceError> {
         let file = File::open(path).map_err(PieceError::Io)?;
         if let Ok(reader) = WavReader::new(BufReader::new(file)) {
             return Self::wav(reader);
@@ -152,7 +153,7 @@ impl Pieces {
     /// a truncated or corrupt file is refused before any transcription rather
     /// than after minutes of it. Compressed audio is decoded only once, as it
     /// is transcribed: damage found later names where it is.
-    pub(super) fn validate(&mut self) -> Result<(), PieceError> {
+    pub(crate) fn validate(&mut self) -> Result<(), PieceError> {
         if !matches!(self.source, Source::Wav { .. }) {
             return Ok(());
         }
@@ -170,18 +171,18 @@ impl Pieces {
     }
 
     /// The recording's length, when its header says.
-    pub(super) fn duration_ms(&self) -> Option<u64> {
+    pub(crate) fn duration_ms(&self) -> Option<u64> {
         self.duration_ms
     }
 
     /// How far into the recording reading has got, in milliseconds.
-    pub(super) fn position_ms(&self) -> u64 {
+    pub(crate) fn position_ms(&self) -> u64 {
         self.frames * 1_000 / u64::from(self.rate.max(1))
     }
 
     /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
     /// end of the file.
-    pub(super) fn next(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
+    pub(crate) fn next(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
         loop {
             if let Some(piece) = self.ready.pop_front() {
                 return Ok(Some(piece));
@@ -280,7 +281,7 @@ impl PieceBuffer {
 
 /// `samples` as a 16 kHz mono 32-bit float WAV: what the local API takes for
 /// one piece, with no sample converted or dropped.
-pub(super) fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PieceError> {
+pub(crate) fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PieceError> {
     let mut bytes = Cursor::new(Vec::new());
     {
         let spec = WavSpec {

@@ -379,7 +379,10 @@ pub fn finalize_capture_bundle_for_config(
         duration_ms,
         no_screen,
     } = recording;
+    // A capture that streamed its samples to `audio.wav` already has the file:
+    // encoding an empty recording here would replace it with a 44-byte one.
     if let Some(ref audio) = recorded_audio
+        && !audio.is_on_disk()
         && let Ok(wav_bytes) = audio.wav_bytes_16k()
         && !wav_bytes.is_empty()
     {

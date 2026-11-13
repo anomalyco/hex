@@ -503,7 +503,7 @@ impl Controller {
             tracing::warn!(%error, "could not close replay narration sink");
             None
         });
-        let mut timeline = super::Timeline::new(active.press_at);
+        let mut timeline = super::Timeline::new(active.press_at, active.bundle.join("audio.wav"));
         while let Ok(chunk) = active.chunks.try_recv() {
             match chunk {
                 CaptureAudio::Samples {
@@ -516,8 +516,11 @@ impl Controller {
         }
         let held = release_at.duration_since(active.press_at);
         let recorded = if held >= MIN_NARRATION_HOLD {
-            timeline.finish(release_at, closed)
+            let audio = timeline.finish(release_at, closed);
+            narration_on_clock(&active.bundle.join("audio.wav"), audio)
         } else {
+            drop(timeline);
+            let _ = fs::remove_file(active.bundle.join("audio.wav"));
             RecordedAudio::default()
         };
         lock(outcomes).stopped(&active.bundle, End::Finish);
@@ -964,6 +967,20 @@ impl SealedReplay {
             gaps,
             missing_transcript,
         })
+    }
+}
+
+/// The replay's narration moves later by the exported clip's length, which
+/// needs samples: read the streamed `audio.wav` back. A narration hold is
+/// seconds long, so this does not grow with anything.
+#[cfg(target_os = "macos")]
+fn narration_on_clock(path: &Path, audio: RecordedAudio) -> RecordedAudio {
+    match audio.into_memory() {
+        Ok(audio) => audio,
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "could not read the replay's narration");
+            RecordedAudio::default()
+        }
     }
 }
 

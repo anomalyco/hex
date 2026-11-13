@@ -199,10 +199,13 @@ fn with_temp_wav<T>(audio: &RecordedAudio, f: impl FnOnce(&Path) -> Result<T>) -
 pub trait Transcriber: Send + Sync {
     fn transcribe(&self, audio: &RecordedAudio) -> Result<Option<TranscriptData>>;
 
+    /// Transcribes a WAV file when only the file is available. The default
+    /// decodes it to samples, so a transcriber that reads `audio.samples`
+    /// still works; a transcriber that can read pieces overrides it.
     fn transcribe_wav(&self, wav_path: &Path, _duration_ms: u64) -> Result<Option<TranscriptData>> {
         let bytes = std::fs::read(wav_path)?;
-        let audio = crate::audio::recorded_audio_from_wav(bytes)?;
-        self.transcribe(&audio)
+        let samples = crate::audio::decode_wav_16k(&bytes)?;
+        self.transcribe(&RecordedAudio::new(samples, 16_000, 0, Vec::new()))
     }
 }
 
@@ -390,10 +393,13 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
     };
     let live = audio.take_live();
     let engine = Engine::preferred();
+    let on_disk = audio.is_on_disk();
     let transcript = run(
         engine,
         || match engine {
             Engine::Apple => Ok(None),
+            // A streamed recording's samples are in `wav`, which the fallback reads.
+            Engine::Hex if on_disk => Ok(None),
             Engine::Hex => try_hex(audio),
             Engine::Command => try_command(wav, audio),
         },
@@ -402,7 +408,9 @@ pub fn transcribe(wav: Option<&Path>, audio: Option<&RecordedAudio>) -> Transcri
                 .unwrap_or_else(|| apple(wav))
         },
     );
-    shift_transcript(transcript, audio.start_offset_ms)
+    // WAV times already start at 0 on the capture's clock, leading silence included.
+    let shift = if on_disk { 0 } else { audio.start_offset_ms };
+    shift_transcript(transcript, shift)
 }
 
 /// Transcribes `audio` (or `wav` when only a WAV file on disk is available) using an explicit
@@ -413,7 +421,7 @@ pub fn transcribe_with(
     audio: Option<&RecordedAudio>,
     transcriber: &dyn Transcriber,
 ) -> TranscriptData {
-    if let Some(audio) = audio.filter(|a| has_audio_samples(a)) {
+    if let Some(audio) = audio.filter(|a| has_audio_samples(a) && !a.is_on_disk()) {
         if let Some(live) = audio.take_live().and_then(|live| finish_live(live, audio)) {
             return normalize_transcript(live, audio.start_offset_ms);
         }
@@ -429,7 +437,8 @@ pub fn transcribe_with(
         };
     }
     if let Some(wav) = wav {
-        let missing = match transcriber.transcribe_wav(wav, 0) {
+        let duration_ms = audio.map_or(0, RecordedAudio::duration_ms);
+        let missing = match transcriber.transcribe_wav(wav, duration_ms) {
             Ok(Some(transcript)) => return normalize_transcript(transcript, 0),
             Ok(None) => transcriber_unavailable(),
             Err(error) => transcriber_failed(&error),
@@ -737,6 +746,34 @@ mod tests {
         assert_eq!(tr.segments[0].t0, 260);
         assert_eq!(tr.segments[0].t1, 350);
         assert_eq!(tr.segments[0].text, "hello world.");
+    }
+
+    #[test]
+    fn a_streamed_recording_is_transcribed_from_its_wav() {
+        struct FromWav;
+        impl Transcriber for FromWav {
+            fn transcribe(&self, _: &RecordedAudio) -> Result<Option<TranscriptData>> {
+                panic!("a streamed recording must not be transcribed from empty samples");
+            }
+            fn transcribe_wav(
+                &self,
+                wav: &Path,
+                duration_ms: u64,
+            ) -> Result<Option<TranscriptData>> {
+                assert_eq!(wav, Path::new("audio.wav"));
+                assert_eq!(duration_ms, 6_250);
+                Ok(Some(TranscriptData {
+                    source: "wav".into(),
+                    text: "hello".into(),
+                    ..Default::default()
+                }))
+            }
+        }
+        let audio = RecordedAudio::on_disk(Path::new("audio.wav"), 96_000, 16_000, 250, Vec::new());
+        let transcript = transcribe_with(Some(Path::new("audio.wav")), Some(&audio), &FromWav);
+        assert_eq!(transcript.source, "wav");
+        assert_eq!(transcript.text, "hello");
+        assert_eq!(transcript.missing, None);
     }
 
     #[test]

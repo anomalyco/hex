@@ -125,7 +125,7 @@ explicit settings: no command turns Meetings on as a side effect.
 file here and decodes its first audio, so a file Hex can't read is refused
 before anything transcribes: WAV through hound (every sample read once up
 front, so a truncated WAV is refused), everything else through Symphonia, and
-Opus through opuscule (`control/cli/transcribe/pieces/media.rs`). It then
+Opus through opuscule (`transcription/pieces/media.rs`). It then
 sends the recording one piece at a time to `POST /transcriptions`
 (`Content-Type: audio/wav`), choosing the endpoint once
 (`control/cli/embedded.rs`): the running app's discovery file, so the app
@@ -135,14 +135,17 @@ embedded `hex service --embedded` child it starts in its own process group,
 reads one ready line from, and ends on success, failure, and Ctrl-C. A Hex
 that runs but answers the wrong API version or token is an error, never a
 reason to start a second service. Pieces are at most 30 s
-(`control/cli/transcribe/pieces.rs`), decoded and resampled incrementally and
+(`transcription/pieces.rs`), decoded and resampled incrementally and
 cut through the quietest point near their end by `gguf_session::quiet_cut`,
 the same cut a long GGUF clip gets; the service skips a piece of only silence
 once the speech detector is installed, and the rest of the text is joined
 with one space, so a file can be any length and only about one piece is in
 memory. A `model-not-ready` piece offers the download on a terminal
 (`control/cli/prepare.rs`), prepares the model through the service's
-`POST /models/{id}/prepare` events, and retries that piece once.
+`POST /models/{id}/prepare` events, and retries that piece once. A finished
+capture's words read its `audio.wav` through the same reader
+(`capture_host/words.rs`), so an hours-long capture is transcribed one piece
+at a time without holding the session.
 
 `hex completions` also never reaches `/control`: it reads its Labs switch from
 `settings.json` (`AppSettings::read`), then prints a script generated at
@@ -239,7 +242,7 @@ the settings-to-capability table; `control::cli::transcribe::tests` cover a
 file that isn't media and a truncated WAV refused before any transcription,
 the selected model and language, a file with no audio as `no-speech`, pieces
 joined in order, and a file whose pieces all hear nothing as `no-speech`;
-`control::cli::transcribe::pieces::tests` cover a 95 s clip split into pieces
+`transcription::pieces::tests` cover a 95 s clip split into pieces
 that cover every sample once, a 48 kHz file read into ≤30 s pieces whose
 samples match `AudioClip::decode_wav`, every WAV sample format, a file that
 changes mid-read naming where reading stopped, every container fixture in

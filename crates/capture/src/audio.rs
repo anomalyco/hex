@@ -25,6 +25,9 @@ pub struct RecordedAudio {
     pub sample_rate: u32,
     pub start_offset_ms: u64,
     pub gaps: Vec<GapSpan>,
+    /// Where the samples live when they were streamed to disk: reading them
+    /// back is only needed by a path that shifts or rewrites the audio.
+    pub(crate) streamed: Option<std::path::PathBuf>,
     pub(crate) sample_count: usize,
     pub(crate) duration_ms: u64,
     pub(crate) wav_bytes: Vec<u8>,
@@ -50,10 +53,56 @@ impl RecordedAudio {
             sample_rate: rate,
             start_offset_ms,
             gaps,
+            streamed: None,
             sample_count,
             duration_ms,
             wav_bytes: Vec::new(),
             live: Default::default(),
+        }
+    }
+
+    /// A recording whose samples stay in `audio.wav` on disk: a capture streams
+    /// them while it records instead of holding the whole session in memory.
+    /// `sample_count` counts the samples after `start_offset_ms`, as `samples`
+    /// would.
+    pub fn on_disk(
+        path: &std::path::Path,
+        sample_count: usize,
+        sample_rate: u32,
+        start_offset_ms: u64,
+        gaps: Vec<GapSpan>,
+    ) -> Self {
+        let rate = if sample_rate == 0 {
+            SAMPLE_RATE
+        } else {
+            sample_rate
+        };
+        Self {
+            samples: Vec::new(),
+            sample_rate: rate,
+            start_offset_ms,
+            gaps,
+            streamed: Some(path.to_path_buf()),
+            sample_count,
+            duration_ms: start_offset_ms + (sample_count as u64 * 1_000) / u64::from(rate),
+            wav_bytes: Vec::new(),
+            live: Default::default(),
+        }
+    }
+
+    /// Whether its samples are already in `audio.wav` on disk, so they are
+    /// never encoded into `wav_bytes` or read from `samples`.
+    pub fn is_on_disk(&self) -> bool {
+        self.streamed.is_some()
+    }
+
+    /// Its samples in memory, read back from the streamed file when they are
+    /// on disk and kept as they are otherwise. A caller that shifts or
+    /// rewrites the audio needs them.
+    pub fn into_memory(self) -> Result<Self> {
+        match self.streamed.clone() {
+            Some(path) => self.shifted_from_file(&path, 0),
+            None => Ok(self),
         }
     }
 
@@ -121,6 +170,9 @@ impl RecordedAudio {
     /// The same audio on a clock that starts `ms` later (a phone movie's first frame): what came
     /// before is dropped, and the gaps move with the clock.
     pub fn since(self, ms: u64) -> Result<Self> {
+        if let Some(path) = self.streamed.clone() {
+            return self.shifted_from_file(&path, ms);
+        }
         if ms == 0 {
             return Ok(self);
         }
@@ -138,16 +190,22 @@ impl RecordedAudio {
         let skip_ms = ms.saturating_sub(self.start_offset_ms);
         let skip = usize::try_from(skip_ms * u64::from(rate) / 1_000).unwrap_or(usize::MAX);
         samples.drain(..skip.min(samples.len()));
-        let gaps = self
-            .gaps
-            .iter()
-            .filter(|gap| gap.end_ms > ms)
-            .map(|gap| GapSpan {
-                start_ms: gap.start_ms.saturating_sub(ms),
-                end_ms: gap.end_ms - ms,
-            })
-            .collect();
+        let gaps = shifted_gaps(self.gaps, ms);
         Ok(Self::new(samples, rate, start_offset_ms, gaps))
+    }
+
+    /// [`Self::since`] for a recording streamed to `path`: reads it back and
+    /// drops the audio before `ms`, exactly as the in-memory shift does.
+    fn shifted_from_file(self, path: &std::path::Path, ms: u64) -> Result<Self> {
+        let decoded = decode_wav_16k(&std::fs::read(path)?)?;
+        let lead = (self.start_offset_ms * u64::from(SAMPLE_RATE) / 1_000) as usize;
+        let mut samples = decoded.get(lead..).unwrap_or_default().to_vec();
+        let skip_ms = ms.saturating_sub(self.start_offset_ms);
+        let skip = usize::try_from(skip_ms * u64::from(SAMPLE_RATE) / 1_000).unwrap_or(usize::MAX);
+        samples.drain(..skip.min(samples.len()));
+        let start_offset_ms = self.start_offset_ms.saturating_sub(ms);
+        let gaps = shifted_gaps(self.gaps, ms);
+        Ok(Self::new(samples, SAMPLE_RATE, start_offset_ms, gaps))
     }
 
     pub fn set_live(&self, live: Option<crate::live_transcribe::Live>) {
@@ -157,6 +215,16 @@ impl RecordedAudio {
     pub fn take_live(&self) -> Option<crate::live_transcribe::Live> {
         self.live.take()
     }
+}
+
+fn shifted_gaps(gaps: Vec<GapSpan>, ms: u64) -> Vec<GapSpan> {
+    gaps.iter()
+        .filter(|gap| gap.end_ms > ms)
+        .map(|gap| GapSpan {
+            start_ms: gap.start_ms.saturating_sub(ms),
+            end_ms: gap.end_ms - ms,
+        })
+        .collect()
 }
 
 fn resample_to_16k(samples: &[f32], rate: u32) -> Vec<f32> {
@@ -377,6 +445,7 @@ impl AudioRecorder {
             sample_rate: SAMPLE_RATE,
             start_offset_ms: 0,
             gaps: Vec::new(),
+            streamed: None,
             sample_count,
             duration_ms,
             wav_bytes,
@@ -461,6 +530,7 @@ pub fn recorded_audio_from_wav(wav_bytes: Vec<u8>) -> Result<RecordedAudio> {
         sample_rate: SAMPLE_RATE,
         start_offset_ms: 0,
         gaps: Vec::new(),
+        streamed: None,
         sample_count,
         duration_ms: sample_count as u64 * 1_000 / u64::from(SAMPLE_RATE),
         wav_bytes,
@@ -763,5 +833,60 @@ mod tests {
         assert_eq!(decoded.len(), 1_760);
         assert!(decoded[..1_600].iter().all(|&s| s == 0.0));
         assert!(decoded[1_600..].iter().all(|&s| (s - 0.5).abs() < 0.01));
+    }
+
+    #[test]
+    fn audio_streamed_to_disk_counts_its_samples_and_can_be_read_back() {
+        let path =
+            std::env::temp_dir().join(format!("hex-audio-streamed-{}.wav", std::process::id()));
+        // 250 ms of leading silence and 1 s of audio at 16 kHz.
+        let mut padded = vec![0.0_f32; 4_000];
+        padded.extend(vec![0.5_f32; 16_000]);
+        std::fs::write(&path, encode_wav_16k(&padded).unwrap()).unwrap();
+
+        let audio = RecordedAudio::on_disk(
+            &path,
+            16_000,
+            16_000,
+            250,
+            vec![GapSpan {
+                start_ms: 1_000,
+                end_ms: 2_000,
+            }],
+        );
+        assert!(audio.is_on_disk());
+        assert!(audio.samples.is_empty() && audio.wav_bytes.is_empty());
+        assert_eq!(audio.sample_count(), 16_000);
+        // 250 ms before the first sample + 1 s of samples.
+        assert_eq!(audio.duration_ms(), 1_250);
+        assert_eq!(audio.gaps.len(), 1);
+
+        let read_back = audio.clone().into_memory().unwrap();
+        assert!(!read_back.is_on_disk());
+        assert_eq!(read_back.samples.len(), 16_000);
+        assert_eq!(read_back.start_offset_ms, 250);
+
+        // A zero shift still reads it back, because the caller rewrites the
+        // file (the phone path) rather than keeping the streamed one.
+        let unchanged = audio.clone().since(0).unwrap();
+        assert!(!unchanged.is_on_disk());
+        assert_eq!(unchanged.samples.len(), 16_000);
+        assert_eq!(unchanged.start_offset_ms, 250);
+
+        // The phone path drops the first 300 ms: 50 ms of samples go, and the
+        // gaps move with the clock.
+        let shifted = audio.since(300).unwrap();
+        assert!(!shifted.is_on_disk());
+        assert_eq!(shifted.start_offset_ms, 0);
+        assert_eq!(shifted.samples.len(), 15_200);
+        assert_eq!(
+            shifted.gaps,
+            vec![GapSpan {
+                start_ms: 700,
+                end_ms: 1_700
+            }]
+        );
+        let _ = std::fs::remove_file(&path);
+        assert!(!RecordedAudio::new(vec![0.5; 160], 16_000, 0, Vec::new()).is_on_disk());
     }
 }

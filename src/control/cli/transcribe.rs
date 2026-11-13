@@ -3,13 +3,11 @@
 //! command starts and stops ([`super::embedded`]). Nothing is pasted, saved
 //! to History, or processed, and this process never loads a model.
 //!
-//! A file of any length is read in pieces of at most 30 s ([`pieces`]) and
-//! their text is joined with one space: a piece that short can run on the
-//! running Hex's dictation engine's loaded copy when it holds the model,
-//! instead of its service loading a second one, and Hex keeps one piece
-//! rather than the whole file in memory.
-
-mod pieces;
+//! A file of any length is read in pieces of at most 30 s
+//! ([`crate::transcription::pieces`]) and their text is joined with one space:
+//! a piece that short can run on the running Hex's dictation engine's loaded
+//! copy when it holds the model, instead of its service loading a second one,
+//! and Hex keeps one piece rather than the whole file in memory.
 
 use std::path::Path;
 use std::time::Duration;
@@ -20,8 +18,8 @@ use super::{Output, embedded, prepare, print, progress};
 use crate::control::{ControlReply, model_selection};
 use crate::local_api::Endpoint;
 use crate::transcription::models::TranscriptionSelection;
+use crate::transcription::pieces::{PieceError, Pieces};
 use crate::transcription::service::AudioError;
-use pieces::{PieceError, Pieces};
 
 /// One piece waits for a cold model behind it and for its own transcription.
 const TIMEOUT: Duration = Duration::from_secs(600);
@@ -180,7 +178,7 @@ fn run_pieces(
             Ok(None) => break,
             Err(error) => return refused(file, error),
         };
-        let wav = match pieces::wav_bytes(&samples) {
+        let wav = match crate::transcription::pieces::wav_bytes(&samples) {
             Ok(wav) => wav,
             Err(error) => return refused(file, error),
         };

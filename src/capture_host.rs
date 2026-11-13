@@ -42,19 +42,6 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use color_eyre::eyre::{Result, WrapErr, eyre};
-use scrawl_capture::audio::RecordedAudio;
-use scrawl_capture::capture::{
-    AudioIn, ConfigSource, Event, Host, InputSink, MovieQuality, OwnWindows,
-    SharedCaptureTelemetry, SharedResources, Stage, Start, Target,
-};
-use scrawl_capture::handoff::EngineConfig;
-use scrawl_capture::hosted_input::{HostInput, HostedInput, Modifiers};
-use scrawl_capture::model::{TranscriptData, WordTiming};
-#[cfg(target_os = "macos")]
-use scrawl_capture::transcribe::AppleTranscriber;
-use scrawl_capture::transcribe::Transcriber;
-
 use crate::audio::CaptureInstant;
 #[cfg(target_os = "macos")]
 pub use crate::audio::recording_environment::RecordingEnvironmentController as Environment;
@@ -68,6 +55,16 @@ use crate::control::{
 use crate::dictation::audio::DictationAudio;
 use crate::transcription::engine::TranscriptionEngine;
 use crate::transcription::models::{ModelRuntime, TranscriptionModelId};
+use color_eyre::eyre::{Result, WrapErr, eyre};
+use scrawl_capture::audio::RecordedAudio;
+use scrawl_capture::capture::{
+    AudioIn, ConfigSource, Event, Host, InputSink, MovieQuality, OwnWindows,
+    SharedCaptureTelemetry, SharedResources, Stage, Start, Target,
+};
+use scrawl_capture::handoff::EngineConfig;
+use scrawl_capture::hosted_input::{HostInput, HostedInput, Modifiers};
+use scrawl_capture::model::WordTiming;
+use scrawl_capture::transcribe::Transcriber;
 
 // `hex annotate`'s folder commands; Windows has no control transport for
 // them yet.
@@ -80,6 +77,8 @@ mod routing;
 mod screen_access;
 mod sink;
 mod timeline;
+mod wav_file;
+mod words;
 
 pub use library::{
     explain as explain_capture, list as list_captures, send as send_capture, show as show_capture,
@@ -104,6 +103,7 @@ pub use sink::CaptureSink;
 pub use sink::ListenerTimeline;
 pub use sink::{CaptureAudio, CaptureSinkClosed};
 use timeline::Timeline;
+use words::ChosenTranscriber;
 
 /// "While dictating" for a capture on Linux: its own audio suppressor, made
 /// when the capture starts and restoring what it changed when dropped.
@@ -147,7 +147,8 @@ const SINK_CAPACITY: usize = 512;
 const EVENT_CAPACITY: usize = 64;
 const SAMPLE_RATE: u32 = 16_000;
 /// A capture keeps at most this much audio; the rest is recorded as a gap.
-const MAX_CAPTURE: Duration = Duration::from_secs(20 * 60);
+/// It bounds disk use only: the audio streams to `audio.wav`, never memory.
+const MAX_CAPTURE: Duration = Duration::from_secs(8 * 60 * 60);
 const GAP_TOLERANCE: Duration = Duration::from_millis(50);
 /// How long shutdown waits for capture threads, inside the quit deadline.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
@@ -712,133 +713,11 @@ fn shared_engine(
     Ok(made)
 }
 
-/// The transcriber `capture.transcriber` names when a capture is written.
-struct ChosenTranscriber;
-
-impl Transcriber for ChosenTranscriber {
-    fn transcribe(&self, audio: &RecordedAudio) -> anyhow::Result<Option<TranscriptData>> {
-        match crate::app_settings::capture_settings().transcriber {
-            crate::app_settings::CaptureTranscriber::Parakeet => HexTranscriber {
-                engine: DICTATION_ENGINE
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .clone(),
-            }
-            .transcribe(audio),
-            #[cfg(target_os = "macos")]
-            crate::app_settings::CaptureTranscriber::Apple => {
-                AppleTranscriber::default().transcribe(audio)
-            }
-            // Apple's SpeechAnalyzer is macOS's; elsewhere it is Hex's model.
-            #[cfg(not(target_os = "macos"))]
-            crate::app_settings::CaptureTranscriber::Apple => HexTranscriber {
-                engine: DICTATION_ENGINE
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .clone(),
-            }
-            .transcribe(audio),
-        }
-    }
-}
-
-/// Word-timed transcription on the dictation engine's loaded model. It holds
-/// the engine weakly, so a capture still writing never keeps it alive.
-struct HexTranscriber {
-    engine: Option<Weak<TranscriptionEngine>>,
-}
-
-impl Transcriber for HexTranscriber {
-    /// Word times are milliseconds from `audio.samples[0]`; the engine moves
-    /// them onto the capture's clock and builds the segments.
-    fn transcribe(&self, audio: &RecordedAudio) -> anyhow::Result<Option<TranscriptData>> {
-        let Some(engine) = &self.engine else {
-            return Ok(None);
-        };
-        let samples = if audio.sample_rate == SAMPLE_RATE {
-            audio.samples.clone()
-        } else {
-            crate::dictation::try_resample_for_parakeet(&audio.samples, audio.sample_rate)
-                .map_err(|error| anyhow::anyhow!(error))?
-        };
-        let (_, selection) = crate::app_settings::transcription_selection();
-        let (text, words) = transcribe_words(engine, &selection, samples)
-            .map_err(|error| anyhow::anyhow!("{error:#}"))?;
-        Ok(Some(TranscriptData {
-            source: "hex".into(),
-            model: Some(selection.model.as_str().into()),
-            text,
-            words: corrected_words(words, word_lag(selection.model)),
-            ..TranscriptData::default()
-        }))
-    }
-}
-
 /// One word and its times, in ms from the clip's start.
 pub struct TimedWord {
     pub start_ms: i64,
     pub end_ms: i64,
     pub text: String,
-}
-
-/// The clip's text and words on the dictation engine's warm model.
-#[cfg(target_os = "macos")]
-fn transcribe_words(
-    engine: &Weak<TranscriptionEngine>,
-    selection: &crate::transcription::models::TranscriptionSelection,
-    samples: Vec<f32>,
-) -> Result<(String, Vec<TimedWord>)> {
-    let transcript = crate::parakeet::transcribe_with_words(engine, selection, samples)?;
-    let words = transcript
-        .words
-        .into_iter()
-        .map(|word| TimedWord {
-            start_ms: word.start_ms,
-            end_ms: word.end_ms,
-            text: word.text,
-        })
-        .collect();
-    Ok((transcript.text, words))
-}
-
-/// The clip's text and words, as one foreground request on the Linux or
-/// Windows listener's engine: after the dictation already sent, never inside
-/// a live stream. Its model is whatever the listener has loaded.
-#[cfg(not(target_os = "macos"))]
-fn transcribe_words(
-    engine: &Weak<TranscriptionEngine>,
-    _selection: &crate::transcription::models::TranscriptionSelection,
-    samples: Vec<f32>,
-) -> Result<(String, Vec<TimedWord>)> {
-    if samples.is_empty() {
-        return Ok((String::new(), Vec::new()));
-    }
-    let (send, transcript) = mpsc::sync_channel(1);
-    let offline: crate::transcription::engine::Offline = Box::new(move |model, samples| {
-        let (text, words) = model
-            .transcribe_words(&samples)
-            .map_err(|error| format!("{error:#}"))?;
-        let _ = send.send((text.clone(), words));
-        Ok(text)
-    });
-    engine
-        .upgrade()
-        .ok_or_else(|| eyre!("the transcription engine stopped"))?
-        .foreground(samples, offline)?
-        .wait()
-        .map_err(|error| eyre!(error))?;
-    let (text, words) = transcript
-        .try_recv()
-        .map_err(|_| eyre!("the transcription returned no words"))?;
-    let words = words
-        .into_iter()
-        .map(|(start_ms, end_ms, text)| TimedWord {
-            start_ms,
-            end_ms,
-            text,
-        })
-        .collect();
-    Ok((text, words))
 }
 
 /// How late a model's word times run, in ms: the median against Apple's
@@ -3560,7 +3439,7 @@ fn collect(
             return;
         }
     };
-    let mut timeline = Timeline::new(t0);
+    let mut timeline = Timeline::new(t0, bundle.join("audio.wav"));
     // A Screenshots recording goes to its card, never the router.
     let routed = !lock(outcomes).is_clip(&bundle);
     let prepared = routed
@@ -3591,6 +3470,8 @@ fn collect(
                 tracing::error!(error, "the capture's screen source failed");
                 input.detach(&bundle);
                 drop(chunks);
+                // Close `audio.wav` before the bundle (and the file) is removed.
+                drop(timeline);
                 capture.cancel();
                 remove_bundle(&bundle);
                 lock(outcomes).fail(bundle, error);
@@ -3633,7 +3514,11 @@ fn collect(
                 }
             }
         }
-        Ok(Seal::Cancel) | Err(_) => capture.cancel(),
+        Ok(Seal::Cancel) | Err(_) => {
+            // Close `audio.wav` before the bundle (and the file) is removed.
+            drop(timeline);
+            capture.cancel();
+        }
     }
     lock(outcomes).settle(bundle, Stage::Cancelled, None);
 }
@@ -3763,7 +3648,8 @@ impl AudioTimeline for WavTimeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scrawl_capture::audio::GapSpan;
+    use scrawl_capture::audio::{GapSpan, pcm16};
+    use scrawl_capture::model::TranscriptData;
 
     /// A pen release on the `capture-input` thread ends its stroke while
     /// that thread holds the input target's lock; reading the ink must not
@@ -3853,6 +3739,28 @@ mod tests {
         std::env::temp_dir().join(format!("hex-capture-{name}-{unique}"))
     }
 
+    /// A temp `audio.wav` in its own folder, with the folder made.
+    fn temp_wav(name: &str) -> PathBuf {
+        let dir = temp_dir(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("audio.wav")
+    }
+
+    fn wav_samples(path: &Path) -> Vec<i16> {
+        let mut reader = hound::WavReader::open(path).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16_000);
+        assert_eq!(reader.spec().channels, 1);
+        assert_eq!(reader.spec().bits_per_sample, 16);
+        reader
+            .samples::<i16>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn remove_wav(path: &Path) {
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
     #[test]
     fn a_screenshots_recording_keeps_every_pixel_and_a_capture_stays_compact() {
         let t0 = CaptureInstant::now();
@@ -3863,7 +3771,8 @@ mod tests {
 
     #[test]
     fn the_timeline_resamples_pads_gaps_and_ends_at_the_stop() {
-        let mut timeline = Timeline::new(t(0));
+        let path = temp_wav("timeline");
+        let mut timeline = Timeline::new(t(0), path.clone());
         // Audio starts 100 ms in (a cold microphone).
         let mut through = t(100);
         for _ in 0..50 {
@@ -3883,6 +3792,7 @@ mod tests {
         );
         assert_eq!(audio.sample_rate, 16_000);
         assert_eq!(audio.start_offset_ms, 100);
+        assert!(audio.samples.is_empty() && audio.is_on_disk());
         assert_eq!(
             audio.gaps,
             [GapSpan {
@@ -3892,13 +3802,31 @@ mod tests {
         );
         // 500 + 300 + 500 ms of audio, cut 100 ms before the last chunk.
         assert_eq!(audio.duration_ms(), 100 + 1_200);
-        let resampled_silence = &audio.samples[8_000 + 100..8_000 + 4_700];
-        assert!(resampled_silence.iter().all(|sample| *sample == 0.0));
+        assert_eq!(audio.sample_count(), 1_200 * 16);
+        let samples = wav_samples(&path);
+        assert_eq!(samples.len(), 100 * 16 + 1_200 * 16);
+        // The WAV keeps the leading 100 ms and the 300 ms gap as silence.
+        assert!(samples[..1_600].iter().all(|&sample| sample == 0));
+        assert!(
+            samples[1_600 + 8_000..1_600 + 8_000 + 4_800]
+                .iter()
+                .all(|&sample| sample == 0)
+        );
+        assert!(
+            samples[1_600..9_600].iter().any(|&sample| sample != 0),
+            "the resampled first 500 ms is written"
+        );
+        assert!(
+            samples[14_400..].iter().all(|&sample| sample == pcm16(0.5)),
+            "the 16 kHz tail is written exactly"
+        );
+        remove_wav(&path);
     }
 
     #[test]
     fn a_pending_gap_and_a_stalled_tail_come_back_from_the_closed_sink() {
-        let mut timeline = Timeline::new(t(0));
+        let path = temp_wav("pending");
+        let mut timeline = Timeline::new(t(0), path.clone());
         timeline.push(&[0.5; 1_600], 16_000, t(100));
         let audio = timeline.finish(
             t(600),
@@ -3920,7 +3848,52 @@ mod tests {
                 }
             ]
         );
-        assert_eq!(audio.samples.len(), 9_600);
+        assert_eq!(audio.sample_count(), 9_600);
+        assert_eq!(wav_samples(&path).len(), 9_600);
+        remove_wav(&path);
+    }
+
+    #[test]
+    fn a_gap_is_digital_silence_where_it_happened() {
+        let path = temp_wav("gap");
+        let mut timeline = Timeline::new(t(0), path.clone());
+        timeline.push(&[0.5; 1_600], 16_000, t(100));
+        timeline.gap(t(100), t(400));
+        timeline.push(&[0.5; 1_600], 16_000, t(500));
+        let audio = timeline.finish(t(500), None);
+        assert_eq!(
+            audio.gaps,
+            [GapSpan {
+                start_ms: 100,
+                end_ms: 400
+            }]
+        );
+        let samples = wav_samples(&path);
+        assert_eq!(samples.len(), 8_000);
+        assert!(samples[..1_600].iter().all(|&sample| sample == pcm16(0.5)));
+        assert!(samples[1_600..6_400].iter().all(|&sample| sample == 0));
+        assert!(samples[6_400..].iter().all(|&sample| sample == pcm16(0.5)));
+        remove_wav(&path);
+    }
+
+    #[test]
+    fn a_capture_longer_than_twenty_minutes_keeps_all_of_its_audio() {
+        let path = temp_wav("long");
+        let mut timeline = Timeline::new(t(0), path.clone());
+        // 21 minutes in 5 s chunks, the way the sink delivers them.
+        let chunk = vec![0.25_f32; 5 * 16_000];
+        let mut through = t(0);
+        for _ in 0..(21 * 60 / 5) {
+            through = through + Duration::from_secs(5);
+            timeline.push(&chunk, 16_000, through);
+        }
+        let audio = timeline.finish(through, None);
+        let expected = 21 * 60 * 16_000;
+        assert_eq!(audio.sample_count(), expected);
+        assert!(audio.is_on_disk() && audio.samples.is_empty());
+        assert!(audio.gaps.is_empty());
+        assert_eq!(wav_samples(&path).len(), expected);
+        remove_wav(&path);
     }
 
     #[derive(Default)]
@@ -3973,18 +3946,25 @@ mod tests {
     impl Transcriber for FakeTranscriber {
         fn transcribe(&self, audio: &RecordedAudio) -> anyhow::Result<Option<TranscriptData>> {
             assert_eq!(audio.sample_rate, 16_000);
+            // Word times are from `samples[0]`; a streamed capture's file
+            // starts with its own leading silence, so the words move with it.
+            let lead_ms = audio
+                .samples
+                .iter()
+                .position(|sample| *sample != 0.0)
+                .map_or(0, |lead| lead as u64 * 1_000 / u64::from(audio.sample_rate));
             Ok(Some(TranscriptData {
                 source: "fake".into(),
                 text: "hello there".into(),
                 words: vec![
                     WordTiming {
-                        t0: 0,
-                        t1: 200,
+                        t0: lead_ms,
+                        t1: lead_ms + 200,
                         text: "hello".into(),
                     },
                     WordTiming {
-                        t0: 250,
-                        t1: 500,
+                        t0: lead_ms + 250,
+                        t1: lead_ms + 500,
                         text: "there".into(),
                     },
                 ],
@@ -4371,16 +4351,17 @@ mod tests {
     }
 
     #[test]
-    fn padding_past_the_length_limit_stays_bounded() {
-        let mut timeline = Timeline::with_limit(t(0), Duration::from_secs(1));
+    fn past_the_guard_the_file_stops_and_the_rest_is_one_gap() {
+        let path = temp_wav("guard");
+        let mut timeline = Timeline::with_limit(t(0), path.clone(), Duration::from_secs(1));
         timeline.push(&[0.5; 1_600], 16_000, t(100));
-        // A gap far past the limit pads only up to it.
+        // A gap far past the guard pads only up to it.
         timeline.gap(t(100), t(3 * 60 * 60 * 1_000));
-        assert!(timeline.samples.len() <= 16_000);
         timeline.gap(t(3 * 60 * 60 * 1_000), t(6 * 60 * 60 * 1_000));
         timeline.push(&[0.5; 1_600], 16_000, t(6 * 60 * 60 * 1_000 + 100));
         let audio = timeline.finish(t(6 * 60 * 60 * 1_000 + 100), None);
-        assert_eq!(audio.samples.len(), 16_000);
+        assert_eq!(audio.sample_count(), 16_000);
+        assert_eq!(wav_samples(&path).len(), 16_000);
         assert_eq!(
             audio.gaps,
             [
@@ -4394,6 +4375,7 @@ mod tests {
                 }
             ]
         );
+        remove_wav(&path);
     }
 
     /// Holds every transcription until the test lets it through.
@@ -4702,6 +4684,9 @@ mod tests {
             (recording.target, recording.worked),
             (TargetKind::Pointer, false)
         );
+        // Some audio, so discarding also closes and removes its `audio.wav`.
+        audio.feed(160, recording.since + Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(20));
 
         let discarded = report(host.command(CaptureCommand::Discard, &audio));
         assert!(discarded.changed);
@@ -4715,6 +4700,10 @@ mod tests {
         assert!(audio.open.lock().unwrap().is_none(), "the sink is closed");
         wait_until_idle(&host);
         assert!(!first.exists());
+        assert!(
+            !first.join("audio.wav").exists(),
+            "the streamed file is gone"
+        );
         assert_eq!(lock(&host.outcomes).snapshot(), CaptureSnapshot::default());
         assert!(
             report(host.control(ScrawlCaptureAction::Status, &audio))
