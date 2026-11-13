@@ -731,14 +731,33 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
   -> The call app counts as present while it holds the microphone OR any of
      its Core Audio processes plays output (WhatsApp keeps the microphone
      while muted; its output stays open until hang-up)
+  -> A browser keeps both through a switch to another meeting, so its page
+     decides too: a page that keeps naming another call (another Meet code,
+     another call site) after this recording's own went unseen for about
+     20 s counts as the call ended, and the new call is detected and
+     recorded as its own rather than staying snoozed as the old one
+     ├── A page naming no call (another tab) or one that can't be read is no
+     │   evidence: switching tabs never stops a recording
+     ├── Ignored for the first 30 s of a recording, while a Meet link
+     │   redirects to the meeting's own address
+     └── Only a recording started from a browser's page; native apps and
+         calendar recordings are judged by microphone and output alone
   -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
      unless you keep recording."
      ├── App back on the microphone or output within 30 s -> nothing stops
      ├── Keep recording -> nothing stops for this absence; leaving again re-arms
+     │   (a page still naming another call keeps the absence going, so the
+     │   kept recording does not re-arm while that lasts)
      ├── Stop & transcribe -> stops now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
          "meeting recording stopped automatically after its call ended"
   -> Off -> exactly as above: microphone only, nothing stops
+  Checks: another_meeting_in_the_same_browser_ends_a_recorded_call,
+  another_call_ends_a_browser_recording_only_after_its_own_went_unseen,
+  a_page_naming_no_call_never_ends_a_browser_recording,
+  a_switched_browser_call_is_recorded_again_without_the_minute,
+  a_browser_call_recording_keeps_its_page_and_a_zoom_one_does_not;
+  not observed on a real browser call
 
 ### Import Audio (Labs)
 
