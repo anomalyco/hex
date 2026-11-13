@@ -129,27 +129,34 @@ adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
 
 ```ts
 System audio                                      // meetings.system-audio
-├── Linux -> one pw-record per sink, each capturing that output's monitor
-│   (stream.capture.sink with target.object = "<sink>"), mixed into the one
-│   system track (#1801), so a call playing on a headset or dock that isn't
-│   the default output is recorded. Sinks come from `pactl get-default-sink`
-│   and `pactl -f json list sinks`: the default first, then the rest, each
-│   once, and a name that would change pw-record's property string (a quote,
-│   brace, backslash, or whitespace) is skipped. A capture that ends is
-│   dropped while the others keep recording; the source fails only when none
-│   is left, or when no monitor delivered audio for 3 s. A route check every
-│   2 s re-reads the sink list and reopens the source when the set changed,
-│   keeping the open captures when the sound server can't be read or lists
-│   nothing (a changed default alone does not reopen). When that read fails
-│   or lists nothing, one untargeted pw-record follows the default output as
-│   before. No pw-record -> recording refuses with "Install PipeWire's
-│   pw-record"; --raw only where its help lists it (PipeWire 1.3.81+), since
-│   1.2 and older reject it and already pipe raw audio on -
-│   // checks: every_output_is_captured_with_the_default_first,
-│   // a_default_the_server_does_not_list_is_still_captured_first,
-│   // a_sink_listed_twice_is_captured_once,
-│   // nothing_listed_and_no_default_captures_nothing (audio/output_route.rs);
-│   // a_capture_targets_its_own_sink_and_the_fallback_keeps_the_default,
+├── Linux -> one pw-record per hardware sink, each capturing that output's
+│   monitor (stream.capture.sink, node.dont-fallback/dont-reconnect, and
+│   target.object = "<sink>"), mixed into the one system track (#1801), so a
+│   call playing on a headset or dock that isn't the default output is
+│   recorded. Sinks come from `pactl get-default-sink` and
+│   `pactl -f json list sinks`, keeping only sinks whose properties carry
+│   `device.api` (alsa, bluez5, ...) so a virtual sink (EasyEffects,
+│   filter-chain, loopback, combine, null) is not captured alongside the
+│   hardware sink it forwards into: the default first among them, each once,
+│   and a name that would change pw-record's property string (a quote, brace,
+│   backslash, or whitespace) is skipped. When no listed sink is a device,
+│   only the default is captured. A capture that ends is dropped while the
+│   others keep recording; the source fails only when none is left (naming
+│   the last one's exit) or when no monitor delivered audio for 3 s. A route
+│   check every 2 s re-reads the sink list and reopens the source when the set
+│   changed, keeping the open captures when the sound server can't be read or
+│   lists nothing (a changed default alone does not reopen); a fallback
+│   capture reopens into one per output once sinks can be read. When that read
+│   fails or lists nothing, one untargeted pw-record follows the default
+│   output as before. No pw-record -> recording refuses with "Install
+│   PipeWire's pw-record"; --raw only where its help lists it (PipeWire
+│   1.3.81+), since 1.2 and older reject it and already pipe raw audio on -
+│   // checks: every_hardware_output_is_captured_with_the_default_first,
+│   // a_virtual_default_and_hardware_outputs_capture_only_the_hardware,
+│   // only_virtual_sinks_capture_just_the_default,
+│   // a_sink_listed_twice_is_captured_once, nothing_listed_captures_nothing
+│   // (audio/output_route.rs); a_capture_targets_its_own_sink_and_the_
+│   // fallback_keeps_the_default,
 │   // a_sink_name_that_would_change_the_property_string_is_skipped, and
 │   // a_reordered_sink_list_is_not_a_change (meeting/linux.rs); the mix by
 │   // audio_on_any_output_reaches_the_system_track (meeting/capture.rs, now

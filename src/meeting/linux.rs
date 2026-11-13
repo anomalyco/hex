@@ -24,7 +24,10 @@ use super::capture::{LiveSource, MIX_HOLD, POLL_INTERVAL, PacketSink, STALL_TIME
 const PW_RECORD: &str = "pw-record";
 /// 100 ms of 16 kHz mono `f32`.
 const READ_BYTES: usize = SAMPLE_RATE as usize / 10 * 4;
-const QUEUE_CAPACITY: usize = 128;
+/// Messages buffered for each capture, and the most the source buffers in
+/// total however many outputs it hears.
+const QUEUE_PER_CAPTURE: usize = 128;
+const QUEUE_CAPACITY: usize = 1_024;
 /// How often the source checks that the outputs to capture have not changed.
 const ROUTE_CHECK: Duration = Duration::from_secs(2);
 /// The PipeWire node every system audio monitor presents.
@@ -81,6 +84,8 @@ struct MonitorSource {
     buffers: Receiver<MonitorEvent>,
     last_audio: Instant,
     route_checked: Instant,
+    /// The last capture's exit, so the all-closed error can name it.
+    last_exit: Option<String>,
 }
 
 /// One captured output: its `pw-record`, what it hears, and its audio not yet
@@ -135,6 +140,17 @@ fn sinks_changed(open: &[String], listed: &[String]) -> bool {
     open != listed
 }
 
+/// Whether the source should reopen: its captures moved with the listed sinks,
+/// or it is still on the untargeted fallback and sinks can now be listed.
+/// `None` is a sound server Hex could not read, which never reopens.
+fn route_needs_reopen(open: &[String], listed: Option<&[String]>) -> bool {
+    match listed {
+        None => false,
+        Some(listed) if open.is_empty() => !listed.is_empty(),
+        Some(listed) => sinks_changed(open, listed),
+    }
+}
+
 impl MonitorSource {
     fn start() -> Result<Self> {
         let executable =
@@ -152,7 +168,8 @@ impl MonitorSource {
         } else {
             sinks.iter().map(String::as_str).map(Some).collect()
         };
-        let (sender, buffers) = mpsc::sync_channel(QUEUE_CAPACITY);
+        let queue = (QUEUE_PER_CAPTURE * targets.len()).min(QUEUE_CAPACITY);
+        let (sender, buffers) = mpsc::sync_channel(queue);
         let mut outputs = Vec::with_capacity(targets.len());
         let mut first_error = None;
         for target in targets {
@@ -191,6 +208,7 @@ impl MonitorSource {
             buffers,
             last_audio: Instant::now(),
             route_checked: Instant::now(),
+            last_exit: None,
         })
     }
 
@@ -210,50 +228,58 @@ impl MonitorSource {
     /// Drops one capture that ended, so the others keep recording and its
     /// unpicked audio never replays later.
     fn close(&mut self, index: usize) {
-        let Some(output) = self.outputs.get_mut(index) else {
-            return;
+        let reason = {
+            let Some(output) = self.outputs.get_mut(index) else {
+                return;
+            };
+            let Some(mut child) = output.child.take() else {
+                return;
+            };
+            let status = child.try_wait().ok().flatten();
+            let _ = child.kill();
+            let _ = child.wait();
+            output.pending.clear();
+            let sink = output.sink.as_deref().unwrap_or("the default output");
+            match status {
+                Some(status) => format!("{sink}: pw-record exited ({status})"),
+                None => format!("{sink}: pw-record closed its output"),
+            }
         };
-        let Some(mut child) = output.child.take() else {
-            return;
-        };
-        let status = child.try_wait().ok().flatten();
-        let _ = child.kill();
-        let _ = child.wait();
-        output.pending.clear();
-        let sink = output.sink.as_deref().unwrap_or("the default output");
-        match status {
-            Some(status) => tracing::warn!(sink = %sink, %status, "system audio monitor exited"),
-            None => tracing::warn!(sink = %sink, "system audio monitor closed its output"),
-        }
+        tracing::warn!(%reason, "system audio monitor stopped");
+        self.last_exit = Some(reason);
     }
 
     /// Whether the outputs to capture changed since they were opened. A sound
     /// server that cannot be read, or lists nothing, keeps what is open.
     fn route_changed(&self) -> bool {
-        if self.sinks.is_empty() {
-            return false;
-        }
-        capturable_sinks().is_some_and(|listed| sinks_changed(&self.sinks, &listed))
+        route_needs_reopen(&self.sinks, capturable_sinks().as_deref())
     }
 
     /// Why no capture is left, for the source's error.
-    fn stopped(&mut self) -> String {
-        for output in &mut self.outputs {
-            if let Some(Ok(Some(status))) = output.child.as_mut().map(Child::try_wait) {
-                return format!("pw-record exited ({status})");
-            }
-        }
-        "every system audio monitor stopped".into()
+    fn stopped(&self) -> String {
+        self.last_exit
+            .clone()
+            .unwrap_or_else(|| "every system audio monitor stopped".into())
     }
 }
 
-/// The stream properties that capture `target`'s monitor, or the default
-/// output's when `target` is `None`.
-fn properties(target: Option<&str>) -> String {
+/// The stream properties that capture `target`'s monitor as capture `index`,
+/// or the default output's when `target` is `None`.
+fn properties(target: Option<&str>, index: usize) -> String {
+    let node = match target {
+        // One node per output, so the graph lists each capture separately.
+        Some(_) => format!("{NODE_NAME}-{index}"),
+        None => NODE_NAME.to_owned(),
+    };
     let mut properties = format!(
-        "{{ stream.capture.sink = true node.name = {NODE_NAME} \
+        "{{ stream.capture.sink = true node.name = {node} \
          node.description = \"{NODE_DESCRIPTION}\""
     );
+    if target.is_some() {
+        // A target that will not link must not be moved to the default
+        // output: that would mix the default monitor's audio in a second time.
+        properties.push_str(" node.dont-fallback = true node.dont-reconnect = true");
+    }
     if let Some(target) = target {
         properties.push_str(&format!(" target.object = \"{target}\""));
     }
@@ -270,7 +296,7 @@ fn spawn_monitor(
     index: usize,
     sender: SyncSender<MonitorEvent>,
 ) -> Result<Child> {
-    let properties = properties(target);
+    let properties = properties(target, index);
     let rate = SAMPLE_RATE.to_string();
     let mut child = tied_to_thread(&mut Command::new(executable))
         .args(crate::linux::pipewire::raw_args(executable))
@@ -488,14 +514,17 @@ mod tests {
         // The untargeted capture is today's exactly: the session manager links
         // it to the default output.
         assert_eq!(
-            properties(None),
+            properties(None, 0),
             "{ stream.capture.sink = true node.name = hex-meeting-system-audio \
              node.description = \"Hex meeting system audio\" }"
         );
+        // A targeted capture names its own node, never falls back to the
+        // default output, and folds those flags into the property string.
         assert_eq!(
-            properties(Some("bluez_output.AA_BB_CC_DD_EE_FF.1")),
-            "{ stream.capture.sink = true node.name = hex-meeting-system-audio \
+            properties(Some("bluez_output.AA_BB_CC_DD_EE_FF.1"), 2),
+            "{ stream.capture.sink = true node.name = hex-meeting-system-audio-2 \
              node.description = \"Hex meeting system audio\" \
+             node.dont-fallback = true node.dont-reconnect = true \
              target.object = \"bluez_output.AA_BB_CC_DD_EE_FF.1\" }"
         );
     }
@@ -540,6 +569,21 @@ mod tests {
                 "dock".to_owned()
             ]
         ));
+    }
+
+    #[test]
+    fn a_fallback_capture_reopens_once_the_sinks_can_be_read() {
+        // The untargeted capture follows the default output; it moves to one
+        // capture per output only when a non-empty list can be targeted.
+        assert!(!route_needs_reopen(&[], None));
+        assert!(!route_needs_reopen(&[], Some(&[])));
+        assert!(route_needs_reopen(&[], Some(&["speakers".to_owned()])));
+        // Opened captures survive a failed read or the same list, and reopen
+        // when nothing listed can be targeted any more.
+        let open = ["speakers".to_owned()];
+        assert!(!route_needs_reopen(&open, None));
+        assert!(!route_needs_reopen(&open, Some(&["speakers".to_owned()])));
+        assert!(route_needs_reopen(&open, Some(&[])));
     }
 
     #[test]

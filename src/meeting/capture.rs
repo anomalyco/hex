@@ -256,12 +256,17 @@ fn retry_delay(delay: Duration, ran: Duration) -> Duration {
 }
 
 /// 16 kHz samples each output's audio is held back before mixing, so two
-/// outputs playing at once line up instead of following each other.
+/// outputs playing at once line up instead of following each other. Linux and
+/// Windows mix their outputs; macOS hears one tap and compiles this only for
+/// the mixer's test.
+#[cfg(any(not(target_os = "macos"), test))]
 pub(super) const MIX_HOLD: usize = SAMPLE_RATE as usize / 20;
 
 /// Mixes each output's pending audio up to the latest output's position less
 /// `hold`, leaving the rest for the next call. An output that delivered
-/// nothing (nothing plays on it) adds nothing.
+/// nothing (nothing plays on it) adds nothing. Linux and Windows mix their
+/// outputs; macOS hears one tap and compiles this only for the mixer's test.
+#[cfg(any(not(target_os = "macos"), test))]
 pub(super) fn mix(pending: &mut [&mut Vec<f32>], hold: usize) -> Vec<f32> {
     let length = pending
         .iter()
@@ -934,5 +939,12 @@ mod tests {
         // Nothing plays: nothing is sent.
         let mut idle = Vec::new();
         assert!(mix(&mut [&mut idle], 2).is_empty());
+
+        // The shared hold is 50 ms at 16 kHz, so a 1,000-sample buffer is
+        // mixed only up to 200.
+        assert_eq!(MIX_HOLD, 800);
+        let mut left = vec![0.5; 1_000];
+        let mut right = Vec::new();
+        assert_eq!(mix(&mut [&mut left, &mut right], MIX_HOLD), vec![0.5; 200]);
     }
 }
