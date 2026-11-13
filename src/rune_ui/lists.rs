@@ -676,10 +676,65 @@ pub(super) fn slider_in<S: 'static>(
     width: f32,
     set: impl Fn(&mut S, f32, bool) + 'static,
 ) -> El {
+    col()
+        .key(key)
+        .w(width)
+        .gap(4.0)
+        .child(
+            row()
+                .key("heading")
+                .justify_between()
+                .child(text(label).key("label").font(DESCRIPTION).color(p.muted()))
+                .child(
+                    text(display.clone())
+                        .key("value")
+                        .font(p.k.ty.mono)
+                        .color(p.faint()),
+                )
+                // The slider reads its name and value.
+                .a11y_hidden(),
+        )
+        .child(slider_track(p, label, value, display, width, set))
+}
+
+/// A [`slider`] for a row that already names it: the track with the value
+/// after it, and no heading.
+pub(super) fn inline_slider(
+    p: Paint,
+    key: &str,
+    label: &str,
+    value: f32,
+    display: String,
+    width: f32,
+    set: impl Fn(&mut Ui, f32, bool) + 'static,
+) -> El {
+    row()
+        .key(key)
+        .center_y()
+        .gap(10.0)
+        .child(slider_track(p, label, value, display.clone(), width, set))
+        .child(
+            row()
+                .key("value")
+                .w(36.0)
+                .justify_end()
+                .a11y_hidden()
+                .child(text(display).font(p.k.ty.mono).color(p.faint())),
+        )
+}
+
+fn slider_track<S: 'static>(
+    p: Paint,
+    label: &str,
+    value: f32,
+    display: String,
+    width: f32,
+    set: impl Fn(&mut S, f32, bool) + 'static,
+) -> El {
     let c = &p.k.c;
     let value = value.clamp(0.0, 1.0);
     let knob = 14.0;
-    let track = row()
+    row()
         .key("track")
         .role("slider")
         .label(label)
@@ -723,24 +778,5 @@ pub(super) fn slider_in<S: 'static>(
                 .fill(c.knob)
                 .border(p.hair.max(0.5), c.border_strong)
                 .a11y_hidden(),
-        );
-    col()
-        .key(key)
-        .w(width)
-        .gap(4.0)
-        .child(
-            row()
-                .key("heading")
-                .justify_between()
-                .child(text(label).key("label").font(DESCRIPTION).color(p.muted()))
-                .child(
-                    text(display)
-                        .key("value")
-                        .font(p.k.ty.mono)
-                        .color(p.faint()),
-                )
-                // The slider reads its name and value.
-                .a11y_hidden(),
         )
-        .child(track)
 }

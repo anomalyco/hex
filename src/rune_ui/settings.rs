@@ -27,13 +27,6 @@ use self::grants::{on_gnome, portal_grant};
 
 static CHECK: &rune::Icon = &rune_theme_opencode::icons::CHECK_SMALL;
 
-pub(super) const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
-    ("Off", 0.0),
-    ("25%", 0.25),
-    ("50%", 0.5),
-    ("75%", 0.75),
-    ("100%", 1.0),
-];
 /// How long a newly saved shortcut shows "Saved".
 const SAVED_FOR: Duration = Duration::from_secs(1);
 /// How long to wait for the service to start a requested shortcut edit.
@@ -518,19 +511,13 @@ pub(super) fn restore_default(ui: &mut Ui, target: ShortcutTarget, default: Hotk
     }
 }
 
-pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
-    if !settings.sound_effects || settings.sound_effect_volume <= 0.0 {
-        return 0;
+/// The tone volume the slider shows: zero while tones are off.
+pub(super) fn sound_volume(settings: &AppSettings) -> f32 {
+    if settings.sound_effects {
+        settings.sound_effect_volume.clamp(0.0, 1.0)
+    } else {
+        0.0
     }
-    SOUND_VOLUME_STEPS[1..]
-        .iter()
-        .enumerate()
-        .min_by(|(_, (_, left)), (_, (_, right))| {
-            (settings.sound_effect_volume - left)
-                .abs()
-                .total_cmp(&(settings.sound_effect_volume - right).abs())
-        })
-        .map_or(0, |(index, _)| index + 1)
 }
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {

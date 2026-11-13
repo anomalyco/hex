@@ -16,7 +16,7 @@ use super::controls::{
     pressable_row, row_switch, value_button, value_font,
 };
 use super::icons::*;
-use super::lists::{PermissionControl, permission_control, slider};
+use super::lists::{PermissionControl, inline_slider, permission_control, slider};
 use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
@@ -1012,32 +1012,47 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -
             ),
         );
     }
+    let volume = ui
+        .sound_volume_drag
+        .unwrap_or_else(|| s::sound_volume(settings));
     rows.push(
         tr("Sound volume"),
-        pick_row(
-            ui,
+        icon_row(
             p,
             "sound-volume",
             &VOLUME,
             tr("Sound volume"),
-            s::SOUND_VOLUME_STEPS
-                .iter()
-                .map(|(label, _)| tr(label))
-                .collect(),
-            s::sound_volume_index(settings),
-            |ui, index| {
-                let volume = s::SOUND_VOLUME_STEPS[index].1;
-                let saved = ui.update(|settings| {
-                    settings.sound_effects = volume > 0.0;
-                    if volume > 0.0 {
-                        settings.sound_effect_volume = volume;
+            None,
+            inline_slider(
+                p,
+                "sound-volume-slider",
+                tr("Sound volume"),
+                volume,
+                if volume > 0.0 {
+                    format!("{:.0}%", volume * 100.0)
+                } else {
+                    tr("Off").to_owned()
+                },
+                160.0,
+                |ui, value, done| {
+                    let volume = (value * 100.0).round() / 100.0;
+                    ui.sound_volume_drag = if done { None } else { Some(volume) };
+                    if !done {
+                        return;
                     }
-                });
-                if saved && volume > 0.0 && ui.live() {
-                    crate::feedback::play(crate::feedback::Tone::DictationStart);
-                }
-            },
-            layer,
+                    // Zero turns tones off and keeps the last level, as
+                    // `hex settings set sound_effect_volume 0` does.
+                    let saved = ui.update(|settings| {
+                        settings.sound_effects = volume > 0.0;
+                        if volume > 0.0 {
+                            settings.sound_effect_volume = volume;
+                        }
+                    });
+                    if saved && volume > 0.0 && ui.live() {
+                        crate::feedback::play(crate::feedback::Tone::DictationStart);
+                    }
+                },
+            ),
         ),
     );
     rows.push(
