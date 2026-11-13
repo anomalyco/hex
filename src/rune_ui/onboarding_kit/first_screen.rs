@@ -1,11 +1,11 @@
 //! More on `"Setting up Hex"` than a title and a percentage: the details a
 //! download page owes you, how much is down and that your voice stays on
-//! this Mac.
+//! this computer.
 
 use rune::{El, Icon, TextStyle, Transition, col, icon, row, text};
 use rune_kit::glyphs;
 
-use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 use super::super::controls::Paint;
 use super::fixture::Download;
@@ -18,10 +18,16 @@ const NOTE_FROM_BOTTOM: f32 = 40.0;
 pub(super) fn amount(p: Paint, s: &Onboard, d: Download) -> Option<El> {
     (!d.done() && d.total > 0 && !failed(s)).then(|| {
         let mb = |bytes: u64| (bytes as f64 / 1_000_000.0).round() as u64;
-        text(format!("{} of {} MB", mb(d.downloaded), mb(d.total)))
-            .key("amount")
-            .font(TextStyle::new(13.0, 420.0).lh(18.0).features("'tnum' 1"))
-            .color(p.muted())
+        text(tr_named(
+            "{done} of {total} MB",
+            &[
+                ("done", &mb(d.downloaded).to_string()),
+                ("total", &mb(d.total).to_string()),
+            ],
+        ))
+        .key("amount")
+        .font(TextStyle::new(13.0, 420.0).lh(18.0).features("'tnum' 1"))
+        .color(p.muted())
     })
 }
 
@@ -38,7 +44,7 @@ pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
             marked(
                 p,
                 &glyphs::LOCK,
-                "Hex hears you on this Mac. Your voice never leaves it.",
+                tr("Hex hears you on this computer. Your voice never leaves it."),
             ),
         )),
         Step::Try | Step::TryHearing | Step::TryHeard | Step::Ready

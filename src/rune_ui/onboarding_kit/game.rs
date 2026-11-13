@@ -36,7 +36,7 @@ use super::fixture::Take;
 use super::flight::{Flight, ember_tone, flicker, flying, typeset};
 use super::high_score;
 use super::hud_stage::{LiveHud, frame_slot};
-use super::landing::{LEAD, keys, title_font};
+use super::landing::{LEAD, around_keys, keys, title_font};
 use super::live;
 use super::sfx::{SfxTrack, WordHits};
 use super::sparks::impacts;
@@ -607,6 +607,9 @@ struct Look<'a, S> {
     /// The listener runs but hasn't started listening: the game says so
     /// instead of inviting a hold that does nothing.
     warming: bool,
+    /// The listener failed to start: the game offers Reopen Hex instead of
+    /// the shortcut until it is ready.
+    reopen: bool,
     /// What the last try needs said.
     hint: Option<&'static str>,
     /// Switches the shortcut to tap to start, for a player who keeps
@@ -944,7 +947,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     let hud = session.hud.frame();
     let offers = offers_toggle(s);
     let hint = if offers {
-        Some("Rather not hold it? Tap to start, tap again to stop.")
+        Some(tr("Rather not hold it? Tap to start, tap again to stop."))
     } else {
         s.live.as_ref().and_then(live::hint_copy)
     };
@@ -954,6 +957,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         tr("Clear your messages")
     };
     let warming = s.live.as_ref().is_some_and(|live| live.warming);
+    let reopen = s.live.as_ref().is_some_and(|live| live.reopen);
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
             caps: &s.caps,
@@ -962,7 +966,8 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
             title,
             toggle: s.toggle,
             warming,
-            hint,
+            reopen,
+            hint: hint.filter(|_| !reopen),
             offer: offers.then(|| Rc::new(live::use_toggle) as Action<Ui>),
             finish: Rc::new(live::on_ui(finish)),
             done: Rc::new(live::on_ui(Onboard::after_game)),
@@ -985,6 +990,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
             title,
             toggle: s.toggle,
             warming: false,
+            reopen: false,
             hint,
             offer: offers.then(|| {
                 Rc::new(|s: &mut Onboard| {
@@ -1121,6 +1127,7 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
             title: "Clear your messages",
             toggle: false,
             warming: false,
+            reopen: false,
             hint: None,
             offer: None,
             finish: Rc::new(|g: &mut Game| {
@@ -1320,7 +1327,9 @@ fn header<S: 'static>(
                 .font(title_font(p))
                 .color(p.text()),
         )
-        .child(if look.warming {
+        .child(if look.reopen {
+            row().key("lead").center_y().child(live::recovery(p))
+        } else if look.warming {
             row().key("lead").center_y().child(
                 text(live::warming_copy())
                     .key("warming")
@@ -1328,23 +1337,16 @@ fn header<S: 'static>(
                     .color(p.muted()),
             )
         } else {
-            row()
-                .key("lead")
-                .gap(8.0)
-                .center_y()
-                .child(
-                    text(if look.toggle { "Tap" } else { "Hold" })
-                        .key("hold")
-                        .font(LEAD)
-                        .color(p.muted()),
-                )
-                .child(keys(p, "keys", look.caps, g.holding))
-                .child(
-                    text(tr("and answer the one that's lit."))
-                        .key("rest")
-                        .font(LEAD)
-                        .color(p.muted()),
-                )
+            let sentence = if look.toggle {
+                tr("Tap {keys} and answer the one that's lit.")
+            } else {
+                tr("Hold {keys} and answer the one that's lit.")
+            };
+            row().key("lead").gap(8.0).center_y().children(around_keys(
+                sentence,
+                keys(p, "keys", look.caps, g.holding),
+                |words| text(words).font(LEAD).color(p.muted()),
+            ))
         });
     // The share card's Continue stands in for Done while it shows.
     let done = (chrome > 0.005).then(|| {
@@ -1405,7 +1407,9 @@ fn hud<S>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<S>) -> Vec<El> 
                 1.0 - settled(since, 0.3)
             }
     };
-    if shown * chrome <= 0.002 {
+    // A shortcut that didn't start can't answer: the header offers
+    // Reopen Hex instead.
+    if shown * chrome <= 0.002 || look.reopen {
         return scope.into_iter().collect();
     }
     let pill = idle_pill(p, look.caps, look.toggle, t, reduced)
@@ -1457,7 +1461,7 @@ fn idle_pill(p: Paint, caps: &[String], toggle: bool, t: f64, reduced: bool) -> 
         .border(p.hair, p.faint().alpha(0.25 + 0.35 * glow))
         .child(dot)
         .child(
-            text("Not recording")
+            text(tr("Not recording"))
                 .key("idle-state")
                 .font(k.ty.small)
                 .color(p.faint()),
@@ -1467,19 +1471,15 @@ fn idle_pill(p: Paint, caps: &[String], toggle: bool, t: f64, reduced: bool) -> 
                 .size(p.hair, 14.0)
                 .fill(k.c.border_weak),
         )
-        .child(
-            text(if toggle { "Tap" } else { "Hold" })
-                .key("idle-hold")
-                .font(LEAD)
-                .color(p.text()),
-        )
-        .child(keys(p, "idle-keys", caps, dip))
-        .child(
-            text(if toggle { "to start" } else { "to answer" })
-                .key("idle-rest")
-                .font(LEAD)
-                .color(p.text()),
-        );
+        .children(around_keys(
+            if toggle {
+                tr("Tap {keys} to start")
+            } else {
+                tr("Hold {keys} to answer")
+            },
+            keys(p, "idle-keys", caps, dip),
+            |words| text(words).font(LEAD).color(p.text()),
+        ));
     row()
         .key("idle-at")
         .absolute(0.0, HUD_AT[1] - H * 0.5)
@@ -1542,7 +1542,7 @@ fn hint<S: 'static>(p: Paint, copy: &'static str, offer: Option<&Action<S>>) -> 
                 .transition(Transition::opacity()),
         )
         .children(offer.map(|offer| {
-            Button::new("Use tap to start")
+            Button::new(tr("Use tap to start"))
                 .variant(ButtonVariant::Ghost)
                 .on_press(act(offer))
                 .build_push(p.k)

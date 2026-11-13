@@ -209,29 +209,37 @@ pub(crate) fn ready(
 
 /// `"Hold [⌥] anywhere, then talk."`, or `"Tap"` when the shortcut taps.
 pub(crate) fn hold_anywhere(p: Paint, caps: &[String], toggle: bool) -> El {
+    let sentence = if toggle {
+        tr("Tap {keys} anywhere, then talk.")
+    } else {
+        tr("Hold {keys} anywhere, then talk.")
+    };
     row()
         .key("hold-anywhere")
         .gap(8.0)
         .center_y()
-        .child(
-            text(gesture(toggle))
-                .key("hold")
-                .font(LEAD)
-                .color(p.muted()),
-        )
-        .child(keys(p, "keys", caps, false))
-        .child(
-            text(tr("anywhere, then talk."))
-                .key("anywhere")
-                .font(LEAD)
-                .color(p.muted()),
-        )
+        .children(around_keys(
+            sentence,
+            keys(p, "keys", caps, false),
+            |words| text(words).font(LEAD).color(p.muted()),
+        ))
 }
 
-/// The shortcut's gesture before its keycaps, as the saved trigger mode
-/// (General's Hold or Tap) names it.
-pub(crate) fn gesture(toggle: bool) -> &'static str {
-    if toggle { tr("Tap") } else { tr("Hold") }
+/// A translated sentence with the shortcut's keycap `tray` where its
+/// `{keys}` is, so each language puts the keys where its grammar wants
+/// them: the words before (`"before"`), the tray, and the words after
+/// (`"after"`), each side left out when the sentence has none.
+pub(crate) fn around_keys(sentence: &str, tray: El, words: impl Fn(&str) -> El) -> Vec<El> {
+    let (before, after) = sentence.split_once("{keys}").unwrap_or((sentence, ""));
+    let side = |copy: &str, key: &str| {
+        let copy = copy.trim();
+        (!copy.is_empty()).then(|| words(copy).key(key))
+    };
+    side(before, "before")
+        .into_iter()
+        .chain(Some(tray))
+        .chain(side(after, "after"))
+        .collect()
 }
 
 /// Quiet capsule previewing the single-hexagon icon where Hex lives: the

@@ -19,9 +19,10 @@ use crate::desktop::i18n::tr;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use rune::{El, TextEdit, Transition, Tx, text};
+use rune::{El, TextEdit, Transition, Tx, row, text};
+use rune_kit::{Button, ButtonVariant};
 
-use super::super::controls::Paint;
+use super::super::controls::{Paint, PushSize};
 use super::super::found_choice::{self, ChoiceRow};
 use super::super::paste_access::{self, PasteAccess};
 use super::super::platform::Os;
@@ -801,6 +802,28 @@ pub(super) fn reopen(ui: &mut Ui) {
     onboarding::input(ui, Input::Reopen);
 }
 
+/// Hex's shortcut didn't start, and Reopen Hex: what a page shows instead
+/// of asking for the shortcut until the listener is ready.
+pub(super) fn recovery(p: Paint) -> El {
+    row()
+        .key("reopen")
+        .gap(10.0)
+        .center_y()
+        .child(
+            text(tr("Hex's shortcut didn't start."))
+                .key("why")
+                .font(super::landing::LEAD)
+                .color(p.muted()),
+        )
+        .child(
+            Button::new(tr("Reopen Hex"))
+                .variant(ButtonVariant::Neutral)
+                .on_press(reopen)
+                .build_push(p.k)
+                .key("reopen-hex"),
+        )
+}
+
 /// "Use a model file…" when the download is blocked: a GGUF chosen here is
 /// imported and selected, and the first run moves on once it is ready.
 pub(super) fn use_file(ui: &mut Ui) {
@@ -870,7 +893,7 @@ pub(super) fn warming_copy() -> &'static str {
 /// What the practice dictation's last try needs said.
 pub(super) fn hint_copy(live: &Live) -> Option<&'static str> {
     Some(match live.practice {
-        Practice::TooShort => "Keep holding the shortcut while you talk, then let go.",
+        Practice::TooShort => tr("Keep holding the shortcut while you talk, then let go."),
         Practice::NothingHeard => tr("Hex didn't hear any words. Try again a little louder."),
         Practice::Failed => tr("That didn't work. Try again."),
         Practice::Transcribing => tr("Typing what you said…"),
@@ -890,6 +913,9 @@ pub(super) fn use_toggle(ui: &mut Ui) {
 
 /// [`hint_copy`] under the practice field.
 pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
+    if live.reopen {
+        return None;
+    }
     let copy = hint_copy(live)?;
     Some(
         text(copy)

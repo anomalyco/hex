@@ -852,11 +852,10 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         clock_offset(meeting.duration_ms),
     ];
     meta_line.extend(meeting.app.clone());
-    if !meeting.status.is_active()
-        && let Some(kept_for) = meeting.kept_for
-    {
-        meta_line.push(tr_fill("Deleted after {}", tr(kept_for)));
-    }
+    let retention = meeting
+        .kept_for
+        .filter(|_| !meeting.status.is_active())
+        .map(|kept_for| ld::meta_note(p, "retention", &tr_fill("Deleted after {}", tr(kept_for))));
     let mut meta: Vec<El> = status_tag(p, meeting.status, pane.stop_pending)
         .into_iter()
         .collect();
@@ -950,6 +949,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .grow(1.0)
         .shrink()
         .child(ld::card_header(title, meta, actions))
+        .children(retention)
         .children(confirm)
         .child(ld::card_scroll_sticky(
             p,

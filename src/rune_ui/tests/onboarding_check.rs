@@ -382,3 +382,76 @@ fn onboarding_walkthrough() {
         downloaded.load(std::sync::atomic::Ordering::Relaxed)
     );
 }
+
+/// The practice and Hex is ready speak the interface language, the
+/// shortcut's keycaps sitting where the translation puts `{keys}`.
+#[test]
+fn the_practice_and_ready_pages_are_translated() {
+    let shown = |scene: &str| {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        crate::desktop::i18n::apply(Some("zh"));
+        settle(&mut rt);
+        texts(&rt)
+    };
+    let english = [
+        "Hold",
+        "Tap",
+        "Not recording",
+        "and answer the one that's lit.",
+        "anywhere, then talk.",
+        "to answer",
+        "Keyboard mode",
+        "Hex is ready",
+    ];
+    for (scene, expected) in [
+        (
+            "mac-onboarding-try",
+            &["按住", "，回复亮起的那条。", "未在录音", "回复"][..],
+        ),
+        (
+            "mac-onboarding-ready",
+            &["在任何地方按住", "，然后开口说。"][..],
+        ),
+    ] {
+        let shown = shown(scene);
+        for text in expected {
+            assert!(
+                shown.iter().any(|t| t == text),
+                "{scene}: {text}: {shown:?}"
+            );
+        }
+        for text in english {
+            assert!(
+                !shown.iter().any(|t| t == text),
+                "{scene}: {text}: {shown:?}"
+            );
+        }
+    }
+}
+
+/// A shortcut that didn't start leaves only the way out: no hold prompt or
+/// idle pill inviting a press that does nothing, and one Reopen Hex.
+#[test]
+fn a_shortcut_that_did_not_start_shows_only_reopen() {
+    let rt = runtime("mac-onboarding-reopen", true, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        !shown
+            .iter()
+            .any(|t| t == "and answer the one that's lit." || t == "and say anything."),
+        "{shown:?}"
+    );
+    assert!(rt.find("idle-pill").is_none(), "no idle pill");
+    assert_eq!(
+        rt.elements()
+            .iter()
+            .filter(|e| !e.exiting && e.path.ends_with("/reopen-hex"))
+            .count(),
+        1,
+        "one Reopen Hex"
+    );
+    assert!(
+        shown.iter().any(|t| t == "Hex's shortcut didn't start."),
+        "{shown:?}"
+    );
+}

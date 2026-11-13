@@ -1275,7 +1275,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                         .font(controls::DESCRIPTION)
                         .color(p.muted()),
                 )
-                .child(unload_after(ui, p)),
+                .child(unload_after(ui, p, layer)),
         ),
         Lab::Feature(Feature::KeepMicrophoneOpen) => Some(
             row()
@@ -1366,21 +1366,30 @@ fn appearance_theme(ui: &Ui, p: Paint) -> El {
 }
 
 /// How long the model sits unused before it unloads.
-fn unload_after(ui: &Ui, p: Paint) -> El {
+fn unload_after(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     use crate::app_settings::UNLOAD_IDLE_MINUTES;
     let labels: Vec<String> = UNLOAD_IDLE_MINUTES
         .iter()
         .map(|minutes| tr_fill("{} min", &minutes.to_string()))
         .collect();
-    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     let selected = UNLOAD_IDLE_MINUTES
         .iter()
         .position(|minutes| *minutes == ui.settings.labs.unload_idle_minutes)
         .unwrap_or(1);
-    controls::segmented(p, "unload-idle-minutes", &labels, selected, |ui, index| {
-        let minutes = UNLOAD_IDLE_MINUTES[index];
-        ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
-    })
+    super::general::quiet_select(
+        ui,
+        p,
+        super::Menu::Pick("unload-idle-minutes"),
+        "unload-idle-minutes".to_owned(),
+        tr("Unload after"),
+        labels,
+        selected,
+        |ui, index| {
+            let minutes = UNLOAD_IDLE_MINUTES[index];
+            ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
+        },
+        layer,
+    )
 }
 
 /// How long the microphone stays open after a dictation before it is
