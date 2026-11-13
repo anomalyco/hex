@@ -56,7 +56,7 @@ impl AppearanceTheme {
     }
 }
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`) are ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -213,9 +213,6 @@ pub struct LabsSettings {
     /// for Modes rewriting and the Modes model picker when no Windows
     /// service answers (Windows).
     pub opencode_in_wsl: bool,
-    /// `hex transcribe <file>` turns a WAV recording into text with the
-    /// dictation model.
-    pub transcribe_files: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -374,7 +371,6 @@ impl Default for LabsSettings {
             annotate_replay: false,
             more_call_apps: false,
             opencode_in_wsl: false,
-            transcribe_files: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,

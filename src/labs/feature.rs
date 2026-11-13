@@ -75,7 +75,6 @@ pub enum Feature {
     ExpireMeetingAudio,
     CapsLockDictation,
     OpenCodeInWsl,
-    TranscribeFiles,
     ApiProcessing,
     ApiTimestamps,
     ApiBrowserAccess,
@@ -88,7 +87,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 79] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -159,7 +158,6 @@ impl Feature {
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,
         Self::OpenCodeInWsl,
-        Self::TranscribeFiles,
         Self::ApiProcessing,
         Self::ApiTimestamps,
         Self::ApiBrowserAccess,

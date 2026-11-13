@@ -1,6 +1,12 @@
-//! A saved WAV read as pieces: streaming decode, downmix, 16 kHz resampling,
-//! and the quiet-point cut the GGUF adapters use for a long clip, so
-//! `hex transcribe` holds about one 30 s piece instead of the whole file.
+//! A saved recording read as pieces: streaming decode, downmix, 16 kHz
+//! resampling, and the quiet-point cut the GGUF adapters use for a long clip,
+//! so `hex transcribe` holds about one 30 s piece instead of the whole file.
+//!
+//! WAV reads through Hound, as the local API reads an upload; every other
+//! container (MP4/M4A/MOV, CAF, AIFF, MP3, FLAC, Ogg, WebM/Matroska) through
+//! Symphonia, with Opus through `opuscule`.
+
+mod media;
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -13,66 +19,109 @@ use crate::dictation::StreamingResampler;
 use crate::transcription::gguf_session::quiet_cut;
 use crate::transcription::service::{AudioError, WavFormat, validate_wav_input, wav_format};
 
-/// 30 s at 16 kHz: the longest piece. A clip that short can run on the
-/// running Hex's dictation engine's loaded copy when it holds the model,
-/// instead of its service loading a second copy.
-pub(super) const PIECE_SAMPLES: usize = 30 * 16_000;
-/// Frames decoded per read: 85 ms at 48 kHz, so a piece is cut near its end
-/// without holding much more than one piece.
+/// 30 s at 16 kHz: the longest piece, the longest clip the local API runs
+/// on the running Hex's dictation engine's loaded copy when it holds the
+/// model, instead of its service loading a second copy.
+pub(super) const PIECE_SAMPLES: usize = crate::transcription::service::SHARED_MAX_SAMPLES;
+/// Frames decoded per WAV read: 85 ms at 48 kHz, so a piece is cut near its
+/// end without holding much more than one piece.
 const BLOCK_FRAMES: usize = 4_096;
 
-/// Why a saved WAV could not be read into pieces.
+/// Why a recording could not be read into pieces.
 #[derive(Debug)]
 pub(super) enum PieceError {
     /// The file could not be opened or read at all.
     Io(std::io::Error),
-    /// The file is not a WAV this build decodes: either it is not a WAV at
-    /// all, or its rate, channels, or sample format is unsupported.
+    /// A WAV whose rate or channels this build does not take.
     Audio(AudioError),
+    /// Not a container Hex reads.
+    NotMedia,
+    /// A container with no audio track, such as a silent screen recording.
+    NoAudioTrack,
+    /// An audio track in a codec Hex can't decode, named.
+    UnsupportedCodec(String),
     /// The file holds no audio at all.
     Empty,
-    /// The header was accepted but the samples could not all be read: the
+    /// A WAV header was accepted but its samples could not all be read: the
     /// file is truncated or corrupt.
     Incomplete,
-    /// The file could not be read after the up-front read accepted it: it
+    /// A WAV could not be read after the up-front read accepted it: it
     /// changed, or could no longer be read, while Hex was transcribing it.
     Changed { at_ms: u64 },
+    /// Compressed audio stopped decoding partway through.
+    Damaged { at_ms: u64 },
 }
 
-/// The 16 kHz samples of one saved WAV, one piece at a time.
+/// The 16 kHz samples of one recording, one piece at a time.
 pub(super) struct Pieces {
-    reader: WavReader<BufReader<File>>,
-    format: WavFormat,
-    channels: usize,
-    bits: u16,
+    source: Source,
     /// `None` once the input ended and its tail was flushed.
     resampler: Option<StreamingResampler>,
     buffer: PieceBuffer,
     ready: VecDeque<Vec<f32>>,
+    /// The first decoded block, read while opening to prove the audio
+    /// decodes; it is resampled first.
+    first: Option<Vec<f32>>,
     done: bool,
-    /// 16 kHz samples handed to `buffer` so far, for where a read failed.
-    emitted: usize,
+    /// Source frames read so far, for where a read failed.
+    frames: u64,
+    rate: u32,
+    duration_ms: Option<u64>,
+}
+
+enum Source {
+    Wav {
+        reader: WavReader<BufReader<File>>,
+        format: WavFormat,
+        channels: usize,
+        bits: u16,
+    },
+    Media(media::Media),
 }
 
 impl std::fmt::Debug for Pieces {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Pieces")
-            .field("format", &self.format)
-            .field("channels", &self.channels)
-            .field("bits", &self.bits)
+            .field("wav", &matches!(self.source, Source::Wav { .. }))
+            .field("rate", &self.rate)
             .field("done", &self.done)
             .finish_non_exhaustive()
     }
 }
 
 impl Pieces {
-    /// Opens `path` and checks its header and format, so a file Hex cannot
-    /// read is refused before any model is loaded or Hex is asked.
+    /// Opens `path`, picks its audio, and decodes its first block, so a file
+    /// Hex cannot read is refused before any model is loaded, downloaded, or
+    /// Hex is asked.
     pub(super) fn open(path: &Path) -> Result<Self, PieceError> {
         let file = File::open(path).map_err(PieceError::Io)?;
-        let reader = WavReader::new(BufReader::new(file))
-            .map_err(|_| PieceError::Audio(AudioError::Invalid))?;
+        if let Ok(reader) = WavReader::new(BufReader::new(file)) {
+            return Self::wav(reader);
+        }
+        let file = File::open(path).map_err(PieceError::Io)?;
+        let mut media = media::Media::open(file, path)?;
+        let first = media.read()?;
+        let Some(rate) = media.rate().filter(|_| !first.is_empty()) else {
+            return Err(PieceError::Empty);
+        };
+        let duration_ms = media.duration_ms();
+        let resampler = StreamingResampler::new(rate)
+            .map_err(|_| PieceError::UnsupportedCodec(format!("audio at {rate} Hz")))?;
+        Ok(Self {
+            frames: first.len() as u64,
+            source: Source::Media(media),
+            resampler: Some(resampler),
+            buffer: PieceBuffer::default(),
+            ready: VecDeque::new(),
+            first: Some(first),
+            done: false,
+            rate,
+            duration_ms,
+        })
+    }
+
+    fn wav(reader: WavReader<BufReader<File>>) -> Result<Self, PieceError> {
         let spec = reader.spec();
         validate_wav_input(&spec).map_err(PieceError::Audio)?;
         let format = wav_format(&spec).map_err(PieceError::Audio)?;
@@ -82,29 +131,52 @@ impl Pieces {
         let resampler = StreamingResampler::new(spec.sample_rate)
             .map_err(|_| PieceError::Audio(AudioError::Unsupported))?;
         Ok(Self {
-            reader,
-            format,
-            channels: usize::from(spec.channels),
-            bits: spec.bits_per_sample,
+            duration_ms: Some(u64::from(reader.duration()) * 1_000 / u64::from(spec.sample_rate)),
+            source: Source::Wav {
+                reader,
+                format,
+                channels: usize::from(spec.channels),
+                bits: spec.bits_per_sample,
+            },
             resampler: Some(resampler),
             buffer: PieceBuffer::default(),
             ready: VecDeque::new(),
+            first: None,
             done: false,
-            emitted: 0,
+            frames: 0,
+            rate: spec.sample_rate,
         })
     }
 
-    /// Reads every sample once without keeping any, so a truncated or
-    /// corrupt file is refused before any transcription rather than after
-    /// minutes of it. Only `prepare` calls this: it costs one decode pass.
+    /// A WAV's every sample read once without keeping any, then rewound, so
+    /// a truncated or corrupt file is refused before any transcription rather
+    /// than after minutes of it. Compressed audio is decoded only once, as it
+    /// is transcribed: damage found later names where it is.
     pub(super) fn validate(&mut self) -> Result<(), PieceError> {
+        if !matches!(self.source, Source::Wav { .. }) {
+            return Ok(());
+        }
         loop {
-            match self.read_source() {
-                Ok(block) if block.is_empty() => return Ok(()),
+            match self.read_wav() {
+                Ok(block) if block.is_empty() => break,
                 Ok(_) => {}
                 Err(_) => return Err(PieceError::Incomplete),
             }
         }
+        if let Source::Wav { reader, .. } = &mut self.source {
+            reader.seek(0).map_err(|_| PieceError::Incomplete)?;
+        }
+        Ok(())
+    }
+
+    /// The recording's length, when its header says.
+    pub(super) fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
+    }
+
+    /// How far into the recording reading has got, in milliseconds.
+    pub(super) fn position_ms(&self) -> u64 {
+        self.frames * 1_000 / u64::from(self.rate.max(1))
     }
 
     /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
@@ -124,7 +196,10 @@ impl Pieces {
     /// Decodes one block and queues the pieces it completed. The end of the
     /// file flushes the resampler's tail and then the last piece.
     fn fill(&mut self) -> Result<(), PieceError> {
-        let block = self.read_block()?;
+        let block = match self.first.take() {
+            Some(block) => block,
+            None => self.read_block()?,
+        };
         if block.is_empty() {
             self.done = true;
             let tail = self
@@ -139,33 +214,37 @@ impl Pieces {
             Some(resampler) => resampler.push(&block),
             None => block,
         };
-        self.emitted += resampled.len();
         self.ready.extend(self.buffer.push(&resampled));
         Ok(())
     }
 
-    /// One block of mono source samples, before resampling.
-    fn read_source(&mut self) -> Result<Vec<f32>, PieceError> {
-        read_frames(
-            &mut self.reader,
-            self.channels,
-            BLOCK_FRAMES,
-            self.format,
-            self.bits,
-        )
-    }
-
     fn read_block(&mut self) -> Result<Vec<f32>, PieceError> {
-        // `validate` read the whole file before this run started, so a failure
-        // here means it changed underneath.
-        self.read_source().map_err(|_| PieceError::Changed {
-            at_ms: self.position_ms(),
-        })
+        let at_ms = self.position_ms();
+        let block = match &mut self.source {
+            Source::Media(media) => media.read().map_err(|error| match error {
+                PieceError::Damaged { .. } => PieceError::Damaged { at_ms },
+                error => error,
+            })?,
+            // `validate` read the whole WAV before this run started, so a
+            // failure here means it changed underneath.
+            Source::Wav { .. } => self.read_wav().map_err(|_| PieceError::Changed { at_ms })?,
+        };
+        self.frames += block.len() as u64;
+        Ok(block)
     }
 
-    /// How far into the file the pieces have got, in milliseconds.
-    fn position_ms(&self) -> u64 {
-        self.emitted as u64 * 1_000 / 16_000
+    /// One block of mono WAV samples, before resampling.
+    fn read_wav(&mut self) -> Result<Vec<f32>, PieceError> {
+        let Source::Wav {
+            reader,
+            format,
+            channels,
+            bits,
+        } = &mut self.source
+        else {
+            return Ok(Vec::new());
+        };
+        read_frames(reader, *channels, BLOCK_FRAMES, *format, *bits)
     }
 }
 
@@ -553,15 +632,104 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_is_not_wav_is_invalid() {
+    fn a_file_that_is_not_media_is_refused() {
         let path = temp("not-wav");
         std::fs::write(&path, b"this is not a wav").unwrap();
         let error = Pieces::open(&path).unwrap_err();
         let _ = std::fs::remove_file(&path);
-        assert!(
-            matches!(error, PieceError::Audio(AudioError::Invalid)),
-            "{error:?}"
-        );
+        assert!(matches!(error, PieceError::NotMedia), "{error:?}");
+    }
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/media")
+            .join(name)
+    }
+
+    /// Each fixture is half a second of a 440 Hz sine, with video beside it
+    /// in `sine-video.mp4`.
+    #[test]
+    fn every_container_hex_reads_decodes_to_its_sixteen_kilohertz_audio() {
+        for name in [
+            "sine-aac.m4a",
+            "sine-aac.caf",
+            "sine-alac.caf",
+            "sine.aiff",
+            "sine.flac",
+            "sine.mp3",
+            "sine-opus.ogg",
+            "sine-opus.webm",
+            "sine-vorbis.ogg",
+            "sine-video.mp4",
+        ] {
+            let mut pieces =
+                Pieces::open(&fixture(name)).unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            pieces.validate().unwrap();
+            let mut samples = Vec::new();
+            while let Some(piece) = pieces
+                .next()
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"))
+            {
+                samples.extend(piece);
+            }
+            let seconds = samples.len() as f64 / 16_000.0;
+            // MP3 and AAC frames pad the end a little; CAF doesn't say how
+            // much AAC priming to drop (2,112 frames, 0.13 s at 16 kHz), so
+            // it stays as leading silence.
+            let slack = if name == "sine-aac.caf" { 0.2 } else { 0.08 };
+            assert!((seconds - 0.5).abs() < slack, "{name}: {seconds} s");
+            let middle = &samples[samples.len() / 4..samples.len() * 3 / 4];
+            let rms = (middle
+                .iter()
+                .map(|&sample| f64::from(sample).powi(2))
+                .sum::<f64>()
+                / middle.len() as f64)
+                .sqrt();
+            assert!(
+                (0.04..0.6).contains(&rms),
+                "{name}: a sine, not silence (rms {rms})"
+            );
+        }
+    }
+
+    #[test]
+    fn ogg_opus_drops_its_pre_skip_and_ends_where_its_container_says() {
+        let mut pieces = Pieces::open(&fixture("sine-opus.ogg")).unwrap();
+        let mut samples = 0;
+        while let Some(piece) = pieces.next().unwrap() {
+            samples += piece.len();
+        }
+        assert_eq!(samples, 8_000, "24,000 frames at 48 kHz, each kept once");
+    }
+
+    #[test]
+    fn a_video_with_no_audio_track_says_so() {
+        let error = Pieces::open(&fixture("rgbw.mp4")).unwrap_err();
+        assert!(matches!(error, PieceError::NoAudioTrack), "{error:?}");
+    }
+
+    #[test]
+    fn a_compressed_file_cut_short_reads_what_it_holds_or_names_the_damage() {
+        let bytes = std::fs::read(fixture("sine.mp3")).unwrap();
+        let path = temp("cut.mp3");
+        std::fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
+        let mut pieces = Pieces::open(&path).unwrap();
+        let mut result = Ok(0);
+        loop {
+            match pieces.next() {
+                Ok(Some(piece)) => *result.as_mut().unwrap() += piece.len(),
+                Ok(None) => break,
+                Err(error) => {
+                    result = Err(error);
+                    break;
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+        match result {
+            Ok(samples) => assert!(samples < 6_000, "only what was kept: {samples}"),
+            Err(error) => assert!(matches!(error, PieceError::Damaged { .. }), "{error:?}"),
+        }
     }
 
     #[test]

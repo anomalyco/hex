@@ -145,25 +145,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_k_quant_import_needs_the_lab_and_falls_back_without_it (custom_models);
 │                                        // smaller_model_files_is_its_own_switch_and_macos_only (labs.rs); not observed on Metal
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
-├── Transcribe files no   labs.transcribe_files        (every OS) `hex transcribe <file>` prints a saved WAV recording's transcript
-│                                        from the selected model (or --model); any length is read in ≤30 s pieces and their text
-│                                        joined with one space; Hex running sends one piece at a time to POST /transcriptions with
-│                                        that model named (each on the dictation engine's loaded copy when it holds that model), Hex
-│                                        stopped loads the model here once on Linux and Windows (macOS answers not-running); the whole
-│                                        WAV is checked here; silent pieces are skipped once the speech detector is installed; no paste, History, or processing
-│                                        // checks: the_lab_off_refuses_and_names_its_toggle,
-│                                        // a_file_that_is_not_wav_is_refused_before_any_transcription,
-│                                        // a_wav_uses_the_selected_model_and_language, every_piece_hearing_nothing_is_no_speech,
-│                                        // pieces_join_with_one_space_in_order, a_truncated_file_is_refused_before_any_transcription,
-│                                        // a_piece_is_kept_without_the_detector_and_it_is_not_consulted,
-│                                        // an_installed_detector_skips_a_piece_it_hears_nothing_in,
-│                                        // a_refusal_follows_hexs_code_rather_than_its_status
-│                                        // (control/cli/transcribe.rs); pieces_cover_every_sample_exactly_once_in_order,
-│                                        // a_48_khz_file_is_read_in_pieces_of_at_most_thirty_seconds,
-│                                        // every_supported_sample_format_matches_the_whole_file_decoder,
-│                                        // streamed_samples_match_the_whole_file_decoder (control/cli/transcribe/pieces.rs);
-│                                        // a running service answered model-unavailable for an uninstalled
-│                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
@@ -2850,6 +2831,12 @@ written while the lab was on still follows later notes and renames. Checks:
 [labs.rs](../../src/labs.rs). The Labs page goldens (`mac-labs`,
 `windows-labs`, `linux-labs`) show the new card. Not yet observed: a real macOS
 end-to-end run writing, renaming, and trashing a separate notes file.
+
+Transcribe files (`transcribe-files`) graduated: `hex transcribe <file>`
+always works now, reads common audio and video formats, and starts its own
+embedded service when Hex isn't running ([control-cli.md](control-cli.md)).
+`hex labs on|off transcribe-files` still answers with that and exits 0
+(`labs::GRADUATED`); the saved `labs.transcribe_files` key is ignored.
 
 Meeting platform icons (`meeting-platform-icons`, issue 1290) graduated:
 each recording in the Meetings list always shows its call service's icon, or

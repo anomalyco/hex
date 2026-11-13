@@ -628,11 +628,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",
     ),
     key(
-        "labs.transcribe_files",
-        Kind::Bool,
-        "Labs: hex transcribe <file> turns a WAV recording into text with the selected dictation model",
-    ),
-    key(
         "labs.api_processing",
         Kind::Bool,
         "Labs: apps using Hex's local API can ask for transcripts with Global mode's corrections, \

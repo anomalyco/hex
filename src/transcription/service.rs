@@ -33,8 +33,9 @@ const SHARED_RETRY: Duration = Duration::from_millis(50);
 /// using a copy of the service's own.
 const SHARED_WAIT: Duration = Duration::from_secs(20);
 /// Longer host audio would hold a dictation released during it behind it on
-/// the shared engine, so it runs on a copy of the service's own.
-const SHARED_MAX_SAMPLES: usize = 30 * 16_000;
+/// the shared engine, so it runs on a copy of the service's own. `hex
+/// transcribe` sends a long file in pieces of this length.
+pub(crate) const SHARED_MAX_SAMPLES: usize = 30 * 16_000;
 
 pub struct TranscriptionService {
     commands: Option<SyncSender<Command>>,
@@ -497,6 +498,9 @@ fn transcribe(
 ) -> std::result::Result<Transcript, TranscriptionServiceError> {
     check_canceled(canceled)?;
     let mut samples = clip.samples;
+    if heard_nothing(selection, &samples, timings) {
+        return Ok(Transcript::default());
+    }
     let engine_has_model = if samples.len() <= SHARED_MAX_SAMPLES {
         let audio = Arc::new(samples);
         let shared = {
@@ -525,6 +529,25 @@ fn transcribe(
     let transcript = transcript?;
     check_canceled(canceled)?;
     Ok(transcript)
+}
+
+/// Whether a GGUF clip holds only silence, as a long GGUF clip's silent
+/// chunks are skipped: models invent text for silence (#1194) or run to their
+/// generation cap (#968). Only an installed speech detector is asked, so a
+/// request never starts its download, and a timed request still gets the
+/// model's own answer or refusal.
+fn heard_nothing(
+    selection: &TranscriptionSelection,
+    samples: &[f32],
+    timings: TimestampLevel,
+) -> bool {
+    timings == TimestampLevel::None
+        && matches!(
+            crate::transcription::models::definition(selection.model).runtime,
+            crate::transcription::models::ModelRuntime::Gguf(_)
+        )
+        && crate::transcription::models::speech_detector_installed()
+        && !crate::transcription::gguf_session::chunk_may_hold_speech(samples)
 }
 
 /// Transcribes `samples` on a held model, with the model's own timings only

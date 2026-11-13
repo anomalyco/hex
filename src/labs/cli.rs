@@ -137,7 +137,7 @@ fn live_typing_note() -> Option<&'static str> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 2] = [
+const GRADUATED: [(&str, &str); 3] = [
     (
         "custom-models",
         "custom-models graduated: adding a model file and models found on this computer are always on now",
@@ -145,6 +145,10 @@ const GRADUATED: [(&str, &str); 2] = [
     (
         "meeting-platform-icons",
         "meeting-platform-icons graduated: the Meetings list always shows each recording's call app icon now",
+    ),
+    (
+        "transcribe-files",
+        "transcribe-files graduated: hex transcribe <file> is always available now",
     ),
 ];
 
