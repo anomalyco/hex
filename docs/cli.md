@@ -170,21 +170,25 @@ records or finishes, it answers done but the listener drops the job.
 `transcribe <file>` (Labs › Transcribe files, off by default) prints a saved
 WAV recording's transcript to stdout with the selected dictation model, or
 the one `--model` names; `--language` picks a language the model supports.
-It is refused with `disabled` while the lab is off. The file is read here and
-capped at 64 MiB, and Hex's own WAV decoder checks it first, so a file that
-isn't WAV is refused with `unsupported` (convert it first, for example with
-ffmpeg) before anything else runs. With Hex running, the file goes to its
-local API's `POST /transcriptions` with that model named: a clip up to 30 s
-runs on Hex's dictation engine when it already holds that model, and a longer
-one makes Hex's transcription service load its own copy. With Hex stopped,
-Linux and Windows load the model in this process, as `hex model transcribe`
-does; macOS answers `not-running`. An empty transcript answers `no-speech`
+It is refused with `disabled` while the lab is off. The file is opened and
+read through once here, so a file Hex can't read or decode is refused with
+`unsupported` (convert it first, for example with ffmpeg) and one with no
+audio with `no-speech`, before anything else runs. A recording of any length
+is read and sent in pieces of at most 30 seconds: a piece of only silence is
+skipped once the speech detector is installed, the rest of the text is joined
+with one space, and Hex holds about one piece rather than the whole file. With
+Hex running, each piece goes to its local API's `POST /transcriptions` with
+that model named: a piece that short runs on Hex's dictation engine when it
+already holds that model, so no second copy loads and dictation can run
+between pieces. With Hex stopped,
+Linux and Windows load the model in this process once, as `hex model
+transcribe` does; macOS answers `not-running`. A piece that hears no speech
+is skipped, and only a file with no speech at all answers `no-speech`
 (exit 4). It never pastes, records History, or runs mode processing. With
 `--json` the reply is the same `transcript` status `dictation stop --print`
-uses. The lab
-is read from `settings.json` (`AppSettings::read`), as `hex labs` reads it,
-whether or not Hex is running; a running Hex saves its Labs toggle there at
-once.
+uses. The lab is read from `settings.json` (`AppSettings::read`), as `hex labs`
+reads it, whether or not Hex is running; a running Hex saves its Labs toggle
+there at once.
 
 `model import`, `rename`, `repair`, and `remove` run in this process on every
 OS; `hex models` is an alias for `hex model`. An import's id is `custom-` and
@@ -308,9 +312,10 @@ transcription and `/streams`, but answer `/control` with
   route.
 
 `hex transcribe` uses that same owner-only discovery file and bearer token,
-but sends the file's bytes to `POST /transcriptions?model=<id>&language=<code>`
-with `Content-Type: audio/wav` instead, up to 64 MiB. The route answers the
-transcript (`{"transcript": "…", "durationMs": …}`) or a code such as
+but sends the file one 30 s piece at a time to
+`POST /transcriptions?model=<id>&language=<code>` with `Content-Type:
+audio/wav`. The route answers each piece's transcript
+(`{"transcript": "…", "durationMs": …}`) or a code such as
 `model-not-ready`, `unsupported-audio`, `queue-full`, or `resource-exhausted`.
 
 ## Wire format (version 4)
@@ -444,9 +449,9 @@ not-ready              Hex is waiting for setup (permissions or the dictation mo
 meeting-active         quit/restart while a meeting records (pass --force)
 busy                   something is in progress (recording, transcribing, a full queue),
                        or the listener couldn't confirm it's idle
-resource-exhausted     `hex transcribe`'s file is over 64 MiB or too long to decode
+resource-exhausted     a running Hex refused a `hex transcribe` piece as too large or too long
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
-no-speech              `dictation start --print` or `stop --print` heard no speech; nothing printed (exit 4)
+no-speech              `dictation start --print` or `stop --print` heard no speech, or `hex transcribe`'s file had none; nothing printed (exit 4)
 not-recording          `dictation stop --print` with nothing recording
 unavailable            a part of Hex the command needs isn't available
 unsupported            this build or OS can't do it (e.g. restart from a development binary)

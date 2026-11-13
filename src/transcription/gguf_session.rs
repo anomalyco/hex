@@ -561,12 +561,26 @@ const QUIET_SPAN_SAMPLES: usize = 1_600;
 /// How far back from a window's end the quietest span is looked for.
 const QUIET_SEARCH_SAMPLES: usize = 5 * 16_000;
 
+/// Where a window is cut into the next one: the middle of the quietest 100 ms
+/// in its last five seconds (or its last half, when that is shorter), never
+/// its first sample. `samples` must hold at least `max_samples`, and only
+/// those are read, so a streaming reader can cut before it has read the rest
+/// of the clip.
+pub(crate) fn quiet_cut(samples: &[f32], max_samples: usize) -> usize {
+    let max_samples = max_samples.max(1);
+    let search = QUIET_SEARCH_SAMPLES.min(max_samples / 2).max(1);
+    let span = QUIET_SPAN_SAMPLES.min(search);
+    let quiet =
+        max_samples - search + quietest_span(&samples[max_samples - search..max_samples], span);
+    quiet.max(1)
+}
+
 /// Splits a clip into consecutive ranges of at most `max_samples`, cutting
 /// each window at the middle of the quietest 100 ms in its last five seconds
 /// (or half the window, when that is shorter), adapted from Cohere's reference
 /// processor. An exact sample cut lands mid-word, and each slice starts a
 /// fresh sentence with a capital and a closing full stop, so a long dictation
-/// reads as many sentences instead of one.
+/// reads as many sentences instead of one. Each cut is [`quiet_cut`]'s.
 ///
 /// Every sample is covered exactly once by a non-empty range. Ties pick the
 /// latest span, so the ranges are deterministic. The search is energy-based,
@@ -581,11 +595,7 @@ pub(crate) fn chunk_ranges(samples: &[f32], max_samples: usize) -> Vec<Range<usi
             ranges.push(start..samples.len());
             break;
         }
-        let end = start + max_samples;
-        let search = QUIET_SEARCH_SAMPLES.min(max_samples / 2).max(1);
-        let span = QUIET_SPAN_SAMPLES.min(search);
-        let quiet = end - search + quietest_span(&samples[end - search..end], span);
-        let cut = quiet.max(start + 1);
+        let cut = start + quiet_cut(&samples[start..], max_samples);
         ranges.push(start..cut);
         start = cut;
     }
@@ -699,12 +709,13 @@ fn trimmed_audio<'a>(
     (Cow::Owned(audio), span.start)
 }
 
-/// Whether one chunk of a long clip goes to the model. The clip as a whole
-/// held speech, but a chunk of it can be only silence (a locked dictation
-/// left waiting before the words), and models such as Cohere and Whisper
-/// invent long, repeating text for that (#1194, #1770). Without the detector
-/// every chunk runs.
-fn chunk_may_hold_speech(samples: &[f32]) -> bool {
+/// Whether one chunk of a long clip, or one piece of a long file, goes to the
+/// model. The recording as a whole held speech, but a chunk of it can be only
+/// silence (a locked dictation left waiting before the words, or a pause
+/// between two pieces), and models such as Cohere and Whisper invent long,
+/// repeating text for that (#1194, #1770), or run to their generation cap
+/// (#968). Without the detector every chunk runs.
+pub(crate) fn chunk_may_hold_speech(samples: &[f32]) -> bool {
     crate::transcription::speech_detector::contains_speech(samples) != Some(false)
 }
 

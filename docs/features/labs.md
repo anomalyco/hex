@@ -141,15 +141,23 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Transcribe files no   labs.transcribe_files        (every OS) `hex transcribe <file>` prints a saved WAV recording's transcript
-│                                        from the selected model (or --model); Hex running sends it to POST /transcriptions with that
-│                                        model named (≤30 s on the dictation engine's loaded copy, longer clips on the service's
-│                                        own), Hex stopped loads the model here on Linux and Windows (macOS answers
-│                                        not-running); the file is capped at 64 MiB and checked as WAV here; no paste, History, or processing
+│                                        from the selected model (or --model); any length is read in ≤30 s pieces and their text
+│                                        joined with one space; Hex running sends one piece at a time to POST /transcriptions with
+│                                        that model named (each on the dictation engine's loaded copy when it holds that model), Hex
+│                                        stopped loads the model here once on Linux and Windows (macOS answers not-running); the whole
+│                                        WAV is checked here; silent pieces are skipped once the speech detector is installed; no paste, History, or processing
 │                                        // checks: the_lab_off_refuses_and_names_its_toggle,
 │                                        // a_file_that_is_not_wav_is_refused_before_any_transcription,
-│                                        // a_wav_uses_the_selected_model_and_language, an_empty_transcript_is_no_speech,
+│                                        // a_wav_uses_the_selected_model_and_language, every_piece_hearing_nothing_is_no_speech,
+│                                        // pieces_join_with_one_space_in_order, a_truncated_file_is_refused_before_any_transcription,
+│                                        // a_piece_is_kept_without_the_detector_and_it_is_not_consulted,
+│                                        // an_installed_detector_skips_a_piece_it_hears_nothing_in,
 │                                        // a_refusal_follows_hexs_code_rather_than_its_status
-│                                        // (control/cli/transcribe.rs); a running service answered model-unavailable for an uninstalled
+│                                        // (control/cli/transcribe.rs); pieces_cover_every_sample_exactly_once_in_order,
+│                                        // a_48_khz_file_is_read_in_pieces_of_at_most_thirty_seconds,
+│                                        // every_supported_sample_format_matches_the_whole_file_decoder,
+│                                        // streamed_samples_match_the_whole_file_decoder (control/cli/transcribe/pieces.rs);
+│                                        // a running service answered model-unavailable for an uninstalled
 │                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
