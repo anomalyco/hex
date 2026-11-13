@@ -282,6 +282,10 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   under a plain heading; none -> "No labs match" / "Nothing turned on yet"
 │   // checks: the_labs_search_clear_button_empties_the_field_and_brings_every_card_back,
 │   // labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
+│   // labs_search_clears_across_the_titlebar_button_and_keeps_typing (labs/store.rs):
+│   // macOS runtime, top/middle/bottom presses with the native titlebar band, both
+│   // appearances, typed and linked searches, restored cards, retained focus and typing;
+│   // observed failing without the clear callback and passing with it; no AppKit window
 │   // every_group_has_a_feature_and_round_trips_its_id (labs/group.rs);
 │   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link
 ├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch;

@@ -79,8 +79,8 @@ let
       hash = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
     };
     "rune-0.0.1" = {
-      rev = "d6715352fb0cb3ab3551853c3ba92a7995a9bce5";
-      hash = "sha256-lENb2aPCQcUryfKFLXLt90WvQfeW4+0oUzqWne+AMEI=";
+      rev = "8e1ae9ae3a38e7a2013ce4d947870ffe5eebec08";
+      hash = "sha256-Vs+p9B7SMRSSfAMz6NHraiWpC85ZQxTVOTiV+xj+afc=";
     };
     "transcribe-cpp-sys-0.4.1" = {
       rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a";
