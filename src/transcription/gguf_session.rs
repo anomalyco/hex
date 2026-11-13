@@ -709,12 +709,13 @@ fn trimmed_audio<'a>(
     (Cow::Owned(audio), span.start)
 }
 
-/// Whether one chunk of a long clip goes to the model. The clip as a whole
-/// held speech, but a chunk of it can be only silence (a locked dictation
-/// left waiting before the words), and models such as Cohere and Whisper
-/// invent long, repeating text for that (#1194, #1770). Without the detector
-/// every chunk runs.
-fn chunk_may_hold_speech(samples: &[f32]) -> bool {
+/// Whether one chunk of a long clip, or one piece of a long file, goes to the
+/// model. The recording as a whole held speech, but a chunk of it can be only
+/// silence (a locked dictation left waiting before the words, or a pause
+/// between two pieces), and models such as Cohere and Whisper invent long,
+/// repeating text for that (#1194, #1770), or run to their generation cap
+/// (#968). Without the detector every chunk runs.
+pub(crate) fn chunk_may_hold_speech(samples: &[f32]) -> bool {
     crate::transcription::speech_detector::contains_speech(samples) != Some(false)
 }
 

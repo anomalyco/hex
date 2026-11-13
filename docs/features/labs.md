@@ -143,16 +143,18 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Transcribe files no   labs.transcribe_files        (every OS) `hex transcribe <file>` prints a saved WAV recording's transcript
 │                                        from the selected model (or --model); any length is read in ≤30 s pieces and their text
 │                                        joined with one space; Hex running sends one piece at a time to POST /transcriptions with
-│                                        that model named (each on the dictation engine's loaded copy), Hex stopped loads the
-│                                        model here once on Linux and Windows (macOS answers not-running); the WAV header is
-│                                        checked here; no paste, History, or processing
+│                                        that model named (each on the dictation engine's loaded copy when it holds that model), Hex
+│                                        stopped loads the model here once on Linux and Windows (macOS answers not-running); the whole
+│                                        WAV is checked here; silent pieces are skipped; no paste, History, or processing
 │                                        // checks: the_lab_off_refuses_and_names_its_toggle,
 │                                        // a_file_that_is_not_wav_is_refused_before_any_transcription,
 │                                        // a_wav_uses_the_selected_model_and_language, every_piece_hearing_nothing_is_no_speech,
-│                                        // pieces_join_with_one_space_in_order,
+│                                        // pieces_join_with_one_space_in_order, a_truncated_file_is_refused_before_any_transcription,
+│                                        // a_piece_of_silence_is_skipped_before_it_is_sent,
 │                                        // a_refusal_follows_hexs_code_rather_than_its_status
 │                                        // (control/cli/transcribe.rs); pieces_cover_every_sample_exactly_once_in_order,
 │                                        // a_48_khz_file_is_read_in_pieces_of_at_most_thirty_seconds,
+│                                        // every_supported_sample_format_matches_the_whole_file_decoder,
 │                                        // streamed_samples_match_the_whole_file_decoder (control/cli/transcribe/pieces.rs);
 │                                        // a running service answered model-unavailable for an uninstalled
 │                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows

@@ -171,11 +171,12 @@ records or finishes, it answers done but the listener drops the job.
 WAV recording's transcript to stdout with the selected dictation model, or
 the one `--model` names; `--language` picks a language the model supports.
 It is refused with `disabled` while the lab is off. The file is opened and
-its WAV header checked here, so a file that isn't WAV is refused with
-`unsupported` (convert it first, for example with ffmpeg) before anything
-else runs. A recording of any length is read and sent in pieces of at most
-30 seconds, joining their text with one space, so Hex holds about one piece
-rather than the whole file. With Hex running, each piece goes to its
+read through once here, so a file that isn't WAV, is truncated, or holds no
+audio is refused with `unsupported` or `no-speech` (convert it first, for
+example with ffmpeg) before anything else runs. A recording of any length is
+read and sent in pieces of at most 30 seconds: a piece of only silence is
+skipped, the rest of the text is joined with one space, and Hex holds about
+one piece rather than the whole file. With Hex running, each piece goes to its
 local API's `POST /transcriptions` with that model named: a piece that short
 runs on Hex's dictation engine when it already holds that model, so no second
 copy loads and dictation can run between pieces. With Hex stopped,
@@ -449,7 +450,7 @@ busy                   something is in progress (recording, transcribing, a full
                        or the listener couldn't confirm it's idle
 resource-exhausted     a running Hex refused a `hex transcribe` piece as too large or too long
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
-no-speech              `dictation start --print` or `stop --print` heard no speech; nothing printed (exit 4)
+no-speech              `dictation start --print` or `stop --print` heard no speech, or `hex transcribe`'s file had none; nothing printed (exit 4)
 not-recording          `dictation stop --print` with nothing recording
 unavailable            a part of Hex the command needs isn't available
 unsupported            this build or OS can't do it (e.g. restart from a development binary)

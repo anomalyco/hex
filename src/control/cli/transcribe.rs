@@ -3,9 +3,10 @@
 //! Hex is stopped. Nothing is pasted, saved to History, or processed.
 //!
 //! A file of any length is read in pieces of at most 30 s ([`pieces`]) and
-//! their text is joined with one space: a piece that short runs on the
-//! running Hex's dictation engine, never needs a second model copy loaded,
-//! and keeps one piece rather than the whole file in memory.
+//! their text is joined with one space: a piece that short can run on the
+//! running Hex's dictation engine's loaded copy when it holds the model,
+//! instead of its service loading a second one, and Hex keeps one piece
+//! rather than the whole file in memory.
 
 mod pieces;
 
@@ -18,6 +19,7 @@ use super::{Output, print};
 use crate::control::{ControlReply, model_selection};
 use crate::labs::Feature;
 use crate::transcription::models::TranscriptionSelection;
+use crate::transcription::service::AudioError;
 use pieces::{PieceError, Pieces};
 
 /// One piece waits for a cold model behind it and for its own transcription.
@@ -58,8 +60,8 @@ pub(super) fn run(
     print(reply, output)
 }
 
-/// The lab's gate, the file's header, and the model, all checked before Hex
-/// is asked or a model is loaded. The samples are read piece by piece later.
+/// The lab's gate, the file, and the model, all checked before Hex is asked
+/// or a model is loaded. The samples are read piece by piece later.
 fn prepare(
     settings: &crate::app_settings::AppSettings,
     file: &Path,
@@ -76,9 +78,12 @@ fn prepare(
         };
         return Err(ControlReply::error("disabled", message));
     }
-    // The header and format are refused here, before anything runs; this
-    // reads no samples.
-    open(file)?;
+    // Every sample is read once here and dropped, so a truncated or corrupt
+    // file is refused before Hex is asked or a model loads, rather than after
+    // minutes of transcription.
+    open(file)?
+        .validate()
+        .map_err(|error| refused(file, error))?;
     let model = model.unwrap_or_else(|| settings.transcription.model.as_str().to_owned());
     let selection = model_selection(settings, &model, language.as_deref())?;
     Ok(Job {
@@ -91,13 +96,32 @@ fn open(file: &Path) -> std::result::Result<Pieces, ControlReply> {
     Pieces::open(file).map_err(|error| refused(file, error))
 }
 
-/// The refusal for a file Hex cannot read, before any transcription runs.
+/// The refusal for a file Hex cannot read, before any transcription runs, or
+/// for one that changed while it was being read.
 fn refused(file: &Path, error: PieceError) -> ControlReply {
     let name = file.display();
     match error {
         PieceError::Io(error) => {
             ControlReply::error("failed", format!("couldn't read {name}: {error}"))
         }
+        PieceError::Changed { at_ms } => ControlReply::error(
+            "failed",
+            format!(
+                "couldn't read {name} past {}; the file changed while Hex was transcribing it",
+                minute_second(at_ms)
+            ),
+        ),
+        PieceError::Empty => ControlReply::error(
+            "no-speech",
+            format!("{name} has no audio; nothing to transcribe"),
+        ),
+        PieceError::Audio(AudioError::Unsupported) => ControlReply::error(
+            "unsupported",
+            format!(
+                "{name} isn't a WAV Hex can decode; convert it to 16 kHz mono WAV, \
+                 for example with ffmpeg: ffmpeg -i <file> -ar 16000 -ac 1 <file>.wav"
+            ),
+        ),
         PieceError::Audio(_) => ControlReply::error(
             "unsupported",
             format!(
@@ -108,6 +132,11 @@ fn refused(file: &Path, error: PieceError) -> ControlReply {
     }
 }
 
+/// A duration as `m:ss`.
+fn minute_second(ms: u64) -> String {
+    format!("{}:{:02}", ms / 60_000, ms / 1_000 % 60)
+}
+
 fn transcribe(job: &Job) -> ControlReply {
     if crate::local_api::running_pid().is_some() {
         return in_running_hex(job);
@@ -116,8 +145,10 @@ fn transcribe(job: &Job) -> ControlReply {
 }
 
 /// The running Hex transcribes one piece at a time with the model the
-/// request names: a piece of at most 30 s runs on its dictation engine's
-/// loaded copy, so no second copy loads and dictation can run between pieces.
+/// request names. A piece of at most 30 s runs on its dictation engine's
+/// loaded copy when it holds that model, so no second copy loads and
+/// dictation can run between pieces; a piece of only silence is skipped
+/// before it is sent.
 fn in_running_hex(job: &Job) -> ControlReply {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("model", job.selection.model.as_str())
@@ -130,7 +161,7 @@ fn in_running_hex(job: &Job) -> ControlReply {
     };
     let mut texts = Vec::new();
     loop {
-        let samples = match pieces.next() {
+        let samples = match next_speechful(&mut pieces) {
             Ok(Some(samples)) => samples,
             Ok(None) => break,
             Err(error) => return refused(&job.file, error),
@@ -155,6 +186,22 @@ fn in_running_hex(job: &Job) -> ControlReply {
         }
     }
     joined(texts)
+}
+
+/// The next piece that may hold speech, skipping pieces of only silence as a
+/// long GGUF clip's silent chunks are skipped: models invent text for silence
+/// (#1194) or run to their generation cap (#968).
+fn next_speechful(pieces: &mut Pieces) -> std::result::Result<Option<Vec<f32>>, PieceError> {
+    loop {
+        match pieces.next()? {
+            Some(samples)
+                if !crate::transcription::gguf_session::chunk_may_hold_speech(&samples) =>
+            {
+                continue;
+            }
+            piece => return Ok(piece),
+        }
+    }
 }
 
 /// One piece's transcript, trimmed, or the refusal for an answer Hex cannot
@@ -280,7 +327,7 @@ fn offline(job: &Job) -> ControlReply {
     };
     let mut texts = Vec::new();
     loop {
-        let samples = match pieces.next() {
+        let samples = match next_speechful(&mut pieces) {
             Ok(Some(samples)) => samples,
             Ok(None) => break,
             Err(error) => return refused(&job.file, error),
@@ -379,8 +426,26 @@ mod tests {
         assert_eq!(job.selection.language, settings.transcription.language);
     }
 
+    /// A 16 kHz mono WAV of `seconds` of silence.
+    fn wav_at(name: &str, seconds: f32) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("hex-transcribe-{name}-{}.wav", std::process::id()));
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for _ in 0..(16_000.0 * seconds) as usize {
+            writer.write_sample(0_i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        path
+    }
+
     #[test]
-    fn a_file_with_no_audio_is_refused_like_an_unreadable_one() {
+    fn a_file_with_no_audio_answers_no_speech() {
         let mut settings = AppSettings::default();
         settings.labs.transcribe_files = true;
         let path =
@@ -398,9 +463,50 @@ mod tests {
         let reply = prepare(&settings, &path, None, None).unwrap_err();
         let _ = std::fs::remove_file(&path);
         assert!(
+            matches!(reply, ControlReply::Error { ref code, .. } if code == "no-speech"),
+            "{reply:?}"
+        );
+    }
+
+    #[test]
+    fn a_truncated_file_is_refused_before_any_transcription() {
+        let mut settings = AppSettings::default();
+        settings.labs.transcribe_files = true;
+        let path = wav_at("truncated", 3.0);
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
+
+        let reply = prepare(&settings, &path, None, None).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+        assert!(
             matches!(reply, ControlReply::Error { ref code, .. } if code == "unsupported"),
             "{reply:?}"
         );
+    }
+
+    #[test]
+    fn a_piece_of_silence_is_skipped_before_it_is_sent() {
+        let path = wav_at("silent", 1.0);
+        let mut pieces = open(&path).unwrap();
+        {
+            let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
+            assert!(next_speechful(&mut pieces).unwrap().is_none());
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_piece_is_kept_when_the_detector_hears_speech_or_is_absent() {
+        let path = wav_at("kept", 1.0);
+        for verdict in [Some(true), None] {
+            let mut pieces = open(&path).unwrap();
+            let _verdict = crate::transcription::speech_detector::override_for_test(verdict);
+            assert!(
+                next_speechful(&mut pieces).unwrap().is_some(),
+                "{verdict:?}"
+            );
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -494,5 +600,43 @@ mod tests {
             transcript(b"not json"),
             Err(ControlReply::Error { ref code, .. }) if code == "failed"
         ));
+    }
+
+    #[test]
+    fn a_changed_file_names_where_reading_stopped() {
+        let (code, message) = error(refused(
+            Path::new("talk.wav"),
+            PieceError::Changed { at_ms: 125_000 },
+        ));
+        assert_eq!(code, "failed");
+        assert!(message.contains("past 2:05"), "{message}");
+        assert!(message.contains("changed while Hex"), "{message}");
+        assert_eq!(minute_second(0), "0:00");
+        assert_eq!(minute_second(59_999), "0:59");
+        assert_eq!(minute_second(3_600_000), "60:00");
+    }
+
+    #[test]
+    fn an_unsupported_wav_asks_for_sixteen_kilohertz_mono() {
+        let (code, message) = error(refused(
+            Path::new("wide.wav"),
+            PieceError::Audio(crate::transcription::service::AudioError::Unsupported),
+        ));
+        assert_eq!(code, "unsupported");
+        assert!(message.contains("16 kHz mono"), "{message}");
+        assert!(message.contains("-ar 16000 -ac 1"), "{message}");
+    }
+
+    #[test]
+    fn a_broken_wav_asks_for_a_wav() {
+        let (code, message) = error(refused(
+            Path::new("broken.wav"),
+            PieceError::Audio(crate::transcription::service::AudioError::Invalid),
+        ));
+        assert_eq!(code, "unsupported");
+        assert!(
+            message.contains("isn't a WAV file Hex can read"),
+            "{message}"
+        );
     }
 }

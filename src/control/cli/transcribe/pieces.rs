@@ -13,8 +13,9 @@ use crate::dictation::StreamingResampler;
 use crate::transcription::gguf_session::quiet_cut;
 use crate::transcription::service::{AudioError, WavFormat, validate_wav_input, wav_format};
 
-/// 30 s at 16 kHz: the longest piece. A clip that short runs on the running
-/// Hex's dictation engine instead of making its service load a second copy.
+/// 30 s at 16 kHz: the longest piece. A clip that short can run on the
+/// running Hex's dictation engine's loaded copy when it holds the model,
+/// instead of its service loading a second copy.
 pub(super) const PIECE_SAMPLES: usize = 30 * 16_000;
 /// Frames decoded per read: 85 ms at 48 kHz, so a piece is cut near its end
 /// without holding much more than one piece.
@@ -25,8 +26,13 @@ const BLOCK_FRAMES: usize = 4_096;
 pub(super) enum PieceError {
     /// The file could not be opened or read at all.
     Io(std::io::Error),
-    /// The file is not a WAV this build decodes.
+    /// The file is a WAV this build does not decode.
     Audio(AudioError),
+    /// The file holds no audio at all.
+    Empty,
+    /// The file stopped being readable at `at_ms`, after the up-front read
+    /// had accepted it: it changed while Hex was transcribing it.
+    Changed { at_ms: u64 },
 }
 
 /// The 16 kHz samples of one saved WAV, one piece at a time.
@@ -40,6 +46,8 @@ pub(super) struct Pieces {
     buffer: PieceBuffer,
     ready: VecDeque<Vec<f32>>,
     done: bool,
+    /// 16 kHz samples handed to `buffer` so far, for where a read failed.
+    emitted: usize,
 }
 
 impl std::fmt::Debug for Pieces {
@@ -65,7 +73,7 @@ impl Pieces {
         validate_wav_input(&spec).map_err(PieceError::Audio)?;
         let format = wav_format(&spec).map_err(PieceError::Audio)?;
         if reader.duration() == 0 {
-            return Err(PieceError::Audio(AudioError::Unsupported));
+            return Err(PieceError::Empty);
         }
         let resampler = StreamingResampler::new(spec.sample_rate)
             .map_err(|_| PieceError::Audio(AudioError::Unsupported))?;
@@ -78,7 +86,16 @@ impl Pieces {
             buffer: PieceBuffer::default(),
             ready: VecDeque::new(),
             done: false,
+            emitted: 0,
         })
+    }
+
+    /// Reads every sample once without keeping any, so a truncated or
+    /// corrupt file is refused before any transcription rather than after
+    /// minutes of it. Only `prepare` calls this: it costs one decode pass.
+    pub(super) fn validate(&mut self) -> Result<(), PieceError> {
+        while !self.read_source()?.is_empty() {}
+        Ok(())
     }
 
     /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
@@ -113,11 +130,13 @@ impl Pieces {
             Some(resampler) => resampler.push(&block),
             None => block,
         };
+        self.emitted += resampled.len();
         self.ready.extend(self.buffer.push(&resampled));
         Ok(())
     }
 
-    fn read_block(&mut self) -> Result<Vec<f32>, PieceError> {
+    /// One block of mono source samples, before resampling.
+    fn read_source(&mut self) -> Result<Vec<f32>, PieceError> {
         read_frames(
             &mut self.reader,
             self.channels,
@@ -125,6 +144,19 @@ impl Pieces {
             self.format,
             self.bits,
         )
+    }
+
+    fn read_block(&mut self) -> Result<Vec<f32>, PieceError> {
+        // `validate` read the whole file before this run started, so a failure
+        // here means it changed underneath.
+        self.read_source().map_err(|_| PieceError::Changed {
+            at_ms: self.position_ms(),
+        })
+    }
+
+    /// How far into the file the pieces have got, in milliseconds.
+    fn position_ms(&self) -> u64 {
+        self.emitted as u64 * 1_000 / 16_000
     }
 }
 
@@ -270,8 +302,14 @@ mod tests {
         for sample in samples {
             match spec.sample_format {
                 SampleFormat::Float => writer.write_sample(*sample).unwrap(),
+                SampleFormat::Int if spec.bits_per_sample <= 8 => {
+                    writer.write_sample((sample * 127.0) as i8).unwrap();
+                }
                 SampleFormat::Int if spec.bits_per_sample <= 16 => {
                     writer.write_sample((sample * 32_767.0) as i16).unwrap();
+                }
+                SampleFormat::Int if spec.bits_per_sample <= 24 => {
+                    writer.write_sample((sample * 8_388_607.0) as i32).unwrap();
                 }
                 SampleFormat::Int => {
                     writer
@@ -281,6 +319,13 @@ mod tests {
             }
         }
         writer.finalize().unwrap();
+    }
+
+    /// A varying signal, so each sample format's quantization is exercised.
+    fn wave(sample_rate: u32, seconds: f32) -> Vec<f32> {
+        (0..(sample_rate as f32 * seconds) as usize)
+            .map(|index| (index as f32 * 0.01).sin() * 0.6)
+            .collect()
     }
 
     fn temp(name: &str) -> std::path::PathBuf {
@@ -341,6 +386,7 @@ mod tests {
         };
         write(&path, spec, &paced(48_000, 70));
         let pieces = collect(&path);
+        let whole = AudioClip::decode_wav(BufReader::new(File::open(&path).unwrap())).unwrap();
         let _ = std::fs::remove_file(&path);
 
         assert!(pieces.len() > 1, "70 s is more than one piece");
@@ -353,6 +399,45 @@ mod tests {
             70 * 16_000,
             "the whole 48 kHz file is resampled, not truncated"
         );
+        let streamed = pieces.concat();
+        assert_eq!(streamed.len(), whole.samples.len());
+        assert!(
+            streamed
+                .iter()
+                .zip(&whole.samples)
+                .all(|(streamed, whole)| (streamed - whole).abs() <= 1e-5),
+            "every piece's samples match the whole-file decoder"
+        );
+    }
+
+    #[test]
+    fn every_supported_sample_format_matches_the_whole_file_decoder() {
+        for (name, bits, sample_format) in [
+            ("i8", 8, SampleFormat::Int),
+            ("i16", 16, SampleFormat::Int),
+            ("i24", 24, SampleFormat::Int),
+            ("i32", 32, SampleFormat::Int),
+            ("f32", 32, SampleFormat::Float),
+        ] {
+            let path = temp(name);
+            let spec = WavSpec {
+                channels: 1,
+                sample_rate: 48_000,
+                bits_per_sample: bits,
+                sample_format,
+            };
+            write(&path, spec, &wave(48_000, 2.7));
+            let pieces = collect(&path);
+            let whole = AudioClip::decode_wav(BufReader::new(File::open(&path).unwrap())).unwrap();
+            let _ = std::fs::remove_file(&path);
+
+            assert_eq!(whole.duration_ms, 2_700, "{name}");
+            assert!(
+                pieces.iter().all(|piece| piece.len() <= PIECE_SAMPLES),
+                "{name}: every piece is at most 30 s"
+            );
+            assert_eq!(pieces.concat(), whole.samples, "{name}: same samples");
+        }
     }
 
     #[test]
@@ -394,8 +479,64 @@ mod tests {
         );
         let error = Pieces::open(&path).unwrap_err();
         let _ = std::fs::remove_file(&path);
+        assert!(matches!(error, PieceError::Empty), "{error:?}");
+    }
+
+    #[test]
+    fn a_truncated_file_is_refused_by_the_up_front_read() {
+        let path = temp("truncated");
+        write(
+            &path,
+            WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: SampleFormat::Int,
+            },
+            &paced(16_000, 3),
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
+
+        // The header still promises the whole recording, so opening succeeds;
+        // the up-front read is what finds the missing audio.
+        let mut pieces = Pieces::open(&path).unwrap();
+        let error = pieces.validate().unwrap_err();
+        let _ = std::fs::remove_file(&path);
         assert!(
-            matches!(error, PieceError::Audio(AudioError::Unsupported)),
+            matches!(error, PieceError::Audio(AudioError::Invalid)),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_that_changes_mid_read_reports_where_it_stopped() {
+        let path = temp("changed");
+        write(
+            &path,
+            WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: SampleFormat::Int,
+            },
+            &paced(16_000, 40),
+        );
+        let mut pieces = Pieces::open(&path).unwrap();
+        assert!(pieces.next().unwrap().is_some(), "the first piece reads");
+
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() / 3]).unwrap();
+        let error = loop {
+            match pieces.next() {
+                Ok(Some(_)) => continue,
+                Ok(None) => panic!("expected the shortened file to fail"),
+                Err(error) => break error,
+            }
+        };
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(error, PieceError::Changed { at_ms } if (29_000..31_000).contains(&at_ms)),
             "{error:?}"
         );
     }
