@@ -206,7 +206,7 @@ pub(super) fn mode_call(p: Paint, s: &Onboard) -> Option<El> {
         .shadow(6.0, 26.0, k.c.bg_accent.alpha(0.6))
         .child(icon(&glyphs::MIC, 26.0).key("glyph").color(ink))
         .child(
-            text("VOICE-FIRST MODE".to_string())
+            text(tr("Voice-first mode").to_uppercase())
                 .key("copy")
                 .font(TextStyle::new(30.0, 900.0).lh(34.0).tracking(-0.5))
                 .color(ink),
@@ -233,14 +233,14 @@ pub(super) fn mode_chip(p: Paint, voice: bool) -> El {
     let (glyph, copy, fill, ink) = if voice {
         (
             &glyphs::MIC,
-            "Voice-first mode",
+            tr("Voice-first mode"),
             k.c.bg_accent,
             k.c.submit_fg,
         )
     } else {
         (
             &glyphs::KEYBOARD,
-            "Keyboard mode",
+            tr("Keyboard mode"),
             k.c.surface_raised,
             p.muted(),
         )

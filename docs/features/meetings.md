@@ -1370,7 +1370,8 @@ Meetings › Settings -> Keep meetings: 24 hours / 7 days / 30 days / Forever
 │   until the user chooses (the `meeting-retention-default` migration
 │   unsets the `forever` that #604 saved as its default)
 └── Chosen -> applies to every finished meeting, older ones included
-Each finished card -> "Deleted after 24 hours" (or 7 days, 30 days)
+Each finished card -> "Deleted after 24 hours" (or 7 days, 30 days), on its
+own wrapping line under the date line, never truncated
 Meeting controller, Meetings on or off           // meetings.retention
 ├── At launch, hourly, and soon after the setting changes
 ├── Age from ended_at_ms, else created_at_ms; older than its retention

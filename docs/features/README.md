@@ -288,6 +288,9 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
 │   └── Within 2 min of that relaunch -> "Hex's shortcut didn't start." + Reopen Hex
+│       in place of the practice's hold prompt, idle pill, and hint (never a
+│       second Reopen Hex in the top banner); Hex is ready keeps the banner.
+│       Check: `a_shortcut_that_did_not_start_shows_only_reopen`
 └── Hex is ready -> where Hex lives (menu bar, system tray, or app launcher)
     ├── macOS: "Open Hex when your Mac starts?" + Launch at login
     ├── Try again -> back to the practice game
@@ -1585,6 +1588,10 @@ Menu bar and Settings                    // maintenance
 │   │       window instead; dictation keeps running, the menu bar icon quits (labs.md)
 │   ├── No Meetings… (Settings… opens the same window) and no Show Hex in
 │   │   Screen Recordings (Annotate's pane has it)
+│   ├── In the interface language: macOS title case in English, else the
+│   │   window's translated labels; fixed rows retitle as the menu opens, state
+│   │   rows (meeting, pause, update) with each update; meeting titles never
+│   │   translate. Check: the_menu_follows_the_interface_language
 │   └── check: the_menu_reads_meeting_then_actions_then_the_app,
 │       paste_last_shows_the_saved_binding_or_nothing,
 │       the_pause_row_reads_pause_or_resume (status_item.rs; the

@@ -2408,10 +2408,40 @@ fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group()));
     settle(&mut rt);
-    assert!(rt.find("unload-idle-minutes").is_none(), "hidden while off");
+    assert!(
+        rt.find("unload-idle-minutes-trigger").is_none(),
+        "hidden while off"
+    );
     tap(&mut rt, "lab-unload-idle");
     assert!(rt.state.settings.labs.unload_idle);
-    assert!(rt.find("unload-idle-minutes").is_some());
+    assert!(rt.find("unload-idle-minutes-trigger").is_some());
+}
+
+/// At the window's smallest size, in a longer language, the minutes stay
+/// inside their card and the last choice is still reachable.
+#[test]
+fn unload_after_fits_its_card_in_a_small_translated_window() {
+    let mut rt = runtime("mac-labs", true, (860.0, 560.0));
+    crate::desktop::i18n::apply(Some("de"));
+    rt.update(|ui, _| {
+        ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group());
+        ui.settings.labs.unload_idle = true;
+    });
+    settle(&mut rt);
+    let (control, _) = rt
+        .presented("unload-idle-minutes-trigger")
+        .expect("the minutes' control");
+    let (card, _) = rt.presented("lab-card-unload-idle").expect("its card");
+    assert!(
+        control[0] >= card[0] && control[0] + control[2] <= card[0] + card[2],
+        "the minutes' control stays inside its card: {control:?} in {card:?}"
+    );
+    tap(&mut rt, "unload-idle-minutes-trigger");
+    tap(&mut rt, "option3");
+    assert_eq!(
+        rt.state.settings.labs.unload_idle_minutes,
+        crate::app_settings::UNLOAD_IDLE_MINUTES[3]
+    );
 }
 
 #[test]

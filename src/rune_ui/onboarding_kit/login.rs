@@ -8,6 +8,7 @@ use rune_kit::{Button, ButtonVariant, glyphs};
 use super::super::Ui;
 use super::super::controls::{Paint, PushSize};
 use super::super::platform::{PlatformRequest, PlatformState};
+use crate::desktop::i18n::tr;
 use crate::desktop::login_item::LoginItemStatus;
 
 /// What the login item says, as the ask shows it.
@@ -156,8 +157,8 @@ pub(crate) fn login_ask<S: 'static>(
     let (question, button, line) = match ask.login {
         Login::Hidden => return None,
         Login::Off => (
-            "Open Hex when your Mac starts?",
-            Button::new("Launch at login")
+            tr("Open Hex when your Mac starts?"),
+            Button::new(tr("Launch at login"))
                 .rolling("login-label")
                 .variant(if alone {
                     ButtonVariant::Contrast
@@ -165,25 +166,25 @@ pub(crate) fn login_ask<S: 'static>(
                     ButtonVariant::Neutral
                 }),
             if toggle {
-                "It's tiny. It naps in your menu bar until you tap the key."
+                tr("It's tiny. It naps in your menu bar until you tap the key.")
             } else {
-                "It's tiny. It naps in your menu bar until you hold the key."
+                tr("It's tiny. It naps in your menu bar until you hold the key.")
             },
         ),
         Login::On => (
-            "Hex opens when your Mac starts.",
-            Button::new("Launches at login")
+            tr("Hex opens when your Mac starts."),
+            Button::new(tr("Launches at login"))
                 .rolling("login-label")
                 .icon(&glyphs::CHECK)
                 .variant(ButtonVariant::Neutral),
-            "It'll be there before your coffee is.",
+            tr("It'll be there before your coffee is."),
         ),
         Login::Approve => (
-            "Open Hex when your Mac starts?",
-            Button::new("Allow in Login Items")
+            tr("Open Hex when your Mac starts?"),
+            Button::new(tr("Allow in Login Items"))
                 .rolling("login-label")
                 .variant(ButtonVariant::Neutral),
-            "macOS wants your OK first. It's very protective.",
+            tr("macOS wants your OK first. It's very protective."),
         ),
     };
     let on = ask.login == Login::On;
