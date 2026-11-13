@@ -13,11 +13,15 @@
 //! The recording capsule's "Copy new" and "Copy all" copy the in-call
 //! transcript (Parakeet, `meeting::TranscriptReader`); "Copy new" shares
 //! Option-Control-V's cursor and first transcribes the call up to the click
-//! (`meeting::entries_for_copy`), saying "Transcribing…" meanwhile.
+//! (`meeting::entries_for_copy`), saying "Transcribing…" meanwhile. "Copy
+//! agent prompt" copies instructions that tell a coding agent which `hex
+//! meetings` commands read the meeting. The ready panel offers the same three
+//! under the finished meeting's title and summary.
 //!
-//! The recording capsule rests as a compact pill in its corner and springs
-//! open to show its actions while the pointer is over it. Dragging it moves
-//! the window; on release it snaps to the nearest corner, which is saved.
+//! The recording capsule rests as a small pill in its corner, only its voice
+//! bars and elapsed time, and springs open into a panel with Stop and its
+//! copies while the pointer is over it. Dragging it moves the window; on
+//! release it snaps to the nearest corner, which is saved.
 //! It is a function of the controller's current recording and the live
 //! Show recording indicator setting ([`PillModel`]): the call-ended prompt
 //! stands in for it until Keep recording, and turning the setting on or off
@@ -41,17 +45,19 @@ use rune::{
     Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx,
     col, row, text,
 };
-use rune_kit::{
-    Badge, BadgeVariant, Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant,
-};
+use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
-use super::controls::{Paint, PushSize, pulsing_dot, status_dot};
+use super::controls::{Paint, PushSize, status_dot};
 use crate::app_settings::{MeetingIndicatorCorner, MeetingPolicy, MeetingProviderChoice};
 use crate::calendar::CalendarMeeting;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::meeting::detection::MeetingCandidate;
 use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
+
+mod panel;
+
+use panel::{Bars, agent_prompt, hex_command, ready, ready_summary, recording, recording_notice};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -60,8 +66,6 @@ const MEETING_MENU_WIDTH: f32 = 560.0;
 const MEETING_PANEL_HEIGHT: f32 = 64.0;
 /// Between a capsule's buttons and its right edge.
 const ACTIONS_INSET: f32 = 8.0;
-/// The recording capsule stays a full pill.
-const PILL_RADIUS: f32 = 999.0;
 /// The reminder: the meeting's title beside up to three buttons.
 const REMINDER_PANEL_WIDTH: f32 = 520.0;
 /// "Microsoft Teams left the call" beside Keep recording and Stop &
@@ -69,20 +73,63 @@ const REMINDER_PANEL_WIDTH: f32 = 520.0;
 const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 /// How often an open reminder recounts "Starts in N min".
 const REMINDER_TICK: Duration = Duration::from_secs(5);
-/// The recording capsule's window, as wide as the open pill.
-const RECORDING_PANEL_WIDTH: f32 = 640.0;
-/// The resting pill: the dot, the title and elapsed time, and a `+N` tag.
-const RECORDING_COMPACT_WIDTH: f32 = 244.0;
+/// Between a capsule's window edges and what it draws.
+const CAPSULE_INSET: f32 = 4.0;
+/// The resting pill: the voice bars and the elapsed time.
+const REST_HEIGHT: f32 = 38.0;
+/// The resting pill's sides, and the open panel header's right side, so the
+/// timer stays put as the pill opens.
+const REST_PX: f32 = 11.0;
+/// The open recording pill and the ready panel.
+const PANEL_WIDTH: f32 = 252.0;
+const PANEL_RADIUS: f32 = 13.0;
+/// Around the open panel's rows.
+const PANEL_PAD: f32 = 5.0;
+const HEADER_HEIGHT: f32 = 36.0;
+const ROW_HEIGHT: f32 = 36.0;
+/// Concentric with the panel across [`PANEL_PAD`].
+const ROW_RADIUS: f32 = PANEL_RADIUS - PANEL_PAD;
+/// A row's icon and label inset; titles and summaries share it.
+const ROW_PX: f32 = 9.0;
+/// Under the first row, which is raised.
+const FIRST_ROW_GAP: f32 = 2.0;
+/// "Microphone is silent" or "Started automatically" under the header.
+const NOTICE_HEIGHT: f32 = 20.0;
+/// The ready panel's summary: Apple Intelligence's two sentences.
+const SUMMARY_LINES: usize = 3;
+const SUMMARY_LINE: f32 = 19.5;
+/// The resting pill fits a timer up to `100:00`.
+#[cfg(target_os = "windows")]
+const REST_WINDOW_WIDTH: f32 = 116.0;
+/// The recording capsule's window at its largest: the open panel with a
+/// notice.
+const RECORDING_WINDOW: (f32, f32) = (
+    PANEL_WIDTH + 2.0 * CAPSULE_INSET,
+    HEADER_HEIGHT
+        + NOTICE_HEIGHT
+        + 3.0 * ROW_HEIGHT
+        + FIRST_ROW_GAP
+        + PANEL_PAD
+        + 2.0 * CAPSULE_INSET,
+);
 /// Opening under the pointer, and closing after it leaves (GPUI's snap
 /// springs), with no overshoot.
 const RECORDING_OPEN: Spring = Spring::new(0.25, 0.0);
 const RECORDING_CLOSE: Spring = Spring::new(0.2, 0.0);
-/// "Copy new", "Copy new (12)", and "Copied" keep one width, so the other
-/// buttons don't shift as the count changes.
-const COPY_NEW_WIDTH: f32 = 112.0;
-/// How long a copy button says "Copied".
+/// The voice bars: five 2 pt bars 2 pt apart, from a 3 pt dot to 17 pt.
+const BARS: usize = 5;
+const BAR_WIDTH: f32 = 2.0;
+const BAR_STEP: f32 = 4.0;
+const BAR_REST: f32 = 3.0;
+const BAR_MAX: f32 = 17.0;
+const BARS_BOX: (f32, f32) = (BAR_STEP * (BARS - 1) as f32 + BAR_WIDTH, BAR_MAX);
+/// The newest level in the middle, older ones outward and quieter.
+const BAR_SHAPE: [f32; BARS] = [0.55, 0.8, 1.0, 0.8, 0.55];
+/// How often the bars read the meeting's level.
+const BAR_TICK: Duration = Duration::from_millis(50);
+const BAR_SPRING: Spring = Spring::new(0.12, 0.0);
+/// How long a copy says "Copied".
 const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
-const RECORDING_PANEL_HEIGHT: f32 = 48.0;
 const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long after an offer Linux checks that its overlay opened.
@@ -183,7 +230,6 @@ impl PillModel {
             }
             ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::Chapters(_)
-            | ControllerEvent::OpenMeeting(_)
             | ControllerEvent::ImportFailed { .. }
             | ControllerEvent::NotesStarted
             | ControllerEvent::NotesFinished(_) => {}
@@ -206,14 +252,16 @@ impl PillModel {
 enum LiveCopy {
     New,
     All,
+    Prompt,
 }
 
-/// The recording's in-call transcript as the ticker last read it.
+/// The shown meeting's transcript as last read: the recording's in-call
+/// transcript by the ticker, or the ready meeting's when it shows.
 #[derive(Default)]
 struct Live {
     entries: Vec<TranscriptEntry>,
-    /// Speaker turns not yet copied or pasted.
-    pending: usize,
+    /// What Copy new would copy now.
+    pending: meeting::PendingDelta,
     copied: Option<(LiveCopy, Instant)>,
     /// Copy new is transcribing up to the click.
     copying: bool,
@@ -231,17 +279,21 @@ struct Capsule {
     /// The offer shows its Never offer / Always record choices in place of
     /// its actions.
     more_open: bool,
-    copied: bool,
     live: Live,
+    bars: Bars,
     commands: SyncSender<ControllerCommand>,
     hide: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The call-ended prompt's Keep recording brings the recording capsule
     /// back.
     keep_recording: Option<Arc<dyn Fn() + Send + Sync>>,
-    resize: Option<Arc<dyn Fn(f32) + Send + Sync>>,
+    resize: Option<Resize>,
     choose: Choose,
-    /// The recording capsule: the pointer is over the pill (or holding it).
+    /// The pointer is over the recording pill (or holding it), or over the
+    /// ready panel.
     hovered: bool,
+    /// The ready panel's time ran out while the pointer was over it; it
+    /// closes when the pointer leaves.
+    expired: bool,
     /// Where the recording capsule rests, and the panel while
     /// [`Capsule::movable`].
     corner: MeetingIndicatorCorner,
@@ -259,6 +311,8 @@ struct Capsule {
 
 type Choose = Arc<dyn Fn(MeetingProviderChoice) + Send + Sync>;
 type CopyNew = Arc<dyn Fn(String) + Send + Sync>;
+/// Sets the capsule window's size in points.
+type Resize = Arc<dyn Fn((f32, f32)) + Send + Sync>;
 type Shift = Arc<dyn Fn(MeetingIndicatorCorner, f32, f32) + Send + Sync>;
 type SaveCorner = Arc<dyn Fn(MeetingIndicatorCorner) + Send + Sync>;
 
@@ -270,11 +324,46 @@ impl Capsule {
     fn set_more_open(&mut self, open: bool) {
         self.more_open = open;
         if let Some(resize) = &self.resize {
-            resize(if open {
-                MEETING_MENU_WIDTH
-            } else {
-                MEETING_PANEL_WIDTH
-            });
+            resize((
+                if open {
+                    MEETING_MENU_WIDTH
+                } else {
+                    MEETING_PANEL_WIDTH
+                },
+                MEETING_PANEL_HEIGHT,
+            ));
+        }
+    }
+
+    /// The meeting whose transcript the capsule copies: the recording, or
+    /// the ready meeting.
+    fn meeting_id(&self) -> Option<&str> {
+        match &self.kind {
+            Some(Kind::Recording(Recording { id, .. })) => Some(id),
+            Some(Kind::Ready(manifest)) => Some(&manifest.id),
+            _ => None,
+        }
+    }
+
+    /// Windows sizes the recording capsule's window to the pill it draws.
+    /// Elsewhere the window stays at its largest and only the `.hit()` pill
+    /// takes the pointer.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn fit_recording_window(&self) {
+        if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
+            resize(recording_window_size(
+                self.hovered,
+                recording_notice(shown).is_some(),
+            ));
+        }
+    }
+
+    fn set_hovered(&mut self, inside: bool) {
+        self.hovered = inside;
+        #[cfg(target_os = "windows")]
+        self.fit_recording_window();
+        if !inside && self.expired {
+            self.close();
         }
     }
 
@@ -299,7 +388,7 @@ impl Capsule {
     }
 
     fn press_copy_new(&mut self, tx: &mut Tx) {
-        let Some(Kind::Recording(Recording { id, .. })) = &self.kind else {
+        let Some(id) = self.meeting_id().map(str::to_owned) else {
             return;
         };
         if self.live.copying {
@@ -308,26 +397,25 @@ impl Capsule {
         match self.copy_new.clone() {
             Some(copy_new) => {
                 self.live.copying = true;
-                copy_new(id.clone());
+                copy_new(id);
             }
             None => {
-                let (id, entries) = (id.clone(), self.live.entries.clone());
+                let entries = self.live.entries.clone();
                 self.copy_new_from(&id, &entries, tx);
             }
         }
     }
 
     /// Copies the new turns of `entries`, read through the click for the
-    /// recording `id`, if it still shows.
+    /// meeting `id`, if it still shows.
     fn finish_copy_new(
         &mut self,
         id: &str,
         entries: color_eyre::Result<Vec<TranscriptEntry>>,
         tx: &mut Tx,
     ) {
-        // A reply for an earlier recording leaves the shown one's copy alone.
-        if !matches!(&self.kind, Some(Kind::Recording(Recording { id: shown, .. })) if shown == id)
-        {
+        // A reply for an earlier meeting leaves the shown one's copy alone.
+        if self.meeting_id() != Some(id) {
             return;
         }
         self.live.copying = false;
@@ -345,17 +433,60 @@ impl Capsule {
             Ok(())
         }) {
             Ok(_) => {
-                self.live.pending = 0;
+                if entries.len() > self.live.entries.len() {
+                    self.live.entries = entries.to_vec();
+                }
+                self.live.pending = meeting::PendingDelta::default();
                 self.live.copied = Some((LiveCopy::New, Instant::now()));
             }
             Err(error) => tracing::warn!(%error, "could not copy new meeting transcript turns"),
         }
     }
 
+    fn copy_all(&mut self, tx: &mut Tx) {
+        let markdown = match &self.kind {
+            Some(Kind::Recording(_)) if self.live.entries.is_empty() => return,
+            Some(Kind::Recording(_)) => meeting::transcript_markdown(&self.live.entries),
+            Some(Kind::Ready(manifest)) => {
+                match meeting::transcript_markdown_for_manifest(manifest) {
+                    Ok(markdown) => markdown,
+                    Err(error) => {
+                        tracing::warn!(%error, "could not copy meeting transcript");
+                        return;
+                    }
+                }
+            }
+            _ => return,
+        };
+        tx.copy(markdown);
+        self.live.copied = Some((LiveCopy::All, Instant::now()));
+    }
+
+    fn copy_prompt(&mut self, tx: &mut Tx) {
+        let prompt = match &self.kind {
+            Some(Kind::Recording(Recording { id, title, .. })) => {
+                let reached = self.live.entries.last().map_or(0, |entry| entry.end_ms);
+                agent_prompt(&hex_command(), id, title, Some(reached))
+            }
+            Some(Kind::Ready(manifest)) => agent_prompt(
+                &hex_command(),
+                &manifest.id,
+                &meeting::display_title(manifest),
+                None,
+            ),
+            _ => return,
+        };
+        tx.copy(prompt);
+        self.live.copied = Some((LiveCopy::Prompt, Instant::now()));
+    }
+
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
         match &self.kind {
-            Some(Kind::Recording(_)) => recording_window_size(self.hovered),
+            Some(Kind::Recording(shown)) => {
+                recording_window_size(self.hovered, recording_notice(shown).is_some())
+            }
+            Some(Kind::Ready(manifest)) => ready_window_size(manifest),
             Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
@@ -392,16 +523,41 @@ impl Capsule {
     }
 }
 
-/// The recording capsule's window, as wide as the pill it draws: compact
-/// until hovered, then the open pill. Elsewhere the window stays as wide as
-/// the open pill, and only its `.hit()` body takes the pointer.
-fn recording_window_size(open: bool) -> (f32, f32) {
-    let width = if cfg!(target_os = "windows") && !open {
-        RECORDING_COMPACT_WIDTH
+/// The recording capsule's window. On Windows it is the size of what it
+/// draws: the resting pill (as wide as the open panel while it says
+/// `noticed`), then the open panel. Elsewhere it stays at its largest, and
+/// only the `.hit()` pill takes the pointer.
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
+    #[cfg(target_os = "windows")]
+    if !open {
+        let width = if noticed {
+            RECORDING_WINDOW.0
+        } else {
+            REST_WINDOW_WIDTH
+        };
+        return (width, REST_HEIGHT + 2.0 * CAPSULE_INSET);
+    }
+    RECORDING_WINDOW
+}
+
+/// The ready panel's window: its header, a summary while there is one or one
+/// is being written, and the three copies.
+fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
+    let summary = if ready_summary(manifest).is_some() {
+        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + FIRST_ROW_GAP
     } else {
-        RECORDING_PANEL_WIDTH
+        0.0
     };
-    (width, RECORDING_PANEL_HEIGHT)
+    (
+        PANEL_WIDTH + 2.0 * CAPSULE_INSET,
+        HEADER_HEIGHT
+            + summary
+            + 3.0 * ROW_HEIGHT
+            + FIRST_ROW_GAP
+            + PANEL_PAD
+            + 2.0 * CAPSULE_INSET,
+    )
 }
 
 /// Where a corner's capsule window sits: its edge and margin, and its
@@ -506,6 +662,8 @@ pub(crate) struct MeetingCapsules {
 struct Pill {
     handle: OverlayHandle<Capsule>,
     model: Arc<Mutex<PillModel>>,
+    /// The pill's voice bars, the same ones its capsule draws.
+    bars: Bars,
 }
 
 impl Pill {
@@ -542,16 +700,24 @@ impl Pill {
         };
         let id = recording.id.clone();
         if model.shown.as_ref() == Some(&id) {
-            self.handle
-                .update(move |capsule, _| capsule.kind = Some(Kind::Recording(recording)));
+            self.handle.update(move |capsule, _| {
+                capsule.kind = Some(Kind::Recording(recording));
+                // A notice coming or going changes the resting pill's width.
+                #[cfg(target_os = "windows")]
+                capsule.fit_recording_window();
+            });
             return Some(id);
         }
         model.shown = Some(id.clone());
         let corner = crate::app_settings::meeting_indicator_corner();
         place_capsule(&self.handle, corner, 0.0, 0.0);
-        // Windows: a shown pill starts compact.
+        // Windows: a shown pill starts at rest.
         #[cfg(target_os = "windows")]
-        self.handle.resize(recording_window_size(false));
+        self.handle.resize(recording_window_size(
+            false,
+            recording_notice(&recording).is_some(),
+        ));
+        self.bars.show([0.0; 3]);
         self.handle.update(move |capsule, tx| {
             capsule.kind = Some(Kind::Recording(recording));
             capsule.live = Live::default();
@@ -564,20 +730,37 @@ impl Pill {
         Some(id)
     }
 
-    /// While recording `id`, each second: reconciles the pill (the elapsed
+    /// Whether the controller still records `id`.
+    fn records(&self, id: &str) -> bool {
+        self.lock()
+            .recording
+            .as_ref()
+            .is_some_and(|recording| recording.id == id)
+    }
+
+    /// While recording `id`: each second, reconciles the pill (the elapsed
     /// time, the indicator setting) and, while it shows, reads the in-call
-    /// transcript here rather than on the main thread.
+    /// transcript here rather than on the main thread; and every
+    /// [`BAR_TICK`], moves the voice bars to the meeting's level.
     fn tick(&self, id: String) {
+        let bars = self.clone();
+        let bars_id = id.clone();
+        std::thread::spawn(move || {
+            let mut levels = [0.0; 3];
+            while bars.records(&bars_id) {
+                std::thread::sleep(BAR_TICK);
+                if bars.lock().shown.as_deref() != Some(bars_id.as_str()) {
+                    continue;
+                }
+                levels.rotate_right(1);
+                levels[0] = meeting::voice_level();
+                bars.bars.show(levels);
+            }
+        });
         let pill = self.clone();
         std::thread::spawn(move || {
             let mut reader = meeting::TranscriptReader::default();
-            let recording = |pill: &Pill| {
-                pill.lock()
-                    .recording
-                    .as_ref()
-                    .is_some_and(|recording| recording.id == id)
-            };
-            while recording(&pill) {
+            while pill.records(&id) {
                 std::thread::sleep(Duration::from_secs(1));
                 if pill.reconcile().as_ref() != Some(&id) {
                     continue;
@@ -589,7 +772,7 @@ impl Pill {
                         continue;
                     }
                 };
-                let pending = meeting::pending_delta_turns(&id, &entries);
+                let pending = meeting::pending_delta(&id, &entries);
                 let id = id.clone();
                 pill.handle.update(move |capsule, _| {
                     if matches!(&capsule.kind, Some(Kind::Recording(Recording { id: shown, .. })) if *shown == id)
@@ -614,8 +797,8 @@ impl MeetingCapsules {
     ) -> Self {
         let choose: Choose = Arc::new(choose);
         let save_corner: SaveCorner = Arc::new(save_corner);
+        let bars = Bars::default();
         let overlay = |app: &mut rune::App<S>, name, size: (f32, f32)| {
-            let height = size.1;
             let handle = app.overlay(
                 OverlaySpec {
                     name,
@@ -630,14 +813,15 @@ impl MeetingCapsules {
                 Capsule {
                     kind: None,
                     more_open: false,
-                    copied: false,
                     live: Live::default(),
+                    bars: bars.clone(),
                     commands: commands.clone(),
                     hide: None,
                     keep_recording: None,
                     resize: None,
                     choose: choose.clone(),
                     hovered: false,
+                    expired: false,
                     corner: MeetingIndicatorCorner::default(),
                     movable: false,
                     shift: None,
@@ -667,9 +851,7 @@ impl MeetingCapsules {
             handle.update(move |capsule, _| {
                 capsule.copy_new = Some(copy_new);
                 capsule.hide = Some(Arc::new(move || hide.hide()));
-                capsule.resize = Some(Arc::new(move |width| {
-                    resize.resize((width, height));
-                }));
+                capsule.resize = Some(Arc::new(move |size| resize.resize(size)));
                 capsule.shift = Some(Arc::new(move |corner, dx, dy| {
                     place_capsule(&shift, corner, dx, dy);
                 }));
@@ -682,8 +864,13 @@ impl MeetingCapsules {
             (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         );
         let pill = Pill {
-            handle: overlay(app, "Hex meeting recording", recording_window_size(false)),
+            handle: overlay(
+                app,
+                "Hex meeting recording",
+                recording_window_size(false, false),
+            ),
             model: Arc::default(),
+            bars,
         };
         let kept = pill.clone();
         panel.update(move |capsule, _| {
@@ -760,14 +947,36 @@ impl MeetingCapsules {
             }
             ControllerEvent::Finished(manifest) => {
                 self.show_panel(Kind::Ready(manifest.clone()), Some(READY_TIMEOUT));
+                // Copy new's hint reads the final transcript, off the main
+                // thread.
+                let (panel, id) = (self.panel.clone(), manifest.id.clone());
+                std::thread::spawn(move || {
+                    let entries = match meeting::TranscriptReader::default().read(&id) {
+                        Ok(entries) => entries,
+                        Err(error) => {
+                            tracing::debug!(%error, "could not read the finished transcript");
+                            return;
+                        }
+                    };
+                    let pending = meeting::pending_delta(&id, &entries);
+                    panel.update(move |capsule, _| {
+                        if capsule.meeting_id() == Some(id.as_str()) {
+                            capsule.live.entries = entries;
+                            capsule.live.pending = pending;
+                        }
+                    });
+                });
             }
             ControllerEvent::NotesFinished(manifest) => {
                 let manifest = manifest.clone();
+                let panel = self.panel.clone();
                 self.panel.update(move |capsule, _| {
                     if let Some(Kind::Ready(ready)) = &mut capsule.kind
                         && ready.id == manifest.id
                     {
                         *ready = manifest;
+                        // The summary may have arrived or gone.
+                        panel.resize(ready_window_size(ready));
                     }
                 });
             }
@@ -775,7 +984,6 @@ impl MeetingCapsules {
             | ControllerEvent::SourceWarning { .. }
             | ControllerEvent::Failed { .. }
             | ControllerEvent::ImportFailed { .. }
-            | ControllerEvent::OpenMeeting(_)
             | ControllerEvent::Chapters(_)
             | ControllerEvent::NotesStarted => {}
         }
@@ -793,12 +1001,16 @@ impl MeetingCapsules {
             MeetingIndicatorCorner::TopRight
         };
         place_capsule(&self.panel, corner, 0.0, 0.0);
-        self.panel
-            .resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
+        self.panel.resize(match &kind {
+            Kind::Ready(manifest) => ready_window_size(manifest),
+            kind => (panel_width(kind), MEETING_PANEL_HEIGHT),
+        });
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
-            capsule.copied = false;
+            capsule.live = Live::default();
+            capsule.hovered = false;
+            capsule.expired = false;
             capsule.movable = movable;
             capsule.corner = corner;
             tx.instant();
@@ -838,6 +1050,11 @@ impl MeetingCapsules {
                             if candidate.key != "preview" {
                                 capsule.send(ControllerCommand::OfferTimedOut);
                             }
+                        }
+                        // A ready panel waits for the pointer to leave it.
+                        if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
+                            capsule.expired = true;
+                            return;
                         }
                         capsule.close();
                     });
@@ -1008,7 +1225,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
                 }),
             ],
         ),
-        Kind::Ready(manifest) => ready(p, manifest, capsule.copied),
+        Kind::Ready(manifest) => return ready(p, capsule, manifest),
     };
     pill(p, dot, &title, &subtitle, actions, capsule.movable)
 }
@@ -1160,172 +1377,7 @@ fn offer_choices(p: Paint, candidate: &MeetingCandidate) -> (rune::Color, String
     )
 }
 
-fn ready(
-    p: Paint,
-    manifest: &MeetingManifest,
-    copied: bool,
-) -> (rune::Color, String, String, Vec<El>) {
-    let summary = manifest
-        .notes
-        .as_ref()
-        .map(|notes| notes.summary.trim().to_string())
-        .filter(|summary| !summary.is_empty());
-    let subtitle = if meeting::notes_in_progress(&manifest.id) {
-        tr("Writing a title and summary with Apple Intelligence…").to_owned()
-    } else if let Some(summary) = summary {
-        summary
-    } else if let Some(path) = &manifest.export_path {
-        path.file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_default()
-    } else if let Some(error) = &manifest.export_error {
-        tr_fill("Markdown not saved: {}", error)
-    } else {
-        tr("Saved in Meetings").to_owned()
-    };
-    let title = meeting::display_title(manifest);
-    let title = if title == manifest.title && manifest.notes.is_none() {
-        tr("Meeting transcript ready").to_owned()
-    } else {
-        tr_fill("Ready · {}", &title)
-    };
-    let copy = Button::new(tr(if copied { "Copied" } else { "Copy" }))
-        .variant(ButtonVariant::Neutral)
-        .on_press_tx(|c: &mut Capsule, tx: &mut Tx| {
-            let Some(Kind::Ready(manifest)) = &c.kind else {
-                return;
-            };
-            match meeting::transcript_markdown_for_manifest(manifest) {
-                Ok(markdown) => {
-                    tx.copy(markdown);
-                    c.copied = true;
-                }
-                Err(error) => tracing::warn!(%error, "could not copy meeting transcript"),
-            }
-        })
-        .build_push(p.k)
-        .key("copy-transcript");
-    let mut actions = vec![copy];
-    if manifest.export_path.is_some() {
-        actions.push(button(p, "reveal-transcript", tr("Reveal"), true, |c| {
-            if let Some(Kind::Ready(manifest)) = &c.kind
-                && let Some(path) = &manifest.export_path
-            {
-                meeting::reveal(path);
-            }
-            c.close();
-        }));
-    }
-    actions.push(dismiss_button(p));
-    (p.success(), title, subtitle, actions)
-}
-
-fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
-    let Recording {
-        title,
-        started,
-        automatic,
-        warning,
-        ..
-    } = shown;
-    let live = &capsule.live;
-    let elapsed = meeting::format_duration(started.elapsed().as_millis() as u64);
-    let subtitle = if warning.is_some() {
-        tr_fill("Microphone is silent · {}", &elapsed)
-    } else if *automatic && started.elapsed() < AUTOMATIC_LABEL {
-        tr_fill("Started automatically · {}", &elapsed)
-    } else {
-        elapsed
-    };
-    let copied_new = live.copied(LiveCopy::New);
-    let copy_new = Button::new(if live.copying {
-        tr("Transcribing…").to_owned()
-    } else if copied_new {
-        tr("Copied").to_owned()
-    } else if live.pending > 0 {
-        tr_fill("Copy new ({})", &live.pending.to_string())
-    } else {
-        tr("Copy new").to_owned()
-    })
-    .variant(ButtonVariant::Neutral)
-    // Reading through the click can find speech the ticker hasn't shown.
-    .disabled(live.copying || (live.pending == 0 && !copied_new && capsule.copy_new.is_none()))
-    .on_press_tx(|c: &mut Capsule, tx: &mut Tx| c.press_copy_new(tx))
-    .build_push(p.k)
-    .min_w(COPY_NEW_WIDTH)
-    .key("copy-new");
-    let copied_all = live.copied(LiveCopy::All);
-    let copy_all = Button::new(tr(if copied_all { "Copied" } else { "Copy all" }))
-        .variant(ButtonVariant::Neutral)
-        .disabled(live.entries.is_empty() && !copied_all)
-        .on_press_tx(|c: &mut Capsule, tx: &mut Tx| {
-            if c.live.entries.is_empty() {
-                return;
-            }
-            tx.copy(meeting::transcript_markdown(&c.live.entries));
-            c.live.copied = Some((LiveCopy::All, Instant::now()));
-        })
-        .build_push(p.k)
-        .key("copy-all");
-    let actions = vec![
-        copy_new,
-        copy_all,
-        button(p, "open", tr("Open"), false, |c| {
-            if let Some(Kind::Recording(Recording { id, .. })) = &c.kind {
-                c.send(ControllerCommand::Open(id.clone()));
-            }
-        }),
-        button(p, "stop", tr("Stop"), true, |c| {
-            c.send(ControllerCommand::Stop);
-        }),
-    ];
-    let open = capsule.hovered;
-    let pending = (!open && live.pending > 0).then(|| {
-        Badge::new(format!("+{}", live.pending))
-            .variant(BadgeVariant::Accent)
-            .build(p.k)
-            .key("pending")
-    });
-    let pill = pill_body(p, pulsing_dot(p.danger()), title, &subtitle, PILL_RADIUS)
-        .pr(if pending.is_some() { 12.0 } else { 8.0 })
-        .children(pending)
-        .children(open.then(|| row().key("actions").gap(8.0).children(actions)))
-        .clip_rounded(PILL_RADIUS)
-        .cursor(Cursor::Grab)
-        .motion(if open {
-            RECORDING_OPEN
-        } else {
-            RECORDING_CLOSE
-        })
-        .on_hover_change(|c: &mut Capsule, inside, _| {
-            c.hovered = inside;
-            // Windows sizes the window to the drawn pill: grow it for the
-            // open pill and shrink it back when the pointer leaves.
-            #[cfg(target_os = "windows")]
-            if let Some(resize) = &c.resize {
-                resize(recording_window_size(inside).0);
-            }
-        })
-        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
-        // Only the drawn pill takes the pointer; the rest of the window,
-        // as wide as the open pill, lets clicks through. On Windows the
-        // window is only as wide as the pill it draws instead.
-        .hit();
-    let pill = if open {
-        pill.w_full()
-    } else {
-        pill.w(RECORDING_COMPACT_WIDTH - 8.0)
-    };
-    let capsule_row = row().key("capsule").w_full().h_full().px(4.0).py(4.0);
-    if capsule.corner.is_right() {
-        capsule_row.justify_end()
-    } else {
-        capsule_row.justify_start()
-    }
-    .child(pill)
-}
-
-/// The panel capsule (reminder, offer, call ended, ready): status dot, two
+/// The panel capsule (reminder, offer, call ended): status dot, two
 /// truncated lines, and its actions, in a rounded rectangle. A `movable`
 /// one drags to another corner like the recording capsule.
 fn pill(
@@ -1337,7 +1389,7 @@ fn pill(
     movable: bool,
 ) -> El {
     // Only the body takes the pointer, not the window's margin around it.
-    let body = pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
+    let body = pill_body(p, status_dot(dot), title, subtitle)
         .w_full()
         .child(row().key("actions").gap(8.0).children(actions))
         .hit();
@@ -1362,9 +1414,9 @@ fn panel_radius(p: Paint) -> f32 {
     p.k.radius.md + ACTIONS_INSET
 }
 
-/// The capsule body with its dot and two truncated lines: a rounded
-/// rectangle for the panel capsules, a full pill for the recording capsule.
-fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str, radius: f32) -> El {
+/// The panel capsule's body: its dot and two truncated lines in a rounded
+/// rectangle.
+fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str) -> El {
     let c = &p.k.c;
     // A status named by its title, announced when the capsule's title
     // changes; the subtitle stays readable inside it.
@@ -1377,7 +1429,7 @@ fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str, radius: f32) -> El 
         .pl(16.0)
         .pr(ACTIONS_INSET)
         .center_y()
-        .radius(radius)
+        .radius(panel_radius(p))
         .fill(c.bg_base)
         .border(p.hair, c.border_base)
         .child(dot)
@@ -1411,6 +1463,7 @@ mod tests {
     use rune::text::TextSystem;
     use rune::{Env, Runtime};
 
+    use super::panel::shell_word;
     use super::*;
     use crate::meeting::detection::MeetingSource;
 
@@ -1418,7 +1471,7 @@ mod tests {
 
     const PANEL: (f32, f32) = (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
     const MENU: (f32, f32) = (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT);
-    const RECORDING: (f32, f32) = (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT);
+    const RECORDING: (f32, f32) = RECORDING_WINDOW;
     const REMINDER: (f32, f32) = (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
     const CALL_ENDED: (f32, f32) = (CALL_ENDED_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
 
@@ -1483,14 +1536,15 @@ mod tests {
         let capsule = Capsule {
             kind: Some(kind),
             more_open,
-            copied: false,
             live: Live::default(),
+            bars: Bars::default(),
             commands,
             hide: None,
             keep_recording: None,
             resize: None,
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             hovered: false,
+            expired: false,
             corner: MeetingIndicatorCorner::TopRight,
             movable: false,
             shift: None,
@@ -1575,12 +1629,11 @@ mod tests {
                 warning: None,
             })
         };
-        let (rt, _, _) = runtime(recording(Instant::now()), false, true, RECORDING);
-        assert!(
-            texts(&rt)
-                .iter()
-                .any(|text| text.starts_with("Started automatically · "))
-        );
+        let (mut rt, _, _) = runtime(recording(Instant::now()), false, true, RECORDING);
+        assert!(texts(&rt).contains(&"Started automatically".to_string()));
+        // Open, it says so under the header.
+        open_recording(&mut rt);
+        assert!(rt.find("notice-line").is_some());
         let earlier = Instant::now() - AUTOMATIC_LABEL - Duration::from_secs(1);
         let (rt, _, _) = runtime(recording(earlier), false, true, RECORDING);
         assert!(!texts(&rt).iter().any(|text| text.contains("automatically")));
@@ -1595,9 +1648,7 @@ mod tests {
         *warning = Some(crate::meeting::TrackWarning::DigitalSilence);
         let (rt, _, _) = runtime(kind, false, true, RECORDING);
         assert!(
-            texts(&rt)
-                .iter()
-                .any(|text| text.starts_with("Microphone is silent · ")),
+            texts(&rt).contains(&"Microphone is silent".to_string()),
             "{:?}",
             texts(&rt)
         );
@@ -1721,16 +1772,17 @@ mod tests {
         open_recording(&mut rt);
         // Nothing transcribed yet: both copies are unavailable.
         assert!(texts(&rt).contains(&"Copy new".to_string()));
+        assert!(texts(&rt).contains(&"No speech yet".to_string()));
         tap(&mut rt, "copy-new");
         tap(&mut rt, "copy-all");
         assert!(rt.copy_request.is_none());
 
         rt.update(|capsule, _| {
             capsule.live.entries = call();
-            capsule.live.pending = meeting::pending_delta_turns(id, &call());
+            capsule.live.pending = meeting::pending_delta(id, &call());
         });
         rt.frame(1.0 / 60.0);
-        assert!(texts(&rt).contains(&"Copy new (3)".to_string()));
+        assert!(texts(&rt).contains(&"8 sec new".to_string()));
         tap(&mut rt, "copy-new");
         assert_eq!(
             rt.copy_request.take().as_deref(),
@@ -1740,7 +1792,10 @@ mod tests {
         );
         assert!(texts(&rt).contains(&"Copied".to_string()));
         // What was copied is not new again, here or for Option-Control-V.
-        assert_eq!(meeting::pending_delta_turns(id, &call()), 0);
+        assert_eq!(meeting::pending_delta(id, &call()).turns, 0);
+        rt.update(|capsule, _| capsule.live.copied = None);
+        rt.frame(1.0 / 60.0);
+        assert!(texts(&rt).contains(&"Up to date".to_string()));
 
         tap(&mut rt, "copy-all");
         let all = rt.copy_request.take().unwrap();
@@ -1782,7 +1837,7 @@ mod tests {
             )
         );
         assert!(texts(&rt).contains(&"Copied".to_string()));
-        assert_eq!(meeting::pending_delta_turns(id, &call()), 0);
+        assert_eq!(meeting::pending_delta(id, &call()).turns, 0);
 
         // A copy still running when the next recording shows: its late reply
         // neither copies nor ends the new recording's copy.
@@ -1817,21 +1872,29 @@ mod tests {
     #[test]
     fn the_recording_capsule_rests_compact_and_opens_under_the_pointer() {
         let (mut rt, _, _) = runtime(live_recording("capsule-hover"), false, true, RECORDING);
-        rt.update(|capsule, _| capsule.live.pending = 2);
+        rt.update(|capsule, _| {
+            capsule.live.entries = call();
+            capsule.live.pending = meeting::PendingDelta {
+                turns: 2,
+                span_ms: 4 * 60_000 + 59_000,
+            };
+        });
         rt.settle_all();
         rt.frame(0.0);
+        // At rest, only the bars and the time.
         assert!(rt.find("copy-new").is_none());
-        assert!(texts(&rt).contains(&"+2".to_string()));
+        assert!(rt.find("stop").is_none());
+        assert_eq!(texts(&rt), ["04:18"]);
         let (x, _) = rt.find("pill").unwrap();
         assert!(
-            x > RECORDING_PANEL_WIDTH / 2.0,
+            x > RECORDING.0 / 2.0,
             "a right corner's pill rests on the right"
         );
 
         open_recording(&mut rt);
         assert!(rt.state.hovered);
         assert!(rt.find("copy-new").is_some());
-        assert!(!texts(&rt).contains(&"+2".to_string()));
+        assert!(texts(&rt).contains(&"4 min new".to_string()));
         // Moving onto a button inside the pill keeps it open.
         let (x, y) = rt.find("stop").unwrap();
         rt.pointer_move(x, y);
@@ -1912,9 +1975,9 @@ mod tests {
         let screen = (1512.0, 982.0);
         let nearest = |from, dx, dy| nearest_corner(from, dx, dy, screen, RECORDING);
         assert_eq!(nearest(TopRight, -100.0, 40.0), TopRight);
-        assert_eq!(nearest(TopRight, -600.0, 0.0), TopLeft);
+        assert_eq!(nearest(TopRight, -700.0, 0.0), TopLeft);
         assert_eq!(nearest(TopRight, 0.0, 700.0), BottomRight);
-        assert_eq!(nearest(BottomLeft, 500.0, -600.0), TopRight);
+        assert_eq!(nearest(BottomLeft, 700.0, -600.0), TopRight);
         assert_eq!(nearest(BottomLeft, 10.0, -10.0), BottomLeft);
         let (edge, margin, align, inset) = corner_placement(BottomLeft, 10.0, -10.0);
         assert!(matches!((edge, align), (ScreenEdge::Bottom, Align::Start)));
@@ -1929,15 +1992,15 @@ mod tests {
         use MeetingIndicatorCorner::*;
         let screen = (1512.0, 982.0);
         // The panel's centre sits 222 pt in from the right edge, the
-        // recording capsule's 332 pt: the same drag crosses the middle
+        // recording capsule's 142 pt: the same drag crosses the middle
         // only for the wider window.
         assert_eq!(
-            nearest_corner(TopRight, -500.0, 0.0, screen, PANEL),
-            TopRight
+            nearest_corner(TopRight, -560.0, 0.0, screen, PANEL),
+            TopLeft
         );
         assert_eq!(
-            nearest_corner(TopRight, -500.0, 0.0, screen, RECORDING),
-            TopLeft
+            nearest_corner(TopRight, -560.0, 0.0, screen, RECORDING),
+            TopRight
         );
         assert_eq!(
             nearest_corner(TopRight, -600.0, 0.0, screen, PANEL),
@@ -1991,7 +2054,7 @@ mod tests {
     fn only_a_movable_panel_drags() {
         type Moves = Arc<Mutex<Vec<(MeetingIndicatorCorner, f32, f32)>>>;
         for movable in [false, true] {
-            let (mut rt, _, _) = runtime(ready_transcript(), false, true, PANEL);
+            let (mut rt, _, _) = runtime(ready_transcript(), false, true, ready_size());
             let moves: Moves = Moves::default();
             let record = moves.clone();
             rt.update(move |capsule, _| {
@@ -2001,7 +2064,7 @@ mod tests {
                 }));
             });
             rt.frame(0.0);
-            let (x, y) = rt.find("lines").unwrap();
+            let (x, y) = rt.find("header").unwrap();
             rt.pointer_move(x, y);
             rt.pointer_down(x, y);
             rt.pointer_move(x - 20.0, y + 30.0);
@@ -2034,6 +2097,29 @@ mod tests {
     }
 
     fn ready_transcript() -> Kind {
+        ready_with(serde_json::Value::Null)
+    }
+
+    /// "Lantern design sync", with Apple Intelligence's summary.
+    fn ready_summarized() -> Kind {
+        ready_with(serde_json::json!({
+            "title": "Lantern design sync",
+            "summary": "March 26 depends on passing the soak test by March 5. Friday's playtest decides the festival demo.",
+        }))
+    }
+
+    fn ready_size_of(kind: &Kind) -> (f32, f32) {
+        let Kind::Ready(manifest) = kind else {
+            panic!("a ready meeting");
+        };
+        ready_window_size(manifest)
+    }
+
+    fn ready_size() -> (f32, f32) {
+        ready_size_of(&ready_transcript())
+    }
+
+    fn ready_with(notes: serde_json::Value) -> Kind {
         Kind::Ready(Box::new(
             serde_json::from_value(serde_json::json!({
                 "schema_version": 1,
@@ -2042,7 +2128,9 @@ mod tests {
                 "status": "complete",
                 "created_at_ms": 1_760_000_000_000_u64,
                 "ended_at_ms": null,
-                "duration_ms": 1_000,
+                "duration_ms": 536_000,
+                "notes": notes,
+                "title_source": if notes.is_null() { "user" } else { "default" },
                 "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
                 "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
                 "error": null,
@@ -2059,13 +2147,124 @@ mod tests {
     }
 
     #[test]
-    fn dismissing_a_ready_transcript_only_closes_it() {
-        let (mut rt, commands, _) = runtime(ready_transcript(), false, true, PANEL);
-        assert!(rt.find("copy-transcript").is_some());
-        assert!(rt.find("reveal-transcript").is_some());
-        tap(&mut rt, "dismiss");
+    fn the_ready_panel_copies_the_finished_meeting() {
+        let _cursor = PASTE_CURSOR
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let kind = ready_summarized();
+        let size = ready_size_of(&kind);
+        let (mut rt, commands, _) = runtime(kind, false, true, size);
+        let shown = texts(&rt);
+        for expected in [
+            "Lantern design sync",
+            "08:56",
+            "Copy all",
+            "Copy agent prompt",
+        ] {
+            assert!(shown.contains(&expected.to_string()), "{shown:?}");
+        }
+        assert!(shown.iter().any(|text| text.starts_with("March 26")));
+        // The transcript reads after the panel shows; until then Copy new
+        // has nothing to say.
+        tap(&mut rt, "copy-new");
+        assert!(rt.copy_request.is_none());
+
+        rt.update(|capsule, _| {
+            capsule.live.entries = call();
+            capsule.live.pending = meeting::pending_delta("ready-snap", &call());
+        });
+        rt.frame(1.0 / 60.0);
+        assert!(texts(&rt).contains(&"8 sec new".to_string()));
+        tap(&mut rt, "copy-new");
+        assert!(rt.copy_request.take().unwrap().starts_with("Them: Kickoff"));
+        assert_eq!(meeting::pending_delta("ready-snap", &call()).turns, 0);
+
+        tap(&mut rt, "copy-prompt");
+        let prompt = rt.copy_request.take().unwrap();
+        assert!(
+            prompt.contains("meetings show ready-snap --md"),
+            "{}",
+            &*prompt
+        );
         assert!(commands.try_recv().is_err());
+        assert!(rt.state.kind.is_some());
+    }
+
+    #[test]
+    fn a_ready_panel_whose_time_ran_out_closes_when_the_pointer_leaves() {
+        let (mut rt, _, _) = runtime(ready_transcript(), false, true, ready_size());
+        rt.update(|capsule, _| {
+            capsule.set_hovered(true);
+            capsule.expired = true;
+        });
+        assert!(rt.state.kind.is_some());
+        rt.update(|capsule, _| capsule.set_hovered(false));
         assert!(rt.state.kind.is_none());
+    }
+
+    #[test]
+    fn the_agent_prompt_names_real_commands() {
+        assert_eq!(
+            agent_prompt("hex", "2026-11-10-1430", "Q4 launch sync", Some(258_000)),
+            "Use my Hex meeting \"Q4 launch sync\" as context. It is still recording.\n\n\
+             Read the transcript so far:\n  hex meetings show 2026-11-10-1430 --md\n\n\
+             Catch up on what was said since this prompt (the first turn may repeat):\n  \
+             hex meetings show 2026-11-10-1430 --from 04:18 --md\n\n\
+             Find a topic, then read around the time it came up:\n  \
+             hex meetings search \"<words>\"\n  \
+             hex meetings show 2026-11-10-1430 --from <mm:ss> --to <mm:ss> --md\n"
+        );
+        let finished = agent_prompt("hex", "m", "Design sync", None);
+        assert!(finished.starts_with("Use my Hex meeting \"Design sync\" as context.\n\n"));
+        assert!(finished.contains("  hex meetings show m --md\n"));
+        assert!(!finished.contains("--from 0"));
+    }
+
+    #[test]
+    fn hex_commands_quote_paths_with_spaces() {
+        assert_eq!(
+            shell_word("/Applications/Hex.app/Contents/MacOS/hex"),
+            "/Applications/Hex.app/Contents/MacOS/hex"
+        );
+        assert_eq!(
+            shell_word("/Users/alex/Hex Builds/hex"),
+            "'/Users/alex/Hex Builds/hex'"
+        );
+        assert_eq!(shell_word("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn copy_new_says_how_much_is_new() {
+        let (mut rt, _, _) = runtime(live_recording("hint"), false, true, RECORDING);
+        open_recording(&mut rt);
+        for (span_ms, expected) in [
+            (400, "1 sec new"),
+            (1_000, "1 sec new"),
+            (59_999, "59 sec new"),
+            (60_000, "1 min new"),
+            (61 * 60_000, "61 min new"),
+        ] {
+            rt.update(move |capsule, _| {
+                capsule.live.entries = call();
+                capsule.live.pending = meeting::PendingDelta { turns: 1, span_ms };
+            });
+            rt.frame(1.0 / 60.0);
+            assert!(
+                texts(&rt).contains(&expected.to_string()),
+                "{span_ms}: {:?}",
+                texts(&rt)
+            );
+        }
+    }
+
+    #[test]
+    fn a_bottom_corner_opens_upward() {
+        let (mut rt, _, _) = runtime(live_recording("bottom"), false, true, RECORDING);
+        rt.update(|capsule, _| capsule.corner = MeetingIndicatorCorner::BottomRight);
+        open_recording(&mut rt);
+        let (_, header) = rt.find("header").unwrap();
+        let (_, copy_new) = rt.find("copy-new").unwrap();
+        assert!(header > copy_new, "the header sits nearest the screen edge");
     }
 
     #[test]
@@ -2258,48 +2457,86 @@ mod tests {
                 RECORDING,
             ),
             ("auto-started", auto_started(), false, PANEL),
-            ("ready", ready_transcript(), false, PANEL),
+            ("ready", ready_transcript(), false, ready_size()),
+            (
+                "ready-summary",
+                ready_summarized(),
+                false,
+                ready_size_of(&ready_summarized()),
+            ),
         ];
         type Setup = fn(&mut Capsule);
         let nothing: Setup = |_| {};
         let states = states
             .into_iter()
             .map(|(name, kind, more_open, size)| (name, kind, more_open, size, nothing))
-            .chain([
+            .chain::<[(&str, Kind, bool, (f32, f32), Setup); 9]>([
+                (
+                    "recording-rest",
+                    live_recording("snap"),
+                    false,
+                    RECORDING,
+                    |capsule: &mut Capsule| capsule.bars.show([0.9, 0.6, 0.3]),
+                ),
+                (
+                    "recording-silent",
+                    live_recording("snap"),
+                    false,
+                    RECORDING,
+                    |capsule: &mut Capsule| {
+                        if let Some(Kind::Recording(shown)) = &mut capsule.kind {
+                            shown.warning = Some(crate::meeting::TrackWarning::DigitalSilence);
+                        }
+                    },
+                ),
+                (
+                    "recording-hover",
+                    live_recording("snap"),
+                    false,
+                    RECORDING,
+                    |capsule: &mut Capsule| {
+                        capsule.live.entries = call();
+                        capsule.live.pending = meeting::PendingDelta {
+                            turns: 3,
+                            span_ms: 4 * 60_000 + 12_000,
+                        };
+                        capsule.bars.show([0.9, 0.6, 0.3]);
+                        capsule.hovered = true;
+                    },
+                ),
+                (
+                    "recording-hover-bottom-left",
+                    live_recording("snap"),
+                    false,
+                    RECORDING,
+                    |capsule: &mut Capsule| {
+                        capsule.live.entries = call();
+                        capsule.live.pending = meeting::PendingDelta {
+                            turns: 3,
+                            span_ms: 4 * 60_000 + 12_000,
+                        };
+                        capsule.corner = MeetingIndicatorCorner::BottomLeft;
+                        capsule.hovered = true;
+                    },
+                ),
+                (
+                    "recording-hover-silent",
+                    live_recording("snap"),
+                    false,
+                    RECORDING,
+                    |capsule: &mut Capsule| {
+                        if let Some(Kind::Recording(shown)) = &mut capsule.kind {
+                            shown.warning = Some(crate::meeting::TrackWarning::DigitalSilence);
+                        }
+                        capsule.hovered = true;
+                    },
+                ),
                 (
                     "recording-empty",
                     live_recording("snap"),
                     false,
                     RECORDING,
-                    nothing,
-                ),
-                (
-                    "recording-live",
-                    live_recording("snap"),
-                    false,
-                    RECORDING,
-                    |capsule: &mut Capsule| {
-                        capsule.live.entries = call();
-                        capsule.live.pending = 3;
-                    },
-                ),
-                (
-                    "recording-open",
-                    live_recording("snap"),
-                    false,
-                    RECORDING,
-                    |capsule: &mut Capsule| {
-                        capsule.live.entries = call();
-                        capsule.live.pending = 3;
-                        capsule.hovered = true;
-                    },
-                ),
-                (
-                    "recording-left",
-                    live_recording("snap"),
-                    false,
-                    RECORDING,
-                    |capsule: &mut Capsule| capsule.corner = MeetingIndicatorCorner::BottomLeft,
+                    |capsule: &mut Capsule| capsule.hovered = true,
                 ),
                 (
                     "recording-transcribing",
@@ -2308,7 +2545,10 @@ mod tests {
                     RECORDING,
                     |capsule: &mut Capsule| {
                         capsule.live.entries = call();
-                        capsule.live.pending = 3;
+                        capsule.live.pending = meeting::PendingDelta {
+                            turns: 3,
+                            span_ms: 8_000,
+                        };
                         capsule.live.copying = true;
                         capsule.hovered = true;
                     },
@@ -2322,6 +2562,19 @@ mod tests {
                         capsule.live.entries = call();
                         capsule.live.copied = Some((LiveCopy::New, Instant::now()));
                         capsule.hovered = true;
+                    },
+                ),
+                (
+                    "ready-finished",
+                    ready_summarized(),
+                    false,
+                    ready_size_of(&ready_summarized()),
+                    |capsule: &mut Capsule| {
+                        capsule.live.entries = call();
+                        capsule.live.pending = meeting::PendingDelta {
+                            turns: 3,
+                            span_ms: 3 * 60_000 + 5_000,
+                        };
                     },
                 ),
             ]);
@@ -2375,7 +2628,7 @@ mod tests {
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
         let states = [
             ("call-ended", call_ended(), CALL_ENDED),
-            ("ready", ready_transcript(), PANEL),
+            ("ready", ready_transcript(), ready_size()),
             ("auto-started", auto_started(), PANEL),
         ];
         let mut misses = Vec::new();

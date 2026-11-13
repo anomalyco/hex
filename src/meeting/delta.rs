@@ -44,10 +44,20 @@ impl MeetingPasteCursor {
         unseen
     }
 
-    /// Number of coalesced speaker turns available since the last committed
-    /// copy or paste for `id`.
-    pub fn pending_turn_count(&self, id: &str, entries: &[TranscriptEntry]) -> usize {
-        coalesce_transcript(self.unseen(id, entries)).len()
+    /// What a copy of new turns for `id` would hand out now.
+    pub fn pending(&self, id: &str, entries: &[TranscriptEntry]) -> PendingDelta {
+        let unseen = self.unseen(id, entries);
+        let span_ms = match (
+            unseen.first(),
+            unseen.iter().map(|entry| entry.end_ms).max(),
+        ) {
+            (Some(first), Some(end)) => end.saturating_sub(first.start_ms).max(1_000),
+            _ => 0,
+        };
+        PendingDelta {
+            turns: coalesce_transcript(unseen).len(),
+            span_ms,
+        }
     }
 
     /// Formats unseen entries for `id`, runs `commit_output`, and advances the
@@ -159,12 +169,22 @@ pub fn try_consume_delta_from(
     cursor.consume_entries(id, entries, commit_output)
 }
 
-/// Speaker turns in `entries` that the shared cursor has not handed out.
-pub fn pending_delta_turns(id: &str, entries: &[TranscriptEntry]) -> usize {
+/// The part of a meeting's transcript a cursor has not handed out yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PendingDelta {
+    /// Coalesced speaker turns.
+    pub turns: usize,
+    /// Capture time from the first new entry's start to the last one's end,
+    /// at least a second when there is any; zero when there is none.
+    pub span_ms: u64,
+}
+
+/// What in `entries` the shared cursor has not handed out.
+pub fn pending_delta(id: &str, entries: &[TranscriptEntry]) -> PendingDelta {
     shared_paste_cursor()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .pending_turn_count(id, entries)
+        .pending(id, entries)
 }
 
 /// Consumes new completed turns for the active or most recent meeting using

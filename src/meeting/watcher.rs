@@ -30,7 +30,6 @@ pub(crate) enum ControllerCommand {
     Stop,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
-    Open(String),
     Summarize(String),
     /// Record a calendar meeting from its reminder, first opening its call
     /// link when `join`.
@@ -79,7 +78,6 @@ pub(crate) enum ControllerEvent {
     SourceWarning {
         warning: Option<TrackWarning>,
     },
-    OpenMeeting(String),
     Transcribing,
     /// `auto_stop` when the recording stops on its own after
     /// [`crate::meeting::detection::AUTO_STOP_GRACE`] (Labs › Stop when the
@@ -456,9 +454,6 @@ fn handle_command(
             {
                 tracing::info!("kept recording after the call ended");
             }
-        }
-        ControllerCommand::Open(id) => {
-            let _ = events.send(ControllerEvent::OpenMeeting(id));
         }
         ControllerCommand::Summarize(id) => start_notes(id, events),
         ControllerCommand::OfferTimedOut => detector.offer_timed_out(),
