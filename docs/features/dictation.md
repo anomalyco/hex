@@ -1714,10 +1714,13 @@ reporter's MacBook Pro, and not Linux runtime proof.
 Finish
   ├── Near-silent capture -> Discard, no inference    // dictate.silence-gate
   │       // loudest 30 ms window (DC removed) below -50 dBFS with no
-  │       // sustained energy: fewer than 160 ms of windows at the clip's
-  │       // own 10th-percentile noise floor + 12 dB (never below -66 dBFS);
-  │       // no paste, History, or last-result update; process.log records
-  │       // the level, noise floor, and relative threshold
+  │       // contiguous 180 ms run: at least six 30 ms windows at the clip's
+  │       // own 10th-percentile noise floor + 12 dB (never below -66 dBFS),
+  │       // bridging one quiet window; exact-zero windows don't set the
+  │       // floor; a relative-path clip also needs the speech detector to
+  │       // confirm speech, otherwise it is discarded; no paste, History, or
+  │       // last-result update; process.log records the level, noise floor,
+  │       // relative threshold, and run length
   ├── Louder capture, no detected speech -> Discard, no inference
   │       // the Silero speech detector, once installed, finds no speech of
   │       // at least 160 ms before the release; process.log records
@@ -1753,23 +1756,26 @@ checks, and only output that repeats the vocabulary prompt (Whisper, Qwen3-ASR)
 or ends with a known subtitle credit is dropped there. Their transcription runs
 through the same whole-clip chunked path, so a Whisper clip loses its silent
 edges and a long clip skips a window the detector hears no speech in.
-The fixed threshold is conservative, so speech that reaches it is not dropped; a
-noisy room, the start tone, or a key click can also lift a capture above it.
-A clip below it is kept only when at least 160 ms of its 30 ms windows sit at
-least 12 dB above its own 10th-percentile noise floor (a threshold never below
--66 dBFS), so a quiet built-in microphone's speech (13-25 dB above its room)
-still reaches the detector while a constant floor, a single click, digital
-silence, or a DC offset is discarded. Captures that pass the gate then go to the
-Silero speech detector ([transcription/speech_detector.rs](../../src/transcription/speech_detector.rs)),
-which discards them when it finds no speech. The detector (1.2 MB, pinned
-revision and checksum in [transcription/models.rs](../../src/transcription/models.rs))
+The fixed threshold is conservative, so speech that reaches it is not dropped
+and needs no detector to be transcribed; a noisy room, the start tone, or a key
+click can also lift a capture above it. A clip below it is kept only when at
+least 180 ms of its 30 ms windows form one contiguous run at least 12 dB above
+its own 10th-percentile noise floor (a threshold never below -66 dBFS), where a
+single quiet window inside the run is bridged and exact-zero windows don't set
+the floor. That keeps a quiet built-in microphone's speech (13-25 dB above its
+room) while discarding a constant floor, scattered clicks, digital silence, or
+a DC offset. Such a relative-path clip also needs the Silero speech detector
+([transcription/speech_detector.rs](../../src/transcription/speech_detector.rs))
+to confirm speech, and is discarded when it finds none. The detector (1.2 MB,
+pinned revision and checksum in [transcription/models.rs](../../src/transcription/models.rs))
 downloads in the background whenever a transcription model is downloaded or
 activated, and at the first dictation, so an installed model still activates at
 once offline; a failed download is retried at the next dictation. Model
 preparation (macOS, Windows) and the Linux listener load it when present and
 never download it. It runs on the CPU with a speech threshold of 0.4 instead of
 Silero's 0.5, which misses a whisper at -43 dBFS. While it is missing or fails to
-load, captures that pass the level gate still reach the model, as before.
+load, a quiet relative-path clip is discarded as before, so only captures at or
+above the fixed threshold reach the model without one.
 Output that only repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped as well
 ([models](README.md#get-ready)), and so is a known subtitle credit at the very
 end of the text, Turkish included (#1141, #1770). A Whisper clip also loses the
@@ -1777,9 +1783,10 @@ audio outside its detected speech plus 500 ms before a whole-clip transcription
 run, and a chunk of a longer one the detector hears no speech in is skipped (see
 [ongoing jobs and output](#ongoing-jobs-and-output)). Other hallucinations
 after real speech are not addressed; a credit followed by more speech is kept.
-`silence_gate_discards_only_near_silent_captures`,
-`relative_level_gate_keeps_quiet_speech_above_the_noise_floor`,
-`relative_level_gate_discards_clicks_and_constant_floors`, and
+`silence_gate_discards_only_near_silent_captures`, the
+`relative_level_gate_*` tests (quiet speech needs the detector's confirmation;
+scattered clicks, a zero lead, the -66 dBFS clamp, the six-window boundary, and
+one bridged quiet window), and
 `speech_detector_discards_loud_captures_without_speech` in
 [dictation.rs](../../src/dictation.rs) check the policy on synthetic samples
 with the detector's verdict fixed; `real_detector_rejects_silence_and_noise`,
