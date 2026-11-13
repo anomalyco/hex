@@ -991,7 +991,23 @@ fn poll_recording(
             }
         }
     }
+
+    // Labs › Stop when the call ends turned off while a page change was
+    // counting: the watch is gone, so its deadline goes with it instead of
+    // stopping the recording the moment the lab comes back on.
+    disarm_call_stop_unless_watching(recording, crate::labs::stop_when_call_ends());
     Ok(())
+}
+
+/// Drops an armed call-switch stop whenever nothing watches the page: a
+/// deadline counted under a lab that is now off must not carry over.
+fn disarm_call_stop_unless_watching(recording: &mut Option<ActiveRecording>, lab_on: bool) {
+    if let Some(active) = recording.as_mut()
+        && !watching_call_switch(Some(active), lab_on)
+        && active.call_stop.disarm()
+    {
+        tracing::info!("the page is no longer watched; its pending stop is dropped");
+    }
 }
 
 /// Whether a recording watches its browser's page for another call (Labs ›
@@ -1539,6 +1555,25 @@ mod tests {
         let stopped = active_recording(arc, true, Some("abc-defg-hij"));
         stopped.stop.store(true, Ordering::Relaxed);
         assert!(!watching_call_switch(Some(&stopped), true));
+    }
+
+    #[test]
+    fn turning_the_lab_off_drops_an_armed_call_switch_stop() {
+        let arc = Some("company.thebrowser.Browser");
+        let mut active = active_recording(arc, true, Some("abc-defg-hij"));
+        active.call_stop.arm();
+        let mut recording = Some(active);
+        disarm_call_stop_unless_watching(&mut recording, false);
+        let active = recording.as_mut().unwrap();
+        assert!(!active.call_stop.disarm(), "the armed stop was kept");
+        assert!(!active.stop.load(Ordering::Relaxed));
+
+        // While the lab is on and the page watched, the deadline stays.
+        let mut active = active_recording(arc, true, Some("abc-defg-hij"));
+        active.call_stop.arm();
+        let mut recording = Some(active);
+        disarm_call_stop_unless_watching(&mut recording, true);
+        assert!(recording.as_mut().unwrap().call_stop.disarm());
     }
 
     #[test]

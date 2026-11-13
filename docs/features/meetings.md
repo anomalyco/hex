@@ -440,8 +440,9 @@ the microphone; a query in flight at that moment is not repeated beside itself,
 and its answer is discarded. One recording is the exception: an automatic
 browser call whose page named a code, with Labs › Stop when the call ends on,
 keeps its browser's page being read every 2 s for as long as it records, so
-the page naming another call can end it (see Record). When a browser's page is
-found for a run already
+the page naming another call can end it (see Record). That read is the newest
+answer alone, never the remembered page, so one glimpse of another call cannot
+be replayed. When a browser's page is found for a run already
 under way (the first pass had no answer yet), the run keeps counting, now
 toward the known service's 2 s. When no answer names a page, the last page a browser showed while
 it held the microphone names the call for 60 s (`BrowserPageMemory`), so the

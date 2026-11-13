@@ -415,8 +415,9 @@ struct ChangedCall {
 /// [`CALL_CHANGED_AFTER`], so one recording does not span two calls. It never
 /// stops anything; the watcher owns the grace.
 ///
-/// The page read is the browser's front tab alone, so a tab that names no
-/// call (`None`) never ends a recording: only a page that positively names a
+/// The page read is the browser's active tab (with Automation), else the
+/// first call page found in any of its windows, so a tab that names no call
+/// (`None`) never ends a recording: only a page that positively names a
 /// different call does. `None` neither starts nor clears a run; the recorded
 /// code showing again does.
 #[derive(Default)]
@@ -450,8 +451,9 @@ impl CallSwitch {
         self.changed.is_some()
     }
 
-    /// The page names `current` (the browser's front tab's call code; `None`
-    /// when it names none): true once, when another code has shown for
+    /// The page names `current` (the browser's call code: its active tab with
+    /// Automation, else the first call page found in any of its windows;
+    /// `None` when none names one): true once, when another code has shown for
     /// [`CALL_CHANGED_AFTER`].
     pub fn observe(&mut self, current: Option<&str>) -> bool {
         self.observe_at(current, Instant::now())
