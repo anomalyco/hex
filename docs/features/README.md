@@ -246,7 +246,16 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   each card floats off once allowed
 │   │   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
 │   │   ├── Microphone -> macOS prompt; refused -> "Open System Settings" + guide
+│   │   │   ├── Nothing reads CoreAudio inputs before then (General's input list
+│   │   │   │   waits), so macOS never prompts before the page asks
+│   │   │   └── A grant macOS took another way (CoreAudio's prompt, the switch in
+│   │   │       System Settings) reads from TCC, since AVFoundation keeps its first
+│   │   │       answer. Check: `a_microphone_answer_avfoundation_has_not_seen_reads_from_tcc`
 │   │   ├── Accessibility -> Privacy pane + drag guide
+│   │   │   ├── Granted while System Settings is still in front (within 3 s) ->
+│   │   │   │   Hex comes back in front; another app in front keeps it (also
+│   │   │   │   System Audio and Screen Recording). Check:
+│   │   │   │   `hex_returns_after_a_grant_only_while_system_settings_is_in_front`
 │   │   │   ├── Retired Hex bundle IDs (`com.kitlangton.hex2`, `com.kitlangton.Hex`,
 │   │   │   │   `com.kitlangton.Hex.debug`) cleared once in the background (`tccutil reset`,
 │   │   │   │   ignoring `OSStatus -10814` when no bundle is on disk)

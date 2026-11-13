@@ -17,6 +17,7 @@ use crate::desktop::host::{
     DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopUpdateStatus,
 };
 use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::onboarding::PermissionState;
 use crate::dictation::ShortcutMode;
 use crate::transcription::models::{self as transcription_models, ModelPreparationStage};
 
@@ -545,6 +546,11 @@ pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
 /// listing in flight is listed again after it.
 pub(super) fn refresh_microphones(ui: &mut Ui) {
     if matches!(ui.service, Service::Fixture(_)) || ui.microphones_listing.is_some() {
+        return;
+    }
+    // Listing inputs reads CoreAudio, which shows macOS's microphone prompt
+    // before the tour has asked for it. List them once Hex has asked.
+    if ui.platform.permissions.microphone == PermissionState::NeedsRequest {
         return;
     }
     ui.microphones_route = Some(crate::audio::input_route_generation());

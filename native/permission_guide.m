@@ -357,9 +357,9 @@ static NSRect appKitFrame(CGRect frame) {
     );
 }
 
-/// System Audio Recording has no public query; TCC's preflight answers it
-/// (0 is granted). Without it, the guide waits for System Settings to close.
-static BOOL systemAudioGranted(void) {
+/// TCC's own answer for `service`, read fresh each time: 0 granted, 1
+/// refused, 2 not asked yet, or -1 when the preflight is unavailable.
+static int tccPreflight(CFStringRef service) {
     static int (*preflight)(CFStringRef, CFDictionaryRef);
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -369,7 +369,20 @@ static BOOL systemAudioGranted(void) {
             preflight = dlsym(handle, "TCCAccessPreflight");
         }
     });
-    return preflight != NULL && preflight(CFSTR("kTCCServiceAudioCapture"), NULL) == 0;
+    return preflight != NULL ? preflight(service, NULL) : -1;
+}
+
+/// System Audio Recording has no public query; TCC's preflight answers it.
+/// Without it, the guide waits for System Settings to close.
+static BOOL systemAudioGranted(void) {
+    return tccPreflight(CFSTR("kTCCServiceAudioCapture")) == 0;
+}
+
+/// AVFoundation keeps the microphone answer it read first until Hex itself
+/// asks, so a grant that came another way (macOS prompting when CoreAudio
+/// opened an input, or the switch in System Settings) reads from TCC.
+int hex_microphone_preflight(void) {
+    return tccPreflight(CFSTR("kTCCServiceMicrophone"));
 }
 
 static BOOL permissionGranted(void) {
@@ -380,7 +393,8 @@ static BOOL permissionGranted(void) {
             return AXIsProcessTrusted();
         case HexPermissionMicrophone:
             return [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio] ==
-                   AVAuthorizationStatusAuthorized;
+                       AVAuthorizationStatusAuthorized ||
+                   hex_microphone_preflight() == 0;
         case HexPermissionSystemAudio:
             return systemAudioGranted();
         case HexPermissionScreenRecording:

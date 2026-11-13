@@ -39,7 +39,8 @@ use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::tr;
 use crate::desktop::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
 use crate::desktop::onboarding::{
-    Input, PermissionAction, PermissionKind, PermissionState, StalePermissionTracker,
+    Input, PermissionAction, PermissionKind, PermissionState, ReturnFromSettings,
+    StalePermissionTracker,
 };
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};
@@ -603,6 +604,8 @@ struct MacHost {
     /// Tracks System Settings return timing for Accessibility, System Audio,
     /// and Screen Recording.
     stale: [StalePermissionTracker; 3],
+    /// Brings Hex back once an asked permission is granted in System Settings.
+    returning: ReturnFromSettings,
     /// In-flight `"Still grey? Fix it"` resets, indexed by [`stale_slot`].
     resetting: [bool; 3],
     reset_tx: mpsc::Sender<PermissionKind>,
@@ -629,6 +632,7 @@ impl MacHost {
             folder_choice: None,
             calendar: CalendarFeed::default(),
             stale: Default::default(),
+            returning: ReturnFromSettings::default(),
             resetting: [false; 3],
             reset_tx,
             reset_rx,
@@ -938,12 +942,10 @@ impl NativeHost for MacHost {
         });
         changed |= state.permissions_asked.len() != asked_len;
         let now = Instant::now();
-        let focus = self
-            .stale
-            .iter()
-            .any(StalePermissionTracker::is_waiting)
-            .then(crate::desktop::permission_guide::settings_focus)
-            .unwrap_or_default();
+        let focus = (self.returning.is_pending()
+            || self.stale.iter().any(StalePermissionTracker::is_waiting))
+        .then(crate::desktop::permission_guide::settings_focus)
+        .unwrap_or_default();
         let mut next_stale = Vec::new();
         for (kind, untrusted) in [
             (
@@ -968,9 +970,16 @@ impl NativeHost for MacHost {
             let Some(slot) = stale_slot(kind) else {
                 continue;
             };
+            if !untrusted && self.stale[slot].is_waiting() {
+                self.returning.note_granted(now);
+            }
             if !self.resetting[slot] && self.stale[slot].poll(now, untrusted, focus) {
                 next_stale.push(kind);
             }
+        }
+        if self.returning.poll(now, focus) {
+            tracing::info!("permission granted in System Settings; bringing Hex back");
+            crate::macos_rune::bring_window_forward();
         }
         changed |= update(&mut state.permissions_stale, next_stale);
         changed |= update(&mut state.login_item_checking, self.login_checking);
