@@ -10,7 +10,7 @@ use super::super::controls::{DESCRIPTION, Paint};
 use crate::desktop::i18n::tr;
 
 /// How wide the origins field is inside its card.
-const ORIGINS_WIDTH: f32 = 180.0;
+const ORIGINS_WIDTH: f32 = 190.0;
 
 pub(super) fn body(ui: &Ui, p: Paint) -> El {
     let field = TextInput::new(&ui.lab_store.origins)

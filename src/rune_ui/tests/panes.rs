@@ -2322,6 +2322,47 @@ fn browser_access_shows_its_origins_on_its_card_while_on() {
 }
 
 #[test]
+fn browser_access_keeps_its_typing_through_its_own_save() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
+    rt.update(|ui, _| {
+        ui.lab_store.group = Some(Feature::ApiBrowserAccess.group());
+    });
+    settle(&mut rt);
+    tap(&mut rt, "lab-api-browser-access");
+
+    // The saved list is normalized, but the field keeps exactly what was
+    // typed, so a later keystroke lands after the port rather than inside a
+    // rewritten origin.
+    rt.update(|ui, _| {
+        ui.lab_store.origins = rune::TextEdit::new("http://localhost:80".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        vec!["http://localhost".to_string()]
+    );
+    assert_eq!(rt.state.lab_store.origins.text, "http://localhost:80");
+
+    rt.update(|ui, _| {
+        ui.lab_store.origins =
+            rune::TextEdit::new("http://localhost:80, https://example.com,".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        vec![
+            "http://localhost".to_string(),
+            "https://example.com".to_string()
+        ]
+    );
+    assert_eq!(
+        rt.state.lab_store.origins.text,
+        "http://localhost:80, https://example.com,"
+    );
+}
+
+#[test]
 fn a_labs_card_shows_its_description_and_its_switch_turns_it_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));

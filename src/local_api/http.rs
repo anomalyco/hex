@@ -312,6 +312,7 @@ pub(super) fn read_request_until(
     let mut content_type = None;
     let mut content_length = None;
     let mut origin = None;
+    let mut origin_ambiguous = false;
     let mut private_network = false;
     for (index, line) in lines.enumerate() {
         if index >= MAX_HEADERS {
@@ -331,10 +332,15 @@ pub(super) fn read_request_until(
             }
             stream_token = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("origin") {
-            if origin.is_some() {
-                return Err(RequestReadError::Invalid);
+            // Two Origin headers name no one origin, so the request earns no
+            // CORS permission; it is still routed as it was before the lab
+            // existed.
+            if origin_ambiguous || origin.is_some() {
+                origin = None;
+                origin_ambiguous = true;
+            } else {
+                origin = Some(value.trim().to_owned());
             }
-            origin = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("access-control-request-private-network") {
             private_network |= value.trim().eq_ignore_ascii_case("true");
         } else if name.eq_ignore_ascii_case("content-type") {

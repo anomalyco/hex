@@ -122,14 +122,20 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        or no Origin header answers exactly as before (OPTIONS is 401, no CORS headers).
 │                                        Entries are scheme://host[:port] only: *, null, paths, queries, fragments,
 │                                        and userinfo are ignored, a single trailing / and a default port are dropped,
-│                                        and scheme and host are lowercased
+│                                        and scheme and host are lowercased. An IPv6 origin takes the browser's
+│                                        compressed form (http://[::1]:5173) and a non-ASCII host its punycode
+│                                        (xn--…), since a request's Origin is matched exactly. Errors answered before
+│                                        a request is read (400, 408, 431, and 503 when the connection queue is full)
+│                                        carry no CORS headers
 │                                        // checks: local_api::browser_access_is_off_unless_the_lab_lists_the_origin,
 │                                        // an_allowed_origin_gets_its_preflight_without_a_token,
+│                                        // a_duplicate_origin_header_never_earns_cors_but_still_routes,
 │                                        // authenticated_responses_carry_only_the_allowed_origin,
 │                                        // a_streams_events_response_carries_the_allowed_origin;
 │                                        // app_settings::browser_origins normalization tests;
 │                                        // api_browser_access_is_its_own_switch_and_keeps_normalized_origins (labs.rs);
-│                                        // browser_access_shows_its_origins_on_its_card_while_on (rune_ui); not observed
+│                                        // browser_access_shows_its_origins_on_its_card_while_on and
+│                                        // browser_access_keeps_its_typing_through_its_own_save (rune_ui); not observed
 │                                        // from a real browser page, and no live macOS or Windows request
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)

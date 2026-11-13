@@ -265,11 +265,17 @@ impl Store {
     }
 
     /// Adopts origins another writer saved, unless the field holds an unsaved
-    /// draft.
+    /// draft. The field's own save passes the same list on both sides and
+    /// leaves the text (and its caret) as typed.
     pub(super) fn rebase_origins(&mut self, before: &[String], after: &[String]) {
+        let before = crate::app_settings::normalize_browser_origins(before);
+        let after = crate::app_settings::normalize_browser_origins(after);
+        if before == after {
+            return;
+        }
         let draft = crate::app_settings::parse_browser_origins(&self.origins.text);
-        if !self.origins_synced || draft == crate::app_settings::normalize_browser_origins(before) {
-            self.sync_origins(after);
+        if !self.origins_synced || draft == before {
+            self.sync_origins(&after);
         }
     }
 

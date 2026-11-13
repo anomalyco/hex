@@ -1503,6 +1503,37 @@ mod tests {
     }
 
     #[test]
+    fn a_duplicate_origin_header_never_earns_cors_but_still_routes() {
+        // Before this lab, Origin was ignored: a request with two of them is
+        // handled exactly as it was, with no CORS permission either way.
+        for origins in [Vec::new as fn() -> Vec<String>, app_origin] {
+            let api = start_cors(origins);
+            let port = api.document.port;
+            let duplicate = |method: &str, path: &str, token: Option<&str>| {
+                let authorization = token
+                    .map(|token| format!("Authorization: Bearer {token}\r\n"))
+                    .unwrap_or_default();
+                raw_request(
+                    port,
+                    &format!(
+                        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}Origin: https://app.example\r\nOrigin: https://app.example\r\nConnection: close\r\n\r\n"
+                    ),
+                )
+            };
+
+            let preflight = duplicate("OPTIONS", "/health", None);
+            assert!(preflight.starts_with("HTTP/1.1 401"), "{preflight}");
+            assert!(!preflight.to_ascii_lowercase().contains("access-control"));
+            assert!(!preflight.contains("Vary"));
+
+            let health = duplicate("GET", "/health", Some(&api.document.token));
+            assert!(health.starts_with("HTTP/1.1 200"), "{health}");
+            assert!(!health.to_ascii_lowercase().contains("access-control"));
+            assert!(!health.contains("Vary"));
+        }
+    }
+
+    #[test]
     fn authenticated_responses_carry_only_the_allowed_origin() {
         let api = start_cors(app_origin);
         let token = api.document.token.clone();

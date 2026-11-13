@@ -2548,8 +2548,12 @@ required for every request. An origin that isn't listed, a missing `Origin`,
 and the lab off answer exactly as before (`OPTIONS` is `401`, with no CORS
 headers), and nothing allows credentials or `*`. Saved entries are normalized
 to `http://` or `https://` `scheme://host[:port]`; `*`, `null`, paths, queries,
-fragments, and userinfo are ignored. Route tests inject the gate
-(`cors::Cors::gated`); nothing was observed from a real browser page.
+fragments, and userinfo are ignored. An IPv6 origin takes the browser's
+compressed form (`http://[::1]:5173`) and a non-ASCII host its punycode, since
+a request's `Origin` is matched exactly. Errors answered before a request is
+read (`400`, `408`, `431`, and the queue-full `503`) carry no CORS headers.
+Route tests inject the gate (`cors::Cors::gated`); nothing was observed from a
+real browser page.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and
