@@ -915,17 +915,24 @@ a Windows PC).
 one format of the previous clipboard could not be read, which on KDE is common:
 an image on the clipboard also advertises `image/jxl` and `image/heic`, and one
 of them timing out left the transcript there. Formats are now read text and
-`image/png` first (the 1 s deadline is shared), a format that fails or is over
-the remaining 32 MiB cap is skipped and named in the log, and the rest still
-come back in the offer's original order. Nothing is restored only when no
-format could be read or the clipboard's owner changed while it was being read.
-Checks: `an_unreadable_format_is_skipped_and_the_rest_keep_the_offer_order`,
+`image/png` first under the shared 1 s deadline, a format that fails or is over
+the remaining 32 MiB cap is skipped (an INFO line says how many came back and
+names the first eight skipped), and the rest still come back in the offer's
+original order. Formats are not read at all once the deadline has passed.
+Nothing is restored only when no format could be read or the clipboard's owner
+changed while it was being read; X11 compares the owner window, Wayland the
+selection offer. Each failed X11 conversion now starts the next target on a
+fresh requestor window, so an abandoned INCR transfer cannot feed its chunks to
+the wrong MIME. Checks:
+`an_unreadable_format_is_skipped_and_the_rest_keep_the_offer_order`,
 `a_clipboard_with_no_readable_format_is_an_error`,
 `an_offer_with_no_formats_is_empty`,
+`formats_after_the_deadline_are_skipped_without_a_read`,
 `text_and_png_are_read_first_and_offered_back_in_offer_order`, and
 `a_format_over_the_remaining_cap_is_skipped_and_an_empty_one_is_kept` in
 [linux/clipboard.rs](../../src/linux/clipboard.rs) (fake reads; the
-owner-change guards are not covered by tests, and this was not run on KDE).
+owner-change and fresh-window guards are not covered by tests, and this was not
+run on KDE).
 
 **Changed October 22, 2026:** Kit holds Option a little past 300 ms before
 pressing the digit, which 2.3.0 and the Swift app both ignored after the

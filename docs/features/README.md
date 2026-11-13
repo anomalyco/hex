@@ -2057,11 +2057,14 @@ Linux beta                               // not macOS feature parity
 │   │   earlier paste's pending restore stands down and the dictation stays (labs.md)
 │   ├── Before the transcript -> read every offered format (32 MiB, 1 s shared)
 │   │   text and image/png first, then the rest, and offer them back in the
-│   │   offer's own order; empty offer -> cleared again
+│   │   offer's own order; empty offer -> cleared again; nothing is read once
+│   │   the deadline has passed
 │   ├── One format unreadable, or over the remaining cap -> that format is
-│   │   skipped (debug log names it) and the rest still come back
+│   │   skipped and the rest still come back; an INFO line says how many came
+│   │   back and names the first eight skipped
 │   ├── No format could be read, or the clipboard's owner changed while it was
-│   │   being read -> transcript stays; the log names the formats that failed
+│   │   being read -> transcript stays; the all-failed error names the first
+│   │   eight skipped formats and how many more there were
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone
 │   ├── Paste only reached the clipboard -> transcript stays for Ctrl+V
 │   └── Wayland without ext- or wlr-data-control -> transcript stays (KWin offers ext, #719)
@@ -2141,10 +2144,11 @@ Clipboard restoration lives in [linux/paste.rs](../../src/linux/paste.rs)
 empty one empty; a full dictation from a file-fed ALSA microphone pasted into a
 GTK target, then Ctrl+V pasted the original text; an X11 round trip on Xwayland
 restored a 3 MB image through INCR. Not observed on X11 dictation, KDE, or
-Hyprland. `collect_formats` (its skipped-format, all-lost, over-cap, empty-read,
-and read-order cases) is unit-tested against fake reads only; the owner-change
-guards (X11's selection owner, Wayland's selection offer) are not covered by any
-test.
+Hyprland. `collect_formats` (a skipped format, all lost, an empty offer, an
+empty read, read order, and the deadline cutoff) is unit-tested against fake
+reads only. The owner-change guards are not covered by any test: X11 compares
+the selection's owner window, so the same window replacing its contents mid-read
+is not seen, and Wayland compares the selection offer after one roundtrip.
 The Wayland paste choice lives in [linux/paste.rs](../../src/linux/paste.rs) and
 [linux/remote_desktop.rs](../../src/linux/remote_desktop.rs). Observed: the
 wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri

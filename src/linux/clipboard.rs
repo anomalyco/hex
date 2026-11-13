@@ -197,28 +197,51 @@ fn preferred(mime: &str) -> Option<usize> {
         .or_else(|| (mime == "image/png").then_some(TEXT_TARGETS.len()))
 }
 
+/// The first few skipped formats, so a long offer cannot flood one log line.
+fn names(skipped: &[&str]) -> String {
+    const SHOWN: usize = 8;
+    let mut listed = skipped
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if skipped.len() > SHOWN {
+        listed.push_str(&format!(", +{} more", skipped.len() - SHOWN));
+    }
+    listed
+}
+
 /// Reads every format of the clipboard, skipping the ones its owner fails to
 /// hand over, and hands them back in the offer's own order so the restore
-/// still offers exactly what was there. An offer that held formats but
-/// yielded none is an error, never an empty snapshot: an empty snapshot
-/// clears the clipboard, and a failed read must not throw it away.
-fn collect_formats<T: AsRef<[u8]>>(
-    mimes: Vec<String>,
+/// still offers exactly what was there. Formats are not even read once the
+/// shared deadline has passed. An offer that held formats but yielded none is
+/// an error, never an empty snapshot: an empty snapshot clears the clipboard,
+/// and a failed read must not throw it away. `key` is what the caller's reader
+/// needs to ask for the format, kept out of the label.
+fn collect_formats<K: Copy, T: AsRef<[u8]>>(
+    formats: Vec<(K, String)>,
     cap: usize,
-    mut read: impl FnMut(&str, usize) -> Result<T>,
+    deadline: Instant,
+    mut read: impl FnMut(K, &str, usize) -> Result<T>,
 ) -> Result<Vec<(String, T)>> {
-    let mut order: Vec<usize> = (0..mimes.len()).collect();
-    order.sort_by_key(|index| preferred(&mimes[*index]).unwrap_or(usize::MAX));
-    let mut formats: Vec<Option<(String, T)>> = (0..mimes.len()).map(|_| None).collect();
+    let offered = formats.len();
+    let mut order: Vec<usize> = (0..offered).collect();
+    order.sort_by_key(|index| preferred(&formats[*index].1).unwrap_or(usize::MAX));
+    let mut read_formats: Vec<Option<(String, T)>> = (0..offered).map(|_| None).collect();
     let mut total = 0;
     let mut skipped: Vec<&str> = Vec::new();
     for index in order {
-        let mime = mimes[index].as_str();
+        let (key, mime) = &formats[index];
+        if Instant::now() >= deadline {
+            skipped.push(mime);
+            continue;
+        }
         let budget = cap.saturating_sub(total);
-        match read(mime, budget) {
+        match read(*key, mime, budget) {
             Ok(data) if data.as_ref().len() <= budget => {
                 total += data.as_ref().len();
-                formats[index] = Some((mimes[index].clone(), data));
+                read_formats[index] = Some((mime.clone(), data));
             }
             Ok(_) => {
                 tracing::debug!(mime, "a clipboard format is over the remaining cap");
@@ -234,23 +257,21 @@ fn collect_formats<T: AsRef<[u8]>>(
             }
         }
     }
-    let formats: Vec<(String, T)> = formats.into_iter().flatten().collect();
-    if formats.is_empty() && !mimes.is_empty() {
+    let read_formats: Vec<(String, T)> = read_formats.into_iter().flatten().collect();
+    if read_formats.is_empty() && offered > 0 {
         return Err(eyre!(
-            "none of the clipboard's {} formats could be read ({})",
-            mimes.len(),
-            skipped.join(", ")
+            "none of the clipboard's {offered} formats could be read ({})",
+            names(&skipped)
         ));
     }
     if !skipped.is_empty() {
         tracing::info!(
-            skipped = ?skipped,
-            "restoring {} of {} clipboard formats",
-            formats.len(),
-            mimes.len()
+            skipped = %names(&skipped),
+            "restoring {} of {offered} clipboard formats",
+            read_formats.len()
         );
     }
-    Ok(formats)
+    Ok(read_formats)
 }
 
 /// The clipboard's text through `wl-paste`, for a Wayland compositor without
@@ -447,7 +468,7 @@ macro_rules! data_control {
                 return Ok(Snapshot::Empty);
             };
             let offer_id = offer.id();
-            let mimes = session
+            let mimes: Vec<(usize, String)> = session
                 .state
                 .offers
                 .get(&offer.id())
@@ -455,8 +476,9 @@ macro_rules! data_control {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|mime| only.is_none_or(|only| only == mime))
+                .enumerate()
                 .collect();
-            let formats = collect_formats(mimes, CAP, |mime, budget| {
+            let formats = collect_formats(mimes, CAP, deadline, |_, mime, budget| {
                 let (read, write) = pipe()?;
                 offer.receive(mime.to_owned(), write.as_fd());
                 drop(write);
@@ -465,13 +487,13 @@ macro_rules! data_control {
                     .wrap_err_with(|| format!("could not read the clipboard's {mime}"))
             })?;
             // A selection that changed during the read handed over formats
-            // from two different clipboards. Only events already delivered
-            // are seen here; the paste's own still-holds-the-transcript check
-            // covers a later change.
-            session.connection.flush()?;
+            // from two different clipboards. Only a roundtrip can see a new
+            // selection; `connect` already roundtrips without a bound, and
+            // the paste's own still-holds-the-transcript check covers a later
+            // change.
             session
                 .queue
-                .dispatch_pending(&mut session.state)
+                .roundtrip(&mut session.state)
                 .map_err(|error| eyre!("could not follow the clipboard's selection: {error}"))?;
             if !matches!(&session.state.selection, Some(Some(current)) if current.id() == offer_id)
             {
@@ -848,11 +870,12 @@ mod x11 {
         if owner == NONE {
             return Ok(Snapshot::Empty);
         }
-        let window = window(&connection, screen)?;
+        let mut requestor = window(&connection, screen)?;
         let result = (|| {
-            let Some(targets) = convert(&connection, &atoms, window, atoms.TARGETS, CAP, deadline)?
+            let Some(targets) =
+                convert(&connection, &atoms, requestor, atoms.TARGETS, CAP, deadline)?
             else {
-                return Ok(Snapshot::Empty);
+                return Err(eyre!("the clipboard owner offers no readable targets"));
             };
             let skipped = [
                 atoms.TARGETS,
@@ -861,38 +884,51 @@ mod x11 {
                 atoms.SAVE_TARGETS,
                 atoms.DELETE,
             ];
-            let mut wanted = Vec::new();
-            for target in targets
+            let targets: Vec<u32> = targets
                 .data
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .map(|bytes| u32::from_ne_bytes(*bytes))
                 .filter(|target| !skipped.contains(target))
-            {
-                let name = connection.get_atom_name(target)?.reply()?.name;
-                wanted.push((target, String::from_utf8_lossy(&name).into_owned()));
-            }
-            let atoms_by_name: HashMap<&str, u32> = wanted
-                .iter()
-                .map(|(target, name)| (name.as_str(), *target))
                 .collect();
-            let formats: Vec<X11Format> = collect_formats(
-                wanted.iter().map(|(_, name)| name.clone()).collect(),
-                CAP,
-                |name, budget| {
-                    let target = *atoms_by_name
-                        .get(name)
-                        .ok_or_else(|| eyre!("no such clipboard target: {name}"))?;
-                    convert(&connection, &atoms, window, target, budget, deadline)?
-                        .ok_or_else(|| eyre!("the clipboard owner does not offer {name}"))
-                },
-            )?
-            .into_iter()
-            .map(|(_, format)| format)
-            .collect();
+            // Ask for every name before reading any reply, so the whole list
+            // costs one flush instead of one round trip per target.
+            let cookies = targets
+                .iter()
+                .map(|target| connection.get_atom_name(*target))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut wanted = Vec::with_capacity(targets.len());
+            for (target, cookie) in targets.iter().zip(cookies) {
+                let name = cookie.reply()?.name;
+                wanted.push((*target, String::from_utf8_lossy(&name).into_owned()));
+            }
+            // A conversion that failed partway through an INCR transfer
+            // leaves the owner still writing to this window's property. A new
+            // requestor window before the next target keeps the abandoned
+            // chunks, and the MIME they belong to, out of the next read.
+            let mut stale = false;
+            let formats: Vec<X11Format> =
+                collect_formats(wanted, CAP, deadline, |target, name, budget| {
+                    if stale {
+                        let _ = connection.destroy_window(requestor);
+                        requestor = window(&connection, screen)?;
+                        stale = false;
+                    }
+                    let read = convert(&connection, &atoms, requestor, target, budget, deadline)
+                        .and_then(|format| {
+                            format.ok_or_else(|| eyre!("the clipboard owner does not offer {name}"))
+                        });
+                    stale = read.is_err();
+                    read
+                })?
+                .into_iter()
+                .map(|(_, format)| format)
+                .collect();
             // A selection that changed during the read handed over formats
-            // from two different clipboards.
+            // from two different clipboards. This compares the selection's
+            // owner window, so it does not see the same client replacing its
+            // own contents mid-read.
             if connection
                 .get_selection_owner(atoms.CLIPBOARD)?
                 .reply()?
@@ -907,7 +943,7 @@ mod x11 {
                 Snapshot::X11(formats)
             })
         })();
-        let _ = connection.destroy_window(window);
+        let _ = connection.destroy_window(requestor);
         let _ = connection.flush();
         result
     }
@@ -963,19 +999,22 @@ mod x11 {
     fn convert(
         connection: &RustConnection,
         atoms: &Atoms,
-        window: Window,
+        requestor: Window,
         target: u32,
         budget: usize,
         deadline: Instant,
     ) -> Result<Option<X11Format>> {
         let property = atoms.HEX_CLIPBOARD;
-        connection.delete_property(window, property)?;
-        connection.convert_selection(window, atoms.CLIPBOARD, target, property, CURRENT_TIME)?;
+        connection.delete_property(requestor, property)?;
+        connection.convert_selection(requestor, atoms.CLIPBOARD, target, property, CURRENT_TIME)?;
         connection.flush()?;
         let notify = loop {
+            // Another request's notify must not answer this one; a property
+            // of NONE is the owner refusing this target.
             if let Event::SelectionNotify(notify) = next_event(connection, deadline)?
-                && notify.requestor == window
+                && notify.requestor == requestor
                 && notify.target == target
+                && (notify.property == property || notify.property == NONE)
             {
                 break notify;
             }
@@ -984,7 +1023,7 @@ mod x11 {
             return Ok(None);
         }
         let reply = connection
-            .get_property(true, window, property, AtomEnum::ANY, 0, u32::MAX)?
+            .get_property(true, requestor, property, AtomEnum::ANY, 0, u32::MAX)?
             .reply()?;
         if reply.type_ != atoms.INCR {
             if reply.value.len() > budget {
@@ -1007,12 +1046,12 @@ mod x11 {
         loop {
             match next_event(connection, deadline)? {
                 Event::PropertyNotify(event)
-                    if event.window == window
+                    if event.window == requestor
                         && event.atom == property
                         && event.state == Property::NEW_VALUE =>
                 {
                     let chunk = connection
-                        .get_property(true, window, property, AtomEnum::ANY, 0, u32::MAX)?
+                        .get_property(true, requestor, property, AtomEnum::ANY, 0, u32::MAX)?
                         .reply()?;
                     connection.flush()?;
                     if chunk.value.is_empty() {
@@ -1215,8 +1254,20 @@ mod tests {
         assert_eq!(data, b"original");
     }
 
-    fn mimes(names: &[&str]) -> Vec<String> {
+    fn offered(names: &[&str]) -> Vec<(usize, String)> {
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (index, (*name).to_owned()))
+            .collect()
+    }
+
+    fn names_of(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(1)
     }
 
     fn kept(formats: Vec<(String, Vec<u8>)>) -> Vec<String> {
@@ -1227,29 +1278,43 @@ mod tests {
     /// offer's order rather than the order it was read in.
     #[test]
     fn an_unreadable_format_is_skipped_and_the_rest_keep_the_offer_order() {
-        let offered = mimes(&[
-            "image/jxl",
-            "text/plain;charset=utf-8",
-            "image/heic",
-            "image/png",
-        ]);
-        let formats = collect_formats(offered.clone(), CAP, |mime, _| match mime {
-            "image/jxl" | "image/heic" => Err(eyre!("timed out")),
-            _ => Ok(mime.as_bytes().to_vec()),
-        })
+        let formats = collect_formats(
+            offered(&[
+                "image/jxl",
+                "text/plain;charset=utf-8",
+                "image/heic",
+                "image/png",
+            ]),
+            CAP,
+            deadline(),
+            |_, mime, _| match mime {
+                "image/jxl" | "image/heic" => Err(eyre!("timed out")),
+                _ => Ok(mime.as_bytes().to_vec()),
+            },
+        )
         .unwrap();
         assert_eq!(
             kept(formats),
-            mimes(&["text/plain;charset=utf-8", "image/png"])
+            names_of(&["text/plain;charset=utf-8", "image/png"])
         );
-        let formats = collect_formats(offered, CAP, |mime, _| match mime {
-            "text/plain;charset=utf-8" => Err(eyre!("timed out")),
-            _ => Ok(mime.as_bytes().to_vec()),
-        })
+        let formats = collect_formats(
+            offered(&[
+                "image/jxl",
+                "text/plain;charset=utf-8",
+                "image/heic",
+                "image/png",
+            ]),
+            CAP,
+            deadline(),
+            |_, mime, _| match mime {
+                "text/plain;charset=utf-8" => Err(eyre!("timed out")),
+                _ => Ok(mime.as_bytes().to_vec()),
+            },
+        )
         .unwrap();
         assert_eq!(
             kept(formats),
-            mimes(&["image/jxl", "image/heic", "image/png"])
+            names_of(&["image/jxl", "image/heic", "image/png"])
         );
     }
 
@@ -1257,9 +1322,12 @@ mod tests {
     /// clears the clipboard instead of leaving the transcript.
     #[test]
     fn a_clipboard_with_no_readable_format_is_an_error() {
-        let error = collect_formats(mimes(&["image/jxl", "image/heic"]), CAP, |_, _| {
-            Err::<Vec<u8>, _>(eyre!("timed out"))
-        })
+        let error = collect_formats(
+            offered(&["image/jxl", "image/heic"]),
+            CAP,
+            deadline(),
+            |_, _, _| Err::<Vec<u8>, _>(eyre!("timed out")),
+        )
         .unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("could be read"), "{message}");
@@ -1269,34 +1337,61 @@ mod tests {
 
     #[test]
     fn an_offer_with_no_formats_is_empty() {
-        let formats = collect_formats(Vec::new(), CAP, |_, _| -> Result<Vec<u8>> {
-            panic!("an empty offer reads nothing")
-        })
+        let formats = collect_formats(
+            Vec::new(),
+            CAP,
+            deadline(),
+            |_: usize, _, _| -> Result<Vec<u8>> { panic!("an empty offer reads nothing") },
+        )
         .unwrap();
         assert!(formats.is_empty());
+    }
+
+    /// Once the shared deadline has passed the rest are skipped, never read.
+    #[test]
+    fn formats_after_the_deadline_are_skipped_without_a_read() {
+        let mut read = Vec::new();
+        let error = collect_formats(
+            offered(&["text/plain", "image/png"]),
+            CAP,
+            Instant::now(),
+            |_, mime, _| {
+                read.push(mime.to_owned());
+                Ok(Vec::new())
+            },
+        )
+        .unwrap_err();
+        assert!(read.is_empty(), "read after the deadline: {read:?}");
+        let message = format!("{error:#}");
+        assert!(message.contains("could be read"), "{message}");
+        assert!(message.contains("text/plain"), "{message}");
     }
 
     /// Text and PNG are read before a slow exotic format can spend the shared
     /// deadline; the result is still in offer order.
     #[test]
     fn text_and_png_are_read_first_and_offered_back_in_offer_order() {
-        let offered = mimes(&[
-            "image/jxl",
-            "text/html",
-            "image/heic",
-            "image/png",
-            "text/plain",
-            "UTF8_STRING",
-        ]);
         let mut read = Vec::new();
-        let formats = collect_formats(offered, CAP, |mime, _| {
-            read.push(mime.to_owned());
-            Ok(Vec::new())
-        })
+        let formats = collect_formats(
+            offered(&[
+                "image/jxl",
+                "text/html",
+                "image/heic",
+                "image/png",
+                "text/plain",
+                "UTF8_STRING",
+            ]),
+            CAP,
+            deadline(),
+            |_, mime, _| {
+                read.push(mime.to_owned());
+                Ok(Vec::new())
+            },
+        )
         .unwrap();
         assert_eq!(
             read,
-            mimes(&[
+            names_of(&[
                 "text/plain",
                 "UTF8_STRING",
                 "image/png",
@@ -1307,7 +1402,7 @@ mod tests {
         );
         assert_eq!(
             kept(formats),
-            mimes(&[
+            names_of(&[
                 "image/jxl",
                 "text/html",
                 "image/heic",
@@ -1322,16 +1417,20 @@ mod tests {
     /// real data, not a failed read.
     #[test]
     fn a_format_over_the_remaining_cap_is_skipped_and_an_empty_one_is_kept() {
-        let offered = mimes(&["text/plain", "image/png", "image/heic"]);
-        let formats = collect_formats(offered, 8, |mime, budget| {
-            Ok::<_, color_eyre::eyre::Report>(match mime {
-                "text/plain" => b"1234".to_vec(),
-                "image/png" => vec![0; budget + 1],
-                _ => Vec::new(),
-            })
-        })
+        let formats = collect_formats(
+            offered(&["text/plain", "image/png", "image/heic"]),
+            8,
+            deadline(),
+            |_, mime, budget| {
+                Ok::<_, color_eyre::eyre::Report>(match mime {
+                    "text/plain" => b"1234".to_vec(),
+                    "image/png" => vec![0; budget + 1],
+                    _ => Vec::new(),
+                })
+            },
+        )
         .unwrap();
-        assert_eq!(kept(formats), mimes(&["text/plain", "image/heic"]));
+        assert_eq!(kept(formats), names_of(&["text/plain", "image/heic"]));
     }
 
     #[test]
