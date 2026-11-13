@@ -74,9 +74,10 @@ impl MonitorSource {
     fn start() -> Result<Self> {
         let executable =
             find_executable(PW_RECORD).ok_or_else(|| eyre!("{PW_RECORD} is not installed"))?;
+        let raw = crate::linux::pipewire::raw_args(&executable);
         let mut child = tied_to_thread(&mut Command::new(executable))
+            .args(raw)
             .args([
-                "--raw",
                 "--rate",
                 &SAMPLE_RATE.to_string(),
                 "--channels",

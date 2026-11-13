@@ -131,7 +131,9 @@ adapters differ ([meeting/linux.rs](../../src/meeting/linux.rs),
 System audio                                      // meetings.system-audio
 ├── Linux -> pw-record of the default output's monitor (stream.capture.sink);
 │   the session manager follows a changed default; no pw-record -> recording
-│   refuses with "Install PipeWire's pw-record"
+│   refuses with "Install PipeWire's pw-record"; --raw only where its help
+│   lists it (PipeWire 1.3.81+), since 1.2 and older reject it and already
+│   pipe raw audio on -
 └── Windows -> WASAPI loopback (cpal) of the outputs the call app plays on,
     mixed into the one system track, so a call playing on a headset that
     isn't the default output is recorded (#1221). A call recording prefers

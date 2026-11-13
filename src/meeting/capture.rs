@@ -22,6 +22,9 @@ use crate::dictation::StreamingResampler;
 
 const RETRY_INITIAL: Duration = Duration::from_millis(500);
 const RETRY_MAX: Duration = Duration::from_secs(5);
+/// A source that ran this long before failing started; one that dies sooner
+/// keeps backing off instead of reopening at the initial delay.
+const STARTED_AFTER: Duration = Duration::from_secs(1);
 pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Core Audio delivers silence continuously; this long without a buffer
 /// means the device or tap stopped.
@@ -199,8 +202,8 @@ fn supervise(
                     resumed = interrupted,
                     "meeting capture source started"
                 );
-                delay = RETRY_INITIAL;
                 last_open_error = None;
+                let started = Instant::now();
                 let failure = loop {
                     if stop.load(Ordering::Relaxed) {
                         break None;
@@ -214,6 +217,7 @@ fn supervise(
                     return;
                 };
                 interrupted = true;
+                delay = retry_delay(delay, started.elapsed());
                 tracing::warn!(
                     ?source,
                     %error,
@@ -236,6 +240,18 @@ fn supervise(
             thread::sleep(POLL_INTERVAL);
         }
         delay = delay.saturating_mul(2).min(RETRY_MAX);
+    }
+}
+
+/// The wait before reopening a source that ran for `ran` before it failed:
+/// the initial delay once it genuinely started, else the delay it already
+/// reached, so a source that dies right after every open keeps backing off
+/// instead of spawning and logging twice a second forever.
+fn retry_delay(delay: Duration, ran: Duration) -> Duration {
+    if ran >= STARTED_AFTER {
+        RETRY_INITIAL
+    } else {
+        delay
     }
 }
 
@@ -798,6 +814,25 @@ mod tests {
         assert!(retry.due.is_none());
         retry.resolved(Selection::Unlisted, start);
         assert!(retry.due.is_none());
+    }
+
+    #[test]
+    fn a_source_that_dies_right_after_each_open_keeps_backing_off() {
+        let instantly = Duration::from_millis(20);
+        // A source that really started reopens at the initial delay.
+        assert_eq!(retry_delay(RETRY_MAX, STARTED_AFTER), RETRY_INITIAL);
+        // One that failed instantly keeps the delay it already reached.
+        assert_eq!(retry_delay(RETRY_MAX, instantly), RETRY_MAX);
+        // So each instant failure waits longer, instead of spawning forever
+        // twice a second.
+        let mut delay = RETRY_INITIAL;
+        let mut waits = Vec::new();
+        for _ in 0..4 {
+            delay = retry_delay(delay, instantly);
+            waits.push(delay);
+            delay = delay.saturating_mul(2).min(RETRY_MAX);
+        }
+        assert_eq!(waits, [500, 1000, 2000, 4000].map(Duration::from_millis));
     }
 
     #[test]

@@ -31,9 +31,9 @@ const RETRY: Duration = Duration::from_secs(2);
 
 fn spawn() -> std::io::Result<Child> {
     Command::new("pw-cat")
+        .args(crate::linux::pipewire::raw_args("pw-cat"))
         .args([
             "--playback",
-            "--raw",
             "--format",
             "f32",
             "--rate",
