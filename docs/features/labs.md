@@ -212,7 +212,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_drop_after_cancel_waits_for_the_cancelled_worker,
 │                                        // a_file_of_unknown_length_says_transcribing_without_a_percentage,
 │                                        // a_file_hex_cannot_read_is_refused,
-│                                        // a_saved_transcript_where_it_is_and_dismisses,
+│                                        // a_saved_transcript_says_where_it_is_and_dismisses,
 │                                        // the_labs_card_offers_a_file_choice_only_with_its_lab_on (rune_ui/tests/drop_transcribe.rs);
 │                                        // the_first_free_name_numbering_counts_up, a_transcript_never_overwrites_an_earlier_one,
 │                                        // a_file_beside_its_source_keeps_its_own_folder,
@@ -3640,11 +3640,37 @@ route, so a skipped recording keeps the setting's pre-roll. Checks:
 Bluetooth headphones and the lab on, and the Linux and Windows backends on a
 real desktop.
 
-Transcribe dropped audio (`drop-transcribe`, every OS): while on, the backend
+Transcribe dropped audio (`drop-transcribe`, every OS): while on, a file
+dropped anywhere on Hex's window, or chosen with the lab card's "Transcribe a
+file…", joins one queue the window runs one file at a time.
+
+The drop target is the window root
+([rune_ui/drop_transcribe.rs](../../src/rune_ui/drop_transcribe.rs)):
+`on_drop_files` takes the files whose extension this build reads
+(`file_transcript::extensions()`), `on_drop_hover` shows the hint over the
+whole window while a file drag is on it, and a drag with nothing Hex reads
+says what it reads instead ("Hex can transcribe WAV and MP3 files", or the
+macOS extras) through `on_drop_rejected_hover`, and again as a toast if it is
+dropped. With the lab off the window sets no drop handler at all, so nothing
+of this draws or runs. A file's toast shows its name, a ring and percentage of
+the audio decoded (the backend's progress callback), how many files wait
+behind it, and Cancel, which stops the running file and empties the queue.
+The finished toast says "Saved <name>", the full path, and Show in folder
+(`meeting::reveal`, the existing helper); a failure shows the
+`FileTranscriptError`'s own words. Both dismiss with their ✕, and the next
+file starts on its own.
+
+The queue runs on one named worker per file (`hex-transcribe-file`) with the
+dictation model and language in use when the file starts, so a drop never
+waits on the window; the window wakes on the worker's channel, as History's
+Transcribe again does. Files keep their order, one worker runs at a time, and
+a file's own gate (`labs::drop_transcribe`) is checked again inside the
+backend when it starts.
+
+The backend
 ([transcription/file_transcript.rs](../../src/transcription/file_transcript.rs))
-takes a path and the saved model choice and starts its own
-`TranscriptionService` on the calling thread, so it must be called from a
-worker, never the window thread. A WAV is read through the shared pieces
+starts its own `TranscriptionService` on the calling thread, so it must run on
+that worker, never the window thread. A WAV is read through the shared pieces
 reader ([transcription/pieces.rs](../../src/transcription/pieces.rs)); an MP3
 goes through rodio on every OS, and M4A, AIFF, and CAF go through the meeting
 import bridge on macOS only. Every format is downmixed to mono, resampled to
@@ -3655,24 +3681,45 @@ file (`<stem> 2.txt`, `<stem> 3.txt`, …), through a reserved name and an
 atomic rename. A file in the OS temp folder or in an unwritable folder has its
 transcript written to Downloads. Cancelling stops between pieces and while one
 waits for its transcript; progress is reported as the fraction of the file
-decoded. `FileTranscriptError` names the refusal in words: unsupported format,
-unreadable or corrupt file, no speech, model unavailable, transcription
-failed, cancelled, or the transcript could not be written. Checks:
-`the_first_free_name_numbering_counts_up`,
+decoded.
+
+Entry points: a file drag on the window (macOS, Windows, and Linux X11), and
+Labs › Transcribe dropped audio's card button (every desktop, including
+Wayland, which reports no file drags). Nothing is pasted, saved to History,
+or processed.
+
+Checks: `a_dropped_file_does_nothing_with_the_lab_off`,
+`a_dropped_file_hovers_then_queues_a_job`,
+`dropped_files_queue_one_at_a_time`,
+`cancel_stops_the_running_file_and_the_queue`,
+`a_file_hex_cannot_read_is_refused`,
+`a_saved_transcript_says_where_it_is_and_dismisses`,
+`the_labs_card_offers_a_file_choice_only_with_its_lab_on`, and
+`the_drop_surface_shows_nothing_at_rest` in
+[drop_transcribe.rs](../../src/rune_ui/tests/drop_transcribe.rs) (headless
+Linux, with a stand-in worker, so no model loads); the goldens `drop-hover`
+and `drop-running` in both appearances; `the_first_free_name_numbering_counts_up`,
 `a_transcript_never_overwrites_an_earlier_one`,
 `a_file_beside_its_source_keeps_its_own_folder`,
 `an_unwritable_folder_sends_the_transcript_to_downloads`,
 `a_file_in_the_temp_folder_sends_the_transcript_to_downloads`,
 `only_the_formats_this_build_reads_are_accepted`,
+`the_extensions_on_offer_are_the_ones_this_build_reads`,
 `an_unsupported_file_is_refused_before_anything_loads`, and
 `the_bundled_mp3_decodes_to_sixteen_kilohertz_mono` in
 [file_transcript.rs](../../src/transcription/file_transcript.rs);
 `drop_transcribe_is_its_own_switch_and_everywhere` in
-[labs.rs](../../src/labs.rs); the pieces tests moved unchanged to
-[pieces.rs](../../src/transcription/pieces.rs). The window's drop target is a
-later change: nothing in the app calls the backend yet, no model transcribed a
-dropped file, no macOS bridge decode ran, and no transcript was read by a
-person.
+[labs.rs](../../src/labs.rs); and the pieces tests in
+[pieces.rs](../../src/transcription/pieces.rs).
+
+Proof limits: the drop tests drive Rune's headless `drag_files`/`drop_files`,
+so a real Finder, Explorer, or file-manager drag is unobserved; Wayland
+reports no file drags, so there only the card's dialog works, and its native
+picker is unobserved here too; no model transcribed a dropped file, so no
+real WAV or MP3 was read end to end; the macOS M4A, AIFF, and CAF bridge is
+compiled on macOS CI only and never ran; and no transcript saved by the toast
+was opened by a person.
+
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

@@ -15,6 +15,7 @@ pub(crate) mod capture_capsule;
 mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
+mod drop_transcribe;
 mod explainer;
 mod find_popover;
 mod found;
@@ -702,6 +703,9 @@ pub(crate) struct Ui {
     sound_volume_drag: Option<f32>,
     models: models::Models,
     history: history::HistoryPane,
+    /// Labs › Transcribe dropped audio: the drop target, its queue, and the
+    /// toast of the file running or the last one's outcome.
+    drop: drop_transcribe::DropTranscribe,
     #[cfg(hex_capture)]
     captures: captures::CapturesPane,
     modes: modes::ModesPane,
@@ -831,6 +835,7 @@ impl Ui {
             sound_volume_drag: None,
             models: models::Models::default(),
             history: history::HistoryPane::default(),
+            drop: drop_transcribe::DropTranscribe::default(),
             #[cfg(hex_capture)]
             captures: captures::CapturesPane::default(),
             modes,
@@ -1414,6 +1419,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     {
         changed |= labs::screenshots::poll(ui);
     }
+    changed |= drop_transcribe::poll(ui);
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
@@ -1594,7 +1600,18 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         layer.push(first_run);
     }
     find_popover::layer(ui, p, &mut layer);
-    rune_kit::root(window, layer).on_window_focus(window_focused)
+    // A file drag shows over everything else in the window, the first run
+    // included.
+    if let Some(dropped) = drop_transcribe::overlay(ui, p) {
+        layer.push(dropped);
+    }
+    let root = rune_kit::root(window, layer).on_window_focus(window_focused);
+    // The lab off leaves the window with no drop target at all.
+    if drop_transcribe::on(ui) {
+        drop_transcribe::drop_target(root)
+    } else {
+        root
+    }
 }
 
 fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
