@@ -1712,13 +1712,55 @@ the call app coming back drops it too. After 30 s (`AUTO_STOP_GRACE`,
 `AutoStop` in [meeting/detection.rs](../../src/meeting/detection.rs)) the
 controller stops the recording as Stop & Transcribe does and logs it. Manual,
 offered, and calendar recordings never stop, and off, nothing reads the
-output and the capsule and controller are exactly as before. Not built: the
-leave-call button as a signal, per-app rules, and holding off while the
-network is down. Checks: `stop_when_call_ends_is_its_own_bit_and_off_by_default`
-in [labs.rs](../../src/labs.rs) and the auto-stop checks listed in
-[meetings.md](meetings.md#record). Not yet observed: a real WhatsApp, Zoom,
-or Teams call on a Mac with the toggle on; the row renders only in macOS
-builds, so no golden changes.
+output and the capsule and controller are exactly as before.
+
+A browser that never releases the microphone between calls is the second
+signal (#1775; Arc). Leaving a Google Meet call and opening the next one in
+the same browser leaves the microphone and output open, so the absence above
+never comes and one recording spanned both calls. While such a recording
+runs, an automatic one whose call's page named its code (a Meet code, from
+the address or a code-only tab title) keeps that browser's page being read
+every 2 s (`TabProbe::watching`, `TAB_QUERY_WATCH`) instead of dropping it as
+every other recording does, and the controller compares the code with the
+one the recording started with (`CallSwitch` in
+[meeting/detection.rs](../../src/meeting/detection.rs)). Another code showing
+for 4 s (`CALL_CHANGED_AFTER`) is a different call: the same "left the call"
+capsule with the 30 s grace
+(`ControllerEvent::CallEnded { auto_stop: true }`, logged "the page named a
+different call; the recording stops after its grace unless kept"), then Stop
+& Transcribe on its own `AutoStop` deadline, logged "meeting recording
+stopped automatically after its page named another call". Its deadline is
+separate from the absence one because a browser still on the microphone keeps
+the call app present, which drops that one every pass. Keep recording
+disarms both and `CallSwitch::keep()` remembers the code so it never ends
+this recording, however long it shows; a third code still does, and a
+Keep recording after the microphone-release capsule never forgets it. Hex
+reads that page about every 2 s while such a recording runs; a page that
+names no call (mail, another site) never ends it, so switching to a
+non-meeting tab mid-call stops nothing. The 4 s and the grace mean roughly
+the next call's first half-minute lands in the previous recording, and the
+next recording starts once this one finishes transcribing.
+Detection is untouched: once the recording finishes, the new code is offered
+or recorded as a new call rather than snoozed as the first one (#1113). Limits:
+only calls whose page names a code carry this signal (Google Meet today; a
+browser that exposes no address and a tab title without a code names none), a
+tab with no meeting never ends a recording, and the other apps' absence rule
+is unchanged. Not built: the leave-call button as a signal, per-app rules, and
+holding off while the network is down. Checks: `stop_when_call_ends_is_its_own_bit_and_off_by_default`
+in [labs.rs](../../src/labs.rs), and the auto-stop checks listed in
+[meetings.md](meetings.md#record), including
+`a_call_switch_fires_once_after_another_code_holds_for_a_few_seconds`,
+`a_brief_glance_at_another_call_does_not_end_a_recording`,
+`keeping_a_different_call_never_ends_the_recording_for_that_code`,
+`a_call_switch_without_a_recorded_code_never_fires`,
+`a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
+`a_watched_page_is_queried_every_two_seconds_instead_of_backing_off`,
+`only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
+`keep_recording_disarms_the_call_switch_stop_too`, and
+`keep_recording_keeps_the_code_that_was_counting`. Not yet observed: a real
+WhatsApp, Zoom, or Teams call on a Mac with the toggle on, or a real Meet call
+switched in the same Arc window; the row renders only in macOS builds, so no
+golden changes.
 
 More call apps (`more-call-apps`, every OS with Meetings; its row shows
 wherever Meetings does): for calls in messaging apps and on websites call
