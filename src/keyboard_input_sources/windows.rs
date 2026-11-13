@@ -34,11 +34,17 @@ fn id(layout: HKL) -> String {
 /// windows has the focus, without a window, as on the lock screen, or for a
 /// console that reports none.
 pub(crate) fn current() -> Option<String> {
-    // SAFETY: plain Win32 queries; a null window owns no thread or process.
+    // SAFETY: plain Win32 queries; `focused_window` never yields null, and a
+    // window destroyed since that read reports no thread and no process.
     unsafe {
         let window = focused_window()?;
         let mut process_id = 0;
         let thread = GetWindowThreadProcessId(window, &mut process_id);
+        // A window destroyed in between owns no thread, and
+        // `GetKeyboardLayout(0)` would answer for Hex's own runtime thread.
+        if thread == 0 {
+            return None;
+        }
         let layout = GetKeyboardLayout(thread);
         source_from_window(process_id, GetCurrentProcessId(), layout as usize as u32)
     }

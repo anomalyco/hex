@@ -396,7 +396,7 @@ impl WindowsDesktopHost {
             .as_mut()
             .and_then(|watcher| watcher.poll())
         {
-            tracing::debug!(
+            tracing::info!(
                 source = source.as_deref().unwrap_or("none"),
                 "keyboard input source changed"
             );
