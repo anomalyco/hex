@@ -293,6 +293,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             middle().pb(TOP_BAR).child(ready(
                 p,
                 &s.caps,
+                s.toggle,
                 None,
                 s.ready_age(),
                 s.reduced.get(),

@@ -149,6 +149,7 @@ pub(crate) fn login_ask<S: 'static>(
     now: f64,
     reduced: bool,
     alone: bool,
+    toggle: bool,
     press: impl Fn(&mut S) + 'static,
 ) -> Option<El> {
     let k = p.k;
@@ -163,7 +164,11 @@ pub(crate) fn login_ask<S: 'static>(
                 } else {
                     ButtonVariant::Neutral
                 }),
-            "It's tiny. It naps in your menu bar until you hold the key.",
+            if toggle {
+                "It's tiny. It naps in your menu bar until you tap the key."
+            } else {
+                "It's tiny. It naps in your menu bar until you hold the key."
+            },
         ),
         Login::On => (
             "Hex opens when your Mac starts.",

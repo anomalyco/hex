@@ -809,6 +809,13 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-onboarding-ready", |ui| {
         mac_first_run(ui, onboarding::MacStep::Done, Page::Ready)
     }),
+    // After the practice's "Use tap to start".
+    ("mac-onboarding-ready-tap", |ui| {
+        *ui = mac_fixture();
+        ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+        onboarding::mac_fixture(ui, onboarding::MacStep::Done);
+        onboarding_kit::live::fixture(ui, Page::Ready);
+    }),
 ];
 
 /// The Annotate pane with captures `enabled`, a 3-day video retention, and
