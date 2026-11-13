@@ -133,12 +133,28 @@ pub const BOTH_SIDES_WINDOW: Duration = Duration::from_millis(80);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 pub(crate) const PARAKEET_SAMPLE_RATE: u32 = 16_000;
-/// A capture whose loudest 30 ms window stays below this level is treated as
-/// empty rather than transcribed, because models hallucinate closing phrases
-/// such as "thank you" on silence. Deliberately conservative: whispered speech
-/// sits well above it, so only a quiet room's noise floor is discarded.
+/// A capture whose loudest 30 ms window reaches this level is transcribed, or
+/// handed to the speech detector, because models hallucinate closing phrases
+/// such as "thank you" on silence. Below it the clip's own noise floor decides
+/// ([`SILENCE_RELATIVE_MARGIN_DB`]): a built-in microphone can record real
+/// speech at -51 to -60 dBFS while its room noise sits 13-25 dB lower, which a
+/// fixed cutoff would throw away.
 const SILENCE_THRESHOLD_DBFS: f32 = -50.0;
+/// How far a window must rise above the clip's own noise floor to count as
+/// speech there. The speech detector still decides afterwards; this only
+/// keeps quiet speech away from a premature discard.
+const SILENCE_RELATIVE_MARGIN_DB: f32 = 12.0;
+/// No window quieter than this counts as speech over the floor, however quiet
+/// the floor is. It keeps a barely moving microphone and its dither from
+/// passing as sustained speech.
+const SILENCE_RELATIVE_FLOOR_DBFS: f32 = -66.0;
+/// How much of the clip must carry energy above that relative threshold:
+/// 160 ms, the shortest speech the detector itself keeps.
+const SILENCE_SUSTAINED: Duration = Duration::from_millis(160);
 const SILENCE_WINDOW_SAMPLES: usize = 480;
+/// The quietest level a window reports; digital silence and a constant offset
+/// sit here rather than at negative infinity.
+const SILENCE_LEVEL_FLOOR_DBFS: f32 = -120.0;
 /// Live audio is handed to a capture's stream in blocks of at least this many
 /// 16 kHz samples (160 ms), well under the model's chunk, to keep per-feed
 /// overhead low.
@@ -438,6 +454,7 @@ impl DictationClip {
 
     /// The loudest 30 ms window's DC-removed RMS level in dBFS, over the
     /// captured audio through the release.
+    #[cfg(test)]
     fn loudest_window_dbfs(&self) -> f32 {
         loudest_window_dbfs(self.released())
     }
@@ -469,15 +486,17 @@ impl DictationClip {
         !released.is_empty() && released.iter().all(|&sample| sample == 0.0)
     }
 
-    /// Whether the capture holds no speech worth transcribing: its level
-    /// stays below the silence threshold or, once the speech detector is
-    /// installed, the detector finds no speech in it (a key click, the start
-    /// tone, a noisy room, or a microphone turned down too far). Such a
-    /// capture is discarded quietly, with no tone or note; the log has the
-    /// measured level and peak against the thresholds.
+    /// Whether the capture holds no speech worth transcribing: its loudest
+    /// window stays below the fixed threshold with no sustained energy over
+    /// the clip's own noise floor, or, once the speech detector is installed,
+    /// the detector finds no speech in it (a key click, the start tone, a
+    /// noisy room, or a microphone turned down too far). Such a capture is
+    /// discarded quietly, with no tone or note; the log has the measured
+    /// level, noise floor, and peak against the thresholds.
     pub fn is_near_silent(&self) -> bool {
-        let level_dbfs = self.loudest_window_dbfs();
-        let silent = level_dbfs < SILENCE_THRESHOLD_DBFS;
+        let gate = LevelGate::measure(self.released());
+        let level_dbfs = gate.loudest_dbfs;
+        let silent = !gate.passes();
         if silent {
             let evidence = self.silence_evidence();
             let source = self.source.as_deref();
@@ -486,6 +505,8 @@ impl DictationClip {
             tracing::info!(
                 level_dbfs,
                 threshold_dbfs = SILENCE_THRESHOLD_DBFS,
+                noise_floor_dbfs = gate.noise_floor_dbfs,
+                relative_threshold_dbfs = gate.relative_threshold_dbfs,
                 audio_ms = self.duration_ms(),
                 pre_press_ms = self.press_samples as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE),
                 pre_press_dbfs = evidence.pre_press_dbfs,
@@ -546,21 +567,83 @@ impl DictationClip {
     }
 }
 
+/// The level gate over one release: the fixed cutoff is met outright, or the
+/// clip carries enough sustained energy above its own noise floor to be worth
+/// the speech detector's attention.
+#[derive(Clone, Copy, Debug)]
+struct LevelGate {
+    /// The loudest 30 ms window's DC-removed RMS level.
+    loudest_dbfs: f32,
+    /// The clip's own noise floor: its 10th-percentile window level.
+    noise_floor_dbfs: f32,
+    /// The level a window must reach to count as speech over that floor.
+    relative_threshold_dbfs: f32,
+    /// How many windows reach `relative_threshold_dbfs`.
+    sustained_windows: usize,
+}
+
+impl LevelGate {
+    /// How many 30 ms windows [`SILENCE_SUSTAINED`] spans.
+    fn sustained_windows_needed() -> usize {
+        let window_ms =
+            (SILENCE_WINDOW_SAMPLES as u64 * 1_000).div_ceil(u64::from(PARAKEET_SAMPLE_RATE));
+        (SILENCE_SUSTAINED.as_millis() as u64).div_ceil(window_ms) as usize
+    }
+
+    fn measure(samples: &[f32]) -> Self {
+        let mut levels: Vec<f32> = window_levels_dbfs(samples).collect();
+        let loudest_dbfs = levels
+            .iter()
+            .copied()
+            .fold(SILENCE_LEVEL_FLOOR_DBFS, f32::max);
+        let noise_floor_dbfs = noise_floor_dbfs(&mut levels);
+        let relative_threshold_dbfs =
+            (noise_floor_dbfs + SILENCE_RELATIVE_MARGIN_DB).max(SILENCE_RELATIVE_FLOOR_DBFS);
+        let sustained_windows = levels
+            .iter()
+            .filter(|&&level| level >= relative_threshold_dbfs)
+            .count();
+        Self {
+            loudest_dbfs,
+            noise_floor_dbfs,
+            relative_threshold_dbfs,
+            sustained_windows,
+        }
+    }
+
+    fn passes(&self) -> bool {
+        self.loudest_dbfs >= SILENCE_THRESHOLD_DBFS
+            || self.sustained_windows >= Self::sustained_windows_needed()
+    }
+}
+
+/// The 10th-percentile 30 ms window level, the clip's own noise floor; sorts
+/// `levels` in place. Empty audio reports the level floor.
+fn noise_floor_dbfs(levels: &mut [f32]) -> f32 {
+    if levels.is_empty() {
+        return SILENCE_LEVEL_FLOOR_DBFS;
+    }
+    levels.sort_by(f32::total_cmp);
+    levels[(levels.len() - 1) / 10]
+}
+
+/// The DC-removed RMS level of each 30 ms window of 16 kHz `samples`; a short
+/// final window is measured on the samples it has.
+fn window_levels_dbfs(samples: &[f32]) -> impl Iterator<Item = f32> + '_ {
+    samples.chunks(SILENCE_WINDOW_SAMPLES).map(|window| {
+        let count = window.len() as f64;
+        let mean = window.iter().map(|&sample| f64::from(sample)).sum::<f64>() / count;
+        let variance = window
+            .iter()
+            .map(|&sample| (f64::from(sample) - mean).powi(2))
+            .sum::<f64>()
+            / count;
+        ((20.0 * variance.sqrt().max(1e-6).log10()) as f32).max(SILENCE_LEVEL_FLOOR_DBFS)
+    })
+}
+
 fn loudest_window_dbfs(samples: &[f32]) -> f32 {
-    let loudest = samples
-        .chunks(SILENCE_WINDOW_SAMPLES)
-        .map(|window| {
-            let count = window.len() as f64;
-            let mean = window.iter().map(|&sample| f64::from(sample)).sum::<f64>() / count;
-            let variance = window
-                .iter()
-                .map(|&sample| (f64::from(sample) - mean).powi(2))
-                .sum::<f64>()
-                / count;
-            variance.sqrt()
-        })
-        .fold(0.0, f64::max);
-    (20.0 * loudest.max(1e-6).log10()) as f32
+    window_levels_dbfs(samples).fold(SILENCE_LEVEL_FLOOR_DBFS, f32::max)
 }
 
 pub(crate) fn pad_for_parakeet(samples: &mut Vec<f32>) {
@@ -1367,6 +1450,26 @@ mod tests {
         })
     }
 
+    /// Deterministic, DC-free noise at `dbfs` RMS: alternating signs keep the
+    /// mean at zero, and every 30 ms window measures the same level.
+    fn noise(dbfs: f32, samples: usize) -> Vec<f32> {
+        let amplitude = 10.0_f32.powf(dbfs / 20.0);
+        (0..samples)
+            .map(|index| {
+                if index % 2 == 0 {
+                    amplitude
+                } else {
+                    -amplitude
+                }
+            })
+            .collect()
+    }
+
+    /// A sine whose 30 ms RMS level is `dbfs`.
+    fn speech_at(dbfs: f32, samples: usize) -> impl Iterator<Item = f32> {
+        tone(2.0_f32.sqrt() * 10.0_f32.powf(dbfs / 20.0), samples)
+    }
+
     #[test]
     fn streaming_resampler_matches_whole_buffer_conversion() {
         for rate in [16_000, 44_100, 48_000] {
@@ -1436,6 +1539,37 @@ mod tests {
         assert!(!quiet_speech.is_near_silent());
         assert!((quiet_speech.loudest_window_dbfs() - -43.0).abs() < 0.5);
         assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
+    }
+
+    #[test]
+    fn relative_level_gate_keeps_quiet_speech_above_the_noise_floor() {
+        // A built-in microphone records real speech around -54 dBFS while
+        // the room noise floor sits 18 dB lower. The fixed cutoff alone would
+        // discard it before the speech detector sees it.
+        let mut samples = noise(-72.0, 16_000);
+        samples.extend(speech_at(-54.0, 16_000));
+        let clip = DictationClip::for_test(samples);
+
+        assert!(clip.loudest_window_dbfs() < SILENCE_THRESHOLD_DBFS);
+        assert!((clip.loudest_window_dbfs() - -54.0).abs() < 1.0);
+        assert!(!clip.is_near_silent(), "the level gate keeps it");
+        let _detector = crate::transcription::speech_detector::override_for_test(Some(false));
+        assert!(
+            clip.is_near_silent(),
+            "the speech detector still decides afterwards"
+        );
+    }
+
+    #[test]
+    fn relative_level_gate_discards_clicks_and_constant_floors() {
+        // One 30 ms window at -54 dBFS over the same floor is not sustained.
+        let mut click = noise(-72.0, 16_320);
+        click.extend(speech_at(-54.0, SILENCE_WINDOW_SAMPLES));
+        assert!(DictationClip::for_test(click).is_near_silent());
+
+        // A constant -60 dBFS floor alone never moves a window above its own
+        // floor, so it stays discarded too.
+        assert!(DictationClip::for_test(noise(-60.0, 32_000)).is_near_silent());
     }
 
     #[test]
