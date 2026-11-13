@@ -2645,16 +2645,21 @@ mod tests {
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
                 continue;
             }
+            // Where CI's golden-actual artifact picks it up.
+            let actual = std::env::temp_dir().join(format!("rune-settings-{file}-actual.png"));
             let decoder =
                 png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
             let mut reader = decoder.read_info().unwrap();
             let mut golden = vec![0; reader.output_buffer_size().unwrap()];
             let info = reader.next_frame(&mut golden).unwrap();
-            assert_eq!(
-                (info.width, info.height),
-                (w, h),
-                "{name}-{theme} size changed"
-            );
+            if (info.width, info.height) != (w, h) {
+                rune::render::write_png(&actual, w, h, &pixels).unwrap();
+                misses.push(format!(
+                    "{name}-{theme}: size changed; actual at {}",
+                    actual.display()
+                ));
+                continue;
+            }
             // GPUs differ in the last bit of blending and glyph coverage.
             let differing = pixels
                 .chunks(4)
@@ -2662,8 +2667,6 @@ mod tests {
                 .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
                 .count();
             if differing > (w * h) as usize / 500 {
-                // Where CI's golden-actual artifact picks it up.
-                let actual = std::env::temp_dir().join(format!("rune-settings-{file}-actual.png"));
                 rune::render::write_png(&actual, w, h, &pixels).unwrap();
                 misses.push(format!(
                     "{name}-{theme}: {differing} pixels differ; actual at {}",
