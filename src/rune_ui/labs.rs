@@ -952,6 +952,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model."),
     ));
     rows.push(row(
+        Feature::DropTranscribe,
+        None,
+        tr("Transcribe dropped audio"),
+        tr("Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it."),
+    ));
+    rows.push(row(
         Feature::ApiProcessing,
         None,
         tr("Process API transcripts"),
@@ -1204,6 +1210,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::TranscribeFiles => "lab-transcribe-files",
+        Feature::DropTranscribe => "lab-drop-transcribe",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::ApiBrowserAccess => "lab-api-browser-access",

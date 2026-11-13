@@ -161,9 +161,27 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // (control/cli/transcribe.rs); pieces_cover_every_sample_exactly_once_in_order,
 │                                        // a_48_khz_file_is_read_in_pieces_of_at_most_thirty_seconds,
 │                                        // every_supported_sample_format_matches_the_whole_file_decoder,
-│                                        // streamed_samples_match_the_whole_file_decoder (control/cli/transcribe/pieces.rs);
+│                                        // streamed_samples_match_the_whole_file_decoder (transcription/pieces.rs);
 │                                        // a running service answered model-unavailable for an uninstalled
 │                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
+├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV or MP3 file dropped on Hex's window (M4A,
+│                                        AIFF, and CAF too on macOS) is read in ≤30 s pieces, transcribed with the selected
+│                                        model in this process, and saved as `<stem>.txt` beside it. A taken name gets
+│                                        " 2", " 3", and so on; a file in the OS temp folder, or one whose folder Hex can't
+│                                        write, has its transcript saved in Downloads instead. Cancelling stops between
+│                                        pieces; the window reports progress from 0 to 1
+│                                        // checks: the_first_free_name_numbering_counts_up,
+│                                        // a_transcript_never_overwrites_an_earlier_one, a_file_beside_its_source_keeps_its_own_folder,
+│                                        // an_unwritable_folder_sends_the_transcript_to_downloads,
+│                                        // a_file_in_the_temp_folder_sends_the_transcript_to_downloads,
+│                                        // only_the_formats_this_build_reads_are_accepted,
+│                                        // an_unsupported_file_is_refused_before_anything_loads,
+│                                        // the_bundled_mp3_decodes_to_sixteen_kilohertz_mono (transcription/file_transcript.rs);
+│                                        // drop_transcribe_is_its_own_switch_and_everywhere (labs.rs);
+│                                        // pieces_cover_every_sample_exactly_once_in_order,
+│                                        // every_supported_sample_format_matches_the_whole_file_decoder (transcription/pieces.rs);
+│                                        // the window has no drop target yet (a later change), no model transcribed a
+│                                        // dropped file, and no macOS M4A, AIFF, or CAF decode ran
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
@@ -3300,6 +3318,40 @@ route, so a skipped recording keeps the setting's pre-roll. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: a real Mac with wired and
 Bluetooth headphones and the lab on, and the Linux and Windows backends on a
 real desktop.
+
+Transcribe dropped audio (`drop-transcribe`, every OS): while on, the backend
+([transcription/file_transcript.rs](../../src/transcription/file_transcript.rs))
+takes a path and the saved model choice and starts its own
+`TranscriptionService` on the calling thread, so it must be called from a
+worker, never the window thread. A WAV is read through the shared pieces
+reader ([transcription/pieces.rs](../../src/transcription/pieces.rs)); an MP3
+goes through rodio on every OS, and M4A, AIFF, and CAF go through the meeting
+import bridge on macOS only. Every format is downmixed to mono, resampled to
+16 kHz, cut at most every 30 s, and each speechful piece is sent to the
+service in order; the pieces' text joins with one space. The whole transcript
+is written as `<stem>.txt` in the source's folder, never replacing an existing
+file (`<stem> 2.txt`, `<stem> 3.txt`, …), through a reserved name and an
+atomic rename. A file in the OS temp folder or in an unwritable folder has its
+transcript written to Downloads. Cancelling stops between pieces and while one
+waits for its transcript; progress is reported as the fraction of the file
+decoded. `FileTranscriptError` names the refusal in words: unsupported format,
+unreadable or corrupt file, no speech, model unavailable, transcription
+failed, cancelled, or the transcript could not be written. Checks:
+`the_first_free_name_numbering_counts_up`,
+`a_transcript_never_overwrites_an_earlier_one`,
+`a_file_beside_its_source_keeps_its_own_folder`,
+`an_unwritable_folder_sends_the_transcript_to_downloads`,
+`a_file_in_the_temp_folder_sends_the_transcript_to_downloads`,
+`only_the_formats_this_build_reads_are_accepted`,
+`an_unsupported_file_is_refused_before_anything_loads`, and
+`the_bundled_mp3_decodes_to_sixteen_kilohertz_mono` in
+[file_transcript.rs](../../src/transcription/file_transcript.rs);
+`drop_transcribe_is_its_own_switch_and_everywhere` in
+[labs.rs](../../src/labs.rs); the pieces tests moved unchanged to
+[pieces.rs](../../src/transcription/pieces.rs). The window's drop target is a
+later change: nothing in the app calls the backend yet, no model transcribed a
+dropped file, no macOS bridge decode ran, and no transcript was read by a
+person.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

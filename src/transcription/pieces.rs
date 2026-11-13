@@ -1,6 +1,8 @@
-//! A saved WAV read as pieces: streaming decode, downmix, 16 kHz resampling,
-//! and the quiet-point cut the GGUF adapters use for a long clip, so
-//! `hex transcribe` holds about one 30 s piece instead of the whole file.
+//! Saved audio read as pieces of at most 30 s: streaming decode, downmix,
+//! 16 kHz resampling, and the quiet-point cut the GGUF adapters use for a
+//! long clip, so `hex transcribe` and a dropped file hold about one 30 s piece
+//! instead of the whole file. [`Pieces`] reads a WAV; another format's
+//! decoder feeds its mono blocks through [`PieceBuffer`] the same way.
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -16,18 +18,18 @@ use crate::transcription::service::{AudioError, WavFormat, validate_wav_input, w
 /// 30 s at 16 kHz: the longest piece. A clip that short can run on the
 /// running Hex's dictation engine's loaded copy when it holds the model,
 /// instead of its service loading a second copy.
-pub(super) const PIECE_SAMPLES: usize = 30 * 16_000;
+pub(crate) const PIECE_SAMPLES: usize = 30 * 16_000;
 /// Frames decoded per read: 85 ms at 48 kHz, so a piece is cut near its end
 /// without holding much more than one piece.
-const BLOCK_FRAMES: usize = 4_096;
+pub(crate) const BLOCK_FRAMES: usize = 4_096;
 
-/// Why a saved WAV could not be read into pieces.
+/// Why saved audio could not be read into pieces.
 #[derive(Debug)]
-pub(super) enum PieceError {
+pub(crate) enum PieceError {
     /// The file could not be opened or read at all.
     Io(std::io::Error),
-    /// The file is not a WAV this build decodes: either it is not a WAV at
-    /// all, or its rate, channels, or sample format is unsupported.
+    /// The file is not audio this build decodes: either it is not that
+    /// format at all, or its rate, channels, or sample format is unsupported.
     Audio(AudioError),
     /// The file holds no audio at all.
     Empty,
@@ -39,8 +41,18 @@ pub(super) enum PieceError {
     Changed { at_ms: u64 },
 }
 
+/// One saved file's 16 kHz samples, one piece at a time.
+pub(crate) trait PieceSource {
+    /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
+    /// end of the file.
+    fn next_piece(&mut self) -> Result<Option<Vec<f32>>, PieceError>;
+
+    /// How many 16 kHz samples it has decoded so far, for progress.
+    fn position(&self) -> usize;
+}
+
 /// The 16 kHz samples of one saved WAV, one piece at a time.
-pub(super) struct Pieces {
+pub(crate) struct Pieces {
     reader: WavReader<BufReader<File>>,
     format: WavFormat,
     channels: usize,
@@ -69,7 +81,7 @@ impl std::fmt::Debug for Pieces {
 impl Pieces {
     /// Opens `path` and checks its header and format, so a file Hex cannot
     /// read is refused before any model is loaded or Hex is asked.
-    pub(super) fn open(path: &Path) -> Result<Self, PieceError> {
+    pub(crate) fn open(path: &Path) -> Result<Self, PieceError> {
         let file = File::open(path).map_err(PieceError::Io)?;
         let reader = WavReader::new(BufReader::new(file))
             .map_err(|_| PieceError::Audio(AudioError::Invalid))?;
@@ -94,10 +106,17 @@ impl Pieces {
         })
     }
 
+    /// How long the whole file is at 16 kHz, for progress.
+    pub(crate) fn total_samples(&self) -> usize {
+        let rate = usize::try_from(self.reader.spec().sample_rate).unwrap_or(16_000);
+        let frames = usize::try_from(self.reader.duration()).unwrap_or(0);
+        frames.saturating_mul(16_000) / rate.max(1)
+    }
+
     /// Reads every sample once without keeping any, so a truncated or
     /// corrupt file is refused before any transcription rather than after
     /// minutes of it. Only `prepare` calls this: it costs one decode pass.
-    pub(super) fn validate(&mut self) -> Result<(), PieceError> {
+    pub(crate) fn validate(&mut self) -> Result<(), PieceError> {
         loop {
             match self.read_source() {
                 Ok(block) if block.is_empty() => return Ok(()),
@@ -109,7 +128,7 @@ impl Pieces {
 
     /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
     /// end of the file.
-    pub(super) fn next(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
+    pub(crate) fn next(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
         loop {
             if let Some(piece) = self.ready.pop_front() {
                 return Ok(Some(piece));
@@ -169,19 +188,65 @@ impl Pieces {
     }
 }
 
+impl PieceSource for Pieces {
+    fn next_piece(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
+        self.next()
+    }
+
+    fn position(&self) -> usize {
+        self.buffer.position()
+    }
+}
+
+/// The next piece that may hold speech, skipping pieces of only silence as a
+/// long GGUF clip's silent chunks are skipped: models invent text for silence
+/// (#1194) or run to their generation cap (#968).
+///
+/// The check runs only when the speech detector is already installed: a
+/// one-shot run must not start its background model download.
+pub(crate) fn next_speechful<P: PieceSource>(
+    pieces: &mut P,
+) -> Result<Option<Vec<f32>>, PieceError> {
+    let detector = crate::transcription::models::speech_detector_installed();
+    next_speechful_with(pieces, detector)
+}
+
+/// [`next_speechful`] with the detector's availability passed in, so a test
+/// needs no installed model.
+pub(crate) fn next_speechful_with<P: PieceSource>(
+    pieces: &mut P,
+    detector: bool,
+) -> Result<Option<Vec<f32>>, PieceError> {
+    loop {
+        match pieces.next_piece()? {
+            Some(samples) if !keeps_piece(&samples, detector) => continue,
+            piece => return Ok(piece),
+        }
+    }
+}
+
+/// Whether a piece goes to the model: only silence is skipped, and only when
+/// the detector is installed and hears none in it.
+fn keeps_piece(samples: &[f32], detector: bool) -> bool {
+    !detector || crate::transcription::gguf_session::chunk_may_hold_speech(samples)
+}
+
 /// 16 kHz samples waiting to be cut, never more than one piece plus the block
 /// that completed it.
 #[derive(Default)]
-pub(super) struct PieceBuffer {
+pub(crate) struct PieceBuffer {
     samples: Vec<f32>,
+    /// Every 16 kHz sample pushed so far, for progress.
+    decoded: usize,
 }
 
 impl PieceBuffer {
     /// Appends `samples` and returns every piece they completed, each cut
     /// through the quietest 100 ms near its 30 s end as
     /// [`crate::transcription::gguf_session::chunk_ranges`] cuts a long clip.
-    pub(super) fn push(&mut self, samples: &[f32]) -> Vec<Vec<f32>> {
+    pub(crate) fn push(&mut self, samples: &[f32]) -> Vec<Vec<f32>> {
         self.samples.extend_from_slice(samples);
+        self.decoded += samples.len();
         let mut pieces = Vec::new();
         while self.samples.len() > PIECE_SAMPLES {
             let rest = self
@@ -194,14 +259,19 @@ impl PieceBuffer {
 
     /// The samples after the last piece, as the final piece, unless there are
     /// none.
-    pub(super) fn take_rest(&mut self) -> Option<Vec<f32>> {
+    pub(crate) fn take_rest(&mut self) -> Option<Vec<f32>> {
         (!self.samples.is_empty()).then(|| std::mem::take(&mut self.samples))
+    }
+
+    /// How many 16 kHz samples have been pushed so far.
+    pub(crate) fn position(&self) -> usize {
+        self.decoded
     }
 }
 
 /// `samples` as a 16 kHz mono 32-bit float WAV: what the local API takes for
 /// one piece, with no sample converted or dropped.
-pub(super) fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PieceError> {
+pub(crate) fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PieceError> {
     let mut bytes = Cursor::new(Vec::new());
     {
         let spec = WavSpec {
@@ -355,6 +425,22 @@ mod tests {
         collected
     }
 
+    /// A 16 kHz mono WAV of `seconds` of silence.
+    fn silent_wav(name: &str, seconds: f32) -> std::path::PathBuf {
+        let path = temp(name);
+        write(
+            &path,
+            WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: SampleFormat::Int,
+            },
+            &vec![0.0; (16_000.0 * seconds) as usize],
+        );
+        path
+    }
+
     #[test]
     fn pieces_cover_every_sample_exactly_once_in_order() {
         let samples = paced(16_000, 95);
@@ -379,6 +465,7 @@ mod tests {
             samples,
             "every sample appears once, in order"
         );
+        assert_eq!(buffer.position(), samples.len());
     }
 
     #[test]
@@ -577,5 +664,34 @@ mod tests {
         let clip = AudioClip::decode_wav(Cursor::new(bytes)).unwrap();
         assert_eq!(clip.duration_ms, 1_000);
         assert_eq!(clip.samples, samples);
+    }
+
+    #[test]
+    fn a_piece_is_kept_without_the_detector_and_it_is_not_consulted() {
+        let path = silent_wav("silent", 1.0);
+        let mut pieces = Pieces::open(&path).unwrap();
+        {
+            // The override says "no speech": a kept piece proves the check did
+            // not run, so the detector cannot have started its download.
+            let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
+            assert!(next_speechful_with(&mut pieces, false).unwrap().is_some());
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_installed_detector_skips_a_piece_it_hears_nothing_in() {
+        let path = silent_wav("kept", 1.0);
+        {
+            let mut pieces = Pieces::open(&path).unwrap();
+            let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
+            assert!(next_speechful_with(&mut pieces, true).unwrap().is_none());
+        }
+        {
+            let mut pieces = Pieces::open(&path).unwrap();
+            let _speech = crate::transcription::speech_detector::override_for_test(Some(true));
+            assert!(next_speechful_with(&mut pieces, true).unwrap().is_some());
+        }
+        let _ = std::fs::remove_file(&path);
     }
 }

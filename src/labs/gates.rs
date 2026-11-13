@@ -423,6 +423,17 @@ pub fn k_quant_models() -> bool {
     K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
 }
 
+/// Labs › Transcribe dropped audio: a WAV or MP3 file dropped on the window
+/// is transcribed in this process and saved as a text file beside it (read as
+/// each drop starts, and by the window's drop target).
+#[allow(dead_code)] // The window's drop target, a later change, reads it.
+pub fn drop_transcribe() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    DROP_TRANSCRIBE.load(Ordering::Acquire) && Feature::DropTranscribe.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
