@@ -188,6 +188,7 @@ impl Feature {
             Self::StopPhrase => settings.labs.stop_phrase,
             Self::HoldThroughKeys => settings.labs.hold_through_keys,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
+            Self::DropTranscribe => settings.labs.drop_transcribe,
             Self::ShellCompletions => settings.labs.shell_completions,
             Self::YoloMode => settings.labs.yolo_mode,
             Self::CursorContext => settings.labs.cursor_context,
@@ -273,6 +274,7 @@ impl Feature {
             &mut labs.stop_phrase,
             &mut labs.hold_through_keys,
             &mut labs.copy_capture_zip,
+            &mut labs.drop_transcribe,
             &mut labs.shell_completions,
             &mut labs.yolo_mode,
             &mut labs.cursor_context,
@@ -364,6 +366,7 @@ impl Feature {
             Self::StopPhrase => settings.labs.stop_phrase = on,
             Self::HoldThroughKeys => settings.labs.hold_through_keys = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
+            Self::DropTranscribe => settings.labs.drop_transcribe = on,
             Self::ShellCompletions => settings.labs.shell_completions = on,
             Self::YoloMode => settings.labs.yolo_mode = on,
             Self::CursorContext => settings.labs.cursor_context = on,
@@ -523,6 +526,11 @@ static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 /// [`PRINT_START`], written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Transcribe dropped audio's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static DROP_TRANSCRIBE: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Upcoming meetings in menu bar's switch, set beside [`STATE`] like
 /// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
@@ -581,6 +589,7 @@ fn state() -> u64 {
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
+                DROP_TRANSCRIBE.store(drop_transcribe_enabled(&saved), Ordering::Release);
                 CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
@@ -652,6 +661,14 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
     settings.k_quant_models
         && Feature::KQuantModels.shipped()
         && Feature::KQuantModels.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Transcribe dropped audio in this build,
+/// before its managed lock; the state word has no bit for it.
+fn drop_transcribe_enabled(settings: &LabsSettings) -> bool {
+    settings.drop_transcribe
+        && Feature::DropTranscribe.shipped()
+        && Feature::DropTranscribe.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Copy dictation audio in this build,
@@ -776,6 +793,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
+    DROP_TRANSCRIBE.store(drop_transcribe_enabled(settings), Ordering::Release);
     CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
@@ -1902,6 +1920,31 @@ mod tests {
         assert_eq!(Feature::KQuantModels.group(), Group::Models);
         assert_eq!(Feature::KQuantModels.settings_key(), "labs.k_quant_models");
         assert_eq!(Feature::KQuantModels.name(), "k-quant-models");
+    }
+
+    #[test]
+    fn drop_transcribe_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!drop_transcribe_enabled(&labs));
+        labs.drop_transcribe = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(drop_transcribe_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(
+            Feature::DropTranscribe.on_this_os(),
+            "the window exists on every OS"
+        );
+        assert_eq!(Feature::DropTranscribe.added(), 20261113);
+        assert_eq!(Feature::DropTranscribe.audience(), Audience::Everyone);
+        assert_eq!(Feature::DropTranscribe.group(), Group::Models);
+        assert_eq!(
+            Feature::DropTranscribe.settings_key(),
+            "labs.drop_transcribe"
+        );
+        assert_eq!(Feature::DropTranscribe.name(), "drop-transcribe");
     }
 
     #[test]

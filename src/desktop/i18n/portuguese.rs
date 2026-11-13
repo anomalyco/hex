@@ -1401,6 +1401,23 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Se um atalho é feito só de Ctrl, Alt, Shift ou da tecla Windows, sem tecla de letra ou número, pressionar outra tecla ou clicar depois do primeiro segundo não termina mais o ditado; solte para terminar"),
     ("Modes editor", "Editor de modos"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Edite os apps, as correções e a reescrita do OpenCode de cada modo em um painel Modos"),
+    ("Transcribe dropped audio", "Transcrever áudio arrastado"),
+    ("Audio files", "Arquivos de áudio"),
+    ("Transcribe a file", "Transcrever um arquivo"),
+    ("Transcribe a file…", "Transcrever um arquivo…"),
+    ("Drop to save a transcript", "Solte para salvar uma transcrição"),
+    ("WAV or MP3", "WAV ou MP3"),
+    ("WAV, MP3, M4A, AIFF, or CAF", "WAV, MP3, M4A, AIFF ou CAF"),
+    ("Drop a {} file on the Hex window to save its transcript as a text file next to it.", "Arraste um arquivo {} para a janela do Hex para salvar a transcrição como um arquivo de texto ao lado dele."),
+    ("Hex can transcribe {} files", "O Hex pode transcrever arquivos {}"),
+    ("Transcribing… {}%", "Transcrevendo… {}%"),
+    ("Cancelling…", "Cancelando…"),
+    ("{} more queued", "{} mais na fila"),
+    ("Saved {}", "{} salvo"),
+    ("Show in folder", "Mostrar na pasta"),
+    ("Could not transcribe {}", "Não foi possível transcrever {}"),
+    ("A file could not be chosen.", "Não foi possível escolher um arquivo."),
+    ("Transcription stopped.", "A transcrição parou."),
 ];
 
 #[cfg(test)]

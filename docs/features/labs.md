@@ -191,6 +191,45 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // the_cli_prints_completion_scripts (linux.rs, main.rs, windows.rs);
 │                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
 │                                        // a sourced script in a real shell
+├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV or MP3 file dropped anywhere on Hex's window
+│                                        (M4A, AIFF, and CAF too on macOS) queues behind any file already being
+│                                        transcribed, one at a time, each with the dictation model and language in use;
+│                                        it is read in ≤30 s pieces in this process and saved as `<stem>.txt` beside
+│                                        it. A taken name gets " 2", " 3", and so on; a file in the OS temp folder,
+│                                        or one whose folder Hex can't write, has its transcript saved in Downloads
+│                                        instead. A drag with no file Hex reads says what it reads, listing the macOS
+│                                        extras there; Cancel stops the running file and clears the queue, and the
+│                                        file's toast says Cancelling… until its worker answers, so nothing else
+│                                        starts meanwhile; the toast names the file and its progress, and says Saved
+│                                        <name> with the path and Show in folder. The lab's card offers Transcribe a
+│                                        file…, which opens the same queue's file dialog, for Wayland, where nothing
+│                                        can be dropped
+│                                        // checks: the_drop_surface_shows_nothing_at_rest,
+│                                        // a_dropped_file_does_nothing_with_the_lab_off,
+│                                        // a_dropped_file_hovers_then_queues_a_job,
+│                                        // dropped_files_queue_one_at_a_time,
+│                                        // cancel_stops_the_running_file_and_the_queue,
+│                                        // a_drop_after_cancel_waits_for_the_cancelled_worker,
+│                                        // a_file_of_unknown_length_says_transcribing_without_a_percentage,
+│                                        // a_file_hex_cannot_read_is_refused,
+│                                        // a_saved_transcript_where_it_is_and_dismisses,
+│                                        // the_labs_card_offers_a_file_choice_only_with_its_lab_on (rune_ui/tests/drop_transcribe.rs);
+│                                        // the_first_free_name_numbering_counts_up, a_transcript_never_overwrites_an_earlier_one,
+│                                        // a_file_beside_its_source_keeps_its_own_folder,
+│                                        // a_writable_source_folder_needs_no_downloads_folder,
+│                                        // an_unwritable_folder_sends_the_transcript_to_downloads,
+│                                        // a_file_in_the_temp_folder_sends_the_transcript_to_downloads,
+│                                        // a_temp_folder_reached_through_a_symlink_still_sends_the_transcript_to_downloads,
+│                                        // a_cancel_after_the_last_piece_stops_the_save,
+│                                        // a_truncated_wav_is_refused_before_anything_is_transcribed,
+│                                        // a_checked_wav_still_reads_from_its_first_sample,
+│                                        // only_the_formats_this_build_reads_are_accepted,
+│                                        // the_extensions_on_offer_are_the_ones_this_build_reads,
+│                                        // an_unsupported_file_is_refused_before_anything_loads,
+│                                        // the_bundled_mp3_decodes_to_sixteen_kilohertz_mono (transcription/file_transcript.rs);
+│                                        // drop_transcribe_is_its_own_switch_and_everywhere (labs.rs); no model
+│                                        // transcribed a dropped file, nothing ran on Wayland (no file drags), and no
+│                                        // macOS M4A, AIFF, or CAF decode ran
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Copy dictation audio no labs.copy_dictation_audio  History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one WAV file on the clipboard, ready to attach. Needs Keep recordings and stores no audio itself
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
@@ -3600,6 +3639,40 @@ route, so a skipped recording keeps the setting's pre-roll. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: a real Mac with wired and
 Bluetooth headphones and the lab on, and the Linux and Windows backends on a
 real desktop.
+
+Transcribe dropped audio (`drop-transcribe`, every OS): while on, the backend
+([transcription/file_transcript.rs](../../src/transcription/file_transcript.rs))
+takes a path and the saved model choice and starts its own
+`TranscriptionService` on the calling thread, so it must be called from a
+worker, never the window thread. A WAV is read through the shared pieces
+reader ([transcription/pieces.rs](../../src/transcription/pieces.rs)); an MP3
+goes through rodio on every OS, and M4A, AIFF, and CAF go through the meeting
+import bridge on macOS only. Every format is downmixed to mono, resampled to
+16 kHz, cut at most every 30 s, and each speechful piece is sent to the
+service in order; the pieces' text joins with one space. The whole transcript
+is written as `<stem>.txt` in the source's folder, never replacing an existing
+file (`<stem> 2.txt`, `<stem> 3.txt`, …), through a reserved name and an
+atomic rename. A file in the OS temp folder or in an unwritable folder has its
+transcript written to Downloads. Cancelling stops between pieces and while one
+waits for its transcript; progress is reported as the fraction of the file
+decoded. `FileTranscriptError` names the refusal in words: unsupported format,
+unreadable or corrupt file, no speech, model unavailable, transcription
+failed, cancelled, or the transcript could not be written. Checks:
+`the_first_free_name_numbering_counts_up`,
+`a_transcript_never_overwrites_an_earlier_one`,
+`a_file_beside_its_source_keeps_its_own_folder`,
+`an_unwritable_folder_sends_the_transcript_to_downloads`,
+`a_file_in_the_temp_folder_sends_the_transcript_to_downloads`,
+`only_the_formats_this_build_reads_are_accepted`,
+`an_unsupported_file_is_refused_before_anything_loads`, and
+`the_bundled_mp3_decodes_to_sixteen_kilohertz_mono` in
+[file_transcript.rs](../../src/transcription/file_transcript.rs);
+`drop_transcribe_is_its_own_switch_and_everywhere` in
+[labs.rs](../../src/labs.rs); the pieces tests moved unchanged to
+[pieces.rs](../../src/transcription/pieces.rs). The window's drop target is a
+later change: nothing in the app calls the backend yet, no model transcribed a
+dropped file, no macOS bridge decode ran, and no transcript was read by a
+person.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

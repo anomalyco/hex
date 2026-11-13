@@ -239,6 +239,14 @@ pub fn document_dir() -> Option<PathBuf> {
     dirs::document_dir()
 }
 
+/// The Downloads folder (Labs › Transcribe dropped audio saves there when a
+/// dropped file's own folder can't take its transcript): `dirs::download_dir`,
+/// else `Downloads` in the home folder.
+#[allow(dead_code)] // Labs › Transcribe dropped audio is the only caller so far.
+pub fn downloads_dir() -> Option<PathBuf> {
+    dirs::download_dir().or_else(|| home_dir().map(|home| home.join("Downloads")))
+}
+
 fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {
     home.join(".config")
         .join(if test_build { "hex-test" } else { "hex" })

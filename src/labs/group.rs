@@ -140,7 +140,8 @@ impl Feature {
             | Self::ModelInPlace
             | Self::KQuantModels
             | Self::PickerDownloaded
-            | Self::ParakeetUltra => Group::Models,
+            | Self::ParakeetUltra
+            | Self::DropTranscribe => Group::Models,
         }
     }
 }
