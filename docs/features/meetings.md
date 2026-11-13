@@ -523,8 +523,9 @@ Brave WebRTC `getUserMedia({audio: true})` reproduction on Pro confirmed
 
 The capsules have no `--snap` scene. `HEX_CAPSULE_SNAPS=<folder> cargo test
 --bin hex capsule_snapshots` renders the offer, its choices, the
-calendar reminders, and the automatic-recording states in light and dark on a
-Mac with a GPU.
+calendar reminders, the automatic-recording states, the recording pill (at
+rest, open, copied, silent, from a bottom corner) and the finished meeting
+panel in light and dark on a Mac with a GPU.
 
 ### Calendar Reminders
 
@@ -668,23 +669,33 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
-     ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
-     ├── Hover -> widens toward the screen with the actions below; pointer
-     │   leaving -> eases back to compact (a held press keeps it open)
+     ├── At rest: voice bars · mm:ss in a small pill, nothing else
+     │   ├── The bars follow the louder track's level (meeting::voice_level),
+     │   │   sampled every 50 ms on the ticker thread
+     │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
+     │       automatically" shows left of the bars
+     ├── Hover -> springs open into a panel: Stop (left) and the bars and time
+     │   in its header, then Copy new, Copy all, Copy agent prompt; pointer
+     │   leaving -> eases back to rest (a held press keeps it open). A bottom
+     │   corner opens upward, its header nearest the screen edge
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
      │   its centre and saves recording_indicator_corner (window settings too)
-     ├── Copy new (N) -> copies the turns not yet copied or pasted, through
+     ├── Copy new -> copies the turns not yet copied or pasted, through
      │   the click (see meetings.copy-through-now)
      │   ├── Shares Option-Control-V's cursor: either one advances both
-     │   ├── N = speaker turns the ticker has seen; always enabled while
-     │   │   recording, since the latest speech may not be counted yet
-     │   ├── "Transcribing…" (disabled) while it waits, then copies; "Copied" for 1.5 s
+     │   ├── Hint: "4 min new" / "8 sec new" (capture time of the turns the
+     │   │   ticker has seen), "Up to date", or "No speech yet"; always enabled
+     │   │   while recording, since the latest speech may not be counted yet
+     │   ├── "Transcribing…" while it waits, then copies; "✓ Copied" for 1.5 s
      │   └── The wait runs on its own thread, never on the main thread
      ├── Copy all -> the in-call transcript so far as speaker-turn Markdown;
      │   disabled until there is text
      │   └── Both read the Parakeet in-call transcript (TranscriptReader) once a
      │       second on the ticker thread, never on the main thread
-     ├── Open -> activates Hex, then opens the active meeting in the Meetings pane
+     ├── Copy agent prompt -> a prompt telling a coding agent to read this
+     │   meeting with `hex meetings show <id> --md`, catch up with
+     │   `--from <mm:ss>` from the last turn copied into it, and search with
+     │   `hex meetings search` (agent_prompt; the hex path is this executable)
      └── Stop -> Stop & Transcribe
   -> Settings window may stay closed
 
@@ -698,8 +709,8 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> No timeout; nothing stops automatically
 
 Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.panel-drag
-  The panel capsules: offer, reminder, left the call, Meeting transcript
-  ready, Recording automatically
+  The panel capsules: offer, reminder, left the call, the finished meeting,
+  Recording automatically
   -> On: each opens in the saved recording_indicator_corner (read as it shows)
      ├── Drag its body -> follows the pointer; release -> snaps to the corner
      │   nearest its centre (by its own width) and saves it, so the recording
@@ -936,14 +947,17 @@ The capsules are Rune overlays in [meeting_capsules.rs](../../src/rune_ui/meetin
 interactive, non-activating `NSPanel`s at status level on every Space,
 fed by the controller events the menu-bar pump receives
 ([macos_rune.rs](../../src/macos_rune.rs)). The offer (20 s), "left the
-call", ready (15 s, Copy / Reveal / ✕, notes refresh) and a recording capsule
-(title, elapsed time, Copy new, Copy all, Open, Stop, in the configured
-corner, compact until hovered, dragged between corners) are ported. Copy new
-and Copy all are checked by
-`the_recording_capsule_copies_the_in_call_transcript` and
-`copy_new_copies_the_transcript_read_through_the_click`, and rendered by
-`capsule_snapshots` (`recording-empty`, `-live`, `-transcribing`, `-copied`,
-`-open`, `-left`); they have not been clicked on a real Mac. Hover and the corner snap
+call", the finished meeting panel (15 s, title, summary, Copy new, Copy all,
+Copy agent prompt, notes refresh) and a recording pill (voice bars and
+elapsed time at rest; Stop, Copy new, Copy all, Copy agent prompt under the
+pointer; in the configured corner, dragged between corners) are ported. The
+copies are checked by `the_recording_capsule_copies_the_in_call_transcript`,
+`copy_new_copies_the_transcript_read_through_the_click`,
+`copy_new_says_how_much_is_new`, `the_agent_prompt_names_real_commands`, and
+`the_ready_panel_copies_the_finished_meeting`, and rendered by
+`capsule_snapshots` (`recording-rest`, `-hover`, `-copied`, `-transcribing`,
+`-empty`, `-silent`, `-hover-bottom-left`, `ready-finished`); the minimal
+panel (2026-11-12) has not been clicked on a real Mac. Hover and the corner snap
 are checked by `the_recording_capsule_rests_compact_and_opens_under_the_pointer`,
 `dragging_the_recording_capsule_moves_it_and_snaps_to_a_corner`, and
 `a_released_capsule_snaps_to_the_corner_nearest_its_centre`; neither has been
@@ -1245,10 +1259,16 @@ Final publication                                   // meetings.output
     │   follow
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
-Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
-    // Reveal on Windows selects the exported Markdown in Explorer; only the
-    // explorer_select argument unit test checks it, not observed on a real
-    // Windows machine
+Finished meeting panel (15 s, kept open while the pointer is over it; it
+    closes when the pointer leaves after that) -> title · length, the
+    summary while notes are on (or "Writing a title and summary with Apple
+    Intelligence…", or "Markdown not saved: …"), then the recording's copies
+    ├── Copy new -> the turns not yet copied or pasted, from the final
+    │   transcript read off the main thread after the panel shows
+    ├── Copy all -> Markdown, or speaker turns as a fallback
+    └── Copy agent prompt -> `hex meetings show <id> --md` and search
+    (the_ready_panel_copies_the_finished_meeting,
+    a_ready_panel_whose_time_ran_out_closes_when_the_pointer_leaves)
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy
     transcript icon, Reveal files (opens the recording folder), and Reveal
     Markdown (selects the exported .md) while the export exists
@@ -1485,8 +1505,8 @@ Unavailable (not eligible / Apple Intelligence off / model not ready / macOS < 2
   -> Settings row says why; nothing runs
 Meetings pane -> title in list and detail; Summary paragraph above the transcript;
   "Summarize" / "Regenerate summary" / "Summarizing…" in the overflow menu
-Transcript ready capsule -> "Ready · <title>" once a provisional or final title
-  exists; subtitle "Summarizing with Apple Intelligence…", then the summary
+Finished meeting panel -> the shown title; "Writing a title and summary with
+  Apple Intelligence…" under it, then the summary (at most three lines)
 ```
 
 Title rule: the shown title is the user's title unless it is still the default

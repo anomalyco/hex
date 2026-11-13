@@ -1015,9 +1015,6 @@ impl Pump {
                     *shown = title;
                 }
             }
-            ControllerEvent::OpenMeeting(id) => {
-                show(&self.window, Destination::Meetings(Some(id)));
-            }
             ControllerEvent::CallEnded { app, auto_stop } => {
                 if auto_stop {
                     tracing::info!(%app, "the call ended; the recording stops after its grace unless kept");

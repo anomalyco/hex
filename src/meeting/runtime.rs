@@ -192,13 +192,6 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             tracing::info!(id = %manifest.id, "meeting transcript ready");
             *state = MeetingMenuState::Idle;
         }
-        ControllerEvent::OpenMeeting(id) => {
-            let id = id.clone();
-            window.update(move |ui, tx| {
-                crate::rune_ui::show(ui, Destination::Meetings(Some(id)), tx)
-            });
-            window.open();
-        }
         ControllerEvent::Failed { title, error } => {
             tracing::error!(%title, %error, "meeting failed");
             *state = MeetingMenuState::Idle;
