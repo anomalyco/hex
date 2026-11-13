@@ -397,6 +397,22 @@ pub fn api_timestamps() -> bool {
     on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
 }
 
+/// The browser origins the local API answers with CORS, while Labs › Browser
+/// access to the local API is on (read as each request's `Origin` is
+/// checked). Empty turns every response back to what it was, without CORS.
+pub fn api_browser_origins() -> Vec<String> {
+    // A process that never applied its settings still loads its saved
+    // switches on the first read, as `screen_vocabulary` does.
+    let _ = state();
+    if !API_BROWSER_ACCESS.load(Ordering::Acquire) || !Feature::ApiBrowserAccess.on_this_os() {
+        return Vec::new();
+    }
+    API_BROWSER_ORIGINS
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).

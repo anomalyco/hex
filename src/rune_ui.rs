@@ -708,6 +708,7 @@ struct Drafts {
     modes: bool,
     vocabulary: bool,
     phrase: bool,
+    origins: bool,
 }
 
 impl Ui {
@@ -882,6 +883,10 @@ impl Ui {
             &submitted.labs.voice_prompt_phrase,
             &candidate.labs.voice_prompt_phrase,
         );
+        self.lab_store.rebase_origins(
+            &submitted.labs.api_browser_origins,
+            &candidate.labs.api_browser_origins,
+        );
         self.settings = candidate;
         self.modes.committed(&self.settings);
         self.draft_since = None;
@@ -903,6 +908,7 @@ impl Ui {
         self.modes.project(&mut candidate);
         candidate.vocabulary = self.vocabulary.project();
         self.lab_store.project_phrase(&mut candidate);
+        self.lab_store.project_origins(&mut candidate);
         candidate
     }
 
@@ -915,6 +921,7 @@ impl Ui {
             modes: modes.dictation_processing != settings.dictation_processing,
             vocabulary: self.vocabulary.project() != settings.vocabulary,
             phrase: self.lab_store.phrase_dirty(settings),
+            origins: self.lab_store.origins_dirty(settings),
         }
     }
 
@@ -1106,6 +1113,19 @@ impl Ui {
                 self.lab_store.rebase_phrase(
                     &self.settings.labs.voice_prompt_phrase,
                     &service.labs.voice_prompt_phrase,
+                );
+            }
+            // The origins field follows its lab and its saved list the same
+            // way; a toggled lab resyncs it, dropping a stale draft.
+            if service.labs.api_browser_access != self.settings.labs.api_browser_access {
+                self.lab_store
+                    .sync_origins(&service.labs.api_browser_origins);
+            } else if !drafts.origins
+                && service.labs.api_browser_origins != self.settings.labs.api_browser_origins
+            {
+                self.lab_store.rebase_origins(
+                    &self.settings.labs.api_browser_origins,
+                    &service.labs.api_browser_origins,
                 );
             }
             self.settings = service.clone();

@@ -166,6 +166,7 @@ impl Feature {
             | Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::ApiTimestamps
+            | Self::ApiBrowserAccess
             | Self::SpeakersOnly
             | Self::PauseMenu
             | Self::PrintStart
@@ -250,7 +251,10 @@ impl Feature {
             | Self::PauseMenu
             | Self::HistoryMultiSelect => 20261110,
             Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
-            Self::ScreenVocabulary | Self::VoicePrompt | Self::CopyCaptureZip => 20261112,
+            Self::ScreenVocabulary
+            | Self::VoicePrompt
+            | Self::CopyCaptureZip
+            | Self::ApiBrowserAccess => 20261112,
         }
     }
 
@@ -282,6 +286,9 @@ impl Feature {
         }
         if key == "labs.appearance_theme" {
             return Some(Self::Appearance);
+        }
+        if key == "labs.api_browser_origins" {
+            return Some(Self::ApiBrowserAccess);
         }
         if key == "capture.replay_hotkey" {
             return Some(Self::AnnotateReplay);
@@ -378,6 +385,7 @@ impl Feature {
             | Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::ApiTimestamps
+            | Self::ApiBrowserAccess
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::SpeakersOnly => true,
@@ -459,6 +467,7 @@ impl Feature {
             Self::TranscribeFiles => "transcribe-files",
             Self::ApiProcessing => "api-processing",
             Self::ApiTimestamps => "api-timestamps",
+            Self::ApiBrowserAccess => "api-browser-access",
             Self::SpeakersOnly => "speakers-only",
             Self::PauseMenu => "pause-menu",
             Self::PrintStart => "print-start",
@@ -543,6 +552,7 @@ impl Feature {
             Self::TranscribeFiles => "labs.transcribe_files",
             Self::ApiProcessing => "labs.api_processing",
             Self::ApiTimestamps => "labs.api_timestamps",
+            Self::ApiBrowserAccess => "labs.api_browser_access",
             Self::SpeakersOnly => "labs.speakers_only",
             Self::PauseMenu => "labs.pause_menu",
             Self::PrintStart => "labs.print_start",
@@ -631,6 +641,7 @@ impl Feature {
             Self::TranscribeFiles => settings.labs.transcribe_files,
             Self::ApiProcessing => settings.labs.api_processing,
             Self::ApiTimestamps => settings.labs.api_timestamps,
+            Self::ApiBrowserAccess => settings.labs.api_browser_access,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
@@ -716,6 +727,7 @@ impl Feature {
             &mut labs.transcribe_files,
             &mut labs.api_processing,
             &mut labs.api_timestamps,
+            &mut labs.api_browser_access,
             &mut labs.speakers_only,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
@@ -808,6 +820,7 @@ impl Feature {
             Self::TranscribeFiles => settings.labs.transcribe_files = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
+            Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
@@ -951,6 +964,17 @@ static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 /// is full, so this lab has its own atomic.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Browser access to the local API's switch, set beside [`STATE`]
+/// like [`PRINT_START`]: the state word is full, so this lab has its own
+/// atomic, written by [`state`] and [`apply`].
+static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
+
+/// The origins Labs › Browser access to the local API allows, set beside
+/// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
+/// and empty while the lab is off.
+static API_BROWSER_ORIGINS: LazyLock<RwLock<Vec<String>>> =
+    LazyLock::new(|| RwLock::new(Vec::new()));
+
 /// The words that start a voice prompt, set beside [`STATE`] by [`state`] and
 /// [`apply`]. An invalid saved phrase reads as the default.
 static VOICE_PROMPT_PHRASE: LazyLock<RwLock<String>> =
@@ -976,6 +1000,7 @@ fn state() -> u64 {
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
+                store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
             STATE.load(Ordering::Acquire)
@@ -1021,6 +1046,31 @@ fn copy_capture_zip_enabled(settings: &LabsSettings) -> bool {
         && Feature::CopyCaptureZip.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Browser access to the local API in this
+/// build, before its managed lock; the state word has no bit for it.
+fn api_browser_access_enabled(settings: &LabsSettings) -> bool {
+    settings.api_browser_access
+        && Feature::ApiBrowserAccess.shipped()
+        && Feature::ApiBrowserAccess.managed().is_none()
+}
+
+/// Keeps the switch and the origins the local API allows: normalized, and
+/// only while the lab is on. An entry that isn't an origin never widens the
+/// list. The origins are stored first, so a gate read between the two stores
+/// sees no origin this save just disallowed.
+fn store_api_browser_access(settings: &LabsSettings) {
+    let enabled = api_browser_access_enabled(settings);
+    let origins = if enabled {
+        crate::app_settings::normalize_browser_origins(&settings.api_browser_origins)
+    } else {
+        Vec::new()
+    };
+    *API_BROWSER_ORIGINS
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = origins;
+    API_BROWSER_ACCESS.store(enabled, Ordering::Release);
+}
+
 /// Records the trigger phrase matching reads; an invalid value never turns
 /// matching off.
 fn store_voice_prompt_phrase(phrase: &str) {
@@ -1056,6 +1106,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
+    store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
@@ -1972,6 +2023,47 @@ mod tests {
         assert_eq!(state & TYPED_TEXT, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert!(Feature::ApiProcessing.on_this_os());
+    }
+
+    #[test]
+    fn api_browser_access_is_its_own_switch_and_keeps_normalized_origins() {
+        // A process that never applied still loads its saved switches on the
+        // first gate read; do that before this test stores its own.
+        let _ = state();
+        let mut labs = LabsSettings::default();
+        assert!(!api_browser_access_enabled(&labs));
+        assert!(api_browser_origins().is_empty());
+        assert!(
+            Feature::ApiBrowserAccess.on_this_os(),
+            "the local API exists on every OS"
+        );
+        assert_eq!(Feature::ApiBrowserAccess.added(), 20261112);
+        assert_eq!(Feature::ApiBrowserAccess.audience(), Audience::Everyone);
+        assert_eq!(Feature::ApiBrowserAccess.group(), Group::Output);
+        assert_eq!(
+            Feature::ApiBrowserAccess.settings_key(),
+            "labs.api_browser_access"
+        );
+        assert_eq!(Feature::ApiBrowserAccess.name(), "api-browser-access");
+
+        labs.api_browser_access = true;
+        labs.api_browser_origins = vec![
+            "HTTPS://Example.com:443/".into(),
+            "*".into(),
+            "http://localhost:5173".into(),
+            "https://example.com".into(),
+        ];
+        assert!(api_browser_access_enabled(&labs));
+        store_api_browser_access(&labs);
+        assert_eq!(
+            api_browser_origins(),
+            vec!["https://example.com", "http://localhost:5173"]
+        );
+
+        // The switch off allows nothing, whatever the saved list says.
+        labs.api_browser_access = false;
+        store_api_browser_access(&labs);
+        assert!(api_browser_origins().is_empty());
     }
 
     #[test]

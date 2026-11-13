@@ -429,6 +429,26 @@ fn an_invalid_voice_prompt_phrase_loads_the_default_and_keeps_its_switch() {
 }
 
 #[test]
+fn browser_origins_load_normalized_and_ignore_anything_that_is_not_one() {
+    let file = SettingsFile::new(
+        br#"{"labs":{"api_browser_access":true,"api_browser_origins":["HTTPS://Example.com:443/","*","not an origin","http://localhost:5173"]}}"#,
+    );
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.api_browser_access);
+    assert_eq!(
+        settings.labs.api_browser_origins,
+        vec!["https://example.com", "http://localhost:5173"]
+    );
+    // The normalized list is what the next read sees, so an entry that
+    // isn't an origin can never widen what the local API allows.
+    let saved: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert_eq!(
+        saved["labs"]["api_browser_origins"],
+        json!(["https://example.com", "http://localhost:5173"])
+    );
+}
+
+#[test]
 fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,

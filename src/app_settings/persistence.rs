@@ -194,6 +194,14 @@ impl AppSettings {
         }
         settings.apply_one_time_migrations();
         settings.normalize_transcription_recents();
+        // Labs › Browser access to the local API: an entry that isn't an
+        // absolute HTTP(S) origin is ignored, never widened into a match.
+        let origins =
+            crate::app_settings::normalize_browser_origins(&settings.labs.api_browser_origins);
+        if origins != settings.labs.api_browser_origins {
+            warn("labs.api_browser_origins", "not an http(s) origin");
+            settings.labs.api_browser_origins = origins;
+        }
         settings
             .keyboard_model_switching
             .mappings

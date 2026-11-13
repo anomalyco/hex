@@ -219,6 +219,12 @@ pub struct LabsSettings {
     /// The local API's `timestamps=segment|word` returns the speech model's
     /// own segment and word times.
     pub api_timestamps: bool,
+    /// Web pages from `api_browser_origins` may call Hex's local API from
+    /// the browser (Labs › Browser access to the local API).
+    pub api_browser_access: bool,
+    /// The origins allowed while `api_browser_access` is on, each
+    /// `scheme://host[:port]`; an entry that isn't one is ignored.
+    pub api_browser_origins: Vec<String>,
     /// "While dictating" applies only while the default output is speakers;
     /// headphones are left alone.
     pub speakers_only: bool,
@@ -367,6 +373,8 @@ impl Default for LabsSettings {
             transcribe_files: false,
             api_processing: false,
             api_timestamps: false,
+            api_browser_access: false,
+            api_browser_origins: Vec::new(),
             speakers_only: false,
             app_model_switching: false,
             pause_menu: false,

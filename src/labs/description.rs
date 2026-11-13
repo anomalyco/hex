@@ -205,6 +205,9 @@ impl Feature {
             Self::ApiTimestamps => {
                 "Let apps using Hex's local API ask for each segment's or word's start and end times in the transcript, as the speech model heard them"
             }
+            Self::ApiBrowserAccess => {
+                "Let web pages from the origins you list call Hex's local API from the browser; every request still needs the API token"
+            }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
             }

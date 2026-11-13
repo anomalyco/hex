@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use super::cors::CorsOrigin;
 use super::{HEADER_DEADLINE, MAX_HEADER_BYTES, MAX_HEADERS, MAX_PATH_BYTES};
 
 pub(super) struct HttpRequest {
@@ -15,6 +16,10 @@ pub(super) struct HttpRequest {
     pub(super) stream_token: Option<String>,
     pub(super) content_type: Option<String>,
     pub(super) content_length: Option<usize>,
+    /// The browser page that made the request, when it sent one.
+    pub(super) origin: Option<String>,
+    /// `Access-Control-Request-Private-Network: true` on a preflight.
+    pub(super) private_network: bool,
     pub(super) body_prefix: Vec<u8>,
 }
 
@@ -23,6 +28,8 @@ pub(super) struct HttpResponse {
     pub(super) reason: &'static str,
     pub(super) content_type: Option<&'static str>,
     pub(super) body: Vec<u8>,
+    /// Lines a preflight adds; every other response has none.
+    pub(super) headers: Vec<(&'static str, &'static str)>,
 }
 
 pub(super) fn body_read_response(error: BodyReadError) -> HttpResponse {
@@ -96,19 +103,38 @@ pub(super) fn read_body_bounded(
     Ok(())
 }
 
-pub(super) fn write_sse_headers(stream: &mut TcpStream) -> std::io::Result<()> {
-    write_stream_headers(stream, "text/event-stream")
+pub(super) fn write_sse_headers(
+    stream: &mut TcpStream,
+    cors: Option<&CorsOrigin>,
+) -> std::io::Result<()> {
+    write_stream_headers(stream, "text/event-stream", cors)
 }
 
 pub(super) fn write_stream_headers(
     stream: &mut TcpStream,
     content_type: &str,
+    cors: Option<&CorsOrigin>,
 ) -> std::io::Result<()> {
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n"
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n"
     )?;
+    write_cors_headers(stream, cors)?;
+    stream.write_all(b"\r\n")?;
     stream.flush()
+}
+
+/// The lines every response for an allowed browser origin carries: that
+/// origin, never `*`, and `Vary: Origin` so a cache keeps them apart.
+fn write_cors_headers(stream: &mut TcpStream, cors: Option<&CorsOrigin>) -> std::io::Result<()> {
+    if let Some(cors) = cors {
+        write!(
+            stream,
+            "Access-Control-Allow-Origin: {}\r\nVary: Origin\r\n",
+            cors.origin
+        )?;
+    }
+    Ok(())
 }
 
 pub(super) fn write_sse(stream: &mut TcpStream, value: &impl Serialize) -> std::io::Result<()> {
@@ -125,6 +151,32 @@ impl HttpResponse {
             reason: reason(status),
             content_type: None,
             body: Vec::new(),
+            headers: Vec::new(),
+        }
+    }
+
+    /// A CORS preflight answer, without a body: the methods and request
+    /// headers a browser page calls this API with. The allow-origin and
+    /// `Vary` lines come from the response writer, so a refused origin never
+    /// gets them.
+    pub(super) fn preflight(private_network: bool) -> Self {
+        let mut headers = vec![
+            ("Access-Control-Allow-Methods", "GET, POST"),
+            (
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token",
+            ),
+            ("Access-Control-Max-Age", "600"),
+        ];
+        if private_network {
+            headers.push(("Access-Control-Allow-Private-Network", "true"));
+        }
+        Self {
+            status: 204,
+            reason: reason(204),
+            content_type: None,
+            body: Vec::new(),
+            headers,
         }
     }
 
@@ -135,6 +187,7 @@ impl HttpResponse {
                 reason: reason(status),
                 content_type: Some("application/json"),
                 body,
+                headers: Vec::new(),
             },
             Err(error) => {
                 tracing::error!(%error, "could not serialize local API response");
@@ -258,6 +311,9 @@ pub(super) fn read_request_until(
     let mut stream_token = None;
     let mut content_type = None;
     let mut content_length = None;
+    let mut origin = None;
+    let mut origin_ambiguous = false;
+    let mut private_network = false;
     for (index, line) in lines.enumerate() {
         if index >= MAX_HEADERS {
             return Err(RequestReadError::TooLarge);
@@ -275,6 +331,18 @@ pub(super) fn read_request_until(
                 return Err(RequestReadError::Invalid);
             }
             stream_token = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("origin") {
+            // Two Origin headers name no one origin, so the request earns no
+            // CORS permission; it is still routed as it was before the lab
+            // existed.
+            if origin_ambiguous || origin.is_some() {
+                origin = None;
+                origin_ambiguous = true;
+            } else {
+                origin = Some(value.trim().to_owned());
+            }
+        } else if name.eq_ignore_ascii_case("access-control-request-private-network") {
+            private_network |= value.trim().eq_ignore_ascii_case("true");
         } else if name.eq_ignore_ascii_case("content-type") {
             content_type = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-length") {
@@ -303,6 +371,8 @@ pub(super) fn read_request_until(
         stream_token,
         content_type,
         content_length,
+        origin,
+        private_network,
         body_prefix,
     })
 }
@@ -310,6 +380,7 @@ pub(super) fn read_request_until(
 pub(super) fn write_response(
     stream: &mut TcpStream,
     response: HttpResponse,
+    cors: Option<&CorsOrigin>,
 ) -> std::io::Result<()> {
     write!(
         stream,
@@ -321,6 +392,10 @@ pub(super) fn write_response(
     if let Some(content_type) = response.content_type {
         write!(stream, "Content-Type: {content_type}\r\n")?;
     }
+    for (name, value) in &response.headers {
+        write!(stream, "{name}: {value}\r\n")?;
+    }
+    write_cors_headers(stream, cors)?;
     stream.write_all(b"\r\n")?;
     stream.write_all(&response.body)?;
     stream.flush()
