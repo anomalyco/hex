@@ -2567,6 +2567,28 @@ fn the_labs_store_filters_by_tab_chip_and_search() {
 }
 
 #[test]
+fn the_labs_search_clear_button_empties_the_field_and_brings_every_card_back() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    unfold_labs(&mut rt);
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    settle(&mut rt);
+    assert!(rt.find("lab-card-live-text").is_some());
+    assert!(
+        rt.find("lab-card-mouse-shortcuts").is_none(),
+        "the search filters"
+    );
+    tap(&mut rt, "labs-search/action");
+    assert!(
+        rt.state.lab_store.search.text.is_empty(),
+        "the clear button empties the field"
+    );
+    assert!(
+        rt.find("lab-card-mouse-shortcuts").is_some(),
+        "and the filtered-out cards come back"
+    );
+}
+
+#[test]
 fn a_lone_lab_card_keeps_half_the_row() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     unfold_labs(&mut rt);
