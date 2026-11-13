@@ -1733,10 +1733,13 @@ stopped automatically after its page named another call". Its deadline is
 separate from the absence one because a browser still on the microphone keeps
 the call app present, which drops that one every pass. Keep recording
 disarms both and `CallSwitch::keep()` remembers the code so it never ends
-this recording, however long it shows; a third code still does. A page that
-names no call (mail, another site, a failed read) never ends a recording: the
-signal is a positive read of a different code, and the read is the browser's
-front tab alone, so switching to a non-meeting tab mid-call stops nothing.
+this recording, however long it shows; a third code still does, and a
+Keep recording after the microphone-release capsule never forgets it. Hex
+reads that page about every 2 s while such a recording runs; a page that
+names no call (mail, another site) never ends it, so switching to a
+non-meeting tab mid-call stops nothing. The 4 s and the grace mean roughly
+the next call's first half-minute lands in the previous recording, and the
+next recording starts once this one finishes transcribing.
 Detection is untouched: once the recording finishes, the new code is offered
 or recorded as a new call rather than snoozed as the first one (#1113). Limits:
 only calls whose page names a code carry this signal (Google Meet today; a
@@ -1751,8 +1754,10 @@ in [labs.rs](../../src/labs.rs), and the auto-stop checks listed in
 `keeping_a_different_call_never_ends_the_recording_for_that_code`,
 `a_call_switch_without_a_recorded_code_never_fires`,
 `a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
-`only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`, and
-`keep_recording_disarms_the_call_switch_stop_too`. Not yet observed: a real
+`a_watched_page_is_queried_every_two_seconds_instead_of_backing_off`,
+`only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
+`keep_recording_disarms_the_call_switch_stop_too`, and
+`keep_recording_keeps_the_code_that_was_counting`. Not yet observed: a real
 WhatsApp, Zoom, or Teams call on a Mac with the toggle on, or a real Meet call
 switched in the same Arc window; the row renders only in macOS builds, so no
 golden changes.

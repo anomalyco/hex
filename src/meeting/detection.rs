@@ -457,7 +457,9 @@ impl CallSwitch {
         self.observe_at(current, Instant::now())
     }
 
-    fn observe_at(&mut self, current: Option<&str>, now: Instant) -> bool {
+    /// [`Self::observe`] at `now`; the watcher's tests drive it on their own
+    /// clock.
+    pub(crate) fn observe_at(&mut self, current: Option<&str>, now: Instant) -> bool {
         let Some(current) = current else {
             return false;
         };
@@ -493,10 +495,13 @@ impl CallSwitch {
     }
 
     /// Keep recording: the different code showing now never ends this
-    /// recording, however long it stays.
+    /// recording, however long it stays. Called with nothing counting (the
+    /// capsule's Keep recording after a microphone release), it forgets
+    /// nothing: an earlier kept code still never ends this recording.
     pub fn keep(&mut self) {
-        self.kept = self.changed.as_ref().map(|changed| changed.code.clone());
-        self.changed = None;
+        if let Some(changed) = self.changed.take() {
+            self.kept = Some(changed.code);
+        }
     }
 }
 
@@ -2293,6 +2298,8 @@ mod tests {
         assert!(switching.switch.changed());
         switching.switch.keep();
         assert!(!switching.switch.changed());
+        // Keeping again with nothing counting never forgets the code.
+        switching.switch.keep();
         // The kept page stays for twenty seconds and never asks again.
         assert!(switching.run(Some("xyz-wxyz-xyz"), 20_000).is_empty());
         // A third call is still a switch.

@@ -484,6 +484,7 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_reset_drops_the_answer_in_flight_without_starting_a_second_query`,
 `an_answer_is_dated_by_when_its_query_finished`,
 `tab_queries_back_off_after_the_first_thirty_seconds_and_reset`,
+`a_watched_page_is_queried_every_two_seconds_instead_of_backing_off`,
 `a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer`,
 `a_call_switch_fires_once_after_another_code_holds_for_a_few_seconds`,
 `a_brief_glance_at_another_call_does_not_end_a_recording`,
@@ -491,7 +492,8 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_call_switch_without_a_recorded_code_never_fires`,
 `a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
 `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
-`keep_recording_disarms_the_call_switch_stop_too` and
+`keep_recording_disarms_the_call_switch_stop_too`,
+`keep_recording_keeps_the_code_that_was_counting` and
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
 `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
@@ -756,17 +758,19 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      the microphone and output stay open after leaving one call and joining
      the next, so the absence above never comes
      ├── A call whose page named its code (Google Meet today) keeps that
-     │   browser's page being read every 2 s for the recording
+     │   browser's page being read about every 2 s for the recording; a page
+     │   that names no call (mail, another site) never ends it
      ├── The page naming a different code for 4 s (CALL_CHANGED_AFTER,
      │   CallSwitch in meeting/detection.rs) is a different call: the same
      │   "left the call" capsule, with the 30 s grace, then Stop & Transcribe;
      │   logged "the page named a different call; the recording stops after
      │   its grace unless kept" and "meeting recording stopped automatically
      │   after its page named another call"
+     ├── That grace puts roughly the next call's first half-minute in the
+     │   previous recording; the next one starts once this one finishes
+     │   transcribing
      ├── Keep recording -> nothing stops for that code, however long it shows;
      │   a third code still ends the recording
-     ├── A tab that names no call (mail, another site, no page read) never
-     │   ends a recording: only a page that positively names a code does
      ├── The next call is detected normally once the recording finishes: the
      │   new code is not snoozed by the old one (#1113)
      └── Only calls whose page names a code (Google Meet today): a browser

@@ -956,9 +956,7 @@ fn poll_recording(
                     .find(|candidate| candidate.canonical_bundle_id() == Some(application))
             });
             if let Some(microphone) = microphone {
-                let context = browser.recording_context(microphone, |bundle_id| {
-                    detector.is_application_snoozed(bundle_id)
-                });
+                let context = browser.recording_context(microphone);
                 let current =
                     candidate_from_microphone(microphone, &context, crate::labs::more_call_apps())
                         .and_then(|candidate| candidate.call);
@@ -975,8 +973,9 @@ fn poll_recording(
                         auto_stop: true,
                     });
                 }
-                // The page names the recorded call (or a tab with no call):
-                // whatever change was counting is over.
+                // The page names the recorded call again (or one the user
+                // kept): whatever change was counting is over. A page that
+                // names no call neither starts nor ends a count.
                 if !active.call_switch.changed() {
                     active.call_stop.disarm();
                 }
@@ -998,10 +997,12 @@ fn poll_recording(
 /// Whether a recording watches its browser's page for another call (Labs ›
 /// Stop when the call ends) instead of dropping the page while it records:
 /// only one Hex started on its own, for a call whose page named its code, in
-/// a browser. Every other recording keeps the browser watch reset.
+/// a browser, and that has not been told to stop yet. Every other recording
+/// keeps the browser watch reset.
 fn watching_call_switch(recording: Option<&ActiveRecording>, lab_on: bool) -> bool {
     recording.is_some_and(|active| {
-        active.call_switch.recorded().is_some()
+        !active.stop.load(Ordering::Relaxed)
+            && active.call_switch.recorded().is_some()
             && active.application.as_deref().is_some_and(|application| {
                 crate::microphone_activity::is_browser_id(Some(application))
             })
@@ -1239,16 +1240,20 @@ impl BrowserWatch {
 
     /// The page while a recording watches it for another call (Labs › Stop
     /// when the call ends): read every couple of seconds rather than backing
-    /// off, so a call switched to in the same browser is named.
-    fn recording_context(
-        &mut self,
-        application: &ActiveMicrophoneApplication,
-        snoozed: impl Fn(&str) -> bool,
-    ) -> ContextSnapshot {
+    /// off, so a call switched to in the same browser is named. It is the
+    /// probe's newest answer, never `BrowserPageMemory`'s: a page seen once
+    /// must not name the call for 60 s while the reads fail.
+    fn recording_context(&mut self, application: &ActiveMicrophoneApplication) -> ContextSnapshot {
+        if !application.is_browser() {
+            return ContextSnapshot::default();
+        }
+        let Some(bundle_id) = application.canonical_bundle_id() else {
+            return ContextSnapshot::default();
+        };
         self.probe.watching = true;
-        let context = self.context(Some(application), snoozed);
+        let page = self.probe.page(bundle_id, Instant::now());
         self.probe.watching = false;
-        context
+        page
     }
 }
 
@@ -1438,6 +1443,61 @@ mod tests {
     }
 
     #[test]
+    fn keep_recording_keeps_the_code_that_was_counting() {
+        use crate::meeting::detection::CALL_CHANGED_AFTER;
+        let (events, _received) = mpsc::sync_channel(4);
+        let mut active = active_recording(
+            Some("company.thebrowser.Browser"),
+            true,
+            Some("abc-defg-hij"),
+        );
+        // Another code has shown long enough to be a different call.
+        let base = Instant::now();
+        assert!(!active.call_switch.observe_at(Some("xyz-wxyz-xyz"), base));
+        assert!(
+            active
+                .call_switch
+                .observe_at(Some("xyz-wxyz-xyz"), base + CALL_CHANGED_AFTER)
+        );
+        assert!(active.call_switch.changed());
+        active.call_stop.arm();
+        let mut recording = Some(active);
+        handle_command(
+            &mut recording,
+            &mut None,
+            &mut MeetingDetector::default(),
+            &mut Reminders::default(),
+            ControllerCommand::KeepRecording,
+            true,
+            &events,
+        );
+        let active = recording.as_mut().unwrap();
+        assert!(!active.call_switch.changed());
+        assert!(!active.call_stop.disarm());
+        // Keeping again with nothing counting never forgets the kept code.
+        handle_command(
+            &mut recording,
+            &mut None,
+            &mut MeetingDetector::default(),
+            &mut Reminders::default(),
+            ControllerCommand::KeepRecording,
+            true,
+            &events,
+        );
+        let active = recording.as_mut().unwrap();
+        let later = base + Duration::from_secs(120);
+        assert!(!active.call_switch.observe_at(Some("xyz-wxyz-xyz"), later));
+        assert!(
+            !active
+                .call_switch
+                .observe_at(Some("xyz-wxyz-xyz"), later + CALL_CHANGED_AFTER),
+            "the kept code ended the recording anyway"
+        );
+        assert!(!active.call_switch.changed());
+        assert!(!active.stop.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn only_an_automatic_browser_call_with_a_code_keeps_reading_its_page() {
         let arc = Some("company.thebrowser.Browser");
         assert!(watching_call_switch(
@@ -1474,6 +1534,11 @@ mod tests {
             true
         ));
         assert!(!watching_call_switch(None, true));
+        // Once told to stop (transcribing), the page is dropped and detection
+        // resumes with a fresh burst.
+        let stopped = active_recording(arc, true, Some("abc-defg-hij"));
+        stopped.stop.store(true, Ordering::Relaxed);
+        assert!(!watching_call_switch(Some(&stopped), true));
     }
 
     #[test]
@@ -1693,6 +1758,41 @@ mod tests {
         probe.page("com.brave.Browser", at_61);
         assert_eq!(probe.started, Some(at_61));
         settle(&mut probe, at_61, 5);
+    }
+
+    #[test]
+    fn a_watched_page_is_queried_every_two_seconds_instead_of_backing_off() {
+        fn counted(_: &str) -> Result<ContextSnapshot> {
+            Ok(banshee_tab())
+        }
+        let mut probe = TabProbe::new(counted);
+        let started = Instant::now();
+        // A recording watches its page: two seconds, however long the browser
+        // has held the microphone.
+        probe.watching = true;
+        assert_eq!(
+            probe.interval("com.brave.Browser", started),
+            TAB_QUERY_WATCH
+        );
+        assert_eq!(
+            probe.interval("com.brave.Browser", started + Duration::from_secs(31)),
+            TAB_QUERY_WATCH
+        );
+        assert_eq!(
+            probe.interval("com.brave.Browser", started + Duration::from_secs(120)),
+            TAB_QUERY_WATCH
+        );
+        // Once nothing watches, detection resumes with a fresh burst, then
+        // backs off as before.
+        probe.watching = false;
+        assert_eq!(
+            probe.interval("com.brave.Browser", started + Duration::from_secs(120)),
+            TAB_QUERY_INTERVAL
+        );
+        assert_eq!(
+            probe.interval("com.brave.Browser", started + Duration::from_secs(150)),
+            TAB_QUERY_BACKOFF
+        );
     }
 
     #[test]
