@@ -3429,7 +3429,7 @@ fn typed_text_shows_its_recorder_only_with_its_lab() {
     );
 }
 
-/// Labs › Fix results in Output: the Try card offers Vocabulary and Fix
+/// Labs › Fix results in Output: the Try row offers Vocabulary and Fix
 /// this only with the toggle on, and Fix this copies for the sentence typed.
 #[test]
 fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() {
