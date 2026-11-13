@@ -2138,6 +2138,7 @@ mod tests {
             ],
             now_ms: 100_000,
             url: None,
+            terminal: None,
             sessions_error: None,
         }
     }

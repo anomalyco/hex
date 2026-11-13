@@ -17,6 +17,9 @@ use crate::opencode::{
 };
 
 mod read;
+mod terminal;
+
+pub use terminal::{Foreground, Pane, terminal_pane};
 
 /// Pages of newest root sessions read (100 each), besides the exact-folder and by-ID reads.
 pub const SESSION_PAGES: usize = 2;
@@ -32,8 +35,11 @@ pub struct Senses {
     pub tab: fn(Option<&str>, Option<&str>) -> Option<String>,
     /// The port on this Mac that serves `url`, when its host is this Mac.
     pub own_port: fn(&WebUrl) -> Option<u16>,
-    /// The folder and title of a terminal app's focused pane.
-    pub terminal: fn(&str) -> Option<(PathBuf, String)>,
+    /// A terminal app's focused pane, given the captured app's process when known.
+    pub terminal: fn(&str, Option<i32>) -> Option<Pane>,
+    /// Folders and the folder or session captures of a terminal there go to
+    /// (`routing.terminals`).
+    pub terminals: fn() -> Vec<(String, PathBuf)>,
     /// URL prefixes and the folders they serve (`routing.servers`).
     pub servers: fn() -> Vec<(String, PathBuf)>,
     /// URL prefixes and the folder or session their captures go to (`routing.sites`).
@@ -55,6 +61,7 @@ impl Default for Senses {
             tab: super::capture_url,
             own_port,
             terminal: terminal_pane,
+            terminals: || crate::env::get().config.terminal_rules(),
             servers: || crate::env::get().config.server_folders(),
             sites: || crate::env::get().config.site_rules(),
             apps: || crate::env::get().config.app_rules(),
@@ -69,6 +76,9 @@ impl Default for Senses {
 #[derive(Clone, Debug, Default)]
 pub struct Live {
     pub url: Option<String>,
+    /// The captured terminal's project folder, what a `routing.terminals` rule keys on (never
+    /// the home folder or `/`).
+    pub terminal: Option<PathBuf>,
     pub clues: Vec<Clue>,
     pub candidates: Vec<Candidate>,
     /// Why the sessions couldn't be read, when they couldn't.
@@ -101,29 +111,32 @@ pub fn look_live_by(
     deadline: Instant,
     senses: &Senses,
 ) -> Live {
-    look_live_observed(front, target, pid, deadline, senses, |_| {})
+    look_live_observed(front, target, pid, deadline, senses, |_, _| {})
 }
 
-/// Publishes the locally read URL before any session or page result is needed.
+/// Publishes the locally read URL, and then the terminal's folder, before any session or page
+/// result is needed.
 pub fn look_live_observed(
     front: Option<&str>,
     target: Option<&str>,
     pid: Option<i32>,
     deadline: Instant,
     senses: &Senses,
-    observed: impl FnOnce(Option<&str>),
+    mut observed: impl FnMut(Option<&str>, Option<&Path>),
 ) -> Live {
     let started = Instant::now();
     let left = || deadline.saturating_duration_since(Instant::now());
     let mut url = None;
     let mut clues = Vec::new();
+    let mut pane = None;
+    let mut terminal = None;
     let mut local = Duration::ZERO;
     let Read {
         mut candidates,
         error,
     } = read::while_looking(senses.hooks.api, left().min(super::LOOK_BUDGET), || {
         url = (senses.tab)(front, target);
-        observed(url.as_deref());
+        observed(url.as_deref(), None);
         clues = url
             .as_deref()
             .filter(|_| !left().is_zero())
@@ -136,30 +149,25 @@ pub fn look_live_observed(
         }
         // Read beside the sessions, so its folder's and session's are read too.
         clues.extend(target.and_then(|id| app_rule_clue(id, &(senses.apps)())));
-        if let Some((cwd, title)) = [front, target]
+        pane = [front, target]
             .into_iter()
             .flatten()
             .filter(|_| !left().is_zero())
-            .find_map(|id| (senses.terminal)(id))
-        {
-            clues.push(Clue::new(
-                Source::Terminal,
-                Pointer::Folder(folder_of(&cwd)),
-                format!("the terminal's focused pane is in {}", cwd.display()),
-            ));
-            let title_words = words(&title);
-            if !title_words.is_empty() {
-                clues.push(Clue::new(
-                    Source::Title,
-                    Pointer::Words { words: title_words },
-                    format!("{TERMINAL_TITLE} \"{title}\""),
-                ));
-            }
+            .find_map(|id| (senses.terminal)(id, pid));
+        let mut also = Vec::new();
+        if let Some(pane) = &pane {
+            let (found, folder) = pane_clues(pane, &(senses.terminals)());
+            clues.extend(found);
+            terminal = folder;
+            observed(url.as_deref(), terminal.as_deref());
+            // Read by ID in case the title names no session read.
+            also.extend(pane.argv_session().map(str::to_owned));
         }
         local = started.elapsed();
-        targets(&clues, None, &[])
+        targets(&clues, None, &also)
     });
     let error = read_error(error, candidates.is_empty());
+    clues.extend(pane.and_then(|pane| open_session_clue(&pane, &candidates)));
     let looked = started.elapsed();
     if !left().is_zero() {
         look_at_page(url.as_deref(), &mut clues, &mut candidates, senses);
@@ -173,10 +181,100 @@ pub fn look_live_observed(
     ));
     Live {
         url,
+        terminal,
         clues,
         candidates,
         error,
     }
+}
+
+/// The clues a terminal's focused pane gives before the sessions are read: its folder, its
+/// title's words, and the `routing.terminals` rule covering its folder; and the folder such a
+/// rule keys on.
+pub fn pane_clues(pane: &Pane, terminals: &[(String, PathBuf)]) -> (Vec<Clue>, Option<PathBuf>) {
+    let mut clues = Vec::new();
+    let folder = pane.folder().map(folder_of);
+    if let Some(folder) = &folder
+        && !super::smart::is_home_or_root(&folder.root)
+    {
+        clues.push(Clue::new(
+            Source::Terminal,
+            Pointer::Folder(folder.clone()),
+            format!(
+                "the terminal's focused pane is in {}",
+                folder.path.display()
+            ),
+        ));
+    }
+    let shown = match terminal::tui_title(&pane.title) {
+        terminal::TuiTitle::Session(title) => title,
+        terminal::TuiTitle::Home => "",
+        terminal::TuiTitle::Other => &pane.title,
+    };
+    let title_words = words(shown);
+    if !title_words.is_empty() {
+        clues.push(Clue::new(
+            Source::Title,
+            Pointer::Words { words: title_words },
+            format!("{TERMINAL_TITLE} \"{}\"", pane.title),
+        ));
+    }
+    let root = folder
+        .map(|f| f.root)
+        .filter(|root| super::policy::is_terminal_folder(root));
+    clues.extend(
+        root.as_deref()
+            .and_then(|root| terminal_rule_clue(root, terminals)),
+    );
+    (clues, root)
+}
+
+/// The clue a `routing.terminals` rule covering `folder` gives.
+pub fn terminal_rule_clue(folder: &Path, terminals: &[(String, PathBuf)]) -> Option<Clue> {
+    let (key, to) = super::policy::terminal_rule(folder, terminals)?;
+    Some(Clue::new(
+        Source::TerminalRule,
+        rule_pointer(&to),
+        format!("routing.terminals sends {key} to {}", to.display()),
+    ))
+}
+
+/// The session OpenCode shows in the pane, once the sessions are read: the one its title names
+/// (`OC | <title>`), else the one its command line opened, unless that session's title shows
+/// the TUI has moved on. Nothing on OpenCode's home screen, or when several sessions fit the
+/// title and nothing tells them apart.
+pub fn open_session_clue(pane: &Pane, candidates: &[Candidate]) -> Option<Clue> {
+    if !pane.runs_opencode() {
+        return None;
+    }
+    let opened = pane.argv_session();
+    let (id, how) = match terminal::tui_title(&pane.title) {
+        terminal::TuiTitle::Home => return None,
+        terminal::TuiTitle::Session(shown) => {
+            match terminal::session_titled(shown, candidates, pane.folder(), opened) {
+                terminal::Titled::One(found) => (found.id.clone(), "its title"),
+                terminal::Titled::Several => return None,
+                terminal::Titled::None => {
+                    let opened = opened?;
+                    // Read by ID: when its title is known and isn't the one shown, the TUI has
+                    // moved to a session not read.
+                    if candidates.iter().any(|c| c.id == opened) {
+                        return None;
+                    }
+                    (opened.to_owned(), "its command line")
+                }
+            }
+        }
+        terminal::TuiTitle::Other => (opened?.to_owned(), "its command line"),
+    };
+    Some(Clue::new(
+        Source::TerminalSession,
+        Pointer::Session {
+            id,
+            directory: pane.folder().map(Path::to_path_buf),
+        },
+        format!("OpenCode is open in the captured terminal on this session ({how})"),
+    ))
 }
 
 /// How long finding a page's publisher may spend on OpenCode's API (reading sessions not read
@@ -452,8 +550,17 @@ pub fn dev_build_clue(bundle_id: Option<&str>, executable: &Path) -> Option<Clue
 /// The clue a `routing.apps` rule covering `bundle_id` gives.
 pub fn app_rule_clue(bundle_id: &str, apps: &[(String, PathBuf)]) -> Option<Clue> {
     let (key, to) = super::policy::app_rule(bundle_id, apps)?;
+    Some(Clue::new(
+        Source::AppRule,
+        rule_pointer(&to),
+        format!("routing.apps sends {key} to {}", to.display()),
+    ))
+}
+
+/// What an app or terminal rule's target points at: a `ses_` ID, else a folder and its tree.
+fn rule_pointer(to: &Path) -> Pointer {
     let text = to.to_string_lossy();
-    let pointer = if text.starts_with("ses_") && !text.contains('/') {
+    if text.starts_with("ses_") && !text.contains('/') {
         Pointer::Session {
             id: text.into_owned(),
             directory: None,
@@ -461,14 +568,9 @@ pub fn app_rule_clue(bundle_id: &str, apps: &[(String, PathBuf)]) -> Option<Clue
     } else {
         Pointer::Folder(Folder {
             tree: true,
-            ..folder_of(&to)
+            ..folder_of(to)
         })
-    };
-    Some(Clue::new(
-        Source::AppRule,
-        pointer,
-        format!("routing.apps sends {key} to {}", to.display()),
-    ))
+    }
 }
 
 /// The session `text` opens by addressing ("tell scrawl …"), as a [`Source::Named`] clue.
@@ -525,6 +627,7 @@ pub fn evidence_for(bundle: &ScrawlBundle, dir: &Path, live: Live) -> Evidence {
         candidates: live.candidates,
         now_ms: bundle.created_at_ms,
         url: live.url,
+        terminal: live.terminal,
         sessions_error: live.error,
     }
 }
@@ -537,11 +640,13 @@ pub fn replay(saved: Evidence, bundle: &ScrawlBundle, apps: &[(String, PathBuf)]
         .into_iter()
         .filter(|clue| match clue.source {
             Source::Rule
+            | Source::TerminalRule
             | Source::Signed
             | Source::DevBuild
             | Source::Page
             | Source::Port
             | Source::Publisher
+            | Source::TerminalSession
             | Source::Terminal
             | Source::Document => true,
             Source::Title => clue.note.starts_with(TERMINAL_TITLE),
@@ -964,6 +1069,7 @@ pub fn evidence_for_bundle(
     look_at_page(url.as_deref(), &mut clues, &mut candidates, senses);
     let live = Live {
         url,
+        terminal: None,
         clues,
         candidates,
         error: error.clone(),
@@ -1163,24 +1269,6 @@ fn tailscale(args: &[&str]) -> Option<serde_json::Value> {
 
 // MARK: Terminals
 
-/// Ghostty's focused pane: its working directory and title (AppleScript, Ghostty 1.3+). Other
-/// terminals give nothing yet.
-pub fn terminal_pane(bundle_id: &str) -> Option<(PathBuf, String)> {
-    if !bundle_id.eq_ignore_ascii_case(GHOSTTY) {
-        return None;
-    }
-    let script = format!(
-        "tell application id \"{GHOSTTY}\"\nif (count of windows) is 0 then return \"\"\nset t to focused terminal of selected tab of front window\nreturn (working directory of t) & linefeed & (name of t)\nend tell"
-    );
-    let output = run(Command::new("/usr/bin/osascript").args(["-e", &script]))?;
-    let (dir, title) = output
-        .trim_end()
-        .split_once('\n')
-        .unwrap_or((output.trim(), ""));
-    let dir = PathBuf::from(dir.trim());
-    (dir.is_absolute() && dir != Path::new("/")).then(|| (dir, title.trim().to_owned()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1242,7 +1330,7 @@ mod tests {
     fn tailnet(url: &WebUrl) -> Option<u16> {
         (url.host == "studio.example.ts.net").then_some(url.port)
     }
-    fn no_terminal(_: &str) -> Option<(PathBuf, String)> {
+    fn no_terminal(_: &str, _: Option<i32>) -> Option<Pane> {
         None
     }
     fn api(path: &str, _: Duration) -> Result<Vec<u8>> {
@@ -1439,6 +1527,7 @@ mod tests {
                 candidates,
                 now_ms: 0,
                 url: None,
+                terminal: None,
                 sessions_error: None,
             };
             let ladder = destination(&decide(&evidence, Policy::Ladder), Some(url));
@@ -1738,7 +1827,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(60));
             Some("https://studio.example.ts.net:4948/".into())
         }
-        fn terminal(_: &str) -> Option<(PathBuf, String)> {
+        fn terminal(_: &str, _: Option<i32>) -> Option<Pane> {
             panic!("the terminal is looked at after the deadline")
         }
         let senses = Senses {
@@ -1792,6 +1881,7 @@ mod tests {
             candidates,
             now_ms: 15,
             url: None,
+            terminal: None,
             sessions_error: None,
         };
         let j = super::super::smart::decide(&evidence, super::super::smart::Policy::Weigh);
@@ -1836,6 +1926,7 @@ mod tests {
                 candidates,
                 now_ms: 30,
                 url: Some(url.into()),
+                terminal: None,
                 sessions_error: None,
             };
             decide(&evidence, Policy::Weigh).decision
@@ -1875,6 +1966,163 @@ mod tests {
         static PAGE: std::cell::RefCell<PageWorld> = std::cell::RefCell::default();
     }
 
+    thread_local! {
+        static PANE: std::cell::RefCell<Option<Pane>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// OpenCode's TUI in `folder` under `title`, started on `ses_other`.
+    fn opencode_pane(folder: &str, title: &str) -> Pane {
+        Pane {
+            cwd: Some(folder.into()),
+            title: title.into(),
+            foreground: Some(Foreground {
+                name: "opencode-cli".into(),
+                args: vec!["opencode-cli".into(), "-s".into(), "ses_other".into()],
+                cwd: Some(folder.into()),
+            }),
+        }
+    }
+
+    /// A look at Ghostty showing `pane`, with `terminals` as `routing.terminals`.
+    fn look_at_pane(pane: Pane, terminals: fn() -> Vec<(String, PathBuf)>) -> Live {
+        fn pane_sense(id: &str, _: Option<i32>) -> Option<Pane> {
+            (id == GHOSTTY).then(|| PANE.with(|p| p.borrow().clone()))?
+        }
+        PANE.with(|p| *p.borrow_mut() = Some(pane));
+        let senses = Senses {
+            hooks: Hooks {
+                sdk: no_sdk,
+                listener_dir: listener,
+                api,
+            },
+            tab: |_, _| None,
+            own_port: tailnet,
+            terminal: pane_sense,
+            terminals,
+            sites: Vec::new,
+            apps: Vec::new,
+            aliases: Vec::new,
+            ..Senses::default()
+        };
+        look_live(None, Some(GHOSTTY), None, &senses)
+    }
+
+    fn lead_of(live: &Live) -> (String, Option<Source>) {
+        use super::super::smart::{Basis, Policy, decide};
+        let evidence = Evidence {
+            clues: live.clues.clone(),
+            candidates: live.candidates.clone(),
+            ..Evidence::default()
+        };
+        let judgement = decide(&evidence, Policy::Weigh);
+        let top = &judgement.ranking[0];
+        let source = match top.lead().map(|r| r.basis) {
+            Some(Basis::Clue(source)) => Some(source),
+            _ => None,
+        };
+        (top.candidate.id.clone(), source)
+    }
+
+    #[test]
+    fn the_session_open_in_the_captured_tui_comes_first() {
+        // The pane works in OTHER's folder, but its title shows BOARD: the session wins.
+        let live = look_at_pane(opencode_pane("/q", "OC | BOARD"), Vec::new);
+        assert_eq!(live.terminal.as_deref(), Some(Path::new("/q")));
+        let open = live
+            .clues
+            .iter()
+            .find(|c| c.source == Source::TerminalSession)
+            .expect("the TUI's session");
+        assert!(
+            matches!(&open.pointer, Pointer::Session { id, .. } if id == "ses_board"),
+            "the title follows the TUI past the session its command line named"
+        );
+        assert_eq!(
+            lead_of(&live),
+            ("ses_board".into(), Some(Source::TerminalSession))
+        );
+    }
+
+    #[test]
+    fn a_tui_that_moved_off_its_command_lines_session_names_none() {
+        // Started on `ses_other` ("OTHER"), now showing a session not read: no guess.
+        let live = look_at_pane(
+            opencode_pane("/p/board", "OC | Not a session here"),
+            Vec::new,
+        );
+        assert!(
+            !live
+                .clues
+                .iter()
+                .any(|c| c.source == Source::TerminalSession)
+        );
+        // Showing no title of its own, its command line names it.
+        let live = look_at_pane(opencode_pane("/p/board", "opencode-cli"), Vec::new);
+        assert_eq!(
+            lead_of(&live),
+            ("ses_other".into(), Some(Source::TerminalSession))
+        );
+    }
+
+    #[test]
+    fn opencodes_home_screen_gives_only_its_folder() {
+        let live = look_at_pane(opencode_pane("/p/board", "OpenCode"), Vec::new);
+        assert!(
+            !live
+                .clues
+                .iter()
+                .any(|c| c.source == Source::TerminalSession)
+        );
+        assert!(!live.clues.iter().any(|c| c.source == Source::Title));
+        assert!(live.clues.iter().any(|c| c.source == Source::Terminal));
+        assert_eq!(live.terminal.as_deref(), Some(Path::new("/p/board")));
+    }
+
+    #[test]
+    fn a_shell_at_home_names_no_folder_and_no_rule_key() {
+        let home = crate::user_dirs::home_dir().unwrap();
+        let pane = Pane {
+            cwd: Some(home),
+            title: "zsh".into(),
+            foreground: None,
+        };
+        fn everywhere() -> Vec<(String, PathBuf)> {
+            vec![("/".into(), PathBuf::from("/p/board"))]
+        }
+        let live = look_at_pane(pane, everywhere);
+        assert_eq!(live.terminal, None);
+        assert!(!live.clues.iter().any(|c| matches!(
+            c.source,
+            Source::Terminal | Source::TerminalRule | Source::TerminalSession
+        )));
+    }
+
+    #[test]
+    fn a_terminal_rule_sends_a_folders_captures_by_itself() {
+        fn terminals() -> Vec<(String, PathBuf)> {
+            vec![("/p".into(), PathBuf::from("/p/board"))]
+        }
+        let pane = Pane {
+            cwd: Some("/p/tools".into()),
+            title: "zsh".into(),
+            foreground: None,
+        };
+        let live = look_at_pane(pane, terminals);
+        let evidence = Evidence {
+            clues: live.clues.clone(),
+            candidates: live.candidates.clone(),
+            ..Evidence::default()
+        };
+        let judgement = super::super::smart::decide(&evidence, super::super::smart::Policy::Weigh);
+        match judgement.decision {
+            super::super::smart::Decision::Send { to, .. } => {
+                assert_eq!(to.candidate.id, "ses_board");
+                assert!(super::super::policy::explicit(&to));
+            }
+            other => panic!("expected a send, got {other:?}"),
+        }
+    }
+
     fn page_servers() -> Vec<(String, PathBuf)> {
         PAGE.with(|p| p.borrow().servers.clone())
     }
@@ -1894,6 +2142,7 @@ mod tests {
             tab: |_, _| None,
             own_port: tailnet,
             terminal: no_terminal,
+            terminals: Vec::new,
             servers: page_servers,
             sites: Vec::new,
             apps: Vec::new,
@@ -2094,6 +2343,7 @@ mod tests {
             servers: Vec::new,
             sites: host_rule,
             apps: Vec::new,
+            terminals: Vec::new,
             aliases: Vec::new,
             writes: |_, _, _| Vec::new(),
             executable: |_| None,
@@ -2110,6 +2360,7 @@ mod tests {
             address: None,
             now_ms: 0,
             url: Some(url.into()),
+            terminal: None,
             sessions_error: None,
         };
         let judgement = decide(&evidence, Policy::Weigh);

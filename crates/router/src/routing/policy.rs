@@ -60,8 +60,9 @@ impl AutoSend {
 }
 
 /// Whether a send rests on a source that's obeyed rather than guessed: an address (a choice, a
-/// recorded destination), a session named at the start, a `routing.sites` or `routing.apps`
-/// rule, a signed page or its publisher, the localhost port, or a dev build's checkout.
+/// recorded destination), a session named at the start, a `routing.sites`, `routing.apps` or
+/// `routing.terminals` rule, a signed page or its publisher, the localhost port, or a dev build's
+/// checkout.
 pub fn obeyed(to: &Scored) -> bool {
     matches!(
         to.lead().map(|r| r.basis),
@@ -73,6 +74,7 @@ pub fn obeyed(to: &Scored) -> bool {
                         | Source::Signed
                         | Source::Rule
                         | Source::AppRule
+                        | Source::TerminalRule
                         | Source::Page
                         | Source::Port
                         | Source::Publisher
@@ -83,12 +85,14 @@ pub fn obeyed(to: &Scored) -> bool {
 }
 
 /// Whether a send rests on something set down ahead of time: a page that names its session, or
-/// a `routing.sites` or `routing.apps` rule the person saved (an "Always send … here" among
-/// them). Hex sends only these without asking.
+/// a `routing.sites`, `routing.apps` or `routing.terminals` rule the person saved (an "Always
+/// send … here" among them). Hex sends only these without asking.
 pub fn explicit(to: &Scored) -> bool {
     matches!(
         to.lead().map(|r| r.basis),
-        Some(Basis::Clue(Source::Signed | Source::Rule | Source::AppRule))
+        Some(Basis::Clue(
+            Source::Signed | Source::Rule | Source::AppRule | Source::TerminalRule
+        ))
     )
 }
 
@@ -272,12 +276,14 @@ pub fn executable_of(pid: i32) -> Option<PathBuf> {
 
 // MARK: Rule offers
 
-/// What a rule would cover: a site (a URL's origin) or an app (a bundle ID).
+/// What a rule would cover: a site (a URL's origin), an app (a bundle ID), or a terminal working
+/// in a folder (its project's folder).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RuleKind {
     Site,
     App,
+    Terminal,
 }
 
 impl RuleKind {
@@ -285,8 +291,31 @@ impl RuleKind {
         match self {
             Self::Site => "sites",
             Self::App => "apps",
+            Self::Terminal => "terminals",
         }
     }
+}
+
+/// Whether a terminal rule may key on `folder`: an absolute folder other than the home folder
+/// or `/`, where a terminal opens before it's about anything.
+pub fn is_terminal_folder(folder: &Path) -> bool {
+    folder.is_absolute() && !super::smart::is_home_or_root(folder)
+}
+
+/// The `routing.terminals` rule covering a terminal working in `folder`, the longest key first:
+/// its key and target.
+pub fn terminal_rule(folder: &Path, terminals: &[(String, PathBuf)]) -> Option<(String, PathBuf)> {
+    if !is_terminal_folder(folder) {
+        return None;
+    }
+    terminals
+        .iter()
+        .filter(|(key, _)| {
+            let key = Path::new(key.trim());
+            is_terminal_folder(key) && folder.starts_with(key)
+        })
+        .max_by_key(|(key, _)| key.trim().len())
+        .cloned()
 }
 
 /// A rule Scrawl offers once two picks agree: the route result's `offer_rule`.
@@ -299,12 +328,20 @@ pub struct OfferRule {
     pub target: String,
 }
 
-/// The rule key a pick teaches: the tab's origin (never a loopback one), else the app's bundle
-/// ID (never a general-purpose app's).
-pub fn rule_key(url: Option<&str>, bundle_id: Option<&str>) -> Option<(RuleKind, String)> {
+/// The rule key a pick teaches: the tab's origin (never a loopback one), else the captured
+/// terminal's folder (never the home folder or `/`), else the app's bundle ID (never a
+/// general-purpose app's).
+pub fn rule_key(
+    url: Option<&str>,
+    terminal: Option<&Path>,
+    bundle_id: Option<&str>,
+) -> Option<(RuleKind, String)> {
     if let Some(parsed) = url.and_then(super::parse_url) {
         // A dev server's port already says where it goes, and the next one gets another port.
         return (!parsed.is_loopback()).then(|| (RuleKind::Site, parsed.origin()));
+    }
+    if let Some(folder) = terminal.filter(|folder| is_terminal_folder(folder)) {
+        return Some((RuleKind::Terminal, folder.display().to_string()));
     }
     let id = bundle_id.map(str::trim).filter(|id| !id.is_empty())?;
     (!is_general_app(id)).then(|| (RuleKind::App, id.to_owned()))
@@ -450,6 +487,7 @@ fn config_kind(kind: RuleKind) -> &'static str {
     match kind {
         RuleKind::Site => "site",
         RuleKind::App => "app",
+        RuleKind::Terminal => "terminal",
     }
 }
 
@@ -458,27 +496,31 @@ pub fn learned_file() -> Option<PathBuf> {
     crate::env::get().dirs.learned.clone()
 }
 
-/// Whether config already has a rule for `key`.
+/// Whether config already has a rule for `key` (for a terminal, one covering its folder).
 pub fn has_rule(kind: RuleKind, key: &str) -> bool {
     let config = &crate::env::get().config;
     let rules = match kind {
         RuleKind::Site => config.site_rules(),
         RuleKind::App => config.app_rules(),
+        RuleKind::Terminal => {
+            return terminal_rule(Path::new(key.trim()), &config.terminal_rules()).is_some();
+        }
     };
     rules
         .iter()
         .any(|(k, _)| k.trim().eq_ignore_ascii_case(key.trim()))
 }
 
-/// Counts a pick of `session` for `url` or `bundle_id` in the learned file,
-/// with config's refusals and rules: what it counted, and the rule to offer, when there is one.
-/// Errors are logged.
+/// Counts a pick of `session` for `url`, the `terminal`'s folder or `bundle_id` in the learned
+/// file, with config's refusals and rules: what it counted, and the rule to offer, when there is
+/// one. Errors are logged.
 pub fn learn_pick(
     url: Option<&str>,
+    terminal: Option<&Path>,
     bundle_id: Option<&str>,
     session: &str,
 ) -> (Option<Counted>, Option<OfferRule>) {
-    let Some((kind, key)) = rule_key(url, bundle_id) else {
+    let Some((kind, key)) = rule_key(url, terminal, bundle_id) else {
         return (None, None);
     };
     let Some(file) = learned_file() else {
@@ -505,8 +547,9 @@ pub fn learn_pick(
 // MARK: Writing rules
 
 /// A rule's key and target, checked: an app rule needs a bundle ID that isn't a
-/// general-purpose app's, and a folder (other than `~/…`) is made absolute against the working
-/// directory and must exist. A `ses_` ID stays as it is.
+/// general-purpose app's, a terminal rule an absolute folder that isn't the home folder or `/`,
+/// and a folder target (other than `~/…`) is made absolute against the working directory and
+/// must exist. A `ses_` ID stays as it is.
 pub fn rule_target(kind: RuleKind, key: &str, target: &str) -> Result<(String, String)> {
     let key = key.trim();
     let target = target.trim();
@@ -519,6 +562,16 @@ pub fn rule_target(kind: RuleKind, key: &str, target: &str) -> Result<(String, S
         );
         if is_general_app(key) {
             bail!("{key} is a general-purpose app; its captures are about anything, so no rule")
+        }
+    }
+    if kind == RuleKind::Terminal {
+        let folder = match key.strip_prefix("~/") {
+            Some(rest) => crate::user_dirs::home_dir().unwrap_or_default().join(rest),
+            None => PathBuf::from(key),
+        };
+        ensure!(folder.is_absolute(), "{key:?} isn't a folder");
+        if !is_terminal_folder(&folder) {
+            bail!("a terminal opens in {key} before it's about anything, so no rule")
         }
     }
     let target = if target.starts_with("ses_") || target.starts_with('~') {
@@ -656,6 +709,7 @@ mod tests {
             Source::Named,
             Source::Rule,
             Source::AppRule,
+            Source::TerminalRule,
             Source::Page,
             Source::Port,
             Source::Publisher,
@@ -826,19 +880,57 @@ mod tests {
     }
 
     #[test]
-    fn rule_keys_are_a_tabs_origin_or_a_specific_app() {
+    fn rule_keys_are_a_tabs_origin_a_terminals_folder_or_a_specific_app() {
         assert_eq!(
             rule_key(
                 Some("https://board.example.com/x/y?z=1"),
+                None,
                 Some("com.brave.Browser")
             ),
             Some((RuleKind::Site, "https://board.example.com".to_owned()))
         );
         assert_eq!(
-            rule_key(None, Some("com.example.tool")),
+            rule_key(None, None, Some("com.example.tool")),
             Some((RuleKind::App, "com.example.tool".to_owned()))
         );
-        assert_eq!(rule_key(None, Some("com.mitchellh.ghostty")), None);
+        assert_eq!(rule_key(None, None, Some("com.mitchellh.ghostty")), None);
+        // A terminal's folder makes the rule, never Ghostty as a whole.
+        assert_eq!(
+            rule_key(
+                None,
+                Some(Path::new("/code/hex")),
+                Some("com.mitchellh.ghostty")
+            ),
+            Some((RuleKind::Terminal, "/code/hex".to_owned()))
+        );
+        // A terminal in the home folder or `/` says nothing yet.
+        let home = crate::user_dirs::home_dir().unwrap();
+        for folder in [home.as_path(), Path::new("/")] {
+            assert_eq!(
+                rule_key(None, Some(folder), Some("com.mitchellh.ghostty")),
+                None,
+                "{folder:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_terminal_rule_covers_its_folder_and_below() {
+        let rules = vec![
+            ("/code".to_owned(), PathBuf::from("ses_code")),
+            ("/code/hex".to_owned(), PathBuf::from("ses_hex")),
+            ("/".to_owned(), PathBuf::from("ses_root")),
+        ];
+        let rule = |folder: &str| terminal_rule(Path::new(folder), &rules).map(|(k, _)| k);
+        assert_eq!(rule("/code/hex/src").as_deref(), Some("/code/hex"));
+        assert_eq!(rule("/code/hex").as_deref(), Some("/code/hex"));
+        assert_eq!(rule("/code/hexagon").as_deref(), Some("/code"));
+        assert_eq!(rule("/elsewhere"), None, "never the rule for /");
+        let home = crate::user_dirs::home_dir().unwrap();
+        assert!(rule_target(RuleKind::Terminal, "/code/hex", "ses_hex").is_ok());
+        assert!(rule_target(RuleKind::Terminal, &home.display().to_string(), "ses_hex").is_err());
+        assert!(rule_target(RuleKind::Terminal, "/", "ses_hex").is_err());
+        assert!(rule_target(RuleKind::Terminal, "code/hex", "ses_hex").is_err());
     }
 
     #[test]

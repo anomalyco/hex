@@ -895,7 +895,7 @@ pub fn read_shown(dir: &Path) -> Option<Shown> {
 }
 
 /// Counts Kit's pick of `session` for the capture in `dir` (a chip, or a send left to stand)
-/// toward a `routing.sites` or `routing.apps` rule, with Jev routing on. Once two agree, the
+/// toward a `routing.sites`, `routing.terminals` or `routing.apps` rule, with Jev routing on. Once two agree, the
 /// rule to offer is saved in its `routing.json` as `offerRule` and returned.
 pub fn learn_capture(dir: &Path, session: &str) -> Option<policy::OfferRule> {
     if !jev::enabled() {
@@ -921,8 +921,12 @@ pub fn learn_capture(dir: &Path, session: &str) -> Option<policy::OfferRule> {
     let bundle_id = crate::bundle::load_bundle(dir)
         .ok()
         .and_then(|(_, bundle)| bundle.target.bundle_id);
-    let (counted, offer) =
-        policy::learn_pick(evidence.url.as_deref(), bundle_id.as_deref(), session);
+    let (counted, offer) = policy::learn_pick(
+        evidence.url.as_deref(),
+        evidence.terminal.as_deref(),
+        bundle_id.as_deref(),
+        session,
+    );
     let counted = counted?;
     // Kept so an undo of the send can take the pick back (`undo`).
     body["learned"] = serde_json::to_value(&counted).ok()?;
@@ -1369,6 +1373,7 @@ mod tests {
         let error = "couldn't list sessions: OpenCode took over 10000 ms to list sessions";
         let live = look::Live {
             url: Some("http://localhost:5173/".into()),
+            terminal: None,
             clues: vec![Clue::new(
                 Source::Page,
                 Pointer::Session {

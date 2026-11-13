@@ -70,6 +70,7 @@ Serde camelCase, every field optional. `parse_scrawl_config(&str)` reads them fr
 | `undo_window_sec` | `routing.undoWindowSec` | How long an undo still takes a send back (default 600). |
 | `sites` | `routing.sites` | URL prefix → folder (`~` allowed) or `ses_` ID: where a site's items always go. |
 | `apps` | `routing.apps` | Bundle ID (or a prefix) → folder or `ses_` ID. General-purpose apps (browsers, terminals, editors) are ignored. |
+| `terminals` | `routing.terminals` | Folder (`~` allowed) → folder or `ses_` ID: where captures of a terminal working in that folder or below go (the longest key wins). The home folder and `/` are ignored. |
 | `servers` | `routing.servers` | URL prefix → the folder a file server serves. |
 | `aliases` | `routing.aliases` | Spoken name → the session title or folder it means. |
 | `refused_rules` | `routing.refusedRules` | Sites and bundle IDs never offered a rule again. |

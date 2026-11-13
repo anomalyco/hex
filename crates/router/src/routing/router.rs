@@ -393,6 +393,7 @@ fn decide_with(
         candidates,
         now_ms,
         url: url.map(str::to_owned),
+        terminal: None,
         sessions_error: error.clone(),
     };
     let smart = smart::decide(&evidence, Policy::Weigh);
@@ -568,6 +569,7 @@ fn settled_why(judgement: &Judgement) -> Option<String> {
             Basis::Clue(Source::Signed) => "page names its session",
             Basis::Clue(Source::Rule) => "routing.sites rule",
             Basis::Clue(Source::AppRule) => "routing.apps rule",
+            Basis::Clue(Source::TerminalRule) => "routing.terminals rule",
             Basis::Clue(Source::DevBuild) => "dev build's checkout",
             Basis::Clue(Source::Page) => "signed page",
             Basis::Clue(Source::Port) => "localhost port",
@@ -921,7 +923,7 @@ fn deliver_with(
     let (counted, offer_rule) = found
         .as_ref()
         .and_then(|(_, saved)| saved.directory_of(to))
-        .map(|_| policy::learn_pick(present(&item.url), item.app_id(), to))
+        .map(|_| policy::learn_pick(present(&item.url), None, item.app_id(), to))
         .unwrap_or_default();
     origin.learned = counted;
     let sent = match posted {
@@ -1742,7 +1744,7 @@ mod tests {
     fn no_port(_: &crate::routing::WebUrl) -> Option<u16> {
         None
     }
-    fn no_terminal(_: &str) -> Option<(PathBuf, String)> {
+    fn no_terminal(_: &str, _: Option<i32>) -> Option<look::Pane> {
         None
     }
     fn nothing() -> Vec<(String, PathBuf)> {
@@ -1791,6 +1793,7 @@ mod tests {
             tab: |_, _| None,
             own_port: no_port,
             terminal: no_terminal,
+            terminals: nothing,
             servers: nothing,
             sites: nothing,
             apps: nothing,

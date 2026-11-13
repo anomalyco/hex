@@ -36,6 +36,9 @@ pub struct Evidence {
     /// The browser tab's URL, when there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// The captured terminal's project folder, what a `routing.terminals` rule keys on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<PathBuf>,
     /// Why OpenCode's sessions couldn't all be read, when they couldn't: `candidates` holds
     /// what was read before it failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -120,6 +123,9 @@ pub enum Source {
     Rule,
     /// A `routing.apps` rule covering the captured app (Jev routing). Obeyed like a site rule.
     AppRule,
+    /// A `routing.terminals` rule covering the captured terminal's folder. Obeyed like a site
+    /// rule.
+    TerminalRule,
     /// The git working tree the captured app's executable runs from (Jev routing): a dev build
     /// names its project like a localhost port does.
     DevBuild,
@@ -130,6 +136,9 @@ pub enum Source {
     /// Who published the file the tab shows, when a server serves it from outside its own
     /// project: the session the page names, or the one whose tool call wrote the file.
     Publisher,
+    /// The session OpenCode shows in the captured terminal: named by its window title or its
+    /// command line. Weighed, worth a little more than a folder.
+    TerminalSession,
     /// The captured terminal's focused pane.
     Terminal,
     /// The file the tab shows, when it's from outside the server's project: its path's words.
@@ -161,10 +170,12 @@ impl Source {
             Self::Signed => "signed",
             Self::Rule => "rule",
             Self::AppRule => "app-rule",
+            Self::TerminalRule => "terminal-rule",
             Self::DevBuild => "dev-build",
             Self::Page => "page",
             Self::Port => "port",
             Self::Publisher => "publisher",
+            Self::TerminalSession => "terminal-session",
             Self::Terminal => "terminal",
             Self::Document => "document",
             Self::Viewed => "viewed",
@@ -177,9 +188,10 @@ impl Source {
     /// Full points for a clue of this source that names a candidate.
     fn points(self) -> u32 {
         match self {
-            Self::Named | Self::Signed => 100,
+            Self::Named | Self::Signed | Self::TerminalSession => 100,
             Self::Rule
             | Self::AppRule
+            | Self::TerminalRule
             | Self::DevBuild
             | Self::Page
             | Self::Port
@@ -445,6 +457,7 @@ pub fn decide(evidence: &Evidence, policy: Policy) -> Judgement {
         Source::Signed,
         Source::Rule,
         Source::AppRule,
+        Source::TerminalRule,
         Source::DevBuild,
     ] {
         if let Some(judgement) = ruled(evidence, source) {
@@ -1260,6 +1273,7 @@ mod tests {
             candidates: sessions(),
             now_ms: NOW,
             url: None,
+            terminal: None,
             sessions_error: None,
         }
     }
@@ -1318,6 +1332,7 @@ mod tests {
     fn app_rules_and_dev_builds_send_ahead_of_weighing() {
         for (source, via) in [
             (Source::AppRule, "app-rule"),
+            (Source::TerminalRule, "terminal-rule"),
             (Source::DevBuild, "dev-build"),
         ] {
             let mut e = ev(vec![
