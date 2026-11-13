@@ -609,12 +609,17 @@ zero-padded to 30 s) and invented text: the Turkish
 own 30-second window, each window passes the same detector gate as Cohere's,
 and a Whisper clip drops the audio outside its detected speech plus 500 ms
 before transcription (`whisper_audio` in
-[gguf_session.rs](../../src/transcription/gguf_session.rs)). Another model, a
-detector that is unavailable, and a clip it hears no speech in keep every
-sample, as before. Checks: `whisper_chunks_at_its_thirty_second_window` in
+[gguf_session.rs](../../src/transcription/gguf_session.rs)). Long Whisper
+dictations in every language now go through Hex's own 30 s chunking — each
+window cut at the quietest 100 ms of its last 5 s and decoded independently —
+instead of Whisper's long-form loop; not measured on long continuous speech.
+Another model, a detector that is unavailable, and a clip it hears no speech in
+keep every sample, as before. Checks:
+`whisper_chunks_at_its_thirty_second_window` in
 [models.rs](../../src/transcription/models.rs),
-`a_whisper_clip_is_trimmed_to_its_speech_plus_a_margin` (bounds and clip
-lengths, no model), and `a_margin_around_the_speech_clamps_to_the_clip` in
+`a_whisper_clip_is_trimmed_and_padded_to_a_chunks_minimum` and
+`a_trimmed_chunks_times_stay_on_the_clips_timeline` (trim, padding, and timed
+offsets, no model), and `a_margin_around_the_speech_clamps_to_the_clip` in
 [speech_detector.rs](../../src/transcription/speech_detector.rs). Not run with
 Whisper on real Turkish audio. A credit Whisper puts mid-chunk, followed by
 more speech, is still kept, and meeting and word-time chunks keep their
@@ -1546,8 +1551,10 @@ Completed long recording                  // dictate.model-windows
 └── Runs of at most one window, final remainder included
     -> Transcribe each -> Join text in original order
 
-Chunking bounds inference, not capture duration. Only a Whisper clip loses
-silence, at its edges, and only when the detector hears speech in it.
+Chunking bounds inference, not capture duration. Two kinds of silence are
+dropped: a Whisper clip's edges outside its detected speech, and any window of
+a long clip the detector hears no speech in (#1194). Without the detector
+neither happens.
 ```
 
 Each window is cut through the middle of the quietest 100 ms in its last five
@@ -1707,9 +1714,11 @@ The silence gate stops models from hallucinating closing phrases such as "thank
 you" on an empty hold ([#108](https://github.com/anomalyco/hex/issues/108)). It
 covers hotkey and voice-delimited captures on macOS, and the Linux
 hotkey loop. The local API's programmatic dictation and host-audio transcription
-are deliberately left ungated: they skip both silence checks, and only output
-that repeats the vocabulary prompt (Whisper, Qwen3-ASR) or ends with a known
-subtitle credit is dropped there.
+are deliberately left ungated at capture: they skip both capture-level silence
+checks, and only output that repeats the vocabulary prompt (Whisper, Qwen3-ASR)
+or ends with a known subtitle credit is dropped there. Their transcription runs
+through the same whole-clip chunked path, so a Whisper clip loses its silent
+edges and a long clip skips a window the detector hears no speech in.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
 tone, or a key click can lift a capture above it. Those captures then go to the
 Silero speech detector ([transcription/speech_detector.rs](../../src/transcription/speech_detector.rs)),

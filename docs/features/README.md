@@ -414,12 +414,15 @@ stream drops a known credit only when it is the very end of the text (letters
 and digits compared, case and punctuation ignored, Turkish dotted and dotless
 `i` folded together), with its segment and words, in
 dictation, meetings, and the local API alike; the same words elsewhere stay.
-A credit spoken mid-chunk and followed by more speech is kept. The list is in
+A credit spoken mid-chunk and followed by more speech is kept, and so is a
+dictation that genuinely ends with one of the listed phrases, such as the
+Turkish thanks: the list cannot tell it from the invention. The list is in
 [transcription/subtitle_credits.rs](../../src/transcription/subtitle_credits.rs).
 Checks: `a_trailing_subtitle_credit_is_removed`,
 `a_turkish_thanks_for_watching_is_removed`,
 `a_truncated_turkish_credit_is_removed`,
 `the_same_words_mid_sentence_are_kept`,
+`a_combining_mark_inside_a_word_does_not_split_it`,
 `speech_without_a_trailing_credit_is_kept`, and
 `a_trailing_subtitle_credit_is_dropped_from_text_segments_and_words`. No
 inference reproduces the credit.
@@ -2500,6 +2503,8 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   └── Dictation first; uses the loaded model only (docs/streams.md)
 ├── Running app's /transcriptions -> Listener's engine when it holds the model
 │   ├── Otherwise the service's own copy of the requested model
+│   ├── Whole-clip run -> A Whisper clip's silent edges dropped, and a window
+│   │   the detector hears no speech in skipped (see dictation)
 │   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
@@ -2507,8 +2512,9 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
 │   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
-│   ├── No silence gate                  // model output, unlike hotkey dictation;
-│   │                                     // only recognition-hint echoes are dropped
+│   ├── No capture silence gate           // model output, unlike hotkey dictation;
+│   │   └── its whole-clip run still drops a Whisper clip's silent edges,
+│   │       skips a window with no speech, and drops hint echoes
 │   ├── Linux, Windows -> The listener records it (dictation::service owner)
 │   │   ├── With the microphone chosen in Settings, as the shortcut does
 │   │   ├── Shortcut or `hex dictation` records -> 409 dictation-busy

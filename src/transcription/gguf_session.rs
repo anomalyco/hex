@@ -426,20 +426,15 @@ impl OfflineGgufSession {
         } else {
             None
         };
-        let span = whisper_span(samples.len(), &self.architecture, bounds);
-        if span.start == 0 && span.end == samples.len() {
-            return (Cow::Borrowed(samples), 0);
+        let (audio, trimmed) = trimmed_audio(samples, &self.architecture, bounds);
+        if let Cow::Owned(audio) = &audio {
+            tracing::info!(
+                trimmed_ms = trimmed / 16,
+                kept_ms = audio.len() / 16,
+                "trimmed near-silent edges before a Whisper run"
+            );
         }
-        tracing::info!(
-            dropped_ms = (samples.len() - span.len()) / 16,
-            kept_ms = span.len() / 16,
-            "trimmed near-silent edges before a Whisper run"
-        );
-        let mut audio = samples[span.clone()].to_vec();
-        // A trimmed clip can fall under the minimum duration every chunk and
-        // every caller pads to.
-        crate::dictation::pad_for_parakeet(&mut audio);
-        (Cow::Owned(audio), span.start)
+        (audio, trimmed)
     }
 
     pub(crate) fn transcribe_chunked(
@@ -676,6 +671,24 @@ fn whisper_span(len: usize, architecture: &str, bounds: Option<Range<usize>>) ->
         ),
         _ => 0..len,
     }
+}
+
+/// `samples` for a whole-clip run: the span [`whisper_span`] keeps, padded to
+/// the minimum duration every chunk and every caller pads to, and where that
+/// span starts in `samples`. A clip the span covers whole is borrowed, never
+/// copied or padded.
+fn trimmed_audio<'a>(
+    samples: &'a [f32],
+    architecture: &str,
+    bounds: Option<Range<usize>>,
+) -> (Cow<'a, [f32]>, usize) {
+    let span = whisper_span(samples.len(), architecture, bounds);
+    if span.start == 0 && span.end == samples.len() {
+        return (Cow::Borrowed(samples), 0);
+    }
+    let mut audio = samples[span.clone()].to_vec();
+    crate::dictation::pad_for_parakeet(&mut audio);
+    (Cow::Owned(audio), span.start)
 }
 
 /// Whether one chunk of a long clip goes to the model. The clip as a whole
@@ -1085,6 +1098,49 @@ mod tests {
             0..160_000
         );
         assert_eq!(whisper_span(160_000, "whisper", None), 0..160_000);
+    }
+
+    #[test]
+    fn a_whisper_clip_is_trimmed_and_padded_to_a_chunks_minimum() {
+        // 10 s clip, speech from 9.0 s to 9.2 s. The 500 ms margin leaves
+        // 1.2 s, which every chunk pads to the 1.5 s minimum.
+        let samples = vec![0.25_f32; 160_000];
+        let (audio, start) = trimmed_audio(&samples, "whisper", Some(144_000..147_200));
+        assert_eq!(start, 136_000);
+        assert_eq!(audio.len(), 24_000);
+        assert!(audio[..19_200].iter().all(|&sample| sample == 0.25));
+        assert!(audio[19_200..].iter().all(|&sample| sample == 0.0));
+        // Another model, no detector, or speech reaching both edges: the clip
+        // is borrowed unchanged, with no copy or padding.
+        for (architecture, bounds) in [
+            ("cohere_asr", Some(144_000..147_200)),
+            ("whisper", None),
+            ("whisper", Some(0..160_000)),
+        ] {
+            let label = format!("{architecture} {bounds:?}");
+            let (audio, start) = trimmed_audio(&samples, architecture, bounds);
+            assert!(matches!(audio, Cow::Borrowed(_)), "{label}");
+            assert_eq!((start, audio.len()), (0, samples.len()));
+        }
+    }
+
+    #[test]
+    fn a_trimmed_chunks_times_stay_on_the_clips_timeline() {
+        // The timed path adds the trim start to every chunk's sample offset;
+        // this clip starts 8.5 s in, so its first chunk reports 8.5 s.
+        let samples = vec![0.1_f32; 160_000];
+        let (audio, start) = trimmed_audio(&samples, "whisper", Some(144_000..147_200));
+        assert_eq!(start, 136_000);
+        let ranges = chunk_ranges(&audio, 16_000);
+        assert_eq!(ranges.len(), 2, "the padded clip is cut into two windows");
+        assert_eq!(sample_offset_ms(ranges[0].start), 0);
+        for range in &ranges {
+            assert_eq!(
+                sample_offset_ms(start + range.start),
+                8_500 + sample_offset_ms(range.start),
+                "{range:?}"
+            );
+        }
     }
 
     #[test]

@@ -3,7 +3,9 @@
 //! that broadcast audio ends with a credit line, and on a trailing pause or
 //! breath they can append one nobody said. Whisper in Turkish adds a thanks
 //! for watching, or the subtitle editor's credit (#1770). Only a credit at
-//! the very end is removed; the same words anywhere else are kept.
+//! the very end is removed; the same words anywhere else are kept. The thanks
+//! is a real sentence too, so a dictation that genuinely ends with it loses
+//! it.
 
 /// Credits seen appended to dictations, matched case-insensitively on their
 /// letters and digits alone, so punctuation and hyphens may differ. Turkish
@@ -31,7 +33,7 @@ fn is_combining(character: char) -> bool {
 fn fold(text: &str) -> String {
     text.to_lowercase()
         .chars()
-        .filter(|character| !matches!(character, '\u{0300}'..='\u{036F}'))
+        .filter(|character| !is_combining(*character))
         .map(|character| match character {
             'ı' => 'i',
             other => other,
