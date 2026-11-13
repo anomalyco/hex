@@ -953,7 +953,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     ));
     rows.push(row(
         Feature::DropTranscribe,
-        None,
+        Some(&WAVE),
         tr("Transcribe dropped audio"),
         tr("Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it."),
     ));
@@ -1339,6 +1339,8 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         ),
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
+        // Wayland reports no file drags, so its card offers the file dialog.
+        Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

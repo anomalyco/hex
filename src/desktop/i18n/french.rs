@@ -1333,6 +1333,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It'll be there before your coffee is.", "Il sera prêt avant votre café."),
     ("Allow in Login Items", "Autoriser dans Ouverture"),
     ("macOS wants your OK first. It's very protective.", "macOS veut d'abord votre accord. Il est très protecteur."),
+    ("Transcribe a file…", "Transcrire un fichier…"),
+    ("Transcribe a file", "Transcrire un fichier"),
+    ("Drop to save a transcript", "Déposez pour enregistrer une transcription"),
+    ("WAV and MP3", "WAV et MP3"),
+    ("WAV, MP3, M4A, AIFF, and CAF", "WAV, MP3, M4A, AIFF et CAF"),
+    ("Hex can transcribe {} files", "Hex peut transcrire des fichiers {}"),
+    ("Transcribing… {}%", "Transcription… {}%"),
+    ("{} more queued", "{} de plus en attente"),
+    ("Saved {}", "{} enregistré"),
+    ("Show in folder", "Afficher dans le dossier"),
+    ("Could not transcribe {}", "Impossible de transcrire {}"),
+    ("A file could not be chosen.", "Impossible de choisir un fichier."),
 ];
 
 #[cfg(test)]

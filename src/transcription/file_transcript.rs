@@ -10,9 +10,6 @@
 //! and the write itself is atomic, so a transcript Hex cannot finish never
 //! takes the name.
 
-// The window's drop target is the only caller; it lands in a later change.
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader};
@@ -42,6 +39,19 @@ const MAX_ATTEMPTS: usize = 1_000;
 const FORMATS: &str = "WAV, MP3, M4A, AIFF, or CAF";
 #[cfg(not(target_os = "macos"))]
 const FORMATS: &str = "WAV or MP3";
+
+/// The file extensions this build reads, without the dot: the window's drop
+/// target, its "Transcribe a file…" dialog, and their copy all name exactly
+/// these, and [`format_of`] accepts exactly these.
+#[cfg(target_os = "macos")]
+const EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "aiff", "aif", "caf"];
+#[cfg(not(target_os = "macos"))]
+const EXTENSIONS: &[&str] = &["wav", "mp3"];
+
+/// Every extension this build reads, without the dot.
+pub fn extensions() -> &'static [&'static str] {
+    EXTENSIONS
+}
 
 /// Why a dropped file could not become a transcript.
 #[derive(Debug)]
@@ -313,11 +323,19 @@ enum Format {
 
 fn format_of(path: &Path) -> Option<Format> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !EXTENSIONS.contains(&extension.as_str()) {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
     match extension.as_str() {
         "wav" => Some(Format::Wav),
         "mp3" => Some(Format::Mp3),
-        #[cfg(target_os = "macos")]
-        "m4a" | "aiff" | "aif" | "caf" => Some(Format::Bridged),
+        _ => Some(Format::Bridged),
+    }
+    #[cfg(not(target_os = "macos"))]
+    match extension.as_str() {
+        "wav" => Some(Format::Wav),
+        "mp3" => Some(Format::Mp3),
         _ => None,
     }
 }
@@ -700,11 +718,34 @@ mod tests {
 
     #[test]
     fn only_the_formats_this_build_reads_are_accepted() {
+        for extension in extensions() {
+            let path = PathBuf::from(format!("talk.{extension}"));
+            assert!(format_of(&path).is_some(), "{extension}");
+            let upper = PathBuf::from(format!("talk.{}", extension.to_uppercase()));
+            assert_eq!(format_of(&upper), format_of(&path), "{extension}");
+        }
         assert_eq!(format_of(Path::new("talk.wav")), Some(Format::Wav));
         assert_eq!(format_of(Path::new("talk.WAV")), Some(Format::Wav));
         assert_eq!(format_of(Path::new("talk.mp3")), Some(Format::Mp3));
         for refused in ["talk.flac", "talk.ogg", "talk.txt", "talk", "talk.mp4"] {
             assert_eq!(format_of(Path::new(refused)), None, "{refused}");
+        }
+    }
+
+    /// The extensions the window's drop target and its dialog offer are the
+    /// ones this build decodes, and its copy names exactly those.
+    #[test]
+    fn the_extensions_on_offer_are_the_ones_this_build_reads() {
+        for extension in extensions() {
+            assert!(
+                FORMATS
+                    .to_ascii_uppercase()
+                    .contains(&extension.to_uppercase()),
+                "{extension} is readable but the copy ({FORMATS}) doesn't name it"
+            );
+        }
+        for refused in ["flac", "ogg", "txt", "mp4", "wav2"] {
+            assert!(!extensions().contains(&refused), "{refused}");
         }
     }
 
