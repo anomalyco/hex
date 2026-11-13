@@ -946,6 +946,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Show only downloaded speech models in the picker, with the space they take"),
     ));
     rows.push(row(
+        Feature::ShellCompletions,
+        None,
+        tr("Shell completions"),
+        tr("Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"),
+    ));
+    rows.push(row(
         Feature::ApiProcessing,
         None,
         tr("Process API transcripts"),
@@ -1197,6 +1203,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingNotesFile => "lab-meeting-notes-file",
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
+        Feature::ShellCompletions => "lab-shell-completions",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::ApiBrowserAccess => "lab-api-browser-access",

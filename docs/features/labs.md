@@ -145,6 +145,15 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_k_quant_import_needs_the_lab_and_falls_back_without_it (custom_models);
 │                                        // smaller_model_files_is_its_own_switch_and_macos_only (labs.rs); not observed on Metal
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
+├── Shell completions no  labs.shell_completions        (every OS) `hex completions <shell>` prints a bash, zsh, fish,
+│                                        elvish, or PowerShell completion script for `hex`, generated at runtime from the
+│                                        same clap tree the CLI parses, so new commands and flags are in it; off, it
+│                                        answers disabled and names its toggle, and the command stays out of `hex --help`
+│                                        // checks: the_lab_off_refuses_and_names_its_toggle and
+│                                        // every_shell_gets_a_script_with_the_command_tree (control/cli/completions.rs);
+│                                        // the_cli_prints_completion_scripts (linux.rs, main.rs, windows.rs);
+│                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
+│                                        // a sourced script in a real shell
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)

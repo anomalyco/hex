@@ -220,6 +220,9 @@ impl Feature {
             Self::VoicePrompt => {
                 "Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model"
             }
+            Self::ShellCompletions => {
+                "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
+            }
         }
     }
 }

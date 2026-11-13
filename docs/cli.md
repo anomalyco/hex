@@ -83,6 +83,7 @@ hex
 │   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page on that lab's group
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
+├── completions <shell>            Labs › Shell completions: print a completion script for hex
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
 ```
 
@@ -197,6 +198,28 @@ it is installed), and only a file with no speech at all answers `no-speech`
 stderr only when it is a terminal. Ctrl-C ends the command and its service,
 printing nothing, with exit 130. It never pastes, records History, runs mode
 processing, or logs the transcript.
+
+`completions <shell>` (Labs › Shell completions, off by default) prints a
+completion script for `hex` to stdout and nothing else. The script is
+generated at runtime from the same clap definitions every command parses, so
+a new command or flag is in it without anyone writing the script out again;
+`bash`, `zsh`, `fish`, `elvish`, and `powershell` are the shells.
+
+```sh
+hex completions bash > ~/.local/share/bash-completion/completions/hex
+mkdir -p ~/.zfunc && hex completions zsh > ~/.zfunc/_hex
+hex completions fish > ~/.config/fish/completions/hex.fish
+```
+
+For zsh, put `~/.zfunc` on `fpath` before `compinit` runs, in `~/.zshrc`:
+`fpath=(~/.zfunc $fpath)`. Elsewhere, write the script into a directory
+already on `fpath`.
+
+It is refused with `disabled` while the lab is off, and its Labs toggle is
+what turns it on: `hex labs on shell-completions`. The command stays out of
+`hex --help`; `hex labs` lists the toggle. The lab is read from
+`settings.json` (`AppSettings::read`), as `hex labs` lists it, whether or not
+Hex is running; a running Hex saves the toggle there at once.
 
 `model import`, `rename`, `repair`, and `remove` run in this process on every
 OS; `hex models` is an alias for `hex model`. An import's id is `custom-` and

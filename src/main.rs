@@ -81,7 +81,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 #[cfg(target_os = "macos")]
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use color_eyre::Result;
 #[cfg(target_os = "macos")]
 use color_eyre::eyre::eyre;
@@ -321,7 +321,9 @@ fn main() -> Result<()> {
     // lock, GUI, or permission setup of their own, so an agent may run them
     // over SSH while the app is running.
     let cli = match cli.command {
-        Some(Command::Control(command)) => control::cli::finish(control::cli::run(command)),
+        Some(Command::Control(command)) => {
+            control::cli::finish(control::cli::run(command, Cli::command))
+        }
         command => Cli { command },
     };
     #[cfg(debug_assertions)]
@@ -695,6 +697,26 @@ mod tests {
         }
         assert!(Cli::try_parse_from(["hex", "dev", "show", "hudlab"]).is_err());
         assert!(Cli::try_parse_from(["hex", "dev", "hud", "recording"]).is_ok());
+    }
+
+    #[test]
+    fn the_cli_prints_completion_scripts() {
+        use clap::CommandFactory;
+        use clap_complete::Shell;
+
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "hex", &mut script);
+            let script = String::from_utf8(script).expect("a completion script is UTF-8");
+            assert!(
+                script.contains("dictation"),
+                "{shell:?} script has no dictation"
+            );
+            assert!(
+                script.contains("listen"),
+                "{shell:?} script has no macOS-only listen command"
+            );
+        }
     }
 
     #[test]

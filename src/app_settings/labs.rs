@@ -213,6 +213,9 @@ pub struct LabsSettings {
     /// for Modes rewriting and the Modes model picker when no Windows
     /// service answers (Windows).
     pub opencode_in_wsl: bool,
+    /// `hex completions <shell>` prints a completion script for bash, zsh,
+    /// fish, elvish, or PowerShell, generated from Hex's own commands.
+    pub shell_completions: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -371,6 +374,7 @@ impl Default for LabsSettings {
             annotate_replay: false,
             more_call_apps: false,
             opencode_in_wsl: false,
+            shell_completions: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,
