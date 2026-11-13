@@ -24,8 +24,6 @@ use std::time::Duration;
 
 use rune::{OverlayHandle, OverlaySpec, ScreenEdge, Spring, Tx};
 
-use crate::desktop::i18n::tr;
-
 /// The overlay, before a shot gives it its display's size: a laptop's.
 pub(crate) const NOMINAL: (f32, f32) = (1440.0, 900.0);
 /// The display a fixture card rests on, small enough to read in a golden.
@@ -315,10 +313,7 @@ impl Cards {
         match key {
             CardKey::Edit => self.open(id, tx),
             CardKey::Close | CardKey::Keep => self.close(id, tx),
-            CardKey::Copy => {
-                self.note(id, tr("Copied").to_owned(), tx);
-                files::copy(path, recording, self.overlay.clone(), id);
-            }
+            CardKey::Copy => files::copy(path, recording, self.overlay.clone(), id),
             CardKey::Reveal => files::reveal(&path),
             CardKey::Trash => {
                 self.discard(id, tx);
@@ -521,9 +516,10 @@ pub(crate) mod files {
     use rune::OverlayHandle;
 
     use super::Cards;
+    use crate::desktop::i18n::tr;
 
-    /// The file on the clipboard, and a shot's picture with it; a failure
-    /// says so on card `id`.
+    /// The file on the clipboard, and a shot's picture with it. Card `id`
+    /// says what was copied once the clipboard has it, or that it wasn't.
     pub(super) fn copy(
         path: PathBuf,
         recording: bool,
@@ -538,15 +534,27 @@ pub(crate) mod files {
                 let _ = (&path, recording);
                 Err(anyhow::anyhow!("cards copy on macOS only"))
             };
-            if let Err(error) = copied {
-                tracing::warn!(%error, path = %path.display(), "could not copy the capture");
-                if let Some(overlay) = overlay {
-                    overlay.update(move |s, tx| {
-                        s.note(id, crate::desktop::i18n::tr("Couldn't copy").to_owned(), tx)
-                    });
+            let note = match copied {
+                Ok(()) => copied_note(recording),
+                Err(error) => {
+                    tracing::warn!(%error, path = %path.display(), "could not copy the capture");
+                    tr("Couldn't copy")
                 }
+            };
+            if let Some(overlay) = overlay {
+                overlay.update(move |s, tx| s.note(id, note.to_owned(), tx));
             }
         });
+    }
+
+    /// What a card says once its copy is on the clipboard: a shot's
+    /// picture, or a recording's movie file.
+    pub(super) fn copied_note(recording: bool) -> &'static str {
+        if recording {
+            tr("Movie copied")
+        } else {
+            tr("Copied")
+        }
     }
 
     pub(super) fn reveal(path: &Path) {

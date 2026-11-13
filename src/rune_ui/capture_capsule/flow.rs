@@ -27,6 +27,13 @@ pub(crate) fn undo_s() -> f64 {
     tuning::get().undo_s
 }
 
+/// A rule's send waits this long for Undo, and its ring drains over the
+/// same time: the router's own deadline ([`crate::capture_host::SEND_HOLD`]),
+/// so the ring never outlasts the send.
+pub(crate) fn send_hold_s() -> f64 {
+    crate::capture_host::SEND_HOLD.as_secs_f64()
+}
+
 /// The chips stay at least this long even when work starts at once, so
 /// they are seen (Scrawl's `REVEAL_MIN_MS`).
 pub(crate) const CHIPS_MIN_S: f64 = 0.9;
@@ -273,9 +280,14 @@ pub(crate) enum Input {
     ClickAway,
     /// The written capture has no words: the microphone heard no speech.
     NothingHeard,
+    /// The written capture's summary didn't reach the clipboard.
+    CopyFailed,
     /// The router sent the capture, from the capsule or not
     /// (`hex capture send`).
     Settled,
+    /// The router started posting the capture: a rule's send has gone,
+    /// and Undo can no longer stop it.
+    Sending,
 }
 
 /// What the host should do about an input or a click.
@@ -418,6 +430,8 @@ pub(crate) struct Done {
     /// When Undo goes, on the flow's clock: the chip's ring drains to it.
     /// `None` while Undo waits on the router with no window to count.
     pub(crate) countdown: Option<f64>,
+    /// How long the whole window is: the ring's full outline.
+    pub(crate) window: f64,
     /// The pointer holds the countdown: how long it had left. The ring
     /// stands still until the pointer leaves.
     pub(crate) held: Option<f64>,
@@ -451,6 +465,7 @@ impl Done {
             why: None,
             undo: false,
             countdown: None,
+            window: undo_s(),
             held: None,
             ask: None,
             ask_keys: false,
@@ -576,6 +591,8 @@ struct Routed {
     taken_from: Option<Dest>,
     /// A rule's send went: the router said so, so it sounds Sent.
     delivered: bool,
+    /// A rule's send is being posted: past stopping, so Undo is gone.
+    sending: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -674,6 +691,8 @@ pub(crate) struct Flow {
     cues: Vec<Cue>,
     /// The capture shown has no words.
     silent: bool,
+    /// The capture shown isn't on the clipboard: its copy failed.
+    uncopied: bool,
     /// The written capture shown was closed (dismissed, or its hold ran
     /// out); news of it leaves the capsule closed.
     closed: bool,
@@ -715,6 +734,7 @@ impl Flow {
             phone: false,
             cues: Vec::new(),
             silent: false,
+            uncopied: false,
             closed: false,
             undoing: false,
             superseded: false,
@@ -836,7 +856,11 @@ impl Flow {
             (_, _, Some(pause)) => {
                 self.pause = None;
                 if end == Some(pause.end) {
-                    let left = (pause.end - pause.since).clamp(RESUME_LEFT_S, undo_s());
+                    let window = match self.phase {
+                        Phase::Routed(_) => send_hold_s(),
+                        _ => undo_s(),
+                    };
+                    let left = (pause.end - pause.since).clamp(RESUME_LEFT_S, window);
                     let by = now + left - pause.end;
                     match &mut self.phase {
                         Phase::Routed(routed) => routed.at += by,
@@ -1067,8 +1091,13 @@ impl Flow {
             Phase::Routed(Routed {
                 route: Route::Rule { .. },
                 at,
+                delivered: false,
+                sending: false,
                 ..
-            }) => undo_at(*at),
+            }) => {
+                let end = at + send_hold_s();
+                (end > now).then_some(end)
+            }
             Phase::Sent(sent) if sent.undoable => undo_at(sent.at),
             _ => None,
         };
@@ -1085,6 +1114,15 @@ impl Flow {
             && done.countdown == Some(pause.end)
         {
             done.held = Some(pause.end - pause.since);
+        }
+        // A copy that failed never reads as one that worked.
+        if let Pres::Done(done) = &mut pres
+            && self.uncopied
+            && done.lead == Lead::Check
+            && (done.text == copied() || (done.text.is_empty() && done.why.is_none()))
+        {
+            done.lead = Lead::Warning;
+            done.text = tr("Couldn't copy").into();
         }
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
@@ -1536,7 +1574,7 @@ mod tests {
         // window's end, the same moment whenever it is asked.
         assert_eq!(done(&flow, 10.0).why, None);
         for t in [10.0, 11.0, 12.0] {
-            assert_eq!(done(&flow, t).countdown, Some(10.0 + undo_s()));
+            assert_eq!(done(&flow, t).countdown, Some(10.0 + send_hold_s()));
         }
         let actions = flow.input(Input::Undo, 11.0);
         assert_eq!(actions, vec![Action::Undo { to: "SEER".into() }]);
@@ -1558,11 +1596,45 @@ mod tests {
         let mut late = Flow::new();
         late.input(Input::Routed(rule()), 0.0);
         late.input(Input::Settled, 3.0);
-        assert!(!late.tick(undo_s() - 0.1));
-        assert_eq!(late.next_due(3.0), Some(undo_s()));
         let leaves = undo_s().max(3.0 + tuning::get().brief_hold_s);
+        assert!(!late.tick(leaves - 0.1));
+        assert_eq!(late.next_due(3.0), Some(leaves));
         assert!(late.tick(leaves));
         assert_eq!(late.pres(leaves), Pres::Hidden);
+    }
+
+    /// A rule's ring drains over the router's own hold, so it ends as the
+    /// send goes, and Undo leaves the moment the router posts it: it never
+    /// shows, or acts, once the send has gone.
+    #[test]
+    fn a_rules_ring_is_the_routers_hold_and_undo_ends_when_it_sends() {
+        assert_eq!(send_hold_s(), crate::capture_host::SEND_HOLD.as_secs_f64());
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(rule()), 10.0);
+        let shown = done(&flow, 10.0);
+        assert!(shown.undo);
+        assert_eq!(shown.countdown, Some(10.0 + send_hold_s()));
+        assert_eq!(shown.window, send_hold_s(), "the ring's whole outline");
+        assert_eq!(flow.next_due(10.0), Some(10.0 + send_hold_s()));
+
+        let sent_at = 10.0 + send_hold_s();
+        flow.input(Input::Sending, sent_at);
+        let going = done(&flow, sent_at);
+        assert!(!going.undo, "posting, Undo can't stop it");
+        assert_eq!(going.countdown, None);
+        assert!(flow.input(Input::Undo, sent_at).is_empty());
+        flow.input(Input::Settled, sent_at + 0.2);
+        let sent = done(&flow, sent_at + 0.2);
+        assert!(!sent.undo);
+        assert_eq!(sent.text, "Sent to SEER");
+
+        // A pick, sent at once, keeps its own window to take it back.
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::SendRow(0), 1.0);
+        flow.input(Input::Sending, 1.1);
+        assert_eq!(done(&flow, 1.1).window, undo_s());
+        assert!(done(&flow, 1.1).undo);
     }
 
     /// The pointer on the capsule holds Undo's countdown (the router holds
@@ -1575,16 +1647,20 @@ mod tests {
         for t in [12.0, 15.0, 30.0] {
             let held = done(&flow, t);
             assert!(held.undo, "Undo never runs out under the pointer");
-            assert_eq!(held.countdown, Some(10.0 + undo_s()));
-            assert_eq!(held.held, Some(undo_s() - 1.5), "the ring stands still");
+            assert_eq!(held.countdown, Some(10.0 + send_hold_s()));
+            assert_eq!(
+                held.held,
+                Some(send_hold_s() - 1.5),
+                "the ring stands still"
+            );
         }
         assert_eq!(flow.next_due(30.0), None);
         // Two seconds held, it ends two seconds later than it would have.
         assert_eq!(flow.hover(false, 13.5), [Action::Hold(false)]);
         let going = done(&flow, 13.5);
-        assert_eq!(going.countdown, Some(10.0 + undo_s() + 2.0));
+        assert_eq!(going.countdown, Some(10.0 + send_hold_s() + 2.0));
         assert_eq!(going.held, None);
-        assert_eq!(flow.next_due(13.5), Some(10.0 + undo_s() + 2.0));
+        assert_eq!(flow.next_due(13.5), Some(10.0 + send_hold_s() + 2.0));
 
         // A pick's window too, the capsule's alone; one let go near its
         // end keeps a second.
@@ -1606,7 +1682,7 @@ mod tests {
             flow.input(Input::Routed(rule()), 1.0)
                 .contains(&Action::Hold(true))
         );
-        assert_eq!(done(&flow, 9.0).held, Some(undo_s()));
+        assert_eq!(done(&flow, 9.0).held, Some(send_hold_s()));
         let actions = flow.input(Input::Undo, 9.0);
         assert_eq!(actions.first(), Some(&Action::Undo { to: "SEER".into() }));
         assert!(actions.contains(&Action::Hold(false)), "{actions:?}");
@@ -2023,10 +2099,9 @@ mod tests {
     fn an_undo_window_wakes_only_when_it_ends() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
-        flow.input(Input::Settled, 10.2);
-        assert_eq!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
-        assert_eq!(flow.next_due(10.5), Some(10.0 + undo_s()));
-        assert_ne!(flow.pres(10.0), flow.pres(10.0 + undo_s()));
+        assert_eq!(flow.pres(10.5), flow.pres(10.0 + send_hold_s() - 0.5));
+        assert_eq!(flow.next_due(10.5), Some(10.0 + send_hold_s()));
+        assert_ne!(flow.pres(10.0), flow.pres(10.0 + send_hold_s()));
 
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
@@ -2826,6 +2901,39 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), 3.0);
         flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 3.0);
         assert_eq!(done(&flow, 3.0).why, None);
+    }
+
+    /// The capsule says what reached the clipboard, the summary, and only
+    /// once it did: a copy that failed says so, with a warning.
+    #[test]
+    fn a_failed_copy_never_reads_as_copied() {
+        let mut flow = Flow::new();
+        flow.input(Input::Stage(Stage::Recording), 0.0);
+        flow.input(Input::Stage(Stage::Done), 1.0);
+        let shown = done(&flow, 1.0);
+        assert_eq!(shown.text, "Summary copied");
+        assert_eq!(shown.lead, Lead::Check);
+
+        for route in [
+            None,
+            Some(guess()),
+            Some(Route::Nothing { recent: Vec::new() }),
+        ] {
+            let mut flow = Flow::new();
+            flow.input(Input::Stage(Stage::Recording), 0.0);
+            flow.input(Input::CopyFailed, 1.0);
+            flow.input(Input::Stage(Stage::Done), 1.0);
+            if let Some(route) = route {
+                flow.input(Input::Routed(route), 1.0);
+            }
+            let shown = done(&flow, 1.0);
+            assert_eq!(shown.text, "Couldn't copy");
+            assert_eq!(shown.lead, Lead::Warning);
+            // The next recording starts fresh.
+            flow.input(Input::Stage(Stage::Recording), 2.0);
+            flow.input(Input::Stage(Stage::Done), 3.0);
+            assert_eq!(done(&flow, 3.0).text, "Summary copied");
+        }
     }
 
     #[test]

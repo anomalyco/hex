@@ -341,6 +341,13 @@ impl Worker {
             if let Some(rule) = live_rule {
                 current.rule = Some(rule);
             }
+            // The capsule starts a rule's Undo ring when it first shows the
+            // rule, so a send whose rule was still being looked up holds from
+            // now: the ring and the send share one deadline.
+            let shown = matches!(
+                current.route.answer,
+                RouteAnswer::Rule { .. } | RouteAnswer::ResolvingRule { .. }
+            );
             // A rule already sent may gain its recent list, but never another send.
             let send = current
                 .route
@@ -381,9 +388,13 @@ impl Worker {
             if let Some(dest) = send {
                 if let Some(current) = &mut self.current {
                     current.destination = Some(dest);
-                    current
-                        .due
-                        .get_or_insert_with(|| Instant::now() + SEND_HOLD);
+                    if shown {
+                        current
+                            .due
+                            .get_or_insert_with(|| Instant::now() + SEND_HOLD);
+                    } else {
+                        current.due = Some(Instant::now() + SEND_HOLD);
+                    }
                 }
                 self.send_due();
             } else if let Some(current) = &mut self.current

@@ -469,7 +469,7 @@ impl Playground {
         self.at(4.6, Step::Click(Id::Finish));
         let routed_at = 4.6 + 1.8;
         let gone = if self.rule {
-            routed_at + self.tuning.undo_s + 2.5
+            routed_at + super::flow::send_hold_s() + 2.5
         } else {
             let picked = routed_at + 1.8;
             self.at(picked, Step::Input(Input::SendRow(0)));

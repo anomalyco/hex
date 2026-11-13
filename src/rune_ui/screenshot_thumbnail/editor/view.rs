@@ -270,6 +270,11 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
         );
     }
     let note = s.note.as_ref().map(|(note, _)| note.as_str()).unwrap_or("");
+    let ink = if s.failed.is_some() {
+        p.danger()
+    } else {
+        p.muted()
+    };
     bar = bar.child(
         row()
             .grow(1.0)
@@ -281,11 +286,19 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
                 text(note)
                     .key("note")
                     .font(k.ty.ui)
-                    .color(p.muted())
+                    .color(ink)
                     .single_line()
                     .truncate(),
             ),
     );
+    if s.failed.is_some() {
+        bar = bar.child(push(
+            k,
+            Button::new(tr("Retry"))
+                .variant(ButtonVariant::Ghost)
+                .on_press_tx(|s: &mut Editor, tx| s.retry(tx)),
+        ));
+    }
     if s.clip.is_none() {
         bar = bar.child(push(
             k,

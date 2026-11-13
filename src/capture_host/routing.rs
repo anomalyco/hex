@@ -37,8 +37,9 @@ use session_name::{name_answer, session_name};
 const RETRY_EVERY: Duration = Duration::from_secs(15);
 /// How long taking back a send may wait on OpenCode.
 const UNDO_DEADLINE: Duration = Duration::from_secs(10);
-/// How long a rule's send waits for Undo before it goes.
-const SEND_HOLD: Duration = Duration::from_secs(3);
+/// How long a rule's send waits for Undo before it goes. The capsule's
+/// Undo ring drains over this same time, from when the rule shows.
+pub const SEND_HOLD: Duration = Duration::from_secs(3);
 /// A held send resumes with at least this long left, so it never goes the
 /// instant the pointer leaves the capsule.
 const RESUME_LEFT: Duration = Duration::from_secs(1);
@@ -2221,7 +2222,7 @@ mod tests {
                 assert!(started.elapsed() < Duration::from_millis(200));
                 let current = worker.current.as_ref().unwrap();
                 assert!(current.sent.is_none());
-                assert!(current.due.unwrap() >= started + Duration::from_secs(3));
+                assert!(current.due.unwrap() >= started + SEND_HOLD);
                 assert!(matches!(
                     current.route.answer,
                     RouteAnswer::Rule { .. } | RouteAnswer::ResolvingRule { .. }
@@ -2318,6 +2319,47 @@ mod tests {
             );
             drop(found);
             worker.pending = None;
+            std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
+        }
+
+        /// The capsule starts a rule's Undo ring when it first shows the
+        /// rule. A rule still being looked up when its capture was written
+        /// holds its send from its answer, not from the write, so the send
+        /// never goes before the ring runs out.
+        #[test]
+        fn a_rule_answered_late_holds_its_send_from_the_answer() {
+            let router = router_with(|c| {
+                c.apps
+                    .insert("com.example.board".into(), "ses_board".into());
+            });
+            let (look, found) = held_look(router, look::Live::default());
+            let outcomes = SharedOutcomes::default();
+            let mut worker = worker(outcomes.clone());
+            let bundle = written("com.example.board");
+            lock(&outcomes).fail(bundle.clone(), "test".into());
+            worker.written(bundle.clone(), look);
+            // As if the local read found no rule yet, and its hold ran out
+            // while the capsule still said nothing.
+            let current = worker.current.as_mut().unwrap();
+            current.route.answer = RouteAnswer::Looking;
+            current.destination = None;
+            current.due = Some(Instant::now());
+            drop(found);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while matches!(
+                worker.current.as_ref().unwrap().route.answer,
+                RouteAnswer::Looking
+            ) {
+                assert!(Instant::now() < deadline, "the rule never came");
+                worker.prepared();
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            let answered = Instant::now();
+            let current = worker.current.as_ref().unwrap();
+            assert!(current.sent.is_none(), "not before its ring runs out");
+            assert!(current.due.unwrap() + Duration::from_millis(100) >= answered + SEND_HOLD);
+            settle(&mut worker);
+            assert!(worker.current.as_ref().unwrap().sent.is_some());
             std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
         }
 

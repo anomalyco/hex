@@ -160,6 +160,10 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ),
         ("processing", after(&[processing()])),
         ("saved", after(&[In(Input::Stage(Stage::Done))])),
+        (
+            "copy-failed",
+            after(&[In(Input::CopyFailed), In(Input::Stage(Stage::Done))]),
+        ),
         ("failed", after(&[In(failed())])),
         (
             "failed-start",
@@ -584,6 +588,7 @@ const GOLDENS: &[&str] = &[
     "picker-iphone",
     "processing",
     "saved",
+    "copy-failed",
     "rule-sent",
     "rule-resolving",
     "rule-final",

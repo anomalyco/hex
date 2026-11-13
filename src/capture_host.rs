@@ -93,7 +93,7 @@ pub use permissions::{
 };
 pub use replay::available as replay_available;
 pub use routing::CaptureRoute;
-pub use routing::{RouteAnswer, RouteDelivery, RouteDest};
+pub use routing::{RouteAnswer, RouteDelivery, RouteDest, SEND_HOLD};
 #[cfg(target_os = "macos")]
 pub use routing::{recent_sessions, send_image};
 #[cfg(target_os = "macos")]
@@ -1135,6 +1135,9 @@ pub struct SettledCapture {
     pub missing_transcript: Option<String>,
     /// Why a capture failed, when Hex knows.
     pub error: Option<String>,
+    /// Why a written capture's summary didn't reach the clipboard; `None`
+    /// once it did (or for a capture that isn't copied).
+    pub copy_error: Option<String>,
     /// Where a written capture goes, while captures are sent to OpenCode
     /// (`capture.routing`'s `autoSend`).
     pub route: Option<CaptureRoute>,
@@ -1376,11 +1379,11 @@ impl Outcomes {
     }
 
     fn settle(&mut self, bundle: PathBuf, stage: Stage, written: Option<Written>) {
-        self.settle_with(bundle, stage, written, None, None);
+        self.settle_with(bundle, stage, written, None, None, None);
     }
 
     fn fail(&mut self, bundle: PathBuf, error: String) {
-        self.settle_with(bundle, Stage::Failed, None, Some(error), None);
+        self.settle_with(bundle, Stage::Failed, None, Some(error), None, None);
     }
 
     /// A switch discarded `bundle` and then could not start: its outcome,
@@ -1393,6 +1396,7 @@ impl Outcomes {
             gaps: None,
             missing_transcript: None,
             error: Some(error),
+            copy_error: None,
             route: None,
         });
         self.publish();
@@ -1422,6 +1426,7 @@ impl Outcomes {
         stage: Stage,
         written: Option<Written>,
         error: Option<String>,
+        copy_error: Option<String>,
         route: Option<CaptureRoute>,
     ) {
         let discarded = self
@@ -1437,6 +1442,7 @@ impl Outcomes {
                 gaps: written.as_ref().map(|written| written.gaps),
                 missing_transcript: written.and_then(|written| written.missing_transcript),
                 error,
+                copy_error,
                 route,
             });
         }
@@ -3368,11 +3374,22 @@ fn finish_captures(
                     missing_transcript = written.missing_transcript.as_deref(),
                     "capture finished"
                 );
-                if !crate::capture_zip::copy_as_zip(&bundle) {
-                    copy_to_clipboard(&bundle);
-                }
+                let copy_error = if crate::capture_zip::copy_as_zip(&bundle) {
+                    None
+                } else {
+                    copy_to_clipboard(&bundle)
+                        .err()
+                        .map(|error| format!("{error:#}"))
+                };
                 let route = look.as_ref().map(|_| CaptureRoute::looking());
-                lock(outcomes).settle_with(bundle.clone(), Stage::Done, Some(written), None, route);
+                lock(outcomes).settle_with(
+                    bundle.clone(),
+                    Stage::Done,
+                    Some(written),
+                    None,
+                    copy_error,
+                    route,
+                );
                 if let Some(look) = look {
                     let job = routing::Job::Written {
                         bundle: bundle.clone(),
@@ -3502,10 +3519,11 @@ pub(crate) fn with_linux_paster(
 }
 
 /// Copies a written capture to the clipboard, as Scrawl does: its summary,
-/// ready to paste into an agent.
-fn copy_to_clipboard(bundle: &Path) {
+/// ready to paste into an agent. The capsule says "Summary copied" only
+/// once this is `Ok`.
+fn copy_to_clipboard(bundle: &Path) -> anyhow::Result<()> {
     if cfg!(test) {
-        return;
+        return Ok(());
     }
     #[cfg(target_os = "macos")]
     let copied =
@@ -3515,9 +3533,10 @@ fn copy_to_clipboard(bundle: &Path) {
         summary(bundle).and_then(|summary| with_linux_paster(|paster| paster.copy(&summary)));
     #[cfg(target_os = "windows")]
     let copied = scrawl_capture::handoff::copy_bundle_to_clipboard(bundle);
-    if let Err(error) = copied {
+    if let Err(error) = &copied {
         tracing::warn!(error = format!("{error:#}"), "could not copy the capture");
     }
+    copied.map_err(|error| anyhow::anyhow!("{error:#}"))
 }
 
 /// One capture's audio thread: starts the engine, collects until the sink

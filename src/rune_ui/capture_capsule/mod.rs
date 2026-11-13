@@ -426,10 +426,11 @@ impl CapsuleState {
         // An Undo ring two seconds in, so a still shows it draining.
         if let Pres::Done(Done {
             countdown: Some(end),
+            window,
             ..
         }) = &state.surface.pres
         {
-            let now = end - flow::undo_s() + 2.0;
+            let now = end - window + 2.0;
             undo_ring::sync(&mut state.live.ring, &state.surface.pres, now, false);
         }
         state.live.meter.publish(0.4);
