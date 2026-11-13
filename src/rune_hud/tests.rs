@@ -375,10 +375,10 @@ fn a_frame_less_start_hides_once() {
     let mut first_frame = FirstFrame::default();
     first_frame.start(start, 7);
     let early = first_frame.poll(start + Duration::from_millis(100), 7, None, None);
-    assert!(!early.hide);
+    assert!(early.hide.is_none());
     assert_eq!(early.reason, None);
     let resolved = first_frame.poll(start + FIRST_FRAME, 7, None, Some("dx12 on Intel"));
-    assert!(resolved.hide, "the attempt presented nothing");
+    assert!(resolved.hide.is_some(), "the attempt presented nothing");
     assert!(
         resolved
             .reason
@@ -388,7 +388,7 @@ fn a_frame_less_start_hides_once() {
         resolved.reason
     );
     let after = first_frame.poll(start + FIRST_FRAME + Duration::from_secs(1), 7, None, None);
-    assert!(!after.hide);
+    assert!(after.hide.is_none());
 }
 
 #[test]
@@ -396,20 +396,25 @@ fn a_new_start_does_not_hide_on_the_previous_reason() {
     let start = Instant::now();
     let mut first_frame = FirstFrame::default();
     first_frame.start(start, 0);
-    assert!(first_frame.poll(start + FIRST_FRAME, 0, None, None).hide);
+    assert!(
+        first_frame
+            .poll(start + FIRST_FRAME, 0, None, None)
+            .hide
+            .is_some()
+    );
     // The last known reason stays in Settings, but it can't hide the next
     // start before that start has had its own first-frame window.
     let next = start + FIRST_FRAME + Duration::from_millis(1);
     first_frame.start(next, 0);
     let tick = first_frame.poll(next + Duration::from_millis(250), 0, None, None);
-    assert!(!tick.hide);
+    assert!(tick.hide.is_none());
     assert!(
         tick.reason.is_some(),
         "the last attempt's reason still shows"
     );
     let just_before =
         first_frame.poll(next + FIRST_FRAME - Duration::from_millis(1), 0, None, None);
-    assert!(!just_before.hide);
+    assert!(just_before.hide.is_none());
 }
 
 #[test]
@@ -422,12 +427,12 @@ fn a_second_start_while_pending_restarts_the_attempt() {
     // 1.5 s after the first start is only 600 ms into the second.
     let early = first_frame.poll(start + FIRST_FRAME, 5, None, None);
     assert!(
-        !early.hide,
+        early.hide.is_none(),
         "the second start gets its own first-frame window"
     );
     // The second attempt's baseline is its own: one frame since then presents.
     let resolved = first_frame.poll(second + FIRST_FRAME, 6, None, None);
-    assert!(!resolved.hide);
+    assert!(resolved.hide.is_none());
     assert_eq!(resolved.reason, None);
 }
 
@@ -445,13 +450,13 @@ fn an_overlay_failure_never_hides_on_its_own() {
         FIRST_FRAME - Duration::from_millis(1),
     ] {
         let check = first_frame.poll(start + at, 0, Some("device lost"), None);
-        assert!(!check.hide);
+        assert!(check.hide.is_none());
         assert_eq!(check.reason.as_deref(), Some("device lost"));
     }
     // Even after the attempt resolves, a failure still set doesn't hide on its
     // own: the frame that presented is what matters.
     let presented = first_frame.poll(start + FIRST_FRAME, 1, Some("device lost"), None);
-    assert!(!presented.hide);
+    assert!(presented.hide.is_none());
     assert_eq!(presented.reason.as_deref(), Some("device lost"));
 }
 
@@ -460,9 +465,14 @@ fn an_attempt_hides_only_once() {
     let start = Instant::now();
     let mut first_frame = FirstFrame::default();
     first_frame.start(start, 0);
-    assert!(first_frame.poll(start + FIRST_FRAME, 0, None, None).hide);
     assert!(
-        !first_frame
+        first_frame
+            .poll(start + FIRST_FRAME, 0, None, None)
+            .hide
+            .is_some()
+    );
+    assert!(
+        first_frame
             .poll(
                 start + FIRST_FRAME + Duration::from_millis(250),
                 0,
@@ -470,16 +480,18 @@ fn an_attempt_hides_only_once() {
                 None
             )
             .hide
+            .is_none()
     );
     assert!(
-        !first_frame
+        first_frame
             .poll(
                 start + FIRST_FRAME + Duration::from_millis(500),
                 0,
                 Some("device lost"),
                 None
             )
-            .hide,
+            .hide
+            .is_none(),
         "a later failure doesn't hide the attempt again"
     );
 }
@@ -490,7 +502,10 @@ fn the_next_start_hides_again_after_a_hide() {
     let mut first_frame = FirstFrame::default();
     first_frame.start(start, 3);
     assert!(
-        first_frame.poll(start + FIRST_FRAME, 3, None, None).hide,
+        first_frame
+            .poll(start + FIRST_FRAME, 3, None, None)
+            .hide
+            .is_some(),
         "the first attempt presented nothing"
     );
     // The recovery is per start: the next one gets its own hide if it is
@@ -498,7 +513,85 @@ fn the_next_start_hides_again_after_a_hide() {
     let next = start + FIRST_FRAME + Duration::from_secs(1);
     first_frame.start(next, 4);
     assert!(
-        first_frame.poll(next + FIRST_FRAME, 4, None, None).hide,
+        first_frame
+            .poll(next + FIRST_FRAME, 4, None, None)
+            .hide
+            .is_some(),
         "the next attempt presented nothing either"
     );
+}
+
+/// A recovery hide is queued for the runtime thread to apply on the overlay's
+/// own thread, so a dictation that starts in between must keep the HUD its own
+/// start asked for (#1793).
+#[test]
+fn a_stale_attempts_hide_leaves_a_newer_start_alone() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 4);
+    let hide = first_frame
+        .poll(start + FIRST_FRAME, 4, None, None)
+        .hide
+        .expect("the attempt presented nothing");
+    assert!(first_frame.should_apply_hide(hide, 4));
+
+    // The next dictation starts while that hide is still queued: its start
+    // re-asserts the HUD, so the stale hide must not run.
+    let next = start + FIRST_FRAME + Duration::from_millis(120);
+    first_frame.start(next, 4);
+    assert!(
+        !first_frame.should_apply_hide(hide, 4),
+        "a later start owns the HUD now"
+    );
+
+    // That start's own frame-less attempt still hides, and only it.
+    let next_hide = first_frame
+        .poll(next + FIRST_FRAME, 4, None, None)
+        .hide
+        .expect("the new attempt presented nothing either");
+    assert_ne!(next_hide.attempt, hide.attempt, "each attempt has its tag");
+    assert!(first_frame.should_apply_hide(next_hide, 4));
+}
+
+/// The hide is applied a turn after it is decided, and a HUD that presented its
+/// first frame in between is up: hiding it would take away the HUD the user is
+/// watching, and report a failure that did not happen (#1793).
+#[test]
+fn a_hide_is_dropped_when_a_frame_presented_after_the_poll() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 0);
+    let hide = first_frame
+        .poll(start + FIRST_FRAME, 0, None, None)
+        .hide
+        .expect("the attempt presented nothing");
+
+    // The first frame lands between the poll and the queued hide.
+    assert!(
+        !first_frame.should_apply_hide(hide, 1),
+        "one frame since the poll means the HUD is drawing"
+    );
+    // The same poll's hide still applies when nothing presented.
+    assert!(first_frame.should_apply_hide(hide, 0));
+}
+
+/// `reshow_due` is the recording's own recovery: a HUD Rune declined or Hex hid
+/// is asked for once, after its frames stop, and never again in that recording
+/// (#1793).
+#[test]
+fn a_recording_asks_again_only_when_its_frames_stop() {
+    let stale = RESHOW_AFTER + Duration::from_millis(1);
+    let fresh = Duration::from_millis(16);
+    // Frames are coming: nothing to do.
+    assert!(!reshow_due(Some(fresh), false));
+    // Frames stopped: ask, once.
+    assert!(reshow_due(Some(stale), false));
+    assert!(!reshow_due(Some(stale), true));
+    // A start sets the clock, so a frame the previous dictation left can't make
+    // it look late.
+    assert!(!reshow_due(None, false));
+    // A recovery hide re-arms the ask and restarts the clock: the meter right
+    // after it is not late, and the next stale one asks once more (#1793).
+    assert!(!reshow_due(Some(Duration::ZERO), false));
+    assert!(reshow_due(Some(stale), false));
 }

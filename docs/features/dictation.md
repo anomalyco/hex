@@ -2228,7 +2228,26 @@ isn't Hidden opens a fresh first-frame attempt: its own present baseline and
 clock, its own one recovery hide, and no inherited no-frame decision, so a
 previous attempt's reason can stay in Settings without hiding the new one,
 and a second start while the first still runs restarts the attempt. The
-attempt hides the overlay at once (the immediate hide, not the exit fade,
+attempt opens where the show is requested, in `Hud::handle` on Rune's thread,
+which shares one `Watch` with the sender; not where the listener sent the
+start. That keeps the listener thread and the event queue out of the budget,
+so the 1.5 s measures the show Rune runs rather than the wait in front of it
+(the start's `show` is itself a queued request, applied a turn later). It does
+not make a slow show fast. Rune's 600 to 850 ms is making a new device
+(adapter enumeration, the device and its pipelines); a surface on a device
+another surface already holds presents its first frame in about 16 ms. The
+window and swapchain are made for each show either way, since Windows' zero
+idle gives them back on every hide (#1308, #1359, #1793). Rune is also where
+the rest of that cost comes from: `prepare` can block the loop thread while
+the device Rune is making on `warm_gpu`'s thread is taken (`render/warm.rs`'s
+`take` waits on the `Making` state), the HUD's device is parked only when
+nothing else holds it (`Overlay::park`'s `Arc::try_unwrap`), and a surface
+that draws with the app's pooled device makes a new `Renderer` per show, which
+is a new `DeviceKey` and so a new painter here (`Painter`, 75 to 115 ms). The
+holder can be any window or overlay on that pool, the HUD's own live-text
+overlay included. Fixing that needs a Rune change: let an overlay keep its own
+parked device, and never block a show on a device being made.
+The attempt hides the overlay at once (the immediate hide, not the exit fade,
 which itself needs a frame) when it presents no frame after 1.5 s; Rune's
 overlay failure is reported as the reason but never hides on its own, since a
 failed overlay presents nothing and the frame-less check covers it. That
@@ -2236,12 +2255,38 @@ clears the HUD's shown state and lets Rune give its window and GPU surface
 back (Windows' zero idle parks both), so the next dictation start makes both
 again, and a lost GPU device such as a laptop resumed from standby costs one
 HUD rather than the rest of the session. Each attempt hides at most once, and
-a later frame-less start hides again. Checked by `rune_hud::tests`'
-first-frame tests (`a_frame_less_start_hides_once`,
+a later frame-less start hides again. The hide is queued for Rune's thread, so
+it carries the attempt and the present count it was decided with and does
+nothing if a start opened a later attempt or a frame presented since: a hide
+decided for a HUD that was only late never takes away one that is up. Every
+start also asks Rune for the HUD again, on Windows as well as Linux, clearing
+`shown` first. `shown` is Hex's record of a request, not of Rune's state: it
+is set before Rune applies the show, and `show_fading` gives up when the window
+or surface it has to make fails. A `ShowWindow` Windows leaves cloaked is the
+other reason not to trust it, but re-asking does not help there: Rune ignores a
+show while it counts the overlay shown, so only the 1.5 s recovery hide and the
+rebuild after it get a cloaked or stuck surface back. What re-asking does
+recover is a show that failed in setup, one Hex hid, and a layer surface the
+compositor closed (#1663), and Rune's show is a no-op while the overlay is
+visible, so it costs nothing. `fade_out` and `hide` both clear `shown`, so a
+start during the exit fade already reached Rune before this. While a recording
+runs, the HUD also asks on its own: a recording's own events are meters, so
+once its frames have stopped for `RESHOW_AFTER` (250 ms) it clears `shown` and
+asks. That is one ask, and the recovery hide frees exactly one more by
+restarting the clock and the ask together, so one rebuild follows the hide and
+a HUD that can never show does not rebuild its window and surface on every
+meter. Checked by `rune_hud::tests`' first-frame and
+recovery tests
+(`a_frame_less_start_hides_once`,
 `a_new_start_does_not_hide_on_the_previous_reason`,
 `a_second_start_while_pending_restarts_the_attempt`,
 `an_overlay_failure_never_hides_on_its_own`, `an_attempt_hides_only_once`,
-and `the_next_start_hides_again_after_a_hide`), not on Windows hardware.
+`the_next_start_hides_again_after_a_hide`,
+`a_stale_attempts_hide_leaves_a_newer_start_alone`,
+`a_hide_is_dropped_when_a_frame_presented_after_the_poll`, and
+`a_recording_asks_again_only_when_its_frames_stop`), and
+`only_the_recording_phase_is_recording` in `dictation::indicator` pins the one
+phase a re-ask may act on, not on Windows hardware.
 Every OS takes dark or light and Reduce Motion from Rune, and loads
 `dot-scope.json` at launch.
 Windows and Linux drop the HUD's painter, and its buffers, bind group and
