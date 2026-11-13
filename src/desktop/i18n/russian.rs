@@ -1288,6 +1288,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("This speech model doesn't show live words; pick {first} or {second}", "Эта речевая модель не показывает слова в реальном времени; выберите {first} или {second}"),
     ("This speech model doesn't show live words; pick {}", "Эта речевая модель не показывает слова в реальном времени; выберите {}"),
     ("The selected speech model doesn't show live words", "Выбранная речевая модель не показывает слова в реальном времени"),
+    ("Browser access", "Доступ из браузера"),
+    ("Let web pages on the origins you list call Hex's local API from JavaScript.", "Разрешить веб-страницам с перечисленных источников вызывать локальный API Hex из JavaScript."),
+    ("Origins", "Источники"),
+    ("Separate origins with commas or new lines; only http and https work", "Разделяйте источники запятыми или новыми строками; работают только http и https"),
 ];
 
 #[cfg(test)]

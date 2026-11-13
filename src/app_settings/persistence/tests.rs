@@ -429,6 +429,28 @@ fn an_invalid_voice_prompt_phrase_loads_the_default_and_keeps_its_switch() {
 }
 
 #[test]
+fn browser_access_origins_load_normalized_and_drop_the_rest() {
+    let original = br#"{"labs":{"api_browser_access":true,"api_browser_origins":["HTTP://LocalHost:3000","https://App.Example.com","*","http://example.com/path","http://LOCALHOST:3000"]}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.api_browser_access);
+    assert_eq!(
+        settings.labs.api_browser_origins,
+        ["http://localhost:3000", "https://app.example.com"],
+        "each kept origin is normalized and listed once; the others are dropped"
+    );
+}
+
+#[test]
+fn a_missing_browser_access_list_loads_empty_and_keeps_its_switch() {
+    let original = br#"{"labs":{"api_browser_access":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.api_browser_access);
+    assert!(settings.labs.api_browser_origins.is_empty());
+}
+
+#[test]
 fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,

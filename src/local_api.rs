@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
+mod cors;
 mod dictation;
 mod discovery;
 mod http;
@@ -22,6 +23,7 @@ mod streams;
 pub(crate) mod timestamps;
 mod transcriptions;
 
+pub use cors::BrowserAccess;
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use discovery::call_developer;
@@ -104,6 +106,9 @@ struct HttpContext {
     meeting_events: meeting_events::Source,
     processing: processing::Processing,
     timestamps: timestamps::Timestamps,
+    /// Labs › Browser access: the page origins a CORS header may name, and
+    /// the preflight they may pass without a token.
+    browser_access: BrowserAccess,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -147,6 +152,10 @@ pub struct LocalApiOptions {
     /// transcripts). Off, a timed request answers
     /// `403 timestamps-disabled`.
     pub timestamps: Timestamps,
+    /// Web pages on a listed origin (Labs › Browser access) may call the API
+    /// from JavaScript. Off, no CORS header is sent and `OPTIONS` stays
+    /// `401`.
+    pub browser_access: BrowserAccess,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
@@ -282,6 +291,7 @@ impl LocalApi {
             meeting_events,
             processing: options.processing,
             timestamps: options.timestamps,
+            browser_access: options.browser_access,
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -476,7 +486,7 @@ fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bo
             Ok((stream, _)) => match connections.try_send(stream) {
                 Ok(()) => {}
                 Err(TrySendError::Full(mut stream)) => {
-                    let _ = write_response(&mut stream, HttpResponse::empty(503));
+                    let _ = write_response(&mut stream, HttpResponse::empty(503), None);
                 }
                 Err(TrySendError::Disconnected(_)) => break,
             },
@@ -559,8 +569,14 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             tracing::debug!(%error, "could not set local API write timeout");
             continue;
         }
+        let mut allow_origin = None;
         let action = match read_request(&mut stream, &context.shutdown) {
-            Ok(request) => handle_request(request, &context),
+            Ok(request) => {
+                allow_origin = context
+                    .browser_access
+                    .allow_origin(request.origin.as_deref());
+                handle_request(request, &context, allow_origin.as_deref())
+            }
             Err(RequestReadError::TooLarge) => RequestAction::Respond(HttpResponse::empty(431)),
             Err(RequestReadError::Invalid) => RequestAction::Respond(HttpResponse::empty(400)),
             Err(RequestReadError::Deadline) => RequestAction::Respond(HttpResponse::empty(408)),
@@ -570,9 +586,10 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 continue;
             }
         };
+        let allow_origin = allow_origin.as_deref();
         match action {
             RequestAction::Respond(response) => {
-                if let Err(error) = write_response(&mut stream, response) {
+                if let Err(error) = write_response(&mut stream, response, allow_origin) {
                     tracing::debug!(%error, "local API client disconnected");
                 }
             }
@@ -584,6 +601,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     context.model_preparing.clone(),
                     &context.shutdown,
                     context.transcription.clone(),
+                    allow_origin,
                 );
             }
             RequestAction::Transcribe {
@@ -607,7 +625,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     &context,
                 );
                 if let Some(response) = response
-                    && let Err(error) = write_response(&mut stream, response)
+                    && let Err(error) = write_response(&mut stream, response, allow_origin)
                 {
                     tracing::debug!(%error, "transcription client disconnected");
                 }
@@ -623,7 +641,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     context.developer_control.as_ref(),
                     &context.shutdown,
                 );
-                if let Err(error) = write_response(&mut stream, response) {
+                if let Err(error) = write_response(&mut stream, response, allow_origin) {
                     tracing::debug!(%error, "developer control client disconnected");
                 }
             }
@@ -638,7 +656,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     context.control.as_ref(),
                     &context.shutdown,
                 );
-                if let Err(error) = write_response(&mut stream, response) {
+                if let Err(error) = write_response(&mut stream, response, allow_origin) {
                     tracing::debug!(%error, "control client disconnected");
                 }
             }
@@ -647,7 +665,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 body_prefix,
             } => {
                 let response = dictation::start(&mut stream, content_length, body_prefix, &context);
-                if let Err(error) = write_response(&mut stream, response) {
+                if let Err(error) = write_response(&mut stream, response, allow_origin) {
                     tracing::debug!(%error, "dictation client disconnected");
                 }
             }
@@ -656,18 +674,30 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 owner_token,
                 action,
             } => {
-                dictation::handle(&mut stream, id, owner_token, action, &context);
+                dictation::handle(&mut stream, id, owner_token, action, &context, allow_origin);
             }
-            RequestAction::Stream(action) => streams::handle(&mut stream, action, &context),
+            RequestAction::Stream(action) => {
+                streams::handle(&mut stream, action, &context, allow_origin);
+            }
             RequestAction::MeetingEvents(subscription) => {
-                meeting_events::stream(&mut stream, subscription, &context);
+                meeting_events::stream(&mut stream, subscription, &context, allow_origin);
             }
         }
     }
 }
 
-fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction {
+fn handle_request(
+    request: HttpRequest,
+    context: &HttpContext,
+    allow_origin: Option<&str>,
+) -> RequestAction {
     let path = request.path.split('?').next().unwrap_or("/");
+    // A page can't put its token on a preflight, so a listed origin's one is
+    // answered before authentication. Every other request needs its token.
+    if request.is_preflight() && allow_origin.is_some() {
+        // The allow-origin header is added by the writer, as on any answer.
+        return RequestAction::Respond(HttpResponse::preflight(request.private_network));
+    }
     if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
         context
             .auth_limiter
@@ -755,6 +785,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 reason: reason(200),
                 content_type: Some("application/json"),
                 body: snapshot.to_json().into_bytes(),
+                preflight: None,
             },
             None => HttpResponse::code(503, "vitals-unavailable"),
         },
@@ -1125,6 +1156,7 @@ fn stream_model_prepare(
     preparing: Arc<AtomicBool>,
     shutdown: &AtomicBool,
     transcription: crate::transcription::service::TranscriptionServiceHandle,
+    allow_origin: Option<&str>,
 ) {
     let preparer: ModelPreparer = Box::new(move |canceled, downloaded, stage| {
         if matches!(
@@ -1146,7 +1178,7 @@ fn stream_model_prepare(
             .prepare(selection, canceled)
             .map_err(|error| eyre!("model preparation failed: {error:?}"))
     });
-    stream_model_prepare_with(stream, model, preparing, shutdown, preparer);
+    stream_model_prepare_with(stream, model, preparing, shutdown, preparer, allow_origin);
 }
 
 fn stream_model_prepare_with(
@@ -1155,8 +1187,9 @@ fn stream_model_prepare_with(
     preparing: Arc<AtomicBool>,
     shutdown: &AtomicBool,
     preparer: ModelPreparer,
+    allow_origin: Option<&str>,
 ) {
-    if let Err(error) = write_sse_headers(stream) {
+    if let Err(error) = write_sse_headers(stream, allow_origin) {
         preparing.store(false, Ordering::Release);
         tracing::debug!(%error, "model preparation client disconnected before streaming");
         return;
@@ -2078,6 +2111,9 @@ mod tests {
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
                 body_prefix: Vec::new(),
+                origin: None,
+                access_control_request_method: None,
+                private_network: false,
             },
             &transcription,
             &Processing::default(),
@@ -2098,6 +2134,9 @@ mod tests {
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
                 body_prefix: Vec::new(),
+                origin: None,
+                access_control_request_method: None,
+                private_network: false,
             },
             &transcription,
             &Processing::default(),
@@ -2133,6 +2172,7 @@ mod tests {
             meeting_events: meeting_events::Source::default(),
             processing: Processing::default(),
             timestamps: Timestamps::default(),
+            browser_access: BrowserAccess::default(),
         };
         let action = handle_request(
             HttpRequest {
@@ -2144,8 +2184,12 @@ mod tests {
                 content_type: None,
                 content_length: None,
                 body_prefix: Vec::new(),
+                origin: None,
+                access_control_request_method: None,
+                private_network: false,
             },
             &context,
+            None,
         );
         let RequestAction::Respond(response) = action else {
             panic!("busy preparation must return a buffered conflict");
@@ -2195,6 +2239,7 @@ mod tests {
             preparing.clone(),
             &AtomicBool::new(false),
             preparer,
+            None,
         );
         drop(stream);
         let response = client.join().unwrap();
@@ -2233,6 +2278,7 @@ mod tests {
             Arc::new(AtomicBool::new(true)),
             &AtomicBool::new(false),
             preparer,
+            None,
         );
         drop(stream);
         let response = client.join().unwrap();

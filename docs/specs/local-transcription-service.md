@@ -96,10 +96,14 @@ not at process entry. Startup-failure and descendant-process cleanup remain
 native-distribution acceptance gates in the delivery plan.
 
 Every request requires `Authorization: Bearer <token>`. The token is delivered
-only over the child's stdout pipe. The server deliberately sends no CORS
-headers. A parsed request with a missing or incorrect bearer credential returns
-an empty `401` response; malformed HTTP can be rejected before authentication.
-The standalone Hex application may still publish owner-only discovery for its
+only over the child's stdout pipe. The server sends no CORS header unless
+Labs › Browser access is on and the request's `Origin` is one of
+`labs.api_browser_origins`; only then does a listed page origin get
+`Access-Control-Allow-Origin` and an unauthenticated `OPTIONS` preflight that
+Hex answers before the token check. A parsed request with a missing or
+incorrect bearer credential returns an empty `401` response; malformed HTTP
+can be rejected before authentication. The standalone Hex application may
+still publish owner-only discovery for its
 own existing local API. Embedded `create()` uses the child handshake; desktop
 `connect()` remains a separate discovery-based path.
 

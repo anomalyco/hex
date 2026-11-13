@@ -2266,6 +2266,47 @@ fn voice_prompt_shows_its_phrase_on_its_card_while_on() {
 }
 
 #[test]
+fn browser_access_lists_its_origins_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::ApiBrowserAccess.group()));
+    settle(&mut rt);
+    assert!(
+        rt.find("browser-access-origins").is_none(),
+        "hidden while off"
+    );
+    tap(&mut rt, "lab-api-browser-access");
+    assert!(rt.state.settings.labs.api_browser_access);
+    assert!(rt.find("browser-access-origins").is_some());
+
+    // A typed list saves normalized, and the field shows that list back.
+    rt.update(|ui, _| {
+        ui.lab_store.origins =
+            rune::TextEdit::new("HTTP://LocalHost:3000, https://App.Example.com".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        ["http://localhost:3000", "https://app.example.com"]
+    );
+    refresh(&mut rt);
+    assert_eq!(
+        rt.state.lab_store.origins.text,
+        "http://localhost:3000, https://app.example.com"
+    );
+
+    // Turning it off keeps the saved list, and the field leaves with it.
+    tap(&mut rt, "lab-api-browser-access");
+    assert!(!rt.state.settings.labs.api_browser_access);
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        ["http://localhost:3000", "https://app.example.com"]
+    );
+    refresh(&mut rt);
+    assert!(rt.find("browser-access-origins").is_none());
+}
+
+#[test]
 fn a_labs_card_shows_its_description_and_its_switch_turns_it_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));

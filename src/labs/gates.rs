@@ -397,6 +397,19 @@ pub fn api_timestamps() -> bool {
     on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
 }
 
+/// A web page on one of [`api_browser_origins`] may call the local API from
+/// JavaScript, with CORS headers and a preflight it can pass (read where each
+/// request's route starts).
+pub fn api_browser_access() -> bool {
+    super::origins::enabled()
+}
+
+/// The origins [`api_browser_access`] lists, normalized and lowercased
+/// (read where each request starts, so a change applies without a restart).
+pub fn api_browser_origins() -> Vec<String> {
+    super::origins::listed()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).

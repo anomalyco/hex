@@ -708,6 +708,7 @@ struct Drafts {
     modes: bool,
     vocabulary: bool,
     phrase: bool,
+    origins: bool,
 }
 
 impl Ui {
@@ -883,6 +884,8 @@ impl Ui {
             &candidate.labs.voice_prompt_phrase,
         );
         self.settings = candidate;
+        self.lab_store
+            .adopt_origins(&self.settings.labs.api_browser_origins);
         self.modes.committed(&self.settings);
         self.draft_since = None;
         self.settings_changed();
@@ -903,6 +906,7 @@ impl Ui {
         self.modes.project(&mut candidate);
         candidate.vocabulary = self.vocabulary.project();
         self.lab_store.project_phrase(&mut candidate);
+        self.lab_store.project_origins(&mut candidate);
         candidate
     }
 
@@ -915,6 +919,7 @@ impl Ui {
             modes: modes.dictation_processing != settings.dictation_processing,
             vocabulary: self.vocabulary.project() != settings.vocabulary,
             phrase: self.lab_store.phrase_dirty(settings),
+            origins: self.lab_store.origins_dirty(settings),
         }
     }
 
@@ -1107,6 +1112,13 @@ impl Ui {
                     &self.settings.labs.voice_prompt_phrase,
                     &service.labs.voice_prompt_phrase,
                 );
+            }
+            if service.labs.api_browser_access != self.settings.labs.api_browser_access {
+                self.lab_store
+                    .sync_origins(&service.labs.api_browser_origins);
+            } else if !drafts.origins {
+                self.lab_store
+                    .adopt_origins(&service.labs.api_browser_origins);
             }
             self.settings = service.clone();
             self.settings_changed();

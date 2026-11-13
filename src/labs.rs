@@ -35,6 +35,7 @@ mod description;
 mod feature;
 mod gates;
 mod group;
+pub mod origins;
 
 pub use self::cli::{LabsCommand, run, run_retired_experiments};
 pub use self::feature::Feature;
@@ -166,6 +167,7 @@ impl Feature {
             | Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::ApiTimestamps
+            | Self::ApiBrowserAccess
             | Self::SpeakersOnly
             | Self::PauseMenu
             | Self::PrintStart
@@ -251,6 +253,7 @@ impl Feature {
             | Self::HistoryMultiSelect => 20261110,
             Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
             Self::ScreenVocabulary | Self::VoicePrompt | Self::CopyCaptureZip => 20261112,
+            Self::ApiBrowserAccess => 20261112,
         }
     }
 
@@ -276,6 +279,9 @@ impl Feature {
         }
         if key == "labs.voice_prompt_phrase" {
             return Some(Self::VoicePrompt);
+        }
+        if key == "labs.api_browser_origins" {
+            return Some(Self::ApiBrowserAccess);
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
@@ -378,6 +384,7 @@ impl Feature {
             | Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::ApiTimestamps
+            | Self::ApiBrowserAccess
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::SpeakersOnly => true,
@@ -459,6 +466,7 @@ impl Feature {
             Self::TranscribeFiles => "transcribe-files",
             Self::ApiProcessing => "api-processing",
             Self::ApiTimestamps => "api-timestamps",
+            Self::ApiBrowserAccess => "api-browser-access",
             Self::SpeakersOnly => "speakers-only",
             Self::PauseMenu => "pause-menu",
             Self::PrintStart => "print-start",
@@ -543,6 +551,7 @@ impl Feature {
             Self::TranscribeFiles => "labs.transcribe_files",
             Self::ApiProcessing => "labs.api_processing",
             Self::ApiTimestamps => "labs.api_timestamps",
+            Self::ApiBrowserAccess => "labs.api_browser_access",
             Self::SpeakersOnly => "labs.speakers_only",
             Self::PauseMenu => "labs.pause_menu",
             Self::PrintStart => "labs.print_start",
@@ -631,6 +640,7 @@ impl Feature {
             Self::TranscribeFiles => settings.labs.transcribe_files,
             Self::ApiProcessing => settings.labs.api_processing,
             Self::ApiTimestamps => settings.labs.api_timestamps,
+            Self::ApiBrowserAccess => settings.labs.api_browser_access,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
@@ -716,6 +726,7 @@ impl Feature {
             &mut labs.transcribe_files,
             &mut labs.api_processing,
             &mut labs.api_timestamps,
+            &mut labs.api_browser_access,
             &mut labs.speakers_only,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
@@ -808,6 +819,7 @@ impl Feature {
             Self::TranscribeFiles => settings.labs.transcribe_files = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
+            Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
@@ -976,6 +988,7 @@ fn state() -> u64 {
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
+                origins::store(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
             STATE.load(Ordering::Acquire)
@@ -1056,6 +1069,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
+    origins::store(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
@@ -1988,6 +2002,40 @@ mod tests {
         assert!(Feature::ApiTimestamps.on_this_os());
         assert_eq!(Feature::ApiTimestamps.added(), 20261110);
         assert_eq!(Feature::ApiTimestamps.audience(), Audience::Everyone);
+    }
+
+    #[test]
+    fn api_browser_access_is_its_own_atomic_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert!(!labs.api_browser_access);
+        assert!(labs.api_browser_origins.is_empty());
+        assert!(!Feature::ApiBrowserAccess.on(&AppSettings::default()));
+        // It has its own atomic because the state word is full, so no bit of
+        // the shared word changes when it is on.
+        assert_eq!(encode_where(&labs, |_| true) & API_TIMESTAMPS, 0);
+        labs.api_browser_access = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & API_PROCESSING, 0);
+        assert_eq!(state & API_TIMESTAMPS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::ApiBrowserAccess.on_this_os());
+        assert_eq!(Feature::ApiBrowserAccess.added(), 20261112);
+        assert_eq!(Feature::ApiBrowserAccess.audience(), Audience::Everyone);
+        assert_eq!(Feature::ApiBrowserAccess.group(), Group::Output);
+        assert_eq!(
+            Feature::ApiBrowserAccess.settings_key(),
+            "labs.api_browser_access"
+        );
+        assert_eq!(Feature::ApiBrowserAccess.name(), "api-browser-access");
+        assert_eq!(
+            Feature::for_settings_key("labs.api_browser_origins"),
+            Some(Feature::ApiBrowserAccess)
+        );
+        assert_eq!(
+            Feature::for_settings_key("labs.api_browser_access"),
+            Some(Feature::ApiBrowserAccess)
+        );
     }
 
     #[test]

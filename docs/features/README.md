@@ -2533,6 +2533,17 @@ model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
 
+`Origin` (Labs › Browser access, off by default) is the one CORS exception,
+for a web page on an origin the person listed in `labs.api_browser_origins`.
+While on, a request from a listed origin gets `Access-Control-Allow-Origin`
+and `Vary: Origin` on every answer, and its `OPTIONS` preflight is answered
+`204` before the token check with `Access-Control-Allow-Methods: GET, POST`
+and the four request headers, plus Chrome's Private Network Access grant when
+asked. Off, or from any other origin, `OPTIONS` stays `401` and no
+`Access-Control-*` header is sent, exactly as before; only `http`/`https`
+origins normalize, with no wildcard, path, or query ([labs.md](labs.md),
+[cors.rs](../../src/local_api/cors.rs)).
+
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and
 [SDK tests](../../sdk/typescript/test) distinguish those paths. Helper-only service

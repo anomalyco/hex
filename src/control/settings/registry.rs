@@ -640,6 +640,18 @@ pub(super) const KEYS: &[Key] = &[
          in a transcript, as the speech model heard them (timestamps=segment|word)",
     ),
     key(
+        "labs.api_browser_access",
+        Kind::Bool,
+        "Labs: web pages on the origins you list may call Hex's local API from JavaScript, with the \
+         CORS headers and preflight a browser needs",
+    ),
+    key(
+        "labs.api_browser_origins",
+        Kind::Json,
+        "Origins a page may call the local API from: a JSON list of http:// or https:// scheme, host, \
+         and optional port; anything else is dropped when Hex loads them",
+    ),
+    key(
         "labs.speakers_only",
         Kind::Bool,
         "Labs: While dictating applies only while the default output is speakers; headphones are \

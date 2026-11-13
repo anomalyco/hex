@@ -127,7 +127,12 @@ pub(super) fn route(
     }
 }
 
-pub(super) fn handle(connection: &mut TcpStream, action: StreamAction, context: &HttpContext) {
+pub(super) fn handle(
+    connection: &mut TcpStream,
+    action: StreamAction,
+    context: &HttpContext,
+    allow_origin: Option<&str>,
+) {
     let response = match action {
         StreamAction::Create {
             content_length,
@@ -138,10 +143,10 @@ pub(super) fn handle(connection: &mut TcpStream, action: StreamAction, context: 
             content_length,
             body_prefix,
         } => audio(connection, &stream, content_length, body_prefix, context),
-        StreamAction::Events(stream) => return events(connection, &stream, context),
+        StreamAction::Events(stream) => return events(connection, &stream, context, allow_origin),
         StreamAction::Finish { stream, processing } => finish(&stream, processing, context),
     };
-    if let Err(error) = write_response(connection, response) {
+    if let Err(error) = write_response(connection, response, allow_origin) {
         tracing::debug!(%error, "stream client disconnected");
     }
 }
@@ -301,8 +306,13 @@ fn finish(
     }
 }
 
-fn events(connection: &mut TcpStream, stream: &Stream, context: &HttpContext) {
-    if write_sse_headers(connection).is_err() {
+fn events(
+    connection: &mut TcpStream,
+    stream: &Stream,
+    context: &HttpContext,
+    allow_origin: Option<&str>,
+) {
+    if write_sse_headers(connection, allow_origin).is_err() {
         return;
     }
     let ready = serde_json::json!({

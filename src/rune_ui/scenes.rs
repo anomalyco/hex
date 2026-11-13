@@ -722,6 +722,19 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.unload_idle = true;
         ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group());
     }),
+    // Labs › Browser access' card while on: its origins field and the saved
+    // list shown back normalized.
+    ("mac-labs-browser-access", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.api_browser_access = true;
+        ui.settings.labs.api_browser_origins = vec![
+            "http://localhost:3000".into(),
+            "https://app.example.com".into(),
+        ];
+        ui.lab_store.group = Some(crate::labs::Feature::ApiBrowserAccess.group());
+        let saved = ui.settings.labs.api_browser_origins.clone();
+        ui.lab_store.sync_origins(&saved);
+    }),
     // Labs › Screenshots' card while on (macOS only: elsewhere the lab has
     // no row).
     ("mac-labs-screenshots", |ui| {

@@ -112,6 +112,13 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
 │                                        // clamping, empty arrays), transcription::service (the 422 decision), and
 │                                        // gguf_session (chunk offsets); no real-model transcript with times
+├── Browser access  no    labs.api_browser_access + labs.api_browser_origins (every OS) web pages on the
+│                                        origins you list call the local API from JavaScript: a listed origin's
+│                                        preflight (OPTIONS) is answered 204 without the bearer token, and every
+│                                        answer to it carries Access-Control-Allow-Origin and Vary: Origin;
+│                                        off, OPTIONS stays 401 and no CORS header is sent, exactly as before
+│                                        // checks: local_api::cors route tests and labs::origins normalization;
+│                                        // not observed in a real browser, on any OS
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
@@ -2543,6 +2550,65 @@ offsets; `api_timestamps_is_its_own_bit_and_off_by_default` and
 `every_feature_is_off_by_default_and_round_trips` in
 [labs.rs](../../src/labs.rs) cover the switch. Not observed: a real model
 answering with times, on any OS, and the macOS `/transcriptions` path.
+
+Browser access (`api-browser-access`; every OS; its row is Output's, beside
+the two API labs): for a page, such as a local web app, that wants to call
+the running Hex from JavaScript instead of through a native host. Browsers
+apply CORS to `http://127.0.0.1:<port>`, and the API's bearer token lives in
+`hex`'s discovery file where a page can't read it, so a listed origin is the
+one exception. While on, a request whose `Origin` header exactly matches one
+of `labs.api_browser_origins` (after normalization) gets
+`Access-Control-Allow-Origin: <origin>` and `Vary: Origin` on every answer,
+refusals included. An `OPTIONS` carrying `Access-Control-Request-Method` is
+answered `204` before authentication, because a browser never sends the
+bearer token on a preflight, with `Access-Control-Allow-Methods: GET, POST`,
+`Access-Control-Allow-Headers: Authorization, Content-Type,
+X-Hex-Dictation-Token, X-Hex-Stream-Token`, `Access-Control-Max-Age: 600`,
+and `Access-Control-Allow-Private-Network: true` only when the page asked
+with `Access-Control-Request-Private-Network: true` (Chrome's Private
+Network Access, needed for a public page reaching 127.0.0.1). No
+auth-failure observation is written for a preflight Hex answers.
+
+Everything else is unchanged, and off is byte-for-byte the old behavior: no
+`Access-Control-*` header, and any `OPTIONS` is still answered `401`
+without the token (or `404` with it), whether or not it names a method.
+Authentication on every non-OPTIONS request is exactly as before, including
+`401` for a page that has not read the token; a listed origin's `401` now
+also carries its allow-origin, so the page sees the status instead of an
+opaque CORS error. There is no wildcard: `*`, a path, a query, a fragment,
+userinfo, a scheme other than `http`/`https`, a port of 0, or anything else
+malformed is dropped when settings load, with the usual invalid-setting
+warning, and typing one on the card leaves it out of the saved list. Origins
+keep their scheme, host, and port lowercased, and a default port is not
+added or removed, so a browser's `https://example.com` never matches a
+listed `https://example.com:443`.
+
+The switch and the list are read per request through the same
+`fn() -> bool`/`fn() -> Vec<String>` seam as `Processing`, and
+`labs::apply` writes both on every settings save, so a change applies
+without restarting Hex. A process without the window (`hex service`, the
+embedded helper) reads the saved `labs` block once, on its first request,
+the same as the API labs above. The gate and header plumbing live in
+[`local_api/cors.rs`](../../src/local_api/cors.rs) and
+[`local_api/http.rs`](../../src/local_api/http.rs); the list and its
+normalization live in [`labs/origins.rs`](../../src/labs/origins.rs).
+
+Checks: `local_api::cors` route tests cover off (`OPTIONS` `401`, no
+header, no `Vary`), a listed origin's preflight (`204`, every header, an
+empty body), Private Network Access with and without the ask, an
+authenticated `POST /control` and an unauthenticated `GET /health` both
+carrying the header, an unlisted origin changing nothing, a normalized
+match, an `OPTIONS` without a requested method not being a preflight, and
+the streaming writer with and without an origin; `labs::origins` tests
+cover what normalizes and what is dropped; `labs::tests::
+api_browser_access_is_its_own_atomic_and_off_by_default` covers the switch,
+name, group, and settings keys;
+`app_settings::persistence::tests::
+browser_access_origins_load_normalized_and_drop_the_rest` covers a saved
+list; `rune_ui::tests::panes::
+browser_access_lists_its_origins_on_its_card_while_on` covers the card.
+Not observed: a real browser making the call on any OS, Chrome's Private
+Network Access prompt, and a service process reading a saved list.
 
 Meeting finished event (`meeting-finished-event`, issue 964; every OS with
 Meetings; its row shows wherever Meetings does): for a companion app that

@@ -51,8 +51,13 @@ pub(super) fn action(request: &HttpRequest, context: &HttpContext) -> RequestAct
 
 /// Streams finished meetings until shutdown, the toggle turning off, or the
 /// client leaving; the subscription's drop frees the slot.
-pub(super) fn stream(stream: &mut TcpStream, subscription: Subscription, context: &HttpContext) {
-    if let Err(error) = write_sse_headers(stream) {
+pub(super) fn stream(
+    stream: &mut TcpStream,
+    subscription: Subscription,
+    context: &HttpContext,
+    allow_origin: Option<&str>,
+) {
+    if let Err(error) = write_sse_headers(stream, allow_origin) {
         tracing::debug!(%error, "meeting events client disconnected before streaming");
         return;
     }

@@ -219,11 +219,13 @@ pub(in crate::local_api) fn handle(
     owner_token: String,
     action: DictationAction,
     context: &HttpContext,
+    allow_origin: Option<&str>,
 ) {
     let Some(controls) = &context.dictations.control else {
         let _ = write_response(
             stream,
             HttpResponse::code(404, "service-capture-unavailable"),
+            allow_origin,
         );
         return;
     };
@@ -235,6 +237,7 @@ pub(in crate::local_api) fn handle(
                 levels,
                 context,
                 |level| serde_json::json!({ "rmsDb": level.rms_db, "peakDb": level.peak_db }),
+                allow_origin,
             );
         }
         DictationAction::Partials => {
@@ -244,16 +247,24 @@ pub(in crate::local_api) fn handle(
                 partials,
                 context,
                 |partial| serde_json::json!({ "stable": partial.stable, "tentative": partial.tentative }),
+                allow_origin,
             );
         }
         DictationAction::Audio => {
-            return stream_dictation_audio(stream, id, owner_token, controls, context);
+            return stream_dictation_audio(
+                stream,
+                id,
+                owner_token,
+                controls,
+                context,
+                allow_origin,
+            );
         }
         DictationAction::Finish => dictation_finish(id, owner_token, controls),
         DictationAction::Cancel => dictation_cancel(id, owner_token, controls, context),
         DictationAction::Heartbeat => dictation_heartbeat(id, owner_token, controls),
     };
-    if let Err(error) = write_response(stream, response) {
+    if let Err(error) = write_response(stream, response, allow_origin) {
         tracing::debug!(%error, "dictation client disconnected");
     }
 }
@@ -328,12 +339,17 @@ fn stream_observations<T>(
     observations: Option<Receiver<T>>,
     context: &HttpContext,
     event: impl Fn(T) -> serde_json::Value,
+    allow_origin: Option<&str>,
 ) {
     let Some(observations) = observations else {
-        let _ = write_response(stream, HttpResponse::code(404, "dictation-not-found"));
+        let _ = write_response(
+            stream,
+            HttpResponse::code(404, "dictation-not-found"),
+            allow_origin,
+        );
         return;
     };
-    if write_sse_headers(stream).is_err() {
+    if write_sse_headers(stream, allow_origin).is_err() {
         return;
     }
     while !context.shutdown.load(Ordering::Acquire) {
@@ -355,6 +371,7 @@ fn stream_dictation_audio(
     owner_token: String,
     controls: &Control,
     context: &HttpContext,
+    allow_origin: Option<&str>,
 ) {
     let (audio, chunks) = mpsc::sync_channel(4);
     if let Err(response) = call_recognition(
@@ -368,10 +385,10 @@ fn stream_dictation_audio(
             reply,
         },
     ) {
-        let _ = write_response(stream, response);
+        let _ = write_response(stream, response, allow_origin);
         return;
     }
-    if write_stream_headers(stream, "application/octet-stream").is_err() {
+    if write_stream_headers(stream, "application/octet-stream", allow_origin).is_err() {
         return;
     }
     while !context.shutdown.load(Ordering::Acquire) {

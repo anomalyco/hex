@@ -6,6 +6,7 @@
 //! Voice Filter, Playground) joins the main sidebar while on and is hidden
 //! while off.
 
+mod browser_access;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 mod screenshots;
@@ -212,6 +213,11 @@ pub(super) struct Store {
     pub(super) phrase: TextEdit,
     /// Whether `phrase` started from the saved phrase.
     pub(super) phrase_synced: bool,
+    /// Labs › Browser access' origins while it's on, comma- or new-line
+    /// separated: a draft, so a half-typed origin never reaches settings.
+    pub(super) origins: TextEdit,
+    /// Whether `origins` started from the saved list.
+    pub(super) origins_synced: bool,
 }
 
 impl Store {
@@ -250,6 +256,37 @@ impl Store {
         }
         let draft = self.phrase.text.trim();
         !draft.is_empty() && draft != settings.labs.voice_prompt_phrase
+    }
+
+    /// Starts the origins field at `saved` when Labs opens or its lab turns on.
+    pub(super) fn sync_origins(&mut self, saved: &[String]) {
+        self.origins = TextEdit::new(crate::labs::origins::display(saved));
+        self.origins_synced = true;
+    }
+
+    /// Shows `saved` back, normalized, once this field's own draft produced
+    /// it; typing that hasn't saved yet stays exactly as typed.
+    pub(super) fn adopt_origins(&mut self, saved: &[String]) {
+        if self.origins_synced && crate::labs::origins::parse_list(&self.origins.text) == saved {
+            self.sync_origins(saved);
+        }
+    }
+
+    /// The origins `settings` should hold: the draft's list, normalized. A lab
+    /// that's off, or a field never opened, keeps the saved list untouched.
+    pub(super) fn project_origins(&self, settings: &mut crate::app_settings::AppSettings) {
+        if settings.labs.api_browser_access && self.origins_synced {
+            settings.labs.api_browser_origins =
+                crate::labs::origins::parse_list(&self.origins.text);
+        }
+    }
+
+    /// Whether the origins field holds typing the saved list doesn't have.
+    pub(super) fn origins_dirty(&self, settings: &crate::app_settings::AppSettings) -> bool {
+        settings.labs.api_browser_access
+            && self.origins_synced
+            && crate::labs::origins::parse_list(&self.origins.text)
+                != settings.labs.api_browser_origins
     }
 }
 
@@ -310,6 +347,8 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
     ui.lab_store = Store::default();
     ui.lab_store
         .sync_phrase(&ui.settings.labs.voice_prompt_phrase);
+    let origins = ui.settings.labs.api_browser_origins.clone();
+    ui.lab_store.sync_origins(&origins);
     tx.settle();
 }
 
@@ -893,6 +932,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Apps can ask Hex's local API for transcripts with Global mode's processing applied."),
     ));
     rows.push(row(
+        Feature::ApiBrowserAccess,
+        None,
+        tr("Browser access"),
+        tr("Let web pages on the origins you list call Hex's local API from JavaScript."),
+    ));
+    rows.push(row(
         Feature::ApiTimestamps,
         None,
         tr("Timestamps in API transcripts"),
@@ -1134,6 +1179,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::TranscribeFiles => "lab-transcribe-files",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
+        Feature::ApiBrowserAccess => "lab-api-browser-access",
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
         Feature::PrintStart => "lab-print-start",
@@ -1178,6 +1224,12 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::VoicePrompt => {
             let saved = ui.settings.labs.voice_prompt_phrase.clone();
             ui.lab_store.sync_phrase(&saved);
+        }
+        // Its origins start at the saved list, and a half-typed one leaves
+        // with its lab.
+        Feature::ApiBrowserAccess => {
+            let saved = ui.settings.labs.api_browser_origins.clone();
+            ui.lab_store.sync_origins(&saved);
         }
         // A notice already on screen leaves with its lab.
         Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
@@ -1253,6 +1305,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                 .child(appearance_theme(ui, p)),
         ),
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
+        Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

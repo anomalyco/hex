@@ -216,6 +216,13 @@ pub struct LabsSettings {
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
+    /// Web pages on one of `api_browser_origins` may call the local API from
+    /// JavaScript, with the CORS headers and preflight they need.
+    pub api_browser_access: bool,
+    /// The page origins that may: `http://` or `https://`, a host, and an
+    /// optional port, normalized at load.
+    #[serde(deserialize_with = "deserialize_api_browser_origins")]
+    pub api_browser_origins: Vec<String>,
     /// The local API's `timestamps=segment|word` returns the speech model's
     /// own segment and word times.
     pub api_timestamps: bool,
@@ -302,6 +309,25 @@ where
     }
 }
 
+/// A saved `api_browser_origins` keeps only well-formed origins; every other
+/// entry is dropped with the usual invalid-setting warning, so a hand-edited
+/// list never reaches the local API.
+fn deserialize_api_browser_origins<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let entries = Vec::<String>::deserialize(deserializer)?;
+    let (kept, dropped) = crate::labs::origins::normalize_all(entries);
+    for entry in dropped {
+        tracing::warn!(
+            key = "labs.api_browser_origins",
+            reason = format!("{entry:?} is not an http or https origin"),
+            "invalid setting entry; dropped"
+        );
+    }
+    Ok(kept)
+}
+
 impl Default for LabsSettings {
     fn default() -> Self {
         Self {
@@ -366,6 +392,8 @@ impl Default for LabsSettings {
             opencode_in_wsl: false,
             transcribe_files: false,
             api_processing: false,
+            api_browser_access: false,
+            api_browser_origins: Vec::new(),
             api_timestamps: false,
             speakers_only: false,
             app_model_switching: false,
