@@ -618,6 +618,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: the speech model picker's Use model file where it is… adds a GGUF file without copying it, so several accounts can share one file",
     ),
     key(
+        "labs.k_quant_models",
+        Kind::Bool,
+        "Labs: add your own speech model files that use Q6_K, Q5_K, or Q4_K weights (macOS); they are smaller than Q8_0 but Hex hasn't verified them",
+    ),
+    key(
         "labs.picker_downloaded",
         Kind::Bool,
         "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",

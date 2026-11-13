@@ -143,6 +143,9 @@ pub struct LabsSettings {
     pub picker_active_first: bool,
     /// The picker's "Use model file where it is…" adds a GGUF file without copying it (issue 941).
     pub model_in_place: bool,
+    /// An import may use Q6_K, Q5_K, or Q4_K weights, which Metal runs and
+    /// Hex hasn't verified (macOS).
+    pub k_quant_models: bool,
     /// The picker's All speech models view offers "Only downloaded models" (issue 1018).
     pub picker_downloaded: bool,
     /// The ISO section key, left of 1, may be a shortcut on its own (Linux
@@ -350,6 +353,7 @@ impl Default for LabsSettings {
             output_fixes: false,
             picker_active_first: false,
             model_in_place: false,
+            k_quant_models: false,
             picker_downloaded: false,
             section_key_alone: false,
             keep_recordings: false,

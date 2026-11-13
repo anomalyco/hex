@@ -17,7 +17,9 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
 │   says the file was made for another program and needs a transcribe.cpp
 │   conversion, or the catalog's download; #1299);
 │   stt.variant; general.languages with a code Hex knows; only F32, F16, and
-│   Q8_0 tensors (the types every build runs on Metal and Vulkan); the tensor
+│   Q8_0 tensors (the types every build runs on Metal and Vulkan), plus
+│   Q4_K, Q5_K, and Q6_K while Labs › Smaller model files is on (macOS; the
+│   Vulkan builds embed no shaders for them); the tensor
 │   data fits the file. Anything else -> "<file> can't be imported: <reason>"
 ├── Copy -> models/custom/<16 hex>.gguf while hashing; the copy is checked again;
 │   receipt <16 hex>.gguf.verified.json (size, SHA-256, mtime, inode where
@@ -84,6 +86,51 @@ Picker header -> "Use model file where it is…" beside "Add model file…" -> t
 
 Off, the picker has no such button and Hex copies every added file as before.
 Shared folders and catalog models from a shared folder are not built.
+
+## Smaller Model Files (Labs, macOS)
+
+```ts
+Labs › Smaller model files on (labs.k_quant_models, off by default, macOS)  // labs.k-quant-models
+├── Add model file… and Use model file where it is… accept Q6_K, Q5_K, and
+│   Q4_K tensors too, beside F32, F16, and Q8_0; the header check is the same
+│   one (custom_models::profile, given the types this build can run), so a
+│   file is refused or accepted before anything loads
+├── The import's manifest records `k_quants: true`; manifests written before
+│   the field read as false
+├── The card stays in the picker with Rename and Remove, but no Use, while
+│   the lab is off, and says "Turn on Labs › Smaller model files to use it.";
+│   its availability folds in the lab (as Parakeet Ultra's does), so
+│   `hex model list`, the trays, and the menu bar leave it out
+├── Saving it as the model while the lab is off (or on Linux and Windows,
+│   where the lab does not exist) -> the choice stays saved and the listener
+│   runs the default model, as for a missing import: General says it needs
+│   Labs › Smaller model files, and `hex status` says "its Labs toggle is
+│   off" (custom_models::fallback_reason)
+├── `hex model use <custom-…>` while the lab is off -> refused, naming
+│   `hex labs on k-quant-models`
+└── Off -> exactly the F32, F16, and Q8_0 rule and its message, byte for byte
+```
+
+Metal has the K-quant kernels (mul_mat and get_rows); the Linux and Windows
+Vulkan builds embed shaders only for the catalog's types and ggml aborts a
+Vulkan run whose weights use another type, so those builds refuse these files
+whatever the setting says. A file another tool quantized may mix in types
+neither list holds — Q5_0 and Q4_0 are the common ones from old-style
+quantizers — and those are still refused with the type named. Turning the lab
+off while a K-quant model is selected falls back to the default model at once
+(the choice stays saved), and turning it back on runs the saved import again.
+Hex has not measured any import's accuracy; a Q6_K, Q5_K, or Q4_K file may
+transcribe worse than its Q8_0 source.
+
+Checks:
+`k_quants_are_known_only_where_the_caller_runs_them` and
+`k_quant_tensors_are_measured_in_their_ggml_block_sizes` in
+[transcription/gguf_header.rs](../../src/transcription/gguf_header.rs), and
+`a_k_quant_import_needs_the_lab_and_falls_back_without_it` in
+[transcription/custom_models.rs](../../src/transcription/custom_models.rs);
+`smaller_model_files_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs). Not observed: a real K-quant file on Metal, and
+the row on a Mac screen.
 
 The local digest identifies the file Hex copied; it is not a publisher
 checksum. The selection, recent models, and keyboard-language mappings keep an

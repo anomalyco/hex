@@ -45,7 +45,8 @@ alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing,
 Screen vocabulary (macOS), Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
 pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
-Unload model when idle (#442), Terminal paste (Windows), and Terminal paste
+Unload model when idle (#442), Smaller model files (macOS), Terminal paste
+(Windows), and Terminal paste
 shortcut (Windows, Linux). Externally contributed features land there too.
 Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
@@ -187,7 +188,8 @@ substitute for source inspection or a second roadmap.
   Orukeet).
 - `transcription/custom_models`, `transcription/gguf_header`: your own speech
   models: GGUF imports checked from their header alone (family, variant,
-  languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under their
+  languages, F32/F16/Q8_0 tensors, plus Q4_K/Q5_K/Q6_K under Labs › Smaller
+  model files on macOS), copied into `models/custom/` under their
   SHA-256 with a receipt and manifest (or recorded in place for a found file),
   `TranscriptionModelId::Custom` IDs, and the default-model fallback for an
   import that can't run.

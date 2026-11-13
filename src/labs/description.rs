@@ -119,6 +119,9 @@ impl Feature {
             Self::ModelInPlace => {
                 "Add a speech model file and use it where it is, without copying it, so several accounts can share one file"
             }
+            Self::KQuantModels => {
+                "Add your own speech model files that use Q6_K, Q5_K, or Q4_K weights. They are smaller than Q8_0 but Hex hasn't verified them, so accuracy may vary."
+            }
             Self::PickerDownloaded => {
                 "Show only downloaded speech models in the picker, with the space they take"
             }

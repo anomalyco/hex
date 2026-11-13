@@ -1,7 +1,8 @@
 //! Labs › Use your own speech model: GGUF files the person imports from
 //! disk, beside the pinned catalog. An import is checked from its header
 //! alone (architecture, variant, languages, and tensor types every build runs
-//! on Metal and Vulkan) before transcribe.cpp ever loads it, then copied into
+//! on Metal and Vulkan, plus the K quants Labs › Smaller model files allows on
+//! macOS) before transcribe.cpp ever loads it, then copied into
 //! `models/custom/` under its SHA-256, with a receipt of its size and digest
 //! and a manifest of what its metadata declared. Its ID (`custom-` and the
 //! digest's first 16 hex digits) is stable across launches and machines.
@@ -24,7 +25,7 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::gguf_header::{self, GgufHeader};
+use super::gguf_header::{self, GgufHeader, TensorTypes};
 use super::models::{
     GgufArtifact, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
     is_known_language, known_language, models_dir,
@@ -114,6 +115,11 @@ struct Manifest {
     /// Where a found file came from: `owner/name@abcdef1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     origin: Option<String>,
+    /// Its weights include K-quant tensors, which run only while Labs ›
+    /// Smaller model files is on. Older manifests were all imports Hex
+    /// could run, so they read as false.
+    #[serde(default)]
+    k_quants: bool,
 }
 
 /// The receipt every model file has: the size and digest Hex checked, and
@@ -376,6 +382,7 @@ pub fn definition(id: CustomModelId) -> &'static ModelDefinition {
                 imported_at: 0,
                 path: None,
                 origin: None,
+                k_quants: false,
             },
         )
     })
@@ -438,6 +445,14 @@ pub fn imported() -> Vec<Imported> {
         .collect()
 }
 
+/// Whether `id`'s weights include K-quant tensors, which run only while
+/// Labs › Smaller model files is on (macOS).
+pub fn uses_k_quants(id: CustomModelId) -> bool {
+    registry()
+        .entry(id)
+        .is_some_and(|entry| entry.manifest.k_quants)
+}
+
 /// Why the listener runs [`fallback`] in place of a saved selection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -446,14 +461,25 @@ pub enum FallbackReason {
     Missing,
     /// The import's file is not the one imported.
     Changed,
-    /// Parakeet Ultra with its Labs toggle off.
+    /// Parakeet Ultra, or an import with K-quant weights, with its Labs
+    /// toggle off.
     LabsOff,
 }
 
 /// Why `selection` can't run now, if it can't.
 pub fn fallback_reason(selection: &TranscriptionSelection) -> Option<FallbackReason> {
+    fallback_reason_where(selection, crate::labs::k_quant_models())
+}
+
+/// [`fallback_reason`] against `k_quants` rather than this process's Labs
+/// switch, so a test can run either side of it.
+fn fallback_reason_where(
+    selection: &TranscriptionSelection,
+    k_quants: bool,
+) -> Option<FallbackReason> {
     match selection.model {
         TranscriptionModelId::Custom(id) => match status(id) {
+            Status::Ready if !k_quants && uses_k_quants(id) => Some(FallbackReason::LabsOff),
             Status::Ready => None,
             Status::Missing => Some(FallbackReason::Missing),
             Status::Changed => Some(FallbackReason::Changed),
@@ -519,15 +545,32 @@ pub(crate) struct Profile {
     pub(crate) detects_language: bool,
     pub(crate) license: Option<String>,
     pub(crate) repository: Option<String>,
+    /// Its weights include K-quant tensors, so it runs only while Labs ›
+    /// Smaller model files is on.
+    pub(crate) k_quants: bool,
+}
+
+/// The tensor types this process can run: Labs › Smaller model files adds
+/// the K quants on macOS, where Metal's kernels cover them.
+pub(crate) fn tensor_types() -> TensorTypes {
+    if crate::labs::k_quant_models() {
+        TensorTypes::WITH_K_QUANTS
+    } else {
+        TensorTypes::STANDARD
+    }
 }
 
 /// Checks a header against what Hex can run, with the reason when it can't.
 /// What a header declares, or why Hex can't run it (also the hub-cache scan).
-pub(crate) fn profile_of(header: &GgufHeader, file_name: &str) -> Result<Profile> {
-    profile(header, file_name)
+pub(crate) fn profile_of(
+    header: &GgufHeader,
+    file_name: &str,
+    types: TensorTypes,
+) -> Result<Profile> {
+    profile(header, file_name, types)
 }
 
-fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
+fn profile(header: &GgufHeader, file_name: &str, types: TensorTypes) -> Result<Profile> {
     let Some(architecture) = header.string("general.architecture") else {
         bail!("it has no general.architecture, so Hex can't tell which model family it is");
     };
@@ -548,12 +591,14 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     if header.tensor_types.is_empty() {
         bail!("it has no tensors");
     }
-    let unsupported = header.unsupported_tensor_types();
+    let unsupported = header.unsupported_tensor_types(types);
     if !unsupported.is_empty() {
         bail!(
-            "it has {} tensors; Hex runs only F32, F16, and Q8_0 weights on Metal and Vulkan. \
+            "it has {} tensors; Hex runs only {} weights {}. \
              Quantize it to Q8_0 with transcribe-quantize",
-            unsupported.join(", ")
+            unsupported.join(", "),
+            types.names(),
+            types.platform()
         );
     }
     let mut languages: Vec<String> = Vec::new();
@@ -581,6 +626,7 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
         detects_language: header.bool("stt.capability.lang_detect"),
         license: header.string("general.license").map(str::to_owned),
         repository: header.string("general.repo_url").map(str::to_owned),
+        k_quants: header.uses_k_quants(),
     })
 }
 
@@ -594,11 +640,11 @@ fn clamp_name(name: &str) -> String {
 }
 
 /// Checks `path` without copying it: what an import would say, or why it
-/// would refuse.
-pub fn check(path: &Path) -> Result<String> {
+/// would refuse. `types` is what the caller can run ([`tensor_types`]).
+pub fn check(path: &Path, types: TensorTypes) -> Result<String> {
     let header = gguf_header::read(path)
         .map_err(|error| eyre!("{} can't be imported: {error}", display_name(path)))?;
-    let profile = profile(&header, &file_stem(path))
+    let profile = profile(&header, &file_stem(path), types)
         .map_err(|error| eyre!("{} can't be imported: {error}", display_name(path)))?;
     Ok(format!(
         "{} ({}, {}, {} languages)",
@@ -629,7 +675,18 @@ fn file_stem(path: &Path) -> String {
 /// keeps the first import (renamed to `name` when given). On failure or
 /// cancellation only this import's partial copy is removed.
 pub fn import(source: &Path, name: Option<&str>, canceled: &AtomicBool) -> Result<CustomModelId> {
-    check(source)?;
+    import_with_types(source, name, canceled, tensor_types())
+}
+
+/// [`import`] against `types` rather than this process's switches, so a
+/// test can run either side of Labs › Smaller model files.
+pub(crate) fn import_with_types(
+    source: &Path,
+    name: Option<&str>,
+    canceled: &AtomicBool,
+    types: TensorTypes,
+) -> Result<CustomModelId> {
+    check(source, types)?;
     let directory = directory()?;
     fs::create_dir_all(&directory)?;
     let partial = directory.join(format!(
@@ -639,7 +696,7 @@ pub fn import(source: &Path, name: Option<&str>, canceled: &AtomicBool) -> Resul
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos())
     ));
-    let result = copy_and_record(source, &partial, &directory, name, canceled);
+    let result = copy_and_record(source, &partial, &directory, name, canceled, types);
     if result.is_err() {
         let _ = fs::remove_file(&partial);
     }
@@ -653,12 +710,13 @@ fn copy_and_record(
     directory: &Path,
     name: Option<&str>,
     canceled: &AtomicBool,
+    types: TensorTypes,
 ) -> Result<CustomModelId> {
     let (bytes, sha256) = copy_hashing(source, partial, canceled)
         .wrap_err_with(|| format!("could not copy {}", display_name(source)))?;
     // The copy is what runs, so the copy is what is checked.
     let header = gguf_header::read(partial)?;
-    let profile = profile(&header, &file_stem(source))
+    let profile = profile(&header, &file_stem(source), types)
         .map_err(|error| eyre!("{} can't be imported: {error}", display_name(source)))?;
     let id = CustomModelId::from_sha256(&sha256);
     let file = model_file(directory, id);
@@ -714,6 +772,7 @@ fn copy_and_record(
                 .map_or(0, |elapsed| elapsed.as_secs()),
             path: None,
             origin: None,
+            k_quants: profile.k_quants,
         },
     )?;
     tracing::info!(id = id.as_str(), bytes, "imported a speech model");
@@ -827,7 +886,7 @@ pub fn adopt_in_place(
     origin: &str,
     canceled: &AtomicBool,
 ) -> Result<CustomModelId> {
-    record_in_place(path, blob_sha256, Some(origin), canceled)
+    record_in_place(path, blob_sha256, Some(origin), canceled, tensor_types())
 }
 
 /// Labs › Use model files where they are: adds a file the person chose
@@ -838,7 +897,7 @@ pub fn adopt_in_place(
 /// goes once the OS shows the chosen file is a different one; choosing
 /// Hex's copy itself changes nothing. Forgetting it later leaves the file.
 pub fn add_in_place(path: &Path, canceled: &AtomicBool) -> Result<CustomModelId> {
-    record_in_place(path, None, None, canceled)
+    record_in_place(path, None, None, canceled, tensor_types())
 }
 
 fn record_in_place(
@@ -846,10 +905,11 @@ fn record_in_place(
     blob_sha256: Option<&str>,
     origin: Option<&str>,
     canceled: &AtomicBool,
+    types: TensorTypes,
 ) -> Result<CustomModelId> {
     let header = gguf_header::read(path)
         .map_err(|error| eyre!("{} can't be used: {error}", display_name(path)))?;
-    let profile = profile(&header, &file_stem(path))
+    let profile = profile(&header, &file_stem(path), types)
         .map_err(|error| eyre!("{} can't be used: {error}", display_name(path)))?;
     let sha256 = super::models::sha256_hex(path, Some(canceled))?;
     if blob_sha256.is_some_and(|blob| blob != sha256) {
@@ -903,6 +963,7 @@ fn record_in_place(
                 .map_or(0, |elapsed| elapsed.as_secs()),
             path: Some(path.to_path_buf()),
             origin: origin.map(str::to_owned),
+            k_quants: profile.k_quants,
         },
     )?;
     // The same file imported by copy before: the file in place replaces
@@ -998,6 +1059,21 @@ mod tests {
             &[("general.languages", &["en", "de", "xx"])],
             &[("stt.capability.lang_detect", true)],
             &[("encoder.weight", 8, 64), ("norm", 0, 16)],
+        )
+    }
+
+    /// The same model quantized to Q6_K, which only Labs › Smaller model
+    /// files runs.
+    fn k_quant(name: &str) -> Vec<u8> {
+        gguf(
+            &[
+                ("general.architecture", "parakeet"),
+                ("general.name", name),
+                ("stt.variant", "tdt-0.6b-primeline"),
+            ],
+            &[("general.languages", &["en"])],
+            &[],
+            &[("encoder.weight", 14, 512), ("norm", 0, 16)],
         )
     }
 
@@ -1318,12 +1394,13 @@ mod tests {
     #[test]
     fn a_parakeet_header_gives_its_profile() {
         let header = gguf_header::tests::read_header(parakeet("Parakeet primeLine"));
-        let profile = profile(&header, "file").unwrap();
+        let profile = profile(&header, "file", TensorTypes::STANDARD).unwrap();
         assert_eq!(profile.name, "Parakeet primeLine");
         assert_eq!(profile.architecture, "parakeet");
         assert_eq!(profile.languages, ["en", "de"]);
         assert!(profile.detects_language);
         assert_eq!(profile.license.as_deref(), Some("cc-by-4.0"));
+        assert!(!profile.k_quants);
     }
 
     #[test]
@@ -1338,7 +1415,7 @@ mod tests {
             &[("stt.capability.lang_detect", true)],
             &[("a", 8, 64)],
         ));
-        let profile = profile(&header, "file").unwrap();
+        let profile = profile(&header, "file", TensorTypes::STANDARD).unwrap();
         assert_eq!(profile.architecture, "gigaam");
         assert_eq!(family(&profile.architecture), "GigaAM");
         let manifest = Manifest {
@@ -1356,6 +1433,7 @@ mod tests {
             imported_at: 0,
             path: None,
             origin: None,
+            k_quants: false,
         };
         let definition = build(CustomModelId::from_sha256(&manifest.sha256), &manifest);
         assert!(!definition.accepts_language_hint);
@@ -1382,38 +1460,50 @@ mod tests {
 
     #[test]
     fn unsupported_files_are_refused_with_a_reason() {
-        let reason = |bytes: Vec<u8>| {
-            profile(&gguf_header::tests::read_header(bytes), "file")
+        let reason = |bytes: Vec<u8>, types: TensorTypes| {
+            profile(&gguf_header::tests::read_header(bytes), "file", types)
                 .unwrap_err()
                 .to_string()
         };
         assert!(
-            reason(gguf(
-                &[("general.architecture", "llama")],
-                &[],
-                &[],
-                &[("a", 0, 4)]
-            ))
+            reason(
+                gguf(
+                    &[("general.architecture", "llama")],
+                    &[],
+                    &[],
+                    &[("a", 0, 4)]
+                ),
+                TensorTypes::STANDARD
+            )
             .contains("its architecture is llama")
         );
         // A SenseVoice file made for another program names that, not a
         // family Hex says it runs (#1299).
-        let other_runtime = reason(gguf(
-            &[("general.architecture", "sensevoice-small")],
-            &[],
-            &[],
-            &[("a", 0, 4)],
-        ));
+        let other_runtime = reason(
+            gguf(
+                &[("general.architecture", "sensevoice-small")],
+                &[],
+                &[],
+                &[("a", 0, 4)],
+            ),
+            TensorTypes::STANDARD,
+        );
         assert!(other_runtime.contains("made for another program"));
         assert!(other_runtime.contains("converted with transcribe.cpp"));
-        assert!(reason(gguf(&[], &[], &[], &[("a", 0, 4)])).contains("no general.architecture"));
         assert!(
-            reason(gguf(
-                &[("general.architecture", "whisper")],
-                &[],
-                &[],
-                &[("a", 0, 4)]
-            ))
+            reason(gguf(&[], &[], &[], &[("a", 0, 4)]), TensorTypes::STANDARD)
+                .contains("no general.architecture")
+        );
+        assert!(
+            reason(
+                gguf(
+                    &[("general.architecture", "whisper")],
+                    &[],
+                    &[],
+                    &[("a", 0, 4)]
+                ),
+                TensorTypes::STANDARD
+            )
             .contains("no stt.variant")
         );
         let quantized = gguf(
@@ -1425,7 +1515,37 @@ mod tests {
             &[],
             &[("a", 12, 256)],
         );
-        assert!(reason(quantized).contains("Q4_K (1) tensors"));
+        let refused = reason(quantized.clone(), TensorTypes::STANDARD);
+        assert!(refused.contains("Q4_K (1) tensors"), "{refused}");
+        assert!(
+            refused.contains("Hex runs only F32, F16, and Q8_0 weights on Metal and Vulkan"),
+            "{refused}"
+        );
+        // Labs › Smaller model files runs the K quants, so the same header
+        // passes and its profile says why it needs the lab.
+        let accepted = profile(
+            &gguf_header::tests::read_header(quantized.clone()),
+            "file",
+            TensorTypes::WITH_K_QUANTS,
+        )
+        .unwrap();
+        assert!(accepted.k_quants);
+        // Neither list holds Q5_0, so it is refused either way.
+        let legacy_quant = gguf(
+            &[
+                ("general.architecture", "whisper"),
+                ("stt.variant", "whisper-small"),
+            ],
+            &[("general.languages", &["en"])],
+            &[],
+            &[("a", 6, 256)],
+        );
+        let refused = reason(legacy_quant, TensorTypes::WITH_K_QUANTS);
+        assert!(refused.contains("Q5_0 (1) tensors"), "{refused}");
+        assert!(
+            refused.contains("Hex runs only F32, F16, Q8_0, Q4_K, Q5_K, and Q6_K"),
+            "{refused}"
+        );
         let no_languages = gguf(
             &[
                 ("general.architecture", "whisper"),
@@ -1435,6 +1555,80 @@ mod tests {
             &[],
             &[("a", 0, 4)],
         );
-        assert!(reason(no_languages).contains("no language Hex knows"));
+        let refused = reason(no_languages, TensorTypes::STANDARD);
+        assert!(refused.contains("no language Hex knows"), "{refused}");
+    }
+
+    /// A K-quant file: refused everywhere until Labs › Smaller model files
+    /// is on, recorded as needing the lab, and never run without it.
+    #[test]
+    fn a_k_quant_import_needs_the_lab_and_falls_back_without_it() {
+        let models = temporary_models_dir();
+        let source = models.join("primeline-Q6_K.gguf");
+        fs::write(&source, k_quant("Parakeet Q6_K")).unwrap();
+        // Off: refused, mentioning the type it found, and nothing is recorded.
+        // The explicit types keep this off the process-wide switch.
+        let error = import_with_types(
+            &source,
+            None,
+            &AtomicBool::new(false),
+            TensorTypes::STANDARD,
+        )
+        .unwrap_err();
+        let reason = error.to_string();
+        assert!(reason.contains("Q6_K (1) tensors"), "{reason}");
+        assert!(reason.contains("Quantize it to Q8_0"), "{reason}");
+        assert!(!is_registered(CustomModelId::from_sha256(
+            &super::super::models::sha256_hex(&source, None).unwrap()
+        )));
+        // On: the copy is recorded and says why it needs the lab.
+        let id = import_with_types(
+            &source,
+            None,
+            &AtomicBool::new(false),
+            TensorTypes::WITH_K_QUANTS,
+        )
+        .unwrap();
+        assert_eq!(status(id), Status::Ready);
+        assert!(uses_k_quants(id));
+        // The picker and the tray leave it out while the lab is off, and the
+        // selection gate names LabsOff, as for Parakeet Ultra: the saved
+        // choice stays saved and the listener runs the fallback.
+        let model = definition(id);
+        assert!(!model.available_where(false));
+        assert!(model.available_where(true));
+        let saved = TranscriptionSelection {
+            model: TranscriptionModelId::Custom(id),
+            language: "en".into(),
+        };
+        assert_eq!(
+            fallback_reason_where(&saved, false),
+            Some(FallbackReason::LabsOff)
+        );
+        assert_eq!(fallback_reason_where(&saved, true), None);
+        // A manifest written before the field existed still loads, and reads
+        // as an import that needs no lab.
+        let older: Manifest = serde_json::from_str(
+            r#"{"name":"Old","metadata_name":"Old","architecture":"parakeet",
+                "variant":"tdt-0.6b-primeline","languages":["en"],
+                "detects_language":false,"bytes":1,"sha256":"00",
+                "source":"old.gguf","imported_at":0}"#,
+        )
+        .unwrap();
+        assert!(!older.k_quants, "an older manifest reads as no K quants");
+        // A Q8_0 import needs no lab either way.
+        let plain = models.join("primeline-Q8_0.gguf");
+        fs::write(&plain, parakeet("Parakeet Q8_0")).unwrap();
+        let plain_id =
+            import_with_types(&plain, None, &AtomicBool::new(false), TensorTypes::STANDARD)
+                .unwrap();
+        assert!(!uses_k_quants(plain_id));
+        assert!(definition(plain_id).available_where(false));
+        assert!(definition(plain_id).available_where(true));
+        remove(plain_id).unwrap();
+        remove(id).unwrap();
+        assert!(!is_registered(id));
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
     }
 }

@@ -59,7 +59,8 @@ Taiwan-usage phrase converter (`desktop/i18n/traditional_chinese.rs`), not yet
 reviewed by a native speaker.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Your own speech models](own-models.md) covers adding a GGUF file and using
-models another app already downloaded.
+models another app already downloaded; its Labs › Smaller model files toggle
+(off by default, macOS) also accepts imports quantized to Q6_K, Q5_K, or Q4_K.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
 [Screenshots](labs.md) (Labs, macOS) takes CleanShot-style ⌘⇧4 area and

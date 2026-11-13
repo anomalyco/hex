@@ -23,6 +23,7 @@ use color_eyre::eyre::{Result, bail, eyre};
 use serde::{Deserialize, Serialize};
 
 use super::custom_models::Receipt;
+use super::gguf_header::TensorTypes;
 use super::models::{MODELS, ModelDefinition, ModelRuntime, TranscriptionModelId, models_dir};
 
 /// One compatible GGUF found in the cache.
@@ -48,7 +49,8 @@ pub struct Found {
     pub architecture: String,
     pub variant: String,
     pub languages: Vec<String>,
-    /// The quantization most of its weights use: Q8_0, F16, or F32.
+    /// The quantization most of its weights use: Q8_0, F16, or F32, or the
+    /// K quant a file Labs › Smaller model files allows (Q4_K, Q5_K, Q6_K).
     pub compression: &'static str,
     /// The tensor data it loads, which estimates the memory it needs.
     pub tensor_bytes: u64,
@@ -94,7 +96,10 @@ struct Stamp {
 
 #[derive(Default)]
 struct Cache {
-    files: HashMap<PathBuf, (Stamp, Option<Found>)>,
+    /// Each file's result, keyed by its stamp and the tensor types the scan
+    /// could run: toggling Labs › Smaller model files re-reads the header
+    /// instead of answering from the last scan.
+    files: HashMap<PathBuf, ((Stamp, TensorTypes), Option<Found>)>,
     last: Vec<Found>,
 }
 
@@ -125,6 +130,12 @@ pub fn scan() -> Vec<Found> {
 }
 
 fn scan_in(hub: &Path) -> Vec<Found> {
+    scan_in_where(hub, super::custom_models::tensor_types())
+}
+
+/// [`scan_in`] against `types` rather than this process's Labs switch, so a
+/// test can scan either side of Labs › Smaller model files.
+fn scan_in_where(hub: &Path, types: TensorTypes) -> Vec<Found> {
     let mut found = Vec::new();
     let Ok(repositories) = std::fs::read_dir(hub) else {
         return found;
@@ -148,7 +159,7 @@ fn scan_in(hub: &Path) -> Vec<Found> {
                 if path.extension().is_none_or(|extension| extension != "gguf") {
                     continue;
                 }
-                if let Some(model) = read(&path, &repository_name, &revision) {
+                if let Some(model) = read(&path, &repository_name, &revision, types) {
                     found.push(model);
                 }
             }
@@ -204,26 +215,33 @@ pub(crate) fn inode(metadata: &std::fs::Metadata) -> Option<u64> {
     }
 }
 
-/// One file's result, from the cache while its stamp holds.
-fn read(path: &Path, repository: &str, revision: &str) -> Option<Found> {
+/// One file's result, from the cache while its stamp and the runnable tensor
+/// types both hold.
+fn read(path: &Path, repository: &str, revision: &str, types: TensorTypes) -> Option<Found> {
     let stamp = stamp(path)?;
     let cache = CACHE.lock().unwrap_or_else(|error| error.into_inner());
     if let Some((cached, found)) = cache.files.get(path)
-        && *cached == stamp
+        && *cached == (stamp, types)
     {
         return found.clone();
     }
     drop(cache);
-    let found = inspect(path, repository, revision, stamp.bytes);
+    let found = inspect(path, repository, revision, stamp.bytes, types);
     CACHE
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .files
-        .insert(path.to_path_buf(), (stamp, found.clone()));
+        .insert(path.to_path_buf(), ((stamp, types), found.clone()));
     found
 }
 
-fn inspect(path: &Path, repository: &str, revision: &str, bytes: u64) -> Option<Found> {
+fn inspect(
+    path: &Path,
+    repository: &str,
+    revision: &str,
+    bytes: u64,
+    types: TensorTypes,
+) -> Option<Found> {
     let file_name = path.file_name()?.to_string_lossy().into_owned();
     let blob_sha256 = std::fs::read_link(path)
         .ok()
@@ -254,7 +272,7 @@ fn inspect(path: &Path, repository: &str, revision: &str, bytes: u64) -> Option<
             return None;
         }
     };
-    let profile = match super::custom_models::profile_of(&header, &file_name) {
+    let profile = match super::custom_models::profile_of(&header, &file_name, types) {
         Ok(profile) => profile,
         Err(error) => {
             tracing::debug!(path = %path.display(), %error, "skipping a cached model Hex can't run");
@@ -305,7 +323,15 @@ fn catalog_match(
 
 fn compression(header: &super::gguf_header::GgufHeader) -> &'static str {
     let count = |kind| header.tensor_types.get(&kind).copied().unwrap_or(0);
-    if count(8) > 0 {
+    // A K-quant file is named for its smallest weights, the ones that make it
+    // smaller than Q8_0; the catalog's files have none of these.
+    if count(12) > 0 {
+        "Q4_K"
+    } else if count(13) > 0 {
+        "Q5_K"
+    } else if count(14) > 0 {
+        "Q6_K"
+    } else if count(8) > 0 {
         "Q8_0"
     } else if count(1) > 0 {
         "F16"
@@ -668,6 +694,48 @@ mod tests {
         // A second scan answers unchanged files from the cache.
         assert_eq!(scan_in(&hub), found);
         assert_eq!(snapshot_of(&hub), before, "the cache is never written");
+        fs::remove_dir_all(hub).unwrap();
+    }
+
+    /// The per-file cache remembers which tensor types answered, so toggling
+    /// Labs › Smaller model files re-reads the header instead of keeping a
+    /// newly allowed file hidden (or a disallowed one offered).
+    #[test]
+    fn a_scan_re_reads_a_file_when_the_labs_toggle_changes() {
+        let hub = temporary("toggle");
+        let contents = gguf(
+            &[
+                ("general.architecture", "whisper"),
+                ("general.name", "Whisper Small Q6_K"),
+                ("stt.variant", "whisper-small"),
+            ],
+            &[("general.languages", &["en"])],
+            &[],
+            &[("encoder.weight", 14, 512), ("norm", 0, 16)],
+        );
+        cache(
+            &hub,
+            "someone/whisper-small-gguf",
+            "0123456789abcdef",
+            "whisper-small-Q6_K.gguf",
+            &"ab".repeat(32),
+            Some(&contents),
+            0,
+        );
+        // Off: the K types are refused, and the miss is cached.
+        assert!(scan_in_where(&hub, TensorTypes::STANDARD).is_empty());
+        // On: the same unchanged file is offered, named for its weights, and
+        // its K tensor data counts toward the memory estimate.
+        let found = scan_in_where(&hub, TensorTypes::WITH_K_QUANTS);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].compression, "Q6_K");
+        assert!(
+            found[0].tensor_bytes >= 420,
+            "{} bytes of K weights",
+            found[0].tensor_bytes
+        );
+        // Back off: the cached offer must not survive the toggle either.
+        assert!(scan_in_where(&hub, TensorTypes::STANDARD).is_empty());
         fs::remove_dir_all(hub).unwrap();
     }
 
