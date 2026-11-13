@@ -414,9 +414,11 @@ stream drops a known credit only when it is the very end of the text (letters
 and digits compared, case and punctuation ignored, Turkish dotted and dotless
 `i` folded together), with its segment and words, in
 dictation, meetings, and the local API alike; the same words elsewhere stay.
-A credit spoken mid-chunk and followed by more speech is kept, and so is a
-dictation that genuinely ends with one of the listed phrases, such as the
-Turkish thanks: the list cannot tell it from the invention. The list is in
+A credit spoken mid-chunk and followed by more speech is kept. A dictation that
+genuinely ends with a listed phrase, such as the Turkish thanks, loses it: the
+list cannot tell it from the invention. Folding drops the combining marks in
+U+0300–U+036F, not only the Turkish dot: a decomposed `é` folds to `e`, while a
+precomposed one is unchanged. The list is in
 [transcription/subtitle_credits.rs](../../src/transcription/subtitle_credits.rs).
 Checks: `a_trailing_subtitle_credit_is_removed`,
 `a_turkish_thanks_for_watching_is_removed`,

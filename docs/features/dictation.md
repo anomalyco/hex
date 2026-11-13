@@ -613,17 +613,24 @@ before transcription (`whisper_audio` in
 dictations in every language now go through Hex's own 30 s chunking — each
 window cut at the quietest 100 ms of its last 5 s and decoded independently —
 instead of Whisper's long-form loop; not measured on long continuous speech.
-Another model, a detector that is unavailable, and a clip it hears no speech in
-keep every sample, as before. Checks:
-`whisper_chunks_at_its_thirty_second_window` in
+Another model, and a detector that is unavailable, keep every sample, as
+before. A clip the detector hears no speech in is left unchanged by the trim,
+though a silent Whisper clip over 30 s now has each window gated and can
+return empty text. Checks: `whisper_chunks_at_its_thirty_second_window` in
 [models.rs](../../src/transcription/models.rs),
-`a_whisper_clip_is_trimmed_and_padded_to_a_chunks_minimum` and
-`a_trimmed_chunks_times_stay_on_the_clips_timeline` (trim, padding, and timed
-offsets, no model), and `a_margin_around_the_speech_clamps_to_the_clip` in
+`a_whisper_clip_is_trimmed_to_its_speech_plus_a_margin`,
+`a_whisper_clip_is_trimmed_and_padded_to_a_chunks_minimum`, and
+`a_trimmed_chunks_times_stay_on_the_clips_timeline` (trim, padding, and the
+`chunk_offset_ms` helper the timed path uses; the end-to-end timed run needs a
+model and is not run) in
+[gguf_session.rs](../../src/transcription/gguf_session.rs), and
+`a_margin_around_the_speech_clamps_to_the_clip` and
+`detected_segments_bound_the_speech_inside_the_clip` in
 [speech_detector.rs](../../src/transcription/speech_detector.rs). Not run with
-Whisper on real Turkish audio. A credit Whisper puts mid-chunk, followed by
-more speech, is still kept, and meeting and word-time chunks keep their
-existing preparation.
+Whisper on real Turkish audio. Known limits: a credit Whisper puts mid-chunk,
+followed by more speech, is still kept; a quiet first or last word the detector
+misses by more than 500 ms is cut from Whisper runs; meeting and word-time
+chunks keep their existing preparation.
 
 ### Vocabulary Quality Checks
 

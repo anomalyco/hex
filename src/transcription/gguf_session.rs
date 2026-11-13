@@ -494,12 +494,12 @@ impl OfflineGgufSession {
             let transcript = self
                 .run(samples, options)
                 .wrap_err("transcription failed")?;
-            return Ok(timed(transcript, sample_offset_ms(trimmed)));
+            return Ok(timed(transcript, chunk_offset_ms(trimmed, 0)));
         };
         let mut timed = crate::transcription::transcript::Transcript::default();
         let mut texts = Vec::new();
         for range in chunk_ranges(samples, max_samples) {
-            let offset = sample_offset_ms(trimmed + range.start);
+            let offset = chunk_offset_ms(trimmed, range.start);
             let samples = &samples[range];
             if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
                 return Err(eyre!("transcription was cancelled"));
@@ -623,6 +623,14 @@ fn quietest_span(samples: &[f32], span: usize) -> usize {
 /// Where `sample` sits in the clip, in whole milliseconds.
 pub(crate) fn sample_offset_ms(sample: usize) -> i64 {
     i64::try_from(sample / 16).unwrap_or(i64::MAX)
+}
+
+/// Where a chunk starting at `chunk_start` in the trimmed audio sits in the
+/// original clip, in whole milliseconds. A trimmed clip's segment and word
+/// times move by this, so they stay on the clip's timeline; the whole clip is
+/// the chunk that starts at 0.
+fn chunk_offset_ms(trim_start: usize, chunk_start: usize) -> i64 {
+    sample_offset_ms(trim_start.saturating_add(chunk_start))
 }
 
 fn timed_spans(
@@ -1126,17 +1134,19 @@ mod tests {
 
     #[test]
     fn a_trimmed_chunks_times_stay_on_the_clips_timeline() {
-        // The timed path adds the trim start to every chunk's sample offset;
-        // this clip starts 8.5 s in, so its first chunk reports 8.5 s.
+        // `transcribe_chunked_timed` asks `chunk_offset_ms` for the whole clip
+        // and for each chunk of the trimmed audio; this clip starts 8.5 s in,
+        // so its first chunk reports 8.5 s. The end-to-end timed run needs a
+        // model and is not run here.
         let samples = vec![0.1_f32; 160_000];
         let (audio, start) = trimmed_audio(&samples, "whisper", Some(144_000..147_200));
         assert_eq!(start, 136_000);
+        assert_eq!(chunk_offset_ms(start, 0), 8_500);
         let ranges = chunk_ranges(&audio, 16_000);
         assert_eq!(ranges.len(), 2, "the padded clip is cut into two windows");
-        assert_eq!(sample_offset_ms(ranges[0].start), 0);
         for range in &ranges {
             assert_eq!(
-                sample_offset_ms(start + range.start),
+                chunk_offset_ms(start, range.start),
                 8_500 + sample_offset_ms(range.start),
                 "{range:?}"
             );
