@@ -1194,7 +1194,7 @@ pub fn open_env_arguments(
 }
 
 #[cfg(target_os = "macos")]
-fn microphone_state() -> PermissionState {
+pub(crate) fn microphone_state() -> PermissionState {
     // A WAV fixture stands in for the microphone, which is never opened.
     if crate::audio::uses_fixture() {
         return PermissionState::Ready;

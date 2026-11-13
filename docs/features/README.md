@@ -246,8 +246,9 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   each card floats off once allowed
 │   │   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
 │   │   ├── Microphone -> macOS prompt; refused -> "Open System Settings" + guide
-│   │   │   ├── Nothing reads CoreAudio inputs before then (General's input list
-│   │   │   │   waits), so macOS never prompts before the page asks
+│   │   │   ├── Until then, tones stay silent when the default output also records
+│   │   │   │   (a USB headset, a Mac VM's one sound device): opening it would
+│   │   │   │   make macOS prompt before the page asks
 │   │   │   └── A grant macOS took another way (CoreAudio's prompt, the switch in
 │   │   │       System Settings) reads from TCC, since AVFoundation keeps its first
 │   │   │       answer. Check: `a_microphone_answer_avfoundation_has_not_seen_reads_from_tcc`
