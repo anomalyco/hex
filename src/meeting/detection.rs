@@ -33,25 +33,29 @@ const DROPOUT_GRACE: Duration = Duration::from_secs(2);
 const BROWSER_PAGE_MEMORY: Duration = Duration::from_secs(60);
 
 /// Websites whose pages are calls whenever a browser holds the microphone on
-/// them. Google Meet is separate: only its meeting paths are calls.
-const CALL_SITES: [(&str, MeetingSource); 4] = [
+/// them. Google Meet is separate: only its meeting paths are calls. Teams
+/// pages are the Microsoft Teams app's service, so they carry its provider
+/// key rather than one of their own (see [`provider_key_for_site`]).
+const CALL_SITES: [(&str, MeetingSource); 7] = [
     ("banshee.app", MeetingSource::Banshee),
     ("web.whatsapp.com", MeetingSource::WhatsApp),
     ("app.v2.gather.town", MeetingSource::Gather),
     ("app.gather.town", MeetingSource::Gather),
+    ("teams.microsoft.com", MeetingSource::Teams),
+    ("teams.cloud.microsoft", MeetingSource::Teams),
+    ("teams.live.com", MeetingSource::Teams),
 ];
 
 /// The websites Labs › More call apps names, with the label an offer's "…"
-/// saves as that site's provider. Teams and FaceTime pages have their own
-/// choice, shown apart from the apps' names.
-const MORE_CALL_SITES: [(&str, MeetingSource, &str); 5] = [
+/// saves as that site's provider. FaceTime pages have their own choice,
+/// shown apart from the app's name.
+const MORE_CALL_SITES: [(&str, MeetingSource, &str); 4] = [
     (
         "voice.google.com",
         MeetingSource::GoogleVoice,
         "Google Voice",
     ),
     ("messenger.com", MeetingSource::Messenger, "Messenger"),
-    ("teams.live.com", MeetingSource::Teams, "Teams (web)"),
     (
         "facetime.apple.com",
         MeetingSource::FaceTime,
@@ -138,6 +142,20 @@ fn known_provider_label(key: &str, more_call_apps: bool) -> Option<&'static str>
                 })
                 .or_else(|| is_webex_host(key).then_some(MeetingSource::Webex.label()))
         })
+}
+
+/// The provider key a website's calls use. Teams pages are the Microsoft
+/// Teams app's own service, so the app's choice covers them instead of a
+/// separate row per website host.
+fn provider_key_for_site(host: &str) -> &str {
+    if matches!(
+        host,
+        "teams.microsoft.com" | "teams.cloud.microsoft" | "teams.live.com"
+    ) {
+        "com.microsoft.teams2"
+    } else {
+        host
+    }
 }
 
 /// A website or app whose calls share one Ask / Always record / Never offer
@@ -235,10 +253,12 @@ impl MeetingCandidate {
 
     /// Whose call this is, for the user's Ask / Always record / Never offer
     /// choice: the website when known, else the app. Known services use the
-    /// name Settings lists them under; `more_call_apps` is Labs › More call
-    /// apps, whose names are unknown while it is off.
+    /// name Settings lists them under; a Teams page is the Teams app's
+    /// service, so it carries the app's key. `more_call_apps` is Labs › More
+    /// call apps, whose names are unknown while it is off.
     pub fn provider(&self, more_call_apps: bool) -> Option<MeetingProvider> {
-        let key = self.site.clone().or_else(|| self.application.clone())?;
+        let site = self.site.as_deref().map(provider_key_for_site);
+        let key = site.or(self.application.as_deref())?.to_string();
         let label = known_provider_label(&key, more_call_apps)
             .map(str::to_string)
             .or_else(|| self.site.clone())
@@ -255,7 +275,9 @@ impl MeetingCandidate {
     }
 
     /// The user's choice for this call: the website's when it has one, else
-    /// the app's (a browser's choice covers its other sites), else Ask.
+    /// the app's (a browser's choice covers its other sites), else Ask. A
+    /// Teams page keeps a choice other than Ask saved for its own earlier
+    /// host key; an Ask there no longer shadows the Teams app's choice.
     pub fn policy(&self, choices: &[MeetingProviderChoice]) -> MeetingPolicy {
         let chosen = |key: Option<&str>| {
             let key = key?;
@@ -264,7 +286,17 @@ impl MeetingCandidate {
                 .find(|choice| choice.key == key)
                 .map(|choice| choice.policy)
         };
-        chosen(self.site.as_deref())
+        let raw = self.site.as_deref();
+        let site = raw.map(provider_key_for_site);
+        let legacy = if site == raw {
+            chosen(raw)
+        } else {
+            // Ask is stored as a real entry, so an older host row left on Ask
+            // must not shadow a newer choice under the mapped key.
+            chosen(raw).filter(|policy| *policy != MeetingPolicy::Ask)
+        };
+        legacy
+            .or_else(|| chosen(site))
             .or_else(|| chosen(self.application.as_deref()))
             .unwrap_or_default()
     }
@@ -1527,11 +1559,6 @@ mod tests {
                 "messenger.com",
             ),
             (
-                "https://teams.live.com/meet/123",
-                MeetingSource::Teams,
-                "teams.live.com",
-            ),
-            (
                 "https://facetime.apple.com/join/abc",
                 MeetingSource::FaceTime,
                 "facetime.apple.com",
@@ -1604,7 +1631,7 @@ mod tests {
     }
 
     #[test]
-    fn teams_and_facetime_pages_have_their_own_provider_and_choice() {
+    fn teams_pages_use_the_teams_apps_provider_and_facetime_its_own() {
         let teams = super::candidate_from_microphone(
             &brave(),
             &context(
@@ -1616,37 +1643,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(teams.source, MeetingSource::Teams);
-        // The page is named after the service; its provider is its own.
+        // The page is named after the service and shares the app's provider.
         assert_eq!(teams.offer_title(), "Microsoft Teams call detected");
+        assert_eq!(teams.site.as_deref(), Some("teams.live.com"));
         let provider = teams.provider(true).unwrap();
-        assert_eq!(provider.key, "teams.live.com");
-        assert_eq!(provider.label, "Teams (web)");
+        assert_eq!(provider.key, "com.microsoft.teams2");
+        assert_eq!(provider.label, "Microsoft Teams");
 
-        let web = MeetingProviderChoice {
-            key: "teams.live.com".into(),
-            label: "Teams (web)".into(),
-            policy: MeetingPolicy::AlwaysRecord,
-        };
-        assert_eq!(
-            teams.policy(std::slice::from_ref(&web)),
-            MeetingPolicy::AlwaysRecord
-        );
-        // The Teams app's choice does not cover its website.
+        // The Teams app's choice covers its pages.
         let app = MeetingProviderChoice {
             key: "com.microsoft.teams2".into(),
             label: "Microsoft Teams".into(),
-            policy: MeetingPolicy::NeverOffer,
+            policy: MeetingPolicy::AlwaysRecord,
         };
         assert_eq!(
             teams.policy(std::slice::from_ref(&app)),
-            MeetingPolicy::Ask,
-            "the app's choice is not the page's"
+            MeetingPolicy::AlwaysRecord
+        );
+        // A choice other than Ask saved for the page's own host before pages
+        // shared the app's key still applies, and wins over the app's.
+        let web = MeetingProviderChoice {
+            key: "teams.live.com".into(),
+            label: "Teams (web)".into(),
+            policy: MeetingPolicy::NeverOffer,
+        };
+        assert_eq!(
+            teams.policy(std::slice::from_ref(&web)),
+            MeetingPolicy::NeverOffer
         );
         assert_eq!(
-            teams.policy(&[app, web]),
-            MeetingPolicy::AlwaysRecord,
-            "the page's own choice wins"
+            teams.policy(&[app.clone(), web]),
+            MeetingPolicy::NeverOffer,
+            "the page's own saved choice wins"
         );
+        // Ask is stored as a real entry; an older host row left on Ask does
+        // not shadow the app's choice.
+        let asked_web = MeetingProviderChoice {
+            key: "teams.live.com".into(),
+            label: "Teams (web)".into(),
+            policy: MeetingPolicy::Ask,
+        };
+        assert_eq!(teams.policy(&[app, asked_web]), MeetingPolicy::AlwaysRecord);
 
         let facetime = super::candidate_from_microphone(
             &brave(),
@@ -1664,14 +1701,54 @@ mod tests {
         assert_eq!(provider.key, "facetime.apple.com");
         assert_eq!(provider.label, "FaceTime (web)");
 
-        assert_ne!(
+        assert_eq!(
             known_provider_label("teams.live.com", true),
-            known_provider_label("com.microsoft.teams2", false)
+            known_provider_label("com.microsoft.teams2", false),
+            "Teams pages and the app share one name"
         );
         assert_ne!(
             known_provider_label("facetime.apple.com", true),
             known_provider_label("com.apple.FaceTime", false)
         );
+    }
+
+    #[test]
+    fn teams_web_calls_are_the_teams_service_outside_the_lab() {
+        let always = MeetingProviderChoice {
+            key: "com.microsoft.teams2".into(),
+            label: "Microsoft Teams".into(),
+            policy: MeetingPolicy::AlwaysRecord,
+        };
+        for (url, host) in [
+            (
+                "https://teams.microsoft.com/meet/123?p=abc",
+                "teams.microsoft.com",
+            ),
+            (
+                "https://teams.microsoft.com/v2/?meetingjoin=true#/meet/123?anon=true",
+                "teams.microsoft.com",
+            ),
+            ("https://teams.microsoft.com/v2/", "teams.microsoft.com"),
+            ("https://teams.cloud.microsoft/v2/", "teams.cloud.microsoft"),
+        ] {
+            let call = candidate_from_microphone(&arc(), &context("Arc", Some(url), "Weekly sync"))
+                .unwrap_or_else(|| panic!("{url} is a Teams call"));
+            assert_eq!(call.source, MeetingSource::Teams, "{url}");
+            assert_eq!(call.site.as_deref(), Some(host), "{url}");
+            assert_eq!(call.required_stability(), STABLE_FOR, "{url}");
+            let provider = call.provider(false).unwrap();
+            assert_eq!(provider.key, "com.microsoft.teams2", "{url}");
+            assert_eq!(provider.label, "Microsoft Teams", "{url}");
+            assert_eq!(
+                call.policy(std::slice::from_ref(&always)),
+                MeetingPolicy::AlwaysRecord,
+                "{url} follows the Teams app's choice"
+            );
+            assert!(
+                names_call(&Url::parse(url).unwrap(), false),
+                "{url} names a call"
+            );
+        }
     }
 
     #[test]
@@ -2104,6 +2181,14 @@ mod tests {
             pid: 49686,
             bundle_id: "com.brave.Browser".into(),
             name: "Brave Browser".into(),
+        }
+    }
+
+    fn arc() -> ActiveMicrophoneApplication {
+        ActiveMicrophoneApplication {
+            pid: 1592,
+            bundle_id: "company.thebrowser.Browser".into(),
+            name: "Arc".into(),
         }
     }
 
