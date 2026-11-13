@@ -171,15 +171,16 @@ records or finishes, it answers done but the listener drops the job.
 WAV recording's transcript to stdout with the selected dictation model, or
 the one `--model` names; `--language` picks a language the model supports.
 It is refused with `disabled` while the lab is off. The file is opened and
-read through once here, so a file that isn't WAV, is truncated, or holds no
-audio is refused with `unsupported` or `no-speech` (convert it first, for
-example with ffmpeg) before anything else runs. A recording of any length is
-read and sent in pieces of at most 30 seconds: a piece of only silence is
-skipped, the rest of the text is joined with one space, and Hex holds about
-one piece rather than the whole file. With Hex running, each piece goes to its
-local API's `POST /transcriptions` with that model named: a piece that short
-runs on Hex's dictation engine when it already holds that model, so no second
-copy loads and dictation can run between pieces. With Hex stopped,
+read through once here, so a file Hex can't read or decode is refused with
+`unsupported` (convert it first, for example with ffmpeg) and one with no
+audio with `no-speech`, before anything else runs. A recording of any length
+is read and sent in pieces of at most 30 seconds: a piece of only silence is
+skipped once the speech detector is installed, the rest of the text is joined
+with one space, and Hex holds about one piece rather than the whole file. With
+Hex running, each piece goes to its local API's `POST /transcriptions` with
+that model named: a piece that short runs on Hex's dictation engine when it
+already holds that model, so no second copy loads and dictation can run
+between pieces. With Hex stopped,
 Linux and Windows load the model in this process once, as `hex model
 transcribe` does; macOS answers `not-running`. A piece that hears no speech
 is skipped, and only a file with no speech at all answers `no-speech`

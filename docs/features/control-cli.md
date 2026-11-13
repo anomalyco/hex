@@ -116,8 +116,9 @@ the request names, every piece on its dictation engine's loaded copy when it
 holds that model. Pieces are at most 30 s
 (`control/cli/transcribe/pieces.rs`), read and resampled incrementally and cut
 through the quietest point near their end by `gguf_session::quiet_cut`, the
-same cut a long GGUF clip gets; a piece of only silence is skipped, and their
-text is joined with one space, so a file can be any length and only about one
+same cut a long GGUF clip gets; a piece of only silence is skipped once the
+speech detector is installed, and the rest of the text is joined with one
+space, so a file can be any length and only about one
 piece is in memory. Its Labs toggle is read from `settings.json`
 (`AppSettings::read`), the same read `hex labs` lists from, so the check works
 with Hex running or stopped; a running Hex saves the toggle there at once.
@@ -202,8 +203,9 @@ Windows keyboard or live SDK recording smoke test.
 without a recorded reason; `settings_name_real_capabilities_and_keys` checks
 the settings-to-capability table; `control::cli::transcribe::tests` cover the
 lab-off refusal, a non-WAV, a frame-less and a truncated file refused before
-any transcription, the selected model and language, silent pieces skipped
-before they are sent, pieces joined in order, and a file whose pieces all hear
+any transcription, the selected model and language, silent pieces skipped once
+the detector is installed and kept (without consulting or downloading it) when
+it is not, pieces joined in order, and a file whose pieces all hear
 nothing as `no-speech`, while `control::cli::transcribe::pieces::tests` cover a
 95 s clip split into pieces that cover every sample once, a 48 kHz file read
 into ≤30 s pieces whose samples match `AudioClip::decode_wav`, every supported

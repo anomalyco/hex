@@ -26,12 +26,16 @@ const BLOCK_FRAMES: usize = 4_096;
 pub(super) enum PieceError {
     /// The file could not be opened or read at all.
     Io(std::io::Error),
-    /// The file is a WAV this build does not decode.
+    /// The file is not a WAV this build decodes: either it is not a WAV at
+    /// all, or its rate, channels, or sample format is unsupported.
     Audio(AudioError),
     /// The file holds no audio at all.
     Empty,
-    /// The file stopped being readable at `at_ms`, after the up-front read
-    /// had accepted it: it changed while Hex was transcribing it.
+    /// The header was accepted but the samples could not all be read: the
+    /// file is truncated or corrupt.
+    Incomplete,
+    /// The file could not be read after the up-front read accepted it: it
+    /// changed, or could no longer be read, while Hex was transcribing it.
     Changed { at_ms: u64 },
 }
 
@@ -94,8 +98,13 @@ impl Pieces {
     /// corrupt file is refused before any transcription rather than after
     /// minutes of it. Only `prepare` calls this: it costs one decode pass.
     pub(super) fn validate(&mut self) -> Result<(), PieceError> {
-        while !self.read_source()?.is_empty() {}
-        Ok(())
+        loop {
+            match self.read_source() {
+                Ok(block) if block.is_empty() => return Ok(()),
+                Ok(_) => {}
+                Err(_) => return Err(PieceError::Incomplete),
+            }
+        }
     }
 
     /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
@@ -328,8 +337,13 @@ mod tests {
             .collect()
     }
 
+    /// A temp WAV path unique to this module: tests in other modules run in
+    /// parallel in one process and share `TMPDIR`.
     fn temp(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("hex-transcribe-{name}-{}.wav", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "hex-transcribe-pieces-{name}-{}.wav",
+            std::process::id()
+        ))
     }
 
     fn collect(path: &Path) -> Vec<Vec<f32>> {
@@ -503,10 +517,7 @@ mod tests {
         let mut pieces = Pieces::open(&path).unwrap();
         let error = pieces.validate().unwrap_err();
         let _ = std::fs::remove_file(&path);
-        assert!(
-            matches!(error, PieceError::Audio(AudioError::Invalid)),
-            "{error:?}"
-        );
+        assert!(matches!(error, PieceError::Incomplete), "{error:?}");
     }
 
     #[test]

@@ -107,13 +107,17 @@ fn refused(file: &Path, error: PieceError) -> ControlReply {
         PieceError::Changed { at_ms } => ControlReply::error(
             "failed",
             format!(
-                "couldn't read {name} past {}; the file changed while Hex was transcribing it",
+                "couldn't read {name} past {}; it changed or could no longer be read",
                 minute_second(at_ms)
             ),
         ),
         PieceError::Empty => ControlReply::error(
             "no-speech",
             format!("{name} has no audio; nothing to transcribe"),
+        ),
+        PieceError::Incomplete => ControlReply::error(
+            "unsupported",
+            format!("{name} is truncated or corrupt; Hex couldn't read all of its audio"),
         ),
         PieceError::Audio(AudioError::Unsupported) => ControlReply::error(
             "unsupported",
@@ -148,7 +152,7 @@ fn transcribe(job: &Job) -> ControlReply {
 /// request names. A piece of at most 30 s runs on its dictation engine's
 /// loaded copy when it holds that model, so no second copy loads and
 /// dictation can run between pieces; a piece of only silence is skipped
-/// before it is sent.
+/// before it is sent once the speech detector is installed.
 fn in_running_hex(job: &Job) -> ControlReply {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("model", job.selection.model.as_str())
@@ -191,17 +195,32 @@ fn in_running_hex(job: &Job) -> ControlReply {
 /// The next piece that may hold speech, skipping pieces of only silence as a
 /// long GGUF clip's silent chunks are skipped: models invent text for silence
 /// (#1194) or run to their generation cap (#968).
+///
+/// The check runs only when the speech detector is already installed: a
+/// one-shot command must not start its background model download.
 fn next_speechful(pieces: &mut Pieces) -> std::result::Result<Option<Vec<f32>>, PieceError> {
+    let detector = crate::transcription::models::speech_detector_installed();
+    next_speechful_with(pieces, detector)
+}
+
+/// [`next_speechful`] with the detector's availability passed in, so a test
+/// needs no installed model.
+fn next_speechful_with(
+    pieces: &mut Pieces,
+    detector: bool,
+) -> std::result::Result<Option<Vec<f32>>, PieceError> {
     loop {
         match pieces.next()? {
-            Some(samples)
-                if !crate::transcription::gguf_session::chunk_may_hold_speech(&samples) =>
-            {
-                continue;
-            }
+            Some(samples) if !keeps_piece(&samples, detector) => continue,
             piece => return Ok(piece),
         }
     }
+}
+
+/// Whether a piece goes to the model: only silence is skipped, and only when
+/// the detector is installed and hears none in it.
+fn keeps_piece(samples: &[f32], detector: bool) -> bool {
+    !detector || crate::transcription::gguf_session::chunk_may_hold_speech(samples)
 }
 
 /// One piece's transcript, trimmed, or the refusal for an answer Hex cannot
@@ -353,11 +372,17 @@ mod tests {
     use super::*;
     use crate::app_settings::AppSettings;
 
-    fn not_a_wav() -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "hex-transcribe-not-a-wav-{}.wav",
+    /// A temp WAV path unique to this module: tests in other modules run in
+    /// parallel in one process and share `TMPDIR`.
+    fn temp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "hex-transcribe-cli-{name}-{}.wav",
             std::process::id()
-        ));
+        ))
+    }
+
+    fn not_a_wav() -> std::path::PathBuf {
+        let path = temp("not-a-wav");
         std::fs::write(&path, b"this is not a wav").unwrap();
         path
     }
@@ -416,8 +441,7 @@ mod tests {
     fn a_wav_uses_the_selected_model_and_language() {
         let mut settings = AppSettings::default();
         settings.labs.transcribe_files = true;
-        let path =
-            std::env::temp_dir().join(format!("hex-transcribe-wav-{}.wav", std::process::id()));
+        let path = temp("wav");
         std::fs::write(&path, wav()).unwrap();
         let job = prepare(&settings, &path, None, None).unwrap();
         let _ = std::fs::remove_file(&path);
@@ -428,8 +452,7 @@ mod tests {
 
     /// A 16 kHz mono WAV of `seconds` of silence.
     fn wav_at(name: &str, seconds: f32) -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("hex-transcribe-{name}-{}.wav", std::process::id()));
+        let path = temp(name);
         let spec = hound::WavSpec {
             channels: 1,
             sample_rate: 16_000,
@@ -448,8 +471,7 @@ mod tests {
     fn a_file_with_no_audio_answers_no_speech() {
         let mut settings = AppSettings::default();
         settings.labs.transcribe_files = true;
-        let path =
-            std::env::temp_dir().join(format!("hex-transcribe-empty-{}.wav", std::process::id()));
+        let path = temp("empty");
         let spec = hound::WavSpec {
             channels: 1,
             sample_rate: 16_000,
@@ -478,33 +500,36 @@ mod tests {
 
         let reply = prepare(&settings, &path, None, None).unwrap_err();
         let _ = std::fs::remove_file(&path);
-        assert!(
-            matches!(reply, ControlReply::Error { ref code, .. } if code == "unsupported"),
-            "{reply:?}"
-        );
+        let (code, message) = error(reply);
+        assert_eq!(code, "unsupported");
+        assert!(message.contains("truncated or corrupt"), "{message}");
     }
 
     #[test]
-    fn a_piece_of_silence_is_skipped_before_it_is_sent() {
+    fn a_piece_is_kept_without_the_detector_and_it_is_not_consulted() {
         let path = wav_at("silent", 1.0);
         let mut pieces = open(&path).unwrap();
         {
+            // The override says "no speech": a kept piece proves the check did
+            // not run, so the detector cannot have started its download.
             let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
-            assert!(next_speechful(&mut pieces).unwrap().is_none());
+            assert!(next_speechful_with(&mut pieces, false).unwrap().is_some());
         }
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
-    fn a_piece_is_kept_when_the_detector_hears_speech_or_is_absent() {
+    fn an_installed_detector_skips_a_piece_it_hears_nothing_in() {
         let path = wav_at("kept", 1.0);
-        for verdict in [Some(true), None] {
+        {
             let mut pieces = open(&path).unwrap();
-            let _verdict = crate::transcription::speech_detector::override_for_test(verdict);
-            assert!(
-                next_speechful(&mut pieces).unwrap().is_some(),
-                "{verdict:?}"
-            );
+            let _silent = crate::transcription::speech_detector::override_for_test(Some(false));
+            assert!(next_speechful_with(&mut pieces, true).unwrap().is_none());
+        }
+        {
+            let mut pieces = open(&path).unwrap();
+            let _speech = crate::transcription::speech_detector::override_for_test(Some(true));
+            assert!(next_speechful_with(&mut pieces, true).unwrap().is_some());
         }
         let _ = std::fs::remove_file(&path);
     }
@@ -610,10 +635,24 @@ mod tests {
         ));
         assert_eq!(code, "failed");
         assert!(message.contains("past 2:05"), "{message}");
-        assert!(message.contains("changed while Hex"), "{message}");
+        assert!(
+            message.contains("changed or could no longer be read"),
+            "{message}"
+        );
         assert_eq!(minute_second(0), "0:00");
         assert_eq!(minute_second(59_999), "0:59");
         assert_eq!(minute_second(3_600_000), "60:00");
+    }
+
+    #[test]
+    fn a_truncated_wav_says_it_is_truncated() {
+        let (code, message) = error(refused(Path::new("cut.wav"), PieceError::Incomplete));
+        assert_eq!(code, "unsupported");
+        assert!(message.contains("truncated or corrupt"), "{message}");
+        assert!(
+            message.contains("couldn't read all of its audio"),
+            "{message}"
+        );
     }
 
     #[test]
