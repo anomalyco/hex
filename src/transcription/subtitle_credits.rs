@@ -1,11 +1,16 @@
 //! Subtitle credits a speech model invents at the end of a clip (#1141).
 //! Models trained on subtitled video (Whisper, Cohere Transcribe) learned
 //! that broadcast audio ends with a credit line, and on a trailing pause or
-//! breath they can append one nobody said. Only a credit at the very end is
-//! removed; the same words anywhere else are kept.
+//! breath they can append one nobody said. Whisper in Turkish adds a thanks
+//! for watching, or the subtitle editor's credit (#1770). Only a credit at
+//! the very end is removed; the same words anywhere else are kept. The thanks
+//! is a real sentence too, so a dictation that genuinely ends with it loses
+//! it.
 
 /// Credits seen appended to dictations, matched case-insensitively on their
-/// letters and digits alone, so punctuation and hyphens may differ.
+/// letters and digits alone, so punctuation and hyphens may differ. Turkish
+/// `İ` and `I` both fold to `i`: lowercasing leaves a combining dot that is
+/// dropped, and the dotless `ı` counts as `i`.
 const CREDITS: &[&str] = &[
     "Sous-titrage Société Radio-Canada",
     "Sous-titrage ST' 501",
@@ -13,21 +18,45 @@ const CREDITS: &[&str] = &[
     "Sous-titres par la communauté d'Amara.org",
     "Subtitles by the Amara.org community",
     "Untertitel der Amara.org-Community",
+    "İzlediğiniz için teşekkür ederim",
+    "Altyazı M.K.",
+    "Altyazı M.",
 ];
 
-/// Each run of letters or digits in `text`, lowercased, with its byte offset.
+/// A combining mark such as the dot Turkish lowercasing leaves behind (`İ`
+/// becomes `i` + U+0307).
+fn is_combining(character: char) -> bool {
+    matches!(character, '\u{0300}'..='\u{036F}')
+}
+
+/// `text` lowercased and folded so Turkish case and dot rules do not matter.
+fn fold(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .filter(|character| !is_combining(*character))
+        .map(|character| match character {
+            'ı' => 'i',
+            other => other,
+        })
+        .collect()
+}
+
+/// Each run of letters or digits in `text`, folded, with its byte offset.
 fn tokens(text: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let mut start = None;
     for (index, character) in text.char_indices() {
         if character.is_alphanumeric() {
             start.get_or_insert(index);
+        } else if is_combining(character) && start.is_some() {
+            // A mark inside a word never splits the token, so the offsets of
+            // the tokens after it stay on the original text.
         } else if let Some(begin) = start.take() {
-            out.push((begin, text[begin..index].to_lowercase()));
+            out.push((begin, fold(&text[begin..index])));
         }
     }
     if let Some(begin) = start {
-        out.push((begin, text[begin..].to_lowercase()));
+        out.push((begin, fold(&text[begin..])));
     }
     out
 }
@@ -114,9 +143,69 @@ mod tests {
     }
 
     #[test]
+    fn a_turkish_thanks_for_watching_is_removed() {
+        assert_eq!(
+            strip("Toplantı yarına kaldı. İzlediğiniz için teşekkür ederim."),
+            Some(("Toplantı yarına kaldı.".into(), 4))
+        );
+        // The dotted capital as a plain `I`, and all lowercase.
+        assert_eq!(
+            strip("Toplantı yarına kaldı. Izlediğiniz için teşekkür ederim"),
+            Some(("Toplantı yarına kaldı.".into(), 4))
+        );
+        assert_eq!(
+            strip("Toplantı yarına kaldı. izlediğiniz için teşekkür ederim"),
+            Some(("Toplantı yarına kaldı.".into(), 4))
+        );
+        assert_eq!(
+            strip("Toplantı yarına kaldı. İZLEDİĞİNİZ İÇİN TEŞEKKÜR EDERİM"),
+            Some(("Toplantı yarına kaldı.".into(), 4))
+        );
+    }
+
+    #[test]
+    fn a_truncated_turkish_credit_is_removed() {
+        assert_eq!(
+            strip("Toplantı yarına kaldı. Altyazı M.K."),
+            Some(("Toplantı yarına kaldı.".into(), 3))
+        );
+        assert_eq!(
+            strip("Toplantı yarına kaldı. Altyazı M."),
+            Some(("Toplantı yarına kaldı.".into(), 2))
+        );
+        assert_eq!(
+            strip("Toplantı yarına kaldı. ALTYAZI M.K."),
+            Some(("Toplantı yarına kaldı.".into(), 3))
+        );
+    }
+
+    #[test]
+    fn the_same_words_mid_sentence_are_kept() {
+        assert_eq!(
+            strip("İzlediğiniz için teşekkür ederim demek istemedim."),
+            None
+        );
+        assert_eq!(strip("Altyazı M.K. yazısını gördüm ama okumadım."), None);
+    }
+
+    #[test]
+    fn a_combining_mark_inside_a_word_does_not_split_it() {
+        // `İ` written as `I` plus a combining dot, and a decomposed accent:
+        // the marks stay inside the word, so tokens and their byte offsets do.
+        assert_eq!(token_count("I\u{0307}zledig\u{0306}iniz"), 1);
+        assert_eq!(token_count("cafe\u{0301}"), 1);
+        assert_eq!(
+            strip("cafe\u{0301}. Altyazı M.K."),
+            Some(("cafe\u{0301}.".into(), 3))
+        );
+    }
+
+    #[test]
     fn counts_letter_and_digit_runs() {
         assert_eq!(token_count("Radio-Canada."), 2);
         assert_eq!(token_count("d'Amara.org"), 3);
+        assert_eq!(token_count("İzlediğiniz için teşekkür ederim"), 4);
+        assert_eq!(token_count("Altyazı M.K."), 3);
         assert_eq!(token_count(" , "), 0);
     }
 }
