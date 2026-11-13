@@ -311,6 +311,9 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │   a `/meet/<code>` address (Arc opening a Calendar link) resolves to
      │   its code, and a page without a code still counts as the snoozed
      │   call (#1113)
+     │   └── While that recording is an automatic one with Labs › Stop when
+     │       the call ends on, the page is still read every 2 s: another code
+     │       showing for 4 s ends the recording's call (see Record)
      └── Stopped by hand -> the snooze ends once the call app has been off
          the microphone for 3 s (seen while transcribing too), so the next
          call in the same app is offered; a dismissed offer keeps the minute
@@ -434,7 +437,11 @@ the remembered page are dropped
 while Hex records, Meetings is off, the browser is snoozed for a call without
 a meeting code, or no browser holds
 the microphone; a query in flight at that moment is not repeated beside itself,
-and its answer is discarded. When a browser's page is found for a run already
+and its answer is discarded. One recording is the exception: an automatic
+browser call whose page named a code, with Labs › Stop when the call ends on,
+keeps its browser's page being read every 2 s for as long as it records, so
+the page naming another call can end it (see Record). When a browser's page is
+found for a run already
 under way (the first pass had no answer yet), the run keeps counting, now
 toward the known service's 2 s. When no answer names a page, the last page a browser showed while
 it held the microphone names the call for 60 s (`BrowserPageMemory`), so the
@@ -477,7 +484,14 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_reset_drops_the_answer_in_flight_without_starting_a_second_query`,
 `an_answer_is_dated_by_when_its_query_finished`,
 `tab_queries_back_off_after_the_first_thirty_seconds_and_reset`,
-`a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer` and
+`a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer`,
+`a_call_switch_fires_once_after_another_code_holds_for_a_few_seconds`,
+`a_brief_glance_at_another_call_does_not_end_a_recording`,
+`keeping_a_different_call_never_ends_the_recording_for_that_code`,
+`a_call_switch_without_a_recorded_code_never_fires`,
+`a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
+`only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
+`keep_recording_disarms_the_call_switch_stop_too` and
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
 `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
@@ -738,6 +752,27 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      ├── Stop & transcribe -> stops now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
          "meeting recording stopped automatically after its call ended"
+  -> A browser that never releases the microphone between calls (Arc, #1775):
+     the microphone and output stay open after leaving one call and joining
+     the next, so the absence above never comes
+     ├── A call whose page named its code (Google Meet today) keeps that
+     │   browser's page being read every 2 s for the recording
+     ├── The page naming a different code for 4 s (CALL_CHANGED_AFTER,
+     │   CallSwitch in meeting/detection.rs) is a different call: the same
+     │   "left the call" capsule, with the 30 s grace, then Stop & Transcribe;
+     │   logged "the page named a different call; the recording stops after
+     │   its grace unless kept" and "meeting recording stopped automatically
+     │   after its page named another call"
+     ├── Keep recording -> nothing stops for that code, however long it shows;
+     │   a third code still ends the recording
+     ├── A tab that names no call (mail, another site, no page read) never
+     │   ends a recording: only a page that positively names a code does
+     ├── The next call is detected normally once the recording finishes: the
+     │   new code is not snoozed by the old one (#1113)
+     └── Only calls whose page names a code (Google Meet today): a browser
+         Hex can't read (no Automation, no web area) names one only from a
+         code-only tab title, and a named title names none, so it keeps the
+         absence rule
   -> Off -> exactly as above: microphone only, nothing stops
 
 ### Import Audio (Labs)

@@ -355,10 +355,15 @@ impl CallPresence {
 /// Labs › Stop when the call ends (#835).
 pub const AUTO_STOP_GRACE: Duration = Duration::from_secs(30);
 
+/// How long a browser's page must name a different call before an automatic
+/// recording treats its own call as over: long enough that a tab previewed
+/// on the way to another one never stops anything.
+pub const CALL_CHANGED_AFTER: Duration = Duration::from_secs(4);
+
 /// Labs › Stop when the call ends: the deadline at which a recording Hex
 /// started on its own stops, armed when [`CallPresence`] reports the call
-/// ended and dropped when the call app comes back or the user keeps
-/// recording.
+/// ended (or [`CallSwitch`] reports another call's page) and dropped when the
+/// call app comes back or the user keeps recording.
 #[derive(Default)]
 pub struct AutoStop {
     deadline: Option<Instant>,
@@ -391,6 +396,107 @@ impl AutoStop {
             return true;
         }
         false
+    }
+}
+
+/// A different call's code showing on a recording's browser page, and how
+/// long it has shown.
+struct ChangedCall {
+    code: String,
+    run: Run,
+    /// It already asked the controller to stop this recording; the same code
+    /// never asks twice.
+    reported: bool,
+}
+
+/// Labs › Stop when the call ends in a browser that never releases the
+/// microphone between calls (Arc, #1775): the call code the recording started
+/// with, and another code showing on the same browser's page for
+/// [`CALL_CHANGED_AFTER`], so one recording does not span two calls. It never
+/// stops anything; the watcher owns the grace.
+///
+/// The page read is the browser's front tab alone, so a tab that names no
+/// call (`None`) never ends a recording: only a page that positively names a
+/// different call does. `None` neither starts nor clears a run; the recorded
+/// code showing again does.
+#[derive(Default)]
+pub struct CallSwitch {
+    /// The call's code when its recording started; without one nothing is
+    /// watched.
+    recorded: Option<String>,
+    /// A different code showing since.
+    changed: Option<ChangedCall>,
+    /// A different code the user kept recording through: it never ends this
+    /// recording.
+    kept: Option<String>,
+}
+
+impl CallSwitch {
+    pub fn new(recorded: Option<String>) -> Self {
+        Self {
+            recorded,
+            ..Self::default()
+        }
+    }
+
+    /// The code the recording started with, when its page named one.
+    pub fn recorded(&self) -> Option<&str> {
+        self.recorded.as_deref()
+    }
+
+    /// Whether a different call's code is showing: its count is under way, or
+    /// it already asked to stop.
+    pub fn changed(&self) -> bool {
+        self.changed.is_some()
+    }
+
+    /// The page names `current` (the browser's front tab's call code; `None`
+    /// when it names none): true once, when another code has shown for
+    /// [`CALL_CHANGED_AFTER`].
+    pub fn observe(&mut self, current: Option<&str>) -> bool {
+        self.observe_at(current, Instant::now())
+    }
+
+    fn observe_at(&mut self, current: Option<&str>, now: Instant) -> bool {
+        let Some(current) = current else {
+            return false;
+        };
+        let Some(recorded) = self.recorded.as_deref() else {
+            return false;
+        };
+        if current == recorded || self.kept.as_deref() == Some(current) {
+            self.changed = None;
+            return false;
+        }
+        if self
+            .changed
+            .as_ref()
+            .is_none_or(|changed| changed.code != current)
+        {
+            self.changed = Some(ChangedCall {
+                code: current.to_string(),
+                run: Run::start(now),
+                reported: false,
+            });
+        }
+        let Some(changed) = self.changed.as_mut() else {
+            return false;
+        };
+        if changed.reported {
+            return false;
+        }
+        if changed.run.extend(now) >= CALL_CHANGED_AFTER {
+            changed.reported = true;
+            return true;
+        }
+        false
+    }
+
+    /// Keep recording: the different code showing now never ends this
+    /// recording, however long it stays.
+    pub fn keep(&mut self) {
+        self.kept = self.changed.as_ref().map(|changed| changed.code.clone());
+        self.changed = None;
     }
 }
 
@@ -2095,6 +2201,111 @@ mod tests {
         // code lets the next one through after a short gap (#1594).
         assert!(watch.run(None, &[], 2_000).is_empty());
         assert_eq!(watch.stable(&second, &[]), Some(Detection::Offer(second)));
+    }
+
+    #[test]
+    fn a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        // The recording of the first call ends after its page named the
+        // second while the browser kept the microphone the whole time: no
+        // absence at all, and the second call is still offered as a new one
+        // two seconds after the first's offer.
+        assert_eq!(
+            offered(&watch.run(Some(&second), &[], 2_500)),
+            vec![4_500],
+            "the browser's new call was snoozed by the old one"
+        );
+    }
+
+    /// A `CallSwitch` fed on a fake monotonic clock, like the watcher feeds
+    /// it from its page reads.
+    struct Switching {
+        switch: CallSwitch,
+        base: Instant,
+        elapsed_ms: u64,
+    }
+
+    impl Switching {
+        fn new(recorded: Option<&str>) -> Self {
+            Self {
+                switch: CallSwitch::new(recorded.map(str::to_string)),
+                base: Instant::now(),
+                elapsed_ms: 0,
+            }
+        }
+
+        /// Observes `current` every `STEP_MS` for `ms`; the times it fired.
+        fn run(&mut self, current: Option<&str>, ms: u64) -> Vec<u64> {
+            let mut fired = Vec::new();
+            let end = self.elapsed_ms + ms;
+            while self.elapsed_ms < end {
+                let now = self.base + Duration::from_millis(self.elapsed_ms);
+                if self.switch.observe_at(current, now) {
+                    fired.push(self.elapsed_ms);
+                }
+                self.elapsed_ms += STEP_MS;
+            }
+            fired
+        }
+    }
+
+    #[test]
+    fn a_call_switch_fires_once_after_another_code_holds_for_a_few_seconds() {
+        let mut switching = Switching::new(Some("abc-defg-hij"));
+        // The recorded call's own page, and a tab that names no call (or no
+        // page at all), never end a recording.
+        assert!(switching.run(Some("abc-defg-hij"), 6_000).is_empty());
+        assert!(switching.run(None, 6_000).is_empty());
+        // A different call's page, long enough: one ending.
+        assert_eq!(switching.run(Some("xyz-wxyz-xyz"), 4_500), vec![16_000]);
+        // Asked once: the same page keeps showing and asks nothing again.
+        assert!(switching.run(Some("xyz-wxyz-xyz"), 10_000).is_empty());
+        // Back on the recorded call, the count starts over: a later switch to
+        // that page ends once more, and once only.
+        assert!(switching.run(Some("abc-defg-hij"), 1_000).is_empty());
+        assert_eq!(switching.run(Some("xyz-wxyz-xyz"), 9_000), vec![31_500]);
+    }
+
+    #[test]
+    fn a_brief_glance_at_another_call_does_not_end_a_recording() {
+        let mut switching = Switching::new(Some("abc-defg-hij"));
+        assert!(switching.run(Some("xyz-wxyz-xyz"), 3_500).is_empty());
+        // The recorded call's page returns before the four seconds are up.
+        assert!(switching.run(Some("abc-defg-hij"), 1_000).is_empty());
+        assert!(switching.run(Some("xyz-wxyz-xyz"), 3_500).is_empty());
+        // Another call, but never four seconds of one.
+        assert!(switching.run(Some("qqq-qqqq-qqq"), 3_500).is_empty());
+        // Back on the recorded call nothing is counting any more.
+        assert!(switching.run(Some("abc-defg-hij"), 500).is_empty());
+        assert!(!switching.switch.changed());
+    }
+
+    #[test]
+    fn keeping_a_different_call_never_ends_the_recording_for_that_code() {
+        let mut switching = Switching::new(Some("abc-defg-hij"));
+        assert_eq!(switching.run(Some("xyz-wxyz-xyz"), 4_500), vec![4_000]);
+        assert!(switching.switch.changed());
+        switching.switch.keep();
+        assert!(!switching.switch.changed());
+        // The kept page stays for twenty seconds and never asks again.
+        assert!(switching.run(Some("xyz-wxyz-xyz"), 20_000).is_empty());
+        // A third call is still a switch.
+        assert_eq!(switching.run(Some("qqq-qqqq-qqq"), 4_500), vec![28_500]);
+    }
+
+    #[test]
+    fn a_call_switch_without_a_recorded_code_never_fires() {
+        let mut switching = Switching::new(None);
+        assert!(switching.run(Some("xyz-wxyz-xyz"), 20_000).is_empty());
+        assert!(switching.run(None, 5_000).is_empty());
+        assert!(!switching.switch.changed());
+        assert_eq!(switching.switch.recorded(), None);
     }
 
     #[test]

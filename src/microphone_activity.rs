@@ -85,7 +85,8 @@ fn deduplicated(
     applications
 }
 
-fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
+/// Whether a canonical bundle ID is a browser Hex reads pages from.
+pub(crate) fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
     matches!(
         canonical_bundle_id,
         Some(
