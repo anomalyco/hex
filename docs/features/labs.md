@@ -299,7 +299,8 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── A chip, a search (name, description, group), or Turned on -> only the matching cards,
 │   still under their headers; a chip or search shows every match whatever the folds,
 │   under a plain heading; none -> "No labs match" / "Nothing turned on yet"
-│   // checks: labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
+│   // checks: the_labs_search_clear_button_empties_the_field_and_brings_every_card_back,
+│   // labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
 │   // every_group_has_a_feature_and_round_trips_its_id (labs/group.rs);
 │   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link
 ├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch;
@@ -590,8 +591,9 @@ restores the pane. The gate is the pane
 `labs::Feature::SettingsSearch`), so off, General is exactly as before.
 Checks: `settings_search_shows_with_its_lab_and_filters_general`,
 `settings_search_matches_descriptions`,
-`settings_search_keeps_permissions_and_status_cards`, and
-`command_f_focuses_general_search_only_with_its_lab_and_pane` in
+`settings_search_keeps_permissions_and_status_cards`,
+`the_settings_search_clear_button_empties_the_field_and_restores_the_pane`,
+and `command_f_focuses_general_search_only_with_its_lab_and_pane` in
 [tests.rs](../../src/rune_ui/tests.rs) and the matching test in
 [general/search.rs](../../src/rune_ui/general/search.rs). Not yet observed
 in a real window; the Labs page goldens were regenerated for macOS
