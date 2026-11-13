@@ -17,6 +17,8 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(hex_capture)]
+pub mod annotations;
 pub mod captures;
 pub mod playback;
 pub mod recordings;
