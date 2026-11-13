@@ -452,3 +452,96 @@ fn feedback_button(p: Paint, key: &str, variant: ButtonVariant) -> El {
         .build_small_push(p.k)
         .key(key)
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use crate::rune_ui::{AppSettings, SCENES, Service, deep_link, offscreen, view};
+    use rune::text::TextSystem;
+    use rune::{Env, Key, KeyEvent, Mods, Runtime};
+
+    #[test]
+    fn labs_search_clears_across_the_titlebar_button_and_keeps_typing() {
+        // Unlike the Linux golden suite, this runs on macOS too, with the
+        // real pane_header's window_drag region. The native band overlaps
+        // the upper half of the search button.
+        for dark in [false, true] {
+            for fraction in [0.05, 0.5, 0.95] {
+                for from_link in [false, true] {
+                    let mut ui = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+                    SCENES
+                        .iter()
+                        .find(|(name, _)| *name == "mac-labs")
+                        .unwrap()
+                        .1(&mut ui);
+                    for group in crate::labs::Group::ALL {
+                        ui.settings.labs.groups.insert(group.id().to_string(), true);
+                    }
+                    let text =
+                        TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+                    let mut rt =
+                        offscreen::runtime(ui, view, (980.0, 4000.0), Env::new(dark, 2.0), text);
+                    rt.set_native_titlebar_band(28.0);
+                    settle(&mut rt);
+                    if from_link {
+                        let target = deep_link::parse("hex://labs?search=live%20text", "hex")
+                            .unwrap()
+                            .unwrap();
+                        rt.update(|ui, tx| deep_link::open(ui, target, tx));
+                        settle(&mut rt);
+                    }
+                    let (x, y) = rt.find("labs-search/value/input").unwrap();
+                    rt.pointer_down(x, y);
+                    rt.pointer_up(x, y);
+                    if !from_link {
+                        rt.key(KeyEvent {
+                            key: Key::Text("live text".into()),
+                            mods: Mods::default(),
+                        });
+                    }
+                    settle(&mut rt);
+                    assert_eq!(rt.state.lab_store.search.text, "live text");
+                    assert!(rt.find("lab-card-live-text").is_some());
+                    assert!(rt.find("lab-card-mouse-shortcuts").is_none());
+                    let button = rt
+                        .elements()
+                        .into_iter()
+                        .find(|e| e.path.ends_with("labs-search/action"))
+                        .unwrap()
+                        .rect;
+                    assert!(button[1] < 28.0 && button[1] + button[3] > 28.0);
+                    let (x, y) = (
+                        button[0] + button[2] / 2.0,
+                        button[1] + button[3] * fraction,
+                    );
+                    rt.pointer_down(x, y);
+                    assert!(
+                        rt.take_titlebar_action().is_none(),
+                        "clear must not drag at y={y}"
+                    );
+                    rt.pointer_up(x, y);
+                    settle(&mut rt);
+                    assert!(
+                        rt.state.lab_store.search.text.is_empty(),
+                        "clear at y={y}, dark={dark}, link={from_link}"
+                    );
+                    assert!(rt.find("lab-card-mouse-shortcuts").is_some());
+                    assert!(rt.state.lab_store.search.focused);
+                    rt.key(KeyEvent {
+                        key: Key::Text("mouse".into()),
+                        mods: Mods::default(),
+                    });
+                    settle(&mut rt);
+                    assert_eq!(rt.state.lab_store.search.text, "mouse");
+                    assert!(rt.find("lab-card-live-text").is_none());
+                    assert!(rt.find("lab-card-mouse-shortcuts").is_some());
+                }
+            }
+        }
+    }
+
+    fn settle(rt: &mut Runtime<Ui>) {
+        rt.settle_all();
+        rt.frame(0.0);
+    }
+}
