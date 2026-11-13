@@ -75,6 +75,11 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Ctrl-C -> the child ends, nothing printed, exit 130
 │   └── No speech in every piece -> no-speech, exit 4; nothing pasted, kept,
 │       or processed
+├── hex completions <bash|zsh|fish|elvish|powershell>
+│   ├── Labs › Shell completions off -> disabled, exit 1; nothing printed
+│   ├── Runs here: no running Hex, no /control request
+│   └── On -> the script on stdout and nothing else, generated from the same
+│       clap tree every command parses (hidden from hex --help)
 ├── hex meetings record [--title] | stop | copy-last
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
@@ -108,14 +113,15 @@ Agent or terminal                                  // control.cli; every OS
 └── hex logs [--process] [-n N] [-f] -> local tail; works with Hex stopped
 ```
 
-Every command except `start`, `restart`, `logs`, `settings apply`, and the
-read commands talks only to the running Hex; none of them launch Hex. Every OS reaches it through
+Every command except `start`, `restart`, `logs`, `settings apply`,
+`completions`, and the read commands talks only to the running Hex; none of
+them launch Hex. Every OS reaches it through
 the local API's owner-only discovery file and the bearer-authenticated
 `POST /control` route. Commands dispatch before logging and the instance lock on every OS,
 so they never compete with the running app for its files. Opt-ins stay
 explicit settings: no command turns Meetings on as a side effect.
 
-`hex transcribe` is the one command that doesn't use `/control`. It opens the
+`hex transcribe` is one command that doesn't use `/control`. It opens the
 file here and decodes its first audio, so a file Hex can't read is refused
 before anything transcribes: WAV through hound (every sample read once up
 front, so a truncated WAV is refused), everything else through Symphonia, and
@@ -137,6 +143,16 @@ with one space, so a file can be any length and only about one piece is in
 memory. A `model-not-ready` piece offers the download on a terminal
 (`control/cli/prepare.rs`), prepares the model through the service's
 `POST /models/{id}/prepare` events, and retries that piece once.
+
+`hex completions` also never reaches `/control`: it reads its Labs switch from
+`settings.json` (`AppSettings::read`), then prints a script generated at
+runtime from the top-level `Cli` of the OS running it
+(`src/main.rs` on macOS, `src/linux.rs`, `src/windows.rs`, each flattening
+`ControlCli`), so every command and flag in this tree is in the script. The
+subcommand is `hide = true`: it never shows in `hex --help`, and `hex labs`
+lists the toggle that turns it on. Off, it answers `disabled` naming `hex labs
+on shell-completions`, prints nothing, and exits 1. On, only the script goes
+to stdout.
 
 On Linux and Windows `control::host::answer` carries every command out through
 the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
@@ -187,7 +203,11 @@ and `model_selection` (remembered hints, wildcard-language validation); `control
 and zero volume (`enabling_tones_restores_a_nonzero_level` covers enabling a
 saved zero); `control::cli::tests` pin
 exit codes, output, and `hex start`'s `open`
-arguments; `desktop::onboarding::tests::relaunch_forwards_only_the_hex_environment`
+arguments; `control::cli::completions::tests` pin the Shell completions gate
+and that every shell gets a script naming the command tree, and the
+`the_cli_prints_completion_scripts` tests in `linux.rs`, macOS's `main.rs`, and
+`windows.rs` each generate bash, zsh, and fish from that OS's own top-level
+`Cli`; `desktop::onboarding::tests::relaunch_forwards_only_the_hex_environment`
 pins restart's; `macos_rune::control::tests` check that `model use` prepares
 its exact selection installed-only;
 `dictation::audio::tests::marked_captures_are_intentional_without_a_hold`

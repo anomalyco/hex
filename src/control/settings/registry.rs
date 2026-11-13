@@ -628,6 +628,12 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",
     ),
     key(
+        "labs.shell_completions",
+        Kind::Bool,
+        "Labs: hex completions <shell> prints a completion script for bash, zsh, fish, elvish, or \
+         PowerShell, generated from Hex's own commands",
+    ),
+    key(
         "labs.api_processing",
         Kind::Bool,
         "Labs: apps using Hex's local API can ask for transcripts with Global mode's corrections, \

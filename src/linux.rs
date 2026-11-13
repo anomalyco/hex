@@ -31,7 +31,7 @@ pub(crate) mod typed_text;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use color_eyre::Result;
 
 use crate::control::cli::ControlCli;
@@ -141,7 +141,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     // Control and read commands talk to the running Hex or read files: no
     // log, lock, or Hex of their own.
     let command = match command {
-        Command::Control(command) => crate::control::cli::finish(crate::control::cli::run(command)),
+        Command::Control(command) => {
+            crate::control::cli::finish(crate::control::cli::run(command, Cli::command))
+        }
         Command::Stop => crate::control::cli::finish(crate::control::cli::send(
             crate::control::ControlCommand::Quit { force: false },
             Default::default(),
@@ -244,6 +246,25 @@ mod tests {
     use clap::{CommandFactory, Parser};
 
     use super::{Cli, Command, ControlCli, SessionAdoption, session_adoption};
+
+    #[test]
+    fn the_cli_prints_completion_scripts() {
+        use clap_complete::Shell;
+
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "hex", &mut script);
+            let script = String::from_utf8(script).expect("a completion script is UTF-8");
+            assert!(
+                script.contains("dictation"),
+                "{shell:?} script has no dictation"
+            );
+            assert!(
+                script.contains("service"),
+                "{shell:?} script has no Linux-only service command"
+            );
+        }
+    }
 
     #[test]
     fn the_service_adopts_any_display_and_launchers_only_xwayland() {

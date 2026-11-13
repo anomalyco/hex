@@ -12,8 +12,8 @@
 //! dictation shortcut,
 //! more dictation shortcuts with their own activation modes
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
-//! recording when its call ends (macOS), transcribing a saved WAV file from a
-//! terminal, and Terminal paste, shortcut sharing
+//! recording when its call ends (macOS), printing a shell completion script
+//! from a terminal, and Terminal paste, shortcut sharing
 //! on Windows, and a terminal-paste dictation shortcut on Windows and Linux,
 //! and applying While dictating only on speakers) is just its toggle.
 //!
@@ -172,6 +172,7 @@ impl Feature {
             | Self::PrintStart
             | Self::VoicePrompt
             | Self::CopyCaptureZip
+            | Self::ShellCompletions
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -255,6 +256,7 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
             Self::KQuantModels => 20261113,
+            Self::ShellCompletions => 20261113,
         }
     }
 
@@ -388,7 +390,8 @@ impl Feature {
             | Self::ApiBrowserAccess
             | Self::VoicePrompt
             | Self::CopyCaptureZip
-            | Self::SpeakersOnly => true,
+            | Self::SpeakersOnly
+            | Self::ShellCompletions => true,
         }
     }
 
@@ -473,6 +476,7 @@ impl Feature {
             Self::PrintStart => "print-start",
             Self::VoicePrompt => "voice-prompt",
             Self::CopyCaptureZip => "copy-capture-zip",
+            Self::ShellCompletions => "shell-completions",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -558,6 +562,7 @@ impl Feature {
             Self::PrintStart => "labs.print_start",
             Self::VoicePrompt => "labs.voice_prompt",
             Self::CopyCaptureZip => "labs.copy_capture_zip",
+            Self::ShellCompletions => "labs.shell_completions",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -647,6 +652,7 @@ impl Feature {
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
+            Self::ShellCompletions => settings.labs.shell_completions,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -734,6 +740,7 @@ impl Feature {
             &mut labs.print_start,
             &mut labs.voice_prompt,
             &mut labs.copy_capture_zip,
+            &mut labs.shell_completions,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -826,6 +833,7 @@ impl Feature {
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
+            Self::ShellCompletions => settings.labs.shell_completions = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -2228,6 +2236,26 @@ mod tests {
         assert_eq!(Feature::KQuantModels.group(), Group::Models);
         assert_eq!(Feature::KQuantModels.settings_key(), "labs.k_quant_models");
         assert_eq!(Feature::KQuantModels.name(), "k-quant-models");
+    }
+
+    #[test]
+    fn shell_completions_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!Feature::ShellCompletions.on(&AppSettings::default()));
+        labs.shell_completions = true;
+        assert!(Feature::ShellCompletions.on(&AppSettings {
+            labs,
+            ..AppSettings::default()
+        }));
+        assert!(Feature::ShellCompletions.on_this_os());
+        assert_eq!(Feature::ShellCompletions.added(), 20261113);
+        assert_eq!(Feature::ShellCompletions.audience(), Audience::Everyone);
+        assert_eq!(Feature::ShellCompletions.group(), Group::Output);
+        assert_eq!(
+            Feature::ShellCompletions.settings_key(),
+            "labs.shell_completions"
+        );
+        assert_eq!(Feature::ShellCompletions.name(), "shell-completions");
     }
 
     #[test]

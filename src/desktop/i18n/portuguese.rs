@@ -122,6 +122,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Turn on Labs › Smaller model files to use it.", "Ative Labs › Arquivos de modelo menores para usá-lo."),
     ("{model} needs Labs › Smaller model files, so Hex uses {fallback} until you turn it on or choose another model", "{model} precisa de Labs › Arquivos de modelo menores, então o Hex usa {fallback} até você ativá-lo ou escolher outro modelo."),
     ("Add your own speech model files that use Q6_K, Q5_K, or Q4_K weights. They are smaller than Q8_0 but Hex hasn't verified them, so accuracy may vary.", "Adicione seus próprios arquivos de modelo de voz com pesos Q6_K, Q5_K ou Q4_K. Eles são menores que o Q8_0, mas o Hex não os verificou, então a precisão pode variar."),
+    ("Shell completions", "Completar no shell"),
+    ("Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>", "Imprima um script de completude para bash, zsh, fish, elvish ou PowerShell com hex completions <shell>"),
     ("Add a speech model file without copying it, so several accounts can share one file", "Adiciona um arquivo de modelo de voz sem copiá-lo, para que várias contas compartilhem um só arquivo"),
     ("Stop when the call ends", "Parar quando a chamada terminar"),
     ("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet", "Para uma gravação que o Hex iniciou sozinho 30 s depois que o app de chamada solta o microfone e fica em silêncio"),

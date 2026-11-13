@@ -84,6 +84,7 @@ impl Feature {
             | Self::ApiTimestamps
             | Self::ApiBrowserAccess
             | Self::PrintStart
+            | Self::ShellCompletions
             | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats

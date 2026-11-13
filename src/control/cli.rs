@@ -7,6 +7,7 @@
 //! heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
+mod completions;
 mod embedded;
 mod human;
 mod prepare;
@@ -204,6 +205,14 @@ pub enum ControlCli {
     Annotate {
         #[command(subcommand)]
         command: CaptureCommand,
+    },
+    /// Print a shell completion script for `hex` (Labs › Shell
+    /// completions).
+    #[command(hide = true)]
+    Completions {
+        /// The shell to print a completion script for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
     },
     /// Print Hex's recent log lines; works without Hex running.
     Logs {
@@ -418,7 +427,9 @@ pub fn finish(code: u8) -> ! {
     std::process::exit(code.into())
 }
 
-pub fn run(command: ControlCli) -> u8 {
+/// Runs `command`. `top_level` builds this OS's whole `hex` command tree, and
+/// only `completions` asks for it, so no other command pays for it.
+pub fn run(command: ControlCli, top_level: impl FnOnce() -> clap::Command) -> u8 {
     match command {
         ControlCli::Status { output } => send(ControlCommand::Status, output),
         ControlCli::Start { output } => start(output),
@@ -565,6 +576,7 @@ pub fn run(command: ControlCli) -> u8 {
             lines,
             follow,
         } => logs(process, lines, follow),
+        ControlCli::Completions { shell } => completions::run(shell, top_level()),
         ControlCli::History(crate::control::transcript_cli::HistoryArgs {
             action: Some(crate::control::transcript_cli::HistoryAction::Clear { yes, output }),
             ..

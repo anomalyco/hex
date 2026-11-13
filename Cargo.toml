@@ -63,6 +63,7 @@ accesskit_windows = { git = "https://github.com/anomalyco/rune.git", rev = "d671
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+clap_complete = { version = "4.6.11", default-features = false }
 color-eyre = "0.6.5"
 cpal = "0.18.2"
 ctrlc = "3.5.2"

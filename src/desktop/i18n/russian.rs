@@ -118,6 +118,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Turn on Labs › Smaller model files to use it.", "Включите Лаборатория › Меньшие файлы моделей, чтобы использовать её."),
     ("{model} needs Labs › Smaller model files, so Hex uses {fallback} until you turn it on or choose another model", "{model} требует Лаборатория › Меньшие файлы моделей, поэтому Hex использует {fallback}, пока вы не включите их или не выберете другую модель."),
     ("Add your own speech model files that use Q6_K, Q5_K, or Q4_K weights. They are smaller than Q8_0 but Hex hasn't verified them, so accuracy may vary.", "Добавляйте собственные файлы моделей речи с весами Q6_K, Q5_K или Q4_K. Они меньше Q8_0, но Hex их не проверял, поэтому точность может отличаться."),
+    ("Shell completions", "Дополнение оболочки"),
+    ("Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>", "Выведите сценарий дополнения для bash, zsh, fish, elvish или PowerShell командой hex completions <shell>"),
     ("Add a speech model file without copying it, so several accounts can share one file", "Добавляет файл модели речи без копирования, чтобы несколько учётных записей могли использовать один файл"),
     ("Turn off the mic when not dictating", "Выключать микрофон вне диктовки"),
     ("The mic opens only while you dictate; the first moment can be clipped", "Микрофон открывается только во время диктовки; самое начало может обрезаться"),
