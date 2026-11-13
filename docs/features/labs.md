@@ -97,7 +97,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
 ├── More call apps no    labs.more_call_apps             (every OS with Meetings) Signal, Telegram, WeChat, LINE, Webex, Element, and Phone calls are offered,
-│                                        and calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages are named
+│                                        and calls on Google Voice, Messenger, FaceTime, GroupMe, and Webex pages are named
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 ├── Process API transcripts no labs.api_processing       (every OS) apps using Hex's local API can add process=global to
 │                                        POST /transcriptions and POST /streams/{id}/finish to get the text after Global
@@ -1734,17 +1734,18 @@ Webex app's Windows host. Signal, Telegram, WeChat, LINE, Element, Messenger,
 and GroupMe also hold the microphone for voice notes or clips, so they keep
 it about 20 s before they count as calls, as WhatsApp does; Webex and Phone
 count after 2 s. A browser on Google Voice (`voice.google.com`), Messenger
-(`messenger.com`), Teams (`teams.live.com`), FaceTime
-(`facetime.apple.com`), GroupMe (`web.groupme.com`), or any `webex.com`
-subdomain is named after the service; these names need the browser's page,
-which Hex reads on macOS ([meetings.md](meetings.md#detect-and-offer)).
-Detected calls lists the seven apps, Google Voice, Messenger, and GroupMe
-while the lab is on. A Teams page gets its own `teams.live.com` choice from
-an offer's "…", shown as "Teams (web)", and a FaceTime page its own
-`facetime.apple.com` choice ("FaceTime (web)"); neither follows the Teams or
-FaceTime app's choice. A Webex page's `webex.com` choice is set the same way
-and covers every subdomain, so those three have no always-listed row; Ask /
-Always record / Never offer work as for the existing services. Off, offers are unchanged: those processes are not meeting apps,
+(`messenger.com`), FaceTime (`facetime.apple.com`), GroupMe
+(`web.groupme.com`), or any `webex.com` subdomain is named after the service;
+these names need the browser's page, which Hex reads on macOS
+([meetings.md](meetings.md#detect-and-offer)). Detected calls lists the seven
+apps, Google Voice, Messenger, and GroupMe while the lab is on. A FaceTime page
+gets its own `facetime.apple.com` choice from an offer's "…", shown as
+"FaceTime (web)", which does not follow the FaceTime app's choice. A Webex
+page's `webex.com` choice is set the same way and covers every subdomain, so
+those two have no always-listed row; Ask / Always record / Never offer work as
+for the existing services. Teams pages are not part of this lab: they are
+recognised without it, and follow the Microsoft Teams app's choice
+([meetings.md](meetings.md#detect-and-offer)). Off, offers are unchanged: those processes are not meeting apps,
 the pages stay unknown pages ("Browser call") after 20 s, and Detected calls
 lists exactly the services it did before. Checks:
 `more_call_apps_are_unknown_until_their_lab_is_on`,

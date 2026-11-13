@@ -168,6 +168,7 @@ impl CallProvider {
             Self::Teams => &[
                 "com.microsoft.teams2",
                 "teams.microsoft.com",
+                "teams.cloud.microsoft",
                 "teams.live.com",
             ],
             Self::Slack => &["com.tinyspeck.slackmacgap", "app.slack.com"],
@@ -336,7 +337,9 @@ fn classify(url: &Url) -> Option<CallLink> {
         CallProvider::Zoom
     } else if host == "meet.google.com" && is_meet_path(&path) {
         CallProvider::GoogleMeet
-    } else if (host_is(&host, "teams.microsoft.com") || host_is(&host, "teams.live.com"))
+    } else if (host_is(&host, "teams.microsoft.com")
+        || host_is(&host, "teams.cloud.microsoft")
+        || host_is(&host, "teams.live.com"))
         && (path.starts_with("/l/meetup-join/") || path.starts_with("/meet/"))
     {
         CallProvider::Teams
@@ -810,6 +813,11 @@ mod tests {
                 CallProvider::Teams,
             ),
             (
+                "notes",
+                "https://teams.cloud.microsoft/meet/93123456",
+                CallProvider::Teams,
+            ),
+            (
                 "url",
                 "https://app.slack.com/huddle/T012AB3C4/C012AB3C4",
                 CallProvider::Slack,
@@ -1065,6 +1073,7 @@ mod tests {
             ("www.zoom.us", CallProvider::Zoom),
             ("meet.google.com", CallProvider::GoogleMeet),
             ("teams.microsoft.com", CallProvider::Teams),
+            ("teams.cloud.microsoft", CallProvider::Teams),
             ("app.slack.com", CallProvider::Slack),
             ("acme.webex.com", CallProvider::Webex),
         ] {

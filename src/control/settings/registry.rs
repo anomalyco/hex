@@ -525,7 +525,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.more_call_apps",
         Kind::Bool,
-        "Labs: offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages",
+        "Labs: offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on Google Voice, Messenger, FaceTime, GroupMe, and Webex pages",
     ),
     key(
         "labs.movable_meeting_capsules",

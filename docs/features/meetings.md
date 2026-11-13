@@ -259,7 +259,7 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses 
   its Canary and PTB builds, Discord.exe, the Linux discord binary and Flatpak,
   #1283)
 Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser call on
-  voice.google.com, messenger.com, teams.live.com, facetime.apple.com,
+  voice.google.com, messenger.com, facetime.apple.com,
   web.groupme.com, or webex.com                 // Labs › More call apps, off by default
   (Signal: org.whispersystems.signal-desktop; Telegram: ru.keepcoder.Telegram,
   com.tdesktop.Telegram, org.telegram.desktop; WeChat: com.tencent.xinWeChat;
@@ -270,13 +270,15 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
   as voice notes and clips also hold the microphone; Webex and Phone wait 2 s)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
-     │   Google Meet and Banshee (banshee.app) in a browser count as known
-     │   services; a slow watcher loop never stretches the time
+     │   Google Meet, Banshee (banshee.app), and Teams pages
+     │   (teams.microsoft.com, teams.cloud.microsoft, teams.live.com) in a
+     │   browser count as known services; a slow watcher loop never
+     │   stretches the time
      └── Browser on a page that is not a known call site -> 20 s,
          so voice notes and dictation fields are not offered
   -> Provider = the website when known, else the app; the website's choice
      when it has one, else the app's (a browser's choice covers its other
-     sites), else Ask
+     sites), else Ask. A Teams page uses the Microsoft Teams app's choice.
      ├── Never offer -> nothing shown; an earlier offer stays snoozed
      ├── Always record -> starts recording, no offer   // meetings.auto-record
      │   └── recording capsule says "Started automatically" for 10 s; with the
@@ -341,6 +343,15 @@ Vivaldi was missing until #1105, so its calls
 `vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
 Vivaldi call.
 
+Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
+`teams.live.com`) are known call sites without the lab: a browser on one is a
+Microsoft Teams call after 2 s. They use the Microsoft Teams app's
+`com.microsoft.teams2` choice, so Always record set for the app covers its
+website too; a `teams.live.com` choice saved earlier from an offer's "…" still
+applies to that host. Check:
+`teams_web_calls_are_the_teams_service_outside_the_lab`; not observed on a
+real browser Teams call.
+
 Labs › More call apps (`labs.more_call_apps`, off by default; every OS with
 Meetings) widens which calls detection recognizes. While on, Signal, Telegram,
 WeChat, LINE, Webex, Element, and the Phone app are call apps: the Electron
@@ -354,15 +365,14 @@ Windows host. Signal, Telegram, WeChat, LINE, Element, Messenger, and GroupMe
 keep WhatsApp's about-20 s threshold because voice notes and clips hold the
 microphone too; Webex and Phone take the normal 2 s. On macOS, where Hex reads
 the browser's page, pages on `voice.google.com` (Google Voice), `messenger.com`,
-`teams.live.com` (the Teams source), `facetime.apple.com` (FaceTime), and
-`web.groupme.com` are named, and any `webex.com` subdomain is Webex, with one
-`webex.com` provider choice covering them all. Settings › Meetings › Detected
-calls lists the seven apps, Google Voice, Messenger, and GroupMe only while
-the lab is on (`app_settings::known_meeting_providers`). A Teams page gets its
-own `teams.live.com` choice from an offer's "…", shown as "Teams (web)", and a
-FaceTime page its own `facetime.apple.com` choice ("FaceTime (web)"); neither
-follows the Teams or FaceTime app's choice. A Webex page's `webex.com` choice
-is made the same way and covers every subdomain, so those three have no
+`facetime.apple.com` (FaceTime), and `web.groupme.com` are named, and any
+`webex.com` subdomain is Webex, with one `webex.com` provider choice covering
+them all. Settings › Meetings › Detected calls lists the seven apps, Google
+Voice, Messenger, and GroupMe only while the lab is on
+(`app_settings::known_meeting_providers`). A FaceTime page gets its own
+`facetime.apple.com` choice from an offer's "…", shown as "FaceTime (web)",
+which does not follow the FaceTime app's choice. A Webex page's `webex.com`
+choice is made the same way and covers every subdomain, so those two have no
 always-listed row. Their Ask / Always record / Never offer choices work as the
 existing services' do. Off,
 offers are unchanged: a Signal or Telegram process is not a meeting app, and
