@@ -848,6 +848,24 @@ pub(super) fn icon_button(
         .key(key)
 }
 
+/// A quiet text action beside a row's control, such as a shortcut's Reset.
+/// Assistive technology reads `label`, which says more than the short `text`.
+pub(super) fn quiet_button(
+    p: Paint,
+    key: &str,
+    text: &str,
+    label: &str,
+    press: impl Fn(&mut Ui) + 'static,
+) -> El {
+    Button::new(text)
+        .variant(ButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .on_press(press)
+        .build(p.k)
+        .label(label)
+        .key(key)
+}
+
 /// The type of a row's value: a borderless select's, a [`value_button`]'s.
 pub(super) fn value_font(p: Paint) -> TextStyle {
     p.k.ty.ui_medium.lh(16.0)

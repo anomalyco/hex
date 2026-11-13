@@ -339,20 +339,12 @@ fn gnome_desktops_point_to_the_clipboard_lab_until_it_is_on() {
 }
 
 #[test]
-fn restore_default_brings_back_paste_last_only_with_its_lab_on() {
+fn reset_brings_back_paste_lasts_default() {
     use crate::app_settings::HotkeyBinding;
     let default = HotkeyBinding::paste_last_default();
     let mut rt = runtime("portal", true, TALL_SIZE);
     open_advanced(&mut rt, Pane::General);
     rt.state.settings.paste_last_hotkey = None;
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(
-        rt.find("restore-paste-last").is_none(),
-        "hidden while Labs › Restore shortcut default is off"
-    );
-
-    rt.state.settings.labs.restore_shortcut_default = true;
     rt.invalidate();
     settle(&mut rt);
     let note = format!("Default shortcut: {}", default.keycaps().join("+"));
@@ -380,6 +372,36 @@ fn restore_default_brings_back_paste_last_only_with_its_lab_on() {
         rt.state.capture,
         settings::Capture::Listening {
             message: Some(_),
+            ..
+        }
+    ));
+}
+
+/// The Paste last recorder says Backspace turns it off, and plain
+/// Backspace does; Dictation's recorder says nothing and keeps its binding.
+#[test]
+fn backspace_in_an_optional_recorder_turns_the_shortcut_off() {
+    let hint = "Press Backspace to turn it off";
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    assert!(rt.state.settings.paste_last_hotkey.is_some());
+    assert!(!texts(&rt).iter().any(|text| text == hint));
+    tap(&mut rt, "paste-last-hotkey");
+    assert!(texts(&rt).iter().any(|text| text == hint));
+    key(&mut rt, Key::Backspace, Mods::default());
+    assert_eq!(rt.state.settings.paste_last_hotkey, None);
+    assert!(!matches!(rt.state.capture, Capture::Listening { .. }));
+    assert!(!texts(&rt).iter().any(|text| text == hint));
+
+    let dictation = rt.state.settings.dictation_hotkey.clone();
+    tap(&mut rt, "dictation-hotkey");
+    assert!(!texts(&rt).iter().any(|text| text == hint));
+    key(&mut rt, Key::Backspace, Mods::default());
+    assert_eq!(rt.state.settings.dictation_hotkey, dictation);
+    assert!(matches!(
+        rt.state.capture,
+        Capture::Listening {
+            message: Some("Add a modifier"),
             ..
         }
     ));

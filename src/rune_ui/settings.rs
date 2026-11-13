@@ -218,7 +218,18 @@ pub(super) fn modifier_only_hint(peak: HotkeyModifiers) -> &'static str {
 }
 
 /// Saves a recorded chord, or keeps listening with why it was rejected.
+/// Plain ⌫ (or Delete) turns a shortcut that can be off off.
 fn record(ui: &mut Ui, target: ShortcutTarget, binding: Result<HotkeyBinding, &'static str>) {
+    if can_turn_off(target) && binding.as_ref().is_ok_and(HotkeyBinding::is_bare_erase) {
+        cancel_capture(ui);
+        if ui.update(|settings| turn_off(settings, target)) {
+            ui.capture = Capture::Saved {
+                target,
+                until: None,
+            };
+        }
+        return;
+    }
     let message = match binding.and_then(|binding| {
         validate(&ui.settings, target, &binding)?;
         Ok(binding)
@@ -329,7 +340,10 @@ pub(super) fn recorded_binding(event: &KeyEvent) -> Result<HotkeyBinding, &'stat
     // their Labs toggles in `validate` (Linux).
     let lone_labs_key = cfg!(target_os = "linux")
         && (HotkeyKey::section_name(&name) || HotkeyKey::special_name(&name));
-    if modifiers.is_empty() && !matches!(event.key, Key::Function(_)) && !lone_labs_key {
+    // Plain ⌫ or Delete turns an optional shortcut off (`record`);
+    // `validate` refuses it as a binding.
+    let erase = matches!(event.key, Key::Backspace | Key::Delete);
+    if modifiers.is_empty() && !matches!(event.key, Key::Function(_)) && !lone_labs_key && !erase {
         return Err(tr("Add a modifier"));
     }
     Ok(HotkeyBinding {
@@ -345,6 +359,12 @@ pub(super) fn validate(
 ) -> Result<(), &'static str> {
     // A bare left click would swallow every click, this window's included.
     if binding.is_bare_primary_click() {
+        return Err(tr("Add a modifier"));
+    }
+    // Plain ⌫ turns a shortcut off rather than binding (`record`). Windows'
+    // cancel key may be any key alone, as it always could.
+    if binding.is_bare_erase() && !(cfg!(target_os = "windows") && target == ShortcutTarget::Cancel)
+    {
         return Err(tr("Add a modifier"));
     }
     // Menu, Pause, and Scroll Lock need Labs › Special keys alone (Linux).
@@ -489,7 +509,36 @@ pub(super) fn set_binding(
     }
 }
 
-/// Labs › Restore shortcut default: puts `default` back as `target`'s
+/// The shortcuts in General and Output that can be off: plain ⌫ while
+/// recording one turns it off.
+pub(super) fn can_turn_off(target: ShortcutTarget) -> bool {
+    match target {
+        ShortcutTarget::PasteLast
+        | ShortcutTarget::RawDictation
+        | ShortcutTarget::SecondDictation => true,
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => true,
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => true,
+        _ => false,
+    }
+}
+
+/// Turns off a shortcut [`can_turn_off`] allows; others keep their binding.
+pub(super) fn turn_off(settings: &mut AppSettings, target: ShortcutTarget) {
+    match target {
+        ShortcutTarget::PasteLast => settings.paste_last_hotkey = None,
+        ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
+        ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = None,
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => settings.typed_text_hotkey = None,
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey = None,
+        _ => {}
+    }
+}
+
+/// A shortcut row's Reset: puts `default` back as `target`'s
 /// shortcut under the rules a recorded one meets. A default another
 /// shortcut already uses changes nothing and opens the recorder with the
 /// usual conflict, so another can be recorded.
@@ -1310,6 +1359,81 @@ mod section_key_tests {
             validate(&settings, ShortcutTarget::Dictation, &dead_key),
             Ok(())
         );
+    }
+}
+
+/// Plain ⌫ while recording turns an optional shortcut off; a required one
+/// ignores it, and ⌫ with a modifier records like any key.
+#[cfg(test)]
+mod erase_tests {
+    use super::*;
+    use crate::app_settings::ModifierSide;
+
+    fn erase(modifiers: HotkeyModifiers) -> HotkeyBinding {
+        let key = if cfg!(target_os = "macos") {
+            HotkeyKey {
+                code: 51,
+                label: "Delete".into(),
+            }
+        } else {
+            HotkeyKey::named("backspace")
+        };
+        HotkeyBinding {
+            modifiers,
+            key: Some(key),
+        }
+    }
+
+    fn recording(target: ShortcutTarget) -> Ui {
+        let mut ui = super::super::scenes::mac_fixture();
+        ui.settings.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
+        begin_capture(&mut ui, target);
+        ui
+    }
+
+    #[test]
+    fn plain_erase_turns_an_optional_shortcut_off() {
+        let mut ui = recording(ShortcutTarget::PasteLast);
+        record(
+            &mut ui,
+            ShortcutTarget::PasteLast,
+            Ok(erase(HotkeyModifiers::default())),
+        );
+        assert_eq!(ui.settings.paste_last_hotkey, None);
+        assert!(matches!(ui.capture, Capture::Saved { .. }));
+    }
+
+    #[test]
+    fn a_required_shortcut_ignores_plain_erase() {
+        let mut ui = recording(ShortcutTarget::Dictation);
+        let dictation = ui.settings.dictation_hotkey.clone();
+        record(
+            &mut ui,
+            ShortcutTarget::Dictation,
+            Ok(erase(HotkeyModifiers::default())),
+        );
+        assert_eq!(ui.settings.dictation_hotkey, dictation);
+        assert!(matches!(
+            ui.capture,
+            Capture::Listening {
+                message: Some(_),
+                ..
+            }
+        ));
+        assert!(!can_turn_off(ShortcutTarget::Dictation));
+        assert!(!can_turn_off(ShortcutTarget::Cancel));
+    }
+
+    #[test]
+    fn erase_with_a_modifier_records() {
+        let mut ui = recording(ShortcutTarget::PasteLast);
+        let chord = erase(HotkeyModifiers {
+            control: Some(ModifierSide::Either),
+            ..HotkeyModifiers::default()
+        });
+        assert!(!chord.is_bare_erase());
+        record(&mut ui, ShortcutTarget::PasteLast, Ok(chord.clone()));
+        assert_eq!(ui.settings.paste_last_hotkey, Some(chord));
     }
 }
 

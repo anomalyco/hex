@@ -115,7 +115,6 @@ impl Feature {
             | Self::SidedChords
             | Self::TapOrHold
             | Self::DoubleTapModifiers
-            | Self::RestoreShortcutDefault
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
             | Self::ShareShortcut

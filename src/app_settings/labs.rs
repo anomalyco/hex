@@ -56,7 +56,7 @@ impl AppearanceTheme {
     }
 }
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`) are ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`, `labs.restore_shortcut_default`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -87,8 +87,6 @@ pub struct LabsSettings {
     /// default.
     #[serde(deserialize_with = "deserialize_keep_microphone_open_seconds")]
     pub keep_microphone_open_seconds: u32,
-    /// Paste last dictation's row offers its default shortcut back (issue 613).
-    pub restore_shortcut_default: bool,
     /// A pasted dictation stays on the clipboard, not the previous one (macOS and Windows, issue 200).
     pub keep_on_clipboard: bool,
     /// A dictation is put on the clipboard and never pasted (macOS and Windows, issue 629).
@@ -326,7 +324,6 @@ impl Default for LabsSettings {
             unload_idle_minutes: 15,
             keep_microphone_open: false,
             keep_microphone_open_seconds: Self::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS,
-            restore_shortcut_default: false,
             keep_on_clipboard: false,
             copy_only: false,
             return_to_app: false,

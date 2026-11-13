@@ -329,9 +329,12 @@ impl ChordCapture {
         // Function and navigation keys type nothing, so one may be a shortcut
         // alone. The section key does type something, but the recorder takes it
         // alone too: `settings::validate` refuses it while Labs › Section key
-        // alone is off, as Linux's recorder does.
-        let stands_alone =
-            is_function_key(&key.label) || is_navigation_key(code) || key.is_section();
+        // alone is off, as Linux's recorder does. Plain ⌫ turns an optional
+        // shortcut off, and `settings::validate` refuses it as a binding.
+        let stands_alone = is_function_key(&key.label)
+            || is_navigation_key(code)
+            || key.is_section()
+            || key.is_erase();
         if modifiers.is_empty() && !stands_alone {
             return Some(Chord::Captured(Err(tr("Add a modifier"))));
         }
@@ -1831,6 +1834,20 @@ mod tests {
         assert_eq!(single_key_character(Some("ab")), None);
         assert_eq!(single_key_character(Some("\u{0}")), None);
         assert_eq!(single_key_character(None), None);
+    }
+
+    /// Plain ⌫ and Forward Delete reach the window, which turns an optional
+    /// shortcut off with them; with a modifier they record as usual.
+    #[test]
+    fn delete_records_alone_for_the_window_to_turn_a_shortcut_off() {
+        let mut capture = ChordCapture::default();
+        for (code, flags) in [(51, 0), (117, FUNCTION)] {
+            let binding = captured(capture.key_down(code, false, None, flags)).unwrap();
+            assert!(binding.is_bare_erase(), "{code}");
+        }
+        let with_command = captured(capture.key_down(51, false, None, LEFT_COMMAND)).unwrap();
+        assert!(!with_command.is_bare_erase());
+        assert_eq!(with_command.modifiers.command, Some(ModifierSide::Either));
     }
 
     fn calendar_answer(granted: bool, status: CalendarAccess) -> AccessAnswer {
