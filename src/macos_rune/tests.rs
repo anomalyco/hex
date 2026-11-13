@@ -86,7 +86,7 @@ impl Fixture {
         let releases = Mutex::new(releases);
         let (finish, finished) = mpsc::channel();
         let preparation = TranscriptionPreparation::with_prepare(Arc::new(
-            move |selection, installed_only, cancelled, _| {
+            move |selection, installed_only, cancelled, _, _| {
                 start.send((selection.clone(), installed_only)).unwrap();
                 releases
                     .lock()

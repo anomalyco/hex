@@ -1101,6 +1101,8 @@ fn artifact_receipt_matches(path: &Path, artifact: &GgufArtifact) -> bool {
         && modified_ns(&metadata).is_some_and(|modified| modified == receipt.modified_ns)
 }
 
+/// `hex model install` on Linux and Windows, and tests.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn download_with_progress(
     model: &ModelDefinition,
     canceled: &AtomicBool,

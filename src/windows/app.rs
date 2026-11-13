@@ -28,7 +28,7 @@ use crate::desktop::host::{
 };
 use crate::desktop::i18n::tr_fill;
 use crate::history::History;
-use crate::transcription::models::{ModelPreparationStage, TranscriptionModelId};
+use crate::transcription::models::TranscriptionModelId;
 use crate::transcription::preparation::TranscriptionPreparation;
 use crate::windows::rune::{Published, Request};
 
@@ -793,9 +793,7 @@ impl WindowsDesktopHost {
             transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: preparation.downloaded_bytes,
                 error: preparation.error,
-                preparation_stage: preparation
-                    .model
-                    .map(|_| ModelPreparationStage::Downloading),
+                preparation_stage: preparation.stage,
                 selection: self.settings.transcription.clone(),
                 preparing: preparation.model,
             },
