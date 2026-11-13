@@ -255,6 +255,38 @@ fn retry_delay(delay: Duration, ran: Duration) -> Duration {
     }
 }
 
+/// 16 kHz samples each output's audio is held back before mixing, so two
+/// outputs playing at once line up instead of following each other. Linux and
+/// Windows mix their outputs; macOS hears one tap and compiles this only for
+/// the mixer's test.
+#[cfg(any(not(target_os = "macos"), test))]
+pub(super) const MIX_HOLD: usize = SAMPLE_RATE as usize / 20;
+
+/// Mixes each output's pending audio up to the latest output's position less
+/// `hold`, leaving the rest for the next call. An output that delivered
+/// nothing (nothing plays on it) adds nothing. Linux and Windows mix their
+/// outputs; macOS hears one tap and compiles this only for the mixer's test.
+#[cfg(any(not(target_os = "macos"), test))]
+pub(super) fn mix(pending: &mut [&mut Vec<f32>], hold: usize) -> Vec<f32> {
+    let length = pending
+        .iter()
+        .map(|samples| samples.len())
+        .max()
+        .unwrap_or(0)
+        .saturating_sub(hold);
+    let mut mixed = vec![0.0f32; length];
+    for samples in pending.iter_mut() {
+        let take = samples.len().min(length);
+        for (out, sample) in mixed.iter_mut().zip(samples.drain(..take)) {
+            *out += sample;
+        }
+    }
+    for sample in &mut mixed {
+        *sample = sample.clamp(-1.0, 1.0);
+    }
+    mixed
+}
+
 /// Converts any device rate to the 16 kHz meeting tracks so a reopened
 /// device with a different rate never changes a track's format.
 pub(super) struct To16k {
@@ -886,5 +918,33 @@ mod tests {
         // A manual recording, or an app macOS reports no inputs for.
         assert!(!call_app_reports_input(None, &reported));
         assert!(!call_app_reports_input(Some("BuiltIn"), &[]));
+    }
+
+    #[test]
+    fn audio_on_any_output_reaches_the_system_track() {
+        // Only the headset plays (#1221): its audio is kept, less the hold.
+        let mut speakers = Vec::new();
+        let mut headset = vec![0.25; 10];
+        let mixed = mix(&mut [&mut speakers, &mut headset], 4);
+        assert_eq!(mixed, vec![0.25; 6]);
+        assert_eq!(headset.len(), 4);
+
+        // Both play: their audio adds up sample by sample, clamped.
+        let mut speakers = vec![0.5; 8];
+        let mut headset = vec![0.75; 6];
+        let mixed = mix(&mut [&mut speakers, &mut headset], 2);
+        assert_eq!(mixed, vec![1.0; 6]);
+        assert_eq!((speakers.len(), headset.len()), (2, 0));
+
+        // Nothing plays: nothing is sent.
+        let mut idle = Vec::new();
+        assert!(mix(&mut [&mut idle], 2).is_empty());
+
+        // The shared hold is 50 ms at 16 kHz, so a 1,000-sample buffer is
+        // mixed only up to 200.
+        assert_eq!(MIX_HOLD, 800);
+        let mut left = vec![0.5; 1_000];
+        let mut right = Vec::new();
+        assert_eq!(mix(&mut [&mut left, &mut right], MIX_HOLD), vec![0.5; 200]);
     }
 }

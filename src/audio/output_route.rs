@@ -183,6 +183,67 @@ fn classify_sink(default: &str, sinks: &[Sink]) -> OutputRoute {
     }
 }
 
+/// The sinks the sound server lists now, as `pactl -f json list sinks`
+/// describes them, or `None` when it cannot be read.
+#[cfg(target_os = "linux")]
+fn listed_sinks() -> Option<Vec<Sink>> {
+    use crate::linux::input_route;
+
+    let json = input_route::pactl(&["-f", "json", "list", "sinks"])?;
+    serde_json::from_str(&json)
+        .inspect_err(|error| tracing::debug!(%error, "could not read the sound server's sinks"))
+        .ok()
+}
+
+/// The sinks a meeting's system track captures: every listed sink backed by a
+/// device, the default first among them, so audio playing on an output that is
+/// not the default is still heard (#1801). Each sink appears once.
+///
+/// Virtual sinks (EasyEffects, filter-chain, loopback, combine, null) are left
+/// out: they forward to a hardware sink Hex hears already, so capturing both
+/// would sum the call's audio twice. Only when nothing listed is a device is
+/// the default captured alone, which is the audio the single default capture
+/// always heard.
+#[cfg(any(target_os = "linux", test))]
+fn capture_sinks(default: &str, sinks: &[Sink]) -> Vec<String> {
+    let default = default.trim();
+    let mut chosen: Vec<String> = Vec::with_capacity(sinks.len());
+    // `device.api` is what the sound server sets on a sink backed by a device
+    // (alsa, bluez5, ...); a virtual sink has none.
+    for sink in sinks
+        .iter()
+        .filter(|sink| sink.properties.contains_key("device.api"))
+    {
+        if !chosen.iter().any(|name| name == &sink.name) {
+            chosen.push(sink.name.clone());
+        }
+    }
+    if chosen.is_empty() {
+        return sinks
+            .iter()
+            .any(|sink| sink.name == default)
+            .then(|| default.to_owned())
+            .into_iter()
+            .collect();
+    }
+    if let Some(at) = chosen.iter().position(|name| name == default) {
+        chosen[..=at].rotate_right(1);
+    }
+    chosen
+}
+
+/// The sinks a meeting's system track captures, default first, or `None` when
+/// the sound server cannot be read or lists nothing, which keeps the caller on
+/// its one untargeted capture of the default output.
+#[cfg(target_os = "linux")]
+pub(crate) fn meeting_sinks() -> Option<Vec<String>> {
+    use crate::linux::input_route;
+
+    let default = input_route::pactl(&["get-default-sink"])?;
+    let sinks = capture_sinks(&default, &listed_sinks()?);
+    (!sinks.is_empty()).then_some(sinks)
+}
+
 /// The route of the sound server's default sink now: `pactl` names it and
 /// describes every sink. A session with only `wpctl`, an older `pactl`
 /// without `get-default-sink`, or JSON Hex can't read is unknown.
@@ -193,15 +254,8 @@ pub(crate) fn default_output_route() -> OutputRoute {
     let Some(default) = input_route::pactl(&["get-default-sink"]) else {
         return OutputRoute::Unknown;
     };
-    let Some(json) = input_route::pactl(&["-f", "json", "list", "sinks"]) else {
+    let Some(sinks) = listed_sinks() else {
         return OutputRoute::Unknown;
-    };
-    let sinks: Vec<Sink> = match serde_json::from_str(&json) {
-        Ok(sinks) => sinks,
-        Err(error) => {
-            tracing::debug!(%error, "could not read the sound server's sinks");
-            return OutputRoute::Unknown;
-        }
     };
     classify_sink(default.trim(), &sinks)
 }
@@ -469,5 +523,93 @@ mod tests {
         assert_eq!(classify_device(DeviceType::Speaker), OutputRoute::Speakers);
         assert_eq!(classify_device(DeviceType::Dock), OutputRoute::Unknown);
         assert_eq!(classify_device(DeviceType::Unknown), OutputRoute::Unknown);
+    }
+
+    #[test]
+    fn every_hardware_output_is_captured_with_the_default_first() {
+        // The default sink is captured first, then the others in the sound
+        // server's order, so a call playing on the USB headset is heard
+        // while the built-in speakers stay the default.
+        assert_eq!(
+            capture_sinks("alsa_output.usb-USB_Audio-00.analog-stereo", &sinks()),
+            [
+                "alsa_output.usb-USB_Audio-00.analog-stereo",
+                "alsa_output.pci-0000_00_1f.3.analog-stereo",
+                "alsa_output.pci-0000_00_1f.3.hdmi-stereo",
+                "bluez_output.AA_BB_CC_DD_EE_FF.1",
+                "bluez_output.11_22_33_44_55_66.1",
+            ]
+        );
+        // A default the server no longer lists is not invented; the listed
+        // sinks are still captured.
+        assert_eq!(
+            capture_sinks("alsa_output.pci-0000_00_1f.3.analog-stereo.2", &sinks())[0],
+            "alsa_output.pci-0000_00_1f.3.analog-stereo"
+        );
+    }
+
+    #[test]
+    fn a_virtual_default_and_hardware_outputs_capture_only_the_hardware() {
+        // EasyEffects is the default and forwards into the speakers; hearing
+        // both would sum the call's audio twice.
+        let sinks: Vec<Sink> = serde_json::from_str(
+            r#"[{"name": "easyeffects_sink", "properties": {"node.virtual": "true"}},
+                {"name": "alsa_output.usb-USB_Audio-00.analog-stereo",
+                 "properties": {"device.api": "alsa", "device.class": "sound"}},
+                {"name": "bluez_output.AA_BB_CC_DD_EE_FF.1",
+                 "properties": {"device.api": "bluez5"}}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            capture_sinks("easyeffects_sink", &sinks),
+            [
+                "alsa_output.usb-USB_Audio-00.analog-stereo",
+                "bluez_output.AA_BB_CC_DD_EE_FF.1",
+            ]
+        );
+    }
+
+    #[test]
+    fn only_virtual_sinks_capture_just_the_default() {
+        // Nothing is backed by a device, so the default is the one sink Hex
+        // can hear without also hearing the sink it forwards into.
+        let sinks: Vec<Sink> = serde_json::from_str(
+            r#"[{"name": "easyeffects_sink", "properties": {"node.virtual": "true"}},
+                {"name": "loopback_hex", "properties": {"node.virtual": "true"}},
+                {"name": "combine_sink", "properties": {}}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            capture_sinks("easyeffects_sink", &sinks),
+            ["easyeffects_sink"]
+        );
+        // A default the server does not list leaves nothing to target, which
+        // keeps the caller's untargeted capture of the default output.
+        assert!(capture_sinks("gone_sink", &sinks).is_empty());
+    }
+
+    #[test]
+    fn a_sink_listed_twice_is_captured_once() {
+        let sinks: Vec<Sink> = serde_json::from_str(
+            r#"[{"name": "alsa_output.pci-0000_00_1f.3.analog-stereo", "properties": {"device.api": "alsa"}},
+                {"name": "alsa_output.pci-0000_00_1f.3.analog-stereo", "properties": {"device.api": "alsa"}},
+                {"name": "bluez_output.AA_BB_CC_DD_EE_FF.1", "properties": {"device.api": "bluez5"}}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            capture_sinks("alsa_output.pci-0000_00_1f.3.analog-stereo", &sinks),
+            [
+                "alsa_output.pci-0000_00_1f.3.analog-stereo",
+                "bluez_output.AA_BB_CC_DD_EE_FF.1",
+            ]
+        );
+    }
+
+    #[test]
+    fn nothing_listed_captures_nothing() {
+        // The caller then keeps its one untargeted capture of the default
+        // output rather than starting no monitor at all.
+        assert!(capture_sinks("", &[]).is_empty());
+        assert!(capture_sinks("  \n", &[]).is_empty());
     }
 }

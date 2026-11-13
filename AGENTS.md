@@ -510,7 +510,7 @@ substitute for source inspection or a second roadmap.
   prevention while recording, and reveal and Trash.
 - `meeting/capture`: independent self-healing microphone (cpal) and system
   audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
-  Linux: `pw-record` of the default output's monitor; Windows: WASAPI
+  Linux: one `pw-record` per hardware sink's monitor, mixed; Windows: WASAPI
   loopback); one failing never stops the other, and resumed audio is padded
   onto the timeline.
 - `meeting/runtime`: the Linux and Windows apps' meeting controller thread,
@@ -1094,11 +1094,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   can replace; after Stop they read the final transcript.
 - Meeting system audio uses a Core Audio process tap on macOS (System Audio
   Recording consent), never requiring a display; ScreenCaptureKit is only the
-  fallback. Linux records the default output's PipeWire monitor through
-  `pw-record` and Windows its WASAPI loopback; neither asks for consent.
-  Losing either source never stops the other or the meeting: it retries until
-  Stop, and resumed audio is padded with silence so WAV positions stay on the
-  shared capture clock.
+  fallback. Linux records every hardware output's PipeWire monitor through one
+  `pw-record` each, mixed, and Windows its WASAPI loopback; neither asks for
+  consent. Losing either source never stops the other or the meeting: it
+  retries until Stop, and resumed audio is padded with silence so WAV
+  positions stay on the shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
 - Meeting notes (Apple Intelligence, or OpenCode only once the user turns on
