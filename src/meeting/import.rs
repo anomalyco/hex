@@ -307,7 +307,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     fn assert_decoded(input: &Path, output: &Path) {
-        decode(input, output).expect("decoding a stereo test WAV");
+        decode_to_wav(input, output).expect("decoding a stereo test WAV");
         let mut reader = hound::WavReader::open(output).unwrap();
         let spec = reader.spec();
         assert_eq!(spec.channels, 1, "mono output");
