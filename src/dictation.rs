@@ -504,11 +504,12 @@ impl DictationClip {
             let source = self.source.as_deref();
             let ms =
                 |duration: Option<Duration>| duration.map(|duration| duration.as_millis() as u64);
+            let (noise_floor_dbfs, relative_threshold_dbfs) = gate.logged_levels();
             tracing::info!(
                 level_dbfs,
                 threshold_dbfs = SILENCE_THRESHOLD_DBFS,
-                noise_floor_dbfs = ?gate.noise_floor_dbfs,
-                relative_threshold_dbfs = ?gate.relative_threshold_dbfs,
+                noise_floor_dbfs,
+                relative_threshold_dbfs,
                 sustained_ms = gate.sustained_ms(),
                 audio_ms = self.duration_ms(),
                 pre_press_ms = self.press_samples as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE),
@@ -555,11 +556,12 @@ impl DictationClip {
                 false
             }
             None if !gate.reaches_fixed_threshold() => {
+                let (noise_floor_dbfs, relative_threshold_dbfs) = gate.logged_levels();
                 tracing::info!(
                     level_dbfs,
                     threshold_dbfs = SILENCE_THRESHOLD_DBFS,
-                    noise_floor_dbfs = ?gate.noise_floor_dbfs,
-                    relative_threshold_dbfs = ?gate.relative_threshold_dbfs,
+                    noise_floor_dbfs,
+                    relative_threshold_dbfs,
                     sustained_ms = gate.sustained_ms(),
                     audio_ms = self.duration_ms(),
                     "discarded quiet dictation: no speech detector to confirm it"
@@ -595,7 +597,8 @@ struct LevelGate {
     /// The level a window must reach to count as speech over that floor.
     relative_threshold_dbfs: Option<f32>,
     /// The longest run of windows at `relative_threshold_dbfs`. One quiet
-    /// window inside a run is bridged but doesn't count toward its length.
+    /// window between loud ones is bridged but doesn't count toward its
+    /// length; two in a row end the run.
     sustained_run_windows: usize,
 }
 
@@ -644,21 +647,38 @@ impl LevelGate {
     fn sustained_ms(&self) -> u64 {
         self.sustained_run_windows as u64 * silence_window_ms()
     }
+
+    /// The floor and relative threshold as plain numbers for logs. With no
+    /// noise floor (only digital silence or a constant offset), both report
+    /// the level floor.
+    fn logged_levels(&self) -> (f32, f32) {
+        (
+            self.noise_floor_dbfs.unwrap_or(SILENCE_LEVEL_FLOOR_DBFS),
+            self.relative_threshold_dbfs
+                .unwrap_or(SILENCE_LEVEL_FLOOR_DBFS),
+        )
+    }
 }
 
 /// The most above-threshold windows in one contiguous run. A single quiet
-/// window inside a run is bridged but not counted; two in a row end it.
+/// window between loud ones is bridged but not counted; two in a row end the
+/// run, and leading quiet windows don't consume the bridge.
 fn longest_run_windows(levels: &[f32], threshold: f32) -> usize {
-    let (mut run, mut longest, mut quiet) = (0, 0, false);
+    let (mut run, mut longest, mut bridged) = (0, 0, false);
     for &level in levels {
         if level >= threshold {
             run += 1;
             longest = longest.max(run);
-        } else if quiet {
+            bridged = false;
+        } else if run == 0 {
+            // A leading quiet window doesn't consume the next gap's bridge.
+            bridged = false;
+        } else if bridged {
+            // Two quiet windows in a row end the run.
             run = 0;
-            quiet = false;
+            bridged = false;
         } else {
-            quiet = true;
+            bridged = true;
         }
     }
     longest
@@ -1698,22 +1718,73 @@ mod tests {
     }
 
     #[test]
-    fn relative_level_gate_bridges_one_quiet_window() {
+    fn relative_level_gate_bridges_one_quiet_window_per_gap() {
         let window = SILENCE_WINDOW_SAMPLES;
-        // Three speech windows, one quiet window, three more: a single bridge
-        // keeps the run at six.
-        let mut bridged = noise(-72.0, 40 * window);
-        bridged.extend(speech_at(-54.0, 3 * window));
-        bridged.extend(noise(-72.0, window));
-        bridged.extend(speech_at(-54.0, 3 * window));
-        assert!(LevelGate::measure(&bridged).passes());
+        for lead in [40, 41] {
+            // Three speech windows, one quiet window, three more: one bridge
+            // keeps the run at six, with an odd or even lead-in.
+            let mut bridged = noise(-72.0, lead * window);
+            bridged.extend(speech_at(-54.0, 3 * window));
+            bridged.extend(noise(-72.0, window));
+            bridged.extend(speech_at(-54.0, 3 * window));
+            assert!(LevelGate::measure(&bridged).passes(), "{lead} lead windows");
 
-        // Two quiet windows in a row end the run, leaving only three.
-        let mut broken = noise(-72.0, 40 * window);
-        broken.extend(speech_at(-54.0, 3 * window));
-        broken.extend(noise(-72.0, 2 * window));
-        broken.extend(speech_at(-54.0, 3 * window));
-        assert!(!LevelGate::measure(&broken).passes());
+            // Two quiet windows in a row end the run, leaving only three.
+            let mut broken = noise(-72.0, lead * window);
+            broken.extend(speech_at(-54.0, 3 * window));
+            broken.extend(noise(-72.0, 2 * window));
+            broken.extend(speech_at(-54.0, 3 * window));
+            assert!(!LevelGate::measure(&broken).passes(), "{lead} lead windows");
+
+            // Two separate single quiet windows are bridged independently:
+            // 3 + 2 + 3 loud windows.
+            let mut bridged_twice = noise(-72.0, lead * window);
+            bridged_twice.extend(speech_at(-54.0, 3 * window));
+            bridged_twice.extend(noise(-72.0, window));
+            bridged_twice.extend(speech_at(-54.0, 2 * window));
+            bridged_twice.extend(noise(-72.0, window));
+            bridged_twice.extend(speech_at(-54.0, 3 * window));
+            assert!(
+                LevelGate::measure(&bridged_twice).passes(),
+                "{lead} lead windows"
+            );
+        }
+    }
+
+    #[test]
+    fn longest_run_bridges_one_quiet_window_per_gap() {
+        let threshold = -60.0;
+        let loud = -40.0;
+        let quiet = -80.0;
+
+        // Leading quiet windows, odd or even, don't consume the bridge.
+        assert_eq!(
+            longest_run_windows(&[quiet, quiet, quiet, loud, loud], threshold),
+            2
+        );
+        assert_eq!(
+            longest_run_windows(&[quiet, quiet, quiet, loud, quiet, loud], threshold),
+            2
+        );
+        assert_eq!(
+            longest_run_windows(&[quiet, quiet, quiet, quiet, loud, quiet, loud], threshold),
+            2
+        );
+
+        // Each gap gets its own bridge.
+        assert_eq!(
+            longest_run_windows(
+                &[loud, loud, quiet, loud, quiet, loud, loud, loud],
+                threshold
+            ),
+            6
+        );
+
+        // Two quiet windows in a row end the run.
+        assert_eq!(
+            longest_run_windows(&[loud, loud, quiet, quiet, loud, loud, loud], threshold),
+            3
+        );
     }
 
     #[test]

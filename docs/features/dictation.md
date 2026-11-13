@@ -1716,11 +1716,11 @@ Finish
   │       // loudest 30 ms window (DC removed) below -50 dBFS with no
   │       // contiguous 180 ms run: at least six 30 ms windows at the clip's
   │       // own 10th-percentile noise floor + 12 dB (never below -66 dBFS),
-  │       // bridging one quiet window; exact-zero windows don't set the
-  │       // floor; a relative-path clip also needs the speech detector to
-  │       // confirm speech, otherwise it is discarded; no paste, History, or
-  │       // last-result update; process.log records the level, noise floor,
-  │       // relative threshold, and run length
+  │       // bridging one quiet window per gap; exact-zero windows don't set
+  │       // the floor; a relative-path clip also needs the speech detector
+  │       // to confirm speech, otherwise it is discarded; no paste, History,
+  │       // or last-result update; process.log records the level, noise
+  │       // floor, relative threshold, and run length
   ├── Louder capture, no detected speech -> Discard, no inference
   │       // the Silero speech detector, once installed, finds no speech of
   │       // at least 160 ms before the release; process.log records
@@ -1761,10 +1761,10 @@ and needs no detector to be transcribed; a noisy room, the start tone, or a key
 click can also lift a capture above it. A clip below it is kept only when at
 least 180 ms of its 30 ms windows form one contiguous run at least 12 dB above
 its own 10th-percentile noise floor (a threshold never below -66 dBFS), where a
-single quiet window inside the run is bridged and exact-zero windows don't set
-the floor. That keeps a quiet built-in microphone's speech (13-25 dB above its
-room) while discarding a constant floor, scattered clicks, digital silence, or
-a DC offset. Such a relative-path clip also needs the Silero speech detector
+single quiet window between loud ones is bridged and exact-zero windows don't
+set the floor. That keeps a quiet built-in microphone's speech (13-25 dB above
+its room) while discarding a constant floor, scattered clicks, digital silence,
+or a DC offset. Such a relative-path clip also needs the Silero speech detector
 ([transcription/speech_detector.rs](../../src/transcription/speech_detector.rs))
 to confirm speech, and is discarded when it finds none. The detector (1.2 MB,
 pinned revision and checksum in [transcription/models.rs](../../src/transcription/models.rs))
@@ -1786,7 +1786,7 @@ after real speech are not addressed; a credit followed by more speech is kept.
 `silence_gate_discards_only_near_silent_captures`, the
 `relative_level_gate_*` tests (quiet speech needs the detector's confirmation;
 scattered clicks, a zero lead, the -66 dBFS clamp, the six-window boundary, and
-one bridged quiet window), and
+one quiet window bridged per gap), and
 `speech_detector_discards_loud_captures_without_speech` in
 [dictation.rs](../../src/dictation.rs) check the policy on synthetic samples
 with the detector's verdict fixed; `real_detector_rejects_silence_and_noise`,
