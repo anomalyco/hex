@@ -408,13 +408,18 @@ Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
 
 Models trained on subtitled video can end a clip with a subtitle credit nobody
 said, such as "Sous-titrage Société Radio-Canada" from Cohere Transcribe in
-French after a trailing pause (#1141). Every GGUF run and live stream drops a
-known credit only when it is the very end of the text (letters and digits
-compared, case and punctuation ignored), with its segment and words, in
+French after a trailing pause (#1141), or "İzlediğiniz için teşekkür ederim"
+and "Altyazı M.K." from Whisper in Turkish (#1770). Every GGUF run and live
+stream drops a known credit only when it is the very end of the text (letters
+and digits compared, case and punctuation ignored, Turkish dotted and dotless
+`i` folded together), with its segment and words, in
 dictation, meetings, and the local API alike; the same words elsewhere stay.
-The list is in
+A credit spoken mid-chunk and followed by more speech is kept. The list is in
 [transcription/subtitle_credits.rs](../../src/transcription/subtitle_credits.rs).
 Checks: `a_trailing_subtitle_credit_is_removed`,
+`a_turkish_thanks_for_watching_is_removed`,
+`a_truncated_turkish_credit_is_removed`,
+`the_same_words_mid_sentence_are_kept`,
 `speech_without_a_trailing_credit_is_kept`, and
 `a_trailing_subtitle_credit_is_dropped_from_text_segments_and_words`. No
 inference reproduces the credit.

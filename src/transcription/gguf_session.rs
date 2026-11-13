@@ -168,6 +168,9 @@ pub(crate) struct OfflineGgufSession {
     last_run: Option<Instant>,
     /// How runs take the vocabulary.
     vocabulary: VocabularySlot,
+    /// The file's architecture, read once: Whisper trims its near-silent
+    /// edges before a run.
+    architecture: String,
 }
 
 impl OfflineGgufSession {
@@ -183,12 +186,14 @@ impl OfflineGgufSession {
         let options = session_options(model.device()?.device_type);
         let session = model.session_with(&options)?;
         let vocabulary = VocabularySlot::of(&model);
+        let architecture = model.arch();
         Ok(Self {
             model,
             session: Some(session),
             options,
             last_run: None,
             vocabulary,
+            architecture,
         })
     }
 
@@ -409,12 +414,42 @@ impl OfflineGgufSession {
         }
     }
 
+    /// The audio a whole-clip run gets, and where it starts in `samples`.
+    /// Whisper decodes a whole 30 s window and fills a near-silent opening or
+    /// tail with text nobody said (a Turkish "thanks for watching", #1770), so
+    /// its clip keeps only the speech the detector hears plus
+    /// [`WHISPER_EDGE_MARGIN_SAMPLES`]. Another model, a detector that is
+    /// unavailable, and a clip it hears no speech in all keep every sample.
+    fn whisper_audio<'a>(&self, samples: &'a [f32]) -> (Cow<'a, [f32]>, usize) {
+        let bounds = if self.architecture == "whisper" {
+            crate::transcription::speech_detector::speech_bounds(samples)
+        } else {
+            None
+        };
+        let span = whisper_span(samples.len(), &self.architecture, bounds);
+        if span.start == 0 && span.end == samples.len() {
+            return (Cow::Borrowed(samples), 0);
+        }
+        tracing::info!(
+            dropped_ms = (samples.len() - span.len()) / 16,
+            kept_ms = span.len() / 16,
+            "trimmed near-silent edges before a Whisper run"
+        );
+        let mut audio = samples[span.clone()].to_vec();
+        // A trimmed clip can fall under the minimum duration every chunk and
+        // every caller pads to.
+        crate::dictation::pad_for_parakeet(&mut audio);
+        (Cow::Owned(audio), span.start)
+    }
+
     pub(crate) fn transcribe_chunked(
         &mut self,
         samples: &[f32],
         options: &transcribe_cpp::RunOptions,
         max_audio_samples: Option<usize>,
     ) -> Result<String> {
+        let (audio, _) = self.whisper_audio(samples);
+        let samples = audio.as_ref();
         let Some(max_samples) =
             max_audio_samples.filter(|&max_samples| samples.len() > max_samples)
         else {
@@ -456,18 +491,20 @@ impl OfflineGgufSession {
         options: &transcribe_cpp::RunOptions,
         max_audio_samples: Option<usize>,
     ) -> Result<crate::transcription::transcript::Transcript> {
+        let (audio, trimmed) = self.whisper_audio(samples);
+        let samples = audio.as_ref();
         let Some(max_samples) =
             max_audio_samples.filter(|&max_samples| samples.len() > max_samples)
         else {
             let transcript = self
                 .run(samples, options)
                 .wrap_err("transcription failed")?;
-            return Ok(timed(transcript, 0));
+            return Ok(timed(transcript, sample_offset_ms(trimmed)));
         };
         let mut timed = crate::transcription::transcript::Transcript::default();
         let mut texts = Vec::new();
         for range in chunk_ranges(samples, max_samples) {
-            let offset = sample_offset_ms(range.start);
+            let offset = sample_offset_ms(trimmed + range.start);
             let samples = &samples[range];
             if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
                 return Err(eyre!("transcription was cancelled"));
@@ -622,10 +659,30 @@ fn timed_spans(
     }
 }
 
+/// How much audio a trimmed Whisper run keeps around the speech the detector
+/// hears, on each side.
+const WHISPER_EDGE_MARGIN_SAMPLES: usize = 8_000;
+
+/// The span of a clip of `len` samples a whole-clip run keeps. A Whisper clip
+/// loses everything outside its detected speech plus
+/// [`WHISPER_EDGE_MARGIN_SAMPLES`]; any other model, and a clip without speech
+/// bounds, keeps every sample.
+fn whisper_span(len: usize, architecture: &str, bounds: Option<Range<usize>>) -> Range<usize> {
+    match (architecture, bounds) {
+        ("whisper", Some(bounds)) => crate::transcription::speech_detector::edge_bounds(
+            len,
+            bounds,
+            WHISPER_EDGE_MARGIN_SAMPLES,
+        ),
+        _ => 0..len,
+    }
+}
+
 /// Whether one chunk of a long clip goes to the model. The clip as a whole
 /// held speech, but a chunk of it can be only silence (a locked dictation
-/// left waiting before the words), and models such as Cohere invent long,
-/// repeating text for that (#1194). Without the detector every chunk runs.
+/// left waiting before the words), and models such as Cohere and Whisper
+/// invent long, repeating text for that (#1194, #1770). Without the detector
+/// every chunk runs.
 fn chunk_may_hold_speech(samples: &[f32]) -> bool {
     crate::transcription::speech_detector::contains_speech(samples) != Some(false)
 }
@@ -1004,6 +1061,30 @@ mod tests {
         })
         .wrap_err("transcription failed");
         assert!(!output_truncated(&repeating.unwrap_err()));
+    }
+
+    #[test]
+    fn a_whisper_clip_is_trimmed_to_its_speech_plus_a_margin() {
+        // 10 s clip, speech from 5 s to 9 s.
+        assert_eq!(
+            whisper_span(160_000, "whisper", Some(80_000..144_000)),
+            72_000..152_000
+        );
+        // Speech up to an edge keeps that edge.
+        assert_eq!(
+            whisper_span(160_000, "whisper", Some(0..100_000)),
+            0..108_000
+        );
+        assert_eq!(
+            whisper_span(160_000, "whisper", Some(60_000..160_000)),
+            52_000..160_000
+        );
+        // Only Whisper trims, and only with speech bounds from the detector.
+        assert_eq!(
+            whisper_span(160_000, "cohere_asr", Some(80_000..144_000)),
+            0..160_000
+        );
+        assert_eq!(whisper_span(160_000, "whisper", None), 0..160_000);
     }
 
     #[test]

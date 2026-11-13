@@ -601,6 +601,25 @@ chunk still runs. Clips that fit the window are unchanged. Check:
 [gguf_session.rs](../../src/transcription/gguf_session.rs) (detector verdict
 overridden; not run with Cohere on real audio).
 
+**Fixed November 13, 2026 (issue 1770):** Whisper was handed whole clips, so
+its own long-form loop also decoded a near-silent remainder (a 70 ms tail
+zero-padded to 30 s) and invented text: the Turkish
+"İzlediğiniz için teşekkür ederim.", "Altyazı M.K." (once truncated to
+"Altyazı M."), or "abone ol" repeated. A Whisper clip now chunks at Whisper's
+own 30-second window, each window passes the same detector gate as Cohere's,
+and a Whisper clip drops the audio outside its detected speech plus 500 ms
+before transcription (`whisper_audio` in
+[gguf_session.rs](../../src/transcription/gguf_session.rs)). Another model, a
+detector that is unavailable, and a clip it hears no speech in keep every
+sample, as before. Checks: `whisper_chunks_at_its_thirty_second_window` in
+[models.rs](../../src/transcription/models.rs),
+`a_whisper_clip_is_trimmed_to_its_speech_plus_a_margin` (bounds and clip
+lengths, no model), and `a_margin_around_the_speech_clamps_to_the_clip` in
+[speech_detector.rs](../../src/transcription/speech_detector.rs). Not run with
+Whisper on real Turkish audio. A credit Whisper puts mid-chunk, followed by
+more speech, is still kept, and meeting and word-time chunks keep their
+existing preparation.
+
 ### Vocabulary Quality Checks
 
 `hex benchmark-transcription` accepts a scoring vocabulary and expected terms,
@@ -1519,13 +1538,16 @@ device; the stream's own loss is not fixed upstream.
 
 ```ts
 Completed long recording                  // dictate.model-windows
-├── Window of at most 35 seconds (Cohere) or the backend-advertised limit
+├── Whisper: audio outside detected speech + 500 ms dropped first
+├── Window of at most 35 seconds (Cohere), 30 seconds (Whisper), or the
+│   backend-advertised limit
 │   -> Last 5 s of the window: cut through the quietest 100 ms
 │   (a tie picks the latest span) -> the next window starts there
 └── Runs of at most one window, final remainder included
     -> Transcribe each -> Join text in original order
 
-Chunking bounds inference, not capture duration. No silence is removed.
+Chunking bounds inference, not capture duration. Only a Whisper clip loses
+silence, at its edges, and only when the detector hears speech in it.
 ```
 
 Each window is cut through the middle of the quietest 100 ms in its last five
@@ -1549,9 +1571,13 @@ The shared `max_audio_chunk_samples` policy in
 reports a 400-second encoder capacity, while its reference processor uses a
 35-second transcription window. Treating the encoder capacity as a useful
 inference window caused [#73](https://github.com/anomalyco/hex/issues/73)'s lost
-passages. A stricter backend bound still wins; other model policies are unchanged.
+passages. Whisper reports no usable bound and decodes one 30-second window at
+a time; handed more, its own long-form loop fills a near-silent remainder with
+invented text, so it chunks at 30 seconds (#1770). A stricter backend bound
+still wins; other model policies are unchanged.
 
-`cohere_chunks_at_reference_window_not_encoder_capacity` checks the policy.
+`cohere_chunks_at_reference_window_not_encoder_capacity` and
+`whisper_chunks_at_its_thirty_second_window` check the policy.
 The opt-in `cohere_long_form_keeps_all_sections_with_and_without_pauses` runs the
 real pinned model on synthetic speech. Reproduce it on macOS with
 [`scripts/test-cohere-long-form.sh`](../../scripts/test-cohere-long-form.sh) and an
@@ -1682,7 +1708,8 @@ you" on an empty hold ([#108](https://github.com/anomalyco/hex/issues/108)). It
 covers hotkey and voice-delimited captures on macOS, and the Linux
 hotkey loop. The local API's programmatic dictation and host-audio transcription
 are deliberately left ungated: they skip both silence checks, and only output
-that repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped there.
+that repeats the vocabulary prompt (Whisper, Qwen3-ASR) or ends with a known
+subtitle credit is dropped there.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
 tone, or a key click can lift a capture above it. Those captures then go to the
 Silero speech detector ([transcription/speech_detector.rs](../../src/transcription/speech_detector.rs)),
@@ -1696,8 +1723,12 @@ never download it. It runs on the CPU with a speech threshold of 0.4 instead of
 Silero's 0.5, which misses a whisper at -43 dBFS. While it is missing or fails to
 load, captures above the threshold still reach the model, as before.
 Output that only repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped as well
-([models](README.md#get-ready)). Other hallucinations after real
-speech are not addressed.
+([models](README.md#get-ready)), and so is a known subtitle credit at the very
+end of the text, Turkish included (#1141, #1770). A Whisper clip also loses the
+audio outside its detected speech plus 500 ms before a whole-clip transcription
+run, and a chunk of a longer one the detector hears no speech in is skipped (see
+[ongoing jobs and output](#ongoing-jobs-and-output)). Other hallucinations
+after real speech are not addressed; a credit followed by more speech is kept.
 `silence_gate_discards_only_near_silent_captures` and
 `speech_detector_discards_loud_captures_without_speech` in
 [dictation.rs](../../src/dictation.rs) check the policy on synthetic samples
