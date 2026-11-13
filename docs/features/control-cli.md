@@ -58,13 +58,15 @@ Agent or terminal                                  // control.cli; every OS
 │       but the listener drops the job: no keys are sent and no state changes
 ├── hex transcribe <file> [--model <id>] [--language <code>]
 │   ├── Labs › Transcribe files off -> disabled, exit 1; the file is never read
-│   ├── Not WAV, or over 64 MiB -> refused here, before Hex is asked
-│   ├── Hex running -> the file to POST /transcriptions with the model named;
-│   │   ≤30 s runs on the dictation engine's model, longer clips on the
-│   │   transcription service's own copy; stdout gets the transcript
-│   ├── Hex stopped -> Linux/Windows load the model here as `model transcribe`;
-│   │   macOS answers not-running, exit 3
-│   └── No speech -> no-speech, exit 4; nothing pasted, kept, or processed
+│   ├── Not WAV -> refused here, before Hex is asked
+│   ├── Any length -> read in ≤30 s pieces, their text joined with one space
+│   ├── Hex running -> one piece at a time to POST /transcriptions with the
+│   │   model named; each piece runs on the dictation engine's model;
+│   │   stdout gets the joined transcript
+│   ├── Hex stopped -> Linux/Windows load the model here once as `model
+│   │   transcribe`; macOS answers not-running, exit 3
+│   └── No speech in every piece -> no-speech, exit 4; nothing pasted, kept,
+│       or processed
 ├── hex meetings record [--title] | stop | copy-last
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
@@ -105,15 +107,18 @@ the local API's owner-only discovery file and the bearer-authenticated
 so they never compete with the running app for its files. Opt-ins stay
 explicit settings: no command turns Meetings on as a side effect.
 
-`hex transcribe` is the one command that doesn't use `/control`: it reads and
-checks the WAV here, then sends it to the same discovery file's
-`POST /transcriptions` (`Content-Type: audio/wav`, 64 MiB cap), so the running
-app transcribes it with the model the request names: a clip up to 30 s on its
-dictation engine's model when it holds that one, a longer clip on the
-transcription service's own copy. Its Labs toggle is read from
-`settings.json` (`AppSettings::read`), the same read `hex labs` lists from, so
-the check works with Hex running or stopped; a running Hex saves the toggle
-there at once. Off, nothing is read.
+`hex transcribe` is the one command that doesn't use `/control`: it checks the
+WAV's header here, then sends the recording one piece at a time to the same
+discovery file's `POST /transcriptions` (`Content-Type: audio/wav`), so the
+running app transcribes it with the model the request names, every piece on
+its dictation engine's model when it holds that one. Pieces are at most 30 s
+(`control/cli/transcribe/pieces.rs`), read and resampled incrementally and cut
+through the quietest point near their end by `gguf_session::quiet_cut`, the
+same cut a long GGUF clip gets; their text is joined with one space, so a file
+can be any length and only about one piece is in memory. Its Labs toggle is
+read from `settings.json` (`AppSettings::read`), the same read `hex labs` lists
+from, so the check works with Hex running or stopped; a running Hex saves the
+toggle there at once. Off, nothing is read.
 
 On Linux and Windows `control::host::answer` carries every command out through
 the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
@@ -193,8 +198,12 @@ Windows keyboard or live SDK recording smoke test.
 `rune_ui::platform::parity_tests` fail when a capability differs across OSes
 without a recorded reason; `settings_name_real_capabilities_and_keys` checks
 the settings-to-capability table; `control::cli::transcribe::tests` cover the
-lab-off refusal, a non-WAV file refused before any transcription, the selected
-model and language, and an empty transcript as `no-speech`.
+lab-off refusal, a non-WAV and a frame-less file refused before any
+transcription, the selected model and language, pieces joined in order, and a
+file whose pieces all hear nothing as `no-speech`, while
+`control::cli::transcribe::pieces::tests` cover a 95 s clip split into pieces
+that cover every sample once, a 48 kHz file read into ≤30 s pieces, and
+streamed samples matching `AudioClip::decode_wav`.
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -219,4 +228,4 @@ microphone, and meeting recording through the CLI has not run on Linux or
 Windows. `hex transcribe`'s gate-off refusal, its non-WAV refusal, and a
 running headless service's `model-unavailable` answer were observed on Linux;
 no model was installed, so its transcript answer was not observed end to end,
-and it has not run on macOS or Windows.
+neither was a long file read in pieces, and it has not run on macOS or Windows.

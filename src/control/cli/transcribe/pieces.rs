@@ -1,0 +1,429 @@
+//! A saved WAV read as pieces: streaming decode, downmix, 16 kHz resampling,
+//! and the quiet-point cut the GGUF adapters use for a long clip, so
+//! `hex transcribe` holds about one 30 s piece instead of the whole file.
+
+use std::collections::VecDeque;
+use std::fs::File;
+use std::io::{BufReader, Cursor};
+use std::path::Path;
+
+use hound::{Sample, SampleFormat, WavReader, WavSpec, WavWriter};
+
+use crate::dictation::StreamingResampler;
+use crate::transcription::gguf_session::quiet_cut;
+use crate::transcription::service::{AudioError, WavFormat, validate_wav_input, wav_format};
+
+/// 30 s at 16 kHz: the longest piece. A clip that short runs on the running
+/// Hex's dictation engine instead of making its service load a second copy.
+pub(super) const PIECE_SAMPLES: usize = 30 * 16_000;
+/// Frames decoded per read: 85 ms at 48 kHz, so a piece is cut near its end
+/// without holding much more than one piece.
+const BLOCK_FRAMES: usize = 4_096;
+
+/// Why a saved WAV could not be read into pieces.
+#[derive(Debug)]
+pub(super) enum PieceError {
+    /// The file could not be opened or read at all.
+    Io(std::io::Error),
+    /// The file is not a WAV this build decodes.
+    Audio(AudioError),
+}
+
+/// The 16 kHz samples of one saved WAV, one piece at a time.
+pub(super) struct Pieces {
+    reader: WavReader<BufReader<File>>,
+    format: WavFormat,
+    channels: usize,
+    bits: u16,
+    /// `None` once the input ended and its tail was flushed.
+    resampler: Option<StreamingResampler>,
+    buffer: PieceBuffer,
+    ready: VecDeque<Vec<f32>>,
+    done: bool,
+}
+
+impl std::fmt::Debug for Pieces {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Pieces")
+            .field("format", &self.format)
+            .field("channels", &self.channels)
+            .field("bits", &self.bits)
+            .field("done", &self.done)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Pieces {
+    /// Opens `path` and checks its header and format, so a file Hex cannot
+    /// read is refused before any model is loaded or Hex is asked.
+    pub(super) fn open(path: &Path) -> Result<Self, PieceError> {
+        let file = File::open(path).map_err(PieceError::Io)?;
+        let reader = WavReader::new(BufReader::new(file))
+            .map_err(|_| PieceError::Audio(AudioError::Invalid))?;
+        let spec = reader.spec();
+        validate_wav_input(&spec).map_err(PieceError::Audio)?;
+        let format = wav_format(&spec).map_err(PieceError::Audio)?;
+        if reader.duration() == 0 {
+            return Err(PieceError::Audio(AudioError::Unsupported));
+        }
+        let resampler = StreamingResampler::new(spec.sample_rate)
+            .map_err(|_| PieceError::Audio(AudioError::Unsupported))?;
+        Ok(Self {
+            reader,
+            format,
+            channels: usize::from(spec.channels),
+            bits: spec.bits_per_sample,
+            resampler: Some(resampler),
+            buffer: PieceBuffer::default(),
+            ready: VecDeque::new(),
+            done: false,
+        })
+    }
+
+    /// The next piece of at most [`PIECE_SAMPLES`] samples, or `None` at the
+    /// end of the file.
+    pub(super) fn next(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
+        loop {
+            if let Some(piece) = self.ready.pop_front() {
+                return Ok(Some(piece));
+            }
+            if self.done {
+                return Ok(self.buffer.take_rest());
+            }
+            self.fill()?;
+        }
+    }
+
+    /// Decodes one block and queues the pieces it completed. The end of the
+    /// file flushes the resampler's tail and then the last piece.
+    fn fill(&mut self) -> Result<(), PieceError> {
+        let block = self.read_block()?;
+        if block.is_empty() {
+            self.done = true;
+            let tail = self
+                .resampler
+                .take()
+                .map(StreamingResampler::finish)
+                .unwrap_or_default();
+            self.ready.extend(self.buffer.push(&tail));
+            return Ok(());
+        }
+        let resampled = match self.resampler.as_mut() {
+            Some(resampler) => resampler.push(&block),
+            None => block,
+        };
+        self.ready.extend(self.buffer.push(&resampled));
+        Ok(())
+    }
+
+    fn read_block(&mut self) -> Result<Vec<f32>, PieceError> {
+        read_frames(
+            &mut self.reader,
+            self.channels,
+            BLOCK_FRAMES,
+            self.format,
+            self.bits,
+        )
+    }
+}
+
+/// 16 kHz samples waiting to be cut, never more than one piece plus the block
+/// that completed it.
+#[derive(Default)]
+pub(super) struct PieceBuffer {
+    samples: Vec<f32>,
+}
+
+impl PieceBuffer {
+    /// Appends `samples` and returns every piece they completed, each cut
+    /// through the quietest 100 ms near its 30 s end as
+    /// [`crate::transcription::gguf_session::chunk_ranges`] cuts a long clip.
+    pub(super) fn push(&mut self, samples: &[f32]) -> Vec<Vec<f32>> {
+        self.samples.extend_from_slice(samples);
+        let mut pieces = Vec::new();
+        while self.samples.len() > PIECE_SAMPLES {
+            let rest = self
+                .samples
+                .split_off(quiet_cut(&self.samples, PIECE_SAMPLES));
+            pieces.push(std::mem::replace(&mut self.samples, rest));
+        }
+        pieces
+    }
+
+    /// The samples after the last piece, as the final piece, unless there are
+    /// none.
+    pub(super) fn take_rest(&mut self) -> Option<Vec<f32>> {
+        (!self.samples.is_empty()).then(|| std::mem::take(&mut self.samples))
+    }
+}
+
+/// `samples` as a 16 kHz mono 32-bit float WAV: what the local API takes for
+/// one piece, with no sample converted or dropped.
+pub(super) fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PieceError> {
+    let mut bytes = Cursor::new(Vec::new());
+    {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        };
+        let mut writer = WavWriter::new(&mut bytes, spec).map_err(broken)?;
+        for sample in samples {
+            writer.write_sample(*sample).map_err(broken)?;
+        }
+        writer.finalize().map_err(broken)?;
+    }
+    Ok(bytes.into_inner())
+}
+
+fn broken(_: hound::Error) -> PieceError {
+    PieceError::Audio(AudioError::Invalid)
+}
+
+/// Up to `frames` mono samples, averaging `channels` and converting them as
+/// the file's format says, exactly as [`crate::transcription::service::AudioClip`]
+/// converts a whole file. The last read may be short; a broken one is
+/// `Invalid`.
+fn read_frames(
+    reader: &mut WavReader<BufReader<File>>,
+    channels: usize,
+    frames: usize,
+    format: WavFormat,
+    bits: u16,
+) -> Result<Vec<f32>, PieceError> {
+    let scale = 2_f32.powi(i32::from(bits) - 1);
+    match format {
+        WavFormat::F32 => read_mono(reader, channels, frames, |sample: f32| sample),
+        WavFormat::I8 => read_mono(reader, channels, frames, |sample: i8| {
+            f32::from(sample) / 128.0
+        }),
+        WavFormat::I16 => read_mono(reader, channels, frames, move |sample: i16| {
+            f32::from(sample) / scale
+        }),
+        WavFormat::I32 => read_mono(reader, channels, frames, move |sample: i32| {
+            sample as f32 / scale
+        }),
+    }
+}
+
+fn read_mono<S: Sample>(
+    reader: &mut WavReader<BufReader<File>>,
+    channels: usize,
+    frames: usize,
+    convert: impl Fn(S) -> f32,
+) -> Result<Vec<f32>, PieceError> {
+    let mut mono = Vec::with_capacity(frames);
+    let mut samples = reader.samples::<S>();
+    for _ in 0..frames {
+        // A whole frame or nothing: hound rejects a data chunk that is not a
+        // multiple of the channels, so a missing sample is a broken file.
+        let Some(first) = samples.next() else {
+            return Ok(mono);
+        };
+        let first = convert(first.map_err(broken)?);
+        if !first.is_finite() {
+            return Err(PieceError::Audio(AudioError::Invalid));
+        }
+        let mut sum = f64::from(first);
+        for _ in 1..channels {
+            let Some(sample) = samples.next() else {
+                return Err(PieceError::Audio(AudioError::Invalid));
+            };
+            let sample = convert(sample.map_err(broken)?);
+            if !sample.is_finite() {
+                return Err(PieceError::Audio(AudioError::Invalid));
+            }
+            sum += f64::from(sample);
+        }
+        let average = (sum / channels as f64) as f32;
+        if !average.is_finite() {
+            return Err(PieceError::Audio(AudioError::Invalid));
+        }
+        mono.push(average);
+    }
+    Ok(mono)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::service::AudioClip;
+
+    /// A WAV of `seconds` with one second of silence every five, so a cut has
+    /// somewhere quiet to land.
+    fn paced(sample_rate: u32, seconds: usize) -> Vec<f32> {
+        (0..sample_rate as usize * seconds)
+            .map(|sample| {
+                if sample / sample_rate as usize % 5 == 4 {
+                    0.0
+                } else {
+                    0.25
+                }
+            })
+            .collect()
+    }
+
+    fn write(path: &Path, spec: WavSpec, samples: &[f32]) {
+        let mut writer = WavWriter::create(path, spec).unwrap();
+        for sample in samples {
+            match spec.sample_format {
+                SampleFormat::Float => writer.write_sample(*sample).unwrap(),
+                SampleFormat::Int if spec.bits_per_sample <= 16 => {
+                    writer.write_sample((sample * 32_767.0) as i16).unwrap();
+                }
+                SampleFormat::Int => {
+                    writer
+                        .write_sample((sample * 2_147_483_647.0) as i32)
+                        .unwrap();
+                }
+            }
+        }
+        writer.finalize().unwrap();
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("hex-transcribe-{name}-{}.wav", std::process::id()))
+    }
+
+    fn collect(path: &Path) -> Vec<Vec<f32>> {
+        let mut pieces = Pieces::open(path).unwrap();
+        let mut collected = Vec::new();
+        while let Some(piece) = pieces.next().unwrap() {
+            collected.push(piece);
+        }
+        collected
+    }
+
+    #[test]
+    fn pieces_cover_every_sample_exactly_once_in_order() {
+        let samples = paced(16_000, 95);
+        let mut buffer = PieceBuffer::default();
+        let mut pieces = Vec::new();
+        for block in samples.chunks(777) {
+            pieces.extend(buffer.push(block));
+        }
+        pieces.extend(buffer.take_rest());
+
+        assert!(pieces.len() > 1, "95 s is more than one piece");
+        assert!(
+            pieces.iter().all(|piece| !piece.is_empty()),
+            "no piece is empty"
+        );
+        assert!(
+            pieces.iter().all(|piece| piece.len() <= PIECE_SAMPLES),
+            "every piece is at most 30 s"
+        );
+        assert_eq!(
+            pieces.concat(),
+            samples,
+            "every sample appears once, in order"
+        );
+    }
+
+    #[test]
+    fn a_piece_of_exactly_thirty_seconds_is_not_cut() {
+        let samples = vec![0.25_f32; PIECE_SAMPLES];
+        let mut buffer = PieceBuffer::default();
+        assert!(buffer.push(&samples).is_empty());
+        assert_eq!(buffer.take_rest().unwrap().len(), PIECE_SAMPLES);
+    }
+
+    #[test]
+    fn a_48_khz_file_is_read_in_pieces_of_at_most_thirty_seconds() {
+        let path = temp("48k");
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        write(&path, spec, &paced(48_000, 70));
+        let pieces = collect(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(pieces.len() > 1, "70 s is more than one piece");
+        assert!(
+            pieces.iter().all(|piece| piece.len() <= PIECE_SAMPLES),
+            "every piece is at most 30 s of 16 kHz audio"
+        );
+        assert_eq!(
+            pieces.iter().map(Vec::len).sum::<usize>(),
+            70 * 16_000,
+            "the whole 48 kHz file is resampled, not truncated"
+        );
+    }
+
+    #[test]
+    fn streamed_samples_match_the_whole_file_decoder() {
+        let path = temp("match");
+        let spec = WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        let left = paced(48_000, 7);
+        let mut stereo = Vec::with_capacity(left.len() * 2);
+        for (index, sample) in left.iter().enumerate() {
+            stereo.push(*sample);
+            stereo.push(if index % 3 == 0 { -*sample } else { *sample });
+        }
+        write(&path, spec, &stereo);
+        let pieces = collect(&path);
+        let whole = AudioClip::decode_wav(BufReader::new(File::open(&path).unwrap())).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(pieces.concat(), whole.samples);
+        assert_eq!(whole.duration_ms, 7_000);
+    }
+
+    #[test]
+    fn a_file_with_no_frames_is_refused() {
+        let path = temp("empty");
+        write(
+            &path,
+            WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: SampleFormat::Int,
+            },
+            &[],
+        );
+        let error = Pieces::open(&path).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(error, PieceError::Audio(AudioError::Unsupported)),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_wav_is_invalid() {
+        let path = temp("not-wav");
+        std::fs::write(&path, b"this is not a wav").unwrap();
+        let error = Pieces::open(&path).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(error, PieceError::Audio(AudioError::Invalid)),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_file_keeps_its_own_error() {
+        let error = Pieces::open(Path::new("/nonexistent/hex-transcribe.wav")).unwrap_err();
+        assert!(matches!(error, PieceError::Io(_)), "{error:?}");
+    }
+
+    #[test]
+    fn a_piece_is_a_wav_the_whole_file_decoder_reads_back() {
+        let samples = paced(16_000, 1);
+        let bytes = wav_bytes(&samples).unwrap();
+        let clip = AudioClip::decode_wav(Cursor::new(bytes)).unwrap();
+        assert_eq!(clip.duration_ms, 1_000);
+        assert_eq!(clip.samples, samples);
+    }
+}

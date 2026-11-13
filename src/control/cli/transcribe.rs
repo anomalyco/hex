@@ -1,9 +1,15 @@
 //! `hex transcribe <file>` (Labs › Transcribe files): a saved WAV through
 //! the running Hex's local API, or in this process on Linux and Windows when
 //! Hex is stopped. Nothing is pasted, saved to History, or processed.
+//!
+//! A file of any length is read in pieces of at most 30 s ([`pieces`]) and
+//! their text is joined with one space: a piece that short runs on the
+//! running Hex's dictation engine, never needs a second model copy loaded,
+//! and keeps one piece rather than the whole file in memory.
 
-use std::io::{Cursor, Read};
-use std::path::Path;
+mod pieces;
+
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -12,9 +18,9 @@ use super::{Output, print};
 use crate::control::{ControlReply, model_selection};
 use crate::labs::Feature;
 use crate::transcription::models::TranscriptionSelection;
-use crate::transcription::service::{AudioClip, AudioError};
+use pieces::{PieceError, Pieces};
 
-/// A whole file waits for a cold model and a long clip.
+/// One piece waits for a cold model behind it and for its own transcription.
 const TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_RESPONSE: usize = 1024 * 1024;
 
@@ -26,7 +32,7 @@ struct Transcript {
 /// What `hex transcribe` sends once its file and model are settled.
 #[derive(Debug)]
 struct Job {
-    wav: Vec<u8>,
+    file: PathBuf,
     selection: TranscriptionSelection,
 }
 
@@ -52,7 +58,8 @@ pub(super) fn run(
     print(reply, output)
 }
 
-/// The lab's gate, the file, and the model, all checked before Hex is asked.
+/// The lab's gate, the file's header, and the model, all checked before Hex
+/// is asked or a model is loaded. The samples are read piece by piece later.
 fn prepare(
     settings: &crate::app_settings::AppSettings,
     file: &Path,
@@ -69,88 +76,112 @@ fn prepare(
         };
         return Err(ControlReply::error("disabled", message));
     }
-    let wav = read_wav(file)?;
+    // The header and format are refused here, before anything runs; this
+    // reads no samples.
+    open(file)?;
     let model = model.unwrap_or_else(|| settings.transcription.model.as_str().to_owned());
     let selection = model_selection(settings, &model, language.as_deref())?;
-    Ok(Job { wav, selection })
+    Ok(Job {
+        file: file.to_path_buf(),
+        selection,
+    })
 }
 
-/// The whole file in memory, read through the size cap so a file that grew
-/// after its metadata was read is still refused, and checked as WAV before
-/// anything is sent.
-fn read_wav(path: &Path) -> std::result::Result<Vec<u8>, ControlReply> {
-    let name = path.display();
-    let read_error = |error: std::io::Error| {
-        ControlReply::error("failed", format!("couldn't read {name}: {error}"))
-    };
-    let file = std::fs::File::open(path).map_err(read_error)?;
-    let length = file.metadata().map_err(read_error)?.len();
-    if length > crate::local_api::MAX_AUDIO_BYTES as u64 {
-        return Err(too_large(&name));
-    }
-    let mut wav = Vec::new();
-    file.take(crate::local_api::MAX_AUDIO_BYTES as u64 + 1)
-        .read_to_end(&mut wav)
-        .map_err(read_error)?;
-    if wav.len() > crate::local_api::MAX_AUDIO_BYTES {
-        return Err(too_large(&name));
-    }
-    match AudioClip::decode_wav(Cursor::new(&wav)) {
-        Ok(_) => Ok(wav),
-        Err(AudioError::ResourceExhausted) => Err(ControlReply::error(
-            "resource-exhausted",
-            format!("{name} is too long for Hex to transcribe at once"),
-        )),
-        Err(_) => Err(ControlReply::error(
+fn open(file: &Path) -> std::result::Result<Pieces, ControlReply> {
+    Pieces::open(file).map_err(|error| refused(file, error))
+}
+
+/// The refusal for a file Hex cannot read, before any transcription runs.
+fn refused(file: &Path, error: PieceError) -> ControlReply {
+    let name = file.display();
+    match error {
+        PieceError::Io(error) => {
+            ControlReply::error("failed", format!("couldn't read {name}: {error}"))
+        }
+        PieceError::Audio(_) => ControlReply::error(
             "unsupported",
             format!(
                 "{name} isn't a WAV file Hex can read; convert it to WAV first, \
                  for example with ffmpeg: ffmpeg -i <file> <file>.wav"
             ),
-        )),
+        ),
     }
-}
-
-fn too_large(name: &std::path::Display<'_>) -> ControlReply {
-    let limit = crate::local_api::MAX_AUDIO_BYTES / (1024 * 1024);
-    ControlReply::error(
-        "resource-exhausted",
-        format!("{name} is larger than {limit} MiB; transcribe a shorter or lower-rate WAV"),
-    )
 }
 
 fn transcribe(job: &Job) -> ControlReply {
     if crate::local_api::running_pid().is_some() {
         return in_running_hex(job);
     }
-    offline(&job.wav, &job.selection)
+    offline(job)
 }
 
-/// The running Hex transcribes with the model the request names: a clip up to
-/// 30 s runs on its dictation engine's loaded copy, and a longer one makes
-/// its transcription service load its own.
+/// The running Hex transcribes one piece at a time with the model the
+/// request names: a piece of at most 30 s runs on its dictation engine's
+/// loaded copy, so no second copy loads and dictation can run between pieces.
 fn in_running_hex(job: &Job) -> ControlReply {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("model", job.selection.model.as_str())
         .append_pair("language", &job.selection.language)
         .finish();
     let path = format!("/transcriptions?{query}");
-    match crate::local_api::post_wav(&path, &job.wav, TIMEOUT, MAX_RESPONSE) {
-        Ok((200, body)) => transcript(&body),
-        Ok((status, body)) => {
-            let code = crate::local_api::error_code(status, &body);
-            refusal(status, &code, job.selection.model.as_str())
+    let mut pieces = match open(&job.file) {
+        Ok(pieces) => pieces,
+        Err(reply) => return reply,
+    };
+    let mut texts = Vec::new();
+    loop {
+        let samples = match pieces.next() {
+            Ok(Some(samples)) => samples,
+            Ok(None) => break,
+            Err(error) => return refused(&job.file, error),
+        };
+        let wav = match pieces::wav_bytes(&samples) {
+            Ok(wav) => wav,
+            Err(error) => return refused(&job.file, error),
+        };
+        match crate::local_api::post_wav(&path, &wav, TIMEOUT, MAX_RESPONSE) {
+            Ok((200, body)) => match transcript(&body) {
+                // A piece that heard no speech is skipped: only a file with
+                // nothing to say answers no-speech.
+                Ok(text) if text.is_empty() => {}
+                Ok(text) => texts.push(text),
+                Err(reply) => return reply,
+            },
+            Ok((status, body)) => {
+                let code = crate::local_api::error_code(status, &body);
+                return refusal(status, &code, job.selection.model.as_str());
+            }
+            Err(error) => return ControlReply::error("transport", format!("{error:#}")),
         }
-        Err(error) => ControlReply::error("transport", format!("{error:#}")),
+    }
+    joined(texts)
+}
+
+/// One piece's transcript, trimmed, or the refusal for an answer Hex cannot
+/// read.
+fn transcript(body: &[u8]) -> std::result::Result<String, ControlReply> {
+    match serde_json::from_slice::<Transcript>(body) {
+        Ok(Transcript { transcript }) => Ok(transcript.trim().to_owned()),
+        Err(_) => Err(ControlReply::error(
+            "failed",
+            "Hex sent an unreadable transcript",
+        )),
     }
 }
 
-fn transcript(body: &[u8]) -> ControlReply {
-    match serde_json::from_slice::<Transcript>(body) {
-        Ok(Transcript { transcript }) if transcript.trim().is_empty() => no_speech(),
-        Ok(Transcript { transcript }) => ControlReply::Transcript { text: transcript },
-        Err(_) => ControlReply::error("failed", "Hex sent an unreadable transcript"),
+/// Every piece's text in order, trimmed and joined with one space; a file
+/// whose pieces all heard nothing is `no-speech`, as an empty transcript was.
+fn joined(texts: Vec<String>) -> ControlReply {
+    let text = texts
+        .iter()
+        .map(|text| text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.is_empty() {
+        return no_speech();
     }
+    ControlReply::Transcript { text }
 }
 
 fn refusal(status: u16, code: &str, model: &str) -> ControlReply {
@@ -230,19 +261,43 @@ fn no_speech() -> ControlReply {
     )
 }
 
-/// Without a running Hex, Linux and Windows load the model here as
-/// `hex model transcribe` does; macOS runs models only inside the app.
+/// Without a running Hex, Linux and Windows load the model here once and run
+/// every piece through it as `hex model transcribe` runs a file; macOS runs
+/// models only inside the app.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn offline(wav: &[u8], selection: &TranscriptionSelection) -> ControlReply {
-    match crate::transcription::local_transcriber::transcribe_wav_bytes(wav, selection) {
-        Ok(text) if text.trim().is_empty() => no_speech(),
-        Ok(text) => ControlReply::Transcript { text },
-        Err(error) => ControlReply::error("failed", format!("couldn't transcribe it: {error:#}")),
+fn offline(job: &Job) -> ControlReply {
+    use crate::transcription::local_transcriber::LocalTranscriber;
+
+    let mut pieces = match open(&job.file) {
+        Ok(pieces) => pieces,
+        Err(reply) => return reply,
+    };
+    let mut transcriber = match LocalTranscriber::load(&job.selection) {
+        Ok(transcriber) => transcriber,
+        Err(error) => {
+            return ControlReply::error("failed", format!("couldn't transcribe it: {error:#}"));
+        }
+    };
+    let mut texts = Vec::new();
+    loop {
+        let samples = match pieces.next() {
+            Ok(Some(samples)) => samples,
+            Ok(None) => break,
+            Err(error) => return refused(&job.file, error),
+        };
+        match transcriber.transcribe_clip(samples) {
+            Ok(text) if text.trim().is_empty() => {}
+            Ok(text) => texts.push(text),
+            Err(error) => {
+                return ControlReply::error("failed", format!("couldn't transcribe it: {error:#}"));
+            }
+        }
     }
+    joined(texts)
 }
 
 #[cfg(target_os = "macos")]
-fn offline(_: &[u8], _: &TranscriptionSelection) -> ControlReply {
+fn offline(_: &Job) -> ControlReply {
     super::not_running()
 }
 
@@ -319,18 +374,55 @@ mod tests {
         std::fs::write(&path, wav()).unwrap();
         let job = prepare(&settings, &path, None, None).unwrap();
         let _ = std::fs::remove_file(&path);
+        assert_eq!(job.file, path);
         assert_eq!(job.selection.model, settings.transcription.model);
         assert_eq!(job.selection.language, settings.transcription.language);
     }
 
     #[test]
-    fn an_empty_transcript_is_no_speech() {
+    fn a_file_with_no_audio_is_refused_like_an_unreadable_one() {
+        let mut settings = AppSettings::default();
+        settings.labs.transcribe_files = true;
+        let path =
+            std::env::temp_dir().join(format!("hex-transcribe-empty-{}.wav", std::process::id()));
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        hound::WavWriter::create(&path, spec)
+            .unwrap()
+            .finalize()
+            .unwrap();
+        let reply = prepare(&settings, &path, None, None).unwrap_err();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(reply, ControlReply::Error { ref code, .. } if code == "unsupported"),
+            "{reply:?}"
+        );
+    }
+
+    #[test]
+    fn every_piece_hearing_nothing_is_no_speech() {
         assert!(matches!(
-            transcript(br#"{"transcript":"  ","durationMs":1000}"#),
+            joined(Vec::new()),
+            ControlReply::Error { ref code, .. } if code == "no-speech"
+        ));
+        assert!(matches!(
+            joined(vec![String::new(), "  ".into()]),
             ControlReply::Error { ref code, .. } if code == "no-speech"
         ));
     }
 
+    #[test]
+    fn pieces_join_with_one_space_in_order() {
+        let reply = joined(vec![" one ".into(), "two".into()]);
+        assert!(
+            matches!(reply, ControlReply::Transcript { ref text } if text == "one two"),
+            "{reply:?}"
+        );
+    }
     fn error(reply: ControlReply) -> (String, String) {
         match reply {
             ControlReply::Error { code, message } => (code, message),
@@ -390,5 +482,17 @@ mod tests {
 
         let (code, _) = error(refusal(413, "http-413", "parakeet_v2"));
         assert_eq!(code, "resource-exhausted");
+    }
+
+    #[test]
+    fn a_piece_answer_is_read_trimmed() {
+        assert_eq!(
+            transcript(br#"{"transcript":" hello ","durationMs":1000}"#).unwrap(),
+            "hello"
+        );
+        assert!(matches!(
+            transcript(b"not json"),
+            Err(ControlReply::Error { ref code, .. }) if code == "failed"
+        ));
     }
 }
