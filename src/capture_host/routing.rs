@@ -2670,12 +2670,21 @@ mod tests {
             }
         }
 
+        /// `path` as an absolute path on this OS: Windows needs a drive.
+        fn absolute(path: &str) -> String {
+            if cfg!(windows) {
+                format!("C:{path}")
+            } else {
+                path.to_owned()
+            }
+        }
+
         /// SEER and RUNE DESKTOP working in one checkout, SEER the newer.
         fn one_checkout(path: &str, _: Duration) -> anyhow::Result<Vec<u8>> {
             let session = |id: &str, title: &str, updated: u64| {
                 serde_json::json!({
                     "id": id, "title": title, "parentID": null,
-                    "time": {"updated": updated}, "location": {"directory": "/p/seer"},
+                    "time": {"updated": updated}, "location": {"directory": absolute("/p/seer")},
                 })
             };
             let all = [
@@ -2737,7 +2746,8 @@ mod tests {
             // What it saved before: the checkout, whose newest session is SEER.
             let (_, sent) = route(
                 router_with(|c| {
-                    c.apps.insert("com.example.rune".into(), "/p/seer".into());
+                    c.apps
+                        .insert("com.example.rune".into(), absolute("/p/seer"));
                 }),
                 "com.example.rune",
                 senses(),
@@ -2759,13 +2769,13 @@ mod tests {
                 }
             }
             fn in_seer(_: &str, _: Option<i32>) -> Option<look::Pane> {
-                Some(shell_in("/p/seer"))
+                Some(shell_in(&absolute("/p/seer")))
             }
             fn below(_: &str, _: Option<i32>) -> Option<look::Pane> {
-                Some(shell_in("/p/seer/site"))
+                Some(shell_in(&absolute("/p/seer/site")))
             }
             fn elsewhere(_: &str, _: Option<i32>) -> Option<look::Pane> {
-                Some(shell_in("/p/other"))
+                Some(shell_in(&absolute("/p/other")))
             }
             let senses = |terminal: fn(&str, Option<i32>) -> Option<look::Pane>| look::Senses {
                 hooks: Hooks {
@@ -2798,7 +2808,7 @@ mod tests {
             let (kind, key, target) = worker.rule_for("ses_rune").expect("a terminal rule");
             assert_eq!(
                 (kind, key.as_str(), target.as_str()),
-                (RuleKind::Terminal, "/p/seer", "ses_rune")
+                (RuleKind::Terminal, absolute("/p/seer").as_str(), "ses_rune")
             );
             let saved = RouterConfig {
                 send_captures: true,
