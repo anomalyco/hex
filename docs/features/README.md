@@ -2055,9 +2055,14 @@ Linux beta                               // not macOS feature parity
 ├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
 │   ├── Labs > Keep dictation on clipboard (off) -> no snapshot, no restore; an
 │   │   earlier paste's pending restore stands down and the dictation stays (labs.md)
-│   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
+│   ├── Before the transcript -> read every offered format (32 MiB, 1 s shared)
+│   │   text and image/png first, then the rest, and offer them back in the
+│   │   offer's own order; empty offer -> cleared again
+│   ├── One format unreadable, or over the remaining cap -> that format is
+│   │   skipped (debug log names it) and the rest still come back
+│   ├── No format could be read, or the clipboard's owner changed while it was
+│   │   being read -> transcript stays; the log names the formats that failed
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone
-│   ├── Over the cap or unreadable -> transcript stays; the log says why
 │   ├── Paste only reached the clipboard -> transcript stays for Ctrl+V
 │   └── Wayland without ext- or wlr-data-control -> transcript stays (KWin offers ext, #719)
 │       ├── Settings › Output -> note pointing to Labs › Restore clipboard on GNOME while it is off
@@ -2136,7 +2141,10 @@ Clipboard restoration lives in [linux/paste.rs](../../src/linux/paste.rs)
 empty one empty; a full dictation from a file-fed ALSA microphone pasted into a
 GTK target, then Ctrl+V pasted the original text; an X11 round trip on Xwayland
 restored a 3 MB image through INCR. Not observed on X11 dictation, KDE, or
-Hyprland.
+Hyprland. `collect_formats` (its skipped-format, all-lost, over-cap, empty-read,
+and read-order cases) is unit-tested against fake reads only; the owner-change
+guards (X11's selection owner, Wayland's selection offer) are not covered by any
+test.
 The Wayland paste choice lives in [linux/paste.rs](../../src/linux/paste.rs) and
 [linux/remote_desktop.rs](../../src/linux/remote_desktop.rs). Observed: the
 wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri

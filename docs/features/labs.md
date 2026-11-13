@@ -663,8 +663,9 @@ it snapshots nothing, schedules no 500 ms restore, and calls its
 `Restore::keep`, so a paste made while the lab was on leaves nothing for a
 later paste with it off to bring back. A typed-text replacement, which saved
 the clipboard before it copied the selection, and a capture's PNG still
-restore; one whose clipboard snapshot failed has nothing to restore and falls
-back to the ordinary paste, so it follows the toggle too. Off, pasting and
+restore; one with no readable format, or one whose clipboard changed while it
+was read, has nothing to restore and falls back to the ordinary paste, so it
+follows the toggle too. Off, pasting and
 clipboard restore are exactly as before. Checks:
 `a_kept_paste_leaves_nothing_to_restore` and
 `a_kept_transcript_is_an_ordinary_clipboard_entry` in
