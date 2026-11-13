@@ -19,6 +19,7 @@ cask "hex" do
   depends_on macos: :sequoia
 
   app "Hex.app"
+  binary "#{appdir}/Hex.app/Contents/MacOS/hex"
 
   uninstall quit: "anomaly.hex"
 

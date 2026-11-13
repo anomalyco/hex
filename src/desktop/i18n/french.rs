@@ -1258,8 +1258,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Another dictation shortcut that always pastes with Ctrl+Shift+V", "Un autre raccourci de dictée qui colle toujours avec Ctrl+Maj+V"),
     ("OpenCode in WSL", "OpenCode dans WSL"),
     ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL.", "Utilise un service OpenCode exécuté dans votre distribution WSL par défaut pour la réécriture des modes et le sélecteur de modèles des modes. Sa recherche peut démarrer WSL."),
-    ("Transcribe files", "Transcrire des fichiers"),
-    ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Ajoute hex transcribe <file>, qui transforme un enregistrement WAV en texte avec votre modèle de dictée."),
     ("Process API transcripts", "Traiter les transcriptions de l'API"),
     ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Les apps peuvent demander à l'API locale de Hex des transcriptions avec le traitement du mode Global appliqué"),
     ("Timestamps in API transcripts", "Horodatages dans les transcriptions de l'API"),

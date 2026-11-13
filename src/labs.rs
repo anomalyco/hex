@@ -164,7 +164,6 @@ impl Feature {
             | Self::GnomeAnnotate
             | Self::CapsLockDictation
             | Self::OpenCodeInWsl
-            | Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::ApiBrowserAccess
@@ -239,8 +238,7 @@ impl Feature {
             | Self::TerminalPasteShortcut
             | Self::ReleaseNotesLink
             | Self::OpenCodeInWsl => 20261108,
-            Self::TranscribeFiles
-            | Self::ApiProcessing
+            Self::ApiProcessing
             | Self::Appearance
             | Self::DoubleTapModifiers
             | Self::ReturnToApp
@@ -385,7 +383,6 @@ impl Feature {
             | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::FillerWords
-            | Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::ApiBrowserAccess
@@ -468,7 +465,6 @@ impl Feature {
             Self::ExpireMeetingAudio => "expire-meeting-audio",
             Self::CapsLockDictation => "caps-lock-dictation",
             Self::OpenCodeInWsl => "opencode-in-wsl",
-            Self::TranscribeFiles => "transcribe-files",
             Self::ApiProcessing => "api-processing",
             Self::ApiTimestamps => "api-timestamps",
             Self::ApiBrowserAccess => "api-browser-access",
@@ -554,7 +550,6 @@ impl Feature {
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
             Self::OpenCodeInWsl => "labs.opencode_in_wsl",
-            Self::TranscribeFiles => "labs.transcribe_files",
             Self::ApiProcessing => "labs.api_processing",
             Self::ApiTimestamps => "labs.api_timestamps",
             Self::ApiBrowserAccess => "labs.api_browser_access",
@@ -644,7 +639,6 @@ impl Feature {
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
-            Self::TranscribeFiles => settings.labs.transcribe_files,
             Self::ApiProcessing => settings.labs.api_processing,
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::ApiBrowserAccess => settings.labs.api_browser_access,
@@ -731,7 +725,6 @@ impl Feature {
             &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
             &mut labs.opencode_in_wsl,
-            &mut labs.transcribe_files,
             &mut labs.api_processing,
             &mut labs.api_timestamps,
             &mut labs.api_browser_access,
@@ -825,7 +818,6 @@ impl Feature {
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
-            Self::TranscribeFiles => settings.labs.transcribe_files = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
@@ -2273,7 +2265,7 @@ mod tests {
     #[test]
     fn retired_switches_are_read_and_ignored() {
         let settings: AppSettings = serde_json::from_str(
-            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "live_text": true}}"#,
+            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "transcribe_files": true, "live_text": true}}"#,
         )
         .unwrap();
         assert!(settings.labs.live_text);
@@ -2282,5 +2274,6 @@ mod tests {
         assert!(json["labs"].get("enabled").is_none());
         assert!(json["labs"].get("collapsible_meeting_sections").is_none());
         assert!(json["labs"].get("meeting_platform_icons").is_none());
+        assert!(json["labs"].get("transcribe_files").is_none());
     }
 }

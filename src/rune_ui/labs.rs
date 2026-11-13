@@ -946,12 +946,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Show only downloaded speech models in the picker, with the space they take"),
     ));
     rows.push(row(
-        Feature::TranscribeFiles,
-        None,
-        tr("Transcribe files"),
-        tr("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model."),
-    ));
-    rows.push(row(
         Feature::ApiProcessing,
         None,
         tr("Process API transcripts"),
@@ -1203,7 +1197,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingNotesFile => "lab-meeting-notes-file",
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
-        Feature::TranscribeFiles => "lab-transcribe-files",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::ApiBrowserAccess => "lab-api-browser-access",

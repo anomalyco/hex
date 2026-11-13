@@ -7,7 +7,10 @@
 //! heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
+mod embedded;
 mod human;
+mod prepare;
+mod progress;
 mod transcribe;
 
 use clap::{Args, Subcommand};
@@ -96,12 +99,14 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
-    /// Transcribe a WAV file with the selected model and print it
-    /// (Labs › Transcribe files).
+    /// Transcribe an audio or video file with the selected model and print
+    /// the text.
     ///
-    /// Nothing is pasted, saved to History, or processed.
+    /// Reads WAV, M4A/MP4/MOV (AAC, ALAC), CAF, AIFF, MP3, FLAC, Ogg and
+    /// WebM (Vorbis, Opus). Works with Hex stopped. Nothing is pasted, saved
+    /// to History, or processed.
     Transcribe {
-        /// The WAV file to transcribe.
+        /// The recording to transcribe.
         file: std::path::PathBuf,
         /// A model id from `hex model list` (default: the selected model).
         #[arg(long)]
@@ -581,7 +586,8 @@ pub fn run(command: ControlCli) -> u8 {
 }
 
 /// `hex model install`: the running Hex downloads in the background;
-/// without one, Linux and Windows download and select here.
+/// without one, Linux and Windows download here and macOS through an
+/// embedded service it starts, then the model is selected.
 fn install_model(model: Option<String>, language: Option<String>, output: Output) -> u8 {
     let model = match model {
         Some(model) => model,
@@ -590,17 +596,30 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
             Err(error) => return fail(&format!("couldn't read settings: {error:#}")),
         },
     };
-    #[cfg(not(target_os = "macos"))]
     if !running() {
         let selection = match selection(Some(model), language) {
             Ok(selection) => selection,
             Err(error) => return fail(&format!("{error:#}")),
         };
+        #[cfg(not(target_os = "macos"))]
         if let Err(error) = crate::transcription::local_transcriber::install(
             &selection,
             &std::sync::atomic::AtomicBool::new(false),
         ) {
             return fail(&format!("{error:#}"));
+        }
+        // macOS runs models only in a Hex process, so an embedded service
+        // downloads it, as `hex transcribe` does with Hex stopped.
+        #[cfg(target_os = "macos")]
+        {
+            embedded::exit_on_interrupt();
+            let prepared = embedded::endpoint()
+                .map_err(|message| ControlReply::error("unavailable", message))
+                .and_then(|endpoint| prepare::prepare(&endpoint, &selection));
+            embedded::done();
+            if let Err(reply) = prepared {
+                return print(reply, output);
+            }
         }
         return select_installed(&selection, output);
     }
@@ -611,7 +630,6 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
 /// made. A Hex that started while the model downloaded takes the choice;
 /// otherwise it is saved under the service lock `settings apply` uses, so a
 /// starting Hex is never written behind. An unchanged selection needs neither.
-#[cfg(not(target_os = "macos"))]
 fn select_installed(
     selection: &crate::transcription::models::TranscriptionSelection,
     output: Output,
@@ -652,7 +670,6 @@ fn select_installed(
 }
 
 /// Hands a downloaded model to a Hex that started while it downloaded.
-#[cfg(not(target_os = "macos"))]
 fn select_in_running_hex(
     selection: &crate::transcription::models::TranscriptionSelection,
     output: Output,
@@ -668,7 +685,6 @@ fn select_in_running_hex(
 
 /// Records a downloaded model as the selected one, as the app's own switch
 /// does. An unchanged selection is left alone.
-#[cfg(not(target_os = "macos"))]
 fn save_selection(
     selection: &crate::transcription::models::TranscriptionSelection,
 ) -> color_eyre::Result<String> {
@@ -706,7 +722,6 @@ fn imported(model: &str) -> color_eyre::Result<crate::transcription::models::Cus
 
 /// The selection a local model command names: `model` with its remembered
 /// language unless `language` is given, or the selected model.
-#[cfg(not(target_os = "macos"))]
 fn selection(
     model: Option<String>,
     language: Option<String>,

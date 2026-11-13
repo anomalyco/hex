@@ -57,14 +57,22 @@ Agent or terminal                                  // control.cli; every OS
 │   └── Recording, a pending start, or a capture still finishing -> done,
 │       but the listener drops the job: no keys are sent and no state changes
 ├── hex transcribe <file> [--model <id>] [--language <code>]
-│   ├── Labs › Transcribe files off -> disabled, exit 1; the file is never read
-│   ├── Not WAV or truncated -> refused here, before Hex is asked
-│   ├── Any length -> read in ≤30 s pieces, their text joined with one space
-│   ├── Hex running -> one piece at a time to POST /transcriptions with the
-│   │   model named; each piece on the dictation engine's loaded copy when it
-│   │   holds that model; stdout gets the joined transcript
-│   ├── Hex stopped -> Linux/Windows load the model here once as `model
-│   │   transcribe`; macOS answers not-running, exit 3
+│   ├── WAV, AIFF, CAF, FLAC, MP3, Ogg Vorbis/Opus, WebM, MP4/M4A/MOV
+│   │   (AAC-LC, HE-AAC, ALAC; a video's soundtrack) -> decoded here
+│   ├── Not media, no audio track, or an unknown codec -> unsupported, exit 1,
+│   │   before Hex is asked
+│   ├── Any length -> decoded in ≤30 s pieces, their text joined with one space
+│   ├── Hex running -> one piece at a time to its POST /transcriptions with
+│   │   the model named; each piece on the dictation engine's loaded copy when
+│   │   it holds that model; no child starts
+│   ├── Hex stopped -> starts and owns `hex service --embedded`, the same
+│   │   route, ended on every exit
+│   ├── Model not downloaded
+│   │   ├── stdin and stderr terminals, no --json -> Download <model>? [Y/n];
+│   │   │   yes downloads, loads, and retries the piece
+│   │   └── otherwise -> model-unavailable naming `hex model install`, exit 1
+│   ├── stdout -> only the transcript or --json reply; progress on a TTY stderr
+│   ├── Ctrl-C -> the child ends, nothing printed, exit 130
 │   └── No speech in every piece -> no-speech, exit 4; nothing pasted, kept,
 │       or processed
 ├── hex meetings record [--title] | stop | copy-last
@@ -107,22 +115,28 @@ the local API's owner-only discovery file and the bearer-authenticated
 so they never compete with the running app for its files. Opt-ins stay
 explicit settings: no command turns Meetings on as a side effect.
 
-`hex transcribe` is the one command that doesn't use `/control`: it checks the
-WAV here, reading every sample once without keeping them so a truncated or
-corrupt file is refused before anything transcribes, then sends the recording
-one piece at a time to the same discovery file's `POST /transcriptions`
-(`Content-Type: audio/wav`), so the running app transcribes it with the model
-the request names, every piece on its dictation engine's loaded copy when it
-holds that model. Pieces are at most 30 s
-(`control/cli/transcribe/pieces.rs`), read and resampled incrementally and cut
-through the quietest point near their end by `gguf_session::quiet_cut`, the
-same cut a long GGUF clip gets; a piece of only silence is skipped once the
-speech detector is installed, and the rest of the text is joined with one
-space, so a file can be any length and only about one
-piece is in memory. Its Labs toggle is read from `settings.json`
-(`AppSettings::read`), the same read `hex labs` lists from, so the check works
-with Hex running or stopped; a running Hex saves the toggle there at once.
-Off, nothing is read.
+`hex transcribe` is the one command that doesn't use `/control`. It opens the
+file here and decodes its first audio, so a file Hex can't read is refused
+before anything transcribes: WAV through hound (every sample read once up
+front, so a truncated WAV is refused), everything else through Symphonia, and
+Opus through opuscule (`control/cli/transcribe/pieces/media.rs`). It then
+sends the recording one piece at a time to `POST /transcriptions`
+(`Content-Type: audio/wav`), choosing the endpoint once
+(`control/cli/embedded.rs`): the running app's discovery file, so the app
+transcribes it with the model the request names, every piece on its dictation
+engine's loaded copy when it holds that model; or, with no Hex running, an
+embedded `hex service --embedded` child it starts in its own process group,
+reads one ready line from, and ends on success, failure, and Ctrl-C. A Hex
+that runs but answers the wrong API version or token is an error, never a
+reason to start a second service. Pieces are at most 30 s
+(`control/cli/transcribe/pieces.rs`), decoded and resampled incrementally and
+cut through the quietest point near their end by `gguf_session::quiet_cut`,
+the same cut a long GGUF clip gets; the service skips a piece of only silence
+once the speech detector is installed, and the rest of the text is joined
+with one space, so a file can be any length and only about one piece is in
+memory. A `model-not-ready` piece offers the download on a terminal
+(`control/cli/prepare.rs`), prepares the model through the service's
+`POST /models/{id}/prepare` events, and retries that piece once.
 
 On Linux and Windows `control::host::answer` carries every command out through
 the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
@@ -201,16 +215,20 @@ Windows keyboard or live SDK recording smoke test.
 `linux::tests` parse the shared tree beside Linux's own commands;
 `rune_ui::platform::parity_tests` fail when a capability differs across OSes
 without a recorded reason; `settings_name_real_capabilities_and_keys` checks
-the settings-to-capability table; `control::cli::transcribe::tests` cover the
-lab-off refusal, a non-WAV, a frame-less and a truncated file refused before
-any transcription, the selected model and language, silent pieces skipped once
-the detector is installed and kept (without consulting or downloading it) when
-it is not, pieces joined in order, and a file whose pieces all hear
-nothing as `no-speech`, while `control::cli::transcribe::pieces::tests` cover a
-95 s clip split into pieces that cover every sample once, a 48 kHz file read
-into ≤30 s pieces whose samples match `AudioClip::decode_wav`, every supported
-sample format (8/16/24/32-bit int and 32-bit float) matching it too, and a file
-that changes mid-read naming where reading stopped.
+the settings-to-capability table; `control::cli::transcribe::tests` cover a
+file that isn't media and a truncated WAV refused before any transcription,
+the selected model and language, a file with no audio as `no-speech`, pieces
+joined in order, and a file whose pieces all hear nothing as `no-speech`;
+`control::cli::transcribe::pieces::tests` cover a 95 s clip split into pieces
+that cover every sample once, a 48 kHz file read into ≤30 s pieces whose
+samples match `AudioClip::decode_wav`, every WAV sample format, a file that
+changes mid-read naming where reading stopped, every container fixture in
+`tests/fixtures/media` (M4A and CAF AAC, ALAC, AIFF, FLAC, MP3, MP4 with
+video, Ogg and WebM Opus, Ogg Vorbis) decoding to its 16 kHz length, Opus
+pre-skip and end trim, a video with no audio track, and a cut-short file;
+`control::cli::prepare::tests` cover the prompt's answers and that `--json`
+never asks; `local_api::discovery::tests` cover choosing an endpoint (absent,
+stale, wrong version or token) and validating the embedded ready line.
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -232,7 +250,12 @@ change does not preview a tone as the window does. Onboarding
 permission prompts, calendar connection, and meeting deletion or renaming have
 no command. Linux and Windows dictation through the CLI has not run with a
 microphone, and meeting recording through the CLI has not run on Linux or
-Windows. `hex transcribe`'s gate-off refusal, its non-WAV refusal, and a
-running headless service's `model-unavailable` answer were observed on Linux;
-no model was installed, so its transcript answer was not observed end to end,
-neither was a long file read in pieces, and it has not run on macOS or Windows.
+Windows. `hex transcribe` was observed on macOS (Nov 13, Apple Silicon): with
+the app running (no child) and stopped (an embedded child, on an empty data
+root), WAV, AIFF, M4A AAC-LC, HE-AAC, ALAC, CAF AAC, FLAC, MP3, Ogg Opus, MP4,
+MOV, and fragmented MP4 each printed the spoken transcript; a 31-minute M4A
+ran in ≤30 s pieces in 21 s at 235 MB peak resident with the model loaded; the
+terminal prompt downloaded SenseVoice Small and retried; non-TTY and `--json`
+answered `model-unavailable`; a silent file answered `no-speech`; Ctrl-C exited
+130 with the child gone. It has not run on Linux or Windows since it moved to
+the embedded service.
