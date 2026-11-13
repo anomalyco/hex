@@ -29,6 +29,26 @@ impl InputSource {
     }
 }
 
+/// A native layout's 32 bits as the stable source ID Hex shows and stores,
+/// `04190419`.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn source_id(layout: u32) -> String {
+    format!("{layout:08X}")
+}
+
+/// The source a window names from the layout of the process that owns it:
+/// Hex's own windows name none, so focusing Settings is not a keyboard change,
+/// and a window reporting no layout (a console) names none either. The Windows
+/// observer reads the window; this decides what it means.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn source_from_window(
+    process_id: u32,
+    own_process_id: u32,
+    layout: u32,
+) -> Option<String> {
+    (process_id != own_process_id && layout != 0).then(|| source_id(layout))
+}
+
 /// No models or workers live here: this only admits the latest picker choice.
 pub(crate) struct Switcher {
     settings: KeyboardModelSwitching,
@@ -247,5 +267,23 @@ mod tests {
             ..source
         };
         assert_eq!(unknown.language_for(v3, "de"), "de");
+    }
+
+    #[test]
+    fn keyboard_source_ignores_hexs_own_window() {
+        assert_eq!(source_from_window(7, 7, 0x0419_0419), None);
+    }
+
+    #[test]
+    fn keyboard_source_is_another_processs_layout_id() {
+        assert_eq!(
+            source_from_window(8, 7, 0x0419_0419).as_deref(),
+            Some("04190419")
+        );
+    }
+
+    #[test]
+    fn keyboard_source_is_none_without_a_layout() {
+        assert_eq!(source_from_window(8, 7, 0), None);
     }
 }

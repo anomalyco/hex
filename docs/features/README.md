@@ -664,19 +664,21 @@ longer offers is dropped when settings load. Removing a source hides its row
 without erasing its saved mapping.
 
 Hex reads input sources only while the setting is on: the Windows runtime's poll
-of the foreground window's layout and the Linux host's XKB connection (polled
-every 250 ms) exist only then, and the macOS main-thread TIS
-distributed-notification observer, which always runs to rebuild the keyboard
-layout snapshot ([recovery](recovery.md#keyboard-layout-resolution)), reports
-the selected source only then; all work without a Settings window, and the
-window lists enabled sources only then. Windows lists the language bar's layouts, named by language and
-keyboard. On Linux the row appears only in X11 sessions: Wayland compositors keep
-the active layout to themselves, with no general protocol (IBus and Fcitx report
-input-method engines, not the compositor's layout), so Wayland is unavailable. Source changes cancel
-obsolete automatic work but keep manual preparation until a mapped choice is
-due. An unmapped source cancels only automatic work. This reuses the shared model
-selection, recording/stream fallback, and meeting-engine behavior; it adds no
-recording-time routing, model cache, or notifications.
+of the keyboard-focused window's layout, which ignores Hex's own windows, and
+the Linux host's XKB connection (polled every 250 ms) exist only then, and the
+macOS main-thread TIS distributed-notification observer, which always runs to
+rebuild the keyboard layout snapshot
+([recovery](recovery.md#keyboard-layout-resolution)), reports the selected
+source only then; all work without a Settings window, and the window lists
+enabled sources only then. Windows lists the language bar's layouts, named by
+language and keyboard. On Linux the row appears only in X11 sessions: Wayland
+compositors keep the active layout to themselves, with no general protocol
+(IBus and Fcitx report input-method engines, not the compositor's layout), so
+Wayland is unavailable. Source changes cancel obsolete automatic work but keep
+manual preparation until a mapped choice is due. An unmapped source cancels only
+automatic work. This reuses the shared model selection, recording/stream
+fallback, and meeting-engine behavior; it adds no recording-time routing, model
+cache, or notifications.
 
 Sources: observers for [macOS](../../src/keyboard_input_sources/macos.rs),
 [Windows](../../src/keyboard_input_sources/windows.rs), and
@@ -685,9 +687,10 @@ Sources: observers for [macOS](../../src/keyboard_input_sources/macos.rs),
 runtimes ([macOS](../../src/macos_rune.rs),
 [Windows](../../src/windows/app.rs), [Linux](../../src/linux/app.rs)), and
 [settings UI](../../src/rune_ui/settings.rs).
-Checks: the switch policy and settings/CLI validation tests, the runtime
-scheduling tests in [macos_rune/tests.rs](../../src/macos_rune/tests.rs) (macOS),
-the settings interaction tests in
+Checks: the switch policy and settings/CLI validation tests, the window-source
+decision tests (Hex's own windows and a missing layout name no source), the
+runtime scheduling tests in [macos_rune/tests.rs](../../src/macos_rune/tests.rs)
+(macOS), the settings interaction tests in
 [keyboard_model_tests.rs](../../src/rune_ui/keyboard_model_tests.rs), and the
 `mac-input-source-models` golden, and the XKB symbols-name tests in the X11
 observer. No check delivers native input-source notifications or switches

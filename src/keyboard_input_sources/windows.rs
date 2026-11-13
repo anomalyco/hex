@@ -1,16 +1,21 @@
 //! Keyboard layouts (HKLs) as input sources. Windows keeps a layout per
-//! thread, so the current source is the foreground window's. Hex reads them
+//! thread, so the current source is the keyboard-focused window's, and Hex's
+//! own windows name none, so focusing one is not a change. Hex reads them
 //! only while keyboard model switching is on.
 
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Globalization::{
     GetLocaleInfoEx, LCIDToLocaleName, LOCALE_SLOCALIZEDDISPLAYNAME,
 };
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayout, GetKeyboardLayoutList, HKL,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+};
 
-use crate::transcription::keyboard_model_switching::InputSource;
+use crate::transcription::keyboard_model_switching::{InputSource, source_from_window, source_id};
 
 const LOCALE_NAME_MAX_LENGTH: usize = 85;
 const LAYOUTS_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Keyboard Layouts";
@@ -22,21 +27,52 @@ pub(crate) fn available() -> bool {
 
 /// The HKL's 32 bits (x64 sign-extends them) as its stable ID, `04190419`.
 fn id(layout: HKL) -> String {
-    format!("{:08X}", layout as usize as u32)
+    source_id(layout as usize as u32)
 }
 
-/// The foreground window's layout; `None` without one, as on the lock
-/// screen, or for a console that reports none.
+/// The keyboard-focused window's layout; `None` while one of Hex's own
+/// windows has the focus, without a window, as on the lock screen, or for a
+/// console that reports none.
 pub(crate) fn current() -> Option<String> {
-    // SAFETY: plain Win32 queries; a null window yields thread 0.
-    let layout = unsafe {
-        let window = GetForegroundWindow();
-        if window.is_null() {
+    // SAFETY: plain Win32 queries; `focused_window` never yields null, and a
+    // window destroyed since that read reports no thread and no process.
+    unsafe {
+        let window = focused_window()?;
+        let mut process_id = 0;
+        let thread = GetWindowThreadProcessId(window, &mut process_id);
+        // A window destroyed in between owns no thread, and
+        // `GetKeyboardLayout(0)` would answer for Hex's own runtime thread.
+        if thread == 0 {
             return None;
         }
-        GetKeyboardLayout(GetWindowThreadProcessId(window, std::ptr::null_mut()))
-    };
-    (!layout.is_null()).then(|| id(layout))
+        let layout = GetKeyboardLayout(thread);
+        source_from_window(process_id, GetCurrentProcessId(), layout as usize as u32)
+    }
+}
+
+/// The window with keyboard focus: the foreground thread's focused window,
+/// else its active one, else the foreground window. `GetGUIThreadInfo` fails
+/// when the foreground thread is out of reach, so the last is a fallback.
+fn focused_window() -> Option<HWND> {
+    // SAFETY: `GetGUIThreadInfo` fills the caller-sized struct for the
+    // foreground thread; a failure leaves its windows null.
+    unsafe {
+        let mut info = GUITHREADINFO {
+            cbSize: size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        if GetGUIThreadInfo(0, &mut info) != 0
+            && let Some(window) = non_null(info.hwndFocus).or_else(|| non_null(info.hwndActive))
+        {
+            return Some(window);
+        }
+        non_null(GetForegroundWindow())
+    }
+}
+
+/// A window handle as an option; Win32 uses null for none.
+fn non_null(window: HWND) -> Option<HWND> {
+    (!window.is_null()).then_some(window)
 }
 
 /// The layouts in the user's language bar.
