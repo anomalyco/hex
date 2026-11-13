@@ -229,7 +229,10 @@ pub fn listen(
     #[cfg(hex_capture)]
     let mut capture_shortcut = crate::capture_host::CaptureShortcut::default();
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
-    let mut personal_host_enabled = crate::app_settings::custom_transformations_enabled();
+    let mut personal_host_enabled = crate::personal_commands::host_needed(
+        crate::app_settings::custom_transformations_selected(),
+    );
+    let mut next_personal_host_check = Instant::now();
     let mut personal_commands = personal_host_enabled
         .then(|| crate::personal_commands::PersonalCommands::start(transformations.clone()))
         .flatten();
@@ -685,12 +688,19 @@ pub fn listen(
             input.set_release_while_idle(next_microphone_policy.release_while_idle);
         }
         microphone_policy = next_microphone_policy;
-        let next_personal_host_enabled = crate::app_settings::custom_transformations_enabled();
-        if next_personal_host_enabled != personal_host_enabled {
-            personal_host_enabled = next_personal_host_enabled;
-            personal_commands = personal_host_enabled
-                .then(|| crate::personal_commands::PersonalCommands::start(transformations.clone()))
-                .flatten();
+        if Instant::now() >= next_personal_host_check {
+            next_personal_host_check = Instant::now() + Duration::from_millis(250);
+            let next_personal_host_enabled = crate::personal_commands::host_needed(
+                crate::app_settings::custom_transformations_selected(),
+            );
+            if next_personal_host_enabled != personal_host_enabled {
+                personal_host_enabled = next_personal_host_enabled;
+                personal_commands = personal_host_enabled
+                    .then(|| {
+                        crate::personal_commands::PersonalCommands::start(transformations.clone())
+                    })
+                    .flatten();
+            }
         }
         if hotkeys.configure(CaptureInstant::now()) {
             handle_hotkey_action(

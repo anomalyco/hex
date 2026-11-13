@@ -1048,6 +1048,11 @@ pub(crate) fn run(
         // latch-based sites never did.
         release_microphone!();
 
+        dictations.answer_status(service.snapshot(
+            capture.is_recording() || start_pending || finishing.is_some(),
+            pending,
+            input.is_recovering(),
+        ));
         indicator.update(capture.is_recording() || start_pending, pending);
         match input.recv_timeout(
             UPDATE_INTERVAL,

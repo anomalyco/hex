@@ -192,14 +192,15 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 fallback_to_default_device: false,
                 ..crate::windows::dictation::WindowsDictationConfig::from_settings(&settings)
             };
-            let _personal_commands =
-                crate::app_settings::transformations_used(&settings.dictation_processing)
-                    .then(|| {
-                        crate::personal_commands::PersonalCommands::start(
-                            config.transformations.clone(),
-                        )
-                    })
-                    .flatten();
+            let _personal_commands = crate::personal_commands::host_needed(
+                crate::personal_commands::custom_transformations_selected(
+                    &settings.dictation_processing,
+                ),
+            )
+            .then(|| {
+                crate::personal_commands::PersonalCommands::start(config.transformations.clone())
+            })
+            .flatten();
             // Settings a foreground listener loaded stay as they are, and
             // only its shortcut drives it.
             crate::windows::dictation::run(

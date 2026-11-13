@@ -293,6 +293,27 @@ pub fn workspace_configured() -> bool {
         .is_ok_and(|workspace| matches!(find_config(&workspace), Ok(Some(_)) | Err(_)))
 }
 
+/// Built-ins run natively and never need the script host.
+pub fn custom_transformations_selected(
+    processing: &crate::app_settings::DictationProcessingSettings,
+) -> bool {
+    std::iter::once(&processing.default_mode)
+        .chain(&processing.modes)
+        .flat_map(|mode| &mode.transformations)
+        .any(|id| !is_builtin_transformation(id))
+}
+
+/// Every OS discovers a newly initialized workspace before a transformation
+/// is selected. Call on the host's coarse refresh, not an audio callback.
+pub fn host_needed(custom_selected: bool) -> bool {
+    let allowed = !crate::policy::Policy::current().locks(crate::policy::Lock::Transforms);
+    host_required(custom_selected, allowed && workspace_configured(), allowed)
+}
+
+fn host_required(custom_selected: bool, configured: bool, allowed: bool) -> bool {
+    allowed && (custom_selected || configured)
+}
+
 /// Creates the config folder with Hex's typings and agent notes, and a
 /// starter `hex.config.ts` unless a config already exists.
 pub fn initialize_workspace() -> Result<PathBuf> {
@@ -1050,6 +1071,41 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{}-{id}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn host_startup_discovers_a_config_without_selecting_a_transformation() {
+        for selected in [false, true] {
+            for configured in [false, true] {
+                assert!(!host_required(selected, configured, false), "policy wins");
+            }
+        }
+        assert!(!host_required(false, false, true));
+        assert!(
+            host_required(false, true, true),
+            "Set up discovers the new config"
+        );
+        assert!(
+            host_required(true, false, true),
+            "a missing selected script still reports its status"
+        );
+        assert!(host_required(true, true, true));
+
+        let mut processing = crate::app_settings::DictationProcessingSettings::default();
+        processing.default_mode.transformations =
+            builtin_transformation_ids().map(str::to_owned).collect();
+        assert!(!custom_transformations_selected(&processing));
+        processing.modes.push(crate::app_settings::DictationMode {
+            transformations: vec!["my-script".into()],
+            ..Default::default()
+        });
+        assert!(custom_transformations_selected(&processing));
+        processing.modes.clear();
+        processing
+            .default_mode
+            .transformations
+            .push("another-script".into());
+        assert!(custom_transformations_selected(&processing));
     }
 
     #[test]

@@ -472,7 +472,8 @@ pub(crate) fn run(
         crate::updater::Updater::start(),
         processing,
     );
-    host.dictations = dictations.into();
+    let dictations = crate::dictation::service::DictationQueue::from(dictations);
+    host.dictations = dictations.clone();
     if enable_on_launch {
         host.start();
     }
@@ -484,6 +485,7 @@ pub(crate) fn run(
     crate::control::host::serve(
         control_receiver,
         Arc::new(control::LinuxControl {
+            dictations,
             host: host.clone(),
             published: Arc::downgrade(&published),
             window: control.clone(),
@@ -724,9 +726,11 @@ impl LinuxDesktopHost {
         if cfg!(test) {
             return;
         }
-        let enabled =
-            crate::app_settings::transformations_used(&self.settings.dictation_processing)
-                || crate::personal_commands::workspace_configured();
+        let enabled = crate::personal_commands::host_needed(
+            crate::personal_commands::custom_transformations_selected(
+                &self.settings.dictation_processing,
+            ),
+        );
         match (enabled, self.personal_commands.is_some()) {
             (true, false) => {
                 self.personal_commands = crate::personal_commands::PersonalCommands::start(

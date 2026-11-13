@@ -2,6 +2,61 @@
 
 use super::*;
 
+/// The next shortcut event or `hex` command, as the action the loop takes,
+/// when it occurred, whether it was deliberate (a command records at once,
+/// like a toggle press), and the shortcut's flavour. A printing stop leaves
+/// its reply in `print`.
+pub(super) fn next_action(
+    hotkey: &WindowsHotkeyMonitor,
+    held: &mut Option<crate::windows::input::HotkeyEvent>,
+    commands: Option<&mpsc::Receiver<ListenerCommand>>,
+    recording: bool,
+    captured_through: CaptureInstant,
+    print: &mut Option<PrintReply>,
+) -> Option<(
+    HotkeyAction,
+    CaptureInstant,
+    bool,
+    crate::dictation::DictationFlavour,
+)> {
+    if let Some(event) = held.take().or_else(|| hotkey.events.try_recv().ok()) {
+        return Some((
+            event.action,
+            event.occurred_at(captured_through),
+            false,
+            event.flavour,
+        ));
+    }
+    let (action, flavour) = match commands?.try_recv().ok()? {
+        ListenerCommand::Dictation { action, raw } => (
+            match action {
+                CaptureAction::Start => HotkeyAction::Start,
+                CaptureAction::Stop => HotkeyAction::Finish,
+                CaptureAction::Cancel => HotkeyAction::Cancel,
+                CaptureAction::Toggle if recording => HotkeyAction::Finish,
+                CaptureAction::Toggle => HotkeyAction::Start,
+            },
+            if raw {
+                crate::dictation::DictationFlavour::Raw
+            } else {
+                crate::dictation::DictationFlavour::Normal
+            },
+        ),
+        ListenerCommand::PasteLast => (
+            HotkeyAction::PasteLast,
+            crate::dictation::DictationFlavour::Normal,
+        ),
+        ListenerCommand::StopAndPrint(reply) => {
+            *print = Some(reply);
+            (
+                HotkeyAction::Finish,
+                crate::dictation::DictationFlavour::Normal,
+            )
+        }
+    };
+    Some((action, captured_through, true, flavour))
+}
+
 /// The shortcuts a listener's keyboard hook registers.
 #[derive(PartialEq)]
 pub(super) struct Shortcuts {

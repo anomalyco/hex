@@ -24,7 +24,7 @@ use crate::windows::paste::WindowsPaster;
 
 mod shortcuts;
 
-use shortcuts::Shortcuts;
+use shortcuts::{Shortcuts, next_action};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 /// The longest wait with the microphone streaming, idle or recording. Its
@@ -668,6 +668,9 @@ pub fn run(
                     if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
                 {
                     recording_flavour = flavour;
+                    if deliberate {
+                        hotkey.command_capture(Some(flavour));
+                    }
                     if audio_ready {
                         capture.start_hotkey_at(
                             occurred_at,
@@ -703,6 +706,9 @@ pub fn run(
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                 }
                 HotkeyAction::Finish | HotkeyAction::Cancel if start_pending => {
+                    if deliberate {
+                        hotkey.command_capture(None);
+                    }
                     // Released before the opening microphone produced audio:
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
@@ -730,6 +736,9 @@ pub fn run(
                     emit_current_state(&mut events, recording, pending, &device_label)?;
                 }
                 HotkeyAction::Finish if recording => {
+                    if deliberate {
+                        hotkey.command_capture(None);
+                    }
                     audio_suppressor.restore();
                     if !recording_feedback_started && capture.become_intentional(occurred_at) {
                         if !start_tone_played {
@@ -762,6 +771,9 @@ pub fn run(
                     });
                 }
                 HotkeyAction::Cancel if recording => {
+                    if deliberate {
+                        hotkey.command_capture(None);
+                    }
                     audio_suppressor.restore();
                     crate::feedback::retract_start();
                     if recording_feedback_started {
@@ -850,6 +862,11 @@ pub fn run(
         // latch-based sites never did.
         release_microphone!();
 
+        dictations.answer_status(service.snapshot(
+            recording || start_pending || finishing.is_some(),
+            pending,
+            input.is_recovering(),
+        ));
         let idle = !recording
             && !start_pending
             && finishing.is_none()
@@ -987,6 +1004,7 @@ pub fn run(
                     recording_feedback_started = false;
                     recording = false;
                     capture.cancel();
+                    hotkey.command_capture(None);
                     events.dictation(DictationPhase::Cancelled, "")?;
                     if let Some(indicator) = &indicator {
                         indicator.send(crate::rune_hud::HudEvent::Cancelled);
@@ -1011,7 +1029,9 @@ pub fn run(
                 }
                 // On-demand open failed (device busy or unplugged): report
                 // and stay released rather than killing the listener.
-                start_pending = false;
+                if std::mem::take(&mut start_pending) {
+                    hotkey.command_capture(None);
+                }
                 if service.is_active() {
                     end_service_capture(
                         &mut capture,
@@ -1250,61 +1270,6 @@ fn resolve_device_name(query: &str) -> Result<String> {
         .into_iter()
         .find(|name| name.to_lowercase().contains(&query_lower))
         .ok_or_else(|| eyre!("microphone is unavailable: {query}"))
-}
-
-/// The next shortcut event or `hex` command, as the action the loop takes,
-/// when it occurred, whether it was deliberate (a command records at once,
-/// like a toggle press), and the shortcut's flavour. A printing stop leaves
-/// its reply in `print`.
-fn next_action(
-    hotkey: &WindowsHotkeyMonitor,
-    held: &mut Option<crate::windows::input::HotkeyEvent>,
-    commands: Option<&mpsc::Receiver<ListenerCommand>>,
-    recording: bool,
-    captured_through: CaptureInstant,
-    print: &mut Option<PrintReply>,
-) -> Option<(
-    HotkeyAction,
-    CaptureInstant,
-    bool,
-    crate::dictation::DictationFlavour,
-)> {
-    if let Some(event) = held.take().or_else(|| hotkey.events.try_recv().ok()) {
-        return Some((
-            event.action,
-            event.occurred_at(captured_through),
-            false,
-            event.flavour,
-        ));
-    }
-    let (action, flavour) = match commands?.try_recv().ok()? {
-        ListenerCommand::Dictation { action, raw } => (
-            match action {
-                CaptureAction::Start => HotkeyAction::Start,
-                CaptureAction::Stop => HotkeyAction::Finish,
-                CaptureAction::Cancel => HotkeyAction::Cancel,
-                CaptureAction::Toggle if recording => HotkeyAction::Finish,
-                CaptureAction::Toggle => HotkeyAction::Start,
-            },
-            if raw {
-                crate::dictation::DictationFlavour::Raw
-            } else {
-                crate::dictation::DictationFlavour::Normal
-            },
-        ),
-        ListenerCommand::PasteLast => (
-            HotkeyAction::PasteLast,
-            crate::dictation::DictationFlavour::Normal,
-        ),
-        ListenerCommand::StopAndPrint(reply) => {
-            *print = Some(reply);
-            (
-                HotkeyAction::Finish,
-                crate::dictation::DictationFlavour::Normal,
-            )
-        }
-    };
-    Some((action, captured_through, true, flavour))
 }
 
 /// Starts a client's dictation, which counts at once (no hold threshold),
