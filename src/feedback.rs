@@ -1174,12 +1174,34 @@ fn open_output() -> Result<Opened<MixerDeviceSink>> {
     Ok(opened)
 }
 
+/// Opening an output device that also records (a USB headset, a Mac VM's one
+/// sound device) makes macOS show its microphone prompt, so until Hex has
+/// asked for the microphone, tones stay silent on such a device.
+#[cfg(target_os = "macos")]
+fn output_waits_for_microphone() -> bool {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    crate::desktop::onboarding::microphone_state()
+        == crate::desktop::onboarding::PermissionState::NeedsRequest
+        && rodio::cpal::default_host()
+            .default_output_device()
+            .and_then(|device| device.supported_input_configs().ok())
+            .is_some_and(|mut inputs| inputs.next().is_some())
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn output_waits_for_microphone() -> bool {
+    false
+}
+
 impl FeedbackOutput<MixerDeviceSink> {
     /// Opens the output and starts its idle grace without playing anything.
     fn prepare(&mut self, now: Instant) {
         let opening = Instant::now();
         self.drop_failed(now);
         let cold = self.sink.is_none();
+        if cold && output_waits_for_microphone() {
+            return;
+        }
         let route = crate::audio::output_route_generation();
         if let Err(error) = self.open_for_tone(now, route, open_output) {
             tracing::warn!(%error, "recording audio output unavailable; retrying");

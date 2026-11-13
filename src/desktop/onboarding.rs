@@ -731,6 +731,48 @@ impl StalePermissionTracker {
     }
 }
 
+/// How long after a grant System Settings may take to come back to the
+/// front (an authentication sheet closing) before Hex stops waiting to
+/// return.
+pub const RETURN_FROM_SETTINGS_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Brings Hex back after the person grants an asked permission in System
+/// Settings, so the tour is in front again. Hex returns only while System
+/// Settings is still the frontmost app: someone who moved on to another app
+/// keeps it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ReturnFromSettings {
+    granted_at: Option<std::time::Instant>,
+}
+
+impl ReturnFromSettings {
+    pub fn note_granted(&mut self, now: std::time::Instant) {
+        self.granted_at = Some(now);
+    }
+
+    pub const fn is_pending(&self) -> bool {
+        self.granted_at.is_some()
+    }
+
+    /// Whether to bring Hex forward now.
+    pub fn poll(&mut self, now: std::time::Instant, focus: SettingsFocus) -> bool {
+        let Some(granted_at) = self.granted_at else {
+            return false;
+        };
+        if focus.hex_active
+            || now.saturating_duration_since(granted_at) > RETURN_FROM_SETTINGS_WINDOW
+        {
+            self.granted_at = None;
+            return false;
+        }
+        if focus.settings_frontmost {
+            self.granted_at = None;
+            return true;
+        }
+        false
+    }
+}
+
 fn next_practice(current: Practice, observation: Observation) -> Practice {
     match observation {
         Observation::Started => Practice::Listening,
@@ -1152,7 +1194,7 @@ pub fn open_env_arguments(
 }
 
 #[cfg(target_os = "macos")]
-fn microphone_state() -> PermissionState {
+pub(crate) fn microphone_state() -> PermissionState {
     // A WAV fixture stands in for the microphone, which is never opened.
     if crate::audio::uses_fixture() {
         return PermissionState::Ready;
@@ -1162,7 +1204,15 @@ fn microphone_state() -> PermissionState {
     };
     let status: isize =
         unsafe { msg_send![class, authorizationStatusForMediaType: &*AVMediaTypeAudio] };
-    microphone_authorization_state(status)
+    if status == 3 {
+        return PermissionState::Ready;
+    }
+    microphone_authorization_state(status, unsafe { hex_microphone_preflight() })
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn hex_microphone_preflight() -> i32;
 }
 
 /// Accessibility reaches a running Hex: `AXIsProcessTrusted` follows the
@@ -1180,11 +1230,16 @@ const fn accessibility_state(post_event_preflight: bool, trusted: bool) -> Permi
     }
 }
 
+/// The microphone from AVFoundation's `status` and TCC's own `preflight`
+/// (0 granted, 1 refused, 2 not asked, -1 unavailable). AVFoundation keeps
+/// the answer it read first until Hex itself asks, so a grant or refusal
+/// that came another way shows only in the preflight.
 #[cfg(any(target_os = "macos", test))]
-const fn microphone_authorization_state(status: isize) -> PermissionState {
-    match status {
-        0 => PermissionState::NeedsRequest,
-        3 => PermissionState::Ready,
+const fn microphone_authorization_state(status: isize, preflight: i32) -> PermissionState {
+    match (status, preflight) {
+        (3, _) | (_, 0) => PermissionState::Ready,
+        (0, 1) => PermissionState::NeedsSettings,
+        (0, _) => PermissionState::NeedsRequest,
         _ => PermissionState::NeedsSettings,
     }
 }
@@ -1303,14 +1358,30 @@ mod tests {
     #[test]
     fn denied_microphone_permission_requires_system_settings() {
         assert_eq!(
-            microphone_authorization_state(0),
+            microphone_authorization_state(0, 2),
             PermissionState::NeedsRequest
         );
         assert_eq!(
-            microphone_authorization_state(2),
+            microphone_authorization_state(0, -1),
+            PermissionState::NeedsRequest
+        );
+        assert_eq!(
+            microphone_authorization_state(2, 1),
             PermissionState::NeedsSettings
         );
-        assert_eq!(microphone_authorization_state(3), PermissionState::Ready);
+        assert_eq!(microphone_authorization_state(3, 2), PermissionState::Ready);
+    }
+
+    #[test]
+    fn a_microphone_answer_avfoundation_has_not_seen_reads_from_tcc() {
+        // macOS prompted for CoreAudio, or the switch moved in System
+        // Settings, while AVFoundation still holds its first answer.
+        assert_eq!(microphone_authorization_state(0, 0), PermissionState::Ready);
+        assert_eq!(microphone_authorization_state(2, 0), PermissionState::Ready);
+        assert_eq!(
+            microphone_authorization_state(0, 1),
+            PermissionState::NeedsSettings
+        );
     }
 
     #[test]
@@ -2237,6 +2308,51 @@ mod tests {
         tracker.note_asked(t0);
         assert!(!tracker.poll(t0 + Duration::from_secs(5), true, back_in_hex));
         assert!(tracker.poll(t0 + STALE_SIDE_BY_SIDE_DELAY, true, back_in_hex));
+    }
+
+    #[test]
+    fn hex_returns_after_a_grant_only_while_system_settings_is_in_front() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let in_settings = SettingsFocus {
+            settings_open: true,
+            settings_frontmost: true,
+            hex_active: false,
+        };
+        let sheet_closing = SettingsFocus {
+            settings_open: true,
+            settings_frontmost: false,
+            hex_active: false,
+        };
+        let back_in_hex = SettingsFocus {
+            settings_open: true,
+            settings_frontmost: false,
+            hex_active: true,
+        };
+        let mut returning = ReturnFromSettings::default();
+        assert!(!returning.poll(t0, in_settings));
+
+        // Granted with System Settings in front: Hex comes back once.
+        returning.note_granted(t0);
+        assert!(returning.poll(t0, in_settings));
+        assert!(!returning.is_pending());
+        assert!(!returning.poll(t0 + Duration::from_millis(500), in_settings));
+
+        // An authentication sheet still closing: wait for Settings.
+        returning.note_granted(t0);
+        assert!(!returning.poll(t0, sheet_closing));
+        assert!(returning.poll(t0 + Duration::from_secs(1), in_settings));
+
+        // Another app in front (or the sheet never clearing): Hex stays put.
+        returning.note_granted(t0);
+        assert!(!returning.poll(t0 + Duration::from_secs(1), sheet_closing));
+        assert!(!returning.poll(t0 + Duration::from_secs(4), in_settings));
+        assert!(!returning.is_pending());
+
+        // Already back in Hex: nothing to do.
+        returning.note_granted(t0);
+        assert!(!returning.poll(t0, back_in_hex));
+        assert!(!returning.is_pending());
     }
 
     #[test]
