@@ -8,8 +8,8 @@ use rune::{
     text,
 };
 use rune_kit::{
-    Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Kit, Menu, MenuItem,
-    Placement, SegmentedControl, Select, SelectAppearance, Switch,
+    Button, ButtonVariant, ControlSize, Kit, Menu, MenuItem, Placement, SegmentedControl, Select,
+    SelectAppearance, Switch,
 };
 
 use super::Ui;
@@ -832,6 +832,7 @@ pub(super) fn button(
 }
 
 /// An icon-only Secondary button the height of [`button`].
+#[cfg(target_os = "macos")]
 pub(super) fn icon_button(
     p: Paint,
     key: &str,
@@ -839,8 +840,8 @@ pub(super) fn icon_button(
     label: &str,
     press: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    IconButton::new(icon)
-        .variant(IconButtonVariant::Neutral)
+    rune_kit::IconButton::new(icon)
+        .variant(rune_kit::IconButtonVariant::Neutral)
         .control_size(ControlSize::Large)
         .label(label)
         .on_press(press)
