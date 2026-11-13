@@ -1523,6 +1523,8 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   │   node hex_microphone) that Hex plays into through `pw-cat` while the Voice Filter is on
 │   │   ├── Status -> Starting… / Available ("Choose Hex Microphone as your input…") / Unavailable + reason
 │   │   ├── pw-cat missing or exits -> Unavailable with its last error line; retries every 2 s
+│   │   ├── --raw -> only where pw-cat's help lists it (PipeWire 1.3.81+);
+│   │   │   1.2 and older reject it and already play raw on -
 │   │   ├── Off or Hex quits -> the source disappears (pw-cat ends with its input); no root, nothing installed
 │   │   └── Session priority 1 -> WirePlumber never picks it as the default input Hex records
 │   ├── macOS driver status -> Installed v<ver> / In use by <app> + Uninstall
