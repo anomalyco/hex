@@ -1074,34 +1074,48 @@ OpenCode rewrite would have run, though only when that rewrite is off: a mode
 that rewrites with OpenCode keeps its own model. It also skips typed text
 (Labs › Transform typed text), a transcript of nothing but numbers, an empty
 transcript, and a dictation a voice prompt answered. `dictation::apple_cleanup`
-holds the decision (`plan`), the one bridge call, and the guard; the guard is
-the iOS cleaner's, ported exactly (length, digits, word counts, negation
-counts with "no wait" read as a self-correction, and word overlap), so both
-apps accept and refuse the same answers. The bridge
+holds the decision (`plan`), the one bridge call, and the guard. The guard
+applies the iOS cleaner's rules (length, digits, word counts, negation counts
+with "no wait" read as a self-correction, and word overlap), with one counting
+difference: a length is counted in scalars here and in grapheme clusters on
+iOS, and the CJK numerals `Character.isNumber` sees but Rust's `is_numeric`
+does not are read as digits here. The bridge
 (`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs the
 plain-text responder at utility priority with a 2 s budget, temperature 0.2,
 and 1024 response tokens; the answer is trimmed, loses one pair of wrapping
-quotes, and is judged by the guard. Whatever happens the dictation pastes: an
+quotes only when the transcript didn't dictate its own, takes back the
+transcript's leading and trailing whitespace (spoken formatting's line breaks),
+and is judged by the guard. Whatever happens the dictation pastes: an
 unavailable model (checked from the cached availability first, so it costs no
-wait), a timeout, a refusal or guardrail block, an error, or an answer the
-guard refuses all keep the corrected text. With the lab off, or Apple
+wait, and never read while the lab is off), a cancelled job, a timeout, a
+refusal or guardrail block, an error, or an answer the guard refuses all keep
+the corrected text. A long dictation can spend the whole 2 s budget and paste
+uncleaned. With the lab off, or Apple
 Intelligence unavailable, the observation stays absent exactly as before; a
 pass that ran records `profile: "Clean up with Apple Intelligence"` with its
 latency in the dictation's NDJSON `processing` field and in History's
 Processing line, and a pass that fell back records the reason as `fallback`
 ("fell back: …" in History). The card shows the same reason Summaries shows
 when this Mac can't run Apple Intelligence, and only locks the switch while it
-is off, so it can always be turned back off again. Dictate without processing
+is off, so it can always be turned back off again (an organization's Labs lock
+keeps the managed row and its words instead). Dictate without processing
 never reaches this stage on macOS: its captures skip the processor entirely.
+The local API's `POST /transcriptions` with `process=global` (Labs › Process
+API transcripts) runs the same shared pipeline on this Mac
+(`local_api::processing::profiles_processor`), so a processed API transcript
+gets this pass too while the lab is on; its cancellation flag stops the stage
+before the bridge call, the same flag the pipeline's other stages read.
 Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
 `punctuation_and_case_changes_are_accepted`, `digit_changes_are_rejected`,
 `a_lost_negation_is_rejected`, `an_added_negation_is_rejected`,
 `runaway_length_is_rejected`, `an_empty_answer_or_transcript_is_rejected`,
 `an_answer_with_little_overlap_is_rejected`,
-`only_a_dictation_the_rewrite_leaves_alone_is_cleaned`,
+`only_a_dictation_with_words_to_clean_is_cleaned`,
 `a_stage_that_cannot_run_changes_nothing`,
-`a_mode_that_rewrites_leaves_the_stage_alone`,
-`an_answer_loses_its_whitespace_and_one_pair_of_quotes`, and
+`a_cancelled_stage_starts_nothing`,
+`quotes_go_only_when_the_transcript_did_not_dictate_them`,
+`the_transcripts_own_whitespace_comes_back`,
+`cjk_numerals_count_as_digits`, and
 `words_keep_their_apostrophes` in
 [dictation/apple_cleanup.rs](../../src/dictation/apple_cleanup.rs);
 `a_plain_text_answer_reads_its_text` in
@@ -1110,11 +1124,14 @@ Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
 `a_numbers_only_dictation_skips_the_cleanup` in
 [processor.rs](../../src/dictation/processor.rs);
 `clean_up_is_its_own_atomic_and_macos_only` in [labs.rs](../../src/labs.rs);
-and `contributed_options_are_labs_toggles_off_by_default` in
+and `contributed_options_are_labs_toggles_off_by_default`,
+`clean_up_says_why_apple_intelligence_cannot_run`, and
+`a_managed_lock_holds_the_cleanup_lab_off` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
-dictation on a Mac with the lab on and Apple Intelligence available, and the
-macOS build of the new Swift bridge (this host can't compile Swift; CI checks
-it). The Labs page goldens were regenerated on Linux with the new row.
+dictation on a Mac with the lab on and Apple Intelligence available, and any
+real-Mac run of the new Swift bridge — this host and CI compile it, but no one
+has dictated through it yet. The Labs page goldens were regenerated on Linux
+with the new row.
 
 Subtitle export (`subtitle-export`, issue 633, macOS like Meetings; its row
 shows wherever Meetings does): while on, `hex meetings show <id> --srt` or

@@ -524,7 +524,7 @@ impl Profiles {
             let (text, observation) = if profile.ai_enabled || source != Source::Dictation {
                 (corrected, None)
             } else {
-                crate::dictation::apple_cleanup::stage(&corrected, profile.ai_enabled, numbers_only)
+                crate::dictation::apple_cleanup::stage(&corrected, numbers_only, cancelled)
             };
             return Processed {
                 text,

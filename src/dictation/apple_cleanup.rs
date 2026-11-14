@@ -1,9 +1,9 @@
 //! Labs › Clean up with Apple Intelligence: one short, conservative
 //! on-device pass over a macOS dictation, after speech preparation and the
 //! mode's corrections and instead of the OpenCode rewrite (a mode that
-//! rewrites keeps its own model). The instructions and the guard are the iOS
-//! cleaner's, word for word (`ios/HEXMobile/TranscriptCleanup.swift`), so
-//! both apps accept and refuse the same answers.
+//! rewrites keeps its own model). The instructions are the iOS cleaner's,
+//! word for word (`ios/HEXMobile/TranscriptCleanup.swift`), and the guard
+//! applies its rules, counted in scalars where iOS counts graphemes.
 //!
 //! The guard is pure and runs on every OS; only the bridge call is macOS's.
 //! Whatever happens, the dictation pastes: a refused, late, oversized, or
@@ -11,6 +11,7 @@
 //! recorded, never to nothing.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -39,7 +40,7 @@ const INSTRUCTIONS: &str = "You clean up a dictated transcript. Fix clearly misr
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Plan {
     /// Nothing to do: the lab is off, the mode already rewrites, the words
-    /// are numbers only, or nothing was said.
+    /// are numbers only, the dictation was cancelled, or nothing was said.
     Skip,
     /// Apple Intelligence can't run now; the words go on as they are.
     Unavailable,
@@ -48,17 +49,18 @@ pub(crate) enum Plan {
 }
 
 /// The decision for one dictation, over what its caller read: the lab's
-/// switch, whether Apple Intelligence can run on this Mac, whether the mode
-/// already rewrites with OpenCode, whether the words are numbers only, and
-/// whether anything was said at all. Pure, so every OS tests it.
+/// switch, whether Apple Intelligence can run on this Mac, whether the words
+/// are numbers only, whether the dictation was cancelled, and whether
+/// anything was said at all. Pure, so every OS tests it. A mode that
+/// rewrites with OpenCode never reaches it: that branch keeps its own model.
 pub(crate) fn plan(
     lab: bool,
     available: bool,
-    rewrites: bool,
     numbers_only: bool,
+    cancelled: &AtomicBool,
     text: &str,
 ) -> Plan {
-    if !lab || rewrites || numbers_only || text.trim().is_empty() {
+    if !lab || numbers_only || cancelled.load(Ordering::Acquire) || text.trim().is_empty() {
         return Plan::Skip;
     }
     if available {
@@ -69,21 +71,25 @@ pub(crate) fn plan(
 }
 
 /// The stage for one dictation: the words to paste and, when something ran,
-/// the observation History and the live log record. `rewrites` is the mode's
-/// OpenCode rewrite, `numbers_only` its numbers-only transcript.
+/// the observation History and the live log record. `numbers_only` is the
+/// mode's numbers-only transcript; `cancelled` is the caller's flag, checked
+/// before the bridge call so a cancelled job starts no model work.
 pub(crate) fn stage(
     text: &str,
-    rewrites: bool,
     numbers_only: bool,
+    cancelled: &AtomicBool,
 ) -> (String, Option<ProcessingObservation>) {
+    // The lab's switch first: with it off, nothing here reads Apple
+    // Intelligence's availability, which is a bridge call and a shared lock.
+    if !crate::labs::clean_up() {
+        return (text.to_owned(), None);
+    }
+    if cancelled.load(Ordering::Acquire) {
+        // A cancelled job starts no model work, and reads no availability.
+        return (text.to_owned(), None);
+    }
     let reason = unavailable_reason();
-    let step = plan(
-        crate::labs::clean_up(),
-        reason.is_none(),
-        rewrites,
-        numbers_only,
-        text,
-    );
+    let step = plan(true, reason.is_none(), numbers_only, cancelled, text);
     if step == Plan::Unavailable {
         // A Mac without Apple Intelligence, or with it off, waits for nothing:
         // the dictation goes on exactly as it does with the lab off.
@@ -130,7 +136,7 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
     let latency_ms = started.elapsed().as_millis() as u64;
     match outcome {
         Ok(answer) => {
-            let cleaned = tidy(&answer);
+            let cleaned = tidy(&answer, text);
             if !is_acceptable(text, &cleaned) {
                 tracing::warn!(
                     latency_ms,
@@ -181,23 +187,46 @@ fn unavailable_reason() -> Option<&'static str> {
     Some("Apple Intelligence needs a Mac")
 }
 
-/// The model's answer without the whitespace and the one pair of wrapping
-/// quotes a model sometimes adds, before the guard judges it.
-fn tidy(answer: &str) -> String {
+/// The model's answer, ready to judge: the transcript's own leading and
+/// trailing whitespace comes back (spoken formatting's line breaks are part
+/// of what the person said), and one pair of wrapping quotes goes only when
+/// the transcript didn't dictate its own, since spoken formatting's
+/// "quote … unquote" becomes a quoted transcript.
+fn tidy(answer: &str, input: &str) -> String {
     let trimmed = answer.trim();
-    for (open, close) in [
-        ('"', '"'),
-        ('\u{201c}', '\u{201d}'),
-        ('\u{2018}', '\u{2019}'),
-    ] {
-        if let Some(rest) = trimmed.strip_prefix(open)
-            && let Some(inner) = rest.strip_suffix(close)
-            && !inner.trim().is_empty()
-        {
-            return inner.trim().to_owned();
-        }
-    }
-    trimmed.to_owned()
+    let unwrapped = if wrapped_in_quotes(input) {
+        trimmed
+    } else {
+        strip_quotes(trimmed).unwrap_or(trimmed)
+    };
+    let leading = input.len() - input.trim_start().len();
+    let trailing = input.trim_end().len();
+    format!("{}{}{}", &input[..leading], unwrapped, &input[trailing..])
+}
+
+/// The quote pairs a model may wrap its answer in, and a dictation may have
+/// dictated.
+const QUOTE_PAIRS: [(char, char); 3] = [
+    ('"', '"'),
+    ('\u{201c}', '\u{201d}'),
+    ('\u{2018}', '\u{2019}'),
+];
+
+/// `text` without one pair of quotes wrapping all of it, when it has one.
+fn strip_quotes(text: &str) -> Option<&str> {
+    QUOTE_PAIRS.iter().find_map(|(open, close)| {
+        let rest = text.strip_prefix(*open)?;
+        let inner = rest.strip_suffix(*close)?;
+        (!inner.trim().is_empty()).then(|| inner.trim())
+    })
+}
+
+/// Whether `text` itself starts and ends with a pair of quotes.
+fn wrapped_in_quotes(text: &str) -> bool {
+    let text = text.trim();
+    QUOTE_PAIRS
+        .iter()
+        .any(|(open, close)| text.starts_with(*open) && text.ends_with(*close))
 }
 
 /// The words that never lose their place, in the spelling the word splitter
@@ -304,9 +333,17 @@ fn ratio(shared: usize, total: usize) -> f64 {
 
 fn digits(text: &str) -> Vec<char> {
     text.chars()
-        .filter(|character| character.is_numeric())
+        .filter(|character| character.is_numeric() || CJK_DIGITS.contains(character))
         .collect()
 }
+
+/// The characters iOS's `Character.isNumber` counts and Rust's
+/// `char::is_numeric` does not: the CJK numerals a Chinese or Japanese
+/// dictation writes numbers with, so both apps read the same digits.
+const CJK_DIGITS: &[char] = &[
+    '〇', '零', '一', '二', '两', '兩', '三', '四', '五', '六', '七', '八', '九', '十', '百', '千',
+    '万', '萬', '亿', '億', '兆',
+];
 
 fn words(text: &str) -> Vec<String> {
     let mut result = Vec::new();
@@ -434,18 +471,23 @@ mod tests {
         ));
     }
 
-    /// The stage runs only where it can do something: the lab off, a mode
-    /// that rewrites, numbers only, and silence all skip it.
+    /// The stage runs only where it can do something: the lab off, numbers
+    /// only, a cancelled job, and silence all skip it.
     #[test]
-    fn only_a_dictation_the_rewrite_leaves_alone_is_cleaned() {
-        assert_eq!(plan(true, true, false, false, "hello there"), Plan::Clean);
-        assert_eq!(plan(false, true, false, false, "hello there"), Plan::Skip);
-        assert_eq!(plan(true, true, true, false, "hello there"), Plan::Skip);
-        assert_eq!(plan(true, true, false, true, "one two three"), Plan::Skip);
-        assert_eq!(plan(true, true, false, false, "   "), Plan::Skip);
-        assert_eq!(plan(true, true, false, false, ""), Plan::Skip);
+    fn only_a_dictation_with_words_to_clean_is_cleaned() {
+        let live = AtomicBool::new(false);
+        let cancelled = AtomicBool::new(true);
+        assert_eq!(plan(true, true, false, &live, "hello there"), Plan::Clean);
+        assert_eq!(plan(false, true, false, &live, "hello there"), Plan::Skip);
+        assert_eq!(plan(true, true, true, &live, "hello there"), Plan::Skip);
         assert_eq!(
-            plan(true, false, false, false, "hello there"),
+            plan(true, true, false, &cancelled, "hello there"),
+            Plan::Skip
+        );
+        assert_eq!(plan(true, true, false, &live, "   "), Plan::Skip);
+        assert_eq!(plan(true, true, false, &live, ""), Plan::Skip);
+        assert_eq!(
+            plan(true, false, false, &live, "hello there"),
             Plan::Unavailable
         );
     }
@@ -462,22 +504,56 @@ mod tests {
         }
     }
 
-    /// A mode that rewrites with OpenCode keeps its own model, whatever the
-    /// lab and this Mac say.
+    /// A cancelled dictation starts no model work: the words go back as they
+    /// are and nothing is recorded.
     #[test]
-    fn a_mode_that_rewrites_leaves_the_stage_alone() {
-        let (text, observation) = stage("ship it", true, false);
+    fn a_cancelled_stage_starts_nothing() {
+        let cancelled = AtomicBool::new(true);
+        let (text, observation) = stage("ship it", false, &cancelled);
         assert_eq!(text, "ship it");
         assert!(observation.is_none());
     }
 
+    /// A short answer wrapped in quotes loses one pair; a transcript that
+    /// dictated its own quotes keeps both.
     #[test]
-    fn an_answer_loses_its_whitespace_and_one_pair_of_quotes() {
-        assert_eq!(tidy("  Ship it.\n"), "Ship it.");
-        assert_eq!(tidy("\"Ship it.\""), "Ship it.");
-        assert_eq!(tidy("\u{201c}Ship it.\u{201d}"), "Ship it.");
-        assert_eq!(tidy("He said \"ship it\""), "He said \"ship it\"");
-        assert_eq!(tidy("\"\""), "\"\"");
+    fn quotes_go_only_when_the_transcript_did_not_dictate_them() {
+        let plain = "ship it";
+        assert_eq!(tidy("\"Ship it.\"", plain), "Ship it.");
+        assert_eq!(tidy("\u{201c}Ship it.\u{201d}", plain), "Ship it.");
+        // Spoken formatting's "quote ship it unquote" reaches us quoted, so
+        // the answer's own quotes stay.
+        let dictated = "\"ship it\"";
+        assert_eq!(tidy("\"Ship it.\"", dictated), "\"Ship it.\"");
+        assert_eq!(tidy("Ship it.", dictated), "Ship it.");
+        assert_eq!(tidy("He said \"ship it\"", plain), "He said \"ship it\"");
+        assert_eq!(tidy("\"\"", plain), "\"\"");
+    }
+
+    /// The transcript's own line breaks and spacing survive the pass, since
+    /// spoken formatting put them there on purpose.
+    #[test]
+    fn the_transcripts_own_whitespace_comes_back() {
+        assert_eq!(
+            tidy("Ship it.\nLeave it.", "Ship it.\nLeave it."),
+            "Ship it.\nLeave it."
+        );
+        assert_eq!(tidy("Ship it.", "  Ship it.\n"), "  Ship it.\n");
+        assert_eq!(tidy("Ship it.", "Ship it.\n\n"), "Ship it.\n\n");
+        assert_eq!(tidy("  Ship it.  ", "Ship it."), "Ship it.");
+    }
+
+    /// A CJK numeral is a digit, as iOS counts it: 三 → 四 changes a number.
+    #[test]
+    fn cjk_numerals_count_as_digits() {
+        assert!(!is_acceptable(
+            "会议在三点，记得带笔记",
+            "会议在四点，记得带笔记"
+        ));
+        assert!(is_acceptable(
+            "会议在三点，记得带笔记",
+            "会议在三点，记得带笔记。"
+        ));
     }
 
     /// The word splitter keeps an inner apostrophe and drops a trailing one,

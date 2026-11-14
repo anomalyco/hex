@@ -3038,6 +3038,34 @@ fn clean_up_says_why_apple_intelligence_cannot_run() {
     );
 }
 
+/// An organization's lock keeps the cleanup card off, disabled, and saying
+/// so, instead of its Apple Intelligence note, whatever this Mac can run.
+#[test]
+fn a_managed_lock_holds_the_cleanup_lab_off() {
+    use crate::policy::{Lock, Policy};
+    let _locked = Policy::forced_for_test(Policy::default().with(Lock::Labs));
+    let mut rt = runtime("mac-labs", true, (980.0, 2400.0));
+    open_labs(&mut rt);
+    assert!(rt.find("lab-clean-up").is_some(), "the card still lists");
+    tap(&mut rt, "lab-clean-up");
+    assert!(
+        !rt.state.settings.labs.clean_up_with_apple_intelligence,
+        "a locked switch never turns on"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Managed by your organization"),
+        "its row says why"
+    );
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence")),
+        "the Apple Intelligence note would replace the lock's words"
+    );
+}
+
 #[test]
 fn an_installed_driver_keeps_the_voice_filter_on() {
     let mut rt = runtime("mac-voice-filter", true, (980.0, 1400.0));
