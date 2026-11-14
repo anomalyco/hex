@@ -410,6 +410,11 @@ fn handle_command(
         }
         ControllerCommand::Import(path) => start_import(recording, importing, path, events),
         ControllerCommand::Record(candidate) if recording.is_none() => {
+            tracing::info!(
+                source = candidate.source.label(),
+                application = candidate.application.as_deref(),
+                "meeting recording started on request"
+            );
             let start = reminders.start_for(&candidate);
             start_recording(recording, reminders, start, false, events);
         }
