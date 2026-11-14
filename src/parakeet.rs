@@ -122,6 +122,8 @@ struct InferenceJob {
     language: String,
     /// The clip, kept for History while Labs › Keep recordings is on.
     recording: Option<crate::history::Recording>,
+    /// See [`JobTimings::held_ms`].
+    held_ms: Option<u64>,
 }
 
 struct ProcessorJob {
@@ -144,6 +146,10 @@ struct JobTimings {
     audio_ms: u64,
     prepare_ms: u128,
     inference_ms: u128,
+    /// How long a shortcut-started dictation's shortcut was held, press to
+    /// release; `None` for every other capture. Labs › YOLO mode
+    /// reads it as the paste commits.
+    held_ms: Option<u64>,
 }
 
 struct CompletedTranscript {
@@ -246,6 +252,9 @@ struct WorkerState {
     /// Labs › Return to app: the app in front when the capture started,
     /// which its output returns to (macOS).
     return_to: Option<i32>,
+    /// Whether the dictation shortcut, rather than `hex dictation`, started
+    /// the capture now recording (Labs › YOLO mode).
+    started_by_shortcut: bool,
 }
 
 impl WorkerState {
@@ -276,6 +285,7 @@ impl DictationWorker {
             jobs: BTreeSet::new(),
             pending_pastes: 0,
             return_to: None,
+            started_by_shortcut: false,
         }));
 
         let (_, selection) = crate::app_settings::transcription_selection();
@@ -366,6 +376,14 @@ impl DictationWorker {
         state.return_to = return_to;
     }
 
+    /// Records who started the capture now recording: a dictation shortcut,
+    /// or a `hex dictation` command. Only a shortcut's paste may send
+    /// (Labs › YOLO mode).
+    pub fn set_started_by_shortcut(&self, by_shortcut: bool) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.started_by_shortcut = by_shortcut;
+    }
+
     /// Hands the clip to the engine at once, so its live stream finishes
     /// before any later capture begins one; the job then waits in order.
     pub fn transcribe(
@@ -421,6 +439,10 @@ impl DictationWorker {
         let language = selection.language.clone();
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
+        // Labs › YOLO mode: only a shortcut dictation's processed
+        // paste may send, judged on how long its shortcut was held.
+        let held_ms = (matches!(target, TranscriptionTarget::Paste) && state.started_by_shortcut)
+            .then(|| clip.held_ms());
         // Labs › Screen vocabulary: this capture's terms belong to its
         // whole-clip run and no other job. Only a model that reads the terms
         // gives up its live stream, whose vocabulary is fixed when it starts
@@ -461,6 +483,7 @@ impl DictationWorker {
             return_to,
             language,
             recording,
+            held_ms,
         })
         .map(|()| {
             state.next_sequence += 1;
@@ -832,6 +855,7 @@ fn run_inference_worker(
             audio_ms,
             prepare_ms: job.prepare_ms,
             inference_ms: inference_started.elapsed().as_millis(),
+            held_ms: job.held_ms,
         };
         let target = job.target;
         match result {
@@ -1016,6 +1040,7 @@ fn finish_output(
                 .and_then(|result| result.processing.clone());
             let result = result.and_then(|mut completed| {
                 let paste_started = Instant::now();
+                let mut sent = false;
                 if !completed.nothing && !completed.text.trim().is_empty() {
                     match target {
                         TranscriptionTarget::Paste
@@ -1035,15 +1060,25 @@ fn finish_output(
                                 )
                             {
                                 PasteMode::CopyOnly
+                            } else if completed.timings.held_ms.is_some_and(|held_ms| {
+                                crate::dictation::yolo_mode::sends(
+                                    held_ms,
+                                    completed.application.as_deref(),
+                                )
+                            }) {
+                                // Labs › YOLO mode, read as the
+                                // output commits.
+                                PasteMode::Send
                             } else {
                                 PasteMode::Continue
                             };
+                            sent = matches!(mode, PasteMode::Send);
                             // Labs › Return to app: the app the capture
                             // started in comes back first. When it can't,
                             // nothing is pasted; the text stays for Paste
                             // last dictation, and History keeps only pasted
                             // output, as on any failed paste.
-                            if matches!(mode, PasteMode::Continue)
+                            if matches!(mode, PasteMode::Continue | PasteMode::Send)
                                 && let Err(error) =
                                     crate::paste::return_to_app::bring_to_front(completed.return_to)
                             {
@@ -1077,7 +1112,7 @@ fn finish_output(
                         *last_transcript = Some(completed.text.clone());
                     }
                     if let Some(history) = history {
-                        record_history(history, target, &mut completed);
+                        record_history(history, target, sent, &mut completed);
                     }
                 }
                 tracing::info!(
@@ -1133,9 +1168,11 @@ fn finish_output(
 fn record_history(
     history: &History,
     target: TranscriptionTarget,
+    sent: bool,
     completed: &mut CompletedTranscript,
 ) {
     let kind = match target {
+        TranscriptionTarget::Paste if sent => HistoryKind::Send,
         TranscriptionTarget::Paste | TranscriptionTarget::CopyOnlyPaste => HistoryKind::Dictation,
         TranscriptionTarget::RawPaste | TranscriptionTarget::RawCopyOnlyPaste => HistoryKind::Raw,
         TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
@@ -1424,6 +1461,7 @@ mod tests {
                 audio_ms: 1000,
                 prepare_ms: 0,
                 inference_ms: 0,
+                held_ms: None,
             },
             recording: None,
         }
@@ -1547,6 +1585,7 @@ mod tests {
                         audio_ms: 2_000,
                         prepare_ms: 0,
                         inference_ms: 0,
+                        held_ms: None,
                     },
                     processing: None,
                     recording: None,
@@ -1603,6 +1642,7 @@ mod tests {
                             audio_ms: 4_000,
                             prepare_ms: 0,
                             inference_ms: 0,
+                            held_ms: None,
                         },
                         processing: None,
                         recording: None,
@@ -1681,6 +1721,7 @@ mod tests {
                 jobs: BTreeSet::from([DictationJobId(0)]),
                 pending_pastes: 0,
                 return_to: None,
+                started_by_shortcut: false,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),

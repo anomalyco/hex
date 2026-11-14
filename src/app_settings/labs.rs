@@ -214,6 +214,16 @@ pub struct LabsSettings {
     /// `hex completions <shell>` prints a completion script for bash, zsh,
     /// fish, elvish, or PowerShell, generated from Hex's own commands.
     pub shell_completions: bool,
+    /// A shortcut dictation held for at least
+    /// `yolo_mode_seconds` presses Return after its paste.
+    pub yolo_mode: bool,
+    /// One of [`YOLO_MODE_SECONDS`]; another value loads the
+    /// default.
+    #[serde(deserialize_with = "deserialize_yolo_mode_seconds")]
+    pub yolo_mode_seconds: u32,
+    /// The apps Labs › YOLO mode sends in, by the names
+    /// Modes match; empty means every app.
+    pub yolo_mode_apps: Vec<String>,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -259,7 +269,13 @@ pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
 /// 30 s, 1, 3, 5, and 30 minutes.
 pub const KEEP_MICROPHONE_OPEN_SECONDS: [u32; 5] = [30, 60, 180, 300, 1_800];
 
+/// The holds Labs › YOLO mode offers, in seconds.
+pub const YOLO_MODE_SECONDS: [u32; 5] = [1, 2, 3, 5, 10];
+
 impl LabsSettings {
+    /// The default [`YOLO_MODE_SECONDS`] choice.
+    pub const DEFAULT_YOLO_MODE_SECONDS: u32 = 2;
+
     /// The default [`KEEP_MICROPHONE_OPEN_SECONDS`] choice.
     pub const DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS: u32 = 60;
 
@@ -288,6 +304,26 @@ where
         Err(serde::de::Error::custom(format!(
             "expected one of {}",
             KEEP_MICROPHONE_OPEN_SECONDS
+                .map(|seconds| seconds.to_string())
+                .join(", ")
+        )))
+    }
+}
+
+/// A saved `yolo_mode_seconds` must name one of
+/// [`YOLO_MODE_SECONDS`]; another value fails to load, so the
+/// field returns to its default with the usual launch note.
+fn deserialize_yolo_mode_seconds<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let seconds = u32::deserialize(deserializer)?;
+    if YOLO_MODE_SECONDS.contains(&seconds) {
+        Ok(seconds)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "expected one of {}",
+            YOLO_MODE_SECONDS
                 .map(|seconds| seconds.to_string())
                 .join(", ")
         )))
@@ -372,6 +408,9 @@ impl Default for LabsSettings {
             more_call_apps: false,
             opencode_in_wsl: false,
             shell_completions: false,
+            yolo_mode: false,
+            yolo_mode_seconds: Self::DEFAULT_YOLO_MODE_SECONDS,
+            yolo_mode_apps: Vec::new(),
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,

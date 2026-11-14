@@ -423,6 +423,28 @@ pub fn k_quant_models() -> bool {
     K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
 }
 
+/// Labs › YOLO mode: how long a shortcut dictation must be held
+/// for Return to follow its paste, or `None` while the lab is off (read as
+/// each dictation's output is committed).
+pub fn yolo_mode() -> Option<std::time::Duration> {
+    // The state word is full, so the lab has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    let seconds = YOLO_MODE_SECONDS.load(Ordering::Acquire);
+    (seconds > 0 && Feature::YoloMode.on_this_os())
+        .then(|| std::time::Duration::from_secs(u64::from(seconds)))
+}
+
+/// The apps Labs › YOLO mode sends in; empty means
+/// every app.
+pub fn yolo_mode_apps() -> Vec<String> {
+    let _ = state();
+    YOLO_MODE_APPS
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).

@@ -1229,6 +1229,9 @@ fn handle_hotkey_action(
             // Labs › Return to app: this paste goes back to the app in front
             // now, even if another one comes forward while the person talks.
             worker.remember_return_to_app();
+            // Labs › YOLO mode: a shortcut started this capture
+            // unless a `hex dictation` command says otherwise below.
+            worker.set_started_by_shortcut(true);
             // The press started a capture, but it may still be provisional:
             // no page is read until the capture is held past its threshold.
             context.begin();
@@ -1480,6 +1483,8 @@ fn control_dictation(
                 release_while_idle,
             )?;
             if accepted {
+                // Labs › YOLO mode never sends a command's capture.
+                worker.set_started_by_shortcut(false);
                 // A warm start already queued its provisional tone. A control
                 // start has no hold threshold to wait for, so its capture is
                 // real now and reads its page at once.

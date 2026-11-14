@@ -53,6 +53,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        long after a capture, so the next dictation starts at once
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
+├── YOLO mode no labs.yolo_mode (every OS) a shortcut dictation held at least its chosen time (2 s default), in one of its chosen apps if any, presses Return after its paste; History records it as Send
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
 ├── Print-only CLI dictation no labs.print_start        (macOS)   hex dictation start --print answers with the transcript however the recording ends; never pasted or copied
 ├── Voice prompt    no    labs.voice_prompt + labs.voice_prompt_phrase ("rewrite this", every OS)
@@ -311,7 +312,8 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
 │   // appearance_shows_its_theme_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
-│   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one). It never turns a lab on. An unknown
+│   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one), scrolls to its card,
+│   and gives the card a focus border for 1.5 s (Store::flash). It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
@@ -321,7 +323,7 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
-├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens Labs on its group
+├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens Labs on its group and card
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver (dev builds; stable has no voice-filter)
 └── hex experiments … -> points at hex labs
@@ -699,6 +701,41 @@ on macOS too). Off, output is exactly as before. Checks:
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation on a Mac or Windows PC with the toggle on.
+
+YOLO mode (`yolo-mode`, every OS): while on, a
+dictation started by a dictation shortcut (hold, double-tap lock, Toggle, a
+second or extra shortcut, Caps Lock dictation on macOS) whose shortcut was
+held at least `labs.yolo_mode_seconds` (1, 2, 3, 5, or 10 s,
+2 s by default; the card's Longer than picker) pastes as usual,
+then presses Return once, 100 ms later (`yolo_mode::SETTLE`), so a chat
+message sends itself. The hold is `DictationClip::held_ms`: the audio from
+the press to the release, without the pre-roll before it or the release
+tail after. Shorter dictations paste as usual. The card's Only in row
+(`labs.yolo_mode_apps`, empty by default: every app) limits it to
+chosen apps, picked with the Modes pane's application picker
+(`modes::PickerTarget::YoloMode`) and matched as a Mode's
+applications are (`ContextSnapshot::application_is`) against the frontmost
+app captured with the dictation; with apps chosen, a dictation whose app is
+unknown (Wayland without foreign-toplevel) never sends. It never applies to Dictate
+without processing, `hex dictation` or local API captures, printing stops,
+Copy dictation only, Live typing's input-method commits, meetings, Annotate
+captures, or Paste last dictation. Each OS decides as the output commits
+(`yolo_mode::sends` reads the lab then): macOS `parakeet::finish_output`
+picks `PasteMode::Send` (⌘V, then a bare Return through
+`keyboard::post_return`, and the continuation ends); Windows
+`process_dictation_job` follows its paste with
+`WindowsPaster::press_return` (VK_RETURN through `SendInput`); Linux
+`DictationOutput::deliver` follows it with `LinuxPaster::press_return`
+(`Chord::Return`: XTest on X11, `wtype -k Return` or the RemoteDesktop
+portal on Wayland). A sent dictation's History entry is kind Send. On Linux
+a desktop keybinding that runs `hex dictation toggle` (Wayland without the
+GlobalShortcuts portal, GNOME custom shortcuts) is a command, so it never
+sends. Checks: `a_hold_reaching_the_chosen_time_is_long_enough` and
+`chosen_apps_limit_where_it_sends` (yolo_mode.rs);
+`release_tail_keeps_audio_through_the_tail_and_no_further` checks
+`held_ms` (dictation.rs); `return_sends_no_modifier` (linux/paste.rs);
+`yolo_mode_is_its_own_switch_and_everywhere` (labs.rs). Not yet
+observed: a real dictation sending a message on any OS.
 
 Return to app (`return-to-app`, macOS): while on, a dictation pastes into the
 app its capture started in. `handle_hotkey_action`'s Start (shared by the

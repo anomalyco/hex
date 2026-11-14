@@ -390,7 +390,21 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut V
         .child(tile(p, entry.icon, TILE))
         .child(copy)
         .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
+        .border(
+            p.hair,
+            if flashing(ui, lab.id()) {
+                c.border_focus
+            } else {
+                c.border_weak
+            },
+        )
+}
+
+/// Whether a Labs link just named this lab.
+fn flashing(ui: &Ui, id: &str) -> bool {
+    ui.lab_store
+        .flash
+        .is_some_and(|(linked, at)| linked == id && at.elapsed() < super::FLASH)
 }
 
 const CARD_PADDING: f32 = 12.0;

@@ -34,6 +34,9 @@ pub enum PasteMode {
     /// Labs › Copy dictation only: the text goes to the clipboard as an
     /// ordinary entry and nothing is pasted, typed, or restored.
     CopyOnly,
+    /// Labs › YOLO mode: pastes as `Continue` does, then presses
+    /// Return. What was sent can't be continued.
+    Send,
 }
 
 struct PreparedClipboard {
@@ -219,6 +222,12 @@ impl Paster {
     pub fn paste(&mut self, text: &str, mode: PasteMode) -> Result<()> {
         if matches!(mode, PasteMode::CopyOnly) {
             return self.copy_only(text);
+        }
+        if matches!(mode, PasteMode::Send) {
+            self.paste(text, PasteMode::Continue)?;
+            self.continuation = None;
+            std::thread::sleep(crate::dictation::yolo_mode::SETTLE);
+            return keyboard::post_return();
         }
         let revision = self.activity.revision();
         let continuation = self.continuation.as_ref().filter(|continuation| {

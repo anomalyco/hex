@@ -12,6 +12,7 @@ mod group;
 mod screenshots;
 mod store;
 mod voice_prompt;
+mod yolo_mode;
 
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
@@ -218,7 +219,13 @@ pub(super) struct Store {
     pub(super) origins: TextEdit,
     /// Whether `origins` started from the saved origins.
     pub(super) origins_synced: bool,
+    /// The lab a `hex://labs/<feature>` link named and when, so its card
+    /// shows a focus border for [`FLASH`].
+    pub(super) flash: Option<(&'static str, std::time::Instant)>,
 }
+
+/// How long a linked lab's card keeps its focus border.
+pub(super) const FLASH: std::time::Duration = std::time::Duration::from_millis(1500);
 
 impl Store {
     fn query(&self) -> String {
@@ -351,8 +358,15 @@ pub(super) fn reveal(ui: &mut Ui, link: &LabsLink, tx: &mut Tx) {
     }
     let Some(id) = &link.lab else { return };
     match shown(ui).into_iter().find(|row| row.lab.id() == id) {
-        Some(row) if link.category.is_none() => ui.lab_store.group = Some(row.group),
-        Some(_) => {}
+        Some(row) => {
+            if link.category.is_none() {
+                ui.lab_store.group = Some(row.group);
+            }
+            let id = row.lab.id();
+            ui.lab_store.flash = Some((id, std::time::Instant::now()));
+            tx.scroll_into_view(format!("lab-card-{id}"));
+            tx.wake_after(FLASH);
+        }
         None => tracing::warn!(feature = %id, "a Labs link named no feature this Hex has"),
     }
 }
@@ -641,6 +655,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
         None,
         tr("Keep dictation on clipboard"),
         tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
+    ));
+    // Every OS's paster can press Return after its paste.
+    rows.push(row(
+        Feature::YoloMode,
+        None,
+        tr("YOLO mode"),
+        tr("Send dictations automatically"),
     ));
     if matches!(
         caps.os,
@@ -1197,6 +1218,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::ShellCompletions => "lab-shell-completions",
+        Feature::YoloMode => "lab-yolo-mode",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::ApiBrowserAccess => "lab-api-browser-access",
@@ -1239,6 +1261,13 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::AppModelSwitching => ui.open = None,
         // The card's duration menu closes when its lab does.
         Feature::KeepMicrophoneOpen => ui.open = None,
+        // Its menu and application picker close with it.
+        Feature::YoloMode => {
+            ui.open = None;
+            if ui.modes.picker_target == super::modes::PickerTarget::YoloMode {
+                ui.modes.application_picker_open = false;
+            }
+        }
         // The phrase field starts at the saved phrase, and an invalid draft
         // leaves with its lab.
         Feature::VoicePrompt => {
@@ -1295,6 +1324,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                 )
                 .child(keep_microphone_open_for(ui, p, layer)),
         ),
+        Lab::Feature(Feature::YoloMode) => Some(yolo_mode::body(ui, p, layer)),
         Lab::Feature(Feature::CapsLockDictation) => Some(
             row()
                 .key("caps-lock-light-row")

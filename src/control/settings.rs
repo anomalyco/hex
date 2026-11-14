@@ -1361,6 +1361,10 @@ mod tests {
             choices("labs.keep_microphone_open_seconds"),
             crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS
         );
+        assert_eq!(
+            choices("labs.yolo_mode_seconds"),
+            crate::app_settings::YOLO_MODE_SECONDS
+        );
     }
 
     #[test]
