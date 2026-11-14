@@ -754,6 +754,14 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.screenshots = true;
         ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
+    // Labs › YOLO mode's card while on, limited to two apps.
+    ("mac-labs-yolo-mode", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.yolo_mode = true;
+        ui.settings.labs.yolo_mode_apps = vec!["Messages".into(), "Slack".into()];
+        crate::labs::apply(&ui.settings.labs);
+        ui.lab_store.group = Some(crate::labs::Feature::YoloMode.group());
+    }),
     // Labs on Windows and Linux: only their OS's labs, groups holding a
     // lab that's on open.
     ("windows-labs", |ui| {
