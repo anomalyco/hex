@@ -1806,6 +1806,32 @@ mod tests {
         }
     }
 
+    /// Each Labs card translates its feature's title and line, and each
+    /// group header its title (`labs::Feature::title`, `summary`,
+    /// `labs::Group::title`), which are not literals at the
+    /// call. Playground keeps its English name.
+    #[test]
+    fn every_lab_card_string_has_every_language() {
+        use crate::labs::Feature;
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
+        let strings = Feature::ALL
+            .into_iter()
+            .flat_map(|feature| [feature.title(), feature.summary()])
+            .chain(crate::labs::Group::ALL.map(crate::labs::Group::title))
+            .filter(|english| *english != "Playground");
+        for english in strings {
+            let translations = table
+                .get(english)
+                .unwrap_or_else(|| panic!("{english:?} has no translations"));
+            assert!(
+                translations
+                    .iter()
+                    .all(|translation| !translation.is_empty()),
+                "{english:?} is missing a language"
+            );
+        }
+    }
+
     /// The listener card translates the status each OS's host publishes,
     /// which is not a literal at the call.
     #[test]

@@ -31,11 +31,14 @@ use std::sync::{LazyLock, RwLock};
 
 use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
 
+mod card;
 mod cli;
 mod description;
 mod feature;
 mod gates;
 mod group;
+#[cfg(test)]
+mod web;
 
 pub use self::cli::{LabsCommand, run, run_retired_experiments};
 pub use self::feature::Feature;
@@ -52,6 +55,25 @@ pub enum Audience {
     Everyone,
     /// Only dev builds have it.
     Dev,
+}
+
+/// An OS Hex runs on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Os {
+    Macos,
+    Windows,
+    Linux,
+}
+
+impl Os {
+    /// The OS this build runs on.
+    pub const CURRENT: Self = if cfg!(target_os = "macos") {
+        Self::Macos
+    } else if cfg!(target_os = "windows") {
+        Self::Windows
+    } else {
+        Self::Linux
+    };
 }
 
 impl Audience {
@@ -308,8 +330,35 @@ impl Feature {
             .find(|feature| feature.settings_key() == key)
     }
 
-    /// Whether this OS has the feature at all, in any build.
+    /// Whether this OS has the feature at all, in any build: one of its
+    /// [`Self::oses`], unless this session or build leaves it out.
     pub fn on_this_os(self) -> bool {
+        match self {
+            Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
+            Self::AnnotateReplay => {
+                #[cfg(hex_capture)]
+                {
+                    crate::capture_host::replay_available()
+                }
+                #[cfg(not(hex_capture))]
+                {
+                    false
+                }
+            }
+            _ => self.oses().contains(&Os::CURRENT),
+        }
+    }
+
+    /// The OSes that have the feature, in the order Hex's website names
+    /// them. Linux's keyboard-language switching needs an X11 session.
+    pub const fn oses(self) -> &'static [Os] {
+        const MACOS: &[Os] = &[Os::Macos];
+        const WINDOWS: &[Os] = &[Os::Windows];
+        const LINUX: &[Os] = &[Os::Linux];
+        const MACOS_WINDOWS: &[Os] = &[Os::Macos, Os::Windows];
+        const MACOS_LINUX: &[Os] = &[Os::Macos, Os::Linux];
+        const WINDOWS_LINUX: &[Os] = &[Os::Windows, Os::Linux];
+        const EVERY: &[Os] = &[Os::Macos, Os::Windows, Os::Linux];
         match self {
             Self::Meetings
             | Self::LiveChapters
@@ -317,19 +366,17 @@ impl Feature {
             | Self::StopWhenCallEnds
             | Self::MovableMeetingCapsules
             | Self::KQuantModels
-            | Self::MeetingImport => cfg!(target_os = "macos"),
-            Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
-            Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => {
-                cfg!(target_os = "windows")
-            }
-            Self::SectionKeyAlone => cfg!(any(target_os = "linux", target_os = "macos")),
+            | Self::MeetingImport => MACOS,
+            Self::VoiceFilter => MACOS_LINUX,
+            Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => WINDOWS,
+            Self::SectionKeyAlone => MACOS_LINUX,
             Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::GnomeMeetingCapsules
             | Self::GnomeAnnotate
-            | Self::LiveTyping => cfg!(target_os = "linux"),
+            | Self::LiveTyping => LINUX,
             Self::StandaloneSpecialKeys | Self::SkipPauses | Self::TerminalPasteShortcut => {
-                cfg!(any(target_os = "linux", target_os = "windows"))
+                WINDOWS_LINUX
             }
             Self::MouseShortcuts
             | Self::PauseBrowser
@@ -346,24 +393,16 @@ impl Feature {
             | Self::PrintStart
             | Self::ScreenVocabulary
             | Self::CursorContext
-            | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
-            Self::CleanUpWithAppleIntelligence => cfg!(target_os = "macos"),
-            Self::CopyOnly => cfg!(any(target_os = "macos", target_os = "windows")),
-            Self::ReturnToApp => cfg!(target_os = "macos"),
-            Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
-            Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
-            Self::AppModelSwitching => cfg!(any(target_os = "macos", target_os = "windows")),
-            Self::AnnotateReplay => {
-                #[cfg(hex_capture)]
-                {
-                    crate::capture_host::replay_available()
-                }
-                #[cfg(not(hex_capture))]
-                {
-                    false
-                }
-            }
+            | Self::MoreDictationShortcuts => MACOS,
+            Self::CleanUpWithAppleIntelligence => MACOS,
+            Self::CopyOnly => MACOS_WINDOWS,
+            Self::ReturnToApp => MACOS,
+            Self::TapOrHold => MACOS_LINUX,
+            Self::AppModelSwitching => MACOS_WINDOWS,
+            // Only builds with the capture build option have it.
+            Self::AnnotateReplay => MACOS,
             Self::Playground
+            | Self::KeyboardModelSwitching
             | Self::LiveText
             | Self::FailureNotices
             | Self::SecondDictationShortcut
@@ -401,7 +440,7 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::SpeakersOnly
             | Self::ShellCompletions
-            | Self::YoloMode => true,
+            | Self::YoloMode => EVERY,
         }
     }
 

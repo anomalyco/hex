@@ -19,7 +19,33 @@ is no master switch. **Labs** is always the last item in the sidebar (Up and
 Down reach it from the last pane; pressing it while it shows keeps it open) and
 lists every Labs feature this OS has as a card (name, one-line description, toggle)
 under its group's collapsible header, each **off by default**, plus Send
-feedback and Run setup again.
+feedback and Run setup again. A card's title and line are
+`labs::Feature::title` and `summary` (`src/labs/card.rs`), translated by the
+window, and its OSes `labs::Feature::oses`.
+
+**On the web.** Every `Everyone` lab (not Dev ones, nor Screenshots, Annotate
+15 s replay, or Copy captures as a zip, which only builds with the capture
+build option have) has a page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
+the dev site), listed newest first at `/hex/labs`, with a 1200 × 630 social
+card. The pages come from `site/src/labs.json`, which only the registry
+writes:
+
+```ts
+Add or change a lab
+├── HEX_UPDATE_LABS_JSON=1 scripts/check labs::web -> rewrites site/src/labs.json from Feature::ALL
+├── commit it               -> labs::web's test fails while the JSON is stale
+└── push to dev (site/**)   -> the dev site's build writes labs/<id>.html, labs/<id>.png, labs.html, and the sitemap entries
+Page
+├── Open in Hex             -> hex://labs/<id> (Mac labs only: only the Mac app registers hex://)
+├── Get Hex                 -> the home page when the stable release's src/labs.rs names the lab,
+│                              else Get Hex Dev (/hex/download/dev, and dev links for its other OSes)
+└── hex labs on <id>        -> the same switch from a terminal, every OS
+```
+
+Checks: `labs::web` (Rust, the JSON and which labs it leaves out),
+`every_lab_card_string_has_every_language` (i18n), and `site/labs.test.ts`
+(`bun test`: links, meta, order). The site's build runs in the deploy only,
+not on pull requests; the live page is unverified until a deploy.
 
 ```ts
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does

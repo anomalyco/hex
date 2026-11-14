@@ -42,6 +42,19 @@ impl Group {
         }
     }
 
+    /// Its English header in Settings › Labs.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Dictation => "Dictation",
+            Self::Output => "Output",
+            Self::History => "History",
+            Self::Meetings => "Meetings",
+            Self::Annotate => "Annotate",
+            Self::Shortcuts => "Shortcuts",
+            Self::Models => "Models",
+        }
+    }
+
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|group| group.id() == id)
     }
