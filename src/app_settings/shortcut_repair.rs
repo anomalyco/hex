@@ -191,6 +191,25 @@ impl AppSettings {
         }
     }
 
+    /// Clears a saved Dictate without processing or Paste last dictation
+    /// shortcut that shares the dictation shortcut's chord. Neither is
+    /// filtered at runtime the way the Lab shortcuts' `active_*` accessors
+    /// are ([`AppSettings::hotkey_in_use`]), so a shared chord would start
+    /// both captures.
+    pub(crate) fn clear_shortcuts_sharing_dictation(&mut self) {
+        let dictation = self.dictation_hotkey.clone();
+        clear_shared_shortcut(
+            &dictation,
+            &mut self.raw_dictation_hotkey,
+            "Dictate without processing",
+        );
+        clear_shared_shortcut(
+            &dictation,
+            &mut self.paste_last_hotkey,
+            "Paste last dictation",
+        );
+    }
+
     /// Puts back every shortcut `matches`: dictation, Paste last dictation,
     /// and Annotate to their defaults, the optional ones unbound. Returns
     /// whether any changed.
@@ -247,6 +266,22 @@ impl AppSettings {
         }
         reset
     }
+}
+
+/// Clears `binding` when it shares `dictation`'s chord, naming it in the log.
+fn clear_shared_shortcut(
+    dictation: &HotkeyBinding,
+    binding: &mut Option<HotkeyBinding>,
+    name: &str,
+) {
+    if !binding
+        .as_ref()
+        .is_some_and(|saved| saved.overlaps(dictation))
+    {
+        return;
+    }
+    tracing::warn!("cleared a shortcut that shares the dictation shortcut: {name}");
+    *binding = None;
 }
 
 #[cfg(test)]

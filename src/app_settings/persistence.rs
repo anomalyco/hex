@@ -229,6 +229,11 @@ impl AppSettings {
         // keep their existing write-on-load behavior for healthy settings.
         let migrated =
             !repaired && (!hints.is_empty() || serde_json::to_value(&settings)? != loaded);
+        // After every repair above, and after the migration check so this
+        // repair alone never rewrites the file: a saved shortcut on the
+        // dictation chord is cleared on every load, and only leaves the file
+        // at its next save.
+        settings.clear_shortcuts_sharing_dictation();
         Ok((settings, migrated, issue))
     }
 
@@ -264,6 +269,9 @@ impl AppSettings {
         let mut merged = json(&current)?;
         merge(&mut merged, &json(self)?, &json(candidate)?);
         let mut merged: Self = serde_json::from_value(merged)?;
+        // The merge can land the dictation shortcut on a shortcut the file
+        // already had, so both are held to the same rule a load repairs.
+        merged.clear_shortcuts_sharing_dictation();
         merged.write_locked(path, policy)?;
         policy.enforce(&mut merged);
         stamp(&mut merged, path, true, &mut revision);
