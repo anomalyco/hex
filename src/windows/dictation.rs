@@ -66,6 +66,10 @@ struct Job {
     flavour: crate::dictation::DictationFlavour,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
+    /// How long a shortcut-started capture's shortcut was held, press to
+    /// release; `None` for a `hex dictation` capture (Labs › YOLO
+    /// mode).
+    held_ms: Option<u64>,
 }
 
 /// A release whose capture is still collecting its post-release tail.
@@ -74,10 +78,12 @@ struct Finishing {
     release: ReleaseWait,
     print: Option<PrintReply>,
     flavour: crate::dictation::DictationFlavour,
+    /// A shortcut, not a `hex dictation` command, started the capture.
+    by_shortcut: bool,
 }
 
 enum OutputJob {
-    Dictation(Job),
+    Dictation(Box<Job>),
     PasteLast,
 }
 
@@ -317,7 +323,7 @@ pub fn run(
             while let Ok(job) = job_receiver.recv() {
                 let result = match job {
                     OutputJob::Dictation(job) => process_dictation_job(
-                        job,
+                        *job,
                         &mut paster,
                         history.as_ref(),
                         &last_dictation,
@@ -334,6 +340,7 @@ pub fn run(
 
     let mut recording = false;
     let mut recording_flavour = crate::dictation::DictationFlavour::Normal;
+    let mut recording_by_shortcut = false;
     let mut recording_feedback_started = false;
     // Whether this capture's start tone already played on its press.
     let mut start_tone_played = false;
@@ -514,7 +521,7 @@ pub fn run(
                 context,
                 print,
                 flavour,
-                ..
+                by_shortcut,
             }) = finishing.take()
             else {
                 unreachable!("checked above");
@@ -529,6 +536,7 @@ pub fn run(
                 &mut pending,
                 print,
                 flavour,
+                by_shortcut,
                 context,
             )?;
             if submitted {
@@ -668,6 +676,7 @@ pub fn run(
                     if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
                 {
                     recording_flavour = flavour;
+                    recording_by_shortcut = !deliberate;
                     if deliberate {
                         hotkey.command_capture(Some(flavour));
                     }
@@ -755,6 +764,7 @@ pub fn run(
                     recording_feedback_started = false;
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
+                        by_shortcut: recording_by_shortcut,
                         print: print.take(),
                         context: if capture.would_transcribe(occurred_at) {
                             crate::windows::context::begin_capture(
@@ -1099,6 +1109,7 @@ fn process_dictation_job(
     let inference_ms = inference_started.elapsed().as_millis() as u64;
     let context = job.context.finish();
     let application = context.application.clone();
+    let mut sent = false;
     let result = transcription.and_then(|raw_text| {
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
@@ -1132,11 +1143,19 @@ fn process_dictation_job(
             let paster = paster.as_mut().map_err(|error| format!("{error:#}"))?;
             // Labs › Copy dictation only, read as the output commits:
             // dictations go to the clipboard unpasted; Paste Last still pastes.
-            let pasted = if crate::labs::copy_only() {
+            let copy_only = crate::labs::copy_only();
+            let pasted = if copy_only {
                 paster.copy_only(&text)
             } else {
                 paster.paste(&text, job.flavour.terminal_paste())
             };
+            // Labs › YOLO mode, read as the output commits.
+            sent = pasted.is_ok()
+                && !copy_only
+                && job.held_ms.is_some_and(|held_ms| {
+                    crate::dictation::yolo_mode::sends(held_ms, application.as_deref())
+                });
+            let pasted = if sent { paster.press_return() } else { pasted };
             // A failed paste still keeps the text for Paste Last.
             *last_dictation
                 .lock()
@@ -1155,6 +1174,8 @@ fn process_dictation_job(
             );
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
+            } else if sent {
+                draft.kind = crate::history::HistoryKind::Send;
             } else if job.flavour.raw() {
                 draft.kind = crate::history::HistoryKind::Raw;
             }
@@ -1323,6 +1344,7 @@ fn submit_capture(
     pending: &mut usize,
     print: Option<PrintReply>,
     flavour: crate::dictation::DictationFlavour,
+    by_shortcut: bool,
     context: crate::windows::context::PendingContext,
 ) -> Result<bool> {
     let mut submitted = false;
@@ -1342,6 +1364,10 @@ fn submit_capture(
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
+            // Labs › YOLO mode judges only a shortcut's processed
+            // paste, on how long the shortcut was held.
+            let held_ms =
+                (by_shortcut && !flavour.raw() && print.is_none()).then(|| clip.held_ms());
             let stream = clip.take_stream();
             let samples = clip.into_transcription_samples();
             let language = engine
@@ -1349,7 +1375,7 @@ fn submit_capture(
                 .unwrap_or_else(|| crate::app_settings::transcription_selection().1)
                 .language;
             let recording = crate::history::Recording::keep(&samples);
-            let job = OutputJob::Dictation(Job {
+            let job = OutputJob::Dictation(Box::new(Job {
                 context,
                 transcript: engine.finish(stream, samples)?,
                 audio_ms,
@@ -1357,7 +1383,8 @@ fn submit_capture(
                 recording,
                 print,
                 flavour,
-            });
+                held_ms,
+            }));
             match jobs.try_send(job) {
                 Ok(()) => {
                     *pending += 1;

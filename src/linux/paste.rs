@@ -27,6 +27,7 @@ use crate::linux::session::LinuxSession;
 const XK_A: u32 = 0x61;
 const XK_C: u32 = 0x63;
 const XK_V: u32 = 0x76;
+const XK_RETURN: u32 = 0xff0d;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
@@ -157,6 +158,8 @@ pub(crate) enum Chord {
     SelectAll,
     Copy,
     Paste,
+    /// Return alone, after a paste (Labs › YOLO mode).
+    Return,
 }
 
 impl WaylandKeys {
@@ -522,7 +525,15 @@ impl LinuxPaster {
         self.selection.current().restore(snapshot)
     }
 
-    /// Sends Ctrl+A, Ctrl+C, or Ctrl+V through this session's key path.
+    /// Labs › YOLO mode: presses Return after a paste, once the
+    /// paste has had [`crate::dictation::yolo_mode::SETTLE`] to land.
+    pub(crate) fn press_return(&mut self) -> Result<()> {
+        thread::sleep(crate::dictation::yolo_mode::SETTLE);
+        self.send_chord(Chord::Return)
+    }
+
+    /// Sends Ctrl+A, Ctrl+C, Ctrl+V, or Return through this session's key
+    /// path.
     fn send_chord(&mut self, chord: Chord) -> Result<()> {
         match &mut self.backend {
             Backend::X11(paster) => paster.chord(chord, &self.stop, &self.keys),
@@ -709,13 +720,18 @@ impl X11Paster {
         })
     }
 
-    /// Sends Ctrl+A, Ctrl+C, or Ctrl+V without touching the clipboard.
+    /// Sends Ctrl+A, Ctrl+C, Ctrl+V, or Return without touching the
+    /// clipboard.
     fn chord(&mut self, chord: Chord, stop: &AtomicBool, keys: &ShortcutKeys) -> Result<()> {
         self.wait_for_modifier_release(stop, keys)?;
         let key = match chord {
             Chord::SelectAll => self.keymap.keycode(XK_A)?,
             Chord::Copy => self.keymap.keycode(XK_C)?,
             Chord::Paste => self.v,
+            Chord::Return => {
+                let key = self.keymap.keycode(XK_RETURN)?;
+                return self.send_keys(&[(KEY_PRESS, key), (KEY_RELEASE, key)]);
+            }
         };
         self.send_keys(&[
             (KEY_PRESS, self.control),
@@ -829,6 +845,7 @@ impl X11Paster {
 const EVDEV_KEY_A: usize = 30;
 const EVDEV_KEY_C: usize = 46;
 const EVDEV_KEY_V: usize = 47;
+const EVDEV_KEY_ENTER: usize = 28;
 
 fn chord_keys(chord: Chord, with_shift: bool) -> Vec<String> {
     let (key, evdev, shift) = match chord {
@@ -836,7 +853,9 @@ fn chord_keys(chord: Chord, with_shift: bool) -> Vec<String> {
         Chord::Copy => ("c", EVDEV_KEY_C, false),
         // Only a paste reads the terminal-paste preference.
         Chord::Paste => ("v", EVDEV_KEY_V, with_shift),
+        Chord::Return => ("Return", EVDEV_KEY_ENTER, false),
     };
+    let control = chord != Chord::Return;
     // wtype numbers its keymap in order of first use from evdev code 1, so a
     // bare `-k v` sends evdev 1 (Escape in the standard keymap). Hyprland
     // reads virtual-keyboard keys through its configured layout to match
@@ -847,7 +866,9 @@ fn chord_keys(chord: Chord, with_shift: bool) -> Vec<String> {
     let mut keys: Vec<String> = (0..evdev - 1)
         .flat_map(|index| ["-p".to_owned(), format!("U{:04X}", 0x2460 + index)])
         .collect();
-    keys.extend(["-M".to_owned(), "ctrl".to_owned()]);
+    if control {
+        keys.extend(["-M".to_owned(), "ctrl".to_owned()]);
+    }
     if shift {
         keys.extend(["-M".to_owned(), "shift".to_owned()]);
     }
@@ -855,7 +876,9 @@ fn chord_keys(chord: Chord, with_shift: bool) -> Vec<String> {
     if shift {
         keys.extend(["-m".to_owned(), "shift".to_owned()]);
     }
-    keys.extend(["-m".to_owned(), "ctrl".to_owned()]);
+    if control {
+        keys.extend(["-m".to_owned(), "ctrl".to_owned()]);
+    }
     // GTK 3's reverse keymap lookup skips the final keycode. Keep the key
     // before a neutral VoidSymbol release so its shortcut remains discoverable
     // (#28).
@@ -1147,6 +1170,18 @@ mod tests {
                     ["-M", "ctrl", "-k", key, "-m", "ctrl", "-p", "VoidSymbol"]
                 );
             }
+        }
+    }
+
+    /// Labs › YOLO mode: Return alone, on `KEY_ENTER`, with no
+    /// Ctrl and whatever the paste preference.
+    #[test]
+    fn return_sends_no_modifier() {
+        for with_shift in [false, true] {
+            assert_eq!(
+                chord_keys(Chord::Return, with_shift)[(EVDEV_KEY_ENTER - 1) * 2..],
+                ["-k", "Return", "-p", "VoidSymbol"]
+            );
         }
     }
 

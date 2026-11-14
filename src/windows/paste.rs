@@ -11,7 +11,7 @@ use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboa
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
     KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyExW, SendInput, VK_CONTROL, VK_LWIN, VK_MENU,
-    VK_RWIN, VK_SHIFT, VK_V,
+    VK_RETURN, VK_RWIN, VK_SHIFT, VK_V,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
@@ -231,6 +231,26 @@ impl WindowsPaster {
             thread::sleep(restore_delay);
             restore_clipboard_generation(&clipboard_restore, generation);
         });
+        Ok(())
+    }
+
+    /// Labs › YOLO mode: one press of Return after a paste, once
+    /// the paste has had [`crate::dictation::yolo_mode::SETTLE`] to land.
+    pub fn press_return(&mut self) -> Result<()> {
+        thread::sleep(crate::dictation::yolo_mode::SETTLE);
+        wait_for_conflicting_modifiers();
+        let scan = foreground_scan_code(VK_RETURN);
+        let inputs = [
+            keyboard_input(VK_RETURN, scan, 0),
+            keyboard_input(VK_RETURN, scan, KEYEVENTF_KEYUP),
+        ];
+        let sent = send_inputs(&inputs);
+        if sent != inputs.len() as u32 {
+            send_inputs(&inputs[1..]);
+            return Err(eyre!(
+                "Windows accepted only {sent} of 2 synthetic Return events; an elevated target window may reject input"
+            ));
+        }
         Ok(())
     }
 

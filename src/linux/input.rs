@@ -241,6 +241,9 @@ pub(crate) enum HotkeyEvent {
     /// dictation.
     Start {
         flavour: DictationFlavour,
+        /// A `hex` command started it, not a shortcut press (Labs › Send
+        /// long dictations never sends a command's capture).
+        command: bool,
     },
     Finish,
     /// `hex dictation stop --print` finished the dictation: its transcript
@@ -711,7 +714,10 @@ impl ShortcutState {
         self.flavour = flavour;
         self.capture = Capture::Locked;
         self.last_release = None;
-        Some(HotkeyEvent::Start { flavour })
+        Some(HotkeyEvent::Start {
+            flavour,
+            command: true,
+        })
     }
 
     /// Hands an idle state to the shortcut pressed, or reports that the
@@ -822,6 +828,7 @@ impl ShortcutState {
                         self.held_since = Some(now);
                         Some(HotkeyEvent::Start {
                             flavour: self.flavour,
+                            command: false,
                         })
                     }
                     // The desktop never sent the release that would have
@@ -1427,6 +1434,12 @@ mod tests {
     use HotkeyEvent::{Cancel, Finish, PasteLast};
     const START: HotkeyEvent = HotkeyEvent::Start {
         flavour: DictationFlavour::Normal,
+        command: false,
+    };
+    /// A `hex dictation start` or `toggle` command's start.
+    const COMMAND_START: HotkeyEvent = HotkeyEvent::Start {
+        flavour: DictationFlavour::Normal,
+        command: true,
     };
     use ShortcutCommand as Command;
 
@@ -1495,6 +1508,7 @@ mod tests {
     fn raw_dictation_owns_the_capture_it_starts() {
         const RAW: HotkeyEvent = HotkeyEvent::Start {
             flavour: DictationFlavour::Raw,
+            command: false,
         };
         let mut test = Test::new(true);
         test.press(Shortcut::RawDictation);
@@ -1509,13 +1523,21 @@ mod tests {
         assert_eq!(test.state.capture, Capture::Idle);
         test.command(Command::DictationToggleRaw);
         test.command(Command::DictationToggleRaw);
-        assert_eq!(test.events, [RAW, Finish, START, Finish, RAW, Finish]);
+        let command_raw = HotkeyEvent::Start {
+            flavour: DictationFlavour::Raw,
+            command: true,
+        };
+        assert_eq!(
+            test.events,
+            [RAW, Finish, START, Finish, command_raw, Finish]
+        );
     }
 
     #[test]
     fn terminal_paste_shortcut_owns_the_capture_it_starts() {
         const TERMINAL: HotkeyEvent = HotkeyEvent::Start {
             flavour: DictationFlavour::TerminalPaste,
+            command: false,
         };
         let mut test = Test::new(true);
         test.press(Shortcut::TerminalPaste);
@@ -1544,6 +1566,7 @@ mod tests {
     fn second_dictation_shortcut_owns_the_capture_it_starts() {
         const SECOND: HotkeyEvent = HotkeyEvent::Start {
             flavour: DictationFlavour::Second,
+            command: false,
         };
         let mut test = Test::new(true);
         test.press(Shortcut::SecondDictation);
@@ -1673,7 +1696,8 @@ mod tests {
         assert_eq!(
             recv_event(&monitor),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         send_key(&harness.connection, harness.root, 5, 8);
@@ -2339,6 +2363,7 @@ mod tests {
     fn tap_or_hold_applies_to_raw_dictation_but_not_commands() {
         const RAW: HotkeyEvent = HotkeyEvent::Start {
             flavour: DictationFlavour::Raw,
+            command: false,
         };
         let mut test = Test::with(tap_or_hold());
         test.press(Shortcut::RawDictation);
@@ -2350,7 +2375,7 @@ mod tests {
         test.command(Command::DictationStart);
         test.now += Duration::from_secs(1);
         test.command(Command::DictationStop);
-        assert_eq!(test.events, [RAW, Finish, START, Finish]);
+        assert_eq!(test.events, [RAW, Finish, COMMAND_START, Finish]);
     }
 
     /// #786: Escape ends no dictation, held, locked, or idle.
@@ -2518,15 +2543,15 @@ mod tests {
         test.command(Command::DictationStart);
         assert_eq!(
             test.events,
-            [START],
+            [COMMAND_START],
             "starting while recording does nothing"
         );
         test.command(Command::DictationStop);
         test.command(Command::DictationStop);
-        assert_eq!(test.events, [START, Finish]);
+        assert_eq!(test.events, [COMMAND_START, Finish]);
         // A stop never counts as the first tap of a double-tap.
         test.tap();
-        assert_eq!(test.events, [START, Finish, START, Finish]);
+        assert_eq!(test.events, [COMMAND_START, Finish, START, Finish]);
     }
 
     #[test]
@@ -2537,7 +2562,7 @@ mod tests {
         test.command(Command::DictationToggle);
         test.command(Command::DictationCancel);
         test.command(Command::DictationCancel);
-        assert_eq!(test.events, [START, Finish, START, Cancel]);
+        assert_eq!(test.events, [COMMAND_START, Finish, COMMAND_START, Cancel]);
     }
 
     #[test]
@@ -2553,11 +2578,20 @@ mod tests {
         test.release(Shortcut::Dictation);
         // A locked double-tap stops through toggle.
         test.now += Duration::from_secs(1);
-        test.lock_from(&[START, Finish, START, Finish]);
+        test.lock_from(&[COMMAND_START, Finish, START, Finish]);
         test.command(Command::DictationToggle);
         assert_eq!(
             test.events,
-            [START, Finish, START, Finish, START, Finish, START, Finish]
+            [
+                COMMAND_START,
+                Finish,
+                START,
+                Finish,
+                START,
+                Finish,
+                START,
+                Finish
+            ]
         );
     }
 
@@ -2783,7 +2817,8 @@ mod tests {
             send_event(
                 &sender,
                 HotkeyEvent::Start {
-                    flavour: DictationFlavour::Normal
+                    flavour: DictationFlavour::Normal,
+                    command: false,
                 }
             )
             .unwrap()
@@ -2792,7 +2827,8 @@ mod tests {
         assert_eq!(
             receiver.try_recv().unwrap(),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         drop(receiver);
@@ -2921,7 +2957,7 @@ mod tests {
         commands.send(Command::DictationToggle.into()).unwrap();
         commands.send(Command::DictationToggle.into()).unwrap();
         let wait = || events.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert_eq!([wait(), wait()], [START, Finish]);
+        assert_eq!([wait(), wait()], [COMMAND_START, Finish]);
         stop.store(true, Ordering::Release);
         worker.join().unwrap().unwrap();
     }
@@ -2943,7 +2979,10 @@ mod tests {
         let started = Instant::now();
         dispatcher.wait_for_commands(Duration::from_secs(5));
         assert!(dispatcher.flush().unwrap());
-        assert_eq!(events.recv_timeout(Duration::from_secs(1)).unwrap(), START);
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            COMMAND_START
+        );
         assert!(started.elapsed() < Duration::from_secs(1));
         sent.join().unwrap();
     }
@@ -2976,11 +3015,13 @@ mod tests {
             received.as_slice(),
             [
                 HotkeyEvent::Start {
-                    flavour: DictationFlavour::Normal
+                    flavour: DictationFlavour::Normal,
+                    command: true,
                 },
                 HotkeyEvent::FinishPrinting(_),
                 HotkeyEvent::Start {
-                    flavour: DictationFlavour::Normal
+                    flavour: DictationFlavour::Normal,
+                    command: true,
                 }
             ]
         ));
@@ -3006,7 +3047,8 @@ mod tests {
         assert_eq!(
             recv_event(&monitor),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
@@ -3023,7 +3065,8 @@ mod tests {
         assert_eq!(
             recv_event(&monitor),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
@@ -3031,7 +3074,8 @@ mod tests {
         assert_eq!(
             recv_event(&monitor),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         assert!(
@@ -3065,7 +3109,8 @@ mod tests {
         assert_eq!(
             recv_event(&monitor),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
@@ -3082,7 +3127,8 @@ mod tests {
         assert_eq!(
             recv_event(&monitor),
             HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
+                flavour: DictationFlavour::Normal,
+                command: false,
             }
         );
         commands.send(Command::DictationStop.into()).unwrap();
@@ -3097,12 +3143,7 @@ mod tests {
                 .is_err()
         );
         commands.send(Command::DictationStart.into()).unwrap();
-        assert_eq!(
-            recv_event(&monitor),
-            HotkeyEvent::Start {
-                flavour: DictationFlavour::Normal
-            }
-        );
+        assert_eq!(recv_event(&monitor), COMMAND_START);
         // Escape stays with applications while the capture records (#786).
         thread::sleep(Duration::from_millis(50));
         grab_variants(

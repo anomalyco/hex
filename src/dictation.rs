@@ -24,6 +24,7 @@ pub(crate) mod text_replacements;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod vocabulary;
 pub(crate) mod voice_prompt;
+pub(crate) mod yolo_mode;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -408,6 +409,17 @@ pub struct DictationClip {
 impl DictationClip {
     pub fn duration_ms(&self) -> u64 {
         self.samples.len() as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
+    }
+
+    /// How long the shortcut was held: the audio from the press to the
+    /// release, without the pre-roll before it or the release tail after.
+    pub fn held_ms(&self) -> u64 {
+        let held = self
+            .samples
+            .len()
+            .saturating_sub(self.press_samples)
+            .saturating_sub(self.tail_samples);
+        held as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
     }
 
     /// Takes the clip's live stream; finish it with the complete clip.
@@ -2059,6 +2071,8 @@ mod tests {
         assert_eq!(clip.samples.last(), Some(&12.0));
         assert!(!clip.samples.contains(&13.0));
         assert_eq!(clip.tail_samples, 3_200);
+        // Press to release: no pre-roll, no tail.
+        assert_eq!(clip.held_ms(), 1_000);
     }
 
     /// Records `sound(ms)` (milliseconds from the release, which is 1 s after

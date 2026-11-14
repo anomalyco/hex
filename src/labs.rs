@@ -25,7 +25,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
@@ -172,6 +172,7 @@ impl Feature {
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::ShellCompletions
+            | Self::YoloMode
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -254,7 +255,7 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
             Self::KQuantModels => 20261113,
-            Self::ShellCompletions => 20261113,
+            Self::ShellCompletions | Self::YoloMode => 20261113,
         }
     }
 
@@ -277,6 +278,9 @@ impl Feature {
         }
         if key == "labs.keep_microphone_open_seconds" {
             return Some(Self::KeepMicrophoneOpen);
+        }
+        if key == "labs.yolo_mode_seconds" || key == "labs.yolo_mode_apps" {
+            return Some(Self::YoloMode);
         }
         if key == "labs.voice_prompt_phrase" {
             return Some(Self::VoicePrompt);
@@ -388,7 +392,8 @@ impl Feature {
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::SpeakersOnly
-            | Self::ShellCompletions => true,
+            | Self::ShellCompletions
+            | Self::YoloMode => true,
         }
     }
 
@@ -473,6 +478,7 @@ impl Feature {
             Self::VoicePrompt => "voice-prompt",
             Self::CopyCaptureZip => "copy-capture-zip",
             Self::ShellCompletions => "shell-completions",
+            Self::YoloMode => "yolo-mode",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -558,6 +564,7 @@ impl Feature {
             Self::VoicePrompt => "labs.voice_prompt",
             Self::CopyCaptureZip => "labs.copy_capture_zip",
             Self::ShellCompletions => "labs.shell_completions",
+            Self::YoloMode => "labs.yolo_mode",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -647,6 +654,7 @@ impl Feature {
             Self::VoicePrompt => settings.labs.voice_prompt,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::ShellCompletions => settings.labs.shell_completions,
+            Self::YoloMode => settings.labs.yolo_mode,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -734,6 +742,7 @@ impl Feature {
             &mut labs.voice_prompt,
             &mut labs.copy_capture_zip,
             &mut labs.shell_completions,
+            &mut labs.yolo_mode,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -826,6 +835,7 @@ impl Feature {
             Self::VoicePrompt => settings.labs.voice_prompt = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::ShellCompletions => settings.labs.shell_completions = on,
+            Self::YoloMode => settings.labs.yolo_mode = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -974,6 +984,15 @@ static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 /// written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › YOLO mode's minimum hold in seconds, 0 while the lab is
+/// off, set beside [`STATE`] like [`PRINT_START`]: the state word is full, so
+/// this lab has its own atomic, written by [`state`] and [`apply`].
+static YOLO_MODE_SECONDS: AtomicU32 = AtomicU32::new(0);
+
+/// The apps Labs › YOLO mode sends in (empty: every
+/// app), set beside [`YOLO_MODE_SECONDS`] by [`state`] and [`apply`].
+static YOLO_MODE_APPS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
 /// and empty while the lab is off.
@@ -1006,6 +1025,7 @@ fn state() -> u64 {
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
+                store_yolo_mode(&saved);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
@@ -1058,6 +1078,32 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
     settings.k_quant_models
         && Feature::KQuantModels.shipped()
         && Feature::KQuantModels.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › YOLO mode in this build,
+/// before its managed lock; the state word has no bit for it.
+fn yolo_mode_enabled(settings: &LabsSettings) -> bool {
+    settings.yolo_mode && Feature::YoloMode.shipped() && Feature::YoloMode.managed().is_none()
+}
+
+/// Records Labs › YOLO mode's apps, then its hold, so a
+/// gate that sees the hold also sees the apps that go with it.
+fn store_yolo_mode(settings: &LabsSettings) {
+    *YOLO_MODE_APPS
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = settings.yolo_mode_apps.clone();
+    YOLO_MODE_SECONDS.store(yolo_mode_seconds(settings), Ordering::Release);
+}
+
+/// Labs › YOLO mode's minimum hold in seconds, or 0 while it's off
+/// (or its hold isn't one it offers).
+fn yolo_mode_seconds(settings: &LabsSettings) -> u32 {
+    let seconds = settings.yolo_mode_seconds;
+    if yolo_mode_enabled(settings) && crate::app_settings::YOLO_MODE_SECONDS.contains(&seconds) {
+        seconds
+    } else {
+        0
+    }
 }
 
 /// Whether `settings` turn on Labs › Browser access to the local API in this
@@ -1121,6 +1167,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
+    store_yolo_mode(settings);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -2248,6 +2295,34 @@ mod tests {
             "labs.shell_completions"
         );
         assert_eq!(Feature::ShellCompletions.name(), "shell-completions");
+    }
+
+    #[test]
+    fn yolo_mode_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!yolo_mode_enabled(&labs));
+        labs.yolo_mode = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(yolo_mode_enabled(&labs));
+        assert_eq!(yolo_mode_seconds(&labs), 2);
+        labs.yolo_mode_seconds = 5;
+        assert_eq!(yolo_mode_seconds(&labs), 5);
+        labs.yolo_mode_seconds = 4;
+        assert_eq!(yolo_mode_seconds(&labs), 0);
+        assert_eq!(
+            Feature::for_settings_key("labs.yolo_mode_seconds"),
+            Some(Feature::YoloMode)
+        );
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & COPY_ONLY, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::YoloMode.on_this_os());
+        assert_eq!(Feature::YoloMode.added(), 20261113);
+        assert_eq!(Feature::YoloMode.audience(), Audience::Everyone);
+        assert_eq!(Feature::YoloMode.group(), Group::Output);
+        assert_eq!(Feature::YoloMode.settings_key(), "labs.yolo_mode");
+        assert_eq!(Feature::YoloMode.name(), "yolo-mode");
     }
 
     #[test]

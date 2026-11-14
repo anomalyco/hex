@@ -29,6 +29,7 @@ const XK_SHIFT_L: i32 = 0xffe1;
 const XK_A: i32 = 0x61;
 const XK_C: i32 = 0x63;
 const XK_V: i32 = 0x76;
+const XK_RETURN: i32 = 0xff0d;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
 /// A restored grant starts in tens of milliseconds; a start that takes
@@ -223,6 +224,7 @@ fn chord_keys(chord: Chord, with_shift: bool) -> Vec<(i32, u32)> {
         Chord::SelectAll => (XK_A, false),
         Chord::Copy => (XK_C, false),
         Chord::Paste => (XK_V, with_shift),
+        Chord::Return => return vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)],
     };
     let mut keys = vec![(XK_CONTROL_L, PRESSED)];
     if shift {

@@ -595,6 +595,26 @@ Paste job -> Carries it through inference and processing        // dictate.retur
 
 Details and checks in [labs.md](labs.md).
 
+### YOLO Mode (Labs, every OS)
+
+With Labs › YOLO mode on (`labs.yolo_mode`, off by
+default), a long shortcut dictation sends itself:
+
+```ts
+Dictation shortcut released (hold, lock, or Toggle)
+  -> Held = press to release, without pre-roll or release tail
+Paste job, as the output commits                     // dictate.yolo-mode
+├── Held >= the chosen time (1-10 s, default 2 s), and the frontmost app is one
+│   of Only in's apps (none chosen = every app) -> Paste as usual, wait 100 ms,
+│   press Return; History records Send
+└── Shorter, or another app -> Paste as usual
+Never: Dictate without processing, `hex dictation`, the local API,
+printing stops, Copy dictation only, Live typing, meetings, captures,
+Paste last dictation
+```
+
+Details and checks in [labs.md](labs.md).
+
 ### Skip Long Pauses (Labs, Linux and Windows)
 
 A dictation transcribed as a whole clip (no stream on this model or device,

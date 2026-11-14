@@ -220,6 +220,7 @@ impl Feature {
             Self::ShellCompletions => {
                 "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
             }
+            Self::YoloMode => "Send dictations automatically",
         }
     }
 }

@@ -344,6 +344,11 @@ pub fn post_command(character: char) -> Result<()> {
     post_key_code(key_code, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1)
 }
 
+/// One press of Return with no modifier held, as a person sends a message.
+pub fn post_return() -> Result<()> {
+    post_key_code(RETURN_KEY_CODE, &[], 1)
+}
+
 /// Types `text` as synthesized key events, never touching the clipboard. Line
 /// breaks are Shift-Return so chat boxes insert a newline instead of sending.
 pub fn type_text(text: &str) -> Result<()> {

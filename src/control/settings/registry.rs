@@ -629,6 +629,22 @@ pub(super) const KEYS: &[Key] = &[
          PowerShell, generated from Hex's own commands",
     ),
     key(
+        "labs.yolo_mode",
+        Kind::Bool,
+        "Labs: a shortcut dictation held for at least labs.yolo_mode_seconds presses Return after pasting",
+    ),
+    key(
+        "labs.yolo_mode_seconds",
+        Kind::NumberChoice(&["1", "2", "3", "5", "10"]),
+        "Seconds a dictation shortcut must be held for Labs › YOLO mode to press Return: 1, 2, 3, 5, or 10",
+    ),
+    key(
+        "labs.yolo_mode_apps",
+        Kind::Json,
+        "Labs: the apps YOLO mode presses Return in, as a JSON list of \
+         application names as Modes match them; an empty list means every app",
+    ),
+    key(
         "labs.api_processing",
         Kind::Bool,
         "Labs: apps using Hex's local API can ask for transcripts with Global mode's corrections, \
