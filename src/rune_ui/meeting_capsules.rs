@@ -2417,6 +2417,8 @@ mod tests {
         );
     }
 
+    include!("meeting_capsules/motion_fixture.rs");
+
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
     #[test]
