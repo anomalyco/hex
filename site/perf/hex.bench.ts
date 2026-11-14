@@ -25,7 +25,7 @@ export default bench({
     }),
   },
   cases: {
-    // A returning visit, from navigation until the engine has drawn the head.
+    // Elapsed time from navigation until the engine draws the head. A headless check needs a lit display.
     "load to live head": {
       primary: "run.duration",
       metrics: ["main.work", "gpu.compile"],
@@ -33,14 +33,14 @@ export default bench({
     },
     // The idle head breathing before anyone presses the key.
     "idle head 8 s": {
-      primary: "main.busy",
-      metrics: ["main.work", "main.gc", "count.frame", "cpu.app.total", "gpu.process.3d", "frames.dropped.pct", "canvas.frames", "canvas.interval.p95"],
+      primary: "main.work",
+      metrics: ["main.busy", "main.gc", "count.frame", "cpu.app.total", "gpu.process.3d", "frames.dropped.pct", "canvas.frames", "canvas.interval.p95"],
       run: ({ page }) => page.wait(8000),
     },
     // Press the option key: the first 20 s of the show (calm, the first OpenCode prompts).
     "show opening 20 s": {
-      primary: "main.busy",
-      metrics: ["main.work", "main.gc", "count.frame", "cpu.app.total", "gpu.process.3d"],
+      primary: "main.work",
+      metrics: ["main.busy", "main.gc", "count.frame", "cpu.app.total", "gpu.process.3d"],
       run: async ({ page }) => {
         await page.click(".keycap")
         await page.wait(20_000)
