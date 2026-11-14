@@ -611,7 +611,14 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             false
         });
     }
-    app.run();
+    // Rune r399 prints a startup error and exits the process from `run` on
+    // native targets, which would end Hex without stopping its workers or
+    // flushing the event log. The menu bar, HUD, and pump live in this loop,
+    // so take the error here and stop the way Quit does, with the reason in
+    // the process log (#979).
+    if let Err(error) = app.try_run() {
+        tracing::error!(%error, "the Hex window failed; Hex stops");
+    }
 
     PUMP.with(|slot| {
         if let Some(state) = slot.borrow_mut().take() {
