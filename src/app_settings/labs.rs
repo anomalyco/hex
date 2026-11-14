@@ -101,6 +101,9 @@ pub struct LabsSettings {
     pub spoken_formatting: bool,
     /// Filler words such as "um" and "uh" are removed from dictations (issue 631).
     pub filler_words: bool,
+    /// One short on-device Apple Intelligence pass over each macOS dictation
+    /// fixes misheard words and spoken self-corrections (macOS).
+    pub clean_up_with_apple_intelligence: bool,
     /// `hex meetings show --srt|--vtt` exports a transcript as timed subtitles (macOS, issue 633).
     pub subtitle_export: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
@@ -369,6 +372,7 @@ impl Default for LabsSettings {
             return_to_app: false,
             spoken_formatting: false,
             filler_words: false,
+            clean_up_with_apple_intelligence: false,
             subtitle_export: false,
             second_dictation_shortcut: false,
             more_dictation_shortcuts: false,

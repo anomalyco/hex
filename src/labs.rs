@@ -117,6 +117,7 @@ impl Feature {
             | Self::ReturnToApp
             | Self::SpokenFormatting
             | Self::FillerWords
+            | Self::CleanUpWithAppleIntelligence
             | Self::SubtitleExport
             | Self::SecondDictationShortcut
             | Self::TerminalPasteShortcut
@@ -257,7 +258,10 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
             Self::KQuantModels => 20261113,
-            Self::ShellCompletions | Self::YoloMode | Self::CursorContext => 20261113,
+            Self::ShellCompletions
+            | Self::YoloMode
+            | Self::CursorContext
+            | Self::CleanUpWithAppleIntelligence => 20261113,
         }
     }
 
@@ -343,6 +347,7 @@ impl Feature {
             | Self::ScreenVocabulary
             | Self::CursorContext
             | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
+            Self::CleanUpWithAppleIntelligence => cfg!(target_os = "macos"),
             Self::CopyOnly => cfg!(any(target_os = "macos", target_os = "windows")),
             Self::ReturnToApp => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
@@ -425,6 +430,7 @@ impl Feature {
             Self::ReturnToApp => "return-to-app",
             Self::SpokenFormatting => "spoken-formatting",
             Self::FillerWords => "filler-words",
+            Self::CleanUpWithAppleIntelligence => "clean-up-apple-intelligence",
             Self::SubtitleExport => "subtitle-export",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
             Self::TerminalPasteShortcut => "terminal-paste-shortcut",
@@ -512,6 +518,7 @@ impl Feature {
             Self::ReturnToApp => "labs.return_to_app",
             Self::SpokenFormatting => "labs.spoken_formatting",
             Self::FillerWords => "labs.filler_words",
+            Self::CleanUpWithAppleIntelligence => "labs.clean_up_with_apple_intelligence",
             Self::SubtitleExport => "labs.subtitle_export",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
             Self::TerminalPasteShortcut => "labs.terminal_paste_shortcut",
@@ -603,6 +610,7 @@ impl Feature {
             Self::ReturnToApp => settings.labs.return_to_app,
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
+            Self::CleanUpWithAppleIntelligence => settings.labs.clean_up_with_apple_intelligence,
             Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut,
@@ -691,6 +699,7 @@ impl Feature {
             &mut labs.return_to_app,
             &mut labs.spoken_formatting,
             &mut labs.filler_words,
+            &mut labs.clean_up_with_apple_intelligence,
             &mut labs.subtitle_export,
             &mut labs.second_dictation_shortcut,
             &mut labs.terminal_paste_shortcut,
@@ -783,6 +792,9 @@ impl Feature {
             Self::ReturnToApp => settings.labs.return_to_app = on,
             Self::SpokenFormatting => settings.labs.spoken_formatting = on,
             Self::FillerWords => settings.labs.filler_words = on,
+            Self::CleanUpWithAppleIntelligence => {
+                settings.labs.clean_up_with_apple_intelligence = on;
+            }
             Self::SubtitleExport => settings.labs.subtitle_export = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut = on,
@@ -1006,6 +1018,11 @@ static YOLO_MODE_SECONDS: AtomicU32 = AtomicU32::new(0);
 /// app), set beside [`YOLO_MODE_SECONDS`] by [`state`] and [`apply`].
 static YOLO_MODE_APPS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
 
+/// Labs › Clean up with Apple Intelligence's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static CLEAN_UP: AtomicBool = AtomicBool::new(false);
+
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
 /// and empty while the lab is off.
@@ -1040,6 +1057,7 @@ fn state() -> u64 {
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
+                CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
@@ -1128,6 +1146,14 @@ fn yolo_mode_seconds(settings: &LabsSettings) -> u32 {
     }
 }
 
+/// Whether `settings` turn on Labs › Clean up with Apple Intelligence in this
+/// build, before its managed lock; the state word has no bit for it.
+fn clean_up_enabled(settings: &LabsSettings) -> bool {
+    settings.clean_up_with_apple_intelligence
+        && Feature::CleanUpWithAppleIntelligence.shipped()
+        && Feature::CleanUpWithAppleIntelligence.managed().is_none()
+}
+
 /// Whether `settings` turn on Labs › Browser access to the local API in this
 /// build, before its managed lock; the state word has no bit for it.
 fn api_browser_access_enabled(settings: &LabsSettings) -> bool {
@@ -1191,6 +1217,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
+    CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -1674,6 +1701,37 @@ mod tests {
         assert_ne!(state & FILLER_WORDS, 0);
         assert_eq!(state & SPOKEN_FORMATTING, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    /// The cleanup lab's own atomic, its switch, and its macOS-only card: the
+    /// state word is full, so it is not a bit.
+    #[test]
+    fn clean_up_is_its_own_atomic_and_macos_only() {
+        let labs = LabsSettings::default();
+        assert!(!clean_up_enabled(&labs));
+        let on = LabsSettings {
+            clean_up_with_apple_intelligence: true,
+            ..LabsSettings::default()
+        };
+        assert!(clean_up_enabled(&on));
+        assert_eq!(
+            Feature::CleanUpWithAppleIntelligence.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::CleanUpWithAppleIntelligence.added(), 20261113);
+        assert_eq!(
+            Feature::CleanUpWithAppleIntelligence.audience(),
+            Audience::Everyone
+        );
+        assert_eq!(Feature::CleanUpWithAppleIntelligence.group(), Group::Output);
+        assert_eq!(
+            Feature::CleanUpWithAppleIntelligence.settings_key(),
+            "labs.clean_up_with_apple_intelligence"
+        );
+        assert_eq!(
+            Feature::CleanUpWithAppleIntelligence.name(),
+            "clean-up-apple-intelligence"
+        );
     }
 
     #[test]

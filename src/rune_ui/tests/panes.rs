@@ -412,6 +412,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-print-start",
         "lab-spoken-formatting",
         "lab-filler-words",
+        "lab-clean-up",
         "lab-spoken-symbols",
         "lab-caps-lock-dictation",
     ] {
@@ -426,6 +427,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.filler_words);
     tap(&mut rt, "lab-filler-words");
     assert!(rt.state.settings.labs.filler_words);
+    assert!(!rt.state.settings.labs.clean_up_with_apple_intelligence);
+    tap(&mut rt, "lab-clean-up");
+    assert!(rt.state.settings.labs.clean_up_with_apple_intelligence);
     assert!(rt.find("lab-share-shortcut").is_none(), "Windows only");
     assert!(!rt.state.settings.labs.mouse_shortcuts);
     tap(&mut rt, "lab-mouse-shortcuts");
@@ -457,6 +461,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
+    assert!(rt.find("lab-clean-up").is_none(), "macOS only");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
     assert!(!rt.state.settings.labs.keep_on_clipboard);
     tap(&mut rt, "lab-keep-on-clipboard");
@@ -2988,6 +2993,49 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     refresh(&mut rt);
     tap(&mut rt, "lab-live-typing");
     assert!(rt.state.settings.labs.live_typing);
+}
+
+/// Labs › Clean up with Apple Intelligence says why Apple Intelligence can't
+/// run here, locks its switch while it is off, and still turns off once on.
+#[test]
+fn clean_up_says_why_apple_intelligence_cannot_run() {
+    use crate::rune_ui::platform::NotesAvailability;
+    // Tall enough that the Output group's cards sit inside the window, where
+    // a tap reaches their switches.
+    let mut rt = runtime("mac-labs", true, (980.0, 2400.0));
+    rt.state.platform.notes = NotesAvailability::NotEnabled;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    assert!(rt.find("lab-clean-up").is_some());
+    tap(&mut rt, "lab-clean-up");
+    assert!(
+        !rt.state.settings.labs.clean_up_with_apple_intelligence,
+        "the switch stays off where it can't work"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence in System Settings")),
+        "its card says why"
+    );
+
+    // Already on, it can still be turned off.
+    rt.state.settings.labs.clean_up_with_apple_intelligence = true;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-clean-up");
+    assert!(!rt.state.settings.labs.clean_up_with_apple_intelligence);
+
+    // This Mac has Apple Intelligence: the switch turns on.
+    rt.state.platform.notes = NotesAvailability::Available;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-clean-up");
+    assert!(rt.state.settings.labs.clean_up_with_apple_intelligence);
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence in System Settings")),
+        "no note while it can run"
+    );
 }
 
 #[test]

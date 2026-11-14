@@ -383,6 +383,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: remove filler words such as um and uh from dictations, without an AI model",
     ),
     key(
+        "labs.clean_up_with_apple_intelligence",
+        Kind::Bool,
+        "Labs: fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence",
+    ),
+    key(
         "labs.subtitle_export",
         Kind::Bool,
         "Labs: export meeting transcripts as SRT or VTT subtitles with hex meetings show --srt|--vtt",

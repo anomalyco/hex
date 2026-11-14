@@ -72,6 +72,7 @@ impl Feature {
             | Self::SpokenFormatting
             | Self::SpokenSymbols
             | Self::FillerWords
+            | Self::CleanUpWithAppleIntelligence
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::ReturnToApp

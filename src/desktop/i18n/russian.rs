@@ -190,6 +190,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Say \"comma\", \"colon\", \"hashtag\", \"underscore\", or \"slash\" to insert the symbol joined to its words", "Скажите «comma», «colon», «hashtag», «underscore» или «slash», чтобы вставить символ, присоединённый к соседним словам"),
     ("Remove filler words", "Убирать слова-паразиты"),
     ("Remove filler words such as um and uh from dictations, without an AI model", "Убирает из диктовок слова-паразиты вроде «um» и «uh» без модели ИИ"),
+    ("Clean up with Apple Intelligence", "Очищать с помощью Apple Intelligence"),
+    ("Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence", "Исправляет на этом Mac с помощью Apple Intelligence явно неверно услышанные слова и произнесённые самопоправки в каждой диктовке"),
     ("Sort and filter models", "Сортировка и фильтрация моделей"),
     ("Sort the Local transcription picker by size or name and show only models for the saved language", "Сортируйте список локального распознавания по размеру или названию и показывайте только модели для сохранённого языка"),
     ("By recommendation", "По рекомендации"),

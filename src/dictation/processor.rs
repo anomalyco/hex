@@ -397,7 +397,10 @@ impl Profiles {
 
     pub fn processes(&self, context: &ContextSnapshot) -> bool {
         let profile = self.select(context);
-        profile.ai_enabled || !profile.transformations.is_empty()
+        // A cleanup-only dictation still shows the HUD's processing stage.
+        profile.ai_enabled
+            || !profile.transformations.is_empty()
+            || crate::dictation::apple_cleanup::runs_here()
     }
 
     fn corrected(
@@ -499,9 +502,11 @@ impl Profiles {
             return voice_prompt_processed(profile, &instruction, &corrected, context, cancelled);
         }
         // A transcript of numbers alone has nothing to rewrite; a model only
-        // turns it into digits and re-punctuates it (#949).
-        let numbers_only = profile.ai_enabled && numbers_only(&corrected);
-        if numbers_only {
+        // turns it into digits and re-punctuates it (#949). Labs › Clean up
+        // with Apple Intelligence skips those too, so the count is read
+        // whether or not this mode rewrites.
+        let numbers_only = numbers_only(&corrected);
+        if profile.ai_enabled && numbers_only {
             tracing::info!(
                 profile = profile.name,
                 "dictation post-processing skipped for a numbers-only transcript"
@@ -514,10 +519,17 @@ impl Profiles {
             );
         }
         if !profile.ai_enabled || numbers_only {
+            // A mode with no OpenCode rewrite leaves the corrections alone
+            // for one on-device pass; a mode that rewrites keeps its model.
+            let (text, observation) = if profile.ai_enabled || source != Source::Dictation {
+                (corrected, None)
+            } else {
+                crate::dictation::apple_cleanup::stage(&corrected, profile.ai_enabled, numbers_only)
+            };
             return Processed {
-                text: corrected,
+                text,
                 nothing: false,
-                observation: None,
+                observation,
                 transformations: profile.transformations.clone(),
             };
         }
@@ -2092,6 +2104,39 @@ mod tests {
             prepare_transcript(speech, "en", Source::Dictation, DictationLabs::default()),
             speech
         );
+    }
+
+    /// Labs › Transform typed text runs the same profile but never the
+    /// dictation cleanup, so its text and observation are untouched.
+    #[test]
+    fn typed_text_never_reaches_the_dictation_cleanup() {
+        let profiles = Profiles::new(Profile::new("Global", ""));
+        let processed = profiles.process_cancellable(
+            "ship it",
+            "en",
+            &context("Zed", None),
+            &AtomicBool::new(false),
+            Source::TypedText,
+        );
+        assert_eq!(processed.text, "ship it");
+        assert!(processed.observation.is_none());
+        assert!(processed.transformations.is_empty());
+    }
+
+    /// A transcript of nothing but numbers gets no cleanup pass either: the
+    /// guard's digit rule would refuse anything a model could add.
+    #[test]
+    fn a_numbers_only_dictation_skips_the_cleanup() {
+        let profiles = Profiles::new(Profile::new("Global", ""));
+        let processed = profiles.process_cancellable(
+            "one two three four five",
+            "en",
+            &context("Zed", None),
+            &AtomicBool::new(false),
+            Source::Dictation,
+        );
+        assert_eq!(processed.text, "one two three four five");
+        assert!(processed.observation.is_none());
     }
 
     #[test]
