@@ -26,12 +26,23 @@ use super::{Hud, HudEvent, RESHOW_AFTER, wants_frame};
 pub(super) const HUD_FRAME: Duration = Duration::from_micros(16_667);
 
 /// Whether the timer should ask for another frame: the HUD moves on screen, and
-/// a frame drew recently enough that another will too. `last_drawn` is the same
-/// clock the recording's re-ask watches, which a start sets too: a show that
-/// never draws lets it age out, so the timer stops instead of asking forever.
+/// either a frame drew since the last poll, which proves the next frame draws
+/// too, or `last_drawn` is recent enough that it will. Rune runs a poll before
+/// the frame's render, so without the first check a stall of `RESHOW_AFTER`
+/// would disarm the timer on the very frame that just drew: Transcribing and
+/// Completed send no meters to restart it, and the HUD would freeze on screen.
 #[cfg(any(target_os = "windows", test))]
-pub(super) fn should_arm(wants: bool, last_drawn: Option<Instant>, now: Instant) -> bool {
-    wants && last_drawn.is_some_and(|at| now.saturating_duration_since(at) < RESHOW_AFTER)
+pub(super) fn should_arm(
+    wants: bool,
+    last_drawn: Option<Instant>,
+    polled_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    wants
+        && last_drawn.is_some_and(|at| {
+            polled_at.is_none_or(|polled| at > polled)
+                || now.saturating_duration_since(at) < RESHOW_AFTER
+        })
 }
 
 /// The step into `IndicatorModel` for a frame `now` on Windows: Rune gives a
@@ -58,18 +69,20 @@ pub(super) fn meter_update(hud: &mut Hud, event: HudEvent) -> bool {
 }
 
 /// Rune's poll for the Windows HUD: arm the next frame while the HUD is moving
-/// and still drawing, and ask for nothing otherwise, so a show nothing draws
-/// never turns the loop at 60 Hz with Hex idle. The frame's own render follows
-/// this pass, so `last_drawn` is the previous drawn frame's; a start sets it,
-/// which arms the first frame after the show. Nothing the view reads changed,
-/// so the frame needs no new commit.
+/// and drawing, and ask for nothing otherwise, so a show nothing draws never
+/// turns the loop at 60 Hz with Hex idle. The frame's own render follows this
+/// pass, so `last_drawn` is the previous drawn frame's (the one this poll's own
+/// frame drew lands after it); `polled_at` tells them apart. Nothing the view
+/// reads changed, so the frame needs no new commit.
 #[cfg(any(target_os = "windows", test))]
 pub(super) fn poll(hud: &mut Hud, _now: f64, tx: &mut Tx) -> bool {
     let wants = wants_frame(
         hud.animating.load(Ordering::Acquire),
         hud.shown.load(Ordering::Acquire),
     );
-    hud.armed = should_arm(wants, hud.last_drawn, Instant::now());
+    let now = Instant::now();
+    hud.armed = should_arm(wants, hud.last_drawn, hud.polled_at, now);
+    hud.polled_at = Some(now);
     if hud.armed {
         tx.wake_after(HUD_FRAME);
     }

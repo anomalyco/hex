@@ -423,10 +423,14 @@ pub(crate) struct Hud {
     /// from it, so a show nothing draws stops asking.
     #[cfg(any(target_os = "windows", test))]
     last_drawn: Option<Instant>,
-    /// When the HUD's timer last armed for another frame: set by `poll` on
-    /// Windows, and what a meter reads to know the timer draws the next level.
+    /// Whether the last poll asked for another frame.
     #[cfg(any(target_os = "windows", test))]
     armed: bool,
+    /// When the last poll ran: a frame drawn after it keeps the timer going
+    /// even when it is older than `RESHOW_AFTER`, because a poll runs before
+    /// its frame's render.
+    #[cfg(any(target_os = "windows", test))]
+    polled_at: Option<Instant>,
     /// When the model last stepped, for the next frame's step: set only by a
     /// frame that steps it, never by a show, and cleared by a hide.
     #[cfg(target_os = "windows")]
@@ -623,6 +627,7 @@ impl Hud {
             // The next show starts a new step, not one from the frame before
             // the hide (`wall_dt`), and its timer arms afresh (`poll`).
             self.armed = false;
+            self.polled_at = None;
             self.stepped_at = None;
         }
         if self.shown.swap(false, Ordering::AcqRel) {
@@ -642,6 +647,7 @@ impl Hud {
         #[cfg(target_os = "windows")]
         {
             self.armed = false;
+            self.polled_at = None;
             self.stepped_at = None;
         }
         if self.shown.swap(false, Ordering::AcqRel) {
@@ -807,6 +813,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             last_drawn: None,
             #[cfg(any(target_os = "windows", test))]
             armed: false,
+            #[cfg(any(target_os = "windows", test))]
+            polled_at: None,
             #[cfg(target_os = "windows")]
             stepped_at: None,
             #[cfg(target_os = "windows")]

@@ -623,6 +623,8 @@ fn hud(shown: bool) -> Hud {
         last_drawn: None,
         #[cfg(any(target_os = "windows", test))]
         armed: false,
+        #[cfg(any(target_os = "windows", test))]
+        polled_at: None,
         #[cfg(target_os = "windows")]
         stepped_at: None,
         #[cfg(target_os = "windows")]
@@ -689,4 +691,31 @@ fn the_timer_arms_from_a_start_and_stops_when_frames_stop() {
     hud.shown.store(false, Ordering::Release);
     windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
     assert!(!hud.armed);
+}
+
+/// Rune runs a poll before the frame's render, so a stall longer than
+/// `RESHOW_AFTER` leaves the next poll looking at a stale `last_drawn` even
+/// though the frame it is part of draws: that frame is the one the previous
+/// poll drew. It must arm the next, or a HUD with no meters to restart it
+/// (Transcribing, Completed, Failed) freezes on screen and never fades out.
+#[test]
+fn a_frame_drawn_since_the_last_poll_keeps_the_timer_armed() {
+    let mut hud = hud(true);
+    hud.animating.store(true, Ordering::Release);
+    let polled = Instant::now() - RESHOW_AFTER - RESHOW_AFTER;
+    hud.polled_at = Some(polled);
+    // Older than RESHOW_AFTER, but the frame drew after that poll.
+    hud.last_drawn = Some(polled + Duration::from_millis(1));
+    assert!(
+        hud.last_drawn
+            .is_some_and(|at| at.elapsed() >= RESHOW_AFTER),
+        "the reference is stale on its own"
+    );
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(hud.armed, "a frame since the last poll keeps the timer");
+
+    // Nothing drew since the last poll and the reference is stale: stop.
+    hud.last_drawn = Some(Instant::now() - RESHOW_AFTER - Duration::from_millis(1));
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(!hud.armed, "no frame since the last poll, and a stale one");
 }
