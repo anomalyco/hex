@@ -8,6 +8,7 @@ use rune_kit::{Button, ButtonVariant, glyphs};
 use super::super::Ui;
 use super::super::controls::{Paint, PushSize};
 use super::super::platform::{PlatformRequest, PlatformState};
+use super::landing::Home;
 use crate::desktop::i18n::tr;
 use crate::desktop::login_item::LoginItemStatus;
 
@@ -53,6 +54,14 @@ impl LoginAsk {
         self.login = login;
         turned_on
     }
+}
+
+/// The ask's copy inputs: where Hex lives, and whether its shortcut taps to
+/// start rather than holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LoginCopy {
+    pub(crate) home: Home,
+    pub(crate) toggle: bool,
 }
 
 /// The login item as the window last heard it from the OS.
@@ -141,23 +150,24 @@ fn burst(p: Paint, ask: &LoginAsk, now: f64, reduced: bool) -> Option<El> {
     )
 }
 
-/// `"Open Hex when your Mac starts?"`, its button, and a line under it.
-/// The button is the page's main action only when it is `alone`: beside
-/// Start using Hex it is a neutral one.
+/// The page's launch-at-login ask: `"Open Hex when your Mac starts?"`, or
+/// the computer's own words where Hex lives in a tray or an app launcher,
+/// with a button and a line under it. The button is the page's main action
+/// only when it is `alone`: beside Start using Hex it is a neutral one.
 pub(crate) fn login_ask<S: 'static>(
     p: Paint,
     ask: &LoginAsk,
     now: f64,
     reduced: bool,
     alone: bool,
-    toggle: bool,
+    copy: LoginCopy,
     press: impl Fn(&mut S) + 'static,
 ) -> Option<El> {
     let k = p.k;
     let (question, button, line) = match ask.login {
         Login::Hidden => return None,
         Login::Off => (
-            tr("Open Hex when your Mac starts?"),
+            copy.home.ask_question(),
             Button::new(tr("Launch at login"))
                 .rolling("login-label")
                 .variant(if alone {
@@ -165,14 +175,10 @@ pub(crate) fn login_ask<S: 'static>(
                 } else {
                     ButtonVariant::Neutral
                 }),
-            if toggle {
-                tr("It's tiny. It naps in your menu bar until you tap the key.")
-            } else {
-                tr("It's tiny. It naps in your menu bar until you hold the key.")
-            },
+            copy.home.ask_nap(copy.toggle),
         ),
         Login::On => (
-            tr("Hex opens when your Mac starts."),
+            copy.home.ask_started(),
             Button::new(tr("Launches at login"))
                 .rolling("login-label")
                 .icon(&glyphs::CHECK)
@@ -180,7 +186,7 @@ pub(crate) fn login_ask<S: 'static>(
             tr("It'll be there before your coffee is."),
         ),
         Login::Approve => (
-            tr("Open Hex when your Mac starts?"),
+            copy.home.ask_question(),
             Button::new(tr("Allow in Login Items"))
                 .rolling("login-label")
                 .variant(ButtonVariant::Neutral),
