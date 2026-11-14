@@ -890,9 +890,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Remove filler words"),
         tr("Remove filler words such as um and uh from dictations, without an AI model"),
     ));
-    // macOS reads the pass through Apple Intelligence. A managed lock keeps
-    // the row it built (off, disabled, saying why); otherwise its card says
-    // why the switch can't turn on and still leaves it able to turn off.
+    // macOS reads the pass through Apple Intelligence: a managed lock keeps
+    // the row it built (off, disabled, saying why), else the card says why.
     if caps.os == super::platform::Os::Macos {
         let clean_up = row(
             Feature::CleanUpWithAppleIntelligence,
@@ -902,15 +901,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 "Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence",
             ),
         );
-        if Feature::CleanUpWithAppleIntelligence.managed().is_some() {
-            rows.push(clean_up);
-        } else {
-            rows.push(Row {
+        rows.push(match Feature::CleanUpWithAppleIntelligence.managed() {
+            Some(_) => clean_up,
+            None => Row {
                 locked: !ui.platform.notes.is_available() && !clean_up.on,
                 note: super::platform_settings::clean_up_note(ui.platform.notes),
                 ..clean_up
-            });
-        }
+            },
+        });
     }
     rows.push(row(
         Feature::HistoryStats,
