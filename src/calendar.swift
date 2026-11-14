@@ -143,56 +143,61 @@ public func hexCalendarChangeCount() -> UInt64 {
 
 @_cdecl("hex_calendar_calendars")
 public func hexCalendarCalendars() -> UnsafeMutablePointer<CChar>? {
-    guard currentStatus() == .fullAccess else { return nil }
-    storeLock.lock()
-    defer { storeLock.unlock() }
-    let calendars = store.calendars(for: .event).map {
-        BridgeCalendar(
-            id: $0.calendarIdentifier,
-            title: $0.title,
-            source: $0.source?.title ?? ""
-        )
+    // Called from Hex's own threads, which have no autorelease pool to drain.
+    autoreleasepool {
+        guard currentStatus() == .fullAccess else { return nil }
+        storeLock.lock()
+        defer { storeLock.unlock() }
+        let calendars = store.calendars(for: .event).map {
+            BridgeCalendar(
+                id: $0.calendarIdentifier,
+                title: $0.title,
+                source: $0.source?.title ?? ""
+            )
+        }
+        return json(calendars)
     }
-    return json(calendars)
 }
 
 /// Events overlapping the window, soonest first, at most `limit`.
 @_cdecl("hex_calendar_events")
 public func hexCalendarEvents(_ fromMs: Double, _ toMs: Double, _ limit: Int32) -> UnsafeMutablePointer<CChar>? {
-    guard currentStatus() == .fullAccess else { return nil }
-    storeLock.lock()
-    defer { storeLock.unlock() }
-    let predicate = store.predicateForEvents(
-        withStart: Date(timeIntervalSince1970: fromMs / 1000),
-        end: Date(timeIntervalSince1970: toMs / 1000),
-        calendars: nil
-    )
-    let events = store.events(matching: predicate)
-        .sorted { $0.startDate < $1.startDate }
-        .prefix(Int(max(limit, 0)))
-        .map { event -> BridgeEvent in
-            let attendees = event.attendees ?? []
-            let declined = attendees.contains { $0.isCurrentUser && $0.participantStatus == .declined }
-            let others = attendees
-                .filter { !$0.isCurrentUser && $0.participantType != .room && $0.participantType != .resource }
-                .map { $0.name ?? $0.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
-            return BridgeEvent(
-                id: event.eventIdentifier ?? event.calendarItemIdentifier,
-                calendar: event.calendar?.calendarIdentifier ?? "",
-                title: event.title ?? "",
-                startMs: event.startDate.timeIntervalSince1970 * 1000,
-                endMs: event.endDate.timeIntervalSince1970 * 1000,
-                allDay: event.isAllDay,
-                free: event.availability == .free,
-                cancelled: event.status == .canceled,
-                declined: declined,
-                attendees: others,
-                location: event.location,
-                notes: event.notes.map { String($0.prefix(notesLimit)) },
-                url: event.url?.absoluteString
-            )
-        }
-    return json(Array(events))
+    autoreleasepool {
+        guard currentStatus() == .fullAccess else { return nil }
+        storeLock.lock()
+        defer { storeLock.unlock() }
+        let predicate = store.predicateForEvents(
+            withStart: Date(timeIntervalSince1970: fromMs / 1000),
+            end: Date(timeIntervalSince1970: toMs / 1000),
+            calendars: nil
+        )
+        let events = store.events(matching: predicate)
+            .sorted { $0.startDate < $1.startDate }
+            .prefix(Int(max(limit, 0)))
+            .map { event -> BridgeEvent in
+                let attendees = event.attendees ?? []
+                let declined = attendees.contains { $0.isCurrentUser && $0.participantStatus == .declined }
+                let others = attendees
+                    .filter { !$0.isCurrentUser && $0.participantType != .room && $0.participantType != .resource }
+                    .map { $0.name ?? $0.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
+                return BridgeEvent(
+                    id: event.eventIdentifier ?? event.calendarItemIdentifier,
+                    calendar: event.calendar?.calendarIdentifier ?? "",
+                    title: event.title ?? "",
+                    startMs: event.startDate.timeIntervalSince1970 * 1000,
+                    endMs: event.endDate.timeIntervalSince1970 * 1000,
+                    allDay: event.isAllDay,
+                    free: event.availability == .free,
+                    cancelled: event.status == .canceled,
+                    declined: declined,
+                    attendees: others,
+                    location: event.location,
+                    notes: event.notes.map { String($0.prefix(notesLimit)) },
+                    url: event.url?.absoluteString
+                )
+            }
+        return json(Array(events))
+    }
 }
 
 @_cdecl("hex_calendar_free_string")
