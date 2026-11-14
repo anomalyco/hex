@@ -241,6 +241,17 @@
       "title": "Remove filler words"
     },
     {
+      "added": "2026-11-13",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "clean-up-apple-intelligence",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence",
+      "title": "Clean up with Apple Intelligence"
+    },
+    {
       "added": "2026-10-31",
       "group": "meetings",
       "groupTitle": "Meetings",
@@ -907,6 +918,17 @@
       ],
       "summary": "Send dictations automatically",
       "title": "YOLO mode"
+    },
+    {
+      "added": "2026-11-13",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "cursor-context",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Rewrite uses the text around the cursor to spell names and terms right and fit where it pastes.",
+      "title": "Rewrite reads nearby text"
     }
   ]
 }
