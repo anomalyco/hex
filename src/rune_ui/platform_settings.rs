@@ -257,6 +257,21 @@ fn on_this_mac_detail(availability: NotesAvailability) -> &'static str {
     }
 }
 
+/// Why Labs › Clean up with Apple Intelligence can't run on this Mac now: the
+/// same words Summaries uses, so every Apple Intelligence row gives one
+/// reason. `None` while it can run.
+pub(super) fn clean_up_note(availability: NotesAvailability) -> Option<String> {
+    let reason = match availability {
+        NotesAvailability::Available => return None,
+        NotesAvailability::DeviceNotEligible => tr("This Mac does not support Apple Intelligence"),
+        NotesAvailability::NotEnabled => tr("Turn on Apple Intelligence in System Settings"),
+        NotesAvailability::ModelNotReady => tr("The Apple Intelligence model is still downloading"),
+        NotesAvailability::UnsupportedSystem => tr("Requires macOS 26 or later"),
+        NotesAvailability::Unknown => tr("Apple Intelligence is unavailable"),
+    };
+    Some(reason.to_owned())
+}
+
 /// Meetings › Settings › After a meeting › Summaries: who writes a meeting's
 /// title and summary, with the OpenCode model nested under it while OpenCode
 /// writes them. A Mac picks Off, On this Mac, or OpenCode; elsewhere a

@@ -54,6 +54,9 @@ impl Feature {
             Self::FillerWords => {
                 "Remove filler words such as um and uh from dictations, without an AI model"
             }
+            Self::CleanUpWithAppleIntelligence => {
+                "Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence"
+            }
             Self::SubtitleExport => {
                 "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
             }

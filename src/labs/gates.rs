@@ -117,6 +117,17 @@ pub fn filler_words() -> bool {
     on(FILLER_WORDS)
 }
 
+/// Labs › Clean up with Apple Intelligence: one on-device pass over each
+/// macOS dictation (read as each dictation's processing starts, and for the
+/// HUD's processing stage). The state word has no bit for it: its own atomic,
+/// written by `labs::apply`, and loaded here first in a process that never
+/// applied.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn clean_up() -> bool {
+    let _ = state();
+    CLEAN_UP.load(Ordering::Acquire) && Feature::CleanUpWithAppleIntelligence.on_this_os()
+}
+
 /// `hex meetings show --srt|--vtt` may export subtitles (read when the
 /// command starts).
 pub fn subtitle_export() -> bool {

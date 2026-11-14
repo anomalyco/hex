@@ -49,7 +49,10 @@ reads nearby text toggle (off by default, macOS) hands the mode's OpenCode
 rewrite the text around the caret as context for names, terms, and where the
 result lands; the text goes to the configured provider, which may be a cloud
 service, password fields are never read, and off leaves the prompt byte for
-byte unchanged.
+byte unchanged. Its Clean up with Apple Intelligence toggle (off by default,
+macOS) gives each dictation its mode does not rewrite one short on-device pass
+that fixes clearly misheard words and spoken self-corrections, pasting the
+corrected text whenever Apple Intelligence is unavailable, slow, or refuses.
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
 used for any French system language (#892), and Русский, used for any

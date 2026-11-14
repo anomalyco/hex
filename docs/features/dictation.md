@@ -389,6 +389,12 @@ Checks: `raw_dictation_owns_the_capture_it_starts` (Linux reducer),
 Proof limits: no physical shortcut run on any OS; the macOS machine pairing
 was not compiled or run here (Linux check, Windows cross-clippy only).
 
+On macOS a raw capture never reaches the processing worker at all
+(`parakeet::run_inference_worker` queues only Paste, Copy only, and Print; the
+raw targets go straight to output), so it also skips Labs › Clean up with
+Apple Intelligence ([labs.md](labs.md)); elsewhere that stage is macOS-only,
+so it never runs on the shared pipeline either.
+
 ### Transform Typed Text (Labs, Linux)
 
 With Labs › Transform typed text on (`labs.typed_text`, off by default),

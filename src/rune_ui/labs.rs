@@ -890,6 +890,26 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Remove filler words"),
         tr("Remove filler words such as um and uh from dictations, without an AI model"),
     ));
+    // macOS reads the pass through Apple Intelligence: a managed lock keeps
+    // the row it built (off, disabled, saying why), else the card says why.
+    if caps.os == super::platform::Os::Macos {
+        let clean_up = row(
+            Feature::CleanUpWithAppleIntelligence,
+            Some(&SPARKLES),
+            tr("Clean up with Apple Intelligence"),
+            tr(
+                "Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence",
+            ),
+        );
+        rows.push(match Feature::CleanUpWithAppleIntelligence.managed() {
+            Some(_) => clean_up,
+            None => Row {
+                locked: !ui.platform.notes.is_available() && !clean_up.on,
+                note: super::platform_settings::clean_up_note(ui.platform.notes),
+                ..clean_up
+            },
+        });
+    }
     rows.push(row(
         Feature::HistoryStats,
         None,
@@ -1182,6 +1202,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ReturnToApp => "lab-return-to-app",
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
+        Feature::CleanUpWithAppleIntelligence => "lab-clean-up",
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",

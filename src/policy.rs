@@ -85,6 +85,13 @@ pub struct Policy(u8);
 impl Policy {
     /// This process's policy, read once.
     pub fn current() -> Self {
+        // A UI test can force a policy on its own thread, so a locked row is
+        // exercised without a managed Mac. Only Linux renders the panes
+        // tests, so only there does the override exist.
+        #[cfg(all(test, target_os = "linux"))]
+        if let Some(forced) = FORCED_FOR_TEST.with(|slot| *slot.borrow()) {
+            return forced;
+        }
         static CURRENT: OnceLock<Policy> = OnceLock::new();
         *CURRENT.get_or_init(|| {
             let policy = Self::from_forced(platform::forced);
@@ -120,6 +127,14 @@ impl Policy {
     /// Whether any lock is in force.
     pub fn any(self) -> bool {
         self.0 != 0
+    }
+
+    /// Forces `policy` on this thread until the guard drops, so a pane test
+    /// can see what an organization's lock does to a row.
+    #[cfg(all(test, target_os = "linux"))]
+    pub fn forced_for_test(policy: Policy) -> ForcedPolicy {
+        FORCED_FOR_TEST.with(|slot| *slot.borrow_mut() = Some(policy));
+        ForcedPolicy
     }
 
     /// The lock on a Labs feature: Labs, Meetings for Meetings, Annotate for
@@ -200,6 +215,25 @@ impl Policy {
         {
             settings.meetings.summaries = MeetingSummaries::OpenCode;
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+thread_local! {
+    /// The policy a test forced on this thread ([`Policy::forced_for_test`]),
+    /// read ahead of the process's own so a locked row needs no managed Mac.
+    static FORCED_FOR_TEST: std::cell::RefCell<Option<Policy>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Clears a test's forced policy when it drops ([`Policy::forced_for_test`]).
+#[cfg(all(test, target_os = "linux"))]
+pub struct ForcedPolicy;
+
+#[cfg(all(test, target_os = "linux"))]
+impl Drop for ForcedPolicy {
+    fn drop(&mut self) {
+        FORCED_FOR_TEST.with(|slot| *slot.borrow_mut() = None);
     }
 }
 
