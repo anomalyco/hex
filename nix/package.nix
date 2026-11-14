@@ -79,8 +79,8 @@ let
       hash = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
     };
     "rune-0.0.1" = {
-      rev = "d6715352fb0cb3ab3551853c3ba92a7995a9bce5";
-      hash = "sha256-lENb2aPCQcUryfKFLXLt90WvQfeW4+0oUzqWne+AMEI=";
+      rev = "1899e648a3a09bcca8a59b44deb9957302a73f04";
+      hash = "sha256-6B+veHICwhZTWdwNwA48xSXZPfNHbh+DmRr03w6dPC0=";
     };
     "transcribe-cpp-sys-0.4.1" = {
       rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a";
@@ -114,10 +114,60 @@ rustPlatform.buildRustPackage (finalAttrs: {
     ];
   };
 
-  cargoLock = {
-    lockFile = ../Cargo.lock;
-    outputHashes = builtins.mapAttrs (_: dependency: dependency.hash) cargoGitDependencies;
-  };
+  # nixpkgs' vendor directory keeps every crate in one place, keyed by name and
+  # version, so it cannot hold two copies from different sources. Rune's
+  # `vendor/tiny-skia-path` is a path dependency inside Rune (a Git crate here)
+  # at 0.11.4, the same name and version as resvg's from crates.io, so vendor
+  # each source's crates in its own directory: Cargo tells them apart by source.
+  # If nixpkgs changes the script, these replacements stop matching and the
+  # build fails on the duplicate instead of vendoring something wrong.
+  cargoDeps =
+    (rustPlatform.importCargoLock {
+      lockFile = ../Cargo.lock;
+      outputHashes = builtins.mapAttrs (_: dependency: dependency.hash) cargoGitDependencies;
+    }).overrideAttrs
+      (old: {
+        buildCommand =
+          let
+            rewritten = lib.replaceStrings
+              [
+                ''
+                  [source.crates-io]
+                  replace-with = "vendored-sources"
+
+                  [source.vendored-sources]
+                  directory = "cargo-vendor-dir"''
+                ''ln -s "$crate" $out/$(basename "$crate" | cut -c 34-)''
+                ''cat "$crate/.cargo-config" >> $out/.cargo/config.toml''
+              ]
+              [
+                ''
+                  [source.crates-io]
+                  replace-with = "registry-vendor-dir"
+
+                  [source.registry-vendor-dir]
+                  directory = "cargo-vendor-dir/registry"
+
+                  [source.git-vendor-dir]
+                  directory = "cargo-vendor-dir/git"''
+                ''
+                  dest=$(basename "$crate" | cut -c 34-)
+                        if [ -e "$crate/.cargo-config" ]; then
+                          mkdir -p $out/git
+                          ln -s "$crate" $out/git/$dest
+                        else
+                          mkdir -p $out/registry
+                          ln -s "$crate" $out/registry/$dest
+                        fi''
+                ''sed 's/replace-with = "vendored-sources"/replace-with = "git-vendor-dir"/' "$crate/.cargo-config" >> $out/.cargo/config.toml''
+              ]
+              old.buildCommand;
+          in
+          if rewritten == old.buildCommand then
+            throw "nix/package.nix: importCargoLock's vendor script changed; re-apply the per-source vendor directories"
+          else
+            rewritten;
+      });
 
   nativeBuildInputs = [
     pkg-config
