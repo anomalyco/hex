@@ -14,6 +14,8 @@
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
 //! integrity checks.
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod install_name;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod legacy;
 pub(crate) mod notes;
@@ -37,6 +39,15 @@ use protocol::{Decision, Install};
 use platform::Staged;
 #[cfg(target_os = "macos")]
 pub use platform::finish_on_launch;
+
+/// Windows: a managed install still running as `hex.exe` moves to
+/// `hex-voice.exe` and relaunches, because Discord's game detection matches
+/// the old name to *HEX: Shards of Fate* (#445). True when the relaunched copy
+/// took over, so the caller exits; a failed move keeps this copy running.
+#[cfg(target_os = "windows")]
+pub fn take_over_install_name() -> bool {
+    platform::take_over_name()
+}
 
 const APP: &str = "hex";
 const ARTIFACT: &str = "desktop";

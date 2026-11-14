@@ -1813,7 +1813,9 @@ the same version again.
 installer (`packaging/windows/hex.iss`, built by
 `scripts/build-windows-installer.ps1`) that installs exactly the managed
 layout `install-windows.ps1` creates, so self-updates keep working:
-`%APPDATA%\hex\versions\<version>\hex.exe`, `current-version`, the
+`%APPDATA%\hex\versions\<version>\hex-voice.exe` (not `hex.exe`, which
+Discord's game detection matches to a game; a pre-rename install moves to the
+new name at launch), `current-version`, the
 `install.json` direct-install receipt, and a Start Menu shortcut carrying the
 managed mark. Its uninstaller lives in `hex\uninstall` because
 updates prune old version directories; it removes every version, the
@@ -1823,7 +1825,8 @@ its `AppId` forever: the updater rewrites that Apps & Features entry's
 version. Release and the Windows installer workflow install, reinstall,
 install over another version with, and uninstall
 it silently on x64 and ARM64 runners (`scripts/test-windows-installer.ps1`).
-Release's `sign-windows` job Authenticode-signs both `hex.exe` through Azure
+Release's `sign-windows` job Authenticode-signs the Windows executables
+(`hex.exe` and `hex.com` as built) through Azure
 Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp), the installers
 are built around the signed bytes, and `sign-windows-installers` signs them
 (`.github/release/verify-authenticode.ps1` checks both). Compile jobs and test

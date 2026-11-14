@@ -263,7 +263,7 @@ mod windows {
             .open(updates.join("update.lock"))?;
         lock.try_lock_exclusive()
             .wrap_err("a Hex install or update is already in progress")?;
-        let staging = updates.join("hex.exe.staging");
+        let staging = updates.join("hex-voice.exe.staging");
         let _ = fs::remove_file(&staging);
         fs::copy(std::env::current_exe()?, &staging).wrap_err("could not copy Hex")?;
         let executable = super::super::platform::activate(root, crate::VERSION, &staging, None)?;

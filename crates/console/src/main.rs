@@ -1,15 +1,18 @@
-//! `hex.com`, the console entry point of Hex on Windows. `hex.exe` is a GUI
-//! program so launching Hex opens no console window (#850), but shells don't
-//! wait for a GUI program or capture its output. A terminal resolves `hex` to
-//! `hex.com` first (PATHEXT lists .COM before .EXE), and this runs `hex.exe`
-//! with the same arguments, standard handles, and console, waits for it, and
-//! exits with its code. Opening the app (`hex`, `hex app [--hidden]`) doesn't
-//! wait: the app stays resident, so the terminal returns once it starts, as
-//! it would for a GUI program.
+//! `hex.com`, the console entry point of Hex on Windows. The GUI executable
+//! is a GUI program so launching Hex opens no console window (#850), but
+//! shells don't wait for a GUI program or capture its output. A terminal
+//! resolves `hex` to `hex.com` first (PATHEXT lists .COM before .EXE), and
+//! this runs the GUI executable with the same arguments, standard handles,
+//! and console, waits for it, and exits with its code. Opening the app (`hex`,
+//! `hex app [--hidden]`) doesn't wait: the app stays resident, so the terminal
+//! returns once it starts, as it would for a GUI program.
 //!
-//! It finds `hex.exe` beside itself (`versions\<version>\hex.com`), or, as
-//! the copy in `%APPDATA%\hex\bin` that PATH names, the version
-//! `current-version` points at.
+//! The GUI executable is `hex-voice.exe`, because Discord's game detection
+//! matches a running `hex.exe` to *HEX: Shards of Fate* (#445); releases
+//! before that rename shipped `hex.exe`, which this still finds. It looks
+//! beside itself (`versions\<version>\hex.com`), or, as the copy in
+//! `%APPDATA%\hex\bin` that PATH names, in the version `current-version`
+//! points at.
 
 #[cfg(windows)]
 fn main() {
@@ -18,8 +21,9 @@ fn main() {
         CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
     };
 
-    // Ctrl+C reaches every process on the console: hex.exe handles it, and
-    // this stays to report its exit code. Closing the console still ends it.
+    // Ctrl+C reaches every process on the console: the GUI executable handles
+    // it, and this stays to report its exit code. Closing the console still
+    // ends it.
     unsafe extern "system" fn wait_for_hex(event: u32) -> i32 {
         if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
             TRUE
@@ -33,7 +37,7 @@ fn main() {
     let hex = match std::env::current_exe().map(|path| locate(&path)) {
         Ok(Some(hex)) => hex,
         _ => {
-            eprintln!("hex: couldn't find hex.exe; reinstall Hex from anoma.ly/hex");
+            eprintln!("hex: couldn't find Hex's executable; reinstall Hex from anoma.ly/hex");
             std::process::exit(1);
         }
     };
@@ -70,14 +74,29 @@ fn main() {
     std::process::exit(2);
 }
 
-/// `hex.exe` beside `console`, or in the version `current-version` beside
-/// its folder names.
+/// The GUI executables beside `console`, in the order releases install them:
+/// `hex-voice.exe` since the rename that keeps Discord's game detection from
+/// matching *HEX: Shards of Fate* (#445), then `hex.exe` from releases before
+/// it.
+const GUI_EXECUTABLES: [&str; 2] = ["hex-voice.exe", "hex.exe"];
+
+/// The GUI executable in `folder`: its new name, else the name releases before
+/// the rename installed.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn existing(folder: &std::path::Path) -> Option<std::path::PathBuf> {
+    GUI_EXECUTABLES
+        .iter()
+        .map(|name| folder.join(name))
+        .find(|path| path.is_file())
+}
+
+/// The GUI executable beside `console`, or in the version `current-version`
+/// beside its folder names. Releases before the rename have only `hex.exe`.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn locate(console: &std::path::Path) -> Option<std::path::PathBuf> {
     let folder = console.parent()?;
-    let beside = folder.join("hex.exe");
-    if beside.is_file() {
-        return Some(beside);
+    if let Some(hex) = existing(folder) {
+        return Some(hex);
     }
     let support = folder.parent()?;
     let version = std::fs::read_to_string(support.join("current-version")).ok()?;
@@ -86,8 +105,9 @@ fn locate(console: &std::path::Path) -> Option<std::path::PathBuf> {
         && version
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b".+_-".contains(&byte));
-    let current = support.join("versions").join(version).join("hex.exe");
-    (named && current.is_file()).then_some(current)
+    (named)
+        .then(|| support.join("versions").join(version))
+        .and_then(|folder| existing(&folder))
 }
 
 #[cfg(test)]
@@ -109,27 +129,55 @@ mod tests {
     }
 
     #[test]
-    fn finds_hex_beside_it_or_through_current_version() {
+    fn finds_the_renamed_executable_beside_it_or_through_current_version() {
         let root = std::env::temp_dir().join(format!("hex-console-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let version = root.join("versions").join("3.4.0");
         std::fs::create_dir_all(&version).unwrap();
         std::fs::create_dir_all(root.join("bin")).unwrap();
-        std::fs::write(version.join("hex.exe"), b"").unwrap();
+        std::fs::write(version.join("hex-voice.exe"), b"").unwrap();
 
         assert_eq!(
             locate(&version.join("hex.com")),
-            Some(version.join("hex.exe"))
+            Some(version.join("hex-voice.exe"))
         );
         let bin = root.join("bin").join("hex.com");
         assert_eq!(locate(&bin), None, "no current-version yet");
         std::fs::write(root.join("current-version"), "3.4.0\n").unwrap();
-        assert_eq!(locate(&bin), Some(version.join("hex.exe")));
+        assert_eq!(locate(&bin), Some(version.join("hex-voice.exe")));
         std::fs::write(root.join("current-version"), "..\\..\\elsewhere").unwrap();
         assert_eq!(
             locate(&bin),
             None,
             "a pointer that leaves versions is ignored"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn finds_a_release_before_the_rename_and_prefers_the_new_name() {
+        let root = std::env::temp_dir().join(format!("hex-console-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let version = root.join("versions").join("3.3.0");
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(version.join("hex.exe"), b"").unwrap();
+        std::fs::write(root.join("current-version"), "3.3.0\n").unwrap();
+
+        // A release staged before the rename still starts through hex.com,
+        // beside it and through bin\hex.com.
+        assert_eq!(
+            locate(&version.join("hex.com")),
+            Some(version.join("hex.exe"))
+        );
+        let bin = root.join("bin").join("hex.com");
+        assert_eq!(locate(&bin), Some(version.join("hex.exe")));
+
+        std::fs::write(version.join("hex-voice.exe"), b"").unwrap();
+        assert_eq!(
+            locate(&bin),
+            Some(version.join("hex-voice.exe")),
+            "the renamed executable wins when both exist"
         );
         let _ = std::fs::remove_dir_all(root);
     }

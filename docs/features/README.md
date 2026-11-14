@@ -95,7 +95,7 @@ Download Hex                              // setup.download-recovery
 └── Older app cannot reach its update feed -> manually install the DMG
 
 Install on Windows                        // setup.windows-installer
-├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
+├── Setup.exe, per user, no admin -> managed versions\<version>\hex-voice.exe
 │   ├── x64 without a Vulkan 1.2 driver -> installs; speech on the CPU + Settings note (#1240)
 │   ├── another version installed (e.g. self-updated) -> install this one over it
 │   └── finish -> Open Hex -> the first run downloads a model
@@ -2184,7 +2184,8 @@ real Hyprland session.
 
 ```ts
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
-├── Install -> Setup.exe or install-windows.ps1 -> hex.exe + install.json receipt
+├── Install -> Setup.exe or install-windows.ps1 -> hex-voice.exe + install.json receipt
+│   └── a release before the rename (hex.exe) -> moves to hex-voice.exe at launch
 ├── Launch -> DLLs load from System32 and Hex's folder only, never PATH (#587)
 │   └── DX12 compiles shaders with FXC (System32), never a dxcompiler.dll on PATH
 ├── GPU -> Rune draws with DX12 only (Vulkan only without a DX12 adapter) on
@@ -2288,12 +2289,15 @@ the same mark in black (`a_light_tray_gets_a_dark_mark_with_the_same_shape`
 checks the pixels, not a real taskbar). Releases are Authenticode-signed once Azure Artifact
 Signing is configured ([windows-signing.md](../windows-signing.md)).
 
-**Known defect, outside Hex:** Discord's game detection matches the running
+**Discord's game detection:** Discord matches a running process named
 `hex.exe` to *HEX: Shards of Fate*
-([#445](https://github.com/anomalyco/hex/issues/445)). The executable name stays
-as it is because the managed install layout, updater, shortcut, and login entry
-use it. The workaround is to hide the entry in Discord's Registered Games
-([Windows guide](../windows.md#known-issues)). No check covers it.
+([#445](https://github.com/anomalyco/hex/issues/445)), so the Windows install
+runs `hex-voice.exe`; `hex` in a terminal is still the `hex.com` console entry
+point, which starts it. A release before the rename moves to the new name and
+relaunches at its first launch. `crates/console` tests that `hex.com` finds
+both names, and `updater/windows.rs` tests that a staged update writes only
+`hex-voice.exe` and leaves the old version's `hex.exe`; Discord itself has not
+been checked with the renamed executable.
 
 No Windows Meetings or local transcription API. See the
 [Windows guide](../windows.md) for the parity table, streaming notes, and
