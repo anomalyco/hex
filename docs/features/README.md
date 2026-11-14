@@ -393,7 +393,8 @@ Choose a supported language              // setup.language-conditioning; macOS +
 │   Whisper turbo also offer it
 ├── Norwegian -> NB-Whisper Medium, always with the `no` hint (Bokmål is all
 │   Hex measured); stock Whisper turbo also offers it (#1150)
-└── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
+├── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
+└── Urdu -> Whisper only, with the `ur` hint; Auto lets Whisper guess per clip
 ```
 
 Whisper and Qwen3-ASR (including QwenCleo) read the shared
@@ -531,6 +532,13 @@ substitute: in a manual test, Whisper's per-clip detection labeled Bangla speech
 as Arabic, Turkish, and Spanish. `bangla_is_transcribed_by_whisper_with_its_language_hint`
 checks the recommendation, the `bn` hint, and that Qwen3-ASR rejects it. It
 runs no inference, and Bangla accuracy has not been measured.
+
+Urdu (`ur`) is offered because Whisper large-v3-turbo was trained on it; it is
+Urdu's only recommended catalog choice, so a computer whose first preferred
+language is Urdu starts on Whisper.
+`urdu_is_transcribed_by_whisper_with_its_language_hint` checks the
+recommendation, the `ur` hint, and that Qwen3-ASR rejects it. It runs no
+inference, and Urdu accuracy has not been measured.
 
 Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
