@@ -83,7 +83,7 @@ struct Finishing {
 }
 
 enum OutputJob {
-    Dictation(Job),
+    Dictation(Box<Job>),
     PasteLast,
 }
 
@@ -323,7 +323,7 @@ pub fn run(
             while let Ok(job) = job_receiver.recv() {
                 let result = match job {
                     OutputJob::Dictation(job) => process_dictation_job(
-                        job,
+                        *job,
                         &mut paster,
                         history.as_ref(),
                         &last_dictation,
@@ -1375,7 +1375,7 @@ fn submit_capture(
                 .unwrap_or_else(|| crate::app_settings::transcription_selection().1)
                 .language;
             let recording = crate::history::Recording::keep(&samples);
-            let job = OutputJob::Dictation(Job {
+            let job = OutputJob::Dictation(Box::new(Job {
                 context,
                 transcript: engine.finish(stream, samples)?,
                 audio_ms,
@@ -1384,7 +1384,7 @@ fn submit_capture(
                 print,
                 flavour,
                 held_ms,
-            });
+            }));
             match jobs.try_send(job) {
                 Ok(()) => {
                     *pending += 1;
