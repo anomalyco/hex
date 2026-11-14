@@ -43,6 +43,41 @@ impl CaretText {
     }
 }
 
+/// Which end of a UTF-16 string a size cap keeps.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Keep {
+    /// The first units: text at or after the selection.
+    Head,
+    /// The last units: text ending at the selection, where the caret is.
+    Tail,
+}
+
+/// At most `max` UTF-16 units of `units`, taken from `keep`'s end, as a
+/// string. A lone surrogate at either edge — left by the cut, or by the app —
+/// is dropped before conversion, so a split pair contributes nothing to that
+/// edge and a real U+FFFD in the text survives it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn bounded_units(units: &[u16], max: usize, keep: Keep) -> String {
+    let mut units = match keep {
+        Keep::Head => &units[..units.len().min(max)],
+        Keep::Tail => &units[units.len().saturating_sub(max)..],
+    };
+    if units
+        .first()
+        .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit))
+    {
+        units = &units[1..];
+    }
+    if units
+        .last()
+        .is_some_and(|unit| (0xD800..=0xDBFF).contains(unit))
+    {
+        units = &units[..units.len() - 1];
+    }
+    String::from_utf16_lossy(units)
+}
+
 /// One capture's read of the text around the cursor: at most one waiting
 /// result and at most one running reader. `recognition::context_watch` starts
 /// it as the capture becomes real and takes it when the capture finishes.
@@ -107,12 +142,20 @@ impl CaretTextRead {
         Some(sender)
     }
 
-    /// This capture's text, if the read finished before its run.
+    /// This capture's text, if the read finished before its run and the lab
+    /// is still on. Turning it off during a capture sends nothing, even for a
+    /// read that already finished: the read is taken and dropped.
     pub(crate) fn take(&mut self) -> Option<CaretText> {
+        self.take_if(crate::labs::cursor_context())
+    }
+
+    /// [`take`](Self::take) under an explicit lab state, so the turn-off is
+    /// testable on every OS, including ones where the lab never turns on.
+    fn take_if(&mut self, reading: bool) -> Option<CaretText> {
         self.read
             .take()
             .and_then(|read| read.try_recv().ok())
-            .filter(|caret| !caret.is_empty())
+            .filter(|caret| reading && !caret.is_empty())
     }
 
     /// The capture ended without transcribing, or a new one started: a late
@@ -176,18 +219,18 @@ mod context_watch {
         let mut caret = CaretTextRead::default();
         // begin: a press that is not a real capture yet.
         assert!(!caret.read_now(false, true, "Stale", ""));
-        assert_eq!(caret.take(), None);
+        assert_eq!(caret.take_if(true), None);
         // intend: the first real capture reads its field.
         assert!(caret.read_now(true, true, "We ship ", " on Friday."));
         // cancel: its read is dropped, and finish sees nothing stale.
         caret.cancel();
-        assert_eq!(caret.take(), None);
+        assert_eq!(caret.take_if(true), None);
         // intend without a pending capture, such as a loop pass after finish.
         assert!(!caret.read_now(false, true, "Stale", ""));
-        assert_eq!(caret.take(), None);
+        assert_eq!(caret.take_if(true), None);
         // The next capture's own read is the only one that reaches it.
         assert!(caret.read_now(true, true, "Meet me at ", " today."));
-        let caret = caret.take().expect("the next capture's text");
+        let caret = caret.take_if(true).expect("the next capture's text");
         assert_eq!(caret.before, "Meet me at ");
         assert_eq!(caret.after, " today.");
     }
@@ -207,21 +250,32 @@ mod context_watch {
             "a waiting read is not replaced"
         );
         assert_eq!(
-            caret.take().map(|caret| caret.before),
+            caret.take_if(true).map(|caret| caret.before),
             Some("Qdrant".into())
         );
         assert!(
             !caret.read_now(true, false, "OpenCode", ""),
             "the lab being off reads nothing"
         );
-        assert_eq!(caret.take(), None);
+        assert_eq!(caret.take_if(true), None);
     }
 
     #[test]
     fn an_empty_read_is_no_context() {
         let mut caret = CaretTextRead::default();
         assert!(caret.read_now(true, true, "", ""));
-        assert_eq!(caret.take(), None);
+        assert_eq!(caret.take_if(true), None);
+    }
+
+    /// Turning the lab off during a capture sends nothing, even for a read
+    /// that already finished: it is taken and dropped instead of reaching the
+    /// rewrite.
+    #[test]
+    fn a_capture_whose_lab_turned_off_sends_nothing() {
+        let mut caret = CaretTextRead::default();
+        assert!(caret.read_now(true, true, "We ship on ", " morning."));
+        assert_eq!(caret.take_if(false), None);
+        assert_eq!(caret.take_if(true), None, "the read is taken and dropped");
     }
 
     #[test]
@@ -237,5 +291,46 @@ mod context_watch {
             "{debug}"
         );
         assert!(debug.contains("before_chars: 11"), "{debug}");
+    }
+}
+
+/// The bounded UTF-16 window the Accessibility read converts before it can
+/// reach a prompt.
+#[cfg(test)]
+mod bounded_units {
+    use super::{Keep, bounded_units};
+
+    #[test]
+    fn the_cap_keeps_the_head_or_the_tail() {
+        let units: Vec<u16> = "abcdef".encode_utf16().collect();
+        assert_eq!(bounded_units(&units, 2, Keep::Head), "ab");
+        assert_eq!(bounded_units(&units, 2, Keep::Tail), "ef");
+        assert_eq!(bounded_units(&units, 6, Keep::Head), "abcdef");
+        assert_eq!(bounded_units(&units, 6, Keep::Tail), "abcdef");
+        assert_eq!(bounded_units(&units, 0, Keep::Head), "");
+        assert_eq!(bounded_units(&[], 4, Keep::Tail), "");
+    }
+
+    /// A cut, or the app, can leave half a surrogate pair at an edge. That
+    /// half is dropped rather than sent as U+FFFD, and the rest stays.
+    #[test]
+    fn a_lone_surrogate_at_an_edge_is_dropped() {
+        // 😀 is D83D DE00; A is 0041.
+        let units = [0xD83D, 0xDE00, 0x0041];
+        assert_eq!(bounded_units(&units, 2, Keep::Head), "😀");
+        assert_eq!(bounded_units(&units, 1, Keep::Head), "");
+        assert_eq!(bounded_units(&units, 2, Keep::Tail), "A");
+        assert_eq!(bounded_units(&units, 1, Keep::Tail), "A");
+        assert_eq!(bounded_units(&[0x0041, 0xD83D], 2, Keep::Head), "A");
+        assert_eq!(bounded_units(&[0xDE00, 0x0041], 2, Keep::Head), "A");
+    }
+
+    /// Only surrogates are dropped: a replacement character the text itself
+    /// holds is real and stays.
+    #[test]
+    fn a_real_replacement_character_survives_the_trim() {
+        let units = [0x0041, 0xFFFD, 0x0042];
+        assert_eq!(bounded_units(&units, 3, Keep::Head), "A\u{FFFD}B");
+        assert_eq!(bounded_units(&units, 2, Keep::Tail), "\u{FFFD}B");
     }
 }

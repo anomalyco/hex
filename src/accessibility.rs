@@ -3,6 +3,8 @@ use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 use std::time::{Duration, Instant};
 
+use crate::dictation::caret_text::{Keep, bounded_units};
+
 type CfTypeRef = *const c_void;
 type CfStringRef = *const c_void;
 type AxUiElementRef = *const c_void;
@@ -272,15 +274,12 @@ pub fn text_around_caret(pid: i32) -> Option<crate::dictation::caret_text::Caret
                 location,
                 length: selection.location - location,
             },
+            Keep::Tail,
         )
-        .map(drop_leading_half)
         .unwrap_or_default();
     }
     if selection.length > 0 {
-        caret.selected = copy_text_for_range(&focused, selection)
-            .map(drop_leading_half)
-            .map(drop_trailing_half)
-            .unwrap_or_default();
+        caret.selected = copy_text_for_range(&focused, selection, Keep::Head).unwrap_or_default();
     }
     // `AXNumberOfCharacters` bounds the after range: asking past the end
     // fails as a whole, and a range over the document's tail would.
@@ -294,28 +293,11 @@ pub fn text_around_caret(pid: i32) -> Option<crate::dictation::caret_text::Caret
                 location: selection_end,
                 length,
             },
+            Keep::Head,
         )
-        .map(drop_trailing_half)
         .unwrap_or_default();
     }
     (!caret.is_empty()).then_some(caret)
-}
-
-/// Drops a lone low surrogate a range's start split off: it reads as U+FFFD
-/// once the UTF-16 units become a `String`.
-fn drop_leading_half(mut text: String) -> String {
-    if text.starts_with('\u{FFFD}') {
-        text.remove(0);
-    }
-    text
-}
-
-/// Drops a lone high surrogate a range's end split off.
-fn drop_trailing_half(mut text: String) -> String {
-    if text.ends_with('\u{FFFD}') {
-        text.pop();
-    }
-    text
 }
 
 /// The page address of the web area holding the application's focused
@@ -501,10 +483,13 @@ fn copy_string_for_range(element: &CfObject, range: CfRange) -> Option<String> {
 }
 
 /// A range's text converted from its UTF-16 units, so a range that starts or
-/// ends inside a surrogate pair keeps the rest of the text.
-fn copy_text_for_range(element: &CfObject, range: CfRange) -> Option<String> {
+/// ends inside a surrogate pair keeps the rest of the text. At most the
+/// range's own unit count is copied, from `keep`'s end: an app may answer a
+/// range with more text than it names, and a whole document must never be
+/// read. A slice edge that splits a surrogate pair drops that half.
+fn copy_text_for_range(element: &CfObject, range: CfRange, keep: Keep) -> Option<String> {
     parameterized_string(element, range)
-        .and_then(|value| cf_string_lossy(value.0))
+        .and_then(|value| cf_string_lossy(value.0, range.length.max(0) as usize, keep))
         .filter(|text| !text.is_empty())
 }
 
@@ -615,9 +600,11 @@ fn cf_string(value: CfTypeRef) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// [`cf_string`] through the string's UTF-16 units, where a lone surrogate
-/// is U+FFFD instead of failing the whole conversion.
-fn cf_string_lossy(value: CfTypeRef) -> Option<String> {
+/// [`cf_string`] through a bounded window of the string's UTF-16 units: at
+/// most `max_units` of them, from `keep`'s end, are copied out of the
+/// returned string. A lone surrogate at a window edge is dropped by
+/// [`bounded_units`] instead of failing the whole conversion.
+fn cf_string_lossy(value: CfTypeRef, max_units: usize, keep: Keep) -> Option<String> {
     if unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
         return None;
     }
@@ -626,20 +613,28 @@ fn cf_string_lossy(value: CfTypeRef) -> Option<String> {
     if length < 0 {
         return None;
     }
-    let mut units = vec![0_u16; length as usize];
-    // SAFETY: `value` is a CFString of `length` UTF-16 units, and `units`
-    // holds exactly that many.
+    let kept = (length as usize).min(max_units);
+    if kept == 0 {
+        return Some(String::new());
+    }
+    let location = match keep {
+        Keep::Head => 0,
+        Keep::Tail => length - kept as isize,
+    };
+    let mut units = vec![0_u16; kept];
+    // SAFETY: `value` is a CFString of `length` UTF-16 units, the range ends
+    // at or before `length`, and `units` holds exactly the range's length.
     unsafe {
         CFStringGetCharacters(
             value,
             CfRange {
-                location: 0,
-                length,
+                location,
+                length: kept as isize,
             },
             units.as_mut_ptr(),
         )
     };
-    Some(String::from_utf16_lossy(&units))
+    Some(bounded_units(&units, kept, keep))
 }
 
 #[cfg(test)]

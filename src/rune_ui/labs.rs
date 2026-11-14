@@ -923,12 +923,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
     // macOS's Accessibility reads the text element's caret and nearby text.
     if caps.os == super::platform::Os::Macos {
         rows.push(Row {
-            note: Some(tr("Password fields are never read.").to_owned()),
+            note: Some(
+                tr("That text goes to the mode's OpenCode model, which may be a cloud provider. Password fields are never read.")
+                    .to_owned(),
+            ),
             ..row(
                 Feature::CursorContext,
                 Some(&BOOK),
                 tr("Rewrite reads nearby text"),
-                tr("Cursor text goes to the OpenCode model, which may be a cloud provider."),
+                tr("Rewrite uses the text around the cursor to spell names and terms right and fit where it pastes."),
             )
         });
     }
