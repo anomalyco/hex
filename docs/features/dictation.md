@@ -374,6 +374,8 @@ Output > Without processing > Dictate without processing   // raw.shortcut
 │       ├── Windows: a key chord (the hook's raw trigger)
 │       └── Linux: an X11 grab, or a portal entry "Dictate without processing",
 │           only while bound
+├── Sharing the dictation shortcut -> cleared (logged) when settings load or
+│   save: one press never starts both captures
 ├── Hold / double-tap lock / toggle -> as the dictation shortcut
 │   ├── The shortcut that started a capture owns it: the other one neither
 │   │   finishes it nor counts toward its double tap
@@ -587,6 +589,10 @@ Checks: `a_failed_paste_keeps_the_dictation_for_paste_last` in
 paste). Windows cross-compiles only; its paste is
 [windows/dictation.rs](../../src/windows/dictation.rs)'s own `WindowsPaster`.
 Issue [#1437](https://github.com/anomalyco/hex/issues/1437).
+
+Paste last dictation's own shortcut has no runtime filter beside dictation's,
+so one saved on the dictation shortcut's chord is cleared (logged) when
+settings load or save.
 
 ### Copy Recent Dictation (Labs, macOS)
 

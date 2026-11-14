@@ -1,6 +1,7 @@
 use super::*;
 use crate::app_settings::{
-    MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
+    HotkeyBinding, HotkeyKey, HotkeyModifiers, LabsSettings, MeetingRetention, MeetingSettings,
+    MeetingSummaries, RecordingAudioBehavior,
 };
 use crate::dictation::vocabulary::VocabularyEntry;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
@@ -467,6 +468,125 @@ fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     assert!(loaded.typed_text_hotkey.is_none());
     assert!(loaded.second_dictation_hotkey.is_none());
     assert!(loaded.terminal_paste_hotkey.is_none());
+}
+
+/// A saved shortcut on the dictation chord is cleared when settings load.
+/// The clear is a repair, so the file keeps its bytes until the next save.
+#[test]
+fn a_saved_shortcut_on_the_dictation_chord_is_cleared_on_load() {
+    let shared = HotkeyBinding::default();
+    let original = serde_json::to_vec(&AppSettings {
+        raw_dictation_hotkey: Some(shared.clone()),
+        ..AppSettings::default()
+    })
+    .unwrap();
+    let file = SettingsFile::new(&original);
+    let loaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(loaded.dictation_hotkey, shared);
+    assert_eq!(loaded.raw_dictation_hotkey, None);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+}
+
+/// A repair that puts the dictation shortcut back on its default can make it
+/// share the chord a saved optional shortcut already had; that shortcut is
+/// cleared after the repair, not left to match beside dictation.
+#[test]
+fn a_repair_that_moves_dictation_onto_a_saved_shortcut_clears_it() {
+    let left_click = HotkeyBinding {
+        modifiers: HotkeyModifiers::default(),
+        key: Some(HotkeyKey::mouse(0).unwrap()),
+    };
+    let raw = HotkeyBinding::default();
+    let file = SettingsFile::new(
+        &serde_json::to_vec(&AppSettings {
+            dictation_hotkey: left_click,
+            raw_dictation_hotkey: Some(raw.clone()),
+            ..AppSettings::default()
+        })
+        .unwrap(),
+    );
+    let loaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(loaded.dictation_hotkey, raw);
+    assert_eq!(loaded.raw_dictation_hotkey, None);
+}
+
+/// Paste last dictation has no runtime filter either, so a saved one on the
+/// dictation chord is cleared too.
+#[test]
+fn a_saved_paste_last_shortcut_on_the_dictation_chord_is_cleared_on_load() {
+    let shared = HotkeyBinding::default();
+    let file = SettingsFile::new(
+        &serde_json::to_vec(&AppSettings {
+            paste_last_hotkey: Some(shared.clone()),
+            ..AppSettings::default()
+        })
+        .unwrap(),
+    );
+    let loaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(loaded.dictation_hotkey, shared);
+    assert_eq!(loaded.paste_last_hotkey, None);
+}
+
+/// The Lab shortcuts are filtered at runtime (`active_*` skip a binding on the
+/// dictation chord), so their saved value stays through a load and a save.
+#[test]
+fn a_second_dictation_shortcut_on_the_dictation_chord_stays_saved() {
+    let shared = HotkeyBinding::default();
+    let file = SettingsFile::new(
+        &serde_json::to_vec(&AppSettings {
+            second_dictation_hotkey: Some(shared.clone()),
+            labs: LabsSettings {
+                second_dictation_shortcut: true,
+                ..Default::default()
+            },
+            ..AppSettings::default()
+        })
+        .unwrap(),
+    );
+    let base = AppSettings::load_from(&file.path).unwrap();
+    assert!(base.labs.second_dictation_shortcut);
+    assert_eq!(base.second_dictation_hotkey, Some(shared.clone()));
+    assert_eq!(base.active_second_dictation_hotkey(), None);
+
+    let mut candidate = base.clone();
+    candidate.sound_effects = !base.sound_effects;
+    let saved = base
+        .update_at(&candidate, &file.path, Policy::default())
+        .unwrap();
+    assert_eq!(saved.second_dictation_hotkey, Some(shared.clone()));
+    let reloaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(reloaded.second_dictation_hotkey, Some(shared));
+}
+
+/// The base-aware merge can move the dictation shortcut onto a shortcut the
+/// file already saved, so the merged settings are held to the same rule
+/// before they are written.
+#[test]
+fn a_save_that_moves_the_dictation_shortcut_clears_a_saved_shortcut_sharing_it() {
+    let shared = HotkeyBinding {
+        modifiers: HotkeyModifiers {
+            function: true,
+            ..HotkeyModifiers::default()
+        },
+        key: None,
+    };
+    let file = SettingsFile::new(
+        &serde_json::to_vec(&AppSettings {
+            raw_dictation_hotkey: Some(shared.clone()),
+            ..AppSettings::default()
+        })
+        .unwrap(),
+    );
+    let base = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(base.raw_dictation_hotkey, Some(shared.clone()));
+    let mut candidate = base.clone();
+    candidate.dictation_hotkey = shared;
+    let saved = base
+        .update_at(&candidate, &file.path, Policy::default())
+        .unwrap();
+    assert_eq!(saved.raw_dictation_hotkey, None);
+    let written: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert_eq!(written["raw_dictation_hotkey"], Value::Null);
 }
 
 #[test]

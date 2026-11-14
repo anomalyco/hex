@@ -832,6 +832,10 @@ General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
      more modifiers) it says so, unless Labs > Double-tap on a lone modifier
      is on (macOS)
 
+Dictate without processing (Output pane; unbound)   // dictation.md
+  -> records and pastes as heard, skipping Output; History kind Raw
+  -> a shortcut on the dictation chord is cleared when settings load or save
+
 Labs > Second dictation shortcut (off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
@@ -886,8 +890,10 @@ Completed output                         // output
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   ├── Last completed dictation
 │   ├── A failed paste still keeps its text (every OS, unless cancelled; dictation.md)
-│   └── macOS menu item shows the saved binding (⌥⇧V by default); unbound,
-│       modifier-only, or a mouse button -> no shortcut shown
+│   ├── macOS menu item shows the saved binding (⌥⇧V by default); unbound,
+│   │   modifier-only, or a mouse button -> no shortcut shown
+│   └── A saved binding on the dictation chord is cleared (logged) when
+│       settings load or save
 └── History
     ├── Inspect / search / copy (row hover or the card) / Delete… (asks once)
     ├── Retention ("Kept 7 days ▾" menu) -> Seven days by default, always hard-capped
