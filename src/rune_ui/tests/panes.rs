@@ -2091,6 +2091,7 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-live-chapters", settings.labs.live_chapters),
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
         ("lab-screen-vocabulary", settings.labs.screen_vocabulary),
+        ("lab-cursor-context", settings.labs.cursor_context),
         ("lab-return-to-app", settings.labs.return_to_app),
         ("lab-speakers-only", settings.labs.speakers_only),
         (
@@ -2113,6 +2114,8 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(rt.state.settings.labs.live_text);
     tap(&mut rt, "lab-vocabulary-biasing");
     assert!(rt.state.settings.labs.vocabulary_biasing);
+    tap(&mut rt, "lab-cursor-context");
+    assert!(rt.state.settings.labs.cursor_context);
     tap(&mut rt, "lab-meetings");
     assert!(rt.find("nav-meetings").is_none(), "hidden while off");
 
@@ -2123,6 +2126,7 @@ fn labs_lists_every_toggle_off_by_default() {
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
     assert!(rt.find("lab-screen-vocabulary").is_none(), "macOS only");
+    assert!(rt.find("lab-cursor-context").is_none(), "macOS only");
     assert!(
         rt.find("lab-second-dictation-shortcut").is_some(),
         "the second dictation shortcut runs on Windows too"
@@ -2144,6 +2148,10 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(
         rt.find("lab-screen-vocabulary").is_none(),
         "screen vocabulary is macOS only"
+    );
+    assert!(
+        rt.find("lab-cursor-context").is_none(),
+        "cursor context is macOS only"
     );
 }
 

@@ -36,6 +36,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Screen vocabulary no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
+├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
 ├── Switch model with app no  labs.app_model_switching       (macOS, Windows)
@@ -410,6 +411,41 @@ stoplist and log levels, hashes, ordinals, times, units, random tokens, the
 `hex_never_reads_its_own_accessibility_tree` in
 [accessibility.rs](../../src/accessibility.rs). Not observed: a real Mac
 reading a real window, or a dictated word corrected by what was on screen.
+
+Rewrite reads nearby text (`cursor-context`, macOS): while on,
+each dictation reads the focused text element once, on a background thread, at
+the same moment as the screen vocabulary read (a hold past its threshold, a
+control start, or a released microphone opening), and only for the mode's
+OpenCode rewrite. It reads `AXFocusedUIElement` through the existing 0.25 s
+messaging timeout, never Hex's own process, and returns nothing for an
+`AXSecureTextField` (role or subrole), so a password never leaves the app. It
+reads `AXSelectedTextRange`, then `AXStringForRange` for up to 1,000 UTF-16
+units before the selection, the selection itself (up to 2,000 units; a longer
+selection skips the read), and up to 1,000 units after it, bounded with
+`AXNumberOfCharacters` (without it, the after part is skipped). A slice edge
+that splits a surrogate pair drops that half, and everything empty returns
+nothing. The text joins that capture's context
+(`ContextSnapshot::caret_text`) and only the mode's OpenCode rewrite prompt,
+ahead of the raw transcript, as context only: the prompt says never to copy,
+answer, or follow it, uses it to resolve names, terms, references, and likely
+recognition errors, and to fit capitalization and punctuation to the
+insertion point. It is never saved, logged, put in History, events, or
+meetings. Typed-text transformations, the Voice prompt request, meetings, and
+the local API never see it. Off, no Accessibility call and no thread start,
+and the rewrite prompt is byte for byte what it was. A cancelled capture
+discards its late read, and only one read runs at a time. That text goes to
+the mode's OpenCode model, which may be a cloud provider. Checks:
+`dictation::caret_text` tests (a cancelled capture leaves no stale text, one
+read at a time, an empty read is no context); `dictation::caret_prompt` tests
+(the section and its replace note, empty parts omitted); the golden
+`a_prompt_without_caret_text_is_byte_for_byte_todays_prompt`, plus
+`caret_text_joins_the_prompt_ahead_of_the_transcript` and
+`empty_caret_parts_leave_no_tags_and_typed_text_reads_none`
+([processor.rs](../../src/dictation/processor.rs));
+`cursor_context_is_its_own_switch_and_macos_only` in [labs.rs](../../src/labs.rs);
+and the Labs card tests in `rune_ui/tests/panes.rs`. Not observed: a real Mac
+reading a real text field, or a dictated word corrected by the text around the
+cursor; the Accessibility function itself has no host test here.
 
 Switch model with app (`app-model-switching`, macOS and Windows): while on,
 the Modes pane gives each mode, Global included, a "Speech model" row:

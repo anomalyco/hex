@@ -44,7 +44,12 @@ light or dark instead of following the OS, while the HUD and other overlays
 keep following it; its Screen vocabulary
 toggle (off by default, macOS) uses names and terms visible in the focused
 window as temporary vocabulary for each dictation, read locally through
-Accessibility and never saved ([vocabulary.md](vocabulary.md)).
+Accessibility and never saved ([vocabulary.md](vocabulary.md)). Its Rewrite
+reads nearby text toggle (off by default, macOS) hands the mode's OpenCode
+rewrite the text around the caret as context for names, terms, and where the
+result lands; the text goes to the configured provider, which may be a cloud
+service, password fields are never read, and off leaves the prompt byte for
+byte unchanged.
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
 used for any French system language (#892), and Русский, used for any
@@ -1340,8 +1345,11 @@ were not run against a live model.
 Built-in text transformations run natively. Custom transformations come from
 `~/.config/hex/hex.config.ts` and run in Hex's embedded script engine, each
 under its own `timeout` (1 s by default, 30 s when the config uses host APIs,
-60 s cap). OpenCode rewriting sends documented
-context to the configured provider; speech transcription stays local.
+60 s cap). OpenCode rewriting sends documented context to the configured
+provider; speech transcription stays local. With Labs › Rewrite reads nearby
+text on (macOS), that context also includes the focused text element's text
+around the caret, read through Accessibility and never saved; password fields
+are skipped, and off leaves the prompt unchanged.
 
 ```ts
 Discover custom transformations           // personal_commands::host_needed; every OS

@@ -85,10 +85,11 @@ pub enum Feature {
     CopyCaptureZip,
     ShellCompletions,
     YoloMode,
+    CursorContext,
 }
 
 impl Feature {
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 81] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -169,5 +170,6 @@ impl Feature {
         Self::CopyCaptureZip,
         Self::ShellCompletions,
         Self::YoloMode,
+        Self::CursorContext,
     ];
 }

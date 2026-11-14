@@ -86,6 +86,7 @@ impl Feature {
             | Self::PrintStart
             | Self::ShellCompletions
             | Self::YoloMode
+            | Self::CursorContext
             | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats

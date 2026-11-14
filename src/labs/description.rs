@@ -217,6 +217,9 @@ impl Feature {
             Self::VoicePrompt => {
                 "Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model"
             }
+            Self::CursorContext => {
+                "The mode's OpenCode rewrite reads the text around the cursor, so names and terms match where the result lands. That text goes to the model, which may be a cloud provider; password fields are never read"
+            }
             Self::ShellCompletions => {
                 "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
             }

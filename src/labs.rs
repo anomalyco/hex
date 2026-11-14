@@ -173,6 +173,7 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::ShellCompletions
             | Self::YoloMode
+            | Self::CursorContext
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -255,7 +256,7 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
             Self::KQuantModels => 20261113,
-            Self::ShellCompletions | Self::YoloMode => 20261113,
+            Self::ShellCompletions | Self::YoloMode | Self::CursorContext => 20261113,
         }
     }
 
@@ -339,6 +340,7 @@ impl Feature {
             | Self::PauseMenu
             | Self::PrintStart
             | Self::ScreenVocabulary
+            | Self::CursorContext
             | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
             Self::CopyOnly => cfg!(any(target_os = "macos", target_os = "windows")),
             Self::ReturnToApp => cfg!(target_os = "macos"),
@@ -479,6 +481,7 @@ impl Feature {
             Self::CopyCaptureZip => "copy-capture-zip",
             Self::ShellCompletions => "shell-completions",
             Self::YoloMode => "yolo-mode",
+            Self::CursorContext => "cursor-context",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -565,6 +568,7 @@ impl Feature {
             Self::CopyCaptureZip => "labs.copy_capture_zip",
             Self::ShellCompletions => "labs.shell_completions",
             Self::YoloMode => "labs.yolo_mode",
+            Self::CursorContext => "labs.cursor_context",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -655,6 +659,7 @@ impl Feature {
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::ShellCompletions => settings.labs.shell_completions,
             Self::YoloMode => settings.labs.yolo_mode,
+            Self::CursorContext => settings.labs.cursor_context,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -743,6 +748,7 @@ impl Feature {
             &mut labs.copy_capture_zip,
             &mut labs.shell_completions,
             &mut labs.yolo_mode,
+            &mut labs.cursor_context,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -836,6 +842,7 @@ impl Feature {
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::ShellCompletions => settings.labs.shell_completions = on,
             Self::YoloMode => settings.labs.yolo_mode = on,
+            Self::CursorContext => settings.labs.cursor_context = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -965,6 +972,11 @@ static PRINT_START: AtomicBool = AtomicBool::new(false);
 /// atomic because the state word is full.
 static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Rewrite reads nearby text's switch, set beside [`STATE`] like
+/// [`SCREEN_VOCABULARY`]: the mode's rewrite reads the focused text element
+/// once per dictation, and the state word has no bit for it.
+static CURSOR_CONTEXT: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Voice prompt's switch: the state word is full too, so it has its
 /// own atomic, written by [`state`] and [`apply`].
 static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
@@ -1022,6 +1034,7 @@ fn state() -> u64 {
                 MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
                 PRINT_START.store(print_start_enabled(&saved), Ordering::Release);
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
+                CURSOR_CONTEXT.store(cursor_context_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
@@ -1054,6 +1067,14 @@ fn screen_vocabulary_enabled(settings: &LabsSettings) -> bool {
     settings.screen_vocabulary
         && Feature::ScreenVocabulary.shipped()
         && Feature::ScreenVocabulary.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Rewrite reads nearby text in this build,
+/// before its managed lock; the state word has no bit for it.
+fn cursor_context_enabled(settings: &LabsSettings) -> bool {
+    settings.cursor_context
+        && Feature::CursorContext.shipped()
+        && Feature::CursorContext.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Voice prompt in this build, before its
@@ -1164,6 +1185,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
     PRINT_START.store(print_start_enabled(settings), Ordering::Release);
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
+    CURSOR_CONTEXT.store(cursor_context_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
@@ -1408,6 +1430,7 @@ pub fn log_launch() {
         playground = playground(),
         vocabulary_biasing = vocabulary_biasing(),
         screen_vocabulary = screen_vocabulary(),
+        cursor_context = cursor_context(),
         history_multi_select = history_multi_select(),
         "labs"
     );
@@ -2224,6 +2247,28 @@ mod tests {
             "labs.screen_vocabulary"
         );
         assert_eq!(Feature::ScreenVocabulary.name(), "screen-vocabulary");
+    }
+
+    #[test]
+    fn cursor_context_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!cursor_context_enabled(&labs));
+        labs.cursor_context = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(cursor_context_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & SMART_SPACING, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CursorContext.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::CursorContext.added(), 20261113);
+        assert_eq!(Feature::CursorContext.audience(), Audience::Everyone);
+        assert_eq!(Feature::CursorContext.group(), Group::Output);
+        assert_eq!(Feature::CursorContext.settings_key(), "labs.cursor_context");
+        assert_eq!(Feature::CursorContext.name(), "cursor-context");
     }
 
     #[test]

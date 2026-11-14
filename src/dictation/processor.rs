@@ -529,6 +529,7 @@ impl Profiles {
                 &profile.vocabulary,
                 &crate::dictation::vocabulary::entries(),
             ),
+            source,
         );
         let (text, observation) = generate_observed(
             &prompt,
@@ -1193,11 +1194,15 @@ fn prompt(
     transcript: &str,
     context: &ContextSnapshot,
     vocabulary: &[VocabularyEntry],
+    source: Source,
 ) -> String {
     let application = context.application.as_deref().unwrap_or("unknown");
     let host = context.browser_host().unwrap_or("none");
+    let caret = crate::dictation::caret_prompt::for_source(context, source)
+        .map(crate::dictation::caret_prompt::section)
+        .unwrap_or_default();
     format!(
-        "{PROTOCOL_PROMPT}\n\nProfile instructions:\n{}\n\n{}Foreground application: {application}\nBrowser host: {host}\n\nRaw transcript:\n<transcript>\n{transcript}\n</transcript>",
+        "{PROTOCOL_PROMPT}\n\nProfile instructions:\n{}\n\n{}Foreground application: {application}\nBrowser host: {host}\n\n{caret}Raw transcript:\n<transcript>\n{transcript}\n</transcript>",
         profile.prompt,
         vocabulary_lines(vocabulary)
     )
@@ -1491,6 +1496,7 @@ fn wait_for_generation_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dictation::caret_text::CaretText;
     use std::net::TcpListener;
 
     use url::Url;
@@ -1529,6 +1535,7 @@ mod tests {
             window_title: None,
             input_revision: None,
             screen_terms: Vec::new(),
+            caret_text: None,
         }
     }
 
@@ -1724,11 +1731,105 @@ mod tests {
             "This is the current transcript.",
             &context("Slack", None),
             &[],
+            Source::Dictation,
         );
         assert!(prompt.contains("Rewrite freely."));
         assert!(prompt.contains("Foreground application: Slack"));
         assert!(prompt.contains("This is the current transcript."));
         assert!(!prompt.contains("Vocabulary"));
+    }
+
+    #[test]
+    fn a_prompt_without_caret_text_is_byte_for_byte_todays_prompt() {
+        let expected = [
+            PROTOCOL_PROMPT,
+            "\n\nProfile instructions:\nRewrite freely.\n\nForeground application: Slack\n\
+             Browser host: none\n\nRaw transcript:\n<transcript>\n\
+             This is the current transcript.\n</transcript>",
+        ]
+        .concat();
+        let prompt = prompt(
+            &Profile::new("default", "Rewrite freely."),
+            "This is the current transcript.",
+            &context("Slack", None),
+            &[],
+            Source::Dictation,
+        );
+        assert_eq!(prompt, expected);
+    }
+
+    #[test]
+    fn caret_text_joins_the_prompt_ahead_of_the_transcript() {
+        let mut with_caret = context("Slack", None);
+        with_caret.caret_text = Some(CaretText {
+            before: "We ship on ".into(),
+            selected: "Friday".into(),
+            after: " morning.".into(),
+        });
+        let prompt = prompt(
+            &Profile::new("default", "Rewrite freely."),
+            "we ship on friday morning.",
+            &with_caret,
+            &[],
+            Source::Dictation,
+        );
+        assert!(
+            prompt.contains("<before_cursor>\nWe ship on \n</before_cursor>"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("<selected_text>\nFriday\n</selected_text>"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("The selected text will be replaced and will not remain."),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("<after_cursor>\n morning.\n</after_cursor>"),
+            "{prompt}"
+        );
+        let caret = prompt.find("<before_cursor>").unwrap();
+        let raw = prompt.find("Raw transcript:").unwrap();
+        assert!(caret < raw, "the context sits before the transcript");
+    }
+
+    #[test]
+    fn empty_caret_parts_leave_no_tags_and_typed_text_reads_none() {
+        let mut with_caret = context("Slack", None);
+        with_caret.caret_text = Some(CaretText {
+            before: "Only before".into(),
+            ..CaretText::default()
+        });
+        let dictation = prompt(
+            &Profile::new("default", "Rewrite freely."),
+            "Ship it.",
+            &with_caret,
+            &[],
+            Source::Dictation,
+        );
+        assert!(dictation.contains("<before_cursor>\nOnly before\n</before_cursor>"));
+        assert!(!dictation.contains("<selected_text>"));
+        assert!(!dictation.contains("<after_cursor>"));
+        assert!(!dictation.contains("will be replaced"));
+        let typed = prompt(
+            &Profile::new("default", "Rewrite freely."),
+            "Ship it.",
+            &with_caret,
+            &[],
+            Source::TypedText,
+        );
+        assert!(!typed.contains("<before_cursor>"), "{typed}");
+        assert_eq!(
+            typed,
+            prompt(
+                &Profile::new("default", "Rewrite freely."),
+                "Ship it.",
+                &context("Slack", None),
+                &[],
+                Source::TypedText,
+            )
+        );
     }
 
     #[test]
@@ -1748,6 +1849,7 @@ mod tests {
             "Ship the avatar change.",
             &context("Slack", None),
             &vocabulary,
+            Source::Dictation,
         );
         assert!(prompt.contains(
             "Vocabulary (spell these exactly when the speaker means them): cappuccino (may be \

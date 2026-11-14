@@ -1255,6 +1255,7 @@ mod tests {
             window_title: Some(title.into()),
             input_revision: None,
             screen_terms: Vec::new(),
+            caret_text: None,
         }
     }
 

@@ -56,6 +56,18 @@ pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }
 
+/// The mode's OpenCode rewrite is given the text around the cursor as
+/// context, read once as the capture becomes real (macOS; read by the
+/// listener at its hold threshold, its control start, or the released
+/// microphone opening).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn cursor_context() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    CURSOR_CONTEXT.load(Ordering::Acquire) && Feature::CursorContext.on_this_os()
+}
+
 /// A finished Annotate capture copies to the clipboard as one light zip file
 /// rather than its image and summary (read where a written capture is copied).
 #[cfg_attr(not(hex_capture), allow(dead_code))]
