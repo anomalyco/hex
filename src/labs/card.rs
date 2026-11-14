@@ -176,6 +176,9 @@ impl Feature {
             Self::ParakeetUltra => {
                 "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
             }
+            Self::StandaloneSpecialKeys if cfg!(target_os = "windows") => {
+                "Use Insert, Home, End, Page Up, or Page Down as a shortcut without a modifier"
+            }
             Self::StandaloneSpecialKeys => {
                 "Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"
             }

@@ -244,6 +244,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("On while it is the dictation model. Choose another model to turn it off.", "Включено, пока это модель для диктовки. Чтобы выключить, выберите другую модель."),
     ("Special keys alone", "Специальные клавиши отдельно"),
     ("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu", "Использовать Menu, Pause или Scroll Lock как сочетание без модификатора, например Caps Lock, переназначенный на Menu"),
+    ("Use Insert, Home, End, Page Up, or Page Down as a shortcut without a modifier", "Использовать Insert, Home, End, Page Up или Page Down как сочетание без модификатора"),
     ("Dictation stats", "Статистика диктовки"),
     ("Stats", "Статистика"),
     ("Add a Stats button to History that shows a summary of your retained dictations, with hex history stats", "Добавляет в Историю кнопку «Статистика», которая показывает сводку сохранённых диктовок, а также команду hex history stats"),

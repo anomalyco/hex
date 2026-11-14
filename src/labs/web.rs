@@ -17,10 +17,11 @@ impl Feature {
             )
     }
 
-    /// The summary the website lists. Unlike `description`, whose Windows
-    /// build names its own keys, `summary` is one string on every OS, so a lab
-    /// that runs on more than one OS names each one's keys here and
-    /// `site/src/labs.json` is the same file wherever it is generated.
+    /// The summary the website lists. A Labs card's `summary` names the keys
+    /// its own OS has (the special-keys lab's Windows build lists Insert
+    /// through Page Down), so the site's line for a lab on more than one OS
+    /// names each one's keys here, and `site/src/labs.json` is the same file on
+    /// every OS.
     const fn web_summary(self) -> &'static str {
         match self {
             Self::StandaloneSpecialKeys => {

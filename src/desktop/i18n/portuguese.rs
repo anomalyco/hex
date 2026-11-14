@@ -248,6 +248,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("On while it is the dictation model. Choose another model to turn it off.", "Fica ativado enquanto for o modelo de ditado. Escolha outro modelo para desativá-lo."),
     ("Special keys alone", "Teclas especiais sozinhas"),
     ("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu", "Use Menu, Pause ou Scroll Lock como atalho sem modificador, como um Caps Lock remapeado para Menu"),
+    ("Use Insert, Home, End, Page Up, or Page Down as a shortcut without a modifier", "Use Insert, Home, End, Page Up ou Page Down como atalho sem modificador"),
     ("Dictation stats", "Estatísticas de ditado"),
     ("Stats", "Estatísticas"),
     ("Add a Stats button to History that shows a summary of your retained dictations, with hex history stats", "Adiciona um botão Estatísticas ao Histórico que mostra um resumo dos seus ditados guardados, também com hex history stats"),

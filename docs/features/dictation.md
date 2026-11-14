@@ -2425,17 +2425,23 @@ On Windows the HUD paces its own frames: Rune's overlays there have no display
 link and don't wait for a swap-chain slot
 (`Dx12UseFrameLatencyWaitableObject::DontWait`; only a window runs Rune's slot
 wait), so a moving HUD would draw, submit and present as fast as the loop
-turns. `HudCompositor::animating` says the HUD is not display-paced, and
-`poll` asks Rune for its next frame `HUD_FRAME` later, a fixed ~60 Hz timer
-rather than the display's refresh. A meter no longer forces a frame of its
-own: a recording sends one with each audio chunk, about 100 a second, and it
-takes the timer's next frame instead (`meter_draws`), since the view reads no
-loudness. This works around a suspected and unmeasured cause on Windows:
-frames presented faster than the GPU retires them keep their staging chunks
-and D3D12 allocators alive, and a hide that waits on the present queue stalls
-the window. Checked by `rune_hud::tests`
-(`a_start_sets_the_timer_that_meters_ride`) and CI's compile and tests only,
-with no real-Windows memory measurement yet.
+turns. `HudCompositor::animating` says the HUD is not display-paced, and `poll`
+(`rune_hud/windows_pacing.rs`) asks Rune for its next frame `HUD_FRAME` later,
+a fixed ~60 Hz timer rather than the display's refresh. It asks only while the
+HUD moves and a frame has drawn within `RESHOW_AFTER` (250 ms), so a show that
+draws nothing stops the timer instead of turning the loop with Hex idle. A
+meter no longer forces a frame of its own: a recording sends one with each
+audio chunk, about 100 a second, and while the timer is armed it takes the
+timer's next frame (`meter_update`), since the view reads no loudness. When
+the timer is not armed, the meter's update draws one frame, and the frame it
+draws lets the poll after it arm the timer again. This works around a
+suspected and unmeasured cause on Windows: frames presented faster than the
+GPU retires them keep their staging chunks and D3D12 allocators alive, and a
+hide that waits on the present queue stalls the window. Checked by
+`rune_hud::tests`
+(`an_armed_timer_draws_for_meters_and_a_stopped_one_lets_a_meter_draw` and
+`the_timer_arms_from_a_start_and_stops_when_frames_stop`) and CI's compile and
+tests only, with no real-Windows memory measurement yet.
 
 Each chunk's meter removes the chunk's mean before measuring RMS and peak, so
 a microphone's DC offset (a Ryzen built-in digital microphone, #841) never

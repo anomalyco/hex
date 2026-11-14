@@ -619,31 +619,74 @@ fn hud(shown: bool) -> Hud {
         gpu: Arc::default(),
         #[cfg(target_os = "windows")]
         watch: Arc::default(),
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", test))]
         last_drawn: None,
+        #[cfg(any(target_os = "windows", test))]
+        armed: false,
+        #[cfg(target_os = "windows")]
+        stepped_at: None,
         #[cfg(target_os = "windows")]
         reshown: false,
     }
 }
 
-/// Windows draws the HUD from its own ~60 Hz timer while it moves, so a
-/// recording's meters take its next frame instead of forcing one each: a
-/// meter draws only while no timer runs. A start marks the HUD moving before
-/// any meter arrives, so the frame it draws schedules the timer they all ride.
+/// An armed timer draws the next level itself, so a meter only updates the
+/// model; a timer that isn't armed draws nothing, so the meter's update draws
+/// one frame. Loudness moves either way.
 #[test]
-fn a_start_sets_the_timer_that_meters_ride() {
+fn an_armed_timer_draws_for_meters_and_a_stopped_one_lets_a_meter_draw() {
     let mut hud = hud(true);
-    assert!(meter_draws(&hud), "nothing moves yet: the meter draws");
+    hud.armed = true;
+    let draws = windows_pacing::meter_update(
+        &mut hud,
+        HudEvent::Meter {
+            average: 0.5,
+            peak: 0.8,
+        },
+    );
+    assert!(!draws, "the armed timer's frame shows the level");
+    assert!((hud.model.loudness() - dot_scope::loudness(0.5)).abs() < f32::EPSILON);
+
+    hud.armed = false;
+    let draws = windows_pacing::meter_update(
+        &mut hud,
+        HudEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        },
+    );
+    assert!(draws, "nothing else draws the level, so this meter does");
+    assert!((hud.model.loudness() - dot_scope::loudness(0.1)).abs() < f32::EPSILON);
+}
+
+/// The timer arms from a start's own time, before any frame it draws, so the
+/// first frame after the show asks for the next one. It stops arming once no
+/// frame has drawn for `RESHOW_AFTER`: a show that fails draws nothing, and an
+/// always-asking timer would turn Rune's loop at 60 Hz with Hex idle. A hidden
+/// HUD arms nothing either.
+#[test]
+fn the_timer_arms_from_a_start_and_stops_when_frames_stop() {
+    let mut hud = hud(true);
+    hud.animating.store(true, Ordering::Release);
+    // `handle(Started)` is where a start's arming reference comes from.
     hud.handle(HudEvent::Started);
     assert!(
-        hud.animating.load(Ordering::Acquire),
-        "a start asks for the frame that schedules the timer"
+        hud.last_drawn.is_some_and(|at| at.elapsed() < RESHOW_AFTER),
+        "the start is the first reference"
     );
-    // `Hud::show` records the show once Rune took it; this HUD has no overlay.
+    // `Hud::show` records the show once Rune takes it; this HUD has no overlay.
     hud.shown.store(true, Ordering::Release);
-    assert!(!meter_draws(&hud), "later meters ride the timer's frames");
-    // Hidden, nothing draws and no timer runs, so a meter asks for a frame
-    // again; Rune draws none for a hidden overlay.
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(hud.armed, "the start's frame asks for the next");
+
+    // Frames stop: the reference ages past `RESHOW_AFTER`.
+    hud.last_drawn = Some(Instant::now() - RESHOW_AFTER - Duration::from_millis(1));
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(!hud.armed, "a stale reference asks for nothing");
+
+    // Hidden, even a fresh reference arms nothing.
+    hud.last_drawn = Some(Instant::now());
     hud.shown.store(false, Ordering::Release);
-    assert!(meter_draws(&hud));
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(!hud.armed);
 }
