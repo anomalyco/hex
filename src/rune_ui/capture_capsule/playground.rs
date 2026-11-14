@@ -25,6 +25,7 @@ use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
 mod family;
+mod motion;
 mod stories;
 pub(crate) use stories::add as stories;
 
@@ -70,6 +71,9 @@ pub(crate) struct Playground {
     copied: bool,
     /// The screens the notch story shows.
     screens: stories::Screens,
+    /// The recording pill's motion options (t1379), drawn in place of the
+    /// capsule while set.
+    motion: Option<motion::Motion>,
 }
 
 /// Opens the playground and runs it until its window closes.
@@ -127,6 +131,7 @@ fn init() -> CapsuleState {
         log: Vec::new(),
         copied: false,
         screens: stories::Screens::Both,
+        motion: None,
     }));
     state
 }
@@ -276,7 +281,26 @@ const SCENES: &[Scene] = &[
             ],
         )
     }),
+    // The recording pill's motion options side by side (t1379).
+    ("motion-entrance", |s| {
+        show_motion(s, motion::Section::Entrance)
+    }),
+    ("motion-silence", |s| {
+        show_motion(s, motion::Section::Silence)
+    }),
+    ("motion-finish", |s| show_motion(s, motion::Section::Finish)),
 ];
+
+/// Shows a section of the pill's motion options from its start, or the
+/// capsule again with `None`.
+fn show_motion(s: &mut CapsuleState, section: impl Into<Option<motion::Section>>) {
+    let reduced = s.reduced.get();
+    if let Some(pg) = s.playground.as_mut() {
+        pg.motion = section
+            .into()
+            .map(|section| motion::Motion::new(section, reduced));
+    }
+}
 
 /// A capture recorded and written, then `steps` at their times.
 fn clip(s: &mut CapsuleState, steps: &[(f64, Step)]) {
@@ -497,6 +521,11 @@ fn poll(s: &mut CapsuleState, wall: f64, tx: &mut Tx) -> bool {
     let scale = if pg.slow { SLOW } else { 1.0 };
     let dt = pg.wall.map_or(0.0, |last| (wall - last).max(0.0));
     pg.wall = Some(wall);
+    if let Some(m) = pg.motion.as_mut() {
+        m.advance((dt * scale) as f32, s.reduced.get());
+        tx.wake_after(Duration::ZERO);
+        return true;
+    }
     pg.clock += dt * scale;
     let now = pg.clock;
     let actions = std::mem::take(&mut *pg.actions.lock().unwrap_or_else(|e| e.into_inner()));
@@ -624,11 +653,19 @@ pub(super) fn view(s: &CapsuleState, cx: &mut Cx<CapsuleState>) -> El {
         _ => stage,
     }
     .child(capsule(p, &s.surface, &s.live, cx));
+    let stage = match &pg.motion {
+        Some(m) => el()
+            .key("motion-stage")
+            .size(PANEL_W, m.height())
+            .child(motion::stage(p, m)),
+        None => stage,
+    };
     let controls = col()
         .key("controls")
         .w(PANEL_W)
         .gap(20.0)
         .padding(PAD)
+        .child(motion_controls(p, pg))
         .child(states(p))
         .child(flow_controls(p, pg))
         .child(log(p, pg));
@@ -728,6 +765,32 @@ fn state_button(p: Paint, label: &'static str, steps: fn() -> Vec<Step>) -> El {
         }
         tx.wake_after(Duration::ZERO);
     })
+}
+
+/// The recording pill's motion options (t1379): one section at a time.
+fn motion_controls(p: Paint, pg: &Playground) -> El {
+    use motion::Section;
+    let shown = pg.motion.as_ref().map(motion::Motion::section);
+    let pick = |key: &'static str, label: &'static str, section: Option<Section>| {
+        let on = shown == section;
+        button(p, key, label, on && section.is_some(), move |s, tx| {
+            show_motion(s, section);
+            tx.wake_after(Duration::ZERO);
+        })
+    };
+    section(
+        p,
+        "motion",
+        "Pill motion (t1379)",
+        row()
+            .key("motion-buttons")
+            .gap(6.0)
+            .flex_wrap()
+            .child(pick("entrance", "Entrance", Some(Section::Entrance)))
+            .child(pick("silence", "Silence", Some(Section::Silence)))
+            .child(pick("finish", "Finish", Some(Section::Finish)))
+            .child(pick("capsule", "Back to the capsule", None)),
+    )
 }
 
 fn states(p: Paint) -> El {
