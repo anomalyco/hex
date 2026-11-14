@@ -713,7 +713,8 @@ the press to the release, without the pre-roll before it or the release
 tail after. Shorter dictations paste as usual. The card's Only in row
 (`labs.yolo_mode_apps`, empty by default: every app) limits it to
 chosen apps, picked with the Modes pane's application picker
-(`modes::PickerTarget::YoloMode`) and matched as a Mode's
+(`modes::PickerTarget::YoloMode`; a popover over the cards below its +,
+closed by a pick, a click outside, or Escape) and matched as a Mode's
 applications are (`ContextSnapshot::application_is`) against the frontmost
 app captured with the dictation; with apps chosen, a dictation whose app is
 unknown (Wayland without foreign-toplevel) never sends. It never applies to Dictate

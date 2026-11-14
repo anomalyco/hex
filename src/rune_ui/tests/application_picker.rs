@@ -7,8 +7,14 @@ fn open(rt: &Runtime<Ui>) -> bool {
     rt.state.modes.application_picker_open
 }
 
-/// Opens, then closes it each way, from the + keyed `trigger`.
-fn dismisses_every_way(mut rt: Runtime<Ui>, trigger: &str, chosen: impl Fn(&Ui) -> Vec<String>) {
+/// Opens, then closes it each way, from the + keyed `trigger`; `first` is
+/// the first app it offers.
+fn dismisses_every_way(
+    mut rt: Runtime<Ui>,
+    trigger: &str,
+    first: &str,
+    chosen: impl Fn(&Ui) -> Vec<String>,
+) {
     tap(&mut rt, trigger);
     assert!(open(&rt), "{trigger} opens the picker");
     key(&mut rt, Key::Escape, Mods::default());
@@ -31,7 +37,7 @@ fn dismisses_every_way(mut rt: Runtime<Ui>, trigger: &str, chosen: impl Fn(&Ui) 
     tap(&mut rt, trigger);
     tap(&mut rt, "available0");
     assert!(!open(&rt), "picking an app closes it");
-    assert!(chosen(&rt.state).contains(&"Visual Studio Code".to_string()));
+    assert!(chosen(&rt.state).iter().any(|name| name == first));
     assert!(rt.find("application-picker").is_none());
 }
 
@@ -40,6 +46,8 @@ fn the_modes_picker_closes_on_a_pick_a_click_outside_or_escape() {
     dismisses_every_way(
         runtime("modes", true, PANE_SIZE),
         "open-application-picker",
+        // Chat already has Firefox and Slack.
+        "Visual Studio Code",
         |ui| {
             ui.settings.dictation_processing.modes[0]
                 .applications
@@ -54,7 +62,7 @@ fn the_yolo_mode_picker_closes_on_a_pick_a_click_outside_or_escape() {
     rt.state.modes.application_picker_open = false;
     rt.invalidate();
     settle(&mut rt);
-    dismisses_every_way(rt, "open-yolo-mode-picker", |ui| {
+    dismisses_every_way(rt, "open-yolo-mode-picker", "Firefox", |ui| {
         ui.settings.labs.yolo_mode_apps.clone()
     });
 }
