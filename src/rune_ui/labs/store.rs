@@ -318,8 +318,10 @@ fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
 }
 
 /// One lab as a card: tile, name and tags on one line, up to two lines of
-/// description, its switch, and while on any settings of its own.
-/// `featured` cards sit under New in Labs, so they carry no New tag.
+/// description, its switch, and while on any settings of its own. A note
+/// under the description may run to three lines, so a caveat such as where
+/// the text goes is never cut short. `featured` cards sit under New in Labs,
+/// so they carry no New tag.
 fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut Vec<El>) -> El {
     let c = &p.k.c;
     let lab = entry.lab;
@@ -368,7 +370,7 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut V
                 .key("note")
                 .font(DESCRIPTION)
                 .color(p.muted())
-                .max_lines(2),
+                .max_lines(3),
         );
     }
     if let Some(extras) = extras(ui, p, entry, layer) {

@@ -3,6 +3,8 @@ use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 use std::time::{Duration, Instant};
 
+use crate::dictation::caret_text::{Keep, bounded_units};
+
 type CfTypeRef = *const c_void;
 type CfStringRef = *const c_void;
 type AxUiElementRef = *const c_void;
@@ -56,6 +58,7 @@ unsafe extern "C" {
     fn CFNumberGetValue(number: CfTypeRef, kind: isize, value: *mut c_void) -> u8;
     fn CFStringGetTypeID() -> usize;
     fn CFStringGetLength(value: CfStringRef) -> isize;
+    fn CFStringGetCharacters(value: CfStringRef, range: CfRange, buffer: *mut u16);
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
     fn CFStringGetCString(
         value: CfStringRef,
@@ -235,6 +238,68 @@ fn char_boundary(text: &str, mut at: usize) -> usize {
     at
 }
 
+/// How much text around the caret Labs › Rewrite reads nearby text keeps, in
+/// UTF-16 units: before the selection, and after it.
+const MAX_CARET_BEFORE: isize = 1_000;
+const MAX_CARET_AFTER: isize = 1_000;
+/// The longest selection carried as context. A longer one skips the read
+/// rather than send a whole document to the mode's model.
+const MAX_CARET_SELECTION: isize = 2_000;
+
+/// The text around the insertion point of another process's focused text
+/// element, for Labs › Rewrite reads nearby text: up to 1,000
+/// UTF-16 units before the selection, the selection itself, and up to 1,000
+/// units after it. A selection over 2,000 units skips the read. Secure text
+/// fields are never read, and a slice edge that splits a surrogate pair
+/// drops that half. `None` when the app names no focused text element or no
+/// selection, or all three parts are empty; without `AXNumberOfCharacters`
+/// the text after the selection is skipped.
+pub fn text_around_caret(pid: i32) -> Option<crate::dictation::caret_text::CaretText> {
+    let application = foreign_application(pid)?;
+    let focused = copy_element(&application, c"AXFocusedUIElement")?;
+    if is_secure_text_field(&focused) {
+        return None;
+    }
+    let selection = copy_range(&focused, c"AXSelectedTextRange")?;
+    if selection.location < 0 || selection.length < 0 || selection.length > MAX_CARET_SELECTION {
+        return None;
+    }
+    let selection_end = selection.location.saturating_add(selection.length);
+    let mut caret = crate::dictation::caret_text::CaretText::default();
+    if selection.location > 0 {
+        let location = selection.location.saturating_sub(MAX_CARET_BEFORE);
+        caret.before = copy_text_for_range(
+            &focused,
+            CfRange {
+                location,
+                length: selection.location - location,
+            },
+            Keep::Tail,
+        )
+        .unwrap_or_default();
+    }
+    if selection.length > 0 {
+        caret.selected = copy_text_for_range(&focused, selection, Keep::Head).unwrap_or_default();
+    }
+    // `AXNumberOfCharacters` bounds the after range: asking past the end
+    // fails as a whole, and a range over the document's tail would.
+    if let Some(total) = copy_number(&focused, c"AXNumberOfCharacters")
+        && total > selection_end as i64
+    {
+        let length = (total - selection_end as i64).min(MAX_CARET_AFTER as i64) as isize;
+        caret.after = copy_text_for_range(
+            &focused,
+            CfRange {
+                location: selection_end,
+                length,
+            },
+            Keep::Head,
+        )
+        .unwrap_or_default();
+    }
+    (!caret.is_empty()).then_some(caret)
+}
+
 /// The page address of the web area holding the application's focused
 /// element, for browsers without a scripting dictionary (Firefox, Zen).
 /// The outermost web area wins, so focus inside an iframe still reports
@@ -412,6 +477,24 @@ fn copy_range(element: &CfObject, name: &CStr) -> Option<CfRange> {
 }
 
 fn copy_string_for_range(element: &CfObject, range: CfRange) -> Option<String> {
+    parameterized_string(element, range)
+        .and_then(|value| cf_string(value.0))
+        .filter(|text| !text.is_empty())
+}
+
+/// A range's text converted from its UTF-16 units, so a range that starts or
+/// ends inside a surrogate pair keeps the rest of the text. At most the
+/// range's own unit count is copied, from `keep`'s end: an app may answer a
+/// range with more text than it names, and a whole document must never be
+/// read. A slice edge that splits a surrogate pair drops that half.
+fn copy_text_for_range(element: &CfObject, range: CfRange, keep: Keep) -> Option<String> {
+    parameterized_string(element, range)
+        .and_then(|value| cf_string_lossy(value.0, range.length.max(0) as usize, keep))
+        .filter(|text| !text.is_empty())
+}
+
+/// The CFString `AXStringForRange` answers for a range.
+fn parameterized_string(element: &CfObject, range: CfRange) -> Option<CfObject> {
     // SAFETY: AXValueCreate copies the CFRange and returns a retained object.
     let parameter = unsafe { AXValueCreate(AX_VALUE_CF_RANGE, (&range as *const CfRange).cast()) };
     if parameter.is_null() {
@@ -423,11 +506,7 @@ fn copy_string_for_range(element: &CfObject, range: CfRange) -> Option<String> {
     let status = unsafe {
         AXUIElementCopyParameterizedAttributeValue(element.0, attribute.0, parameter.0, &mut value)
     };
-    if status != 0 || value.is_null() {
-        return None;
-    }
-    let value = CfObject(value);
-    cf_string(value.0).filter(|text| !text.is_empty())
+    (status == 0 && !value.is_null()).then(|| CfObject(value))
 }
 
 struct CfObject(CfTypeRef);
@@ -521,6 +600,43 @@ fn cf_string(value: CfTypeRef) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+/// [`cf_string`] through a bounded window of the string's UTF-16 units: at
+/// most `max_units` of them, from `keep`'s end, are copied out of the
+/// returned string. A lone surrogate at a window edge is dropped by
+/// [`bounded_units`] instead of failing the whole conversion.
+fn cf_string_lossy(value: CfTypeRef, max_units: usize, keep: Keep) -> Option<String> {
+    if unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
+        return None;
+    }
+    let value = value.cast();
+    let length = unsafe { CFStringGetLength(value) };
+    if length < 0 {
+        return None;
+    }
+    let kept = (length as usize).min(max_units);
+    if kept == 0 {
+        return Some(String::new());
+    }
+    let location = match keep {
+        Keep::Head => 0,
+        Keep::Tail => length - kept as isize,
+    };
+    let mut units = vec![0_u16; kept];
+    // SAFETY: `value` is a CFString of `length` UTF-16 units, the range ends
+    // at or before `length`, and `units` holds exactly the range's length.
+    unsafe {
+        CFStringGetCharacters(
+            value,
+            CfRange {
+                location,
+                length: kept as isize,
+            },
+            units.as_mut_ptr(),
+        )
+    };
+    Some(bounded_units(&units, kept, keep))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,6 +647,7 @@ mod tests {
         assert_eq!(focused_window_text(i32::MAX), None);
         assert_eq!(focused_web_url(i32::MAX), None);
         assert_eq!(char_before_caret(i32::MAX), None);
+        assert_eq!(text_around_caret(i32::MAX), None);
     }
 
     /// Hex's own tree belongs to the main thread that updates it: the
@@ -544,6 +661,7 @@ mod tests {
         assert_eq!(focused_window_text(own_pid), None);
         assert_eq!(focused_web_url(own_pid), None);
         assert_eq!(char_before_caret(own_pid), None);
+        assert_eq!(text_around_caret(own_pid), None);
         assert!(browser_pages(own_pid).urls.is_empty());
     }
 }

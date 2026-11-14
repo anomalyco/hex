@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
+use crate::dictation::caret_text::CaretTextRead;
 use crate::dictation::context::{CaptureRefresh, ContextMonitor, ContextSnapshot};
 use crate::dictation::screen_vocabulary::ScreenVocabulary;
 use crate::suppression::InputActivity;
@@ -28,6 +29,8 @@ pub(super) struct ContextWatch {
     capture: CaptureRefresh,
     /// Labs › Screen vocabulary's one read, for this capture.
     screen: ScreenVocabulary,
+    /// Labs › Rewrite reads nearby text's one read, for this capture.
+    caret: CaretTextRead,
 }
 
 impl ContextWatch {
@@ -38,6 +41,7 @@ impl ContextWatch {
             activity,
             capture: CaptureRefresh::default(),
             screen: ScreenVocabulary::default(),
+            caret: CaretTextRead::default(),
         }
     }
 
@@ -69,6 +73,7 @@ impl ContextWatch {
     /// press a chord discards, so nothing reads the page or the screen yet.
     pub(super) fn begin(&mut self) {
         self.screen.cancel();
+        self.caret.cancel();
         self.capture.begin();
     }
 
@@ -79,6 +84,7 @@ impl ContextWatch {
     pub(super) fn intend(&mut self) {
         let pending = self.capture.pending();
         self.screen.start(pending);
+        self.caret.start(pending);
         let monitor = &self.monitor;
         self.capture.intend(|| monitor.request_refresh());
     }
@@ -87,6 +93,7 @@ impl ContextWatch {
     /// and a late screen vocabulary read is discarded.
     pub(super) fn cancel(&mut self) {
         self.screen.cancel();
+        self.caret.cancel();
         self.capture.cancel();
     }
 
@@ -100,6 +107,9 @@ impl ContextWatch {
         let terms = self.screen.take();
         if !terms.is_empty() {
             snapshot.screen_terms = terms;
+        }
+        if let Some(caret) = self.caret.take() {
+            snapshot.caret_text = Some(caret);
         }
         Ok(snapshot)
     }

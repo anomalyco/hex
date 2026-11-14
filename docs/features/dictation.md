@@ -468,6 +468,25 @@ text is read through `wl-paste`, which may briefly take focus. Proof limits: no
 shortcut press against a real target application was run; the flow is covered
 by unit tests only.
 
+### Rewrite With Nearby Text (Labs, macOS)
+
+While Labs › Rewrite reads nearby text is on (`labs.cursor_context`, off by
+default), each dictation reads the focused text element's text around the
+caret once, on a background thread, as its capture becomes real, and the
+mode's OpenCode rewrite carries it ahead of the raw transcript as context for
+names, terms, references, and where the result lands. Up to 1,000 UTF-16 units
+before the selection, the selection itself (a selection over 2,000 units skips
+the read), and up to 1,000 after it join that capture's context
+(`ContextSnapshot::caret_text`); empty parts are omitted. The read uses
+`AXFocusedUIElement` through the 0.25 s messaging timeout and never reads Hex
+or an `AXSecureTextField`, so a password field returns nothing. Output's
+typed-text path, the Voice prompt request, meetings, the local API, History,
+logs, and events never see it, and the text is never saved. Off, no
+Accessibility read or thread starts, and the rewrite prompt is byte for byte
+what it was. A cancelled capture discards a late read. See [labs.md](labs.md)
+for the prompt wording, bounds, and checks. Not observed: a real Mac reading a
+real text field, or a rewritten word corrected by the text around the cursor.
+
 ### Terminal Paste Shortcut (Labs, Windows and Linux)
 
 A third optional dictation shortcut for typing into a terminal while the main

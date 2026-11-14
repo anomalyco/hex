@@ -35,20 +35,20 @@ user-requested features land in Labs, off by default, not on by default.**
 Labs has no master switch; Settings › Labs lists every lab this OS has as a
 card (name, description, toggle), each off by default, under one collapsible
 header per group (Dictation, Output, History, Meetings, Annotate, Shortcuts,
-Models; `labs::Feature::group`), plus Send feedback and Run setup again. Each feature has an audience: `Everyone` or `Dev` (dev, local, test, and
-dev-channel builds only; a stable build never lists, accepts, or runs it).
-A feature with its own pane joins the sidebar as a normal item while
-on and is hidden while off; a behaviour-only feature is just its toggle. Today:
-Meetings (beta), Voice Filter (Dev; locked on while its macOS driver is
-installed, and a stable build with the driver keeps its pane for Uninstall
-alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing,
-Screen vocabulary (macOS), Switch
-model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
-pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
-Unload model when idle (#442), Smaller model files (macOS), Terminal paste
-(Windows), and Terminal paste
-shortcut (Windows, Linux). Externally contributed features land there too.
-Annotate is a normal feature in every build, stable included, on macOS,
+Models; `labs::Feature::group`), plus Send feedback and Run setup again. Each
+feature has an audience: `Everyone` or `Dev` (dev, local, test, and
+dev-channel builds only; a stable build never lists, accepts, or runs it). A
+feature with its own pane joins the sidebar as a normal item while on and is
+hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
+(beta), Voice Filter (Dev; locked on while its macOS driver is installed, and
+a stable build with the driver keeps its pane for Uninstall alone), Playground
+(Dev), Live text, Live chapters, Vocabulary biasing, Screen vocabulary
+(macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
+language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
+macOS), Share dictation shortcut (#176, Windows), Unload model when idle
+(#442), Smaller model files (macOS), Terminal paste (Windows), and Terminal
+paste shortcut (Windows, Linux). Externally contributed features land there
+too. Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
 `DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
 

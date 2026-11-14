@@ -81,6 +81,7 @@ impl PendingContext {
             window_title: None,
             input_revision: None,
             screen_terms: Vec::new(),
+            caret_text: None,
         }
     }
 }

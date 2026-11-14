@@ -15,6 +15,8 @@ use color_eyre::eyre::WrapErr;
 use color_eyre::eyre::eyre;
 use url::Url;
 
+use crate::dictation::caret_text::CaretText;
+
 /// How soon the worker retries a refreshed snapshot the one-slot channel held
 /// back, instead of waiting the whole poll interval.
 const REFRESH_RETRY: Duration = Duration::from_millis(10);
@@ -34,6 +36,10 @@ pub struct ContextSnapshot {
     /// as this capture became real. Set only on the snapshot a capture
     /// finishes with, so they never reach another dictation or a meeting.
     pub screen_terms: Vec<String>,
+    /// Labs › Rewrite reads nearby text: the focused text element's text
+    /// around this dictation's insertion point. Set only on the snapshot a
+    /// capture finishes with, and never saved or logged.
+    pub caret_text: Option<CaretText>,
 }
 
 /// The page refresh one capture owes. A shortcut's press starts it
@@ -277,6 +283,7 @@ fn snapshot_of(front: &Frontmost, page: Option<Url>) -> ContextSnapshot {
         window_title: front.window_title.clone(),
         input_revision: None,
         screen_terms: Vec::new(),
+        caret_text: None,
     }
 }
 
@@ -326,6 +333,7 @@ impl ContextSnapshot {
                         window_title,
                         input_revision: None,
                         screen_terms: Vec::new(),
+                        caret_text: None,
                     });
                 }
                 Ok(None) => {}
@@ -369,6 +377,7 @@ impl ContextSnapshot {
                     window_title: title,
                     input_revision: None,
                     screen_terms: Vec::new(),
+                    caret_text: None,
                 });
             }
         }

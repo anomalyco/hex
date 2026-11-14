@@ -920,6 +920,21 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Voice prompt"),
         tr("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model"),
     ));
+    // macOS's Accessibility reads the text element's caret and nearby text.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(Row {
+            note: Some(
+                tr("That text goes to the mode's OpenCode model, which may be a cloud provider. Password fields are never read.")
+                    .to_owned(),
+            ),
+            ..row(
+                Feature::CursorContext,
+                Some(&BOOK),
+                tr("Rewrite reads nearby text"),
+                tr("Rewrite uses the text around the cursor to spell names and terms right and fit where it pastes."),
+            )
+        });
+    }
     rows.push(row(
         Feature::PickerSortFilter,
         None,
@@ -1226,6 +1241,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
         Feature::PrintStart => "lab-print-start",
         Feature::VoicePrompt => "lab-voice-prompt",
+        Feature::CursorContext => "lab-cursor-context",
     }
 }
 
