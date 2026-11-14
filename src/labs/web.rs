@@ -17,9 +17,10 @@ impl Feature {
             )
     }
 
-    /// The summary the website lists. A description in Hex may name the only
-    /// platform a lab runs on; the site says what every OS that has it does,
-    /// so `site/src/labs.json` reads the same wherever it is generated.
+    /// The summary the website lists. Unlike `description`, whose Windows
+    /// build names its own keys, `summary` is one string on every OS, so a lab
+    /// that runs on more than one OS names each one's keys here and
+    /// `site/src/labs.json` is the same file wherever it is generated.
     const fn web_summary(self) -> &'static str {
         match self {
             Self::StandaloneSpecialKeys => {

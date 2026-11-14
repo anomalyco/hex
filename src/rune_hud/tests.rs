@@ -596,23 +596,54 @@ fn a_recording_asks_again_only_when_its_frames_stop() {
     assert!(reshow_due(Some(stale), false));
 }
 
-/// Windows has no display link or swap-chain wait to pace the HUD, so it asks
-/// Rune for one frame at a time while it moves on screen. Hidden, nothing
-/// draws, so no timer may keep turning the loop.
-#[test]
-fn a_windows_hud_asks_for_a_frame_only_while_it_moves_on_screen() {
-    assert!(wants_frame(true, true));
-    assert!(!wants_frame(false, true), "settled: Rune rests");
-    assert!(!wants_frame(true, false), "hidden: nothing draws");
+/// A HUD as `install` builds it, without its overlay: the state `handle`
+/// touches, and no GPU or Rune. `shown` is what `Hud::show` records once Rune
+/// took the show; a HUD with no overlay can't ask it.
+fn hud(shown: bool) -> Hud {
+    Hud {
+        model: IndicatorModel::new(dot_scope::lab(), Instant::now()),
+        drawn: None,
+        layout: Layout::default(),
+        position: IndicatorPosition::Top,
+        this: None,
+        shown: Arc::new(AtomicBool::new(shown)),
+        reduce: false,
+        animating: Arc::new(AtomicBool::new(false)),
+        #[cfg(target_os = "macos")]
+        placed: None,
+        #[cfg(not(target_os = "macos"))]
+        edge_placed: None,
+        #[cfg(not(target_os = "macos"))]
+        followed: None,
+        #[cfg(not(target_os = "macos"))]
+        gpu: Arc::default(),
+        #[cfg(target_os = "windows")]
+        watch: Arc::default(),
+        #[cfg(target_os = "windows")]
+        last_drawn: None,
+        #[cfg(target_os = "windows")]
+        reshown: false,
+    }
 }
 
-/// Rune steps a compositor no display link paces by one resume step, not by
-/// the gap between frames, so the Windows HUD takes its model's step from the
-/// last frame it drew.
+/// Windows draws the HUD from its own ~60 Hz timer while it moves, so a
+/// recording's meters take its next frame instead of forcing one each: a
+/// meter draws only while no timer runs. A start marks the HUD moving before
+/// any meter arrives, so the frame it draws schedules the timer they all ride.
 #[test]
-fn the_windows_hud_steps_by_the_gap_since_its_last_drawn_frame() {
-    let now = Instant::now();
-    assert_eq!(wall_dt(None, now, 1.0 / 120.0), 1.0 / 120.0);
-    let gap = wall_dt(Some(now - Duration::from_millis(16)), now, 0.0);
-    assert!((gap - 0.016).abs() < 1e-4, "{gap}");
+fn a_start_sets_the_timer_that_meters_ride() {
+    let mut hud = hud(true);
+    assert!(meter_draws(&hud), "nothing moves yet: the meter draws");
+    hud.handle(HudEvent::Started);
+    assert!(
+        hud.animating.load(Ordering::Acquire),
+        "a start asks for the frame that schedules the timer"
+    );
+    // `Hud::show` records the show once Rune took it; this HUD has no overlay.
+    hud.shown.store(true, Ordering::Release);
+    assert!(!meter_draws(&hud), "later meters ride the timer's frames");
+    // Hidden, nothing draws and no timer runs, so a meter asks for a frame
+    // again; Rune draws none for a hidden overlay.
+    hud.shown.store(false, Ordering::Release);
+    assert!(meter_draws(&hud));
 }

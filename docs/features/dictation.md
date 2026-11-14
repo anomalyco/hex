@@ -2421,6 +2421,22 @@ once Rune's parked device also expires, and on Wayland layer-shell Rune keeps
 its own device regardless. The memory drop is not yet measured on a real
 Windows machine (#1431).
 
+On Windows the HUD paces its own frames: Rune's overlays there have no display
+link and don't wait for a swap-chain slot
+(`Dx12UseFrameLatencyWaitableObject::DontWait`; only a window runs Rune's slot
+wait), so a moving HUD would draw, submit and present as fast as the loop
+turns. `HudCompositor::animating` says the HUD is not display-paced, and
+`poll` asks Rune for its next frame `HUD_FRAME` later, a fixed ~60 Hz timer
+rather than the display's refresh. A meter no longer forces a frame of its
+own: a recording sends one with each audio chunk, about 100 a second, and it
+takes the timer's next frame instead (`meter_draws`), since the view reads no
+loudness. This works around a suspected and unmeasured cause on Windows:
+frames presented faster than the GPU retires them keep their staging chunks
+and D3D12 allocators alive, and a hide that waits on the present queue stalls
+the window. Checked by `rune_hud::tests`
+(`a_start_sets_the_timer_that_meters_ride`) and CI's compile and tests only,
+with no real-Windows memory measurement yet.
+
 Each chunk's meter removes the chunk's mean before measuring RMS and peak, so
 a microphone's DC offset (a Ryzen built-in digital microphone, #841) never
 reads as loudness; the dictation silence gate and the meeting pause detector

@@ -263,6 +263,21 @@ impl HudSender {
         }
         // A Windows first-frame attempt opens where the HUD's `handle` runs, on
         // the overlay thread, not here: see `Hud::handle` (#1793).
+        //
+        // A Windows recording sends a meter with each audio chunk, about 100 a
+        // second, and `update` asks for a frame for every one. The HUD's own
+        // timer already draws while it moves (`poll`) and its view reads no
+        // loudness, so a meter takes the next timer frame's level and asks for
+        // a frame only while that timer isn't running (`meter_draws`).
+        #[cfg(target_os = "windows")]
+        if matches!(&event, HudEvent::Meter { .. }) {
+            self.overlay.update_if(move |hud, _| {
+                let draws = meter_draws(hud);
+                hud.handle(event);
+                draws
+            });
+            return;
+        }
         self.overlay.update(move |hud, _| hud.handle(event));
     }
 
@@ -363,8 +378,9 @@ impl HudSender {
     }
 }
 
-/// How often the Windows HUD asks Rune for its next frame while it animates;
-/// Rune floors a poll's timer to a frame interval, so about 60 Hz.
+/// How often the Windows HUD asks Rune for its next frame while it animates: a
+/// fixed ~60 Hz timer, not the display's refresh. Rune floors a poll's timer to
+/// a frame interval (`TIMER_FRAME`), so it asks no faster than that.
 #[cfg(target_os = "windows")]
 const HUD_FRAME: Duration = Duration::from_micros(16_667);
 
@@ -376,12 +392,24 @@ fn wants_frame(animating: bool, shown: bool) -> bool {
     animating && shown
 }
 
-/// The step into `IndicatorModel` for a frame `now` on Windows: Rune advances a
-/// compositor no display link paces by one 120 Hz resume step, so `Frame::dt`
-/// is not the gap between the HUD's own timer frames. The model takes the gap
-/// since its last drawn frame instead; `fallback` is `Frame::dt` before any
-/// frame drew.
+/// Whether a Windows meter's update must draw a frame of its own: only while
+/// the HUD's timer isn't running. The timer draws anyway, and the view doesn't
+/// read loudness, so its next frame shows the meter's level. Read before the
+/// event is handled, since handling makes the HUD moving by itself.
 #[cfg(any(target_os = "windows", test))]
+fn meter_draws(hud: &Hud) -> bool {
+    !wants_frame(
+        hud.animating.load(Ordering::Acquire),
+        hud.shown.load(Ordering::Acquire),
+    )
+}
+
+/// The step into `IndicatorModel` for a frame `now` on Windows: Rune gives a
+/// frame's running motion the real gap but caps what it hands over as `dt` at
+/// one 120 Hz resume step (`RESUME_STEP`), so `Frame::dt` is not the gap
+/// between the HUD's own timer frames. The model takes the gap since its last
+/// drawn frame instead; `fallback` is `Frame::dt` before any frame drew.
+#[cfg(target_os = "windows")]
 fn wall_dt(last_drawn: Option<Instant>, now: Instant, fallback: f32) -> f32 {
     last_drawn.map_or(fallback, |at| {
         now.saturating_duration_since(at).as_secs_f32()
@@ -719,13 +747,15 @@ fn prebuilt(device: &wgpu::Device, format: wgpu::TextureFormat) -> Option<Painte
         .flatten()
 }
 
-/// Windows has no display link and no swap-chain wait pacing an overlay (Rune
-/// takes its swap chain's latency waitable object with no wait), so Rune's
-/// loop would draw, submit and present at CPU speed while the HUD animates:
-/// every presented frame holds its staging chunks and D3D12 allocators until
-/// the GPU finishes, and a hide that waits for the present queue stalls the
-/// window. Ask for one frame per display frame instead; Rune waits for that
-/// timer and `HudCompositor::animating` says the HUD is not display-paced.
+/// Rune's Windows overlays draw unpaced: there is no display link, and an
+/// overlay takes its drawable through wgpu's DX12 swap chain made `DontWait`,
+/// so nothing waits for a swap-chain slot (a window has its own slot wait; an
+/// overlay has none). This is Hex's workaround: ask for one frame each
+/// `HUD_FRAME`, a fixed ~60 Hz timer rather than the display's refresh, while
+/// the HUD moves, and report the HUD through `HudCompositor::animating` as not
+/// display-paced. Suspected, not measured on Windows: presenting faster than
+/// the GPU retires frames keeps their staging chunks and D3D12 allocators
+/// alive, and a hide that waits on the present queue stalls the window.
 #[cfg(target_os = "windows")]
 fn poll(hud: &mut Hud, _now: f64, tx: &mut Tx) -> bool {
     if hud.wants_frame() {
@@ -775,7 +805,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     // shows at once; a Hex at rest gives the GPU device back.
     .release_gpu_after(GPU_IDLE);
     // Windows' overlay has no display link or swap-chain wait to pace it: the
-    // HUD asks Rune for one frame at a time there (`poll`).
+    // HUD asks Rune for its next frame on a fixed ~60 Hz timer (`poll`).
     #[cfg(target_os = "windows")]
     let configured = configured.poll(poll);
     let overlay = app.overlay(
@@ -1160,9 +1190,9 @@ impl Compositor<Hud> for HudCompositor {
         #[cfg(target_os = "windows")]
         {
             // No display link or swap-chain wait paces a Windows overlay, so
-            // Rune would keep the loop at `ControlFlow::Poll` and draw at CPU
-            // speed; the overlay asks for one frame per display frame instead
-            // (`poll`) and Rune waits for that timer.
+            // Rune would keep the loop at `ControlFlow::Poll` and draw as fast
+            // as it turns; the HUD's `poll` asks for the next frame on a fixed
+            // ~60 Hz timer instead, not the display's refresh.
             false
         }
         #[cfg(not(target_os = "windows"))]
