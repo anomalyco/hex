@@ -2035,8 +2035,9 @@ Linux beta                               // not macOS feature parity
 │       │       wgpu's reason (Live text or the HUD); the window and other overlays
 │       │       keep running; the next show tries again
 │       │       // checked with a noop-backend Rune test; not on NVIDIA hardware
-│       ├── Window's Rune app panics anyway -> `hex window show` errors and
-│       │   `hex status` reports the window and HUD stopped, with the reason (#979)
+│       ├── Window's Rune app panics anyway, or Rune returns a startup error
+│       │   -> `hex window show` errors and `hex status` reports the window
+│       │   and HUD stopped, with the reason (#979)
 │       ├── Neither (Rune refused it, or no layer-shell and no XWayland)
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener's notice or warning (a missing wl-copy outranks it)
