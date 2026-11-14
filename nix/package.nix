@@ -117,10 +117,12 @@ rustPlatform.buildRustPackage (finalAttrs: {
   # nixpkgs' vendor directory keeps every crate in one place, keyed by name and
   # version, so it cannot hold two copies from different sources. Rune's
   # `vendor/tiny-skia-path` is a path dependency inside Rune (a Git crate here)
-  # at 0.11.4, the same name and version as resvg's from crates.io, so vendor
-  # each source's crates in its own directory: Cargo tells them apart by source.
-  # If nixpkgs changes the script, these replacements stop matching and the
-  # build fails on the duplicate instead of vendoring something wrong.
+  # at 0.11.4, the same name and version as resvg's from crates.io, so this
+  # vendors crates.io's crates in `registry/` and every Git source's crates in
+  # `git/`, and points each source at its own directory: Cargo tells them apart
+  # by source. The script is importCargoLock's, rewritten; each fragment below
+  # must still be in it (the guard says which is gone), so a nixpkgs change
+  # fails loudly here instead of vendoring something wrong.
   cargoDeps =
     (rustPlatform.importCargoLock {
       lockFile = ../Cargo.lock;
@@ -129,19 +131,17 @@ rustPlatform.buildRustPackage (finalAttrs: {
       (old: {
         buildCommand =
           let
-            rewritten = lib.replaceStrings
-              [
-                ''
+            # importCargoLock's script, and what this override turns it into.
+            fragments = [
+              {
+                what = "the single vendored-sources config";
+                from = ''
                   [source.crates-io]
                   replace-with = "vendored-sources"
 
                   [source.vendored-sources]
-                  directory = "cargo-vendor-dir"''
-                ''ln -s "$crate" $out/$(basename "$crate" | cut -c 34-)''
-                ''cat "$crate/.cargo-config" >> $out/.cargo/config.toml''
-              ]
-              [
-                ''
+                  directory = "cargo-vendor-dir"'';
+                to = ''
                   [source.crates-io]
                   replace-with = "registry-vendor-dir"
 
@@ -149,8 +149,12 @@ rustPlatform.buildRustPackage (finalAttrs: {
                   directory = "cargo-vendor-dir/registry"
 
                   [source.git-vendor-dir]
-                  directory = "cargo-vendor-dir/git"''
-                ''
+                  directory = "cargo-vendor-dir/git"'';
+              }
+              {
+                what = "the one-directory crate link";
+                from = ''ln -s "$crate" $out/$(basename "$crate" | cut -c 34-)'';
+                to = ''
                   dest=$(basename "$crate" | cut -c 34-)
                         if [ -e "$crate/.cargo-config" ]; then
                           mkdir -p $out/git
@@ -158,15 +162,26 @@ rustPlatform.buildRustPackage (finalAttrs: {
                         else
                           mkdir -p $out/registry
                           ln -s "$crate" $out/registry/$dest
-                        fi''
-                ''sed 's/replace-with = "vendored-sources"/replace-with = "git-vendor-dir"/' "$crate/.cargo-config" >> $out/.cargo/config.toml''
-              ]
-              old.buildCommand;
+                        fi'';
+              }
+              {
+                what = "the Git source config append";
+                from = ''cat "$crate/.cargo-config" >> $out/.cargo/config.toml'';
+                to = ''sed 's/replace-with = "vendored-sources"/replace-with = "git-vendor-dir"/' "$crate/.cargo-config" >> $out/.cargo/config.toml'';
+              }
+            ];
+            missing = builtins.filter (fragment: !(lib.hasInfix fragment.from old.buildCommand)) fragments;
           in
-          if rewritten == old.buildCommand then
-            throw "nix/package.nix: importCargoLock's vendor script changed; re-apply the per-source vendor directories"
+          if missing != [ ] then
+            throw (
+              "nix/package.nix: importCargoLock's vendor script changed; re-apply the split into "
+              + "a registry and a Git vendor directory. Missing: "
+              + lib.concatMapStringsSep ", " (fragment: fragment.what) missing
+            )
           else
-            rewritten;
+            lib.replaceStrings (map (fragment: fragment.from) fragments) (map (
+              fragment: fragment.to
+            ) fragments) old.buildCommand;
       });
 
   nativeBuildInputs = [
