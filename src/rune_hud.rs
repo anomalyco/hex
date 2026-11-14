@@ -1168,9 +1168,9 @@ impl Compositor<Hud> for HudCompositor {
     fn animating(&self) -> bool {
         #[cfg(target_os = "windows")]
         {
-            // No display link paces a Windows overlay, so Rune keeps the loop
-            // at `ControlFlow::Poll`; Rune #985 still waits for swap-chain room
-            // before each frame, and the HUD's `poll` caps it to a fixed ~60 Hz
+            // No display link paces a Windows overlay, so reporting `true`
+            // would keep the loop at `ControlFlow::Poll`; Rune #985 bounds
+            // frames in flight, and the HUD's `poll` caps it at a fixed ~60 Hz
             // timer, not the display's refresh.
             false
         }

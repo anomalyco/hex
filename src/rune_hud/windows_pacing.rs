@@ -4,11 +4,11 @@
 //!
 //! Rune #985 makes every overlay's frames wait for room in their swap chain,
 //! as a window's do, so frames in flight stay bounded. Before it, a HUD that
-//! drew, submitted and presented as fast as the loop turned kept staging
-//! chunks and D3D12 allocators alive (about 100 MB/s to 5+ GB, #1796). Hex
-//! still asks for one frame each `HUD_FRAME`, a fixed ~60 Hz timer rather than
-//! the display's refresh, and reports the HUD through
-//! `HudCompositor::animating` as not display-paced.
+//! drew, submitted and presented as fast as the loop turned grew the swap
+//! chain's queue of presented but unretired frames, and whatever each queued
+//! frame held (about 100 MB/s to 5+ GB, #1796). Hex still asks for one frame
+//! each `HUD_FRAME`, a fixed ~60 Hz timer rather than the display's refresh,
+//! and reports the HUD through `HudCompositor::animating` as not display-paced.
 
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};

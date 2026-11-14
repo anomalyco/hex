@@ -2425,9 +2425,10 @@ On Windows every overlay, the HUD included, waits for room in its swap chain
 before it presents, as a window does: Rune #985 holds the frame's slot and
 skips the frame until the chain has room, which bounds the frames in flight.
 Before it, a moving HUD drew, submitted and presented as fast as the loop
-turned, and frames the GPU had not retired kept their staging chunks and D3D12
-allocators alive: memory grew by about 100 MB/s to 5+ GB on an NVIDIA card
-(#1796). Hex still caps the HUD's frame rate on top of that wait:
+turned, and the swap chain's queue of presented but unretired frames grew,
+with whatever each queued frame held: memory grew by about 100 MB/s to 5+ GB
+on an NVIDIA card (#1796). Hex still caps the HUD's frame rate on top of that
+wait:
 `HudCompositor::animating` says the HUD is not display-paced, and `poll`
 (`rune_hud/windows_pacing.rs`) asks Rune for its next frame `HUD_FRAME` later,
 a fixed ~60 Hz timer rather than the display's refresh. It asks only while the
