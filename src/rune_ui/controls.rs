@@ -8,8 +8,8 @@ use rune::{
     text,
 };
 use rune_kit::{
-    Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Kit, Menu, MenuItem,
-    Placement, SegmentedControl, Select, SelectAppearance, Switch,
+    Button, ButtonVariant, ControlSize, Kit, Menu, MenuItem, Placement, SegmentedControl, Select,
+    SelectAppearance, Switch,
 };
 
 use super::Ui;
@@ -832,6 +832,7 @@ pub(super) fn button(
 }
 
 /// An icon-only Secondary button the height of [`button`].
+#[cfg(target_os = "macos")]
 pub(super) fn icon_button(
     p: Paint,
     key: &str,
@@ -839,12 +840,30 @@ pub(super) fn icon_button(
     label: &str,
     press: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    IconButton::new(icon)
-        .variant(IconButtonVariant::Neutral)
+    rune_kit::IconButton::new(icon)
+        .variant(rune_kit::IconButtonVariant::Neutral)
         .control_size(ControlSize::Large)
         .label(label)
         .on_press(press)
         .build(p.k)
+        .key(key)
+}
+
+/// A quiet text action beside a row's control, such as a shortcut's Reset.
+/// Assistive technology reads `label`, which says more than the short `text`.
+pub(super) fn quiet_button(
+    p: Paint,
+    key: &str,
+    text: &str,
+    label: &str,
+    press: impl Fn(&mut Ui) + 'static,
+) -> El {
+    Button::new(text)
+        .variant(ButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .on_press(press)
+        .build(p.k)
+        .label(label)
         .key(key)
 }
 

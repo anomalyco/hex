@@ -348,11 +348,6 @@ pub(super) const KEYS: &[Key] = &[
         "Seconds the microphone stays open after a dictation with Labs › Keep mic open after dictating on: 30 s, 1, 3, 5, or 30 minutes",
     ),
     key(
-        "labs.restore_shortcut_default",
-        Kind::Bool,
-        "Labs: offer Restore default beside the Paste last dictation shortcut",
-    ),
-    key(
         "labs.keep_on_clipboard",
         Kind::Bool,
         "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there",

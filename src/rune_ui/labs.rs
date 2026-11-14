@@ -852,12 +852,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Frees the speech model's memory after a while unused; the next dictation reloads it"),
     ));
     rows.push(row(
-        Feature::RestoreShortcutDefault,
-        Some(&KEYBOARD),
-        tr("Restore shortcut default"),
-        tr("Offer Restore default next to Paste last dictation's shortcut"),
-    ));
-    rows.push(row(
         Feature::SpokenFormatting,
         None,
         tr("Spoken formatting"),
@@ -1147,7 +1141,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::PauseBrowser => "lab-pause-browser",
         Feature::ShareShortcut => "lab-share-shortcut",
         Feature::UnloadIdle => "lab-unload-idle",
-        Feature::RestoreShortcutDefault => "lab-restore-shortcut-default",
         Feature::KeepOnClipboard => "lab-keep-on-clipboard",
         Feature::CopyOnly => "lab-copy-only",
         Feature::ReturnToApp => "lab-return-to-app",

@@ -10,10 +10,12 @@ use std::time::Duration;
 use rune::{Color, El, Tx, col, el, row, text};
 use rune_kit::{Placement, Select, SelectAppearance};
 
+#[cfg(target_os = "macos")]
+use super::controls::icon_button;
 use super::controls::{
     self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card, folding,
-    icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray, keycap, note,
-    pressable_row, row_switch, value_button, value_font,
+    icon_described_row, icon_row, icon_toggle_row, key_tray, keycap, note, pressable_row,
+    quiet_button, row_switch, value_button, value_font,
 };
 use super::icons::*;
 use super::lists::{PermissionControl, inline_slider, permission_control, slider};

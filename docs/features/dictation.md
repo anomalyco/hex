@@ -153,6 +153,28 @@ Checks: `a_recorder_shows_the_modifiers_held_so_far` in `rune_ui/tests.rs`,
 `rune_ui/tests/panes.rs`, the `shortcut-row*` scenes, and the `ChordCapture`
 tests in `rune_ui/macos_host.rs` (no native end-to-end run).
 
+```ts
+Shortcut row (General, Output)
+├── binding differs from its default (Paste last dictation, Cancel), off included
+│   └── a quiet Reset left of the keys (`restore-{key}`, read as "Restore default shortcut")
+│       └── saves the default under the recorder's checks; one in use opens the recorder with "Already in use"
+├── off, with a default ── the row reads "Default shortcut: …"
+└── recording an optional shortcut (Paste last, Dictate without processing,
+    second dictation, Type text on Linux, Terminal paste on Windows and Linux)
+    ├── the row reads "Press ⌫ to turn it off" (Backspace off macOS)
+    ├── plain ⌫ or Delete ── the shortcut turns off and the recorder closes
+    └── ⌫ with a modifier ── records like any key
+Dictation (required) ── plain ⌫ answers "Add a modifier" and keeps listening
+```
+
+There is no separate Clear button: ⌫ in the recorder is the only way to turn a
+shortcut off from the window. Checks: `erase_tests` in `rune_ui/settings.rs`
+(every OS), `backspace_in_an_optional_recorder_turns_the_shortcut_off` and
+`reset_brings_back_paste_lasts_default` in `rune_ui/tests.rs` (Linux),
+`delete_records_alone_for_the_window_to_turn_a_shortcut_off` in
+`rune_ui/macos_host.rs`, and the `mac-settings-reset`, `mac-settings-reset-off`,
+and `mac-settings-recording-optional` scenes (no native end-to-end run).
+
 **Fixed October 29, 2026 (issue 400):** macOS marks every function, arrow, and
 navigation key press with the Fn flag, and the recorder leaves it out of the
 binding, so a recorded F14 (or ⌘F14 for Voice Action) never matched and never

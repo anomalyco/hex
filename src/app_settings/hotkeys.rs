@@ -402,6 +402,16 @@ impl HotkeyKey {
         MOUSE_INPUT_CODES.contains(&self.code)
     }
 
+    /// ⌫ (Backspace) or Delete: macOS's Delete and Forward Delete key codes,
+    /// elsewhere the named keys.
+    pub fn is_erase(&self) -> bool {
+        if cfg!(target_os = "macos") {
+            matches!(self.code, 51 | 117)
+        } else {
+            matches!(self.name().as_str(), "backspace" | "delete")
+        }
+    }
+
     /// A key identified by name on Windows and Linux.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn named(name: &str) -> Self {
@@ -941,6 +951,12 @@ impl HotkeyBinding {
                 key.code == MOUSE_INPUT_CODES.start
                     || HotkeyKey::mouse_number(&key.label) == Some(1)
             })
+    }
+
+    /// ⌫ or Delete with no modifier: the recorder's gesture for turning a
+    /// shortcut off, never a shortcut itself.
+    pub fn is_bare_erase(&self) -> bool {
+        self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_erase)
     }
 
     /// What the input layers match. On macOS a letter key follows its

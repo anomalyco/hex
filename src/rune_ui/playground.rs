@@ -91,6 +91,18 @@ const PATHS: &[(&str, &str)] = &[
     ("shortcut-row-held", "Window/General/Shortcut/Held"),
     ("shortcut-row-rejected", "Window/General/Shortcut/Rejected"),
     ("shortcut-row-saved", "Window/General/Shortcut/Saved"),
+    (
+        "mac-settings-reset",
+        "Window/General/Shortcut/Paste last changed · Reset",
+    ),
+    (
+        "mac-settings-reset-off",
+        "Window/General/Shortcut/Paste last off · Reset",
+    ),
+    (
+        "mac-settings-recording-optional",
+        "Window/General/Shortcut/Recording Paste last · ⌫ turns off",
+    ),
     ("mac-update-checking", "Window/General/Updates/Checking"),
     (
         "mac-update-downloading",

@@ -41,9 +41,6 @@ impl Feature {
             Self::KeepMicrophoneOpen => {
                 "With Turn off the mic when not dictating on, keep the microphone open for a while after each dictation (labs.keep_microphone_open_seconds), so the next one starts at once"
             }
-            Self::RestoreShortcutDefault => {
-                "Offer Restore default next to Paste last dictation's shortcut"
-            }
             Self::KeepOnClipboard => {
                 "Leave the dictation on the clipboard after pasting instead of restoring what was there"
             }

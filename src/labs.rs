@@ -111,7 +111,6 @@ impl Feature {
             | Self::ShareShortcut
             | Self::UnloadIdle
             | Self::KeepMicrophoneOpen
-            | Self::RestoreShortcutDefault
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::ReturnToApp
@@ -192,7 +191,6 @@ impl Feature {
             | Self::PauseBrowser
             | Self::ShareShortcut => 20261030,
             Self::UnloadIdle
-            | Self::RestoreShortcutDefault
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::SpokenFormatting
@@ -360,7 +358,6 @@ impl Feature {
             | Self::VocabularyBiasing
             | Self::UnloadIdle
             | Self::KeepMicrophoneOpen
-            | Self::RestoreShortcutDefault
             | Self::KeepOnClipboard
             | Self::SpokenFormatting
             | Self::SpokenSymbols
@@ -415,7 +412,6 @@ impl Feature {
             Self::ShareShortcut => "share-shortcut",
             Self::UnloadIdle => "unload-idle",
             Self::KeepMicrophoneOpen => "keep-microphone-open",
-            Self::RestoreShortcutDefault => "restore-shortcut-default",
             Self::KeepOnClipboard => "keep-on-clipboard",
             Self::CopyOnly => "copy-only",
             Self::ReturnToApp => "return-to-app",
@@ -501,7 +497,6 @@ impl Feature {
             Self::ShareShortcut => "share_dictation_shortcut",
             Self::UnloadIdle => "labs.unload_idle",
             Self::KeepMicrophoneOpen => "labs.keep_microphone_open",
-            Self::RestoreShortcutDefault => "labs.restore_shortcut_default",
             Self::KeepOnClipboard => "labs.keep_on_clipboard",
             Self::CopyOnly => "labs.copy_only",
             Self::ReturnToApp => "labs.return_to_app",
@@ -591,7 +586,6 @@ impl Feature {
             Self::ShareShortcut => settings.share_dictation_shortcut,
             Self::UnloadIdle => settings.labs.unload_idle,
             Self::KeepMicrophoneOpen => settings.labs.keep_microphone_open,
-            Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard,
             Self::CopyOnly => settings.labs.copy_only,
             Self::ReturnToApp => settings.labs.return_to_app,
@@ -678,7 +672,6 @@ impl Feature {
             &mut labs.mouse_shortcuts,
             &mut labs.unload_idle,
             &mut labs.keep_microphone_open,
-            &mut labs.restore_shortcut_default,
             &mut labs.keep_on_clipboard,
             &mut labs.copy_only,
             &mut labs.return_to_app,
@@ -769,7 +762,6 @@ impl Feature {
             Self::ShareShortcut => settings.share_dictation_shortcut = on,
             Self::UnloadIdle => settings.labs.unload_idle = on,
             Self::KeepMicrophoneOpen => settings.labs.keep_microphone_open = on,
-            Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default = on,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard = on,
             Self::CopyOnly => settings.labs.copy_only = on,
             Self::ReturnToApp => settings.labs.return_to_app = on,
@@ -2293,7 +2285,7 @@ mod tests {
     #[test]
     fn retired_switches_are_read_and_ignored() {
         let settings: AppSettings = serde_json::from_str(
-            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "transcribe_files": true, "live_text": true}}"#,
+            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "transcribe_files": true, "restore_shortcut_default": true, "live_text": true}}"#,
         )
         .unwrap();
         assert!(settings.labs.live_text);
@@ -2303,5 +2295,6 @@ mod tests {
         assert!(json["labs"].get("collapsible_meeting_sections").is_none());
         assert!(json["labs"].get("meeting_platform_icons").is_none());
         assert!(json["labs"].get("transcribe_files").is_none());
+        assert!(json["labs"].get("restore_shortcut_default").is_none());
     }
 }

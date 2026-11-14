@@ -51,7 +51,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep mic open after dictating no labs.keep_microphone_open + labs.keep_microphone_open_seconds (30/60/180/300/1800, default 60)
 │                                        with Turn off the mic when not dictating on, the microphone stays open for that
 │                                        long after a capture, so the next dictation starts at once
-├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
@@ -560,17 +559,11 @@ last free bit and the window lives in its own atomic, both written by
 page goldens were regenerated for the new card. Not yet observed on a real
 Mac, Windows PC, or Linux desktop: no capture has been run with the lab on.
 
-Restore shortcut default (`restore-shortcut-default`, issue 613): while on,
-General › Advanced › Paste last dictation shows a Restore default shortcut
-button (`restore-paste-last`) whenever the shortcut is not its default
-(Option-Shift-V on macOS, Ctrl+Alt+V elsewhere), and a cleared shortcut's
-row reads "Default shortcut: …". Pressing it saves the default through the
-same checks a recorded shortcut meets; if another Hex shortcut already uses
-it, nothing changes and the recorder opens with "Already in use". Off, the
-row is exactly as before. The gate is the row itself (the feature does no
-other work). Check:
-`restore_default_brings_back_paste_last_only_with_its_lab_on` in
-[tests.rs](../../src/rune_ui/tests.rs).
+Restore shortcut default (`restore-shortcut-default`, issue 613) graduated:
+Paste last dictation's row always offers Reset when its shortcut isn't the
+default (see [dictation.md](dictation.md)). `labs.restore_shortcut_default`
+is read and ignored, and `hex labs on restore-shortcut-default` says it
+graduated.
 
 Settings search (`settings-search`, every OS): while on, General starts with
 a single-line search field. Typing keeps only the rows and cards whose title

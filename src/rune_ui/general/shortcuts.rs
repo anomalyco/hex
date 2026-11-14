@@ -1,8 +1,9 @@
 //! A shortcut's row in General and the other panes' shortcut cards: the
-//! recorder, its Clear and Restore default actions, and what the desktop's
-//! shortcuts portal granted.
+//! recorder, its Reset action, and what the desktop's shortcuts portal
+//! granted.
 
 use super::*;
+use crate::app_settings::HotkeyBinding;
 
 /// A shortcut's row with what a shortcuts portal granted, and the note when
 /// the desktop kept it.
@@ -20,53 +21,13 @@ pub(in crate::rune_ui) fn shortcut_rows(
         .gap(4.0)
         .center_y()
         .child(keys_button(ui, p, target));
-    // The optional shortcuts can be turned off.
-    let second = target == ShortcutTarget::SecondDictation;
-    #[cfg(target_os = "linux")]
-    let typed_text = target == ShortcutTarget::TypedText;
-    #[cfg(not(target_os = "linux"))]
-    let typed_text = false;
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    let terminal = target == ShortcutTarget::TerminalPaste;
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    let terminal = false;
-    let optional = second
-        || typed_text
-        || terminal
-        || matches!(
-            target,
-            ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
-        );
-    if optional && s::binding(&ui.settings, target).is_some() {
-        control = control.child(icon_button(
-            p,
-            &format!("clear-{key}"),
-            &rune_theme_opencode::icons::TRASH,
-            tr("Clear shortcut"),
-            move |ui: &mut Ui| {
-                ui.update(|settings| match target {
-                    ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
-                    #[cfg(target_os = "linux")]
-                    ShortcutTarget::TypedText => settings.typed_text_hotkey = None,
-                    _ if second => settings.second_dictation_hotkey = None,
-                    _ if terminal => settings.terminal_paste_hotkey = None,
-                    _ => settings.paste_last_hotkey = None,
-                });
-            },
-        ));
-    }
-    // Labs › Restore shortcut default: Paste last dictation's default,
-    // offered while the shortcut is something else or off. Cancel's
-    // default, Escape, can't be recorded (Escape ends the recorder), so its
-    // restore is always offered.
+    // Paste last dictation's default, offered while the shortcut is
+    // something else or off. Cancel's default, Escape, can't be recorded
+    // (Escape ends the recorder), so Reset is how it comes back.
     let mut default_note = None;
     let default = match target {
-        ShortcutTarget::PasteLast
-            if crate::labs::Feature::RestoreShortcutDefault.on(&ui.settings) =>
-        {
-            Some(crate::app_settings::HotkeyBinding::paste_last_default())
-        }
-        ShortcutTarget::Cancel => Some(crate::app_settings::HotkeyBinding::cancel_default()),
+        ShortcutTarget::PasteLast => Some(HotkeyBinding::paste_last_default()),
+        ShortcutTarget::Cancel => Some(HotkeyBinding::cancel_default()),
         _ => None,
     };
     if let Some(default) = default {
@@ -78,22 +39,35 @@ pub(in crate::rune_ui) fn shortcut_rows(
             ));
         }
         if current != Some(&default) {
-            control = control.child(icon_button(
+            let reset = quiet_button(
                 p,
                 &format!("restore-{key}"),
-                &REFRESH,
+                tr("Reset"),
                 tr("Restore default shortcut"),
                 move |ui: &mut Ui| s::restore_default(ui, target, default.clone()),
-            ));
+            );
+            control = row().gap(6.0).center_y().child(reset).child(control);
         }
     }
+    // While an optional shortcut records, plain ⌫ turns it off.
+    let listening =
+        matches!(ui.capture, Capture::Listening { target: active, .. } if active == target);
+    let erase_hint = (listening && s::can_turn_off(target)).then(|| {
+        let erase = if cfg!(target_os = "macos") {
+            "⌫"
+        } else {
+            "Backspace"
+        };
+        (tr_fill("Press {} to turn it off", erase), p.muted())
+    });
     let mut rows: Vec<CardRow> = vec![
         icon_described_row(
             p,
             key,
             glyph,
             title,
-            default_note
+            erase_hint
+                .or(default_note)
                 .or_else(|| s::granted(ui, p, target))
                 .or_else(|| purpose.map(|purpose| (purpose.to_string(), p.muted()))),
             control,

@@ -330,6 +330,31 @@ pub(super) const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    // Paste last dictation changed from its default, then off: Reset brings
+    // the default back.
+    ("mac-settings-reset", |ui| {
+        *ui = mac_fixture();
+        let mut changed = HotkeyBinding::paste_last_default();
+        changed.modifiers.shift = None;
+        changed.modifiers.command = Some(ModifierSide::Either);
+        ui.settings.paste_last_hotkey = Some(changed);
+        ui.advanced.push(Pane::General);
+    }),
+    ("mac-settings-reset-off", |ui| {
+        *ui = mac_fixture();
+        ui.settings.paste_last_hotkey = None;
+        ui.advanced.push(Pane::General);
+    }),
+    // Recording Paste last dictation, which ⌫ turns off.
+    ("mac-settings-recording-optional", |ui| {
+        *ui = mac_fixture();
+        ui.advanced.push(Pane::General);
+        ui.capture = Capture::Listening {
+            target: ShortcutTarget::PasteLast,
+            message: None,
+            held: HotkeyModifiers::default(),
+        };
+    }),
     // The microphone row following a recorded voice (`--video`), and with
     // the microphone released while idle, when no audio arrives.
     ("mac-settings-mic-level", |ui| {

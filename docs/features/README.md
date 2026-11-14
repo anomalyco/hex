@@ -33,9 +33,7 @@ Agents can [read retained transcripts](transcript-cli.md) and
 [Labs](labs.md) gives every unfinished feature its own switch, off by
 default, listed under collapsible groups (Dictation, Output, History,
 Meetings, Annotate, Shortcuts, Models) with only this OS's labs.
-Its Restore shortcut default toggle (off by default) puts a Restore default
-button beside Paste last dictation's shortcut (#613); its Sort and filter
-models toggle (off by default) adds a sort and a saved-language filter to the
+Its Sort and filter models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647); its Settings search toggle (off by default) puts a
