@@ -1173,6 +1173,11 @@ function updateWords(dt) {
       continue
     }
     const t = o.target && o.target.state === "typing" ? o.target : null
+    // Spat words keep aiming at the pointer as it moves.
+    if (o.spit && pointer.seen) {
+      o.gx = pointer.x + o.jx
+      o.gy = pointer.y + o.jy
+    }
     if (t) {
       const g = o.slot != null ? slotPoint(t, o.slot, o.entry) : caretOf(t)
       o.gx = g.x
@@ -1293,6 +1298,75 @@ function updateLanding(dt) {
     c.now = time
     cards.draw(c)
     if (!busy) landing.delete(c)
+  }
+}
+
+// ─── Option spit ───────────────────────────────────────────────────────────────
+// After the opening, holding ⌥ makes the head spit nonsense words at the pointer; a word that lands
+// on a notification card destroys it. Keyboard and mouse only, never in reduced motion.
+const GIBBERISH = ["blorp", "skreeb", "fwazzle", "zonk", "glimp", "snorgle", "wubba", "flib", "krungle", "bloop", "zazzle", "mimble", "plonk", "squee", "vroop", "gorp", "frazzit", "nubbin", "skiddle", "zorp", "bwonk", "wibble", "flonk", "grobble"]
+const SPIT_MAX = 28
+let spitHold = 0
+let spitAcc = 0
+let spitInFlight = 0
+let introSeen = false
+let hintDone = false
+const hintEl = coarse || reduced ? null : root.appendChild(Object.assign(document.createElement("p"), { className: "show__hint", textContent: "Hold ⌥ and aim" }))
+hintEl?.setAttribute("aria-hidden", "true")
+
+const spitting = () => userRage && !reduced && !coarse && pointer.seen && introSeen && !blastStage && !powerStage
+
+function cardUnder(x, y) {
+  let best = null
+  for (const c of live) {
+    if (c.state === "dead" || c.kind === "opencode" || c.alpha < 0.5) continue
+    if (Math.abs(x - c.x) > c.hw + 6 || Math.abs(y - c.y) > c.hh + 6) continue
+    if (!best || c.born > best.born) best = c
+  }
+  return best
+}
+
+function spitWord() {
+  const hold = smooth(0, 5, spitHold)
+  const point = { x: pointer.x, y: pointer.y }
+  launch(pick(GIBBERISH), null, { point, i: 0.55, size: rnd(17, 26) * lerp(1, 1.5, hold), weight: 760 })
+  const o = flying[flying.length - 1]
+  o.spit = true
+  o.jx = rnd(-14, 14)
+  o.jy = rnd(-14, 14)
+  o.onPop = () => {
+    spitInFlight--
+    const c = cardUnder(o.x, o.y)
+    if (!c) return
+    c.hitDir = { x: o.vx, y: o.vy }
+    explode(c, 0.8)
+  }
+  spitInFlight++
+  const hp = headPos()
+  audio.spit({ gain: lerp(0.9, 0.55, hold), rate: rnd(0.85, 1.25), pan: (hp.x / W) * 1.4 - 0.7 })
+}
+
+function updateSpit(dt) {
+  if (!introSeen && started && currentStage() >= 2) introSeen = true
+  if (hintEl) {
+    if (userRage) hintDone = true
+    const hb = headBase()
+    hintEl.style.left = `${hb.x}px`
+    hintEl.style.top = `${hb.y + headR() * 1.5}px`
+    hintEl.classList.toggle("is-on", introSeen && !hintDone && !blastStage)
+  }
+  // Words that expired without popping (quiet or cleared) must not leak the in-flight count.
+  spitInFlight = Math.min(spitInFlight, flying.reduce((n, o) => n + (o.spit ? 1 : 0), 0))
+  if (!spitting()) {
+    spitHold = 0
+    spitAcc = 0
+    return
+  }
+  spitHold += dt
+  spitAcc += dt * lerp(2.5, 16, smooth(0, 5, spitHold))
+  while (spitAcc >= 1) {
+    spitAcc -= 1
+    if (spitInFlight < SPIT_MAX) spitWord()
   }
 }
 
@@ -1635,7 +1709,7 @@ function director(dt) {
   const opening = beatIndex === 0 && v.intensity < 0
   const st = currentStage()
   const base = opening ? 0 : st >= 4 ? 3.5 + 1.5 * (st - 4) : 0.33 + 4 * Math.pow(I, 2.1)
-  const rate = base * v.spawn * (userRage ? 2 : 1)
+  const rate = base * v.spawn * (spitting() ? 3 : userRage ? 2 : 1)
   spawnAcc += dt * rate
   if (!opening && time > 0.6 && live.length === 0 && spawnAcc < 1) spawnAcc = 1
   while (spawnAcc >= 1) {
@@ -2334,6 +2408,7 @@ function step(realDt) {
   updatePower(dt)
   updateFinale(dt)
   updateHead(dt)
+  updateSpit(dt)
   updateWords(dt)
   updateLanding(dt)
   updateCards(dt)
@@ -2595,6 +2670,7 @@ return {
     idleTimer = 0
     visible = false
     audio.close()
+    hintEl?.remove()
   },
 }
 }

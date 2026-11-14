@@ -3,7 +3,7 @@
 // builds every play() is logged (time, file, gain, rate, pan, bus) so a recording can be mixed
 // offline without playing anything aloud.
 
-import { ArrivalGate, arrivalVoice, scheduleArrival } from "./arrival.js"
+import { ArrivalGate, arrivalVoice, scheduleArrival, scheduleSpit } from "./arrival.js"
 
 const URLS = import.meta.glob("./audio/*.mp3", { query: "?url", import: "default", eager: true })
 const urlOf = (file) => URLS[`./audio/${file}`]
@@ -19,6 +19,7 @@ export class AudioEngine {
     this.hidden = false
     this.duck = 0
     this.arrivals = new ArrivalGate()
+    this.spits = new ArrivalGate({ gap: 0.07, window: 0.5, max: 6 })
   }
 
   // The context is created by the caller inside the start gesture (or later, on unmute).
@@ -167,6 +168,17 @@ export class AudioEngine {
     if (!this.on || !this.buses?.ui) return
     try {
       scheduleArrival(this.ctx, this.buses.ui, voice, this.ctx.currentTime, { gain: g, rate, pan })
+    } catch {}
+  }
+
+  // The small pfft a nonsense word makes leaving the mouth. Gated so a fast stream stays a patter.
+  spit({ gain = 1, rate = 1, pan = 0 } = {}) {
+    const g = this.spits.admit(this.clock()) * gain
+    if (g <= 0) return
+    this.log?.push({ t: +this.clock().toFixed(4), file: "synth-spit", bus: "ui", gain: +g.toFixed(3), rate: +rate.toFixed(3), pan: +pan.toFixed(3), i: +(this.i ?? 0).toFixed(3), duck: +this.duck.toFixed(3) })
+    if (!this.on || !this.buses?.ui) return
+    try {
+      scheduleSpit(this.ctx, this.buses.ui, this.ctx.currentTime, { gain: g, rate, pan })
     } catch {}
   }
 
