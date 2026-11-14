@@ -1388,9 +1388,13 @@ fn meetings_settings_save_and_ask_for_system_audio() {
         policy(&rt, "us.zoom.xos"),
         Some(MeetingPolicy::AlwaysRecord)
     );
-    pick(&mut rt, "call8-policy", 0);
+    let chosen = format!(
+        "call{}",
+        crate::app_settings::known_meeting_providers().count()
+    );
+    pick(&mut rt, &format!("{chosen}-policy"), 0);
     assert_eq!(policy(&rt, "example.com"), Some(MeetingPolicy::Ask));
-    assert!(rt.find("call8").is_some());
+    assert!(rt.find(&chosen).is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
