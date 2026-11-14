@@ -16,6 +16,20 @@ impl Feature {
                 Self::Screenshots | Self::AnnotateReplay | Self::CopyCaptureZip
             )
     }
+
+    /// The summary the website lists. A Labs card's `summary` names the keys
+    /// its own OS has (the special-keys lab's Windows build lists Insert
+    /// through Page Down), so the site's line for a lab on more than one OS
+    /// names each one's keys here, and `site/src/labs.json` is the same file on
+    /// every OS.
+    const fn web_summary(self) -> &'static str {
+        match self {
+            Self::StandaloneSpecialKeys => {
+                "Use a special key alone as a shortcut: Insert, Home, End, Page Up, or Page Down on Windows, and Menu, Pause, or Scroll Lock on Linux"
+            }
+            _ => self.summary(),
+        }
+    }
 }
 
 impl Os {
@@ -38,7 +52,7 @@ fn catalog_json() -> String {
             serde_json::json!({
                 "id": feature.name(),
                 "title": feature.title(),
-                "summary": feature.summary(),
+                "summary": feature.web_summary(),
                 "group": feature.group().id(),
                 "groupTitle": feature.group().title(),
                 "oses": feature.oses().iter().map(|os| os.id()).collect::<Vec<_>>(),
@@ -58,6 +72,16 @@ mod tests {
 
     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/site/src/labs.json");
 
+    /// The 1-based line two files first differ on, or `None` when one ends
+    /// before the other: a stale file reports the line to look at.
+    fn first_difference(saved: &str, expected: &str) -> Option<usize> {
+        saved
+            .lines()
+            .zip(expected.lines())
+            .position(|(saved, expected)| saved != expected)
+            .map(|line| line + 1)
+    }
+
     #[test]
     fn the_website_lists_every_public_lab() {
         let expected = catalog_json();
@@ -65,12 +89,22 @@ mod tests {
             std::fs::write(PATH, &expected).unwrap();
             return;
         }
-        let saved = std::fs::read_to_string(PATH).unwrap_or_default();
-        assert!(
-            saved == expected,
-            "site/src/labs.json is out of date with the Labs registry; \
-             run `HEX_UPDATE_LABS_JSON=1 scripts/check labs::web` and commit it"
-        );
+        // Git checks text files out with CRLF where `core.autocrlf` is set, as
+        // it is on Windows; the file Hex writes, and the repository's copy, is
+        // LF. Compare lines so a checkout's line endings don't read as drift.
+        let saved = std::fs::read_to_string(PATH)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        if saved != expected {
+            let at = first_difference(&saved, &expected).map_or_else(
+                || "where one file ends".to_string(),
+                |line| format!("at line {line}"),
+            );
+            panic!(
+                "site/src/labs.json is out of date with the Labs registry {at}; \
+                 run `HEX_UPDATE_LABS_JSON=1 scripts/check labs::web` and commit it"
+            );
+        }
     }
 
     #[test]

@@ -22,6 +22,9 @@ pub(crate) use macos::{activation_policy_changed, pointer_screen};
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod rehome;
 pub(crate) mod spring;
+/// Windows' own HUD frame pacing; see its module docs.
+#[cfg(any(target_os = "windows", test))]
+mod windows_pacing;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -261,6 +264,18 @@ impl HudSender {
         }
         // A Windows first-frame attempt opens where the HUD's `handle` runs, on
         // the overlay thread, not here: see `Hud::handle` (#1793).
+        //
+        // A Windows recording sends a meter with each audio chunk, about 100 a
+        // second, and `update` asks for a frame for every one. While the HUD's
+        // timer is armed it draws the next level itself and its view reads no
+        // loudness, so the meter only updates it; a stalled timer draws from
+        // the meter instead (`meter_update`).
+        #[cfg(target_os = "windows")]
+        if matches!(&event, HudEvent::Meter { .. }) {
+            self.overlay
+                .update_if(move |hud, _| windows_pacing::meter_update(hud, event));
+            return;
+        }
         self.overlay.update(move |hud, _| hud.handle(event));
     }
 
@@ -361,6 +376,14 @@ impl HudSender {
     }
 }
 
+/// Whether the HUD wants another frame: it is on screen and something still
+/// moves, its own exit included. A hidden HUD draws nothing, so a timer there
+/// would only turn the loop for nothing.
+#[cfg(any(target_os = "windows", test))]
+fn wants_frame(animating: bool, shown: bool) -> bool {
+    animating && shown
+}
+
 /// The overlay's state: the model and what it last drew.
 pub(crate) struct Hud {
     model: IndicatorModel,
@@ -376,7 +399,8 @@ pub(crate) struct Hud {
     shown: Arc<AtomicBool>,
     /// Rune's Reduce Motion, as of the last frame.
     reduce: bool,
-    /// Whether the compositor wants the display's frames.
+    /// Whether the HUD still moves. The compositor reads it everywhere but
+    /// Windows, where the overlay's `poll` asks for the next frame instead.
     animating: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     placed: Option<crate::rune_hud::hud_placement::Placed>,
@@ -393,11 +417,24 @@ pub(crate) struct Hud {
     /// recovery hide can tell whether a later start took the HUD over (#1793).
     #[cfg(target_os = "windows")]
     watch: Arc<Mutex<Watch>>,
-    /// When a frame last drew, and whether this recording has already asked Rune
-    /// for its show again: a show Rune declined or Hex hid gets one more try,
-    /// and a recovery hide frees one more (#1793).
-    #[cfg(target_os = "windows")]
+    /// When a frame last drew, or this recording's start opened the clock: a
+    /// show Rune declined or Hex hid gets one more ask (with `reshown`), and a
+    /// recovery hide restarts it (#1793). Windows' `poll` also arms its timer
+    /// from it, so a show nothing draws stops asking.
+    #[cfg(any(target_os = "windows", test))]
     last_drawn: Option<Instant>,
+    /// Whether the last poll asked for another frame.
+    #[cfg(any(target_os = "windows", test))]
+    armed: bool,
+    /// When the last poll ran: a frame drawn after it keeps the timer going
+    /// even when it is older than `RESHOW_AFTER`, because a poll runs before
+    /// its frame's render.
+    #[cfg(any(target_os = "windows", test))]
+    polled_at: Option<Instant>,
+    /// When the model last stepped, for the next frame's step: set only by a
+    /// frame that steps it, never by a show, and cleared by a hide.
+    #[cfg(target_os = "windows")]
+    stepped_at: Option<Instant>,
     #[cfg(target_os = "windows")]
     reshown: bool,
     /// When the HUD last checked which display the pointer is on.
@@ -473,11 +510,16 @@ impl Hud {
         }
         // A start's own first frame has to arrive before a recovery re-ask can
         // call it late: the frame the previous dictation left is not this one's,
-        // and one ask is all a recording gets (#1793).
-        #[cfg(target_os = "windows")]
+        // and one ask is all a recording gets (#1793). Windows' `poll` arms its
+        // timer from this too, so the first frame after the show asks for the
+        // next even though `last_drawn` only moves again once a frame draws.
+        #[cfg(any(target_os = "windows", test))]
         if starts {
             self.last_drawn = Some(Instant::now());
-            self.reshown = false;
+            #[cfg(target_os = "windows")]
+            {
+                self.reshown = false;
+            }
         }
         // The first-frame attempt opens here, where the show is requested, and
         // not where the listener sent the start. That takes the listener thread
@@ -580,6 +622,14 @@ impl Hud {
     /// (#1359).
     fn fade_out(&mut self) {
         self.unplace();
+        #[cfg(target_os = "windows")]
+        {
+            // The next show starts a new step, not one from the frame before
+            // the hide (`wall_dt`), and its timer arms afresh (`poll`).
+            self.armed = false;
+            self.polled_at = None;
+            self.stepped_at = None;
+        }
         if self.shown.swap(false, Ordering::AcqRel) {
             if let Some(overlay) = &self.this {
                 #[cfg(target_os = "windows")]
@@ -594,6 +644,12 @@ impl Hud {
 
     fn hide(&mut self) {
         self.unplace();
+        #[cfg(target_os = "windows")]
+        {
+            self.armed = false;
+            self.polled_at = None;
+            self.stepped_at = None;
+        }
         if self.shown.swap(false, Ordering::AcqRel) {
             if let Some(overlay) = &self.this {
                 overlay.hide();
@@ -697,36 +753,41 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     // tags it, and the sender polls it from the runtime thread (#1793).
     #[cfg(target_os = "windows")]
     let watch: Arc<Mutex<Watch>> = Arc::default();
+    let configured = OverlaySpec {
+        name: "hex-hud",
+        size: WINDOW,
+        edge: ScreenEdge::Top,
+        margin: 0.0,
+        align: rune::Align::Center,
+        inset: 0.0,
+        interactive: false,
+        view,
+    }
+    .options(OverlayOptions {
+        // The first press never waits on the window: macOS keeps the
+        // panel drawn at alpha zero; elsewhere only the window waits,
+        // and its GPU surface comes with the show (`release_gpu_after`).
+        prewarm: true,
+        #[cfg(not(target_os = "macos"))]
+        display: display(),
+        ..OverlayOptions::default()
+    })
+    // The shaders write display (sRGB-encoded) values.
+    .srgb_blend(true)
+    // On Linux a burst of dictations keeps the GPU surface, so each HUD
+    // shows at once; a Hex at rest gives the GPU device back.
+    .release_gpu_after(GPU_IDLE);
+    // Windows' overlay has no display link or swap-chain wait to pace it: the
+    // HUD asks Rune for its next frame on a fixed ~60 Hz timer (`windows_pacing`).
+    #[cfg(target_os = "windows")]
+    let configured = configured.poll(windows_pacing::poll);
     let overlay = app.overlay(
-        OverlaySpec {
-            name: "hex-hud",
-            size: WINDOW,
-            edge: ScreenEdge::Top,
-            margin: 0.0,
-            align: rune::Align::Center,
-            inset: 0.0,
-            interactive: false,
-            view,
-        }
-        .options(OverlayOptions {
-            // The first press never waits on the window: macOS keeps the
-            // panel drawn at alpha zero; elsewhere only the window waits,
-            // and its GPU surface comes with the show (`release_gpu_after`).
-            prewarm: true,
-            #[cfg(not(target_os = "macos"))]
-            display: display(),
-            ..OverlayOptions::default()
-        })
-        // The shaders write display (sRGB-encoded) values.
-        .srgb_blend(true)
-        // On Linux a burst of dictations keeps the GPU surface, so each HUD
-        // shows at once; a Hex at rest gives the GPU device back.
-        .release_gpu_after(GPU_IDLE)
-        .compositor(HudCompositor {
+        configured.compositor(HudCompositor {
             #[cfg(not(target_os = "macos"))]
             gpu: gpu.clone(),
             #[cfg(target_os = "macos")]
             gpu: None,
+            #[cfg(not(target_os = "windows"))]
             animating: animating.clone(),
         }),
         Hud {
@@ -748,8 +809,14 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             gpu,
             #[cfg(target_os = "windows")]
             watch: watch.clone(),
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", test))]
             last_drawn: None,
+            #[cfg(any(target_os = "windows", test))]
+            armed: false,
+            #[cfg(any(target_os = "windows", test))]
+            polled_at: None,
+            #[cfg(target_os = "windows")]
+            stepped_at: None,
             #[cfg(target_os = "windows")]
             reshown: false,
         },
@@ -1001,6 +1068,9 @@ struct HudCompositor {
     gpu: Arc<Mutex<GpuSlot>>,
     #[cfg(target_os = "macos")]
     gpu: Option<(rune::compose::DeviceKey, Painter)>,
+    /// Whether the HUD moves. Windows doesn't read it: the overlay asks for one
+    /// frame at a time there (`poll`), and `Hud` holds the same flag.
+    #[cfg(not(target_os = "windows"))]
     animating: Arc<AtomicBool>,
 }
 
@@ -1096,7 +1166,18 @@ impl Compositor<Hud> for HudCompositor {
     }
 
     fn animating(&self) -> bool {
-        self.animating.load(Ordering::Acquire)
+        #[cfg(target_os = "windows")]
+        {
+            // No display link or swap-chain wait paces a Windows overlay, so
+            // Rune would keep the loop at `ControlFlow::Poll` and draw as fast
+            // as it turns; the HUD's `poll` asks for the next frame on a fixed
+            // ~60 Hz timer instead, not the display's refresh.
+            false
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.animating.load(Ordering::Acquire)
+        }
     }
 
     /// The view is empty, so Rune's UI pass is skipped: Hex's own pass
@@ -1106,11 +1187,23 @@ impl Compositor<Hud> for HudCompositor {
         let target = Target::whole(f.size, f.rt.env.scale, f.rt.env.system_dark);
         let hud = &mut f.rt.state;
         hud.reduce = reduce;
+        let now = Instant::now();
         if hud.model.active() {
-            hud.drawn = Some(hud.model.step(Instant::now(), f.dt as f32, reduce));
+            // Windows paces the HUD with its own timer, and Rune caps the `dt`
+            // it hands a compositor at one resume step, so `f.dt` is not the
+            // real gap there (`wall_dt`).
+            #[cfg(target_os = "windows")]
+            let dt = windows_pacing::wall_dt(hud.stepped_at, now, f.dt as f32);
+            #[cfg(not(target_os = "windows"))]
+            let dt = f.dt as f32;
+            hud.drawn = Some(hud.model.step(now, dt, reduce));
+            #[cfg(target_os = "windows")]
+            {
+                hud.stepped_at = Some(now);
+            }
         }
         let active = hud.model.active();
-        self.animating.store(active, Ordering::Release);
+        hud.animating.store(active, Ordering::Release);
         #[cfg(not(target_os = "macos"))]
         if active {
             hud.follow_pointer(Instant::now());
@@ -1124,10 +1217,12 @@ impl Compositor<Hud> for HudCompositor {
             drop(clear_pass(f.encoder, f.target));
             return;
         };
-        // The frame clock a recording's HUD is judged by: see `reshow_due`.
+        // The frame clock a recording's HUD is judged by: see `reshow_due`, and
+        // the reference Windows' `poll` arms its timer from. `wall_dt` measures
+        // from `stepped_at`, which only a stepping frame sets.
         #[cfg(target_os = "windows")]
         {
-            hud.last_drawn = Some(Instant::now());
+            hud.last_drawn = Some(now);
         }
         #[cfg(target_os = "macos")]
         paint(painter(&mut self.gpu, f), f, &drawn, layout, target);
