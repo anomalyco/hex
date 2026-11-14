@@ -615,8 +615,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // native targets, which would end Hex without stopping its workers or
     // flushing the event log. The menu bar, HUD, and pump live in this loop,
     // so take the error here and stop the way Quit does, with the reason in
-    // the process log (#979).
-    if let Err(error) = app.try_run() {
+    // the process log and a failed launch's exit status (#979). The Linux
+    // window keeps running instead (`rune_ui::run_app`).
+    let started = app.try_run();
+    if let Err(error) = &started {
         tracing::error!(%error, "the Hex window failed; Hex stops");
     }
 
@@ -625,7 +627,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             state.timer.invalidate();
         }
     });
-    crate::desktop::process_exit::finish(&DRAIN)
+    crate::desktop::process_exit::finish_with(&DRAIN, if started.is_err() { 1 } else { 0 })
 }
 
 /// Stops and joins the runtime, listener, meeting controller, and local API.
