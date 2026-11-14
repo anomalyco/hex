@@ -2717,7 +2717,7 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Recognition hint: Apple Speech (iOS 26) contextual strings, best effort;
 │   Apple documents them only for DictationTranscriber, and Parakeet's batch
 │   path receives none
-└── Proof limits: unit tests only; no CI compiles the iOS targets
+└── Proof limits: simulator build, unit tests, and the built .appex's launch contract in the iOS workflow; nothing runs the extension on a physical iPhone
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

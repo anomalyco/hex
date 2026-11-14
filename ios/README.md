@@ -132,6 +132,8 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   and unverified on a physical iPhone. Apple documents contextual strings only
   for `DictationTranscriber`, Hex sets them on `SpeechTranscriber`, and
   Parakeet's batch path gets no hint.
-- **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
-  compiles or tests the iOS targets, so these checks run only in a local
-  `xcodebuild test`.
+- **CI:** `.github/workflows/ios.yml` generates the project and runs
+  `xcodebuild test` on a macOS runner for every change under `ios/`, builds the
+  shipping Release configuration for a device, and prints the built
+  `HEXKeyboard.appex`'s `Info.plist` and linked libraries. Nothing boots the
+  extension on a physical iPhone; those checks still run only by hand.
