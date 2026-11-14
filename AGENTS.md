@@ -48,7 +48,15 @@ language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Unload model when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), and Terminal
 paste shortcut (Windows, Linux). Externally contributed features land there
-too. Annotate is a normal feature in every build, stable included, on macOS,
+too.
+Every `Everyone` lab also gets a page on Hex's website,
+`anoma.ly/hex/labs/<id>` (index at `/hex/labs`), built from
+`site/src/labs.json`, which `labs::web`'s test generates from the registry
+(`Feature::title`, `summary`, `group`, `oses`, `added`). Adding or changing a
+lab means running `HEX_UPDATE_LABS_JSON=1 scripts/check labs::web` and
+committing the JSON; the test fails until you do, and the site build turns it
+into the page and its social card.
+Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
 `DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
 
@@ -569,7 +577,8 @@ substitute for source inspection or a second roadmap.
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
 - `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
-  description, audience, group), the runtime gates (`labs::live_text`, `live_chapters`,
+  description, the card's title and line, audience, group, OSes), the
+  website's `site/src/labs.json` (`labs::web`), the runtime gates (`labs::live_text`, `live_chapters`,
   `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
   `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.

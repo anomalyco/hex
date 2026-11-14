@@ -40,6 +40,7 @@ fn catalog_json() -> String {
                 "title": feature.title(),
                 "summary": feature.summary(),
                 "group": feature.group().id(),
+                "groupTitle": feature.group().title(),
                 "oses": feature.oses().iter().map(|os| os.id()).collect::<Vec<_>>(),
                 "added": format!("{}-{:02}-{:02}", added / 10000, added / 100 % 100, added % 100),
             })
