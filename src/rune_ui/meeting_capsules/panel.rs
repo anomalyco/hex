@@ -345,13 +345,9 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
         .child(header)
         .children(summary)
         .child(rows)
-        .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside));
-    let body = if capsule.movable {
-        body.cursor(Cursor::Grab)
-            .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
-    } else {
-        body
-    };
+        .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside))
+        .cursor(Cursor::Grab)
+        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx));
     in_corner(capsule, body)
 }
 

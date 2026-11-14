@@ -348,6 +348,15 @@ impl AppSettings {
                         "summarize_with_apple_intelligence",
                     ][..],
                 ),
+                (
+                    "/labs",
+                    &[
+                        "stop_when_call_ends",
+                        "meeting_descriptive_filenames",
+                        "meeting_notes_file",
+                        "expire_meeting_audio",
+                    ][..],
+                ),
             ] {
                 if let Some(Value::Object(object)) = original.pointer_mut(parent) {
                     for key in keys {

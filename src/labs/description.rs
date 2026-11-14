@@ -54,9 +54,6 @@ impl Feature {
             Self::FillerWords => {
                 "Remove filler words such as um and uh from dictations, without an AI model"
             }
-            Self::SubtitleExport => {
-                "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
-            }
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
@@ -106,9 +103,6 @@ impl Feature {
             Self::SkipPauses => {
                 "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
             }
-            Self::StopWhenCallEnds => {
-                "Stop a meeting recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"
-            }
             Self::OutputFixes => {
                 "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
             }
@@ -136,23 +130,14 @@ impl Feature {
             Self::HideMenuBarIcon => {
                 "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
             }
-            Self::MovableMeetingCapsules => {
-                "Drag meeting capsules such as Meeting transcript ready out of the way; they come back in the corner you left them"
-            }
             Self::GnomeClipboardRestore => {
                 "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
             }
             Self::TypedText => {
                 "Run the focused app's Output steps on the text already typed in the focused field and replace it (typed_text_hotkey)"
             }
-            Self::MeetingNotesVocabulary => {
-                "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
-            }
             Self::NotchIndicator => {
                 "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"
-            }
-            Self::MeetingFinishedEvent => {
-                "Tell apps on this computer when a meeting's transcript is ready, through the local API's GET /meetings/events (the meeting's id only)"
             }
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
@@ -166,29 +151,14 @@ impl Feature {
             Self::CopyCaptureZip => {
                 "A finished capture copies as one zip file, without video or audio."
             }
-            Self::FollowLiveTranscript => {
-                "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
-            }
-            Self::MoreCallApps => {
-                "Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."
-            }
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
             }
             Self::MeetingImport => {
                 "Import an audio file into Meetings and transcribe it on this Mac"
             }
-            Self::MeetingDescriptiveFilenames => {
-                "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"
-            }
-            Self::MeetingNotesFile => {
-                "Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript"
-            }
             Self::QuitClosesWindow => {
                 "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
-            }
-            Self::ExpireMeetingAudio => {
-                "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."
             }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and transcribes"

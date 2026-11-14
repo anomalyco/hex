@@ -2164,7 +2164,7 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
 }
 
 /// Writes the user-facing Markdown copy without replacing an existing file.
-/// `separate_notes` is Labs › Separate notes file: the transcript becomes
+/// `separate_notes` is Separate notes file: the transcript becomes
 /// `<stem>.transcript.md` and its stem stays free for the notes file.
 pub(super) fn export_markdown(
     folder: &Path,

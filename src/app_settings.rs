@@ -69,6 +69,9 @@ static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(MeetingIndicatorCorner
 static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
 static MEETING_AUDIO_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
+static MEETING_STOP_WHEN_CALL_ENDS: AtomicBool = AtomicBool::new(false);
+static MEETING_DESCRIPTIVE_FILENAMES: AtomicBool = AtomicBool::new(false);
+static MEETING_NOTES_FILE: AtomicBool = AtomicBool::new(false);
 const RETENTION_UNSET: u8 = u8::MAX;
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
@@ -389,6 +392,7 @@ const MIGRATIONS: &[&str] = &[
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
+    MEETING_LABS_SETTINGS_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[
@@ -396,6 +400,7 @@ const MIGRATIONS: &[&str] = &[
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
+    MEETING_LABS_SETTINGS_MIGRATION,
 ];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -411,6 +416,10 @@ const MEETING_RETENTION_DEFAULT_MIGRATION: &str = "meeting-retention-default";
 /// Summarize with Apple Intelligence and Summarize with OpenCode became one
 /// choice, `meetings.summaries`.
 const MEETING_SUMMARIES_MIGRATION: &str = "meeting-summaries-choice";
+/// Stop when the call ends, Descriptive meeting file names, Separate
+/// notes file, and Expire meeting audio separately became Meetings ›
+/// Settings rows: their switches were read into `meetings.*` once.
+const MEETING_LABS_SETTINGS_MIGRATION: &str = "meeting-labs-settings";
 
 fn deserialize_retired_value<'de, D>(
     deserializer: D,
@@ -835,6 +844,12 @@ impl AppSettings {
             MeetingRetention::encode(self.meetings.audio_retention),
             Ordering::Release,
         );
+        MEETING_STOP_WHEN_CALL_ENDS.store(self.meetings.stop_when_call_ends, Ordering::Release);
+        MEETING_DESCRIPTIVE_FILENAMES.store(
+            self.meetings.export.descriptive_filenames,
+            Ordering::Release,
+        );
+        MEETING_NOTES_FILE.store(self.meetings.export.notes_file, Ordering::Release);
         *MEETING_OUTPUT_FOLDER
             .get_or_init(Default::default)
             .write()
@@ -939,6 +954,7 @@ impl AppSettings {
                 .push(MEETING_RETENTION_DEFAULT_MIGRATION.into());
         }
         self.migrate_meeting_summaries();
+        self.migrate_meeting_labs();
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
             self.capture.enabled = true;
@@ -959,6 +975,27 @@ impl AppSettings {
         }
         self.meetings.summarize_with_apple_intelligence = None;
         self.meetings.summarize_with_opencode = None;
+    }
+
+    /// The four meeting labs that became Meetings › Settings rows carry
+    /// their switches over once; a separate audio retention stays only if
+    /// its lab was on, since it applied only then.
+    pub(super) fn migrate_meeting_labs(&mut self) {
+        if !self.has_migration(MEETING_LABS_SETTINGS_MIGRATION) {
+            let labs = &self.labs;
+            self.meetings.stop_when_call_ends |= labs.stop_when_call_ends == Some(true);
+            self.meetings.export.descriptive_filenames |=
+                labs.meeting_descriptive_filenames == Some(true);
+            self.meetings.export.notes_file |= labs.meeting_notes_file == Some(true);
+            if labs.expire_meeting_audio != Some(true) {
+                self.meetings.audio_retention = None;
+            }
+            self.migrations.push(MEETING_LABS_SETTINGS_MIGRATION.into());
+        }
+        self.labs.stop_when_call_ends = None;
+        self.labs.meeting_descriptive_filenames = None;
+        self.labs.meeting_notes_file = None;
+        self.labs.expire_meeting_audio = None;
     }
 
     fn has_migration(&self, id: &str) -> bool {
@@ -1564,6 +1601,55 @@ mod tests {
         settings.apply_one_time_migrations_with(|_| true);
         assert_eq!(settings.meetings.summaries, Off);
         assert!(AppSettings::default().has_migration(MEETING_SUMMARIES_MIGRATION));
+    }
+
+    /// The meeting labs that became Meetings › Settings rows carry their
+    /// switches over once; audio retention stays only with its lab on.
+    #[test]
+    fn retired_meeting_labs_become_meeting_settings_once() {
+        let migrated = |json: &str| {
+            let mut settings: AppSettings = serde_json::from_str(json).unwrap();
+            settings.apply_one_time_migrations_with(|_| true);
+            assert!(settings.has_migration(MEETING_LABS_SETTINGS_MIGRATION));
+            let written = serde_json::to_value(&settings).unwrap();
+            for retired in [
+                "stop_when_call_ends",
+                "meeting_descriptive_filenames",
+                "meeting_notes_file",
+                "expire_meeting_audio",
+            ] {
+                assert!(written["labs"].get(retired).is_none(), "{retired}");
+            }
+            settings.meetings
+        };
+        let all_on = migrated(
+            r#"{"labs":{"stop_when_call_ends":true,"meeting_descriptive_filenames":true,"meeting_notes_file":true,"expire_meeting_audio":true},"meetings":{"audio_retention":"week"}}"#,
+        );
+        assert!(all_on.stop_when_call_ends);
+        assert!(all_on.export.descriptive_filenames);
+        assert!(all_on.export.notes_file);
+        assert_eq!(all_on.audio_retention, Some(MeetingRetention::Week));
+
+        let lab_off = migrated(
+            r#"{"labs":{"expire_meeting_audio":false},"meetings":{"audio_retention":"week"}}"#,
+        );
+        assert!(!lab_off.stop_when_call_ends);
+        assert!(!lab_off.export.descriptive_filenames);
+        assert!(!lab_off.export.notes_file);
+        assert_eq!(lab_off.audio_retention, None);
+
+        // Later choices stick.
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"labs":{"stop_when_call_ends":true},"meetings":{"audio_retention":"day"},"migrations":["meeting-labs-settings"]}"#,
+        )
+        .unwrap();
+        settings.apply_one_time_migrations_with(|_| true);
+        assert!(!settings.meetings.stop_when_call_ends);
+        assert_eq!(
+            settings.meetings.audio_retention,
+            Some(MeetingRetention::Day)
+        );
+        assert!(AppSettings::default().has_migration(MEETING_LABS_SETTINGS_MIGRATION));
     }
 
     #[test]
@@ -2457,7 +2543,11 @@ mod tests {
         assert!(saved["meetings"].get("audio_retention").is_none());
 
         // A chosen audio retention survives a save and load.
-        fs::write(&dir.path, r#"{"meetings": {"audio_retention": "week"}}"#).unwrap();
+        fs::write(
+            &dir.path,
+            r#"{"meetings": {"audio_retention": "week"}, "migrations": ["meeting-labs-settings"]}"#,
+        )
+        .unwrap();
         let settings = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(
             settings.meetings.audio_retention,

@@ -531,31 +531,57 @@ fn on_this_mac_without_apple_intelligence_stays_chosen_with_the_fix() {
     assert!(rt.find("meeting-summary-model").is_none());
 }
 
-/// The separate Keep audio row follows its Labs toggle and saves the window.
+/// Keep audio sits beside Keep meetings once Meetings is on and saves its
+/// window.
 #[test]
-fn keep_audio_shows_with_its_lab_and_saves_its_window() {
+fn keep_audio_shows_with_meetings_and_saves_its_window() {
     use crate::app_settings::MeetingRetention;
     let mut rt = runtime("portal", true, TALL_SIZE);
-    rt.state.settings.meetings.enabled = true;
     rt.state.pane = Pane::Meetings;
     rt.state.meetings.view = super::super::meetings::View::Settings;
     refresh(&mut rt);
     assert!(
         rt.find("meeting-audio-retention").is_none(),
-        "hidden while the lab is off"
+        "hidden while Meetings is off"
     );
 
-    rt.state.settings.labs.expire_meeting_audio = true;
+    rt.state.settings.meetings.enabled = true;
     refresh(&mut rt);
     assert!(rt.find("meeting-audio-retention").is_some());
     assert_eq!(
         a11y_value(&rt, "meeting-audio-retention-control-trigger").as_deref(),
-        Some("Follow Keep meetings")
+        Some("Same as meetings")
     );
     pick(&mut rt, "meeting-audio-retention", 2);
     assert_eq!(
         rt.state.settings.meetings.audio_retention,
         Some(MeetingRetention::Week)
+    );
+}
+
+/// Export's two switches and Detected calls' Stop when the call ends save
+/// their meeting settings; the Stop row names the grace it waits.
+#[test]
+fn meeting_export_and_stop_when_call_ends_save_their_settings() {
+    let mut rt = runtime("mac-settings", true, (980.0, 3200.0));
+    rt.state.settings.meetings.enabled = true;
+    rt.state.pane = Pane::Meetings;
+    rt.state.meetings.view = super::super::meetings::View::Settings;
+    refresh(&mut rt);
+    tap(&mut rt, "meeting-descriptive-filenames");
+    assert!(rt.state.settings.meetings.export.descriptive_filenames);
+    tap(&mut rt, "meeting-notes-file");
+    assert!(rt.state.settings.meetings.export.notes_file);
+    tap(&mut rt, "meeting-stop-when-call-ends");
+    assert!(rt.state.settings.meetings.stop_when_call_ends);
+    let grace = format!(
+        " {} s ",
+        crate::meeting::detection::AUTO_STOP_GRACE.as_secs()
+    );
+    assert!(
+        super::super::platform_settings::STOP_WHEN_CALL_ENDS_CAPTION.contains(&grace),
+        "{}",
+        super::super::platform_settings::STOP_WHEN_CALL_ENDS_CAPTION
     );
 }
 
@@ -2395,19 +2421,19 @@ fn a_labs_card_shows_its_description_and_its_switch_turns_it_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
     unfold_labs(&mut rt);
-    let feature = Feature::SubtitleExport;
-    assert!(rt.find("lab-card-subtitle-export").is_some());
-    tap(&mut rt, "lab-card-subtitle-export");
+    let feature = Feature::ReturnToApp;
+    assert!(rt.find("lab-card-return-to-app").is_some());
+    tap(&mut rt, "lab-card-return-to-app");
     assert!(
         !feature.on(&rt.state.settings),
         "pressing a card flips nothing"
     );
-    tap(&mut rt, "lab-subtitle-export");
+    tap(&mut rt, "lab-return-to-app");
     assert!(
         feature.on(&rt.state.settings),
         "the card's switch turns it on"
     );
-    tap(&mut rt, "lab-subtitle-export");
+    tap(&mut rt, "lab-return-to-app");
     assert!(!feature.on(&rt.state.settings), "and off");
 }
 

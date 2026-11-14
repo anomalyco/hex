@@ -834,9 +834,9 @@ pub(super) fn refine(
 }
 
 /// Corrects a finished meeting's live boundaries once and records them.
-/// The Markdown heading, and with its lab the exported file's name, follows
-/// a title the new chapters change. Failures leave the live chapters in
-/// place.
+/// The Markdown heading, and with Descriptive meeting file names the
+/// exported file's name, follows a title the new chapters change. Failures
+/// leave the live chapters in place.
 /// Each call first yields to dictation; a stop or quit ends the pass
 /// without recording anything, so the next notes run redoes it.
 pub(super) fn refine_meeting(directory: &Path, entries: &[TranscriptEntry], stop: &AtomicBool) {
@@ -918,7 +918,7 @@ pub(super) fn retitle_export(manifest: &mut MeetingManifest, previous: &str) {
         super::export_name::rename_to_title(
             manifest,
             &title,
-            crate::labs::meeting_descriptive_filenames(),
+            crate::app_settings::meeting_descriptive_filenames(),
         );
         super::notes_file::refresh(manifest);
     }

@@ -1,9 +1,7 @@
-//! `GET /meetings/events` (Labs › Meeting finished event): one subscriber
-//! at a time receives `data: {"type":"meeting.finished","id":"<id>"}` once
+//! `GET /meetings/events`: one subscriber at a time receives `data: {"type":"meeting.finished","id":"<id>"}` once
 //! per meeting whose final transcript is written, and a comment keepalive
 //! between. Only the id is sent; clients read the rest with
-//! `hex meetings show <id>`. While the toggle is off the route answers
-//! `404 labs-off`, and a stream already open ends.
+//! `hex meetings show <id>`.
 
 use std::io::Write;
 use std::net::TcpStream;
@@ -16,22 +14,20 @@ use super::{HttpContext, HttpRequest, HttpResponse, RequestAction, write_sse, wr
 use crate::meeting::finished_events::{Hub, Subscription};
 
 pub(super) const PATH: &str = "/meetings/events";
-/// How often the stream checks shutdown, the toggle, and the client.
+/// How often the stream checks shutdown and the client.
 const POLL: Duration = Duration::from_millis(250);
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
 
-/// Where the route subscribes, and the gate it reads.
+/// Where the route subscribes.
 #[derive(Clone, Copy)]
 pub(crate) struct Source {
     pub(crate) hub: &'static Hub,
-    pub(crate) enabled: fn() -> bool,
 }
 
 impl Default for Source {
     fn default() -> Self {
         Self {
             hub: crate::meeting::finished_events::global(),
-            enabled: crate::labs::meeting_finished_event,
         }
     }
 }
@@ -40,18 +36,13 @@ pub(super) fn action(request: &HttpRequest, context: &HttpContext) -> RequestAct
     if request.method != "GET" {
         return RequestAction::Respond(HttpResponse::code(404, "not_found"));
     }
-    let source = context.meeting_events;
-    if !(source.enabled)() {
-        return RequestAction::Respond(HttpResponse::code(404, "labs-off"));
-    }
-    match source.hub.subscribe() {
+    match context.meeting_events.hub.subscribe() {
         Some(subscription) => RequestAction::MeetingEvents(subscription),
         None => RequestAction::Respond(HttpResponse::code(409, "subscriber-busy")),
     }
 }
 
-/// Streams finished meetings until shutdown, the toggle turning off, or the
-/// client leaving; the subscription's drop frees the slot.
+/// Streams finished meetings until shutdown or the client leaving; the subscription's drop frees the slot.
 pub(super) fn stream(
     stream: &mut TcpStream,
     subscription: Subscription,
@@ -64,10 +55,7 @@ pub(super) fn stream(
     }
     let mut last_write = Instant::now();
     loop {
-        if context.shutdown.load(Ordering::Acquire)
-            || !(context.meeting_events.enabled)()
-            || client_closed(stream)
-        {
+        if context.shutdown.load(Ordering::Acquire) || client_closed(stream) {
             return;
         }
         let written = match subscription.next(POLL) {
@@ -108,17 +96,10 @@ fn client_closed(stream: &TcpStream) -> bool {
 mod tests {
     use std::io::Read;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
 
     use super::super::{LocalApi, LocalApiOptions, current_health};
     use super::*;
     use crate::desktop::events::EventLog;
-
-    static ON: AtomicBool = AtomicBool::new(false);
-
-    fn on() -> bool {
-        ON.load(Ordering::SeqCst)
-    }
 
     fn send(port: u16, request: &str) -> TcpStream {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -173,21 +154,13 @@ mod tests {
             events,
             LocalApiOptions::default(),
             None,
-            Source {
-                hub: &HUB,
-                enabled: on,
-            },
+            Source { hub: &HUB },
         )
         .unwrap();
         let port = api.document.port;
         let token = api.document.token.clone();
 
         assert!(whole(get(port, None)).starts_with("HTTP/1.1 401"));
-        let off = whole(get(port, Some(&token)));
-        assert!(off.starts_with("HTTP/1.1 404"), "{off}");
-        assert!(off.contains("labs-off"));
-
-        ON.store(true, Ordering::SeqCst);
         let mut subscriber = get(port, Some(&token));
         let headers = read_until(&mut subscriber, "\r\n\r\n");
         assert!(headers.starts_with("HTTP/1.1 200"));
@@ -196,7 +169,7 @@ mod tests {
         assert!(busy.starts_with("HTTP/1.1 409"), "{busy}");
         assert!(busy.contains("subscriber-busy"));
 
-        HUB.publish(on(), "1700000000000-42");
+        HUB.publish("1700000000000-42");
         let event = read_until(&mut subscriber, "\n\n");
         let data = event
             .strip_prefix("data: ")
@@ -208,13 +181,19 @@ mod tests {
             "only the id"
         );
 
-        // Turning the toggle off ends the stream and frees the slot.
-        ON.store(false, Ordering::SeqCst);
-        assert_eq!(whole(subscriber), "");
-        ON.store(true, Ordering::SeqCst);
+        // A subscriber leaving frees the slot.
+        drop(subscriber);
         let mut again = get(port, Some(&token));
-        assert!(read_until(&mut again, "\r\n\r\n").starts_with("HTTP/1.1 200"));
-        ON.store(false, Ordering::SeqCst);
+        let reopened = loop {
+            let headers = read_until(&mut again, "\r\n\r\n");
+            if headers.starts_with("HTTP/1.1 200") {
+                break headers;
+            }
+            assert!(headers.starts_with("HTTP/1.1 409"), "{headers}");
+            std::thread::sleep(POLL);
+            again = get(port, Some(&token));
+        };
+        assert!(reopened.contains("text/event-stream"));
         drop(again);
 
         api.shutdown();

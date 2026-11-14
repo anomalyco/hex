@@ -1321,8 +1321,8 @@ mod tests {
         assert_eq!(change.settings.sound_effect_volume, 0.25);
     }
 
-    /// The Labs card and the key's help are constants, so they can't be
-    /// formatted from the grace; this keeps them saying it.
+    /// The key's help is a constant, so it can't be formatted from the
+    /// grace; this keeps it saying it.
     #[test]
     fn stop_when_call_ends_copy_names_the_grace() {
         let grace = format!(
@@ -1330,11 +1330,9 @@ mod tests {
             crate::meeting::detection::AUTO_STOP_GRACE.as_secs()
         );
         let key = keys()
-            .find(|key| key.key == "labs.stop_when_call_ends")
+            .find(|key| key.key == "meetings.stop_when_call_ends")
             .unwrap();
         assert!(key.about.contains(&grace), "{}", key.about);
-        let card = crate::labs::Feature::StopWhenCallEnds.description();
-        assert!(card.contains(&grace), "{card}");
     }
 
     #[test]

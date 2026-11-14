@@ -244,12 +244,10 @@ has no body.
 `model-changed` means the user switched dictation's model during the stream;
 start a new one. `hex-quitting` means Hex quit.
 
-## Meeting finished events (`GET /meetings/events`, Labs)
+## Meeting finished events (`GET /meetings/events`)
 
 Not part of `/streams`, but on the same local API with the same discovery
-and bearer token. Only while Labs › Meeting finished event
-(`labs.meeting_finished_event`, `hex labs on meeting-finished-event`) is on;
-off, it answers `404 labs-off`. Code: `src/local_api/meeting_events.rs`
+and bearer token. Code: `src/local_api/meeting_events.rs`
 (route) and `src/meeting/finished_events.rs` (the hub the recorder publishes
 to).
 

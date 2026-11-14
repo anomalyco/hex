@@ -94,18 +94,8 @@ impl Feature {
             | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters
-            | Self::SubtitleExport
-            | Self::StopWhenCallEnds
-            | Self::MovableMeetingCapsules
-            | Self::MeetingNotesVocabulary
-            | Self::MeetingFinishedEvent
-            | Self::FollowLiveTranscript
-            | Self::MoreCallApps
             | Self::GnomeMeetingCapsules
-            | Self::MeetingImport
-            | Self::MeetingDescriptiveFilenames
-            | Self::MeetingNotesFile
-            | Self::ExpireMeetingAudio => Group::Meetings,
+            | Self::MeetingImport => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate

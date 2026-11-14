@@ -19,7 +19,7 @@ use rune::{El, Icon, TextEdit, Tx, row, text};
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{
-    BOOK, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
+    BOOK, CAMERA, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
 };
 use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
@@ -542,65 +542,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Live chapters"),
             tr("Break meeting transcripts into chapters while recording"),
         ));
-        rows.push(row(
-            Feature::SubtitleExport,
-            None,
-            tr("Subtitle export"),
-            tr("Export meeting transcripts as SRT or VTT subtitles with hex meetings show"),
-        ));
-        // macOS's meeting controller reads the call app's audio output, so
-        // Linux renders of macOS scenes leave it out.
-        if cfg!(target_os = "macos") {
-            rows.push(row(
-                Feature::StopWhenCallEnds,
-                Some(&TIMER),
-                tr("Stop when the call ends"),
-                tr("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"),
-            ));
-            // Only macOS's capsules know the screen to snap a drag against.
-            rows.push(row(
-                Feature::MovableMeetingCapsules,
-                None,
-                tr("Movable meeting capsules"),
-                tr("Drag meeting capsules out of the way; they come back in the corner you left them"),
-            ));
-        }
-        rows.push(row(
-            Feature::MeetingNotesVocabulary,
-            Some(&BOOK),
-            tr("Vocabulary in meeting notes"),
-            tr("Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"),
-        ));
-        rows.push(row(
-            Feature::MeetingDescriptiveFilenames,
-            None,
-            tr("Descriptive meeting file names"),
-            tr("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"),
-        ));
-        rows.push(row(
-            Feature::MeetingNotesFile,
-            None,
-            tr("Separate notes file"),
-            tr("Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript"),
-        ));
-        rows.push(row(
-            Feature::MeetingFinishedEvent,
-            Some(&GLOBE),
-            tr("Meeting finished event"),
-            tr("Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API"),
-        ));
-        rows.push(row(
-            Feature::FollowLiveTranscript,
-            None,
-            tr("Follow live transcript"),
-            tr("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."),
-        ));
-        rows.push(row(
-            Feature::MoreCallApps,
-            Some(&GLOBE),
-            tr("More call apps"),
-            tr("Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."),
-        ));
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(
                 Feature::MeetingImport,
@@ -609,12 +550,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Add an audio file to Meetings and transcribe it on this Mac"),
             ));
         }
-        rows.push(row(
-            Feature::ExpireMeetingAudio,
-            Some(&CLOCK),
-            tr("Expire meeting audio separately"),
-            tr("Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."),
-        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -1182,7 +1117,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ReturnToApp => "lab-return-to-app",
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
-        Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",
@@ -1198,7 +1132,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
-        Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
         Feature::OutputFixes => "lab-output-fixes",
         Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
@@ -1214,23 +1147,15 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::PauseMenu => "lab-pause-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
-        Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::TypedText => "lab-typed-text",
-        Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
-        Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::GnomeAnnotate => "lab-gnome-annotate",
         Feature::Screenshots => "lab-screenshots",
-        Feature::FollowLiveTranscript => "lab-follow-live-transcript",
-        Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::MeetingImport => "lab-meeting-import",
-        Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
-        Feature::MeetingNotesFile => "lab-meeting-notes-file",
-        Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::ShellCompletions => "lab-shell-completions",
         Feature::YoloMode => "lab-yolo-mode",

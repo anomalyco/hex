@@ -4,7 +4,8 @@ Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
 only for calls from a website or app set to Always record, and never stops
-automatically unless Labs › Stop when the call ends is on (see
+automatically unless Meetings › Settings › Detected calls › Stop when the call
+ends is on (see
 [meetings.auto-stop](#record)). This map describes macOS; [Linux and Windows](#linux-and-windows)
 lists where they differ.
 
@@ -37,10 +38,12 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
 │   │   │   (`AudioCapture` reset on running bundle + retired IDs, re-prompt / guide)
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
-│   ├── After a meeting -> Summaries, Keep meetings, Keep audio
-│   │   (Labs › Expire meeting audio separately), Transcript folder
-│   │   (~/Documents/Hex Meetings; Reveal opens the folder itself; choose
-│   │   another folder; its error shows here)
+│   ├── After a meeting -> Summaries, Keep meetings, Keep audio (Same as
+│   │   meetings by default)
+│   ├── Export -> Transcript folder (~/Documents/Hex Meetings; Reveal opens
+│   │   the folder itself; choose another folder; its error shows here),
+│   │   Descriptive meeting file names, Separate notes file (both off;
+│   │   meetings.export.*)
 │   │   └── Summaries pop-up (meetings.summaries; one-time migration
 │   │       "meeting-summaries-choice" from the two retired switches)
 │   │       ├── Off -> "No titles or summaries"
@@ -66,10 +69,11 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping
 │   │   capsule) and the System Audio Recording row once allowed
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
-│   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
+│   └── Detected calls -> Stop when the call ends (macOS, off;
+│       │   meetings.stop_when_call_ends), then Ask / Always record / Never
+│       │   offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
-│       │   Gather, Discord (always listed)
-│       ├── Labs › More call apps on -> also Signal, Telegram, WeChat, LINE, Webex, Element,
+│       │   Gather, Discord, Signal, Telegram, WeChat, LINE, Webex, Element,
 │       │   Phone, Google Voice, Messenger, and GroupMe (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
@@ -77,14 +81,14 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 
 Debug builds -> Always in the sidebar (DEVELOPER_FEATURES_ENABLED)
 Agents -> hex mcp (read-only MCP server; works whether or not Meetings is on)
-Subtitles -> hex meetings show <id> --srt | --vtt   // Labs › Subtitle export, off by default (#633)
+Subtitles -> hex meetings show <id> --srt | --vtt   // always on (#633; graduated from Labs)
              one cue per transcript entry (You / Them), timed by entry offsets,
-             not word timings; off -> refused naming hex labs on subtitle-export
-             (docs/transcript-cli.md; no export button in the window yet)
-Apps -> GET /meetings/events on the local API      // Labs › Meeting finished event, off by default (#964)
+             not word timings (docs/transcript-cli.md; no export button in the
+             window yet)
+Apps -> GET /meetings/events on the local API      // always on (#964; graduated from Labs)
         one SSE event per meeting once its final transcript is written:
-        {"type":"meeting.finished","id":"<id>"}, nothing else; one subscriber;
-        off -> 404 labs-off (docs/streams.md, labs.md)
+        {"type":"meeting.finished","id":"<id>"}, nothing else; one subscriber
+        (docs/streams.md)
 Recordings list icons                               // always on (#1290; graduated from Labs)
         each row's title gets a small faint icon: Zoom, Google Meet, Teams,
         Slack, or Webex when the meeting's app names it, else a neutral call
@@ -100,11 +104,11 @@ Import audio                                        // Labs › Import audio, of
         ├── Native picker filters WAV, M4A, MP3, AIFF, AIF, and CAF
         ├── Off -> no button, dialog, decoder, or watcher command
         └── see Import Audio (Labs) below
-Live transcript scrolling                           // Labs › Follow live transcript, off by default (#1332)
-        on -> while the selected meeting is Starting or Recording (no Stop
+Live transcript scrolling                           // always on (#1332; graduated from Labs)
+        while the selected meeting is Starting or Recording (no Stop
         pending), the detail card's scroll sticks to the bottom: new turns
         stay in view; scrolling up stops following, scrolling back to the
-        bottom follows again. Finished meetings and off -> scroll by hand as before
+        bottom follows again. Finished meetings scroll by hand
         (follows_live_transcript in rune_ui/meetings.rs; not observed on a real call)
 ```
 
@@ -294,7 +298,7 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses 
   #1283)
 Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser call on
   voice.google.com, messenger.com, facetime.apple.com,
-  web.groupme.com, or webex.com                 // Labs › More call apps, off by default
+  web.groupme.com, or webex.com                 // always on (graduated from Labs)
   (Signal: org.whispersystems.signal-desktop; Telegram: ru.keepcoder.Telegram,
   com.tdesktop.Telegram, org.telegram.desktop; WeChat: com.tencent.xinWeChat;
   LINE: jp.naver.line.mac; Webex: com.webex.meetingmanager,
@@ -345,8 +349,8 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │   a `/meet/<code>` address (Arc opening a Calendar link) resolves to
      │   its code, and a page without a code still counts as the snoozed
      │   call (#1113)
-     │   └── While that recording is an automatic one with Labs › Stop when
-     │       the call ends on, the page is still read every 2 s: another code
+     │   └── While that recording is an automatic one with Stop when the
+     │       call ends on, the page is still read every 2 s: another code
      │       showing for 4 s ends the recording's call (see Record)
      └── Stopped by hand -> the snooze ends once the call app has been off
          the microphone for 3 s (seen while transcribing too), so the next
@@ -381,17 +385,17 @@ Vivaldi was missing until #1105, so its calls
 Vivaldi call.
 
 Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
-`teams.live.com`) are known call sites without the lab: a browser on one is a
+`teams.live.com`) are known call sites: a browser on one is a
 Microsoft Teams call after 2 s. They use the Microsoft Teams app's
 `com.microsoft.teams2` choice, so Always record set for the app covers its
 website too; a choice other than Ask saved earlier for a Teams page's own
 address still applies to that host. Check:
-`teams_web_calls_are_the_teams_service_outside_the_lab`; not observed on a
+`teams_web_calls_are_the_teams_service`; not observed on a
 real browser Teams call.
 
-Labs › More call apps (`labs.more_call_apps`, off by default; every OS with
-Meetings) widens which calls detection recognizes. While on, Signal, Telegram,
-WeChat, LINE, Webex, Element, and the Phone app are call apps: the Electron
+Detection also recognizes Signal, Telegram, WeChat, LINE, Webex, Element, and
+the Phone app as call apps on every OS with Meetings (once Labs › More call
+apps, now always on): the Electron
 apps' helpers fold to their parents, and Windows and Linux executables
 (`signal`, `signal-desktop`, `telegram`, `telegram-desktop`, `wechat`,
 `weixin`, `line`, `webex`, `ciscocollabhost`, `element`, `element-desktop`)
@@ -404,23 +408,18 @@ microphone too; Webex and Phone take the normal 2 s. On macOS, where Hex reads
 the browser's page, pages on `voice.google.com` (Google Voice), `messenger.com`,
 `facetime.apple.com` (FaceTime), and `web.groupme.com` are named, and any
 `webex.com` subdomain is Webex, with one `webex.com` provider choice covering
-them all. Settings › Meetings › Detected calls lists the seven apps, Google
-Voice, Messenger, and GroupMe only while the lab is on
+them all. Settings › Meetings › Detected calls always lists the seven apps,
+Google Voice, Messenger, and GroupMe
 (`app_settings::known_meeting_providers`). A FaceTime page gets its own
 `facetime.apple.com` choice from an offer's "…", shown as "FaceTime (web)",
 which does not follow the FaceTime app's choice. A Webex page's `webex.com`
 choice is made the same way and covers every subdomain, so those two have no
 always-listed row. Their Ask / Always record / Never offer choices work as the
-existing services' do. Off,
-offers are unchanged: a Signal or Telegram process is not a meeting app, and
-those pages are unknown pages (a plain "Browser call" after 20 s). The
-microphone app list in `hex meeting probe` and the logs still resolves and
-merges these apps' helpers under the parent app, because canonicalization is
-not gated; offers and Settings are. Phone calls are not verified on a real
+existing services' do. The microphone app list in `hex meeting probe` and the
+logs resolves and merges these apps' helpers under the parent app. Phone calls are not verified on a real
 call: Continuity call audio may be held by `com.apple.avconferenced` instead
 of `com.apple.mobilephone`.
-Checks: `more_call_apps_are_unknown_until_their_lab_is_on`,
-`more_call_apps_names_its_apps_and_websites_with_their_lab_on`,
+Checks: `more_call_apps_are_named_with_their_websites`,
 `a_telegram_voice_note_is_not_offered_but_a_sustained_call_is`, and
 `a_messenger_voice_clip_is_not_offered_but_a_sustained_call_is` in
 [meeting/detection.rs](../../src/meeting/detection.rs);
@@ -472,7 +471,7 @@ while Hex records, Meetings is off, the browser is snoozed for a call without
 a meeting code, or no browser holds
 the microphone; a query in flight at that moment is not repeated beside itself,
 and its answer is discarded. One recording is the exception: an automatic
-browser call whose page named a code, with Labs › Stop when the call ends on,
+browser call whose page named a code, with Stop when the call ends on,
 keeps its browser's page being read every 2 s for as long as it records, so
 the page naming another call can end it (see Record). That read is the newest
 answer alone, never the remembered page, so one glimpse of another call cannot
@@ -759,24 +758,31 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
          observed on a real Mac)
   -> No timeout; nothing stops automatically
 
-Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.panel-drag
+Panel capsules move like the recording capsule (macOS; #1093, graduated from Labs) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
   Recording automatically
-  -> On: each opens in the saved recording_indicator_corner (read as it shows)
-     ├── Drag its body -> follows the pointer; release -> snaps to the corner
-     │   nearest its centre (by its own width) and saves it, so the recording
-     │   capsule moves there too
+  -> Each opens in the saved recording_indicator_corner (read as it shows)
+     ├── Drag its body (or the recording pill) -> follows the pointer one to one
+     ├── Release -> the corner nearest where the throw would coast to rest
+     │   (release velocity over the last 80 ms, capped at 6000 pt/s, coasting
+     │   with UIScrollView's 0.998 deceleration); the window glides from
+     │   where it was let go into that corner on the GLIDE spring (0.32 s, no
+     │   bounce), carrying the throw's speed, and the corner is saved, so the
+     │   recording capsule moves there too. A press mid-glide catches it
+     │   where it is. Reduce Motion, or no screen size -> it jumps there
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
-  -> Off: top right below the menu bar, no drag, exactly as before
   Checks: a_released_panel_snaps_by_its_own_size,
-  each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
-  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Every panel
+  each_corner_places_the_panel_at_its_edges,
+  a_panel_drags_like_the_recording_capsule (rune_ui/meeting_capsules.rs);
+  the throw tests in rune_ui/meeting_capsules/throw.rs (velocity, corner,
+  landing offset, glide, catch); not observed on a real Mac. Every panel
   capsule takes the pointer only on its body, never the window's margin
   around it (#1305); a click on the body outside its buttons still stops
   there
 
-Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
+Meetings › Settings › Detected calls › Stop when the call ends (macOS, off by default; #835;
+meetings.stop_when_call_ends) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
   and calendar recordings are never stopped
   -> The call app counts as present while it holds the microphone OR any of
@@ -1321,12 +1327,13 @@ Final publication                                   // meetings.output
 └── Markdown copy -> <folder>/<YYYY-MM-DD HHMM> <title>.md
     ├── Title, date, duration, app, You / Them turns
     ├── Never overwrites; adds " (2)"
-    ├── Labs › Descriptive meeting file names on (off by default) ->
-    │   applying notes, refining chapters, or a rename renames it in place to
+    ├── Export › Descriptive meeting file names on (off by default;
+    │   meetings.export.descriptive_filenames) -> applying notes, refining chapters, or a rename renames it in place to
     │   the new title, keeping the date and time prefix; a taken name adds
     │   " (2)" without overwriting (manifest export_path follows; Reveal,
     │   Trash, and retention read it)
-    ├── Labs › Separate notes file on (off by default) -> exports
+    ├── Export › Separate notes file on (off by default;
+    │   meetings.export.notes_file) -> exports
     │   <stem>.transcript.md, then writes <stem>.notes.md beside it when the
     │   notes are applied; the chosen stem is free of both files, a taken
     │   pair adds " (2)" to both, and notes_export_path/notes_export_sha256
@@ -1389,7 +1396,7 @@ searching
 
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title
-  -> file name unchanged by default; with Labs › Descriptive meeting file
+  -> file name unchanged by default; with Export › Descriptive meeting file
      names on it follows a changed title only when the heading did too,
      keeping the date and time prefix
   -> empty title refused
@@ -1464,20 +1471,22 @@ Queries (`hex meetings`, `hex mcp`, the pane) -> leave out expired meetings
     reads `meetings.retention` from settings.json without writing it
 ```
 
-Labs › Expire meeting audio separately (`labs.expire_meeting_audio`, off by
-default; every OS with Meetings) adds a separate window for the WAVs:
+Meetings › Settings › After a meeting › Keep audio (`meetings.audio_retention`,
+every OS with Meetings; once Labs › Expire meeting audio separately) gives the
+WAVs a separate window:
 
 ```ts
 Meetings › Settings -> Keep audio, right under Keep meetings
-│   Follow Keep meetings / 24 hours / 7 days / 30 days / Forever
+│   Same as meetings / 24 hours / 7 days / 30 days / Forever
 │   `meetings.audio_retention` day|week|month|forever, or omitted
-│   ├── Follow Keep meetings (default) -> audio follows `meetings.retention`
-│   ├── Chosen -> only that window applies to the WAVs; at or beyond Keep
-│   │   meetings it has no effect, since the whole meeting expires first
-│   └── Off -> no Keep audio row, and no separate audio pass
-Meeting controller, lab on and an audio retention chosen // labs.expire_meeting_audio
+│   ├── Same as meetings (default) -> audio follows `meetings.retention`
+│   └── Chosen -> only that window applies to the WAVs; at or beyond Keep
+│       meetings it has no effect, since the whole meeting expires first
+│   (the meeting-labs-settings migration keeps a window saved before only
+│   where Labs › Expire meeting audio separately was on)
+Meeting controller, an audio retention chosen       // meetings.audio_retention
 ├── Runs after the whole-meeting pass, at launch, hourly, and soon after
-│   either retention or the lab changes
+│   either retention changes
 ├── Only a Complete meeting (final transcript published) with no
 │   final.pending, no recorder lock, and no notes being written
 │   -> system.wav and microphone.wav move to the Trash (never `rm`);
@@ -1508,9 +1517,10 @@ Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 `separate_audio_expiry_covers_only_finished_meetings_older_than_it`,
 `audio_expiry_moves_only_the_wavs_and_records_it`, and
 `audio_expiry_leaves_unfinished_pending_locked_or_annotated_meetings`;
-`keep_audio_shows_with_its_lab_and_saves_its_window` in
+`keep_audio_shows_with_meetings_and_saves_its_window` in
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs);
-`a_separate_audio_retention_needs_its_lab_and_a_choice` in
+`an_unmigrated_file_keeps_audio_retention_only_with_its_lab` and
+`retired_meeting_labs_become_meeting_settings_once` in
 [app_settings/meetings.rs](../../src/app_settings/meetings.rs), and
 `an_unreadable_setting_keeps_its_default_and_the_rest_loads` in
 [app_settings.rs](../../src/app_settings.rs). No live run of an expiry pass
@@ -1530,16 +1540,16 @@ While recording, setting on, model available           // meetings.title.provisi
   -> Refreshed once when speech reaches 10 minutes; a failure retries a minute
      later; at most 3 calls per meeting; Stop discards a call in flight
   -> The exported Markdown file name and heading use it when it arrived first;
-     a later final notes title renames the file only with Labs › Descriptive
+     a later final notes title renames the file only with Export › Descriptive
      meeting file names on
 
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
   -> ONE call over a bounded excerpt, no map-reduce
-     ├── Labs › Vocabulary in meeting notes on (off by default; #1154) ->
-     │   "Names and terms that may appear: …" (≤30 vocabulary terms, read at
-     │   each generation, Regenerate included) ahead of the calendar context;
-     │   its length comes out of the budget. Off -> prompt unchanged
+     ├── Vocabulary (#1154; graduated from Labs) -> "Names and terms that
+     │   may appear: …" (≤30 vocabulary terms, read at each generation,
+     │   Regenerate included) ahead of the calendar context; its length comes
+     │   out of the budget. No vocabulary -> no line
      ├── Lines "[mm:ss] You|Them: text" (long turns split at 600 chars)
      ├── Whole transcript when it fits; otherwise opening 30 %, up to six
      │   evenly spaced middle passages, ending 20 %, "[…]" between them
@@ -1552,7 +1562,7 @@ Final publication complete                               // meetings.notes
          "model": "provider/model"} (no model when OpenCode's default answered);
          absent on notes written before #1125
   -> Markdown copy, same file name by default, atomic replace
-     ├── Labs › Descriptive meeting file names on (off by default) -> after
+     ├── Export › Descriptive meeting file names on (off by default) -> after
      │   the block is written, the file is renamed to the final title,
      │   keeping its date and time prefix; a taken name adds " (2)"
      ├── Heading -> final title, only while it still reads Hex's last title
@@ -1561,7 +1571,7 @@ Final publication complete                               // meetings.notes
      │       Intelligence", "Written by <provider/model> through OpenCode", or,
      │       for older notes without written_by, no writer at all (#1125;
      │       check: the_notes_footer_names_the_writer_that_wrote_them)
-     ├── Labs › Separate notes file on (off by default) -> <base>.notes.md
+     ├── Export › Separate notes file on (off by default) -> <base>.notes.md
      │   beside the transcript: title, date, duration, app, a relative
      │   percent-encoded transcript link (its text Markdown-escaped), summary,
      │   chapters, and its own footer saying the transcript has the details;
@@ -1588,7 +1598,7 @@ Title rule: the shown title is the user's title unless it is still the default
 `<App> call — 2:30 PM` / `Meeting — 2:30 PM`; then the final notes title, else
 the provisional title, else the default. Named or renamed meetings keep their
 name. By default the exported file keeps its name when the title changes, so
-links, open editors, and Reveal keep working. With Labs › Descriptive meeting
+links, open editors, and Reveal keep working. With Export › Descriptive meeting
 file names on (off by default), applying notes, refining chapters that change
 the title, or renaming the meeting renames the file in place to
 `<YYYY-MM-DD HHMM> <new title>.md`, keeping the original date and time prefix;
@@ -1597,7 +1607,7 @@ and Reveal, Trash, and retention follow the manifest's new `export_path`. A
 failed rename leaves the old path and never fails the notes or the rename. If
 Hex stops between the file rename and the manifest write, the manifest keeps
 the old path: Reveal falls back to the recording folder and the Markdown stays
-in the folder untouched. With Labs › Separate notes file on, the export is
+in the folder untouched. With Export › Separate notes file on, the export is
 `<stem>.transcript.md` and its notes are `<stem>.notes.md`; export chooses a
 stem free of both, a descriptive rename moves the pair together (keeping a
 `.transcript` suffix) and rolls the transcript back if its notes file cannot
@@ -1701,7 +1711,7 @@ would pass that is left out). While recording, the last chapter runs until now.
 A title the user typed, including a rename while recording or transcribing, is
 never extended. Manifests without the field read as `user` when their title is
 not the default. A boundary pass that changes the title also renames the
-exported Markdown with Labs › Descriptive meeting file names on, under the
+exported Markdown with Export › Descriptive meeting file names on, under the
 same date and time prefix and collision rules as notes.
 
 Read surfaces: `hex meetings chapters <id> [--json]`, `hex meetings show <id>

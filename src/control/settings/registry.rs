@@ -383,11 +383,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: remove filler words such as um and uh from dictations, without an AI model",
     ),
     key(
-        "labs.subtitle_export",
-        Kind::Bool,
-        "Labs: export meeting transcripts as SRT or VTT subtitles with hex meetings show --srt|--vtt",
-    ),
-    key(
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut",
@@ -518,31 +513,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
     ),
     key(
-        "labs.stop_when_call_ends",
-        Kind::Bool,
-        "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
-    ),
-    key(
-        "labs.more_call_apps",
-        Kind::Bool,
-        "Labs: offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on Google Voice, Messenger, FaceTime, GroupMe, and Webex pages",
-    ),
-    key(
-        "labs.movable_meeting_capsules",
-        Kind::Bool,
-        "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
-    ),
-    key(
-        "labs.meeting_notes_vocabulary",
-        Kind::Bool,
-        "Labs: final meeting titles and summaries read the vocabulary, so names are spelled the way you wrote them",
-    ),
-    key(
-        "labs.meeting_finished_event",
-        Kind::Bool,
-        "Labs: the local API's GET /meetings/events tells one subscriber each finished meeting's id once its final transcript is written; no transcript, audio, path, or title",
-    ),
-    key(
         "labs.screenshots",
         Kind::Bool,
         "Labs: screenshots.hotkey (command+shift+4) drags out an area or, after space, picks a window; the PNG is copied and saved to screenshots.folder (macOS)",
@@ -578,29 +548,9 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without layer-shell, such as GNOME, Annotate's capsule and ink float over the screen through XWayland while it is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key (Linux)",
     ),
     key(
-        "labs.follow_live_transcript",
-        Kind::Bool,
-        "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",
-    ),
-    key(
         "labs.meeting_import",
         Kind::Bool,
         "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
-    ),
-    key(
-        "labs.meeting_descriptive_filenames",
-        Kind::Bool,
-        "Labs: an exported meeting's Markdown follows its title once notes or a rename provide one, keeping the date and time",
-    ),
-    key(
-        "labs.meeting_notes_file",
-        Kind::Bool,
-        "Labs: a meeting's notes are written to their own file beside the transcript, sharing its name and linking back to it",
-    ),
-    key(
-        "labs.expire_meeting_audio",
-        Kind::Bool,
-        "Labs: finished meetings drop their WAVs on meetings.audio_retention while their transcripts, notes, summary, and Markdown stay",
     ),
     key(
         "labs.output_fixes",
@@ -741,7 +691,22 @@ pub(super) const KEYS: &[Key] = &[
     optional(
         "meetings.audio_retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
-        "How long finished meetings keep their audio with Labs › Expire meeting audio separately on; none follows meetings.retention",
+        "How long finished meetings keep their audio while their transcripts, notes, summary, and Markdown stay; none follows meetings.retention",
+    ),
+    key(
+        "meetings.stop_when_call_ends",
+        Kind::Bool,
+        "A meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
+    ),
+    key(
+        "meetings.export.descriptive_filenames",
+        Kind::Bool,
+        "An exported meeting's Markdown follows its title once notes or a rename provide one, keeping the date and time",
+    ),
+    key(
+        "meetings.export.notes_file",
+        Kind::Bool,
+        "A meeting's notes are written to their own file beside the transcript, sharing its name and linking back to it",
     ),
     key(
         "meetings.providers",
@@ -918,6 +883,16 @@ pub(super) const RETIRED: &[(&str, &str)] = &[
         "meetings.summarize_with_opencode",
         "meetings.summaries opencode",
     ),
+    (
+        "labs.stop_when_call_ends",
+        "meetings.stop_when_call_ends true",
+    ),
+    (
+        "labs.meeting_descriptive_filenames",
+        "meetings.export.descriptive_filenames true",
+    ),
+    ("labs.meeting_notes_file", "meetings.export.notes_file true"),
+    ("labs.expire_meeting_audio", "meetings.audio_retention week"),
 ];
 
 /// Settings that act only where Hex has a capability (by its
@@ -927,15 +902,6 @@ pub(super) const NEEDS: &[(&str, &str)] = &[
     ("meetings.calendar.", "calendar"),
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
-    ("labs.subtitle_export", "meetings"),
-    ("labs.stop_when_call_ends", "meetings"),
-    ("labs.more_call_apps", "meetings"),
-    ("labs.movable_meeting_capsules", "meetings"),
-    ("labs.meeting_notes_vocabulary", "meetings"),
-    ("labs.meeting_finished_event", "meetings"),
-    ("labs.meeting_descriptive_filenames", "meetings"),
-    ("labs.meeting_notes_file", "meetings"),
-    ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),

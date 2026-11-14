@@ -1054,7 +1054,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   offer that times out only closes. Release builds keep the meeting controller
   idle, without inspecting microphone activity, until the user opts in. When the
   detected call app leaves the microphone, offer `Keep Recording` or
-  `Stop & Transcribe`; never stop automatically. An active recording stays
+  `Stop & Transcribe`; never stop automatically, except a recording Hex
+  started on its own while `meetings.stop_when_call_ends` (Detected calls ›
+  Stop when the call ends, default off) is on. An active recording stays
   visible and stoppable from the menu bar without the Settings window.
 - Calendar access is asked for only by Meetings › Settings' Connect calendar, never at
   launch, and only with Meetings on; Meetings off means no EventKit reads and
@@ -1106,10 +1108,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
   untouched. Notes rewrite only the heading Hex wrote and the
-  `<!-- hex:notes -->` block. With Labs › Descriptive meeting file names on,
-  notes or chapter refinement that change the title, and user renames, also
-  rename the exported Markdown to the new title, keeping its date and time
-  prefix and never overwriting.
+  `<!-- hex:notes -->` block. With Meetings › Settings › Export › Descriptive
+  meeting file names on, notes or chapter refinement that change the title,
+  and user renames, also rename the exported Markdown to the new title,
+  keeping its date and time prefix and never overwriting.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
   every macOS, Linux, and Windows build and on by default in every build,
   stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
@@ -1255,7 +1257,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   to the Trash (never `rm`), after a two-step confirmation, and is refused while
   it records, transcribes, or writes notes. Renaming rewrites the manifest and
   only a Markdown heading that still reads the previous title; files keep
-  their names unless Labs › Descriptive meeting file names is on, which renames
+  their names unless Export › Descriptive meeting file names is on, which renames
   the exported Markdown to the new title, keeping its date and time prefix and
   never overwriting.
 - Meeting data is a liability: until the user chooses a `meetings.retention`,

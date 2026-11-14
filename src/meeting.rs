@@ -219,7 +219,7 @@ pub struct MeetingManifest {
     /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
-    /// The notes file beside the transcript while Labs › Separate notes file
+    /// The notes file beside the transcript while Separate notes file
     /// wrote one, tracked so renames, Trash, and retention follow it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_export_path: Option<PathBuf>,
@@ -232,8 +232,8 @@ pub struct MeetingManifest {
     /// and never writes another notes file for this meeting.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notes_export_removed: bool,
-    /// When the meeting's WAV tracks moved to the Trash (Labs › Expire
-    /// meeting audio separately); the transcript, notes, and Markdown stay.
+    /// When the meeting's WAV tracks moved to the Trash (Meetings ›
+    /// Settings › Keep audio); the transcript, notes, and Markdown stay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_removed_at_ms: Option<u64>,
     /// Imported from an audio file rather than recorded: one speaker track,
@@ -956,7 +956,7 @@ fn transcribe(
         &crate::app_settings::meeting_output_folder(),
         manifest,
         &transcript,
-        crate::labs::meeting_notes_file(),
+        crate::app_settings::meeting_notes_file(),
     ) {
         Ok(path) => {
             tracing::info!(path = %path.display(), "published meeting transcript");
@@ -1259,8 +1259,8 @@ fn text_sha256(bytes: &[u8]) -> String {
 }
 
 /// Renames a meeting. The Markdown heading follows only while it still reads
-/// the previous title. The file keeps its name unless Labs › Descriptive
-/// meeting file names is on, which renames it to the new title.
+/// the previous title. The file keeps its name unless Descriptive meeting file
+/// names is on, which renames it to the new title.
 pub fn rename(id: &str, title: &str) -> Result<MeetingManifest> {
     rename_meeting(&root()?.join(id), title)
 }
@@ -1269,7 +1269,7 @@ fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
     rename_meeting_with(
         directory,
         title,
-        crate::labs::meeting_descriptive_filenames(),
+        crate::app_settings::meeting_descriptive_filenames(),
     )
 }
 

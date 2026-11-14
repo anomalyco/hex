@@ -1,7 +1,7 @@
 //! The optional pair of Markdown files beside each other in the user's
 //! meetings folder: `<stem>.transcript.md` and `<stem>.notes.md` while
-//! Labs › Separate notes file is on. Export chooses a stem free for both, and
-//! Labs › Descriptive meeting file names moves the pair together.
+//! Separate notes file is on. Export chooses a stem free for both, and
+//! Descriptive meeting file names moves the pair together.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -89,7 +89,7 @@ pub(super) fn tracked(manifest: &MeetingManifest) -> Option<PathBuf> {
 }
 
 /// Writes or refreshes the meeting's notes file after its notes are applied.
-/// `create` is the caller's Labs › Separate notes file switch: only a first
+/// `create` is the caller's Separate notes file switch: only a first
 /// notes file is gated, while an already tracked one follows later notes.
 pub(super) fn write_after_notes(manifest: &mut MeetingManifest, create: bool) {
     let Some(transcript) = manifest.export_path.clone().filter(|path| path.exists()) else {
@@ -106,7 +106,7 @@ pub(super) fn write_after_notes(manifest: &mut MeetingManifest, create: bool) {
 
 /// Re-renders a tracked notes file whose bytes Hex still wrote, so its
 /// heading and transcript link follow a rename or chapter retitle. Never
-/// creates one: only [`write_after_notes`] does, and only with its lab on.
+/// creates one: only [`write_after_notes`] does, and only with Separate notes file on.
 pub(super) fn refresh(manifest: &mut MeetingManifest) {
     let Some(transcript) = manifest.export_path.clone().filter(|path| path.exists()) else {
         return;

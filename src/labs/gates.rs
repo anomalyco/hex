@@ -117,12 +117,6 @@ pub fn filler_words() -> bool {
     on(FILLER_WORDS)
 }
 
-/// `hex meetings show --srt|--vtt` may export subtitles (read when the
-/// command starts).
-pub fn subtitle_export() -> bool {
-    on(SUBTITLE_EXPORT)
-}
-
 /// A pasted dictation gets one leading space when the character before the
 /// cursor asks for one (macOS; read as each paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -187,20 +181,6 @@ pub fn skip_pauses() -> bool {
     on(SKIP_PAUSES) && Feature::SkipPauses.on_this_os()
 }
 
-/// A meeting recording Hex started on its own stops once its call app has
-/// left the microphone and gone quiet for a grace period (macOS; read on
-/// each pass of the meeting controller).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn stop_when_call_ends() -> bool {
-    on(STOP_WHEN_CALL_ENDS) && Feature::StopWhenCallEnds.on_this_os()
-}
-
-/// Calls in more apps and on more websites are named and offered (read by
-/// call detection and the window's Detected calls list).
-pub fn more_call_apps() -> bool {
-    on(MORE_CALL_APPS) && Feature::MoreCallApps.on_this_os()
-}
-
 /// A dictation saved to History keeps its 16 kHz audio, and History offers
 /// Transcribe again for it (read as each capture is handed to the engine;
 /// the History pane reads the saved setting).
@@ -220,20 +200,6 @@ pub fn hide_menu_bar_icon() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn quit_closes_window() -> bool {
     on(QUIT_CLOSES_WINDOW) && Feature::QuitClosesWindow.on_this_os()
-}
-
-/// The meeting panel capsules (Meeting transcript ready, Recording
-/// automatically, offers, reminders) show in the saved capsule corner and
-/// can be dragged to another (macOS; read each time one shows).
-pub fn movable_meeting_capsules() -> bool {
-    on(MOVABLE_MEETING_CAPSULES) && Feature::MovableMeetingCapsules.on_this_os()
-}
-
-/// Final meeting notes (title and summary) put the vocabulary ahead of the
-/// transcript (every OS with meetings; read at each generation, so
-/// Regenerate summary uses the current list).
-pub fn meeting_notes_vocabulary() -> bool {
-    on(MEETING_NOTES_VOCABULARY) && Feature::MeetingNotesVocabulary.on_this_os()
 }
 
 /// At either visible indicator position, the HUD grows out of the notch on
@@ -274,13 +240,6 @@ pub fn gnome_annotate() -> bool {
     on(GNOME_ANNOTATE) && Feature::GnomeAnnotate.on_this_os()
 }
 
-/// The local API's `GET /meetings/events` serves, and a meeting's final
-/// publication sends, its id (every OS with meetings; read where the route
-/// starts, on each pass of its stream, and at each publication).
-pub fn meeting_finished_event() -> bool {
-    on(MEETING_FINISHED_EVENT) && Feature::MeetingFinishedEvent.on_this_os()
-}
-
 /// The screenshot shortcut takes an area or a window (macOS; read by the
 /// session tap on each key press, so nothing runs while it is off).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -301,20 +260,6 @@ pub fn annotate_replay() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn meeting_import() -> bool {
     on(MEETING_IMPORT) && Feature::MeetingImport.on_this_os()
-}
-
-/// Notes or a user rename rename an exported meeting's Markdown to the
-/// meeting's title, keeping its date and time (read when notes are applied
-/// and when a meeting is renamed).
-pub fn meeting_descriptive_filenames() -> bool {
-    on(MEETING_DESCRIPTIVE_FILENAMES) && Feature::MeetingDescriptiveFilenames.on_this_os()
-}
-
-/// A meeting's transcript exports as `<stem>.transcript.md` and its notes
-/// are written to `<stem>.notes.md` beside it, linking back to the transcript
-/// (read at final export and when notes are written).
-pub fn meeting_notes_file() -> bool {
-    on(MEETING_NOTES_FILE) && Feature::MeetingNotesFile.on_this_os()
 }
 
 /// "While dictating" applies only while the default output is speakers
@@ -429,7 +374,7 @@ pub fn api_browser_origins() -> Vec<String> {
 /// Q5_K, or Q4_K weights (macOS, where Metal has their kernels; read where an
 /// import's header is checked and where a saved selection loads).
 pub fn k_quant_models() -> bool {
-    // The state word is full, so the switch has its own atomic, loaded here
+    // The switch has its own atomic, loaded here
     // first in a process that never applied its settings.
     let _ = state();
     K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
@@ -439,7 +384,7 @@ pub fn k_quant_models() -> bool {
 /// for Return to follow its paste, or `None` while the lab is off (read as
 /// each dictation's output is committed).
 pub fn yolo_mode() -> Option<std::time::Duration> {
-    // The state word is full, so the lab has its own atomic, loaded here
+    // The lab has its own atomic, loaded here
     // first in a process that never applied its settings.
     let _ = state();
     let seconds = YOLO_MODE_SECONDS.load(Ordering::Acquire);
@@ -455,13 +400,6 @@ pub fn yolo_mode_apps() -> Vec<String> {
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
-}
-
-/// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
-/// (read by the meeting controller's expiry pass and the window's Settings
-/// row).
-pub fn expire_meeting_audio() -> bool {
-    on(EXPIRE_MEETING_AUDIO) && Feature::ExpireMeetingAudio.on_this_os()
 }
 
 /// How long the speech model may sit unused before the engine unloads it,

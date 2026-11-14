@@ -69,15 +69,32 @@ pub struct MeetingSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<MeetingRetention>,
     /// How long finished meetings keep their WAV tracks, apart from their
-    /// text (Labs › Expire meeting audio separately). `None` follows
-    /// `retention`, and is left out of the file.
+    /// text (Meetings › Settings › Keep audio). `None` follows `retention`
+    /// (Same as meetings), and is left out of the file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_retention: Option<MeetingRetention>,
+    /// A recording Hex started on its own stops once its call app has left
+    /// the microphone and gone quiet for 30 s (macOS).
+    pub stop_when_call_ends: bool,
+    /// How finished meetings are written to `output_folder`.
+    pub export: MeetingExportSettings,
     /// The OpenCode `provider/model` that writes meeting notes when
     /// `summaries` is OpenCode; left out of the file while unset, when Hex
     /// picks a fast model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencode_model: Option<String>,
+}
+
+/// How finished meetings are written to the meetings folder.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct MeetingExportSettings {
+    /// Notes or a rename rename the exported Markdown to the meeting's
+    /// title, keeping its date and time.
+    pub descriptive_filenames: bool,
+    /// The transcript exports as `<stem>.transcript.md` and the notes go to
+    /// `<stem>.notes.md` beside it, linking back to the transcript.
+    pub notes_file: bool,
 }
 
 /// Who writes meeting titles and summaries. There is no fallback: Mac never
@@ -256,9 +273,7 @@ pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 8] = [
     ("com.hnc.Discord", "Discord"),
 ];
 
-/// The call services Labs › More call apps adds, by the same provider keys.
-/// Settings lists them only while the lab is on; an offer's "…" still saves
-/// a choice for any of them.
+/// The other call services Hex names and offers, by the same provider keys.
 pub const MORE_MEETING_PROVIDERS: [(&str, &str); 10] = [
     ("org.whispersystems.signal-desktop", "Signal"),
     ("ru.keepcoder.Telegram", "Telegram"),
@@ -272,16 +287,11 @@ pub const MORE_MEETING_PROVIDERS: [(&str, &str); 10] = [
     ("web.groupme.com", "GroupMe"),
 ];
 
-/// The providers Settings always lists: the known services, then Labs › More
-/// call apps' while `more_call_apps` is on.
-pub fn known_meeting_providers(
-    more_call_apps: bool,
-) -> impl Iterator<Item = (&'static str, &'static str)> {
-    KNOWN_MEETING_PROVIDERS.into_iter().chain(
-        MORE_MEETING_PROVIDERS
-            .into_iter()
-            .filter(move |_| more_call_apps),
-    )
+/// The providers Settings always lists: the common services, then the rest.
+pub fn known_meeting_providers() -> impl Iterator<Item = (&'static str, &'static str)> {
+    KNOWN_MEETING_PROVIDERS
+        .into_iter()
+        .chain(MORE_MEETING_PROVIDERS)
 }
 
 /// What Hex does when it detects a call from a provider.
@@ -328,6 +338,8 @@ impl Default for MeetingSettings {
             calendar: CalendarSettings::default(),
             retention: None,
             audio_retention: None,
+            stop_when_call_ends: false,
+            export: MeetingExportSettings::default(),
             opencode_model: None,
         }
     }
@@ -406,32 +418,70 @@ fn stored_meeting_retention() -> Option<MeetingRetention> {
     stored_retention("retention")
 }
 
-/// [`MeetingSettings::audio_retention`] for the running meeting controller:
-/// the chosen audio retention only while Labs › Expire meeting audio
-/// separately is on; `None` means audio follows `meetings.retention`. A
-/// process that never loaded settings reads it from `settings.json` without
-/// writing anything.
+/// [`MeetingSettings::audio_retention`] for the running meeting controller;
+/// `None` means audio follows `meetings.retention`. A process that never
+/// loaded settings reads it from `settings.json` without writing anything.
 pub fn meeting_audio_retention() -> Option<MeetingRetention> {
-    let chosen = match MEETING_AUDIO_RETENTION.load(Ordering::Acquire) {
+    match MEETING_AUDIO_RETENTION.load(Ordering::Acquire) {
         RETENTION_UNSET if cfg!(test) => None,
-        RETENTION_UNSET => stored_retention("audio_retention"),
+        RETENTION_UNSET => stored_audio_retention(),
         value => MeetingRetention::decode(value),
-    };
-    effective_audio_retention(crate::labs::expire_meeting_audio(), chosen)
+    }
 }
 
 fn stored_retention(field: &str) -> Option<MeetingRetention> {
     let data = fs::read(path().ok()?).ok()?;
     let settings: serde_json::Value = serde_json::from_slice(&data).ok()?;
+    retention_in(&settings, field)
+}
+
+fn stored_audio_retention() -> Option<MeetingRetention> {
+    let data = fs::read(path().ok()?).ok()?;
+    let settings: serde_json::Value = serde_json::from_slice(&data).ok()?;
+    audio_retention_in(&settings)
+}
+
+fn retention_in(settings: &serde_json::Value, field: &str) -> Option<MeetingRetention> {
     serde_json::from_value(settings.get("meetings")?.get(field)?.clone()).ok()
 }
 
-/// A separate audio retention applies only while its Labs feature is on.
-fn effective_audio_retention(
-    lab_on: bool,
-    chosen: Option<MeetingRetention>,
-) -> Option<MeetingRetention> {
-    if lab_on { chosen } else { None }
+/// The audio retention a settings file holds. A file the
+/// `meeting-labs-settings` migration hasn't seen keeps it only while its
+/// retired Labs switch was on, as the migration will.
+fn audio_retention_in(settings: &serde_json::Value) -> Option<MeetingRetention> {
+    let migrated = settings
+        .get("migrations")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|ids| {
+            ids.iter()
+                .any(|id| id.as_str() == Some(MEETING_LABS_SETTINGS_MIGRATION))
+        });
+    let lab_on = settings
+        .pointer("/labs/expire_meeting_audio")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    (migrated || lab_on)
+        .then(|| retention_in(settings, "audio_retention"))
+        .flatten()
+}
+
+/// Meetings › Settings' Stop when the call ends, as last applied (macOS;
+/// read on each pass of the meeting controller).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn meeting_stop_when_call_ends() -> bool {
+    MEETING_STOP_WHEN_CALL_ENDS.load(Ordering::Acquire)
+}
+
+/// Meetings › Settings › Export's Descriptive meeting file names, as last
+/// applied (read when notes are applied and when a meeting is renamed).
+pub fn meeting_descriptive_filenames() -> bool {
+    MEETING_DESCRIPTIVE_FILENAMES.load(Ordering::Acquire)
+}
+
+/// Meetings › Settings › Export's Separate notes file, as last applied
+/// (read at final export and when notes are written).
+pub fn meeting_notes_file() -> bool {
+    MEETING_NOTES_FILE.load(Ordering::Acquire)
 }
 
 pub fn calendar_settings() -> CalendarSettings {
@@ -510,12 +560,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_extra_providers_are_listed_only_with_their_lab() {
-        let off = known_meeting_providers(false).collect::<Vec<_>>();
-        assert_eq!(off, KNOWN_MEETING_PROVIDERS);
-        assert!(!off.iter().any(|(key, _)| *key == "ru.keepcoder.Telegram"));
-
-        let on = known_meeting_providers(true).collect::<Vec<_>>();
+    fn settings_lists_the_common_providers_first_then_the_rest() {
+        let on = known_meeting_providers().collect::<Vec<_>>();
+        assert_eq!(on[..KNOWN_MEETING_PROVIDERS.len()], KNOWN_MEETING_PROVIDERS);
         assert_eq!(
             on.len(),
             KNOWN_MEETING_PROVIDERS.len() + MORE_MEETING_PROVIDERS.len()
@@ -533,15 +580,21 @@ mod tests {
     }
 
     #[test]
-    fn a_separate_audio_retention_needs_its_lab_and_a_choice() {
-        use MeetingRetention::{Day, Forever};
-        assert_eq!(effective_audio_retention(false, Some(Day)), None);
-        assert_eq!(effective_audio_retention(true, None), None);
-        assert_eq!(effective_audio_retention(true, Some(Day)), Some(Day));
+    fn an_unmigrated_file_keeps_audio_retention_only_with_its_lab() {
+        use MeetingRetention::Day;
+        let read = |json: &str| audio_retention_in(&serde_json::from_str(json).unwrap());
+        assert_eq!(read(r#"{"meetings":{"audio_retention":"day"}}"#), None);
         assert_eq!(
-            effective_audio_retention(true, Some(Forever)),
-            Some(Forever)
+            read(r#"{"meetings":{"audio_retention":"day"},"labs":{"expire_meeting_audio":true}}"#),
+            Some(Day)
         );
+        assert_eq!(
+            read(
+                r#"{"meetings":{"audio_retention":"day"},"migrations":["meeting-labs-settings"]}"#
+            ),
+            Some(Day)
+        );
+        assert_eq!(read(r#"{"migrations":["meeting-labs-settings"]}"#), None);
         assert_eq!(MeetingSettings::default().audio_retention, None);
     }
 }
