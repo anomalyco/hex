@@ -54,7 +54,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        long after a capture, so the next dictation starts at once
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
-├── YOLO mode no labs.yolo_mode (every OS) a shortcut dictation held at least its chosen time (2 s default), in one of its chosen apps if any, presses Return after its paste; History records it as Send
+├── YOLO mode no labs.yolo_mode (every OS) a shortcut dictation held at least its chosen time (2 s default), in one of its chosen apps if any, presses Return after its paste unless Escape came after the release (macOS); History records it as Send
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
 ├── Print-only CLI dictation no labs.print_start        (macOS)   hex dictation start --print answers with the transcript however the recording ends; never pasted or copied
 ├── Voice prompt    no    labs.voice_prompt + labs.voice_prompt_phrase ("rewrite this", every OS)
@@ -778,17 +778,27 @@ without processing, `hex dictation` or local API captures, printing stops,
 Copy dictation only, Live typing's input-method commits, meetings, Annotate
 captures, or Paste last dictation. Each OS decides as the output commits
 (`yolo_mode::sends` reads the lab then): macOS `parakeet::finish_output`
-picks `PasteMode::Send` (⌘V, then a bare Return through
-`keyboard::post_return`, and the continuation ends); Windows
+picks `PasteMode::Send` (⌘V, and the continuation ends), then
+`send_unless_escaped` waits until `yolo_mode::ESCAPE_WINDOW` (500 ms) after
+the job's submission (release plus the 200 ms tail) and `SETTLE` after the
+paste, whichever is later, and presses a bare Return (`PasteMode::Return`,
+`keyboard::post_return`) only if the listener saw no Escape since submission
+(`yolo_mode::SendGate`, a count `note_escape` bumps). An Escape after the
+release leaves the text pasted and unsent, and its History entry is a
+dictation. Pastes usually land 0.25–0.5 s after submission and Return went
+100 ms after them, so the window adds at most about 0.25 s; the log has `YOLO mode pressed Return` with
+`after_submit_ms`, or `YOLO mode pasted without Return`. Windows
 `process_dictation_job` follows its paste with
 `WindowsPaster::press_return` (VK_RETURN through `SendInput`); Linux
 `DictationOutput::deliver` follows it with `LinuxPaster::press_return`
 (`Chord::Return`: XTest on X11, `wtype -k Return` or the RemoteDesktop
-portal on Wayland). A sent dictation's History entry is kind Send. On Linux
+portal on Wayland), with no Escape window. A sent dictation's History entry is kind Send. On Linux
 a desktop keybinding that runs `hex dictation toggle` (Wayland without the
 GlobalShortcuts portal, GNOME custom shortcuts) is a command, so it never
-sends. Checks: `a_hold_reaching_the_chosen_time_is_long_enough` and
-`chosen_apps_limit_where_it_sends` (yolo_mode.rs);
+sends. Checks: `a_hold_reaching_the_chosen_time_is_long_enough`,
+`chosen_apps_limit_where_it_sends`, `escape_after_submission_closes_the_gate`,
+and `return_waits_for_the_window_and_the_settle` (yolo_mode.rs);
+`escape_after_release_pastes_a_yolo_dictation_without_return` (parakeet.rs);
 `release_tail_keeps_audio_through_the_tail_and_no_further` checks
 `held_ms` (dictation.rs); `return_sends_no_modifier` (linux/paste.rs);
 `yolo_mode_is_its_own_switch_and_everywhere` (labs.rs). Not yet

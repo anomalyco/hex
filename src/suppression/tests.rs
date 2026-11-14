@@ -2522,7 +2522,8 @@ fn toggle_mode_escape_leaves_a_locked_capture_recording() {
 }
 
 /// Toggle's cancel shortcut discards a toggled recording, held or
-/// locked; Hold mode has none, and idle it does nothing.
+/// locked; Hold mode has none (only Escape on a held capture), and idle it
+/// does nothing.
 #[test]
 fn the_cancel_shortcut_discards_only_a_toggled_recording() {
     let now = capture_time();
@@ -2572,7 +2573,8 @@ fn the_cancel_shortcut_discards_only_a_toggled_recording() {
         Some(HotkeyAction::CancelShortcut)
     );
 
-    // Hold mode: no cancel, even with a binding.
+    // Hold mode: no cancel shortcut, even with a binding; Escape cancels
+    // only a held capture past the hold threshold.
     let mut hotkey = test_hotkey(true, now);
     hotkey.set_cancel(cancel);
     let held_escape = InputEvent::Key {
@@ -2580,8 +2582,9 @@ fn the_cancel_shortcut_discards_only_a_toggled_recording() {
         down: true,
         flags: OPTION_KEY_MASK,
     };
-    assert_eq!(hotkey.process(held_escape, ms(500)), None);
+    assert_eq!(hotkey.process(held_escape, ms(200)), None);
     assert!(hotkey.is_recording());
+    assert_eq!(hotkey.recording_cancel(), None);
 }
 
 /// The tap keeps the cancel key from the app only while the listener
@@ -4043,6 +4046,90 @@ fn held_modifier_only_shortcut_plus_any_key_discards_after_the_hold_threshold() 
     assert!(hotkey.is_recording());
 }
 
+/// Return pressed while dictating (the session event and its HID echo) keeps
+/// the capture once the hold made the press Hex's; inside the threshold it is
+/// still Option-Return, a chord.
+#[test]
+fn return_after_the_hold_threshold_keeps_a_held_capture() {
+    let now = capture_time();
+    for code in [36, 76] {
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        for (offset, event) in [
+            (809, hid_key(code)),
+            (809, option_key(code, true, OPTION_KEY_MASK)),
+            (880, option_key(code, false, OPTION_KEY_MASK)),
+            (21_721, hid_key(code)),
+            (21_721, option_key(code, true, OPTION_KEY_MASK)),
+            (21_800, option_key(code, false, OPTION_KEY_MASK)),
+        ] {
+            assert_eq!(
+                hotkey.process(event, now + Duration::from_millis(offset)),
+                None,
+                "key {code} at {offset} ms"
+            );
+            assert!(hotkey.is_recording());
+        }
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(22)),
+            Some(HotkeyAction::Finish)
+        );
+
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        assert_eq!(
+            hotkey.process(hid_key(code), now + Duration::from_millis(100)),
+            Some(HotkeyAction::Discard(DiscardCause::HidKey))
+        );
+    }
+}
+
+/// Escape while the Hold shortcut is held past the threshold cancels it, with
+/// the shortcut's modifier still in its flags; earlier it may be
+/// Option-Escape, and a hands-free capture never takes it (#786).
+#[test]
+fn escape_cancels_a_held_capture_after_the_hold_threshold() {
+    let now = capture_time();
+    let ms = |offset| now + Duration::from_millis(offset);
+    let escape = |down| option_key(ESCAPE_KEY_CODE, down, OPTION_KEY_MASK);
+
+    let mut hotkey = test_hotkey(false, now);
+    hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+    assert!(!hotkey.takes_escape(ms(200)));
+    assert_eq!(hotkey.process(escape(true), ms(200)), None);
+    assert_eq!(hotkey.process(escape(false), ms(250)), None);
+    assert!(hotkey.is_recording());
+    assert!(hotkey.takes_escape(ms(300)));
+    assert_eq!(
+        hotkey.process(escape(true), ms(1_200)),
+        Some(HotkeyAction::CancelShortcut)
+    );
+    assert!(!hotkey.is_recording());
+    assert!(!hotkey.takes_escape(ms(1_200)));
+    assert_eq!(hotkey.process(escape(false), ms(1_250)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_400)), None);
+
+    // A double-tap lock is hands-free: Escape stays with the app.
+    let mut hotkey = test_hotkey(false, now);
+    hotkey.set_double_tap_enabled(true);
+    hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+    hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80));
+    hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(180));
+    hotkey.process(InputEvent::Flags(NO_FLAGS), ms(260));
+    assert!(hotkey.is_recording());
+    assert!(!hotkey.takes_escape(ms(2_000)));
+    let plain_escape = |down| option_key(ESCAPE_KEY_CODE, down, NO_FLAGS);
+    assert_eq!(hotkey.process(plain_escape(true), ms(2_000)), None);
+    assert!(hotkey.is_recording());
+
+    // Toggle keeps its own cancel shortcut.
+    let mut hotkey = toggle_hotkey(now, false);
+    hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+    assert!(!hotkey.takes_escape(ms(1_000)));
+    assert_eq!(hotkey.process(escape(true), ms(1_000)), None);
+    assert!(hotkey.is_recording());
+}
+
 #[test]
 fn hid_evidence_while_locked_is_ignored() {
     let now = capture_time();
@@ -4124,29 +4211,28 @@ fn mach_ticks_for(instant: CaptureInstant) -> u64 {
     low
 }
 
+/// Escape pressed with the shortcut is Option-Escape until the hold
+/// threshold, then cancels the held capture.
 #[test]
-fn escape_never_ends_a_held_capture() {
+fn escape_ends_a_held_capture_only_after_the_hold_threshold() {
     let now = capture_time();
     let mut hotkey = test_hotkey(true, now);
-    for at in [now, now + Duration::from_secs(300)] {
-        for down in [true, false] {
-            assert_eq!(
-                hotkey.process(
-                    InputEvent::Key {
-                        code: ESCAPE_KEY_CODE,
-                        down,
-                        flags: OPTION_KEY_MASK,
-                    },
-                    at,
-                ),
-                None
-            );
-        }
-        assert!(hotkey.is_recording());
-    }
+    let escape = |down| InputEvent::Key {
+        code: ESCAPE_KEY_CODE,
+        down,
+        flags: OPTION_KEY_MASK,
+    };
+    assert_eq!(hotkey.process(escape(true), now), None);
+    assert_eq!(hotkey.process(escape(false), now), None);
+    assert!(hotkey.is_recording());
+    assert_eq!(
+        hotkey.process(escape(true), now + Duration::from_secs(300)),
+        Some(HotkeyAction::CancelShortcut)
+    );
+    assert!(!hotkey.is_recording());
     assert_eq!(
         hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(301)),
-        Some(HotkeyAction::Finish)
+        None
     );
 }
 
