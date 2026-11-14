@@ -3395,6 +3395,7 @@ fn goldens() {
     check_golden("history-menu", true, PANE_SIZE);
 }
 
+mod application_picker;
 mod onboarding_check;
 mod panes;
 

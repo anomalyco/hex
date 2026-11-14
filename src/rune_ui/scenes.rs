@@ -762,6 +762,17 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         ui.lab_store.group = Some(crate::labs::Feature::YoloMode.group());
     }),
+    // The same card with its Only in picker open over the cards below.
+    ("mac-labs-yolo-mode-picker", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.yolo_mode = true;
+        ui.settings.labs.yolo_mode_apps = vec!["Slack".into()];
+        crate::labs::apply(&ui.settings.labs);
+        ui.lab_store.group = Some(crate::labs::Feature::YoloMode.group());
+        modes::fixture_catalog(ui);
+        ui.modes.picker_target = modes::PickerTarget::YoloMode;
+        ui.modes.application_picker_open = true;
+    }),
     // Labs on Windows and Linux: only their OS's labs, groups holding a
     // lab that's on open.
     ("windows-labs", |ui| {
