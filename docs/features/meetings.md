@@ -720,12 +720,14 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
-     ├── At rest: voice bars · mm:ss in a small pill, nothing else
-     │   ├── The bars follow the louder track's level (meeting::voice_level),
-     │   │   sampled every 50 ms on the ticker thread
+     ├── At rest: a steady recording dot, two dotted traces and elapsed time
+     │   ├── Top: microphone level; bottom: system audio level, not individual
+     │   │   speakers. Each keeps 14 readings at 50 ms; a missing buffer or one
+     │   │   over 300 ms old adds zero. Under Reduce Motion two stationary
+     │   │   lines change strength instead. Silence never hides the dot
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
-     │       automatically" shows left of the bars
-     ├── Hover -> springs open into a panel: Stop (left) and the bars and time
+     │       automatically" shows beside the meter
+     ├── Hover -> the pill reveals a panel: Stop opposite the meter and time
      │   in its header, then Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge

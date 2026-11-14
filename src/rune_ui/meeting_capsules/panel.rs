@@ -1,4 +1,4 @@
-//! The recording pill and the ready panel: the voice bars and timer at
+//! The recording pill and the ready panel: the two traces and timer at
 //! rest, then Stop and the three copies, and the finished meeting's title
 //! and summary over the same copies.
 
@@ -7,41 +7,67 @@ use rune_theme_opencode::icons;
 
 use super::*;
 
-/// The recording pill's voice bars, set from the bar thread
-/// ([`Pill::tick`]) without rebuilding the view.
-#[derive(Clone)]
-pub(super) struct Bars(pub(super) [rune::Live<[f32; 4]>; BARS]);
+// Dot scope's dotted ink, but the two traces here are measured envelopes:
+// the mic above and system output below. There is no oscillator or idle loop.
+const SAMPLES: usize = 14;
+const STEP: f32 = 2.25;
+const DOT: f32 = 1.75;
+const SCOPE_WIDTH: f32 = STEP * (SAMPLES - 1) as f32 + DOT;
 
-impl Default for Bars {
-    fn default() -> Self {
-        Self(std::array::from_fn(|bar| {
-            rune::Live::new(bar_rect(bar, BAR_REST))
-        }))
+#[derive(Default)]
+pub(super) struct History([[f32; 2]; SAMPLES]);
+
+impl History {
+    pub(super) fn push(&mut self, levels: [f32; 2]) {
+        self.0.rotate_left(1);
+        self.0[SAMPLES - 1] = levels;
     }
 }
 
-impl Bars {
-    /// `levels` newest first, each 0 to 1.
-    pub(super) fn show(&self, levels: [f32; 3]) {
-        for (bar, live) in self.0.iter().enumerate() {
-            let level = levels[bar.abs_diff(BARS / 2)];
-            let height = BAR_REST + (BAR_MAX - BAR_REST) * level * BAR_SHAPE[bar];
-            live.set(bar_rect(bar, height));
+#[test]
+fn track_history_keeps_both_sources_in_time_order() {
+    let mut history = History::default();
+    for pair in [[0.9, 0.0], [0.0, 0.3], [0.5, 0.9], [0.0; 2]] {
+        history.push(pair);
+    }
+    assert_eq!(
+        history.0[SAMPLES - 4..],
+        [[0.9, 0.0], [0.0, 0.3], [0.5, 0.9], [0.0; 2]]
+    );
+    for _ in 0..SAMPLES {
+        history.push([0.0; 2]);
+    }
+    assert_eq!(history.0, [[0.0; 2]; SAMPLES]);
+}
+
+#[derive(Clone)]
+pub(super) struct Scope {
+    dots: [[rune::Live<[f32; 2]>; SAMPLES]; 2],
+    strength: [rune::Live<f32>; 2],
+}
+
+impl Default for Scope {
+    fn default() -> Self {
+        Self {
+            dots: std::array::from_fn(|_| std::array::from_fn(|_| rune::Live::new([0.0; 2]))),
+            strength: std::array::from_fn(|_| rune::Live::new(0.25)),
         }
     }
 }
 
-/// Bar `bar` at `height`, centred in [`BARS_BOX`].
-fn bar_rect(bar: usize, height: f32) -> [f32; 4] {
-    [
-        bar as f32 * BAR_STEP,
-        (BARS_BOX.1 - height) / 2.0,
-        BAR_WIDTH,
-        height,
-    ]
+impl Scope {
+    pub(super) fn show(&self, history: &History) {
+        for (track, dots) in self.dots.iter().enumerate() {
+            let travel = if track == 0 { -7.0 } else { 7.0 };
+            for (dot, sample) in dots.iter().zip(history.0.iter()) {
+                dot.set([0.0, travel * sample[track]]);
+            }
+            self.strength[track].set(0.25 + 0.75 * history.0[SAMPLES - 1][track]);
+        }
+    }
 }
 
-/// What a recording says beside its bars, in place of its title.
+/// What a recording says beside its meter, in place of its title.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Notice {
     /// The microphone is digitally silent (#1518).
@@ -104,20 +130,31 @@ fn timer_style() -> TextStyle {
     TextStyle::new(14.0, 600.0).mono().lh(18.0)
 }
 
-/// The voice bars, moved by [`Bars::show`] without rebuilding the view.
-fn voice_bars(p: Paint, bars: &Bars) -> El {
-    let color = p.success();
-    el().key("bars")
-        .size(BARS_BOX.0, BARS_BOX.1)
-        .a11y_hidden()
-        .children(bars.0.iter().enumerate().map(|(bar, live)| {
-            el().key(format!("bar-{bar}"))
-                .absolute(0.0, 0.0)
-                .size(BAR_WIDTH, BAR_REST)
-                .radius(BAR_WIDTH / 2.0)
-                .fill(color)
-                .live_rect(live.smooth(BAR_SPRING))
-        }))
+fn scope_view(p: Paint, scope: &Scope, reduced: bool) -> El {
+    let mut plate = el().key("scope").size(SCOPE_WIDTH, 20.0).a11y_hidden();
+    for track in 0..2 {
+        let ink = if track == 0 { p.text() } else { p.muted() };
+        let y = if track == 0 { 7.5 } else { 10.75 };
+        if reduced {
+            plate = plate.child(
+                el().absolute(0.0, y)
+                    .size(SCOPE_WIDTH, DOT)
+                    .radius(DOT / 2.0)
+                    .fill(ink)
+                    .live_opacity(&scope.strength[track]),
+            );
+        } else {
+            plate = plate.children(scope.dots[track].iter().enumerate().map(|(i, dot)| {
+                el().key(format!("trace-{track}-{i}"))
+                    .absolute(STEP * i as f32, y)
+                    .size(DOT, DOT)
+                    .radius(DOT / 2.0)
+                    .fill(ink)
+                    .live_offset(dot.smooth(Spring::new(0.12, 0.0)))
+            }));
+        }
+    }
+    plate
 }
 
 /// "4 min new", "Up to date", "Transcribing…", or ✓ Copied: what Copy new
@@ -355,10 +392,10 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
     in_corner(capsule, body)
 }
 
-/// The recording: at rest only its voice bars and elapsed time; under the
+/// The recording: at rest only its status, levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
-pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
+pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, reduced: bool) -> El {
     let open = capsule.hovered;
     let notice = recording_notice(shown);
     let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
@@ -370,57 +407,111 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
             .truncate()
             .min_w(0.0)
     };
+    let right = capsule.corner.is_right();
+    let top = capsule.corner.is_top();
     let meter = row()
         .key("meter")
-        .gap(8.0)
+        .gap(6.0)
         .center_y()
-        .children((!open).then_some(notice).flatten().map(notice_text))
-        .child(voice_bars(p, &capsule.bars))
+        .child(status_dot(p.danger()).size(6.0, 6.0))
+        .child(scope_view(p, &capsule.scope, reduced))
         .child(
             text(elapsed)
                 .key("elapsed")
-                .font(timer_style())
-                .color(p.success()),
+                .font(TextStyle::new(13.0, 500.0).mono().lh(18.0))
+                .color(p.muted()),
         );
-    let header = row().key("header").center_y().justify_between().gap(8.0);
-    let header = if open {
-        let stop = row()
-            .key("stop")
-            .h(HEADER_HEIGHT - 2.0 * PANEL_PAD)
-            .px(ROW_PX)
-            .gap(6.0)
-            .center_y()
-            .radius(ROW_RADIUS)
-            .hover(p.k.c.hover)
-            .label(tr("Stop"))
-            .focusable(true)
-            .on_press(|c: &mut Capsule| {
-                c.send(ControllerCommand::Stop);
-            })
-            .child(icon(&icons::STOP, 12.0).color(p.muted()))
-            .child(
-                text(tr("Stop").to_owned())
-                    .font(p.k.ty.text_xsmall)
-                    .color(p.muted())
-                    .a11y_hidden(),
-            );
+    let accessory = if open {
+        Some(
+            row()
+                .key("stop")
+                .h(HEADER_HEIGHT - 2.0 * PANEL_PAD)
+                .px(ROW_PX)
+                .gap(6.0)
+                .center_y()
+                .radius(ROW_RADIUS)
+                .hover(p.k.c.hover)
+                .label(tr("Stop"))
+                .focusable(true)
+                .on_press(|c: &mut Capsule| {
+                    c.send(ControllerCommand::Stop);
+                })
+                .child(icon(&icons::STOP, 12.0).color(p.muted()))
+                .child(
+                    text(tr("Stop").to_owned())
+                        .font(p.k.ty.text_xsmall)
+                        .color(p.muted())
+                        .a11y_hidden(),
+                ),
+        )
+    } else {
+        notice.map(notice_text)
+    };
+    let panel_height = HEADER_HEIGHT
+        + 3.0 * ROW_HEIGHT
+        + FIRST_ROW_GAP
+        + PANEL_PAD
+        + if notice.is_some() { NOTICE_HEIGHT } else { 0.0 };
+    let width = if open || notice.is_some() {
+        PANEL_WIDTH
+    } else {
+        REST_WIDTH
+    };
+    let height = if open { panel_height } else { REST_HEIGHT };
+    // The full-size layout exists before the first hover. Its origin cancels
+    // the moving clip's origin so neither the rows nor the meter ride its edge.
+    let header = row()
+        .key("header")
+        .absolute(
+            0.0,
+            if top {
+                0.0
+            } else {
+                panel_height - HEADER_HEIGHT
+            },
+        )
+        .w(PANEL_WIDTH)
+        .h(HEADER_HEIGHT)
+        .center_y()
+        .gap(8.0);
+    let spacer = el().key("space").grow(1.0);
+    let header = if right {
         header
-            .w_full()
-            .h(HEADER_HEIGHT)
-            .pl(PANEL_PAD)
+            .pl(if open { PANEL_PAD } else { REST_PX })
             .pr(REST_PX)
-            .child(stop)
+            .children(accessory)
+            .child(spacer)
             .child(meter)
     } else {
-        header.h(REST_HEIGHT).px(REST_PX).child(meter)
+        header
+            .pl(REST_PX)
+            .pr(if open { PANEL_PAD } else { REST_PX })
+            .child(meter)
+            .child(spacer)
+            .children(accessory)
     };
-    let top = capsule.corner.is_top();
-    let mut parts = vec![header];
+    let mut contents = col()
+        .key("panel-contents")
+        .size(PANEL_WIDTH, panel_height)
+        .absolute(
+            if right { width - PANEL_WIDTH } else { 0.0 },
+            if top { 0.0 } else { height - panel_height },
+        )
+        .child(header);
     if open {
         if let Some(notice) = notice {
-            parts.push(
+            contents = contents.child(
                 row()
                     .key("notice-line")
+                    .absolute(
+                        0.0,
+                        if top {
+                            HEADER_HEIGHT
+                        } else {
+                            panel_height - HEADER_HEIGHT - NOTICE_HEIGHT
+                        },
+                    )
+                    .w(PANEL_WIDTH)
                     .h(NOTICE_HEIGHT)
                     .px(PANEL_PAD + ROW_PX)
                     .center_y()
@@ -429,16 +520,18 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         }
         let rows = col()
             .key("rows")
+            .absolute(
+                0.0,
+                if top {
+                    panel_height - (3.0 * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD)
+                } else {
+                    PANEL_PAD
+                },
+            )
+            .w(PANEL_WIDTH)
             .px(PANEL_PAD)
             .children(copy_rows(p, capsule, true));
-        parts.push(if top {
-            rows.pb(PANEL_PAD)
-        } else {
-            rows.pt(PANEL_PAD)
-        });
-    }
-    if !top {
-        parts.reverse();
+        contents = contents.child(rows);
     }
     let radius = if open {
         PANEL_RADIUS
@@ -452,7 +545,8 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .radius(radius)
         .fill(p.k.c.bg_base)
         .border(p.hair, p.k.c.border_base)
-        .children(parts)
+        .size(width, height)
+        .child(contents)
         .clip_rounded(radius)
         .cursor(Cursor::Grab)
         .motion(if open {
@@ -466,7 +560,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         // as large as the open panel, lets clicks through. On Windows the
         // window is only as large as the pill it draws instead.
         .hit();
-    in_corner(capsule, if open { body.w(PANEL_WIDTH) } else { body })
+    in_corner(capsule, body)
 }
 
 /// `path` as one shell word.

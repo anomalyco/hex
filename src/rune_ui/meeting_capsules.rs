@@ -18,8 +18,8 @@
 //! meetings` commands read the meeting. The ready panel offers the same three
 //! under the finished meeting's title and summary.
 //!
-//! The recording capsule rests as a small pill in its corner, only its voice
-//! bars and elapsed time, and springs open into a panel with Stop and its
+//! The recording capsule rests as a small pill in its corner, with a recording
+//! dot, the two sources' level histories and a timer. It opens into Stop and its
 //! copies while the pointer is over it. Dragging it moves the window; on
 //! release it snaps to the nearest corner, which is saved.
 //! It is a function of the controller's current recording and the live
@@ -57,7 +57,9 @@ use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod panel;
 
-use panel::{Bars, agent_prompt, hex_command, ready, ready_summary, recording, recording_notice};
+use panel::{
+    History, Scope, agent_prompt, hex_command, ready, ready_summary, recording, recording_notice,
+};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -75,8 +77,9 @@ const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// Between a capsule's window edges and what it draws.
 const CAPSULE_INSET: f32 = 4.0;
-/// The resting pill: the voice bars and the elapsed time.
-const REST_HEIGHT: f32 = 38.0;
+/// Same header at rest and open so the recording dot and timer stay put.
+const REST_HEIGHT: f32 = HEADER_HEIGHT;
+const REST_WIDTH: f32 = 116.0;
 /// The resting pill's sides, and the open panel header's right side, so the
 /// timer stays put as the pill opens.
 const REST_PX: f32 = 11.0;
@@ -100,7 +103,7 @@ const SUMMARY_LINES: usize = 3;
 const SUMMARY_LINE: f32 = 19.5;
 /// The resting pill fits a timer up to `100:00`.
 #[cfg(target_os = "windows")]
-const REST_WINDOW_WIDTH: f32 = 116.0;
+const REST_WINDOW_WIDTH: f32 = REST_WIDTH + 2.0 * CAPSULE_INSET;
 /// The recording capsule's window at its largest: the open panel with a
 /// notice.
 const RECORDING_WINDOW: (f32, f32) = (
@@ -112,22 +115,10 @@ const RECORDING_WINDOW: (f32, f32) = (
         + PANEL_PAD
         + 2.0 * CAPSULE_INSET,
 );
-/// Opening under the pointer, and closing after it leaves (GPUI's snap
-/// springs), with no overshoot.
-const RECORDING_OPEN: Spring = Spring::new(0.25, 0.0);
-const RECORDING_CLOSE: Spring = Spring::new(0.2, 0.0);
-/// The voice bars: five 2 pt bars 2 pt apart, from a 3 pt dot to 17 pt.
-const BARS: usize = 5;
-const BAR_WIDTH: f32 = 2.0;
-const BAR_STEP: f32 = 4.0;
-const BAR_REST: f32 = 3.0;
-const BAR_MAX: f32 = 17.0;
-const BARS_BOX: (f32, f32) = (BAR_STEP * (BARS - 1) as f32 + BAR_WIDTH, BAR_MAX);
-/// The newest level in the middle, older ones outward and quieter.
-const BAR_SHAPE: [f32; BARS] = [0.55, 0.8, 1.0, 0.8, 0.55];
-/// How often the bars read the meeting's level.
-const BAR_TICK: Duration = Duration::from_millis(50);
-const BAR_SPRING: Spring = Spring::new(0.12, 0.0);
+/// The clip opens under the pointer and retargets when it leaves.
+const RECORDING_OPEN: Spring = Spring::new(0.42, 0.0);
+const RECORDING_CLOSE: Spring = Spring::new(0.38, 0.0);
+const LEVEL_TICK: Duration = Duration::from_millis(50);
 /// How long a copy says "Copied".
 const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
 const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -280,7 +271,7 @@ struct Capsule {
     /// its actions.
     more_open: bool,
     live: Live,
-    bars: Bars,
+    scope: Scope,
     commands: SyncSender<ControllerCommand>,
     hide: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The call-ended prompt's Keep recording brings the recording capsule
@@ -662,8 +653,8 @@ pub(crate) struct MeetingCapsules {
 struct Pill {
     handle: OverlayHandle<Capsule>,
     model: Arc<Mutex<PillModel>>,
-    /// The pill's voice bars, the same ones its capsule draws.
-    bars: Bars,
+    /// The same scope the view draws.
+    scope: Scope,
 }
 
 impl Pill {
@@ -717,7 +708,7 @@ impl Pill {
             false,
             recording_notice(&recording).is_some(),
         ));
-        self.bars.show([0.0; 3]);
+        self.scope.show(&History::default());
         self.handle.update(move |capsule, tx| {
             capsule.kind = Some(Kind::Recording(recording));
             capsule.live = Live::default();
@@ -741,20 +732,20 @@ impl Pill {
     /// While recording `id`: each second, reconciles the pill (the elapsed
     /// time, the indicator setting) and, while it shows, reads the in-call
     /// transcript here rather than on the main thread; and every
-    /// [`BAR_TICK`], moves the voice bars to the meeting's level.
+    /// [`LEVEL_TICK`], adds a reading from each track to its history.
     fn tick(&self, id: String) {
-        let bars = self.clone();
-        let bars_id = id.clone();
+        let scope = self.clone();
+        let scope_id = id.clone();
         std::thread::spawn(move || {
-            let mut levels = [0.0; 3];
-            while bars.records(&bars_id) {
-                std::thread::sleep(BAR_TICK);
-                if bars.lock().shown.as_deref() != Some(bars_id.as_str()) {
+            let mut history = History::default();
+            while scope.records(&scope_id) {
+                std::thread::sleep(LEVEL_TICK);
+                if scope.lock().shown.as_deref() != Some(scope_id.as_str()) {
+                    history = History::default();
                     continue;
                 }
-                levels.rotate_right(1);
-                levels[0] = meeting::voice_level();
-                bars.bars.show(levels);
+                history.push(meeting::track_levels());
+                scope.scope.show(&history);
             }
         });
         let pill = self.clone();
@@ -797,7 +788,7 @@ impl MeetingCapsules {
     ) -> Self {
         let choose: Choose = Arc::new(choose);
         let save_corner: SaveCorner = Arc::new(save_corner);
-        let bars = Bars::default();
+        let scope = Scope::default();
         let overlay = |app: &mut rune::App<S>, name, size: (f32, f32)| {
             let handle = app.overlay(
                 OverlaySpec {
@@ -814,7 +805,7 @@ impl MeetingCapsules {
                     kind: None,
                     more_open: false,
                     live: Live::default(),
-                    bars: bars.clone(),
+                    scope: scope.clone(),
                     commands: commands.clone(),
                     hide: None,
                     keep_recording: None,
@@ -870,7 +861,7 @@ impl MeetingCapsules {
                 recording_window_size(false, false),
             ),
             model: Arc::default(),
-            bars,
+            scope,
         };
         let kept = pill.clone();
         panel.update(move |capsule, _| {
@@ -1137,7 +1128,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         return row().key("empty");
     };
     let (dot, title, subtitle, actions) = match kind {
-        Kind::Recording(shown) => return recording(p, capsule, shown),
+        Kind::Recording(shown) => return recording(p, capsule, shown, cx.is_reduced_motion()),
         Kind::AutoStarted { title } => (
             p.danger(),
             tr("Recording automatically").to_owned(),
@@ -1537,7 +1528,7 @@ mod tests {
             kind: Some(kind),
             more_open,
             live: Live::default(),
-            bars: Bars::default(),
+            scope: Scope::default(),
             commands,
             hide: None,
             keep_recording: None,
@@ -1881,7 +1872,7 @@ mod tests {
         });
         rt.settle_all();
         rt.frame(0.0);
-        // At rest, only the bars and the time.
+        // At rest, the meter and time, no actions.
         assert!(rt.find("copy-new").is_none());
         assert!(rt.find("stop").is_none());
         assert_eq!(texts(&rt), ["04:18"]);
@@ -2478,7 +2469,7 @@ mod tests {
                     live_recording("snap"),
                     false,
                     RECORDING,
-                    |capsule: &mut Capsule| capsule.bars.show([0.9, 0.6, 0.3]),
+                    fixture_scope,
                 ),
                 (
                     "recording-silent",
@@ -2502,7 +2493,7 @@ mod tests {
                             turns: 3,
                             span_ms: 4 * 60_000 + 12_000,
                         };
-                        capsule.bars.show([0.9, 0.6, 0.3]);
+                        fixture_scope(capsule);
                         capsule.hovered = true;
                     },
                 ),
@@ -2632,6 +2623,8 @@ mod tests {
             ("call-ended", call_ended(), CALL_ENDED),
             ("ready", ready_transcript(), ready_size()),
             ("auto-started", auto_started(), PANEL),
+            ("recording-rest", live_recording("fixture"), RECORDING),
+            ("recording-open", live_recording("fixture"), RECORDING),
         ];
         let mut misses = Vec::new();
         for ((name, kind, size), dark) in states
@@ -2642,6 +2635,20 @@ mod tests {
             let file = format!("meeting-capsule-{name}-{theme}");
             let path = folder.join(format!("{file}.png"));
             let (mut rt, _, _) = runtime(kind, false, dark, size);
+            if name.starts_with("recording-") {
+                rt.update(move |c, _| {
+                    if let Some(Kind::Recording(shown)) = &mut c.kind {
+                        shown.started = Instant::now() - Duration::from_secs(258);
+                    }
+                    fixture_scope(c);
+                    c.hovered = name == "recording-open";
+                    c.live.entries = call();
+                    c.live.pending = meeting::PendingDelta {
+                        turns: 2,
+                        span_ms: 64_000,
+                    };
+                });
+            }
             let (w, h, pixels) = render(&gpu, &mut rt, size);
             if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
@@ -2649,6 +2656,11 @@ mod tests {
             }
             // Where CI's golden-actual artifact picks it up.
             let actual = std::env::temp_dir().join(format!("rune-settings-{file}-actual.png"));
+            if !path.exists() {
+                rune::render::write_png(&actual, w, h, &pixels).unwrap();
+                misses.push(format!("{file} is missing; actual at {}", actual.display()));
+                continue;
+            }
             let decoder =
                 png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
             let mut reader = decoder.read_info().unwrap();
