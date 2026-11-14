@@ -106,6 +106,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../resources
       ../assets
       ../packaging
+      # The Labs registry's published copy: a Rust test compares it to the registry.
+      ../site/src/labs.json
       ../macos/HexMicrophoneDriver/Info.plist
       # Built in: a 2.3.1 install moves itself into this installer's layout.
       ../.github/release/install-linux.sh
