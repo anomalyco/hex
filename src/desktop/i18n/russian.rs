@@ -1340,6 +1340,12 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It'll be there before your coffee is.", "Он будет готов раньше вашего кофе."),
     ("Allow in Login Items", "Разрешить в Объектах входа"),
     ("macOS wants your OK first. It's very protective.", "macOS сначала хочет вашего согласия. Он очень заботливый."),
+    ("Open Hex when your computer starts?", "Открывать Hex при запуске компьютера?"),
+    ("Hex opens when your computer starts.", "Hex открывается при запуске компьютера."),
+    ("It's tiny. It naps in your system tray until you tap the key.", "Он крошечный. Дремлет в системном трее, пока вы не нажмёте клавишу."),
+    ("It's tiny. It naps in your system tray until you hold the key.", "Он крошечный. Дремлет в системном трее, пока вы не зажмёте клавишу."),
+    ("It's tiny. It naps in the background until you tap the key.", "Он крошечный. Дремлет в фоне, пока вы не нажмёте клавишу."),
+    ("It's tiny. It naps in the background until you hold the key.", "Он крошечный. Дремлет в фоне, пока вы не зажмёте клавишу."),
 ];
 
 #[cfg(test)]

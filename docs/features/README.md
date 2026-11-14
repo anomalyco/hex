@@ -297,7 +297,10 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │       second Reopen Hex in the top banner); Hex is ready keeps the banner.
 │       Check: `a_shortcut_that_did_not_start_shows_only_reopen`
 └── Hex is ready -> where Hex lives (menu bar, system tray, or app launcher)
-    ├── macOS: "Open Hex when your Mac starts?" + Launch at login
+    ├── macOS: "Open Hex when your Mac starts?" + Launch at login, napping in your menu bar
+    ├── Windows: "Open Hex when your computer starts?" + Launch at login, napping in your system tray
+    ├── Linux: "Open Hex when your computer starts?" + Launch at login, napping in the background
+    │   Check: `the_login_ask_speaks_each_platforms_wording` (all three)
     ├── Try again -> back to the practice game
     └── Start using Hex -> records completion once setup is ready; closes onboarding
 Run setup again (Labs) or `hex onboarding reset` -> the same story from the start,
