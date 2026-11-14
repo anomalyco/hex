@@ -12,7 +12,8 @@ pub enum HotkeyAction {
     Discard(DiscardCause),
     /// Hex ended the recording: its input was lost or suspended.
     Cancel,
-    /// Toggle's cancel shortcut discarded the recording.
+    /// A cancel shortcut discarded the recording: Toggle's, an extra row's,
+    /// or Escape while a Hold capture is held.
     CancelShortcut,
     PasteLast,
     PasteMeeting,
@@ -226,6 +227,45 @@ impl DictationHotkey {
         (self.is_recording() && (self.toggle || self.cancel_in_any_mode))
             .then_some(self.cancel)
             .flatten()
+    }
+
+    /// Hold mode's cancel: Escape while the shortcut is still held, once the
+    /// hold threshold made the press Hex's. Earlier, Escape may belong to a
+    /// chord such as Option-Escape; a hands-free capture never takes it, as
+    /// Escape there may be meant for the app in front (#786).
+    fn escape_cancels_hold(&self, now: CaptureInstant) -> bool {
+        !self.toggle
+            && matches!(self.state, State::Recording { started_at, .. }
+                if now.duration_since(started_at) >= MINIMUM_HOLD_DURATION)
+    }
+
+    /// Whether the tap keeps Escape from the app in front at `now`: it
+    /// cancels this machine's held capture.
+    pub fn takes_escape(&self, now: CaptureInstant) -> bool {
+        self.escape_cancels_hold(now)
+    }
+
+    /// An Escape a recording machine saw and did nothing with, and why.
+    fn log_ignored_escape(&self, now: CaptureInstant) {
+        let reason = match self.state {
+            State::Recording { .. } if self.toggle => "Toggle's cancel shortcut is another key",
+            State::Recording { .. } => "before the hold threshold",
+            State::Locked if self.toggle || self.cancel_in_any_mode => {
+                "the cancel shortcut is another key"
+            }
+            State::Locked => "a hands-free capture in Hold mode has no cancel",
+            _ => return,
+        };
+        let after_press_ms = match self.state {
+            State::Recording { started_at, .. } => Some(signed_ms(now, started_at)),
+            _ => None,
+        };
+        tracing::info!(
+            shortcut = "dictation",
+            reason,
+            after_press_ms,
+            "Escape ignored while recording"
+        );
     }
 
     /// Whether a double-tap gesture is in flight and still waiting for its
@@ -719,6 +759,20 @@ impl DictationHotkey {
             self.state = State::Dirty;
             return Some(HotkeyAction::CancelShortcut);
         }
+        if fresh_key_down && event.is_escape_down() {
+            if let State::Recording { started_at, .. } = self.state
+                && self.escape_cancels_hold(now)
+            {
+                tracing::info!(
+                    shortcut = "dictation",
+                    after_press_ms = signed_ms(now, started_at),
+                    "dictation cancelled by Escape while held"
+                );
+                self.state = State::Dirty;
+                return Some(HotkeyAction::CancelShortcut);
+            }
+            self.log_ignored_escape(now);
+        }
 
         let ignored_because = binding_press
             .then(|| self.resync_stale_press(now))
@@ -778,7 +832,7 @@ impl DictationHotkey {
         let extra_modifiers = flags.is_some_and(|flags| {
             self.binding.required_modifiers_down(flags) && !self.binding.exact_modifiers(flags)
         });
-        // Escape ends no dictation, not even as a chord (#786).
+        // Escape is never a chord: it cancels only a held capture, above (#786).
         let chord_key_down = unrelated_key_down
             && !matches!(
                 event,
@@ -901,8 +955,13 @@ impl DictationHotkey {
                         && (chord_key_down
                             || matches!(event, InputEvent::MouseDown)
                             || extra_modifiers))
-                        // A held modifier-only shortcut plus any key is a chord at any time.
+                        // A held modifier-only shortcut plus any key is a
+                        // chord at any time (Spaceman's Option-1 hides its
+                        // key from the session), except Return once the
+                        // hold made the press Hex's: pressing it while
+                        // dictating never throws the dictation away.
                         || (chord_key_down
+                            && !is_return_key(event)
                             && self.binding.key_code.is_none()
                             && !self.toggle)) =>
             {
@@ -1113,6 +1172,17 @@ impl DictationHotkey {
             }
         })
     }
+}
+
+/// Return and the keypad's Enter.
+const RETURN_KEY_CODES: [u16; 2] = [36, 76];
+
+fn is_return_key(event: InputEvent) -> bool {
+    matches!(
+        event,
+        InputEvent::Key { code, .. } | InputEvent::PhysicalKeyDown { code, .. }
+            if RETURN_KEY_CODES.contains(&code)
+    )
 }
 
 /// Each modifier key's device flag, left and right.

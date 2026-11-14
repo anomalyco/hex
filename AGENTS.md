@@ -768,13 +768,30 @@ CoreAudio formats, AppleScript details, or event serialization.
   Windows' hook only while its capture records, and X11 grabs it only for
   the recording. A shortcuts portal holds a key for as long as Hex runs, so
   on Wayland Hex binds nothing for it and Settings says to bind
-  `hex dictation cancel` in the desktop. `hex dictation cancel` discards
-  whatever records, in any mode. Hold mode has no cancel: Escape ends no
-  capture there, not even as a chord, except a Labs › Caps Lock dictation
-  capture, whose own machine always cancels on Escape. Every other intentional
-  dictation finishes and pastes; only short taps, chords, and silent captures
-  discard, and Hex itself ends a capture only when its input or microphone is
-  lost.
+  `hex dictation cancel` discards
+  whatever records, in any mode. Hold mode has no cancel shortcut, with one
+  exception on macOS: Escape pressed while the shortcut is still held, once
+  the hold threshold (300 ms) made the press Hex's, cancels that capture with
+  any modifiers down, and the session tap keeps that Escape from the app
+  (`DictationHotkey::takes_escape`). Before the threshold Escape is
+  Option-Escape and passes through; a hands-free (locked) Hold capture never
+  takes Escape, which may be meant for the app in front (#786). An Escape a
+  recording machine ignores logs `Escape ignored while recording` with why.
+  Escape is never a chord. A Labs › Caps Lock dictation capture's own machine
+  always cancels on Escape. Every other intentional dictation finishes and
+  pastes; only short taps, chords, and silent captures discard, and Hex
+  itself ends a capture only when its input or microphone is lost.
+- Return (and keypad Enter) pressed while a macOS modifier-only Hold shortcut
+  is held past the hold threshold is not a chord: the capture goes on, and
+  the key reaches the app. Any other key joining it still discards it at any
+  time, so another app's global Option-key shortcut (Spaceman's Option-1)
+  never leaves a dictation running.
+- Labs › YOLO mode on macOS: an Escape the listener sees after a sending
+  dictation's release (from its submission, so the 200 ms tail counts) and
+  before its Return skips the Return; the text still pastes and History
+  records a dictation, not a send. Return waits until
+  `yolo_mode::ESCAPE_WINDOW` (500 ms) after submission and `SETTLE` after the
+  paste, whichever is later. Windows and Linux press Return without the window.
 - A dictation discarded for silence (level under the silence threshold, or no
   speech the detector hears) is discarded quietly on every OS: no error tone,
   no note, nothing in Settings. The log keeps the measured level and peak

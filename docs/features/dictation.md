@@ -2,11 +2,13 @@
 
 Hold the configured shortcut, speak, and release. Hex transcribes locally and
 inserts the result at the current focus. New captures do not cancel accepted
-work. Only Toggle mode has a cancel: its cancel shortcut, Escape by default,
-discards the recording (#786, #1022); every other intentional dictation
-finishes and pastes. The exception is a Labs › Caps Lock dictation capture on
-macOS: it is hands-free in every shortcut mode, so its own Escape binding
-cancels it even in Hold.
+work. Toggle mode has a cancel: its cancel shortcut, Escape by default,
+discards the recording (#786, #1022). In Hold mode on macOS, Escape pressed
+while the shortcut is still held past the hold threshold cancels it; a
+hands-free capture never takes Escape. Every other intentional dictation
+finishes and pastes. The other exception is a Labs › Caps Lock dictation
+capture on macOS: it is hands-free in every shortcut mode, so its own Escape
+binding cancels it even in Hold.
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
@@ -630,8 +632,10 @@ Dictation shortcut released (hold, lock, or Toggle)
   -> Held = press to release, without pre-roll or release tail
 Paste job, as the output commits                     // dictate.yolo-mode
 ├── Held >= the chosen time (1-10 s, default 2 s), and the frontmost app is one
-│   of Only in's apps (none chosen = every app) -> Paste as usual, wait 100 ms,
-│   press Return; History records Send
+│   of Only in's apps (none chosen = every app) -> Paste as usual
+│   -> Wait until 500 ms after submission and 100 ms after the paste (macOS)
+│   ├── No Escape since submission -> Press Return; History records Send
+│   └── Escape after the release (macOS) -> No Return; History records Dictation
 └── Shorter, or another app -> Paste as usual
 Never: Dictate without processing, `hex dictation`, the local API,
 printing stops, Copy dictation only, Live typing, meetings, captures,
@@ -722,6 +726,11 @@ Ordinary hold                            // lock activation is mapped below
   │       (Spaceman's Option-1) -> Seen at HID -> Discard, no double-tap lock
   ├── Modifier-only hold + any key, at any time -> Discard  // dictate.held-chord
   │   (key reaches the app; locked and toggle captures keep recording)
+  │   └── Return or keypad Enter past 300 ms -> Nothing: the capture goes on,
+  │       Return reaches the app                          // dictate.held-return
+  ├── Escape while held past 300 ms -> Cancel, cancel tone; the tap keeps
+  │   Escape from the app                                 // dictate.held-escape
+  │   └── Before 300 ms -> Nothing: Option-Escape reaches the app, logged
   └── Modifier-only hold past 300 ms -> One unassigned key press  // dictate.chord-breaker
       -> Other apps' modifier-tap hotkeys see a chord, not a tap
 
@@ -760,6 +769,25 @@ Command-Tab was silently ignored; the press now resynchronizes itself
 listen-only session and HID taps on Kit's Studio: Spaceman's Option-1/2/3
 reached HID but never the session. The installed fix has no physical-keyboard
 run yet.
+
+**Fixed November 13, 2026 (t1561):** the held-chord rule above also threw
+away a dictation when Return was pressed during it (the log showed `cause="hid-key"
+key_code=36`, 0.8 s and 21.7 s into holds), and Escape never cancelled a Hold
+capture because Hold mode had no cancel at all since #795, so nothing was even
+logged. Return and keypad Enter past the hold threshold now leave the capture
+running; inside 300 ms they are still Option-Return, a chord. Escape while the
+shortcut is still held past 300 ms cancels (`dictate.held-escape`) and the
+session tap keeps it from the app; a hands-free Hold capture still never takes
+Escape (#786), and any Escape a recording machine ignores logs `Escape
+ignored while recording` with its reason (`before the hold threshold`, `a
+hands-free capture in Hold mode has no cancel`, or the cancel shortcut being
+another key). Checks: `return_after_the_hold_threshold_keeps_a_held_capture`,
+`escape_cancels_a_held_capture_after_the_hold_threshold`, and
+`escape_ends_a_held_capture_only_after_the_hold_threshold` in
+[suppression/tests.rs](../../src/suppression/tests.rs), and
+`escape_cancels_a_locked_extra_that_records` in
+[recognition.rs](../../src/recognition.rs) (constructed events; no
+physical-keyboard run).
 
 **Fixed October 30, 2026 (issue 485):** on GNOME Wayland, releasing Ctrl
 before Space (or both at once) can leave the GlobalShortcuts portal without a
@@ -1187,7 +1215,7 @@ Shortcut mode = Double-tap                           // dictate.double-tap-only
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
 
 LOCKED -> Speak hands-free -> Fresh shortcut press -> Finish
-       -> Escape -> Nothing: it reaches the app (#786)
+       -> Escape -> Nothing: it reaches the app (#786); logged as ignored
        -> Missed key release -> Neutral keyboard repairs tracking -> Still LOCKED
 ```
 
@@ -1235,7 +1263,8 @@ Release that will transcribe                          // dictate.stop-tone
      ├── Clip later near-silent or without speech -> Tone already played;
      │   discard quietly, nothing pasted, no error tone or note; the log has
      │   the measured level and peak against the thresholds
-     └── Escape after the release -> Nothing; the clip still transcribes
+     └── Escape after the release -> The clip still transcribes and pastes;
+         a YOLO send skips its Return (macOS)
   -> macOS: the audio owner announces it before draining the tail; HUD
      Transcribing and submission still follow the tail
   -> Paused media resumes without delaying the tone
@@ -1925,7 +1954,8 @@ Settings › General, Shortcut mode = Tap (Toggle)     // dictate.toggle-cancel
      ├── Recorder -> any chord the OS's rules allow (Escape ends the recorder)
      ├── Restore -> back to Escape
      └── Wayland -> no recorder: bind `hex dictation cancel` in the desktop
-  Hold modes -> no row, no cancel
+  Hold modes -> no row, no cancel shortcut; on macOS Escape cancels a capture
+  still held past 300 ms (dictate.held-escape), never a hands-free one
 Toggled recording (held or locked) -> Cancel shortcut
   -> Recording discarded: nothing transcribed, pasted, or kept in History
   -> Cancel tone; the HUD shows it cancelled
@@ -1940,7 +1970,10 @@ Programmatic dictation (local API) -> Its owner cancels through /cancel
 Until #786, Escape cancelled the active capture in every mode, then the newest
 unfinished job, and an accidental Escape wiped a 5-minute dictation. #795
 removed cancel; the people who asked for it back use Toggle, so it returned
-there only, and never reaches past the recording. Hex takes the key only while
+there only, and never reaches past the recording. Since November 13 (t1561)
+Escape also cancels a macOS Hold capture whose shortcut is still held past the
+hold threshold: a held key can't be the hands-free loss #786 was about, and
+the session tap keeps that Escape from the app. Hex takes the cancel key only while
 a toggled recording runs: macOS's session tap suppresses it only while the
 listener arms it, Windows' hook only while its capture records, and X11
 grabs it only for the recording. A shortcuts portal would hold the key from
