@@ -393,7 +393,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu",
+      "summary": "Use a special key alone as a shortcut: Insert, Home, End, Page Up, or Page Down on Windows, and Menu, Pause, or Scroll Lock on Linux",
       "title": "Special keys alone"
     },
     {
