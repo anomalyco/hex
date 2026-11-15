@@ -183,11 +183,30 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ env.HEX_WINDOWS_ARCH }}-pc-windows-msvc
+      # target/ holds C++ objects (transcribe.cpp via clang-cl) built against
+      # one MSVC STL and CRT; an object cached from a newer toolset fails to link
+      # against an older one (__std_replace_2, LNK2019), so the key names it.
+      - name: Find the MSVC toolset
+        if: inputs.test-build
+        id: msvc
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path -LiteralPath $vswhere)) { throw "vswhere.exe was not found" }
+          $installation = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          # The ARM64 images install the ARM64 tools, not the x86_64 ones.
+          if (-not $installation) { $installation = & $vswhere -latest -products * -property installationPath }
+          $default = "$installation\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt"
+          if (-not $installation -or -not (Test-Path -LiteralPath $default)) { throw "no MSVC tools version under $installation" }
+          $version = (Get-Content -LiteralPath $default).Trim()
+          Add-Content $env:GITHUB_OUTPUT "version=$version"
+          Write-Host "MSVC toolset $version"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: inputs.test-build
         with:
           workspaces: source -> target
-          key: test-build
+          key: test-build-msvc-${{ steps.msvc.outputs.version }}
           cache-on-failure: true
       - name: Install the Vulkan SDK
         if: env.HEX_WINDOWS_ARCH == 'x86_64'
