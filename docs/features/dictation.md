@@ -2422,8 +2422,8 @@ its own device regardless. The memory drop is not yet measured on a real
 Windows machine (#1431).
 
 On Windows every overlay, the HUD included, waits for room in its swap chain
-before it presents, as a window does: Rune #985 holds the frame's slot and
-skips the frame until the chain has room, which bounds the frames in flight.
+before it presents, as a window does: Rune #985 defers the frame until the
+chain has room, then draws it, which bounds the frames in flight.
 Before it, a moving HUD drew, submitted and presented as fast as the loop
 turned, and the swap chain's queue of presented but unretired frames grew,
 with whatever each queued frame held: memory grew by about 100 MB/s to 5+ GB
