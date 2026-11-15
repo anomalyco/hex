@@ -28,7 +28,8 @@
 //! mid-recording shows or hides it within a second.
 //! With Labs › Movable meeting capsules on, the panel capsules (offer,
 //! reminder, call ended, ready, recording automatically) show in that same
-//! saved corner and drag the same way; off, they stay in the top right.
+//! saved corner and drag the same way. The finished meeting uses its recording's
+//! corner even with the lab off; the other panels then stay in the top right.
 //!
 //! On a Linux Wayland compositor without layer-shell (GNOME) the capsules
 //! float on XWayland only with Labs › Floating meeting capsules on GNOME
@@ -177,6 +178,8 @@ struct PillModel {
     call_ended: bool,
     /// The recording the pill shows now.
     shown: Option<String>,
+    /// Where this recording was last shown, kept through transcription for its summary.
+    last_anchor: Option<(String, MeetingIndicatorCorner)>,
 }
 
 impl PillModel {
@@ -373,6 +376,18 @@ impl Capsule {
         self.kind = None;
         if let Some(hide) = &self.hide {
             hide();
+        }
+    }
+
+    /// Notes update an existing summary; they never present one.
+    fn refresh_ready(&mut self, manifest: Box<MeetingManifest>) {
+        if let Some(Kind::Ready(ready)) = &mut self.kind
+            && ready.id == manifest.id
+        {
+            *ready = manifest;
+            if let Some(resize) = &self.resize {
+                resize(ready_window_size(ready));
+            }
         }
     }
 
@@ -697,6 +712,7 @@ impl Pill {
         }
         model.shown = Some(id.clone());
         let corner = crate::app_settings::meeting_indicator_corner();
+        model.last_anchor = Some((id.clone(), corner));
         place_capsule(&self.handle, corner, 0.0, 0.0);
         // Windows: a shown pill starts at rest.
         #[cfg(target_os = "windows")]
@@ -854,6 +870,19 @@ impl MeetingCapsules {
             model: Arc::default(),
         };
         let kept = pill.clone();
+        let anchors = pill.model.clone();
+        pill.handle.update(move |capsule, _| {
+            capsule.save_corner = Arc::new(move |corner| {
+                if let Some((_, at)) = &mut anchors
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .last_anchor
+                {
+                    *at = corner;
+                }
+                save_corner(corner);
+            });
+        });
         panel.update(move |capsule, _| {
             capsule.keep_recording = Some(Arc::new(move || kept.keep_recording()));
         });
@@ -950,16 +979,8 @@ impl MeetingCapsules {
             }
             ControllerEvent::NotesFinished(manifest) => {
                 let manifest = manifest.clone();
-                let panel = self.panel.clone();
-                self.panel.update(move |capsule, _| {
-                    if let Some(Kind::Ready(ready)) = &mut capsule.kind
-                        && ready.id == manifest.id
-                    {
-                        *ready = manifest;
-                        // The summary may have arrived or gone.
-                        panel.resize(ready_window_size(ready));
-                    }
-                });
+                self.panel
+                    .update(move |capsule, _| capsule.refresh_ready(manifest));
             }
             ControllerEvent::Retitled { .. }
             | ControllerEvent::SourceWarning { .. }
@@ -973,14 +994,13 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
-        // With Labs › Movable meeting capsules the panel shows in the saved
-        // capsule corner; otherwise in the top right, as it always has.
         let movable = crate::labs::movable_meeting_capsules();
-        let corner = if movable {
-            crate::app_settings::meeting_indicator_corner()
-        } else {
-            MeetingIndicatorCorner::TopRight
-        };
+        let corner = panel::show_corner(
+            &kind,
+            movable,
+            self.pill.lock().last_anchor.as_ref(),
+            crate::app_settings::meeting_indicator_corner,
+        );
         place_capsule(&self.panel, corner, 0.0, 0.0);
         self.panel.resize(match &kind {
             Kind::Ready(manifest) => ready_window_size(manifest),
@@ -1113,9 +1133,10 @@ fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
 }
 
 fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
-    // Only the recording overlay stays dark. Offers, reminders and results
+    // Recording and its summary stay dark. Offers and reminders
     // still belong to the host appearance.
-    let dark = matches!(capsule.kind, Some(Kind::Recording(_))) || cx.system_dark();
+    let dark =
+        matches!(capsule.kind, Some(Kind::Recording(_) | Kind::Ready(_))) || cx.system_dark();
     let p = Paint::new(dark, cx.env().scale);
     let Some(kind) = &capsule.kind else {
         return row().key("empty");
@@ -2172,6 +2193,78 @@ mod tests {
         );
         assert!(commands.try_recv().is_err());
         assert!(rt.state.kind.is_some());
+    }
+
+    #[test]
+    fn summary_inherits_the_recordings_outer_anchor_without_the_drag_lab() {
+        use MeetingIndicatorCorner::{BottomLeft, TopRight};
+        let anchor = ("ready-snap".to_owned(), BottomLeft);
+        let kind = ready_summarized();
+        let corner = panel::show_corner(&kind, false, Some(&anchor), || TopRight);
+        assert_eq!(corner, BottomLeft);
+        assert_eq!(
+            panel::show_corner(&call_ended(), false, Some(&anchor), || BottomLeft),
+            TopRight
+        );
+        let (mut live, _, _) = runtime(live_recording("ready-snap"), false, false, RECORDING);
+        live.update(|c, tx| {
+            if let Some(Kind::Recording(shown)) = &mut c.kind {
+                shown.started = Instant::now() - Duration::from_secs(536);
+            }
+            c.live.entries = call();
+            c.corner = BottomLeft;
+            c.hovered = true;
+            fixture_scope(c);
+            tx.instant();
+        });
+        let size = ready_size_of(&kind);
+        let (mut ready, commands, _) = runtime(kind, false, false, size);
+        ready.update(move |c, tx| {
+            c.corner = corner;
+            c.live.entries = call();
+            tx.instant();
+        });
+        let outer = |rt: &mut Runtime<Capsule>, window: (f32, f32)| {
+            rt.settle_all();
+            rt.frame(0.0);
+            let [x, y, _, h] = rt
+                .elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some("pill"))
+                .unwrap()
+                .rect;
+            // Both windows target the primary screen. Convert their local
+            // bottom-left point to screen-edge distances, including the dock margin.
+            let (edge, margin, align, inset) = corner_placement(rt.state.corner, 0.0, 0.0);
+            assert!(matches!((edge, align), (ScreenEdge::Bottom, Align::Start)));
+            (x + inset, window.1 - (y + h) + margin)
+        };
+        assert_eq!(outer(&mut live, RECORDING), outer(&mut ready, size));
+        let (x, y) = ready.find("dismiss").unwrap();
+        ready.pointer_move(x, y);
+        ready.frame(0.0);
+        assert!(ready.state.hovered);
+        if let Some(dir) = std::env::var_os("HEX_SUMMARY_SNAPS") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
+            for (name, rt, size) in [
+                ("recording", &mut live, RECORDING),
+                ("summary", &mut ready, size),
+            ] {
+                rt.transparent = true;
+                let (w, h, pixels) = render(&gpu, rt, size);
+                rune::render::write_png(&dir.join(format!("{name}.png")), w, h, &pixels).unwrap();
+            }
+        }
+        tap(&mut ready, "dismiss");
+        assert!(ready.state.kind.is_none());
+        assert!(ready.copy_request.is_none() && commands.try_recv().is_err());
+        let Kind::Ready(notes) = ready_summarized() else {
+            unreachable!()
+        };
+        ready.update(move |c, _| c.refresh_ready(notes));
+        assert!(ready.state.kind.is_none());
     }
 
     #[test]

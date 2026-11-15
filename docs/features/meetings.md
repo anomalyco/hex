@@ -772,7 +772,8 @@ Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.pan
      │   capsule moves there too
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
-  -> Off: top right below the menu bar, no drag, exactly as before
+  -> Off: no drag; the finished meeting still uses its recording's corner.
+     Other panel capsules stay top right below the menu bar
   Checks: a_released_panel_snaps_by_its_own_size,
   each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
   (rune_ui/meeting_capsules.rs); not observed on a real Mac. Every panel
@@ -1341,6 +1342,10 @@ Finished meeting panel (15 s, kept open while the pointer is over it; it
     closes when the pointer leaves after that) -> title · length, the
     summary while notes are on (or "Writing a title and summary with Apple
     Intelligence…", or "Markdown not saved: …"), then the recording's copies
+    ├── Dark in either appearance, at the recording pill’s last outer corner
+    │   (the saved corner if there was no pill for this meeting)
+    ├── × (Close) -> hide immediately, even under the pointer. Late notes do not
+    │   reopen it; the saved meeting and transcript remain in Meetings
     ├── Copy new -> the turns not yet copied or pasted, from the final
     │   transcript read off the main thread after the panel shows
     ├── Copy all -> Markdown, or speaker turns as a fallback

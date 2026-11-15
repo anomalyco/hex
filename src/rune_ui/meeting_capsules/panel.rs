@@ -229,6 +229,26 @@ fn panel_body(p: Paint, title: &str) -> El {
         .hit()
 }
 
+/// The finished meeting stays where its pill was; only other panels' placement follows the lab.
+pub(super) fn show_corner(
+    kind: &Kind,
+    movable: bool,
+    last: Option<&(String, MeetingIndicatorCorner)>,
+    saved: impl FnOnce() -> MeetingIndicatorCorner,
+) -> MeetingIndicatorCorner {
+    if let Kind::Ready(manifest) = kind {
+        return last
+            .filter(|(id, _)| *id == manifest.id)
+            .map(|(_, corner)| *corner)
+            .unwrap_or_else(saved);
+    }
+    if movable {
+        saved()
+    } else {
+        MeetingIndicatorCorner::TopRight
+    }
+}
+
 /// Places a capsule's body in its window's corner.
 fn in_corner(capsule: &Capsule, body: El) -> El {
     let column = col()
@@ -257,7 +277,7 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
         .key("header")
         .h(HEADER_HEIGHT)
         .pl(PANEL_PAD + ROW_PX)
-        .pr(REST_PX)
+        .pr(PANEL_PAD)
         .gap(8.0)
         .center_y()
         .child(
@@ -275,7 +295,8 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
                 .key("duration")
                 .font(timer_style())
                 .color(p.muted())
-        }));
+        }))
+        .child(dismiss_button(p));
     let summary = ready_summary(manifest).map(|(summary, written)| {
         text(summary)
             .key("summary")

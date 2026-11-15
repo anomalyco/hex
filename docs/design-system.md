@@ -13,7 +13,7 @@ language:
   `@opencode/ui`'s tokens as data. Hex follows the system appearance, so every
   view works in light and dark; Labs › Appearance can force the main window
   light or dark. The dictation HUD (including its previews) and the meeting
-  recording pill (including its expanded controls) always draw dark. Other
+  recording pill (including its expanded controls and finished summary) always draw dark. Other
   overlays follow the OS.
 
 The window follows OpenCode Desktop's layout: a deep-background sidebar and a
