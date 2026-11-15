@@ -11,14 +11,15 @@ use super::super::{ShortcutTarget, Ui};
 use crate::desktop::file_dialog::{Choice, Dialog, Pending, Target};
 use crate::desktop::i18n::{tr, tr_named};
 
-/// The saves-folder chooser's answer, polled from the window: the folder
-/// picked becomes `screenshots.folder` at once, and a chooser that couldn't
-/// open says why under the row.
+/// The saves-folder chooser's answer, polled from the window: a picked
+/// folder is saved as `screenshots.folder` and applied live, and a chooser,
+/// reveal, or settings save that fails says why under the row.
 #[derive(Default)]
 pub(in crate::rune_ui) struct FolderChoice {
     /// The open dialog, while one is.
     pending: Option<Pending>,
-    /// Why the last chooser failed, until another is opened.
+    /// Why the last chooser, reveal, or settings save failed, until another
+    /// is tried.
     error: Option<String>,
 }
 
@@ -54,7 +55,7 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
                     "reveal-screenshot-folder",
                     tr("Reveal"),
                     ButtonKind::Secondary,
-                    move |_, _| reveal_folder(&reveal_at),
+                    move |ui: &mut Ui, _| reveal_folder(ui, &reveal_at),
                 ))
                 .child(button(
                     p,
@@ -66,12 +67,14 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
         ));
     if let Some(error) = &ui.screenshot_folder.error {
         body = body.child(note("screenshot-folder-error", error, p.danger()));
-    } else if let Some(error) = crate::screenshots::save_error() {
+    } else if let Some((failed, error)) = crate::screenshots::save_error() {
+        // The folder the save meant, which the setting may have left since.
+        let failed = folder_label(&failed);
         body = body.child(note(
             "screenshot-save-error",
             &tr_named(
                 "Couldn't save to {folder}: {error}",
-                &[("folder", label.as_str()), ("error", error.as_str())],
+                &[("folder", failed.as_str()), ("error", error.as_str())],
             ),
             p.danger(),
         ));
@@ -138,16 +141,21 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui) -> bool {
     apply_chosen_folder(ui, choice)
 }
 
-/// What a chooser's answer does to the card and its settings.
+/// What a chooser's answer does to the card and its settings: only a saved
+/// pick counts, so a failed save leaves the old folder and its note.
 pub(in crate::rune_ui) fn apply_chosen_folder(ui: &mut Ui, choice: Choice) -> bool {
     match choice {
         Ok(Some(folder)) => {
-            ui.screenshot_folder.error = None;
-            // A save that failed into the old folder doesn't speak for
-            // the new one.
-            crate::screenshots::clear_save_error();
-            ui.update(|settings| settings.screenshots.folder = Some(folder));
-            true
+            let saved = ui.update(|settings| settings.screenshots.folder = Some(folder));
+            if saved {
+                ui.screenshot_folder.error = None;
+                // A save that failed into the old folder doesn't speak for
+                // the new one.
+                crate::screenshots::clear_save_error();
+            } else {
+                ui.screenshot_folder.error = ui.error.clone();
+            }
+            saved
         }
         Ok(None) => false,
         Err(error) => {
@@ -157,13 +165,19 @@ pub(in crate::rune_ui) fn apply_chosen_folder(ui: &mut Ui, choice: Choice) -> bo
     }
 }
 
-/// Shows the saves folder in Finder, making it first as a save would.
-fn reveal_folder(folder: &std::path::Path) {
-    if let Err(error) = std::fs::create_dir_all(folder) {
-        tracing::warn!(%error, folder = %folder.display(), "could not make the screenshots folder");
-        return;
+/// Shows the saves folder in Finder, making it first as a save would; a
+/// failure reads on the card, as Meetings' and Annotate's folders' do.
+fn reveal_folder(ui: &mut Ui, folder: &std::path::Path) {
+    match std::fs::create_dir_all(folder) {
+        Ok(()) => {
+            crate::meeting::open_folder(folder);
+            ui.screenshot_folder.error = None;
+        }
+        Err(error) => {
+            tracing::warn!(%error, folder = %folder.display(), "could not make the screenshots folder");
+            ui.screenshot_folder.error = Some(error.to_string());
+        }
     }
-    crate::meeting::open_folder(folder);
 }
 
 /// The record shortcut, unbound until recorded, or why it can't record:

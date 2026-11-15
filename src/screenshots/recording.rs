@@ -40,7 +40,7 @@ fn show(bundle: &Path) -> anyhow::Result<()> {
         }
         Err(error) => {
             tracing::warn!(%error, folder = %folder.display(), "could not save the recording");
-            super::record_save_error(&error);
+            super::record_save_error(&folder, &error);
             crate::feedback::play(crate::feedback::Tone::Error);
             recorded
         }

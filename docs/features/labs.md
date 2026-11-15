@@ -2385,8 +2385,9 @@ shortcut uses) opens a second copy of Annotate's capture picker
                       the right edge on the HUD's spring; any card leaves past the right edge
                       (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
                       a dictation while cards show -> pastes as usual, being no shot's talk-over
-                      a failure -> the error tone and, for a failed save, the card's name and why;
-                                   there is no success sound (Hex has no shutter cue)
+                      a failure -> the error tone and, for a failed save, the folder and why
+                                   on Labs › Screenshots' card; there is no success sound
+                                   (Hex has no shutter cue)
 Another app holds Secure Event Input -> ⌘⇧4 and the record shortcut still open the picker
                   (Carbon hotkeys while it lasts; see dictation.md's Shortcuts Under Secure Input);
                   Space and Escape don't arrive, so window mode and Escape don't work then
@@ -2397,24 +2398,35 @@ folder in full with the home folder as `~` ("~/Desktop" until another is
 chosen), and its two Secondary buttons are Reveal, which opens that folder
 in Finder (making it first, as a save would), and the folder itself, which
 opens the one native folder chooser (`desktop/file_dialog`, the seam Labs ›
-Import audio uses) at the folder in use. A pick is saved as
-`screenshots.folder` at once and applies live to the next shot or
-recording; a cancel changes nothing, and a click while a chooser is open
-opens no second one. A chooser that couldn't open reads as a danger note
-under the row, and so does the last save that failed
-("Couldn't save to ~/…: <why>"): `screenshots::save_error` records it when a
-shot or a recording can't be written, bounded at 300 characters, and it is
-cleared when a later save works or another folder is chosen. Choosing a
-folder never moves a shot already saved, and it never changes Annotate's
-captures folder.
+Import audio uses) at the folder in use. A pick counts only once
+`screenshots.folder` is saved, applies live to the next shot or recording,
+and clears the last save's note; a failed settings save reads as a danger
+note instead. A cancel changes nothing, and a click while a chooser is
+open opens no second one.
+
+A danger note under the row says why: the chooser or Reveal couldn't make
+the folder, or the last save failed ("Couldn't save to ~/…: <why>"). The
+note keeps the folder that failed with the error
+(`screenshots::save_error` is an `Option<(PathBuf, String)>`, bounded at
+300 characters per message), so a folder changed since through
+`hex settings` or `settings.json` never makes the note name the wrong one.
+`take` records a shot that can't be written, a recording's save records
+its own, and the editor's Save records a shot's PNG or a trimmed
+recording's movie the same way; any later save that works clears it,
+including one whose clipboard copy then fails. Nothing wakes the window
+when a background save records its failure: the visible window's 250 ms
+tick picks the note up, so no extra wake is kept.
 
 ```ts
 Saves to  -> the folder, home-shortened          Reveal  -> Finder on it, made first
-          -> a chosen folder -> screenshots.folder (settings.json, live at once)
+          -> a chosen folder -> screenshots.folder (settings.json, live at once) -> clears the note
+          -> a settings save that fails -> its reason under the row, old folder kept
           -> a cancel        -> nothing
-          -> a failed chooser, or a failed save -> one danger note under the row
+          -> a failed chooser or Reveal, or a failed save (the folder it meant and why)
+             -> one danger note under the row, until a save works or a pick is saved
 // check: a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed
-//        (tests/panes.rs): a pick saves and shows, a cancel leaves it, a failure says why
+//        (tests/panes.rs): a pick saves and shows, a cancel leaves it, a chooser failure
+//        says why, a save failure names the folder it failed into, and a pick clears it
 ```
 
 The cards stack in the corner as CleanShot's Quick Access Overlay does

@@ -41,7 +41,8 @@ pub(crate) struct Dialog {
 pub(crate) enum Target {
     /// One existing file.
     File(Vec<Filter>),
-    /// Only the macOS meetings folder asks for one yet.
+    /// A folder: the macOS meetings and annotations folders, and Labs ›
+    /// Screenshots' saves folder.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Folder,
 }
