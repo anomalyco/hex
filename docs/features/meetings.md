@@ -720,11 +720,12 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
-     ├── At rest: a steady recording dot, two dotted traces and elapsed time
-     │   ├── Top: microphone level; bottom: system audio level, not individual
-     │   │   speakers. Each keeps 14 readings at 50 ms; a missing buffer or one
-     │   │   over 300 ms old adds zero. Under Reduce Motion two stationary
-     │   │   lines change strength instead. Silence never hides the dot
+     ├── At rest: a steady recording dot, Dot scope and elapsed time
+     │   ├── The dictation HUD's listening field follows the louder fresh RMS
+     │   │   from microphone or system audio (not individual speakers). Missing
+     │   │   buffers and those over 300 ms old read as zero. In silence the
+     │   │   beam fades to an unlit grid; the recording dot stays visible.
+     │   │   Reduce Motion holds the HUD's braid still
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
      ├── Hover -> the pill reveals a panel: Stop opposite the meter and time

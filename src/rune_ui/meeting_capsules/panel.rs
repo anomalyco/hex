@@ -1,4 +1,4 @@
-//! The recording pill and the ready panel: the two traces and timer at
+//! The recording pill and the ready panel: the listening field and timer at
 //! rest, then Stop and the three copies, and the finished meeting's title
 //! and summary over the same copies.
 
@@ -6,66 +6,6 @@ use rune::{Cursor, El, Icon, TextStyle, Tx, col, el, icon, row, text};
 use rune_theme_opencode::icons;
 
 use super::*;
-
-// Dot scope's dotted ink, but the two traces here are measured envelopes:
-// the mic above and system output below. There is no oscillator or idle loop.
-const SAMPLES: usize = 14;
-const STEP: f32 = 2.25;
-const DOT: f32 = 1.75;
-const SCOPE_WIDTH: f32 = STEP * (SAMPLES - 1) as f32 + DOT;
-
-#[derive(Default)]
-pub(super) struct History([[f32; 2]; SAMPLES]);
-
-impl History {
-    pub(super) fn push(&mut self, levels: [f32; 2]) {
-        self.0.rotate_left(1);
-        self.0[SAMPLES - 1] = levels;
-    }
-}
-
-#[test]
-fn track_history_keeps_both_sources_in_time_order() {
-    let mut history = History::default();
-    for pair in [[0.9, 0.0], [0.0, 0.3], [0.5, 0.9], [0.0; 2]] {
-        history.push(pair);
-    }
-    assert_eq!(
-        history.0[SAMPLES - 4..],
-        [[0.9, 0.0], [0.0, 0.3], [0.5, 0.9], [0.0; 2]]
-    );
-    for _ in 0..SAMPLES {
-        history.push([0.0; 2]);
-    }
-    assert_eq!(history.0, [[0.0; 2]; SAMPLES]);
-}
-
-#[derive(Clone)]
-pub(super) struct Scope {
-    dots: [[rune::Live<[f32; 2]>; SAMPLES]; 2],
-    strength: [rune::Live<f32>; 2],
-}
-
-impl Default for Scope {
-    fn default() -> Self {
-        Self {
-            dots: std::array::from_fn(|_| std::array::from_fn(|_| rune::Live::new([0.0; 2]))),
-            strength: std::array::from_fn(|_| rune::Live::new(0.25)),
-        }
-    }
-}
-
-impl Scope {
-    pub(super) fn show(&self, history: &History) {
-        for (track, dots) in self.dots.iter().enumerate() {
-            let travel = if track == 0 { -7.0 } else { 7.0 };
-            for (dot, sample) in dots.iter().zip(history.0.iter()) {
-                dot.set([0.0, travel * sample[track]]);
-            }
-            self.strength[track].set(0.25 + 0.75 * history.0[SAMPLES - 1][track]);
-        }
-    }
-}
 
 /// What a recording says beside its meter, in place of its title.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,33 +68,6 @@ pub(super) fn ready_summary(manifest: &MeetingManifest) -> Option<(String, bool)
 /// The timer: elapsed while recording, the length once finished.
 fn timer_style() -> TextStyle {
     TextStyle::new(14.0, 600.0).mono().lh(18.0)
-}
-
-fn scope_view(p: Paint, scope: &Scope, reduced: bool) -> El {
-    let mut plate = el().key("scope").size(SCOPE_WIDTH, 20.0).a11y_hidden();
-    for track in 0..2 {
-        let ink = if track == 0 { p.text() } else { p.muted() };
-        let y = if track == 0 { 7.5 } else { 10.75 };
-        if reduced {
-            plate = plate.child(
-                el().absolute(0.0, y)
-                    .size(SCOPE_WIDTH, DOT)
-                    .radius(DOT / 2.0)
-                    .fill(ink)
-                    .live_opacity(&scope.strength[track]),
-            );
-        } else {
-            plate = plate.children(scope.dots[track].iter().enumerate().map(|(i, dot)| {
-                el().key(format!("trace-{track}-{i}"))
-                    .absolute(STEP * i as f32, y)
-                    .size(DOT, DOT)
-                    .radius(DOT / 2.0)
-                    .fill(ink)
-                    .live_offset(dot.smooth(Spring::new(0.12, 0.0)))
-            }));
-        }
-    }
-    plate
 }
 
 /// "4 min new", "Up to date", "Transcribing…", or ✓ Copied: what Copy new
@@ -395,7 +308,7 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
 /// The recording: at rest only its status, levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
-pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, reduced: bool) -> El {
+pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let open = capsule.hovered;
     let notice = recording_notice(shown);
     let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
@@ -414,7 +327,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording, reduced:
         .gap(6.0)
         .center_y()
         .child(status_dot(p.danger()).size(6.0, 6.0))
-        .child(scope_view(p, &capsule.scope, reduced))
+        .child(waveform::slot())
         .child(
             text(elapsed)
                 .key("elapsed")

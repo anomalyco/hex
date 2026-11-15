@@ -19,7 +19,7 @@
 //! under the finished meeting's title and summary.
 //!
 //! The recording capsule rests as a small pill in its corner, with a recording
-//! dot, the two sources' level histories and a timer. It opens into Stop and its
+//! dot, the dictation HUD's listening field and a timer. It opens into Stop and its
 //! copies while the pointer is over it. Dragging it moves the window; on
 //! release it snaps to the nearest corner, which is saved.
 //! It is a function of the controller's current recording and the live
@@ -56,10 +56,9 @@ use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod panel;
+mod waveform;
 
-use panel::{
-    History, Scope, agent_prompt, hex_command, ready, ready_summary, recording, recording_notice,
-};
+use panel::{agent_prompt, hex_command, ready, ready_summary, recording, recording_notice};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -79,7 +78,7 @@ const REMINDER_TICK: Duration = Duration::from_secs(5);
 const CAPSULE_INSET: f32 = 4.0;
 /// Same header at rest and open so the recording dot and timer stay put.
 const REST_HEIGHT: f32 = HEADER_HEIGHT;
-const REST_WIDTH: f32 = 116.0;
+const REST_WIDTH: f32 = 160.0;
 /// The resting pill's sides, and the open panel header's right side, so the
 /// timer stays put as the pill opens.
 const REST_PX: f32 = 11.0;
@@ -118,7 +117,6 @@ const RECORDING_WINDOW: (f32, f32) = (
 /// The clip opens under the pointer and retargets when it leaves.
 const RECORDING_OPEN: Spring = Spring::new(0.42, 0.0);
 const RECORDING_CLOSE: Spring = Spring::new(0.38, 0.0);
-const LEVEL_TICK: Duration = Duration::from_millis(50);
 /// How long a copy says "Copied".
 const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
 const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -271,7 +269,7 @@ struct Capsule {
     /// its actions.
     more_open: bool,
     live: Live,
-    scope: Scope,
+    waveform: Option<Box<waveform::Listening>>,
     commands: SyncSender<ControllerCommand>,
     hide: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The call-ended prompt's Keep recording brings the recording capsule
@@ -653,8 +651,6 @@ pub(crate) struct MeetingCapsules {
 struct Pill {
     handle: OverlayHandle<Capsule>,
     model: Arc<Mutex<PillModel>>,
-    /// The same scope the view draws.
-    scope: Scope,
 }
 
 impl Pill {
@@ -708,9 +704,10 @@ impl Pill {
             false,
             recording_notice(&recording).is_some(),
         ));
-        self.scope.show(&History::default());
         self.handle.update(move |capsule, tx| {
             capsule.kind = Some(Kind::Recording(recording));
+            capsule.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
+            tx.wake_after(Duration::ZERO);
             capsule.live = Live::default();
             capsule.hovered = false;
             capsule.corner = corner;
@@ -731,23 +728,8 @@ impl Pill {
 
     /// While recording `id`: each second, reconciles the pill (the elapsed
     /// time, the indicator setting) and, while it shows, reads the in-call
-    /// transcript here rather than on the main thread; and every
-    /// [`LEVEL_TICK`], adds a reading from each track to its history.
+    /// transcript here rather than on the main thread.
     fn tick(&self, id: String) {
-        let scope = self.clone();
-        let scope_id = id.clone();
-        std::thread::spawn(move || {
-            let mut history = History::default();
-            while scope.records(&scope_id) {
-                std::thread::sleep(LEVEL_TICK);
-                if scope.lock().shown.as_deref() != Some(scope_id.as_str()) {
-                    history = History::default();
-                    continue;
-                }
-                history.push(meeting::track_levels());
-                scope.scope.show(&history);
-            }
-        });
         let pill = self.clone();
         std::thread::spawn(move || {
             let mut reader = meeting::TranscriptReader::default();
@@ -788,24 +770,31 @@ impl MeetingCapsules {
     ) -> Self {
         let choose: Choose = Arc::new(choose);
         let save_corner: SaveCorner = Arc::new(save_corner);
-        let scope = Scope::default();
-        let overlay = |app: &mut rune::App<S>, name, size: (f32, f32)| {
+        let overlay = |app: &mut rune::App<S>, name, size: (f32, f32), recording: bool| {
+            let spec = OverlaySpec {
+                name,
+                size,
+                edge: ScreenEdge::Top,
+                margin: WINDOW_MARGIN + MENU_BAR,
+                align: Align::End,
+                inset: WINDOW_MARGIN,
+                interactive: true,
+                view,
+            }
+            .options(Default::default());
+            let spec = if recording {
+                spec.poll(waveform::poll)
+                    .compositor(waveform::Ink::default())
+            } else {
+                spec
+            };
             let handle = app.overlay(
-                OverlaySpec {
-                    name,
-                    size,
-                    edge: ScreenEdge::Top,
-                    margin: WINDOW_MARGIN + MENU_BAR,
-                    align: Align::End,
-                    inset: WINDOW_MARGIN,
-                    interactive: true,
-                    view,
-                },
+                spec,
                 Capsule {
                     kind: None,
                     more_open: false,
                     live: Live::default(),
-                    scope: scope.clone(),
+                    waveform: None,
                     commands: commands.clone(),
                     hide: None,
                     keep_recording: None,
@@ -853,15 +842,16 @@ impl MeetingCapsules {
             app,
             "Hex meeting",
             (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+            false,
         );
         let pill = Pill {
             handle: overlay(
                 app,
                 "Hex meeting recording",
                 recording_window_size(false, false),
+                true,
             ),
             model: Arc::default(),
-            scope,
         };
         let kept = pill.clone();
         panel.update(move |capsule, _| {
@@ -1128,7 +1118,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         return row().key("empty");
     };
     let (dot, title, subtitle, actions) = match kind {
-        Kind::Recording(shown) => return recording(p, capsule, shown, cx.is_reduced_motion()),
+        Kind::Recording(shown) => return recording(p, capsule, shown),
         Kind::AutoStarted { title } => (
             p.danger(),
             tr("Recording automatically").to_owned(),
@@ -1528,7 +1518,7 @@ mod tests {
             kind: Some(kind),
             more_open,
             live: Live::default(),
-            scope: Scope::default(),
+            waveform: None,
             commands,
             hide: None,
             keep_recording: None,
@@ -2593,6 +2583,25 @@ mod tests {
         let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
         let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
         let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
+        if matches!(rt.state.kind, Some(Kind::Recording(_))) {
+            if rt.state.waveform.is_none() {
+                let now = Instant::now();
+                let mut wave = waveform::Listening::new(now);
+                wave.sample(now, [0.0; 2]);
+                rt.state.waveform = Some(Box::new(wave));
+            }
+            return (
+                w,
+                h,
+                paint_recording(
+                    gpu,
+                    &mut renderer,
+                    &target,
+                    rt,
+                    &mut waveform::Ink::default(),
+                ),
+            );
+        }
         renderer.prepare(
             &gpu.device,
             &gpu.queue,

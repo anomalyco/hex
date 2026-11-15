@@ -1364,9 +1364,31 @@ impl Painter {
         frame: &DotFrame,
         layout: Layout,
         target: Target,
+        write: impl FnMut(&wgpu::Buffer, &[u8]),
+    ) -> DotUniforms {
+        self.upload(frame, DotUniforms::new(frame, layout, target), write)
+    }
+
+    /// The listening field inside a surface that already supplies its own chrome.
+    pub(crate) fn write_field(
+        &self,
+        frame: &DotFrame,
+        target: Target,
+        write: impl FnMut(&wgpu::Buffer, &[u8]),
+    ) -> DotUniforms {
+        let mut uniforms = DotUniforms::new(frame, Layout::default(), target);
+        uniforms.plate[3] = 0.0;
+        uniforms.rim[3] = 0.0;
+        uniforms.shadow[3] = 0.0;
+        self.upload(frame, uniforms, write)
+    }
+
+    fn upload(
+        &self,
+        frame: &DotFrame,
+        uniforms: DotUniforms,
         mut write: impl FnMut(&wgpu::Buffer, &[u8]),
     ) -> DotUniforms {
-        let uniforms = DotUniforms::new(frame, layout, target);
         if let Some(buffer) = &self.dot_uniforms {
             write(buffer, bytes(&uniforms));
         }
@@ -1375,7 +1397,7 @@ impl Painter {
     }
 
     /// Clears `view` and draws Dot scope into it.
-    fn draw(
+    pub(crate) fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,

@@ -80,21 +80,15 @@ fn level_slot(source: MeetingSource) -> usize {
     }
 }
 
-/// Maps a buffer's RMS from -50 to -10 dBFS onto 0 to 1.
-fn loudness(samples: &[f32]) -> f32 {
-    let power = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
-    let db = 10.0 * power.max(1e-10).log10();
-    ((db + 50.0) / 40.0).clamp(0.0, 1.0)
-}
-
 fn record_level(source: MeetingSource, samples: &[f32]) {
     let slot = level_slot(source);
-    LEVELS[slot].store(loudness(samples).to_bits(), Ordering::Relaxed);
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    LEVELS[slot].store(rms.to_bits(), Ordering::Relaxed);
     let now = level_epoch().elapsed().as_millis() as u64;
     LEVEL_AT_MS[slot].store(now.max(1), Ordering::Relaxed);
 }
 
-/// Latest microphone and system levels, in that order. These are sources, not speakers.
+/// Latest microphone and system RMS, in that order, in the same units Dot scope takes.
 pub fn track_levels() -> [f32; 2] {
     let now = level_epoch().elapsed().as_millis() as u64;
     std::array::from_fn(|slot| {

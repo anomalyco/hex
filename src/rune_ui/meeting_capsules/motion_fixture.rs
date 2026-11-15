@@ -5,12 +5,12 @@ fn fixture_levels(frame: usize) -> [f32; 2] {
     let phrase = |speed: f32, beat: f32| ((t * speed).sin().abs() * (t * beat).cos().abs()).sqrt();
     [
         if (18..108).contains(&frame) || (216..300).contains(&frame) {
-            phrase(13.0, 2.8)
+            0.12 * phrase(13.0, 2.8).powi(3)
         } else {
             0.0
         },
         if (120..300).contains(&frame) {
-            phrase(6.3, 4.1)
+            0.09 * phrase(6.3, 4.1).powi(3)
         } else {
             0.0
         },
@@ -43,7 +43,23 @@ fn recording_motion_frames() {
         rt.frame(0.0);
         let mut renderer = offscreen::renderer(&gpu.device);
         let target = offscreen::target(&gpu.device, w, h);
-        let mut history = History::default();
+        use crate::{
+            dictation::indicator::{DictationIndicatorEvent as Event, IndicatorModel},
+            rune_hud::{Painter, Target, dot_scope::Tuning, hud_placement::Layout},
+        };
+        let start = Instant::now();
+        let mut hud = IndicatorModel::new(Tuning::default(), start);
+        hud.handle(Event::Started, start, false);
+        rt.state.waveform = Some(Box::new(waveform::Listening::new(start)));
+        let mut ink = waveform::Ink::default();
+        let hud_painter = Painter::new(&gpu.device, offscreen::format());
+        let hud_target = offscreen::target(&gpu.device, w, h);
+        let target_rect = Target {
+            viewport: [0., 0., w as f32, h as f32],
+            clip: [0, 0, w, h],
+            scale: 2.,
+            dark,
+        };
         let mut trace = String::from("frame,hovered,key,x,y,w,h\n");
         for frame in 0..366 {
             // Put the fixture on the same second at each event, independent of GPU speed.
@@ -53,10 +69,19 @@ fn recording_motion_frames() {
             if frame % 60 == 0 {
                 rt.update(|_, _| {});
             }
-            if frame % 3 == 0 {
-                history.push(fixture_levels(frame));
-                rt.state.scope.show(&history);
-            }
+            let now = start + Duration::from_secs_f64(frame as f64 / 60.0);
+            let levels = fixture_levels(frame);
+            let rms = levels[0].max(levels[1]);
+            hud.handle(
+                Event::Meter {
+                    average: rms,
+                    peak: rms,
+                },
+                now,
+                false,
+            );
+            let hud_frame = hud.step(now, 1. / 60., false);
+            rt.state.waveform.as_mut().unwrap().sample(now, levels);
             match frame {
                 66 | 83 => rt.pointer_move(RECORDING.0 - 22.0, 22.0),
                 72 | 249 => rt.pointer_leave(),
@@ -70,7 +95,22 @@ fn recording_motion_frames() {
                 }
             }
             if dark || matches!(frame, 54 | 180) {
-                let rgba = offscreen::paint(&gpu, &mut renderer, &target, &mut rt);
+                let mut encoder = gpu.device.create_command_encoder(&Default::default());
+                let uniforms =
+                    hud_painter.write(&hud_frame, Layout::default(), target_rect, |b, d| {
+                        gpu.queue.write_buffer(b, 0, d)
+                    });
+                hud_painter.draw(&mut encoder, &hud_target.view, &uniforms);
+                hud_target.copy(&mut encoder);
+                gpu.queue.submit([encoder.finish()]);
+                rune::render::write_png(
+                    &dir.join(format!("hud-{frame:03}.png")),
+                    w,
+                    h,
+                    &hud_target.read(&gpu.device),
+                )
+                .unwrap();
+                let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
                 rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &rgba).unwrap();
             }
         }
@@ -79,11 +119,15 @@ fn recording_motion_frames() {
 }
 
 fn fixture_scope(capsule: &mut Capsule) {
-    let mut history = History::default();
-    for frame in (216..258).step_by(3) {
-        history.push(fixture_levels(frame));
+    let start = Instant::now();
+    let mut wave = waveform::Listening::new(start);
+    for frame in 0..=54 {
+        wave.sample(
+            start + Duration::from_secs_f64(frame as f64 / 60.),
+            fixture_levels(frame),
+        );
     }
-    capsule.scope.show(&history);
+    capsule.waveform = Some(Box::new(wave));
 }
 
 #[test]
@@ -131,4 +175,30 @@ fn the_timer_and_saved_corner_hold_through_a_hover_reversal() {
             );
         }
     }
+}
+
+fn paint_recording(
+    gpu: &rune::render::Gpu,
+    ui: &mut rune::render::Renderer,
+    target: &rune::render::Offscreen,
+    rt: &mut Runtime<Capsule>,
+    ink: &mut waveform::Ink,
+) -> Vec<u8> {
+    use rune::compose::{Compositor, Frame};
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    ink.render(&mut Frame {
+        device: &gpu.device,
+        queue: &gpu.queue,
+        encoder: &mut encoder,
+        target: &target.view,
+        format: crate::rune_ui::offscreen::format(),
+        size: (target.width, target.height),
+        dt: 1. / 60.,
+        update_ms: 0.,
+        rt,
+        ui,
+    });
+    target.copy(&mut encoder);
+    gpu.queue.submit([encoder.finish()]);
+    target.read(&gpu.device)
 }
