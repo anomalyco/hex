@@ -2610,7 +2610,6 @@ fn a_lone_lab_card_keeps_half_the_row() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     unfold_labs(&mut rt);
     let mut width = None;
-    let mut lone = false;
     let chips = [
         "chip-all",
         "chip-dictation",
@@ -2632,14 +2631,28 @@ fn a_lone_lab_card_keeps_half_the_row() {
             .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
             .map(|e| e.rect[2])
             .collect();
-        lone |= widths.len() % 2 == 1;
         let width = *width.get_or_insert(widths[0]);
         assert!(
             widths.iter().all(|w| (w - width).abs() < 0.5),
             "{chip}: every card is as wide: {widths:?}"
         );
     }
-    assert!(lone, "some chip leaves a card alone in its row");
+    // A chip's group can come out even as labs are added and removed, so the
+    // lone card is a search that matches exactly one.
+    tap(&mut rt, "chip-all");
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    settle(&mut rt);
+    let lone: Vec<f32> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
+        .map(|e| e.rect[2])
+        .collect();
+    assert_eq!(lone.len(), 1, "the search matches one card: {lone:?}");
+    assert!(
+        (lone[0] - width.expect("a chip shows cards")).abs() < 0.5,
+        "a card alone in its row keeps half the width: {lone:?}"
+    );
 }
 
 #[test]

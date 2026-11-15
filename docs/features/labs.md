@@ -1806,13 +1806,21 @@ Settings › General › Shortcut, press the microphone key  // labs.microphone_
 ├── macOS recorder -> ChordCapture::key_down lets it stand alone like a
 │   function key; `settings::validate` refuses it with any modifiers while the
 │   toggle is off
+├── macOS session tap (microphone-key tap, only while this lab is on)
+│   ├── Toggle on + a Hex shortcut on the key -> press and release are Hex's:
+│   │   fed to the listener like any key, consumed before macOS's Dictation
+│   ├── Toggle on + the window records a shortcut -> press and release are
+│   │   consumed and the press is fed to the window's ChordCapture, so the
+│   │   recorder sees a key its own key events never get
+│   └── Toggle off, Hex paused, or no shortcut on the key -> passed through:
+│       macOS's Dictation and the app keep the key untouched
 ├── hex settings set dictation_hotkey microphone, off -> "the mic key needs
 │   Labs › Microphone key alone: hex labs on microphone-key"
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
     it off -> any macOS shortcut on the microphone key, with or without a
     modifier (Dictation, Paste last, Cancel, Screenshots, capture, and the
     Labs rows), goes back to its default (optional ones unbound), so the
-    listener never registers it
+    listener never registers it; the session tap is removed too
 ```
 
 The key joins F1–F20, the arrows, and the navigation keys, whose always-set
@@ -1826,25 +1834,42 @@ the window's `settings::validate` and in `control/settings.rs`'s `apply`
 ([app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs))
 where settings load and where the toggle turns off; it resets the cancel and
 screenshot shortcuts itself because `reset_shortcuts` doesn't own them. Off,
-Hex is unchanged: any shortcut on the microphone key is refused everywhere and
-a saved one is repaired, as with the section key. macOS may handle the key
-itself before Hex's event tap sees it; if macOS's own Dictation still opens,
-change macOS's dictation shortcut in System Settings › Keyboard › Dictation.
+Hex is unchanged: any shortcut on the microphone key is refused everywhere, a
+saved one is repaired, as with the section key, and no tap is created.
+macOS matches its own Dictation shortcut (a symbolic hot key) before the app
+and before Hex's annotated-session key tap, so this one key is read at a
+session tap ([suppression/dictation_key.rs](../../src/suppression/dictation_key.rs))
+that exists only while the lab is on: it takes a press and its release only
+while the key is one of Hex's shortcuts or a shortcut is being recorded, and
+hands the press to the listener or to the window's recorder through the same
+`ChordCapture`. Everything else passes through, so macOS's Dictation still
+works while the key is not Hex's; there is no need to change macOS's own
+dictation shortcut while it is. The decision is
+`MicrophoneKey::take` in
+[app_settings/microphone_key.rs](../../src/app_settings/microphone_key.rs),
+which also remembers the presses it took so a release is never handed to the
+app after Hex took the press.
 Windows and Linux don't have it.
 Checks: `the_microphone_key_needs_its_labs_toggle` in
 [control/settings.rs](../../src/control/settings.rs) and
 [rune_ui/settings_microphone_key_tests.rs](../../src/rune_ui/settings_microphone_key_tests.rs),
 `a_microphone_key_shortcut_goes_back_to_its_default_while_its_labs_toggle_is_off`
 in [app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs),
+`the_microphone_key_is_hexs_only_while_its_lab_wants_it` and
+`a_recorded_press_keeps_its_release` in
+[app_settings/microphone_key.rs](../../src/app_settings/microphone_key.rs),
+`the_microphone_key_records_from_the_listener_tap` and
 `the_microphone_key_records_alone` in
-[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and
-`the_microphone_key_matches_with_the_fn_flag_macos_adds` in
-[suppression/tests.rs](../../src/suppression/tests.rs) (the rune_ui/settings,
-recorder, and suppression checks are macOS-only). Not yet observed: a real
-laptop microphone key recorded end to end; stale-key recovery for it (whether
-`CGEventSourceKeyState(176)` reports it held, and whether SecondaryFn lingers
-after its release); and whether macOS's own Dictation is suppressed before
-Hex's tap sees the key on every macOS version.
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs),
+`the_microphone_key_taken_at_the_session_tap_starts_and_finishes_a_dictation`
+and `the_microphone_key_matches_with_the_fn_flag_macos_adds` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (the rune_ui, suppression,
+and tap checks are macOS-only; the microphone-key and repair checks run on
+every OS). Not yet observed: a real laptop microphone key recorded end to end
+and a real press suppressed before macOS's Dictation; stale-key recovery for it
+(whether `CGEventSourceKeyState(176)` reports it held, and whether SecondaryFn
+lingers after its release); and whether a session tap sees the key while
+macOS's Dictation shortcut is on for every macOS version.
 
 Dictation stats (`history-stats`, issue 790, every OS): while on, History's
 header shows a Secondary "Stats" button beside its retention select once

@@ -1,7 +1,8 @@
 use super::*;
 use crate::app_settings::{
     COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, LEFT_COMMAND_MASK, LEFT_CONTROL_MASK,
-    LEFT_OPTION_MASK, MICROPHONE_KEY_CODE, OPTION_KEY_MASK, RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
+    LEFT_OPTION_MASK, MICROPHONE_KEY_CODE, MicrophoneKey, MicrophoneKeyTap, OPTION_KEY_MASK,
+    RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
 };
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -23,6 +24,8 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
+        dictation_key_tap: AtomicPtr::new(ptr::null_mut()),
+        microphone_key: Mutex::new(crate::app_settings::MicrophoneKey::default()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
     };
     (context, receiver)
@@ -443,6 +446,54 @@ fn the_microphone_key_matches_with_the_fn_flag_macos_adds() {
         key_code: Some(49),
     };
     assert!(!space.matches_key_press(49, FUNCTION_KEY_MASK));
+}
+
+/// Issue 181: the session tap takes a bound microphone key's press and its
+/// release, and those feed the same dictation state machine every other key
+/// does.
+#[test]
+fn the_microphone_key_taken_at_the_session_tap_starts_and_finishes_a_dictation() {
+    const OBSERVED: u64 = 0x800100;
+    let mut microphone_key = MicrophoneKey::default();
+    let mut hotkey = DictationHotkey::with_binding(
+        false,
+        capture_time(),
+        false,
+        RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::default(),
+            key_code: Some(MICROPHONE_KEY_CODE),
+        },
+    );
+    // Lab on, bound, not recording.
+    let press = microphone_key.take(MICROPHONE_KEY_CODE, true, true, false, false, true);
+    assert_eq!(press, MicrophoneKeyTap::Listener { down: true });
+    let now = capture_time();
+    assert_eq!(
+        hotkey.process(
+            InputEvent::Key {
+                code: MICROPHONE_KEY_CODE,
+                down: true,
+                flags: OBSERVED,
+            },
+            now + Duration::from_millis(10),
+        ),
+        Some(HotkeyAction::Start)
+    );
+    // The release is the tap's even though nothing is bound by the time it
+    // arrives.
+    let release = microphone_key.take(MICROPHONE_KEY_CODE, false, true, false, false, false);
+    assert_eq!(release, MicrophoneKeyTap::Listener { down: false });
+    assert_eq!(
+        hotkey.process(
+            InputEvent::Key {
+                code: MICROPHONE_KEY_CODE,
+                down: false,
+                flags: OBSERVED,
+            },
+            now + Duration::from_secs(1),
+        ),
+        Some(HotkeyAction::Finish)
+    );
 }
 
 #[test]

@@ -25,6 +25,8 @@ mod history;
 #[cfg_attr(target_os = "windows", path = "rune_ui/windows_host.rs")]
 #[cfg_attr(target_os = "macos", path = "rune_ui/macos_host.rs")]
 mod host;
+#[cfg(target_os = "macos")]
+mod hotkey_keys;
 mod hud_lab;
 #[cfg(target_os = "macos")]
 mod hud_stories;
@@ -479,7 +481,7 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
 /// The key `name` names on the active keyboard layout ("v", "space", "f5").
 #[cfg(target_os = "macos")]
 pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
-    host::hotkey_key_named(name)
+    hotkey_keys::hotkey_key_named(name)
 }
 
 /// The key `name` names: Linux and Windows bind keys by name, and the
