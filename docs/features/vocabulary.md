@@ -43,6 +43,11 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 │   rewriting and search still use it
 ├── Every run and live stream reads the list and the boost at its start:
 │   dictation, meetings, captures, the local API
+│   └── `hex transcribe` with no Hex running starts `hex service --embedded`,
+│       as does the TypeScript SDK's direct child on every start; it reads
+│       the saved vocabulary, boost, Labs switches, and speech engine once
+│       when it starts (AppSettings::apply_for_embedded_service); a saved
+│       change reaches a running child only after it restarts
 ├── First 64 terms (the engine's cap) and their spellings; empty or Off -> unchanged
 ├── Whole-clip run on an RNN-T model (Parakeet unified): meetings, captures,
 │   the local API, dictation that falls back to the whole clip
@@ -225,6 +230,12 @@ sheet's count matching both (`terms_read_counts_exactly_what_transcription_takes
 folding hints, boost names);
 `loading_folds_saved_recognition_hints_into_the_vocabulary_once` in
 [app_settings.rs](../../src/app_settings.rs);
+`the_embedded_service_reads_the_saved_vocabulary` in
+[app_settings/persistence/tests.rs](../../src/app_settings/persistence/tests.rs)
+reads the saved list, boost, and Labs switches through the no-write path and
+checks the bias they produce; publishing them into the embedded service's
+globals, and `run_service` calling that, have no automated check, so only a
+separate `hex service --embedded` process shows them;
 `recognition_hints_alias_the_vocabulary` in
 [control/settings.rs](../../src/control/settings.rs);
 `whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases` in
