@@ -54,6 +54,7 @@ impl Feature {
             Self::KQuantModels => "Smaller model files",
             Self::PickerDownloaded => "Downloaded models only",
             Self::SectionKeyAlone => "Section key alone",
+            Self::MicrophoneKeyAlone => "Microphone key alone",
             Self::KeepRecordings => "Keep recordings",
             Self::SettingsSearch => "Settings search",
             Self::Appearance => "Appearance",
@@ -214,6 +215,9 @@ impl Feature {
             }
             Self::SectionKeyAlone => {
                 "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
+            }
+            Self::MicrophoneKeyAlone => {
+                "Use the microphone (dictation) key alone as a shortcut on Mac laptops"
             }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"

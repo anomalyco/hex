@@ -51,6 +51,7 @@ pub enum Feature {
     KQuantModels,
     PickerDownloaded,
     SectionKeyAlone,
+    MicrophoneKeyAlone,
     KeepRecordings,
     SettingsSearch,
     Appearance,
@@ -92,7 +93,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 84] = [
+    pub const ALL: [Self; 85] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -139,6 +140,7 @@ impl Feature {
         Self::KQuantModels,
         Self::PickerDownloaded,
         Self::SectionKeyAlone,
+        Self::MicrophoneKeyAlone,
         Self::KeepRecordings,
         Self::SettingsSearch,
         Self::Appearance,

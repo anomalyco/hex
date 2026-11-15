@@ -1,7 +1,7 @@
 use super::*;
 use crate::app_settings::{
     COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, LEFT_COMMAND_MASK, LEFT_CONTROL_MASK,
-    LEFT_OPTION_MASK, OPTION_KEY_MASK, RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
+    LEFT_OPTION_MASK, MICROPHONE_KEY_CODE, OPTION_KEY_MASK, RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
 };
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -402,6 +402,47 @@ fn function_keys_match_despite_the_fn_flag_macos_adds() {
         ..command
     };
     assert!(!space.matches_key_press(49, COMMAND_KEY_MASK | FUNCTION_KEY_MASK));
+}
+
+/// Issue 181: a laptop keyboard's microphone (dictation) key reports virtual
+/// key code 176 with SecondaryFn always set (observed flags 0x800100), so a
+/// lone 176 binding ignores that flag like a function key does. Fn stays
+/// significant everywhere else.
+#[test]
+fn the_microphone_key_matches_with_the_fn_flag_macos_adds() {
+    // 0x800100: SecondaryFn plus NonCoalesced, as the key was observed.
+    const OBSERVED: u64 = 0x800100;
+    let microphone = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::default(),
+        key_code: Some(MICROPHONE_KEY_CODE),
+    };
+    assert!(microphone.matches_key_press(MICROPHONE_KEY_CODE, OBSERVED));
+    assert!(!microphone.matches_key_press(MICROPHONE_KEY_CODE, OBSERVED | SHIFT_KEY_MASK));
+    assert!(
+        !microphone.matches_key_press(49, OBSERVED),
+        "space is another key"
+    );
+    let now = capture_time();
+    let mut hotkey = DictationHotkey::with_binding(false, now, false, microphone);
+    let key = |down| InputEvent::Key {
+        code: MICROPHONE_KEY_CODE,
+        down,
+        flags: OBSERVED,
+    };
+    assert_eq!(
+        hotkey.process(key(true), now + Duration::from_millis(10)),
+        Some(HotkeyAction::Start)
+    );
+    assert_eq!(
+        hotkey.process(key(false), now + Duration::from_secs(1)),
+        Some(HotkeyAction::Finish)
+    );
+    // Fn is still significant for a key macOS does not mark with it.
+    let space = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::default(),
+        key_code: Some(49),
+    };
+    assert!(!space.matches_key_press(49, FUNCTION_KEY_MASK));
 }
 
 #[test]

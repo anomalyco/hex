@@ -386,6 +386,14 @@ pub(super) fn validate(
     {
         return Err(tr("Add a modifier"));
     }
+    // Any shortcut on the microphone key needs Labs › Microphone key alone
+    // (macOS); a modifier doesn't excuse it.
+    if cfg!(target_os = "macos")
+        && binding.uses_microphone_key()
+        && !settings.microphone_key_allowed()
+    {
+        return Err(tr("Unsupported key"));
+    }
     // A navigation key alone needs Labs › Special keys alone (Windows).
     if cfg!(target_os = "windows")
         && binding.is_lone_navigation_key()
@@ -1361,6 +1369,15 @@ mod section_key_tests {
         );
     }
 }
+
+/// Issue 181: any shortcut on the microphone (dictation) key needs Labs ›
+/// Microphone key alone on macOS, with or without a modifier. macOS's
+/// recorder records the chord and `validate` refuses it here, before saving,
+/// with the same "Unsupported key" the key gave before. Dictation, Cancel,
+/// and Screenshots all go through this check.
+#[cfg(all(test, target_os = "macos"))]
+#[path = "settings_microphone_key_tests.rs"]
+mod microphone_key_tests;
 
 /// Plain ⌫ while recording turns an optional shortcut off; a required one
 /// ignores it, and ⌫ with a modifier records like any key.

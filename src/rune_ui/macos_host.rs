@@ -329,11 +329,15 @@ impl ChordCapture {
         // Function and navigation keys type nothing, so one may be a shortcut
         // alone. The section key does type something, but the recorder takes it
         // alone too: `settings::validate` refuses it while Labs › Section key
-        // alone is off, as Linux's recorder does. Plain ⌫ turns an optional
-        // shortcut off, and `settings::validate` refuses it as a binding.
+        // alone is off, as Linux's recorder does. The microphone key has no
+        // character either, and the recorder likewise takes it alone: `validate`
+        // refuses it while Labs › Microphone key alone is off. Plain ⌫ turns an
+        // optional shortcut off, and `settings::validate` refuses it as a
+        // binding.
         let stands_alone = is_function_key(&key.label)
             || is_navigation_key(code)
             || key.is_section()
+            || key.is_microphone()
             || key.is_erase();
         if modifiers.is_empty() && !stands_alone {
             return Some(Chord::Captured(Err(tr("Add a modifier"))));
@@ -430,6 +434,7 @@ fn hotkey_key(
         79 => Some("F18"),
         80 => Some("F19"),
         90 => Some("F20"),
+        176 => Some("Mic"),
         _ => None,
     };
     if let Some(label) = special {
@@ -491,6 +496,7 @@ pub(super) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
         "end" => Some(119),
         "forwarddelete" => Some(117),
         "help" => Some(114),
+        "mic" | "microphone" => Some(176),
         function => function
             .strip_prefix('f')
             .and_then(|number| number.parse::<u8>().ok())
@@ -1482,7 +1488,7 @@ fn notes_availability() -> NotesAvailability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_settings::{ISO_SECTION_KEY_CODE, ModifierSide};
+    use crate::app_settings::{ISO_SECTION_KEY_CODE, MICROPHONE_KEY_CODE, ModifierSide};
 
     #[test]
     fn paste_last_needs_a_key() {
@@ -1803,6 +1809,44 @@ mod tests {
                 .label,
             "^"
         );
+    }
+
+    /// The recorder takes the microphone (dictation) key alone, as it takes
+    /// the section key; Labs › Microphone key alone is enforced by
+    /// `settings::validate` before saving, not by the recorder.
+    #[test]
+    fn the_microphone_key_records_alone() {
+        let mut capture = ChordCapture::default();
+        let binding =
+            captured(capture.key_down(MICROPHONE_KEY_CODE, false, None, FUNCTION)).unwrap();
+        assert!(binding.modifiers.is_empty());
+        assert_eq!(
+            binding.key,
+            Some(HotkeyKey {
+                code: MICROPHONE_KEY_CODE,
+                label: "Mic".into()
+            })
+        );
+        assert!(binding.uses_microphone_key());
+        assert!(
+            binding
+                .runtime()
+                .matches_key_press(MICROPHONE_KEY_CODE, FUNCTION)
+        );
+        assert_eq!(
+            hotkey_key(MICROPHONE_KEY_CODE, None, || None)
+                .unwrap()
+                .label,
+            "Mic"
+        );
+        assert_eq!(
+            hotkey_key_named("microphone").unwrap(),
+            HotkeyKey {
+                code: MICROPHONE_KEY_CODE,
+                label: "Mic".into()
+            }
+        );
+        assert_eq!(hotkey_key_named("mic").unwrap().code, MICROPHONE_KEY_CODE);
     }
 
     /// The recorder takes the ISO section key alone, as Linux's does; Labs ›

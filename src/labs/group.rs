@@ -135,6 +135,7 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
+            | Self::MicrophoneKeyAlone
             | Self::ShareShortcut
             | Self::CapsLockDictation
             | Self::PauseMenu => Group::Shortcuts,

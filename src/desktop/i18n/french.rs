@@ -99,6 +99,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcription was cancelled.", "La transcription a été annulée."),
     ("Section key alone", "Touche § seule"),
     ("Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound", "Utilise la touche à gauche du 1 sur les claviers ISO, § ou une touche morte comme ^, comme raccourci sans modificateur. Tant qu'elle est attribuée, Hex prend cette touche à toutes les apps"),
+    ("Microphone key alone", "Touche micro seule"),
+    ("Use the microphone (dictation) key alone as a shortcut on Mac laptops", "Utilise la touche micro (dictée) seule comme raccourci sur les portables Mac"),
     ("Floating meeting capsules on GNOME", "Capsules de réunion flottantes sous GNOME"),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Affiche la proposition d'enregistrement et l'indicateur d'enregistrement par-dessus votre appel, via XWayland. Fonctionne seulement si XWayland est déjà lancé"),
     ("Annotate on GNOME", "Annotate sous GNOME"),

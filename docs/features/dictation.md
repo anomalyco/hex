@@ -121,6 +121,24 @@ recording is refused and Settings shows "Add a modifier", as before;
 goes back to its default when settings load or the toggle turns off. While
 bound, the key is Hex's in every app. Details and checks in [labs.md](labs.md).
 
+macOS with Labs › Microphone key alone on (`labs.microphone_key`, off by
+default; issue 181): the microphone (dictation) key in a laptop keyboard's top
+row may be a shortcut with no modifier. Every press reports virtual key code
+176 with SecondaryFn always set (observed flags `0x800100`), so the key typed
+nothing and the recorder refused it as "Unsupported key". The recorder now takes
+it alone and shows `Mic`, and `hex settings set dictation_hotkey mic` (or
+`microphone`) saves it. The key joins F1–F20, the arrows, and the navigation
+keys, whose always-set SecondaryFn the matcher already ignores
+(`key_reports_function_flag` in `app_settings/hotkeys.rs`); Fn is never
+stripped globally, so it stays significant for every other key. Off, any
+shortcut on the key is refused as "Unsupported key", as before, `hex settings`
+refuses it pointing at `hex labs on microphone-key`, and any saved shortcut on
+the microphone key, with or without a modifier, goes back to its default when
+settings load or the toggle turns off. macOS itself may act on the key before
+Hex's event tap sees it: set macOS's own dictation shortcut (System Settings ›
+Keyboard › Dictation) to something else if its Dictation still opens. Details
+and checks in [labs.md](labs.md).
+
 Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
 `mouse_hold_and_release_use_the_dictation_state_machine`,

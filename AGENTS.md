@@ -46,9 +46,9 @@ a stable build with the driver keeps its pane for Uninstall alone), Playground
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Unload model when idle
-(#442), Smaller model files (macOS), Terminal paste (Windows), and Terminal
-paste shortcut (Windows, Linux). Externally contributed features land there
-too.
+(#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
+paste shortcut (Windows, Linux), and Microphone key alone (#181, macOS).
+Externally contributed features land there too.
 Every `Everyone` lab also gets a page on Hex's website,
 `anoma.ly/hex/labs/<id>` (index at `/hex/labs`), built from
 `site/src/labs.json`, which `labs::web`'s test generates from the registry

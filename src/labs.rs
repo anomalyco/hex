@@ -162,6 +162,7 @@ impl Feature {
             Self::KQuantModels => settings.labs.k_quant_models,
             Self::PickerDownloaded => settings.labs.picker_downloaded,
             Self::SectionKeyAlone => settings.labs.section_key_alone,
+            Self::MicrophoneKeyAlone => settings.labs.microphone_key,
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::SettingsSearch => settings.labs.settings_search,
             Self::Appearance => settings.labs.appearance,
@@ -253,6 +254,7 @@ impl Feature {
             &mut labs.k_quant_models,
             &mut labs.picker_downloaded,
             &mut labs.section_key_alone,
+            &mut labs.microphone_key,
             &mut labs.keep_recordings,
             &mut labs.settings_search,
             &mut labs.appearance,
@@ -399,6 +401,10 @@ impl Feature {
             Self::SectionKeyAlone => {
                 settings.labs.section_key_alone = on;
                 settings.repair_section_key();
+            }
+            Self::MicrophoneKeyAlone => {
+                settings.labs.microphone_key = on;
+                settings.repair_microphone_key();
             }
         }
     }

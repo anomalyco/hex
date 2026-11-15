@@ -591,6 +591,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
     ) {
         rows.push(row(Feature::SectionKeyAlone, Some(&KEYBOARD)));
     }
+    // The microphone (dictation) key in a laptop keyboard's top row reports
+    // itself as Fn with key code 176, which macOS's recorder otherwise
+    // refuses (Labs › Microphone key alone, macOS).
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(Feature::MicrophoneKeyAlone, Some(&KEYBOARD)));
+    }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
     if caps.os == super::platform::Os::Linux {
         rows.push(row(Feature::StandaloneSpecialKeys, Some(&KEYBOARD)));
@@ -816,6 +822,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KQuantModels => "lab-k-quant-models",
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
+        Feature::MicrophoneKeyAlone => "lab-microphone-key",
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::CopyDictationAudio => "lab-copy-dictation-audio",
         Feature::HistoryMultiSelect => "lab-history-multi-select",

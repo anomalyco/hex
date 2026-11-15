@@ -128,6 +128,9 @@ impl Feature {
             Self::SectionKeyAlone => {
                 "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
             }
+            Self::MicrophoneKeyAlone => {
+                "Use the microphone (dictation) key in a Mac laptop keyboard's top row on its own as a shortcut; while it's bound, Hex takes the key from other apps. If macOS's own Dictation still opens, change macOS's dictation shortcut in System Settings › Keyboard › Dictation."
+            }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }

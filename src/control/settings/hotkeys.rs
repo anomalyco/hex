@@ -126,6 +126,7 @@ pub fn parse_hotkey(
             && !HotkeyKey::special_name(&key.label)
             && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
             && !(cfg!(any(target_os = "linux", target_os = "macos")) && key.is_section())
+            && !(cfg!(target_os = "macos") && key.is_microphone())
         {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -150,6 +151,16 @@ pub(super) fn special_key_refusal(
         && !settings.section_key_allowed()
     {
         return Some("section needs Labs › Section key alone: hex labs on section-key".into());
+    }
+    // Any shortcut on the microphone key needs Labs › Microphone key alone
+    // (macOS); a modifier doesn't excuse it.
+    if cfg!(target_os = "macos")
+        && binding.uses_microphone_key()
+        && !settings.microphone_key_allowed()
+    {
+        return Some(
+            "the mic key needs Labs › Microphone key alone: hex labs on microphone-key".into(),
+        );
     }
     if cfg!(target_os = "windows") {
         let key = binding.key.as_ref()?;

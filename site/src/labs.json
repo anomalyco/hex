@@ -532,6 +532,17 @@
       "title": "Section key alone"
     },
     {
+      "added": "2026-11-15",
+      "group": "shortcuts",
+      "groupTitle": "Shortcuts",
+      "id": "microphone-key",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Use the microphone (dictation) key alone as a shortcut on Mac laptops",
+      "title": "Microphone key alone"
+    },
+    {
       "added": "2026-11-02",
       "group": "history",
       "groupTitle": "History",
