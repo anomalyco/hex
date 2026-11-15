@@ -126,7 +126,7 @@ objc2::define_class!(
                 Some(action) if action == sel!(restoreCapture:) => restore_capture_enabled(),
                 Some(action) if action == sel!(openCalendarMeeting:) => {
                     let Ok(index) = usize::try_from(item.tag()) else {
-                        return false;
+                        return false.into();
                     };
                     STATUS_ITEM.with(|controller| {
                         controller.borrow().as_ref().is_some_and(|controller| {
