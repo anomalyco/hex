@@ -224,8 +224,12 @@ pub fn clear() {
 /// calendar connected, or no fresh read); `Some` holds the rows to show,
 /// empty when nothing is upcoming.
 pub fn section(now_ms: i64) -> Option<Vec<UpcomingRow>> {
+    // The lab load comes first: with it off, the menu never reads settings.
+    if !lab_on() {
+        return None;
+    }
     let connected = crate::app_settings::calendar_settings().connected;
-    let visible = wanted(connected) && crate::app_settings::meetings_enabled();
+    let visible = connected && crate::app_settings::meetings_enabled();
     let snapshot = SNAPSHOT.read().unwrap_or_else(|error| error.into_inner());
     section_from(visible, &snapshot, now_ms)
 }
@@ -308,7 +312,7 @@ mod tests {
     fn an_in_progress_meeting_reads_now() {
         let meetings = [with_link(meeting("Design sync", 630, 30))];
         // 10:30–11:00, at 10:40.
-        let now = rows(&meetings, 640 * MINUTE, clock);
+        let now = rows_with(&meetings, 640 * MINUTE, clock, date_of);
         assert_eq!(now.len(), 1);
         assert_eq!(now[0].label, "Now · 10:30–11:00  Design sync");
         assert_eq!(
@@ -316,7 +320,7 @@ mod tests {
             Some("Design sync")
         );
         // Before it starts there is no Now.
-        let before = rows(&meetings, 600 * MINUTE, clock);
+        let before = rows_with(&meetings, 600 * MINUTE, clock, date_of);
         assert_eq!(before[0].label, "10:30–11:00  Design sync");
     }
 
@@ -351,7 +355,7 @@ mod tests {
             meeting("Later", 700, 30),
         ];
         // The first ended at 11:00; now is 11:00 sharp.
-        let listed = rows(&meetings, 660 * MINUTE, clock);
+        let listed = rows_with(&meetings, 660 * MINUTE, clock, date_of);
         let labels = listed
             .iter()
             .map(|row| row.label.as_str())
@@ -361,7 +365,7 @@ mod tests {
             ["Now · 10:40–11:10  Starting", "11:40–12:10  Later"]
         );
         // Everything ends before now: nothing is listed.
-        assert!(rows(&meetings, 800 * MINUTE, clock).is_empty());
+        assert!(rows_with(&meetings, 800 * MINUTE, clock, date_of).is_empty());
     }
 
     #[test]
@@ -369,7 +373,7 @@ mod tests {
         let meetings = (0..7)
             .map(|index| meeting("Sync", 600 + index * 10, 5))
             .collect::<Vec<_>>();
-        let listed = rows(&meetings, 590 * MINUTE, clock);
+        let listed = rows_with(&meetings, 590 * MINUTE, clock, date_of);
         assert_eq!(listed.len(), MAX_ROWS);
         assert_eq!(listed[0].label, "10:00–10:05  Sync");
         assert_eq!(listed[4].label, "10:40–10:45  Sync");
@@ -379,9 +383,9 @@ mod tests {
 
     #[test]
     fn an_empty_section_has_no_rows() {
-        assert!(rows(&[], 640 * MINUTE, clock).is_empty());
+        assert!(rows_with(&[], 640 * MINUTE, clock, date_of).is_empty());
         // Only ended meetings read the same as none.
-        assert!(rows(&[meeting("Ended", 600, 10)], 700 * MINUTE, clock).is_empty());
+        assert!(rows_with(&[meeting("Ended", 600, 10)], 700 * MINUTE, clock, date_of).is_empty());
     }
 
     #[test]

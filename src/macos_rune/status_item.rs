@@ -32,8 +32,8 @@ pub enum StatusItemAction {
     /// Copy History entry `id` (Labs › Copy recent dictations).
     CopyRecentDictation(u64),
     /// Join a calendar meeting from the menu: opens its call link without
-    /// recording and marks the occurrence answered (Labs › Upcoming meetings
-    /// in menu bar).
+    /// recording and records the occurrence so no reminder pops (Labs ›
+    /// Upcoming meetings in menu bar).
     JoinCalendarMeeting(CalendarMeeting),
     StartMeeting,
     StopMeeting,
@@ -145,8 +145,9 @@ objc2::define_class!(
         }
 
         /// Labs › Upcoming meetings in menu bar: a meeting with a call link
-        /// joins through the meeting controller, exactly like a reminder's
-        /// Join, and nothing records.
+        /// joins through the meeting controller, which opens the link,
+        /// records the occurrence, and closes its reminder if showing;
+        /// nothing records.
         #[unsafe(method(openCalendarMeeting:))]
         fn open_calendar_meeting(&self, sender: &NSMenuItem) {
             let Ok(index) = usize::try_from(sender.tag()) else {

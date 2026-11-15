@@ -937,16 +937,16 @@ impl Pump {
                     tracing::warn!(%error, "could not copy a recent dictation");
                 }
             }
-            // Labs › Upcoming meetings in menu bar: the row joins exactly as
-            // a reminder's Join does, so the link opens, the occurrence is
-            // marked answered, and no reminder pops afterwards.
+            // Labs › Upcoming meetings in menu bar: opens the link without
+            // recording, records the occurrence so its reminder never pops,
+            // and closes that reminder's capsule if it is up.
             StatusItemAction::JoinCalendarMeeting(meeting) => {
                 if !crate::labs::calendar_menu() {
                     return;
                 }
                 if self
                     .controller_commands
-                    .try_send(ControllerCommand::JoinMeeting(meeting))
+                    .try_send(ControllerCommand::JoinFromMenu(meeting))
                     .is_err()
                 {
                     tracing::warn!("could not reach the meeting controller to join a meeting");

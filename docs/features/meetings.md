@@ -711,8 +711,9 @@ Labs › Upcoming meetings in menu bar          // labs.calendar_menu (macOS, of
 │   ├── "Upcoming" (disabled header)
 │   ├── Up to 5 rows, soonest first: "10:30–11:00  Design sync",
 │   │   "Now · " in progress, "Tomorrow " or the short weekday on a later day
-│   │   ├── With a call link -> joins through the reminder's Join path:
-│   │   │   opens it, marks the occurrence answered, records nothing
+│   │   ├── With a call link -> the menu's own join path:
+│   │   │   opens it, records the occurrence so no reminder pops (closes a
+│   │   │   showing one), records nothing
 │   │   │   (an Always-record provider may still record once the call starts)
 │   │   └── Without one -> informational, disabled
 │   ├── "No upcoming meetings" (disabled) when none are left
@@ -729,13 +730,14 @@ and the status item only formats it on the main thread
 the lab is on, a connected calendar is also read with Reminders switched off,
 since the section does not depend on them; that menu-only read never becomes
 the controller's titling and reminder list, so a detected call is not named
-from the calendar while reminders are off. With no calendar connected nothing
-is read for the menu, and with the lab off the poll is unchanged. Times are
-the computer's local wall-clock times, and a meeting that has ended is left
-out on the next 500 ms refresh. The snapshot keeps at most 32 meetings and
-hides when it is more than 10 minutes old, when Meetings are off, or when no
-calendar is connected; a failed read (no access) clears it, and clearing an
-already empty snapshot takes no write lock.
+from the calendar while reminders are off. Turning the lab on, or turning
+reminders back on after a menu-only read, reads at once. With no calendar
+connected nothing is read for the menu, and with the lab off the poll is
+unchanged. Times are the computer's local wall-clock times, and a meeting that
+has ended is left out on the next 500 ms refresh. The snapshot keeps at most
+32 meetings and hides when it is more than 10 minutes old, when Meetings are
+off, or when no calendar is connected; a failed read (no access) clears it,
+and clearing an already empty snapshot takes no write lock.
 
 Checks: `an_in_progress_meeting_reads_now`,
 `meetings_on_later_days_read_tomorrow_or_their_weekday`,
@@ -746,7 +748,12 @@ Checks: `an_in_progress_meeting_reads_now`,
 `the_menu_read_wants_a_connected_calendar`, and
 `a_local_date_parses_the_iso_date_part` in
 [calendar_menu.rs](../../src/calendar_menu.rs);
-`a_menu_only_read_never_feeds_the_titling_and_reminder_list` in
+`joining_elsewhere_before_the_lead_time_never_reminds` and
+`joining_elsewhere_while_showing_withdraws_it_for_good` in
+[calendar.rs](../../src/calendar.rs);
+`joining_from_the_menu_withdraws_its_reminder_and_starts_nothing`,
+`only_reminders_keep_the_titling_and_reminder_list`, and
+`a_menu_only_read_and_a_new_lab_both_force_an_immediate_read` in
 [meeting/watcher.rs](../../src/meeting/watcher.rs);
 `calendar_menu_is_its_own_switch_and_macos_only` in
 [labs.rs](../../src/labs.rs); and
