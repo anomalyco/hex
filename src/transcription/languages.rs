@@ -46,6 +46,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("sl", "Slovenian"),
     ("mk", "Macedonian"),
     ("fil", "Filipino"),
+    ("km", "Khmer"),
 ];
 
 /// Names for the other languages Whisper knows, which Settings lists only
@@ -77,7 +78,6 @@ const OTHER_LANGUAGES: &[(&str, &str)] = &[
     ("mr", "Marathi"),
     ("pa", "Punjabi"),
     ("si", "Sinhala"),
-    ("km", "Khmer"),
     ("sn", "Shona"),
     ("yo", "Yoruba"),
     ("so", "Somali"),

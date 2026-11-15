@@ -793,9 +793,9 @@ const WHISPER_LANGUAGES: &[&str] = &[
     "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no", "th", "ur",
     "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn",
     "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw", "gl", "mr", "pa", "si",
-    "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo",
-    "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln",
-    "ha", "ba", "jw", "su", "yue",
+    "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo", "ht",
+    "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln", "ha",
+    "ba", "jw", "su", "yue",
 ];
 
 /// Whether `language` is a code Hex knows: one Settings lists, or one of
@@ -2133,6 +2133,26 @@ mod tests {
             validate(&TranscriptionSelection {
                 model: TranscriptionModelId::Qwen3Asr06B,
                 language: "bn".into(),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn khmer_is_transcribed_by_whisper_with_its_language_hint() {
+        let selection = recommended_selection("km");
+        assert_eq!(selection.model, TranscriptionModelId::WhisperLargeV3Turbo);
+        assert_eq!(selection.language, "km");
+        let model = validate(&selection).unwrap();
+        assert_eq!(model.runtime_language_hint("km"), Some("km"));
+        assert!(model.language_choices().contains(&"km"));
+        let choices = choices_for_runtime("km");
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].recommendation, Recommendation::Recommended);
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::Qwen3Asr06B,
+                language: "km".into(),
             })
             .is_err()
         );
