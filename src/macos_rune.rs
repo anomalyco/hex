@@ -922,13 +922,13 @@ impl Pump {
             // Labs › Copy dictation audio: the newest kept recording as a
             // file on the clipboard, never pasted.
             StatusItemAction::CopyLastDictationAudio => {
-                if !crate::labs::copy_dictation_audio() {
+                if !(crate::labs::copy_dictation_audio() && crate::labs::keep_recordings()) {
                     return;
                 }
                 let copied = self
                     .runtime
                     .history()
-                    .and_then(|history| history.newest_recording())
+                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
                     .ok_or_else(|| eyre!("no dictation with kept audio is in History"))
                     .and_then(|path| {
                         crate::history::recordings::copy_to_clipboard(&path)

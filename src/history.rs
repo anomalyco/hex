@@ -537,10 +537,13 @@ impl HistoryStore {
             .and_then(|entry| recordings::saved(&self.recordings, entry))
     }
 
-    /// The newest entry that kept its audio and still has the file, if any
-    /// (Labs › Copy dictation audio's menu and tray item).
-    pub fn newest_recording(&self) -> Option<PathBuf> {
+    /// The newest entry that kept its audio and still has the file within
+    /// `now_ms`'s retention, if any (Labs › Copy dictation audio's menu and
+    /// tray item).
+    pub fn newest_recording(&self, now_ms: u64) -> Option<PathBuf> {
+        let cutoff = self.retention.cutoff(now_ms);
         self.entries()
+            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
             .find_map(|entry| recordings::saved(&self.recordings, entry))
     }
 
@@ -800,10 +803,10 @@ impl History {
         self.synced().saved_recording(id)
     }
 
-    /// The newest entry's kept recording, when the file is still there
-    /// ([`HistoryStore::newest_recording`]).
-    pub fn newest_recording(&self) -> Option<PathBuf> {
-        self.synced().newest_recording()
+    /// The newest entry's kept recording within `now_ms`'s retention, when
+    /// the file is still there ([`HistoryStore::newest_recording`]).
+    pub fn newest_recording(&self, now_ms: u64) -> Option<PathBuf> {
+        self.synced().newest_recording(now_ms)
     }
 
     pub fn set_retention(&self, retention: HistoryRetention) -> io::Result<()> {
@@ -985,17 +988,24 @@ mod tests {
     #[test]
     fn the_newest_kept_recording_skips_entries_without_audio_or_without_the_file() {
         let path = temp_path("newest-recording");
-        let mut store = HistoryStore::open(path, HistoryRetention::Week, 0);
-        assert!(store.newest_recording().is_none());
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        assert!(store.newest_recording(0).is_none());
         let older = store.record(recorded("older"), 1_000).unwrap().unwrap();
         let plain = store.record(draft("plain"), 2_000).unwrap().unwrap();
         assert_eq!(store.saved_recording(plain), None);
-        assert_eq!(store.newest_recording(), store.recording_path(older));
+        assert_eq!(store.newest_recording(3_000), store.recording_path(older));
         let newest = store.record(recorded("newest"), 3_000).unwrap().unwrap();
-        assert_eq!(store.newest_recording(), store.recording_path(newest));
+        assert_eq!(store.newest_recording(4_000), store.recording_path(newest));
         // A file deleted behind the store's back is skipped, not copied.
         fs::remove_file(store.recording_path(newest).unwrap()).unwrap();
-        assert_eq!(store.newest_recording(), store.recording_path(older));
+        assert_eq!(store.newest_recording(4_000), store.recording_path(older));
+        // Retention applies: exactly at the cutoff remains, past it nothing.
+        let day = HistoryRetention::Day.max_age_ms().unwrap();
+        assert_eq!(
+            store.newest_recording(1_000 + day),
+            store.recording_path(older)
+        );
+        assert_eq!(store.newest_recording(1_000 + day + 1), None);
     }
 
     #[test]

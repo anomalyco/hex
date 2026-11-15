@@ -65,10 +65,9 @@ pub(super) struct HistoryPane {
     /// Labs › Keep recordings: the entry playing through the output, if one
     /// started from the card.
     pub(super) playback: Option<Playback>,
-    /// Labs › Copy dictation audio: the entry whose kept audio was copied
-    /// last, and the latest failure for one entry.
-    pub(super) audio_copied: Option<u64>,
-    pub(super) audio_error: Option<(u64, String)>,
+    /// Labs › Copy dictation audio: the entry whose kept audio is going to
+    /// the clipboard or last went there.
+    pub(super) audio: Option<AudioCopy>,
 }
 
 /// Transcribe again's chosen model and the language for this one run.
@@ -77,6 +76,26 @@ pub(super) struct Pending {
     model: TranscriptionModelId,
     name: &'static str,
     pub(super) language: String,
+}
+
+/// One entry's kept recording going to the clipboard, on a worker: the copy
+/// can wait on another app's clipboard, so the window never does.
+pub(super) struct AudioCopy {
+    pub(super) id: u64,
+    worker: Option<Receiver<Result<(), String>>>,
+    /// The worker's answer: `Ok` once the file is on the clipboard.
+    pub(super) result: Option<Result<(), String>>,
+}
+
+impl AudioCopy {
+    /// A finished copy, as if its worker had answered.
+    pub(super) fn finished(id: u64, result: Result<(), String>) -> Self {
+        Self {
+            id,
+            worker: None,
+            result: Some(result),
+        }
+    }
 }
 
 /// One entry's recording transcribed again with another model.
@@ -190,6 +209,7 @@ impl HistoryPane {
         // Playback's answer returns the card to Play; it is not a reason to
         // read the stats again.
         let played = self.poll_playback();
+        let copied = self.poll_audio();
         let mut changed = false;
         // Labs › Select multiple dictations off, History keeps one selected
         // entry: the others fall away.
@@ -222,7 +242,7 @@ impl HistoryPane {
             changed = true;
         }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
-            return answered || played || changed;
+            return answered || played || copied || changed;
         };
         let stale = self.search.text != self.searched || self.revision != Some(store.revision());
         if stale {
@@ -234,7 +254,7 @@ impl HistoryPane {
             self.reload_stats();
             return true;
         }
-        answered || played || changed
+        answered || played || copied || changed
     }
 
     /// Takes Transcribe again's answer once its worker sends it.
@@ -257,6 +277,24 @@ impl HistoryPane {
         self.playback
             .as_mut()
             .is_some_and(|playback| playback.poll())
+    }
+
+    /// Takes Copy audio's answer once its worker sends it.
+    fn poll_audio(&mut self) -> bool {
+        let Some(audio) = &mut self.audio else {
+            return false;
+        };
+        let result = match audio.worker.as_ref().map(Receiver::try_recv) {
+            Some(Ok(result)) => result,
+            Some(Err(TryRecvError::Disconnected)) => Err(tr("The clipboard copy stopped.").into()),
+            Some(Err(TryRecvError::Empty)) | None => return false,
+        };
+        audio.worker = None;
+        if let Err(error) = &result {
+            tracing::warn!(%error, id = audio.id, "could not copy a dictation recording");
+        }
+        audio.result = Some(result);
+        true
     }
 
     fn entry(&self, id: u64) -> Option<&HistoryEntry> {
@@ -512,30 +550,52 @@ fn transcribe_again(
 }
 
 /// Labs › Copy dictation audio: entry `id`'s kept WAV goes on the clipboard
-/// as a file. A missing file or a refused clipboard says so under the row,
-/// as a failed Play does; nothing is copied without a recording.
+/// as a file, on a worker, since another app can hold the clipboard for a
+/// while. A missing file or a refused clipboard says so under the row, as a
+/// failed Play does; nothing is copied without a recording.
 fn copy_audio(ui: &mut Ui, id: u64) {
-    if !ui.settings.labs.copy_dictation_audio {
+    if !(ui.settings.labs.copy_dictation_audio && ui.settings.labs.keep_recordings) {
         return;
     }
-    ui.history.audio_error = None;
-    let copied = ui
+    if ui
+        .history
+        .audio
+        .as_ref()
+        .is_some_and(|audio| audio.worker.is_some())
+    {
+        return;
+    }
+    // One "Copied" at a time: this replaces the text Copy's check.
+    ui.history.copied = None;
+    let Some(path) = ui
         .history
         .store
         .as_ref()
         .and_then(|store| store.saved_recording(id))
-        .ok_or_else(|| tr("The recording is gone.").to_string())
-        .and_then(|path| {
-            crate::history::recordings::copy_to_clipboard(&path)
-                .map_err(|error| format!("{error:#}"))
+    else {
+        ui.history.audio = Some(AudioCopy::finished(
+            id,
+            Err(tr("The recording is gone.").into()),
+        ));
+        return;
+    };
+    let (sender, receiver) = channel();
+    let waker = ui.modes.waker.clone();
+    let started = std::thread::Builder::new()
+        .name("hex-copy-audio".into())
+        .spawn(move || {
+            let copied = crate::history::recordings::copy_to_clipboard(&path)
+                .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(copied);
+            if let Some(waker) = &waker {
+                waker();
+            }
         });
-    match copied {
-        Ok(()) => ui.history.audio_copied = Some(id),
-        Err(error) => {
-            tracing::warn!(%error, id, "could not copy a dictation recording");
-            ui.history.audio_error = Some((id, error));
-        }
-    }
+    ui.history.audio = Some(AudioCopy {
+        id,
+        worker: started.is_ok().then_some(receiver),
+        result: started.err().map(|error| Err(error.to_string())),
+    });
 }
 
 /// Labs › Keep recordings: starts entry `id`'s saved audio, or stops it
@@ -947,6 +1007,8 @@ fn copy_action(ui: &Ui, p: Paint, id: u64, in_row: bool) -> El {
         if let Some(entry) = ui.history.entry(id) {
             tx.copy(entry.final_text.clone());
             ui.history.copied = Some(id);
+            // One "Copied" at a time: this replaces Copy audio's check.
+            ui.history.audio = None;
             ui.history.error = None;
         }
     };
@@ -1162,10 +1224,15 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 // Labs › Copy dictation audio: the kept WAV as a file on the
                 // clipboard, ready to attach.
                 .children(ui.settings.labs.copy_dictation_audio.then(|| {
+                    let audio = ui.history.audio.as_ref().filter(|audio| audio.id == id);
+                    let copying = audio.is_some_and(|audio| audio.worker.is_some());
+                    let copied = audio.is_some_and(|audio| matches!(audio.result, Some(Ok(()))));
                     small_button(
                         p,
                         "again-copy-audio",
-                        if ui.history.audio_copied == Some(id) {
+                        if copying {
+                            tr("Copying…")
+                        } else if copied {
                             tr("Copied")
                         } else {
                             tr("Copy audio")
@@ -1192,10 +1259,11 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
         .child(menu);
     if let Some(error) = ui
         .history
-        .audio_error
+        .audio
         .as_ref()
-        .filter(|(error_id, _)| *error_id == id)
-        .map(|(_, error)| error)
+        .filter(|audio| audio.id == id)
+        .and_then(|audio| audio.result.as_ref())
+        .and_then(|result| result.as_ref().err())
     {
         section = section.child(
             text(tr_fill("Could not copy the audio: {}", error))

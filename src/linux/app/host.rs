@@ -89,7 +89,7 @@ pub(super) fn run_host(
                 // enabled while a kept recording can be copied.
                 let dictation_audio = crate::labs::copy_dictation_audio().then(|| {
                     host.history()
-                        .and_then(|history| history.newest_recording())
+                        .and_then(|history| history.newest_recording(crate::history::now_ms()))
                         .is_some()
                 });
                 let view = crate::linux::tray::view(&snapshot, dictation_audio);

@@ -418,7 +418,7 @@ fn run_runtime(
             // enabled while a kept recording can be copied.
             let dictation_audio = crate::labs::copy_dictation_audio().then(|| {
                 host.history()
-                    .and_then(|history| history.newest_recording())
+                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
                     .is_some()
             });
             let view = tray_view_for(&published, dictation_audio);
@@ -917,12 +917,12 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                 }
             }
             Some(TrayCommand::CopyLastDictationAudio) => {
-                if !crate::labs::copy_dictation_audio() {
+                if !(crate::labs::copy_dictation_audio() && crate::labs::keep_recordings()) {
                     return;
                 }
                 let copied = runtime()
                     .and_then(|runtime| runtime.history())
-                    .and_then(|history| history.newest_recording())
+                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
                     .ok_or_else(|| eyre!("no dictation with kept audio is in History"))
                     .and_then(|path| {
                         crate::history::recordings::copy_to_clipboard(&path)

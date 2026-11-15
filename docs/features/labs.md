@@ -2233,31 +2233,36 @@ and played or transcribed again with another model in a window, on any OS.
 Copy dictation audio (`copy-dictation-audio`, every OS, off by default): the
 kept WAV as a file on the clipboard, ready to attach in an app that takes
 files. It needs Keep recordings, and it stores no audio of its own: it only
-copies a file that lab already wrote.
+copies a file that lab already wrote. Both switches must be on for anything
+to show.
 
 ```ts
 Labs › Copy dictation audio on, Keep recordings on   // labs.copy-dictation-audio
 ├── History card, entry with a kept recording -> "Saved recording" gains Copy audio beside Play
-│   ├── Copy audio -> the entry's history-audio/<id>.wav goes on the clipboard as one file:
+│   ├── Copy audio -> the entry's history-audio/<id>.wav goes on the clipboard as one file,
+│   │   on a worker like Transcribe again, so the window never waits:
 │   │   macOS an NSURL through Scrawl's handoff::copy_file_to_clipboard, Windows CF_HDROP
 │   │   through win::clipboard::set_file, Linux text/uri-list through the process's
 │   │   one LinuxPaster (linux::paste::with_paster, wl-copy on Wayland, the X11 selection)
-│   │   ├── Done -> the button reads Copied
+│   │   ├── While it runs -> "Copying…"; Done -> "Copied" (Copy's own check clears)
 │   │   └── Failed (file gone, clipboard refused) -> "Could not copy the audio: <why>"
 │   ├── No kept recording (Keep recordings off, or the entry predates it) -> nothing to press
-│   └── The lab off -> History is exactly as before
+│   └── The lab off, or Keep recordings off -> History is exactly as before
 ├── Menu bar (macOS) and the Linux and Windows tray -> Copy last dictation audio
-│   ├── The newest History entry that kept its audio and still has its file
-│   │   (HistoryStore::newest_recording; a missing file is skipped, not copied)
-│   ├── Listed only while the lab is on, dimmed while there is nothing to copy
-│   └── Failed -> logged (the menu has no row to say why); nothing is pasted
+│   ├── The newest History entry within retention that kept its audio and still has its file
+│   │   (HistoryStore::newest_recording(now); a missing or expired entry is skipped, not copied)
+│   ├── Listed only while the lab and Keep recordings are on, dimmed while there is nothing to copy
+│   └── Failed -> logged, as the menu's other copy actions do; the status menu and tray have
+│       no notice to show, so nothing appears there
 └── It never records, keeps, or deletes audio: Keep recordings owns every file
 ```
 
 Checks: `the_newest_kept_recording_skips_entries_without_audio_or_without_the_file`
-in [history.rs](../../src/history.rs);
+in [history.rs](../../src/history.rs), which covers a file deleted behind the
+store, retention's cutoff, and an expired entry;
 `copy_dictation_audio_is_its_own_switch_and_everywhere` in
-[labs.rs](../../src/labs.rs); the tray menu's ids and the dimmed
+[labs.rs](../../src/labs.rs); `copy_audio_shows_only_with_its_lab_and_keep_recordings`
+in [tests.rs](../../src/rune_ui/tests.rs); the tray menu's ids and the dimmed
 `copy-last-dictation-audio` item in
 [tray_menu.rs](../../src/desktop/tray_menu.rs); the status menu's row order in
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs). Not yet

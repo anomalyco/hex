@@ -132,7 +132,8 @@ objc2::define_class!(
         }
 
         /// Restore Last Capture is dimmed while no closed card can come
-        /// back, and an upcoming meeting without a call link is
+        /// back, Copy Last Dictation Audio while no kept recording can be
+        /// copied, and an upcoming meeting without a call link is
         /// informational; every other item stays enabled.
         #[unsafe(method(validateMenuItem:))]
         fn validate_menu_item(&self, item: &NSMenuItem) -> bool {
@@ -986,9 +987,10 @@ fn refresh_copy_dictation_audio() {
 /// kept its audio still has its WAV.
 fn copy_last_dictation_audio_enabled() -> bool {
     crate::labs::copy_dictation_audio()
+        && crate::labs::keep_recordings()
         && crate::macos_rune::runtime()
             .and_then(|runtime| runtime.history())
-            .and_then(|history| history.newest_recording())
+            .and_then(|history| history.newest_recording(crate::history::now_ms()))
             .is_some()
 }
 

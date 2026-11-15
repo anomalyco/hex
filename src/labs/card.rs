@@ -319,7 +319,7 @@ impl Feature {
             }
             Self::YoloMode => "Send dictations automatically",
             Self::CopyDictationAudio => {
-                "Copy a dictation's kept audio as a file from History or the menu bar; needs Keep recordings"
+                "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
             }
         }
     }

@@ -201,11 +201,11 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
             crate::linux::service::route_shortcut(route.as_ref(), ShortcutCommand::PasteLast)
         }
         TrayCommand::CopyLastDictationAudio => {
-            if !crate::labs::copy_dictation_audio() {
+            if !(crate::labs::copy_dictation_audio() && crate::labs::keep_recordings()) {
                 return;
             }
             host.history()
-                .and_then(|history| history.newest_recording())
+                .and_then(|history| history.newest_recording(crate::history::now_ms()))
                 .ok_or_else(|| {
                     color_eyre::eyre::eyre!("no dictation with kept audio is in History")
                 })
