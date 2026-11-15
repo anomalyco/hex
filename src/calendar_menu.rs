@@ -136,19 +136,10 @@ fn fresh(read_at_ms: i64, now_ms: i64) -> bool {
 /// menu's rows are local times, so a meeting across a zone change reads as
 /// it happens.
 pub fn local_clock(ms: i64) -> String {
-    let seconds = ms.div_euclid(1_000) as libc::time_t;
-    // SAFETY: `localtime_r` and `localtime_s` write only into the provided
-    // zeroed `tm`.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    #[cfg(unix)]
-    unsafe {
-        libc::localtime_r(&seconds, &mut tm)
-    };
-    #[cfg(windows)]
-    unsafe {
-        libc::localtime_s(&mut tm, &seconds)
-    };
-    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    // `iso_local` is the one place Hex turns an instant into local wall-clock
+    // time; the minutes are the `HH:MM` of its `YYYY-MM-DDTHH:MM:SS±HH:MM`.
+    let iso = crate::meeting::query::iso_local(u64::try_from(ms).unwrap_or_default());
+    iso.get(11..16).map_or(iso.clone(), str::to_owned)
 }
 
 #[cfg(test)]
@@ -246,5 +237,16 @@ mod tests {
         assert!(!fresh(now - STALE_MS - 1, now));
         // A clock change far ahead is stale too, rather than negative.
         assert!(!fresh(now + STALE_MS + 1, now));
+    }
+
+    #[test]
+    fn the_local_clock_reads_hours_and_minutes() {
+        // Any instant reads as this computer's wall-clock `HH:MM`.
+        let clock = local_clock(1_760_000_000_000);
+        assert_eq!(clock.len(), 5);
+        assert_eq!(clock.as_bytes()[2], b':');
+        assert!(clock.split(':').all(|part| part.parse::<u8>().is_ok()));
+        // A timestamp before the epoch reads as something, not a panic.
+        assert_eq!(local_clock(-1).len(), 5);
     }
 }
