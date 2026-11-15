@@ -226,6 +226,9 @@ On Windows                               // capture.windows
 │   contact sheet, then the summary; with Labs › Copy captures as a zip, the
 │   copy is the light zip as CF_HDROP instead
 ├── Pane -> no Screen Recording row, no transcriber choice
+├── Overlays -> Rune waits for a swap-chain slot before each frame (Rune
+│   #985), so the picker, capsule, and ink's frames in flight stay bounded
+│   through a long annotation (#1833; not measured on Windows)
 └── Gaps: no `hex annotate` (Windows has no control transport yet), no
     iPhone, keys pressed in the app are not logged. Checked only by
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on

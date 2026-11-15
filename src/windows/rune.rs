@@ -299,9 +299,17 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         relaunch.open();
         true
     });
-    // Returns on Quit, or when the window closes without a tray.
-    app.run();
-    crate::windows::gpu_fallback::disarm();
+    // Returns on Quit, or when the window closes without a tray. Rune r399
+    // prints a startup error and exits the process from `run` on native
+    // targets, which would skip the stop below; take the error, stop
+    // everything, then report it.
+    let result = app.try_run();
+    if result.is_ok() {
+        // A frame reached the screen, or Hex quit cleanly: this launch's GPU
+        // works. A failed start is neither, and keeps the marker so the next
+        // launch draws on the high-performance GPU.
+        crate::windows::gpu_fallback::disarm();
+    }
     shutdown.store(true, Ordering::Relaxed);
     drop(requests);
     let _ = runtime.join();
@@ -311,7 +319,10 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     }
     drop(local_api);
     drop(tray);
-    Ok(())
+    if let Err(error) = &result {
+        tracing::error!(%error, "the Hex window failed");
+    }
+    result.map_err(|error| eyre!("the Hex window failed: {error}"))
 }
 
 /// Hex is ending: Rune runs this before the loop ends, including from Windows'

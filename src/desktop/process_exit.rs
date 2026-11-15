@@ -87,28 +87,33 @@ impl Drain {
 
 /// Drains, then ends the process without running static destructors.
 pub(crate) fn finish(drain: &Drain) -> ! {
-    finish_within(drain, DEADLINE)
+    finish_within(drain, DEADLINE, 0)
 }
 
-fn finish_within(drain: &Drain, deadline: Duration) -> ! {
+/// `finish`, ending with `code`: a launch whose window never started exits 1.
+pub(crate) fn finish_with(drain: &Drain, code: i32) -> ! {
+    finish_within(drain, DEADLINE, code)
+}
+
+fn finish_within(drain: &Drain, deadline: Duration, code: i32) -> ! {
     QUITTING.store(true, Ordering::Release);
     let _ = std::thread::Builder::new()
         .name("hex-exit-deadline".into())
         .spawn(move || {
             std::thread::sleep(deadline);
             tracing::warn!("Hex stopped before its workers finished");
-            end_process();
+            end_process(code);
         });
     drain.run();
     tracing::info!("Hex stopped");
-    end_process()
+    end_process(code)
 }
 
-fn end_process() -> ! {
+fn end_process(code: i32) -> ! {
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     // SAFETY: `_exit` ends the process immediately; nothing runs after it.
-    unsafe { libc::_exit(0) }
+    unsafe { libc::_exit(code) }
 }
 
 /// What a stopping Linux process is still waiting on, named in the deadline's
@@ -153,7 +158,7 @@ fn pending_work() -> &'static str {
 pub(crate) fn arm_deadline() {
     static ARMED: Once = Once::new();
     ARMED.call_once(|| {
-        if let Err(error) = run_deadline(STOP_DEADLINE, pending_work, || end_process()) {
+        if let Err(error) = run_deadline(STOP_DEADLINE, pending_work, || end_process(0)) {
             tracing::warn!(%error, "could not arm Hex's exit deadline");
         }
     });
@@ -248,7 +253,17 @@ mod tests {
                 std::thread::park();
             }
         });
-        finish_within(&DRAIN, Duration::from_millis(50));
+        finish_within(&DRAIN, Duration::from_millis(50), 0);
+    }
+
+    /// The child half of `a_failed_launch_ends_with_its_code`.
+    #[test]
+    fn failing_child() {
+        if std::env::var_os(CHILD).is_none() {
+            return;
+        }
+        static DRAIN: Drain = Drain::new();
+        finish_with(&DRAIN, 1);
     }
 
     fn run_child(name: &str) -> std::process::Output {
@@ -280,6 +295,16 @@ mod tests {
     #[test]
     fn a_stuck_drain_still_ends_the_process() {
         assert!(run_child("stuck_child").status.success());
+    }
+
+    #[test]
+    fn a_failed_launch_ends_with_its_code() {
+        let output = run_child("failing_child");
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "a launch whose window never started must not report success"
+        );
     }
 
     #[cfg(target_os = "linux")]

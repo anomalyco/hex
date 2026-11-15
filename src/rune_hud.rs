@@ -777,8 +777,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     // On Linux a burst of dictations keeps the GPU surface, so each HUD
     // shows at once; a Hex at rest gives the GPU device back.
     .release_gpu_after(GPU_IDLE);
-    // Windows' overlay has no display link or swap-chain wait to pace it: the
-    // HUD asks Rune for its next frame on a fixed ~60 Hz timer (`windows_pacing`).
+    // Windows' overlay has no display link: Hex caps the HUD at ~60 Hz on top
+    // of Rune's swap-chain slot wait (`windows_pacing`).
     #[cfg(target_os = "windows")]
     let configured = configured.poll(windows_pacing::poll);
     let overlay = app.overlay(
@@ -1168,10 +1168,10 @@ impl Compositor<Hud> for HudCompositor {
     fn animating(&self) -> bool {
         #[cfg(target_os = "windows")]
         {
-            // No display link or swap-chain wait paces a Windows overlay, so
-            // Rune would keep the loop at `ControlFlow::Poll` and draw as fast
-            // as it turns; the HUD's `poll` asks for the next frame on a fixed
-            // ~60 Hz timer instead, not the display's refresh.
+            // No display link paces a Windows overlay, so reporting `true`
+            // would keep the loop at `ControlFlow::Poll`; Rune #985 bounds
+            // frames in flight, and the HUD's `poll` caps it at a fixed ~60 Hz
+            // timer, not the display's refresh.
             false
         }
         #[cfg(not(target_os = "windows"))]

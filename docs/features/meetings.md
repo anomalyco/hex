@@ -715,6 +715,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── Windows: each capsule's window is only as wide as the drawn pill,
      │   so the area around it stays clickable (not verified on a real
      │   Windows machine)
+     ├── Windows: Rune waits for a swap-chain slot before each frame (Rune
+     │   #985), so the pill's and panel's frames in flight stay bounded
+     │   through a long recording (#1833; not measured on Windows)
      ├── In the saved recording_indicator_corner
      ├── Follows the setting mid-recording: turning it off hides the pill and
      │   on shows it, keeping the recording's start time, within a second

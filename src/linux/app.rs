@@ -549,17 +549,19 @@ fn run_window(
     shutdown: &'static AtomicBool,
 ) {
     let app = host.clone();
-    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let failed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::rune_ui::run_app(app, requests, first, shutdown)
     })) {
-        let reason = panic_reason(panic.as_ref());
-        tracing::error!(%reason, "the Hex window failed; Hex keeps running without it");
-        // `hex window show` and `hex status` say so instead of reporting
-        // a window that can no longer open (#979).
-        host.window_failed(reason);
-        while !shutdown.load(Ordering::Acquire) {
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        Ok(Ok(())) => return,
+        Ok(Err(error)) => error,
+        Err(panic) => panic_reason(panic.as_ref()),
+    };
+    tracing::error!(%failed, "the Hex window failed; Hex keeps running without it");
+    // `hex window show` and `hex status` say so instead of reporting
+    // a window that can no longer open (#979).
+    host.window_failed(failed);
+    while !shutdown.load(Ordering::Acquire) {
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 

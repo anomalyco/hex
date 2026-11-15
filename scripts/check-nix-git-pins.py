@@ -2,7 +2,8 @@
 """Fail when Cargo.lock's Git revisions and the Nix cargo pins disagree.
 
 `nix/package.nix` records, for every Git dependency, the revision its
-`cargoLock.outputHashes` entry was computed from. Bumping a pin in Cargo.lock
+`outputHashes` entry was computed from (the table it hands to
+`importCargoLock` inside the `cargoDeps` override). Bumping a pin in Cargo.lock
 without updating that revision and hash makes `nix build` fail late with a
 fixed-output hash mismatch. This check catches the revision half in a pull
 request, before Nix downloads anything.
