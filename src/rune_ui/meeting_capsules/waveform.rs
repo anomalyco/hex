@@ -73,12 +73,10 @@ impl Listening {
         );
         let mut drawn = self.model.step(now, dt, self.reduced);
         // Dictation breathes at rest. A meeting can be silent for hours:
-        // leave its grid, but extinguish the beam instead of simulating speech.
+        // leave the centreline, but extinguish the beam instead of simulating speech.
         for dot in &mut drawn.dots {
             dot[0] = (dot[0] as f32 * self.light).round() as u16;
         }
-        drawn.pose.glow *= self.light;
-        drawn.pose.grid = 1.0;
         drawn.pose.opacity = 1.0;
         self.drawn = Some(drawn);
         true
@@ -173,10 +171,10 @@ impl Compositor<Capsule> for Ink {
             .as_ref()
             .is_none_or(|(key, p)| *key != dev || p.format != f.format)
         {
-            self.0 = Some((dev, Painter::new(f.device, f.format)));
+            self.0 = Some((dev, Painter::dots_only(f.device, f.format)));
         }
         let painter = &self.0.as_ref().unwrap().1;
-        let uniforms = painter.write_field(drawn, target, |buf, bytes| {
+        let uniforms = painter.write(drawn, Default::default(), target, |buf, bytes| {
             f.queue.write_buffer(buf, 0, bytes)
         });
         painter.draw_over(f.encoder, f.target, target, &uniforms);

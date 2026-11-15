@@ -1258,6 +1258,21 @@ impl Painter {
         format: wgpu::TextureFormat,
         linear: bool,
     ) -> Painter {
+        Self::pipeline(device, format, linear, false)
+    }
+
+    /// A field drawn directly in an existing surface. The dot geometry and
+    /// colour response are the HUD's; nothing paints between the dots.
+    pub(crate) fn dots_only(device: &wgpu::Device, format: wgpu::TextureFormat) -> Painter {
+        Self::pipeline(device, format, format.is_srgb(), true)
+    }
+
+    fn pipeline(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        linear: bool,
+        dots_only: bool,
+    ) -> Painter {
         let immediates = device.features().contains(wgpu::Features::IMMEDIATES)
             && device.limits().max_immediate_size >= DOT_UNIFORM_BYTES;
         let source = include_str!("rune_hud.wgsl");
@@ -1319,7 +1334,10 @@ impl Painter {
             immediate_size: if immediates { DOT_UNIFORM_BYTES } else { 0 },
         });
         // Display values; a linear target decodes them.
-        let constants = [("linear_target", f64::from(u8::from(linear)))];
+        let constants = [
+            ("linear_target", f64::from(linear)),
+            ("dots_only", f64::from(dots_only)),
+        ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dot_scope_fragment"),
             layout: Some(&pipeline_layout),
@@ -1364,31 +1382,9 @@ impl Painter {
         frame: &DotFrame,
         layout: Layout,
         target: Target,
-        write: impl FnMut(&wgpu::Buffer, &[u8]),
-    ) -> DotUniforms {
-        self.upload(frame, DotUniforms::new(frame, layout, target), write)
-    }
-
-    /// The listening field inside a surface that already supplies its own chrome.
-    pub(crate) fn write_field(
-        &self,
-        frame: &DotFrame,
-        target: Target,
-        write: impl FnMut(&wgpu::Buffer, &[u8]),
-    ) -> DotUniforms {
-        let mut uniforms = DotUniforms::new(frame, Layout::default(), target);
-        uniforms.plate[3] = 0.0;
-        uniforms.rim[3] = 0.0;
-        uniforms.shadow[3] = 0.0;
-        self.upload(frame, uniforms, write)
-    }
-
-    fn upload(
-        &self,
-        frame: &DotFrame,
-        uniforms: DotUniforms,
         mut write: impl FnMut(&wgpu::Buffer, &[u8]),
     ) -> DotUniforms {
+        let uniforms = DotUniforms::new(frame, layout, target);
         if let Some(buffer) = &self.dot_uniforms {
             write(buffer, bytes(&uniforms));
         }

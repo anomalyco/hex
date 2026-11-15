@@ -89,12 +89,14 @@ fn recording_motion_frames() {
             }
             rt.frame(1.0 / 60.0);
             for elem in rt.elements() {
-                if let Some(key @ ("pill" | "elapsed" | "copy-new")) = elem.key.as_deref() {
+                if let Some(key @ ("pill" | "elapsed" | "copy-new" | "meeting-listening-field")) =
+                    elem.key.as_deref()
+                {
                     let [x, y, w, h] = elem.rect;
                     writeln!(trace, "{frame},{},{key},{x},{y},{w},{h}", rt.state.hovered).unwrap();
                 }
             }
-            if dark || matches!(frame, 54 | 180) {
+            {
                 let mut encoder = gpu.device.create_command_encoder(&Default::default());
                 let uniforms =
                     hud_painter.write(&hud_frame, Layout::default(), target_rect, |b, d| {

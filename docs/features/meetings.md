@@ -724,7 +724,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   ├── The dictation HUD's listening field follows the louder fresh RMS
      │   │   from microphone or system audio (not individual speakers). Missing
      │   │   buffers and those over 300 ms old read as zero. In silence the
-     │   │   beam fades to an unlit grid; the recording dot stays visible.
+     │   │   beam settles to a still dotted line; the recording dot stays visible.
      │   │   Reduce Motion holds the HUD's braid still
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
