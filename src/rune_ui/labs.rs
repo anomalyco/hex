@@ -9,7 +9,7 @@
 mod browser_access;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
-mod screenshots;
+pub(super) mod screenshots;
 mod store;
 mod voice_prompt;
 mod yolo_mode;

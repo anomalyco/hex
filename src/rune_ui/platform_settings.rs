@@ -8,7 +8,7 @@
 use rune::{El, Icon, row, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folding, icon_row,
+    ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folder_label, folding, icon_row,
     icon_toggle_row, note, section, select, setting_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
@@ -415,18 +415,6 @@ struct SummariesOption {
     disabled: bool,
 }
 
-fn folder_label(ui: &Ui) -> String {
-    let folder = ui.settings.meetings.resolved_output_folder();
-    crate::app_paths::home_dir()
-        .and_then(|home| {
-            folder
-                .strip_prefix(home)
-                .ok()
-                .map(|relative| format!("~/{}", relative.display()))
-        })
-        .unwrap_or_else(|| folder.display().to_string())
-}
-
 /// Whether an organization turned OpenCode processing off.
 pub(super) fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
@@ -550,7 +538,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     .child(button(
                         p,
                         "choose-meeting-folder",
-                        &folder_label(ui),
+                        &folder_label(&ui.settings.meetings.resolved_output_folder()),
                         ButtonKind::Secondary,
                         |ui: &mut Ui, _| {
                             ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder))

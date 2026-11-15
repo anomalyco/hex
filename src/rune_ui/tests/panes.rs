@@ -2731,6 +2731,93 @@ fn a_saved_record_shortcut_shows_and_clears_while_annotate_is_off() {
     assert!(rt.find("clear-screenshot-record-shortcut").is_none());
 }
 
+/// Labs › Screenshots' saves folder: the row's label is the folder, a picked
+/// one is saved and shown, a cancel changes nothing, a chooser that
+/// couldn't open says why, and the last failed save names the folder it
+/// failed into (not the one chosen since) until another pick clears it. The
+/// dialog itself never opens here: a test would wait on a real panel.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed() {
+    use crate::rune_ui::labs::screenshots::apply_chosen_folder;
+
+    // The last-save error is one process-wide static: only this test writes
+    // it, and it starts and ends clean so a test running beside it never
+    // inherits a note.
+    crate::screenshots::clear_save_error();
+
+    let mut rt = runtime("mac-labs-screenshots", true, (980.0, 4000.0));
+    let shown = element(&rt, "choose-screenshot-folder")
+        .label
+        .unwrap_or_default();
+    assert!(!shown.is_empty(), "the row shows the saves folder");
+
+    let home = crate::app_paths::home_dir().expect("a home folder");
+    let picked = home.join("Pictures/Hex Shots");
+    rt.update(|ui, _| {
+        assert!(apply_chosen_folder(ui, Ok(Some(picked.clone()))));
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.screenshots.folder, Some(picked.clone()));
+    assert_eq!(
+        element(&rt, "choose-screenshot-folder").label.as_deref(),
+        Some("~/Pictures/Hex Shots"),
+        "the card shows the folder it saves to, home-shortened"
+    );
+    assert!(rt.find("screenshot-folder-error").is_none());
+
+    rt.update(|ui, _| {
+        assert!(
+            !apply_chosen_folder(ui, Ok(None)),
+            "a cancel changes nothing"
+        );
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.screenshots.folder, Some(picked.clone()));
+
+    // A save that failed into an older folder names that folder, not the
+    // setting that has moved on since. `settle` runs the window's poll, so
+    // the note has to come from the poll reporting the change.
+    let stale = home.join("Old Shots");
+    crate::screenshots::record_save_error(&stale, &anyhow::anyhow!("Permission denied"));
+    settle(&mut rt);
+    let shown = texts(&rt).join("\n");
+    assert!(rt.find("screenshot-save-error").is_some(), "{shown}");
+    assert!(shown.contains("~/Old Shots"), "{shown}");
+    assert!(
+        !shown.contains("~/Pictures/Hex Shots: "),
+        "the note names the folder that failed: {shown}"
+    );
+
+    // A pick that saves clears the note, and its own poll reports that.
+    let other = home.join("Pictures/Hex Shots 2");
+    rt.update(|ui, _| {
+        assert!(apply_chosen_folder(ui, Ok(Some(other.clone()))));
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.screenshots.folder, Some(other.clone()));
+    assert!(
+        rt.find("screenshot-save-error").is_none(),
+        "a pick clears it"
+    );
+
+    rt.update(|ui, _| {
+        assert!(apply_chosen_folder(
+            ui,
+            Err("no file chooser portal".into())
+        ));
+    });
+    settle(&mut rt);
+    assert!(rt.find("screenshot-folder-error").is_some());
+    assert_eq!(
+        rt.state.settings.screenshots.folder,
+        Some(other),
+        "a failed chooser leaves the folder alone"
+    );
+
+    crate::screenshots::clear_save_error();
+}
+
 /// Each OS shows only its labs, and a group with none of them hides.
 #[test]
 fn labs_groups_follow_each_os() {

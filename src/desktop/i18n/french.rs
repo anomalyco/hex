@@ -1347,6 +1347,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It's tiny. It naps in your system tray until you hold the key.", "Il est minuscule. Il somnole dans votre zone de notification jusqu'à ce que vous mainteniez la touche."),
     ("It's tiny. It naps in the background until you tap the key.", "Il est minuscule. Il somnole en arrière-plan jusqu'à ce que vous appuyiez sur la touche."),
     ("It's tiny. It naps in the background until you hold the key.", "Il est minuscule. Il somnole en arrière-plan jusqu'à ce que vous mainteniez la touche."),
+    ("Screenshots folder", "Dossier des captures d'écran"),
+    ("Couldn't save to {folder}: {error}", "Impossible d'enregistrer dans {folder} : {error}"),
 ];
 
 #[cfg(test)]

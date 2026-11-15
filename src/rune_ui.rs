@@ -667,6 +667,9 @@ pub(crate) struct Ui {
     labs_open: bool,
     /// The Labs store's search, tab, and chip.
     lab_store: labs::Store,
+    /// Labs › Screenshots' saves-folder chooser, on the card.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    screenshot_folder: labs::screenshots::FolderChoice,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
@@ -797,6 +800,8 @@ impl Ui {
             advanced: Vec::new(),
             labs_open: false,
             lab_store: labs::Store::default(),
+            #[cfg(all(target_os = "macos", hex_capture))]
+            screenshot_folder: labs::screenshots::FolderChoice::default(),
             build_preview: None,
             capture: Capture::Idle,
             vocabulary,
@@ -1359,6 +1364,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
     changed |= meetings::poll_import(ui);
+    // Labs › Screenshots' folder chooser, on macOS.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    {
+        changed |= labs::screenshots::poll(ui);
+    }
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);

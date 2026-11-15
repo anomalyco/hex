@@ -243,6 +243,19 @@ fn separator(p: Paint, key: String) -> El {
         .a11y_hidden()
 }
 
+/// A folder as a label for the row that chooses it: a path under the home
+/// folder reads from `~` ("~/Pictures/Hex Shots"), else it reads whole.
+pub(super) fn folder_label(folder: &std::path::Path) -> String {
+    crate::app_paths::home_dir()
+        .and_then(|home| {
+            folder
+                .strip_prefix(home)
+                .ok()
+                .map(|relative| format!("~/{}", relative.display()))
+        })
+        .unwrap_or_else(|| folder.display().to_string())
+}
+
 /// A setting: title and optional description on the left, its control on
 /// the right.
 pub(super) fn setting_row(
