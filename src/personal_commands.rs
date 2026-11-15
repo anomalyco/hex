@@ -982,6 +982,21 @@ fn invocation_context(
     }
 }
 
+/// Whether a file's content can change what the script host loads. Declaration
+/// files only describe the API, so editing one never needs a reload.
+fn watched_workspace_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    let watched = ["ts", "js", "mjs", "mts", "json"]
+        .iter()
+        .any(|candidate| extension.eq_ignore_ascii_case(candidate));
+    watched && !stem.ends_with(".d") && !stem.ends_with(".D")
+}
+
 fn workspace_fingerprint(root: &Path) -> u64 {
     let mut hash = 1469598103934665603;
     let mut queue = VecDeque::from([(root.to_path_buf(), 0_usize)]);
@@ -1015,12 +1030,7 @@ fn workspace_fingerprint(root: &Path) -> u64 {
             }
             if metadata.is_dir() {
                 queue.push_back((path, depth + 1));
-            } else if metadata.is_file()
-                && matches!(
-                    path.extension().and_then(|value| value.to_str()),
-                    Some("ts" | "json")
-                )
-            {
+            } else if metadata.is_file() && watched_workspace_file(&path) {
                 for byte in path.as_os_str().as_encoded_bytes() {
                     hash = hash
                         .wrapping_mul(1099511628211)
@@ -1328,6 +1338,43 @@ mod tests {
         );
         assert_eq!(status.transformations[0].name, "Lowercase");
         assert_eq!(status.transformations[2].name, "No trailing punctuation");
+    }
+
+    #[test]
+    fn workspace_fingerprint_tracks_every_loaded_file_kind() {
+        let root = unique_temp_dir("hex-watch-kinds");
+        fs::create_dir_all(root.join("lib")).unwrap();
+        let watched = [
+            "hex.config.ts",
+            "spelling.js",
+            "lib/words.mjs",
+            "lib/types.mts",
+            "data.json",
+            "lib/upper.JS",
+        ];
+        for name in watched {
+            fs::write(root.join(name), "first").unwrap();
+        }
+        fs::write(root.join("notes.md"), "first").unwrap();
+        fs::write(root.join("hex.d.ts"), "first").unwrap();
+        let mut fingerprint = workspace_fingerprint(&root);
+        for name in watched {
+            fs::write(root.join(name), "second").unwrap();
+            let next = workspace_fingerprint(&root);
+            assert_ne!(next, fingerprint, "editing {name} should reload");
+            fingerprint = next;
+        }
+        fs::write(root.join("lib/new.js"), "first").unwrap();
+        assert_ne!(
+            workspace_fingerprint(&root),
+            fingerprint,
+            "a new .js file should reload"
+        );
+        fingerprint = workspace_fingerprint(&root);
+        fs::write(root.join("notes.md"), "changed").unwrap();
+        fs::write(root.join("hex.d.ts"), "changed").unwrap();
+        assert_eq!(workspace_fingerprint(&root), fingerprint);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
