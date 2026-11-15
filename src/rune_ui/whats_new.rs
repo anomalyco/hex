@@ -139,11 +139,11 @@ mod tests {
 
     #[test]
     fn headings_count_local_days_not_hours() {
-        // Spring forward: midnight-to-midnight is only 23 hours; fall back
-        // makes it 25. In both cases the following local date is yesterday's successor.
+        // Just after a 23-hour day and late in a 25-hour day in US Pacific
+        // time. Interpret the wall times in the test process's own zone.
         for (now, entry, label) in [
-            ("2026-03-09T00:01:00-07:00", 20260308, "Yesterday"),
-            ("2026-11-01T23:59:00-08:00", 20261031, "Yesterday"),
+            ("2026-03-09T00:01", 20260308, "Yesterday"),
+            ("2026-11-01T23:59", 20261031, "Yesterday"),
             ("2027-01-01", 20270101, "Today"),
             ("2027-01-01", 20261231, "Yesterday"),
             ("2024-03-01", 20240228, "2 days ago"),
@@ -151,8 +151,9 @@ mod tests {
             ("2026-11-05", 20261029, "Oct 29"),
             ("2027-01-01", 20261029, "Oct 29, 2026"),
         ] {
+            let instant = crate::meeting::query::parse_time(now, 0, false).unwrap();
             assert_eq!(
-                heading(LocalDate::from_ymd(entry), LocalDate::parse(now)),
+                heading(LocalDate::from_ymd(entry), local_date(instant as i64)),
                 label
             );
         }
