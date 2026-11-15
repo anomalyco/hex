@@ -164,7 +164,6 @@ impl Compositor<Capsule> for Ink {
             viewport: px,
             clip: [0, 0, f.size.0, f.size.1],
             scale,
-            dark: f.rt.env.system_dark,
         };
         if self
             .0

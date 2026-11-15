@@ -1113,7 +1113,10 @@ fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
 }
 
 fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
-    let p = Paint::new(cx.system_dark(), cx.env().scale);
+    // Only the recording overlay stays dark. Offers, reminders and results
+    // still belong to the host appearance.
+    let dark = matches!(capsule.kind, Some(Kind::Recording(_))) || cx.system_dark();
+    let p = Paint::new(dark, cx.env().scale);
     let Some(kind) = &capsule.kind else {
         return row().key("empty");
     };

@@ -922,9 +922,8 @@ const DOT_UNIFORM_BINDING: &str = "@group(0) @binding(0) var<uniform> u: DotUnif
 impl DotUniforms {
     fn new(frame: &DotFrame, layout: Layout, target: Target) -> Self {
         let pose = &frame.pose;
-        // An island is black in either appearance and draws no plate.
-        let dark = target.dark || layout.island.is_some();
-        let mut colors = dot_scope::palette(dark, pose, frame.tuning.saturation);
+        // The HUD is always a dark surface, including inside a light preview.
+        let mut colors = dot_scope::palette(true, pose, frame.tuning.saturation);
         if layout.island.is_some() {
             for color in [&mut colors.plate, &mut colors.rim, &mut colors.shadow] {
                 color[3] = 0.0;
@@ -950,7 +949,7 @@ impl DotUniforms {
             grid: pose.grid,
             live: pose.live,
             cool: pose.cool,
-            dark: if dark { 1.0 } else { 0.0 },
+            dark: 1.0,
             base: rgba(colors.base),
             core: rgba(colors.core),
             plate: colors.plate,
@@ -1041,17 +1040,15 @@ pub(crate) struct Target {
     pub(crate) clip: [u32; 4],
     /// Device pixels per point.
     pub(crate) scale: f32,
-    pub(crate) dark: bool,
 }
 
 impl Target {
     /// All of a target `size` device pixels big.
-    fn whole(size: (u32, u32), scale: f32, dark: bool) -> Self {
+    fn whole(size: (u32, u32), scale: f32) -> Self {
         Self {
             viewport: [0.0, 0.0, size.0 as f32, size.1 as f32],
             clip: [0, 0, size.0, size.1],
             scale,
-            dark,
         }
     }
 }
@@ -1184,7 +1181,7 @@ impl Compositor<Hud> for HudCompositor {
     /// clears the target.
     fn render(&mut self, f: &mut Frame<'_, Hud>) {
         let reduce = f.rt.reduced_motion;
-        let target = Target::whole(f.size, f.rt.env.scale, f.rt.env.system_dark);
+        let target = Target::whole(f.size, f.rt.env.scale);
         let hud = &mut f.rt.state;
         hud.reduce = reduce;
         let now = Instant::now();

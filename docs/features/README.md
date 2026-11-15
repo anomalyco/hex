@@ -40,8 +40,8 @@ and conditions (#647); its Settings search toggle (off by default) puts a
 search field at the top of General that filters its rows; its Release notes
 link toggle (off by default) puts a link to this build's release notes in the
 sidebar footer; its Appearance toggle (off by default) forces the main window
-light or dark instead of following the OS, while the HUD and other overlays
-keep following it; its Screen vocabulary
+light or dark instead of following the OS. The dictation HUD and meeting
+recording pill always stay dark; other overlays follow the OS; its Screen vocabulary
 toggle (off by default, macOS) uses names and terms visible in the focused
 window as temporary vocabulary for each dictation, read locally through
 Accessibility and never saved ([vocabulary.md](vocabulary.md)). Its Rewrite

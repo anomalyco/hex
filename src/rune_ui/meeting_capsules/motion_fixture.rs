@@ -32,6 +32,7 @@ fn recording_motion_frames() {
         let dir = folder.join(theme);
         std::fs::create_dir_all(&dir).unwrap();
         let (mut rt, _, _) = runtime(live_recording("fixture"), false, dark, RECORDING);
+        rt.transparent = true;
         rt.update(|c, _| {
             c.live.entries = call();
             c.live.pending = meeting::PendingDelta {
@@ -58,7 +59,6 @@ fn recording_motion_frames() {
             viewport: [0., 0., w as f32, h as f32],
             clip: [0, 0, w, h],
             scale: 2.,
-            dark,
         };
         let mut trace = String::from("frame,hovered,key,x,y,w,h\n");
         for frame in 0..366 {
@@ -130,6 +130,37 @@ fn fixture_scope(capsule: &mut Capsule) {
         );
     }
     capsule.waveform = Some(Box::new(wave));
+}
+
+#[test]
+fn a_light_host_draws_the_dark_recording_from_the_first_frame() {
+    use crate::rune_ui::offscreen;
+    let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+        return;
+    };
+    let (w, h) = ((2.0 * RECORDING.0) as u32, (2.0 * RECORDING.1) as u32);
+    for open in [false, true] {
+        let (mut rt, _, _) = runtime(live_recording("fixture"), false, false, RECORDING);
+        if open {
+            open_recording(&mut rt);
+        }
+        let mut renderer = offscreen::renderer(&gpu.device);
+        let target = offscreen::target(&gpu.device, w, h);
+        let mut ink = waveform::Ink::default();
+        let first = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
+        // Opaque interior, above the waveform, outside the antialiased rim.
+        let i = 4 * (15 * w as usize + 365);
+        assert!(first[i..i + 3].iter().all(|c| *c < 40) && first[i + 3] == 255);
+        rt.set_system_dark(true);
+        for _ in 0..16 {
+            rt.frame(1.0 / 60.0);
+            let frame = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
+            assert!(
+                frame == first,
+                "host change recoloured the recording (open={open})"
+            );
+        }
+    }
 }
 
 #[test]

@@ -460,7 +460,6 @@ impl GameFx {
         let bolts = fx.bolts.len() as u32;
         let motes = fx.motes.len() as u32;
         let tones = fx.tones;
-        let dark = f.rt.env.system_dark;
         let mut used = 0u64;
         f.ui.draw_with(
             f.encoder,
@@ -471,7 +470,7 @@ impl GameFx {
                     return;
                 };
                 if is_onboard_mark(site.mark) {
-                    hud.paint(pass, site, device, queue, dark);
+                    hud.paint(pass, site, device, queue);
                     return;
                 }
                 if !is_game_mark(mark) || used >= SLOTS {

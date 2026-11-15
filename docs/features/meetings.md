@@ -720,6 +720,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
+     ├── Always dark in either host appearance, including the open Stop and copy rows
      ├── At rest: a steady recording dot, Dot scope and elapsed time
      │   ├── The dictation HUD's listening field follows the louder fresh RMS
      │   │   from microphone or system audio (not individual speakers). Missing
