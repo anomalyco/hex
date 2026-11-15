@@ -1824,10 +1824,6 @@ mod tests {
             captured(capture.key_down(0, false, Some("a"), 0)),
             Err(tr("Add a modifier"))
         );
-        assert_eq!(single_key_character(Some("^")), Some('^'));
-        assert_eq!(single_key_character(Some("ab")), None);
-        assert_eq!(single_key_character(Some("\u{0}")), None);
-        assert_eq!(single_key_character(None), None);
     }
 
     /// Plain ⌫ and Forward Delete reach the window, which turns an optional

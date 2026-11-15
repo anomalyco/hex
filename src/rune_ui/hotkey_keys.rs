@@ -141,3 +141,18 @@ pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
         _ => Err(tr("Unsupported key")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One visible character is a key; nothing, several, or a control
+    /// character names no label.
+    #[test]
+    fn a_key_names_one_visible_character() {
+        assert_eq!(single_key_character(Some("^")), Some('^'));
+        assert_eq!(single_key_character(Some("ab")), None);
+        assert_eq!(single_key_character(Some("\u{0}")), None);
+        assert_eq!(single_key_character(None), None);
+    }
+}
