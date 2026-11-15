@@ -83,7 +83,7 @@ fn list(p: Paint, notes: &crate::desktop::host::UpdateNotes) -> Option<El> {
         .self_start()
         .radius(p.k.radius.sm)
         .role("link")
-        .label(tr("What's new"))
+        .label(tr("Release notes"))
         .hover(c.hover)
         .press(c.pressed)
         .focusable(true)
@@ -96,7 +96,7 @@ fn list(p: Paint, notes: &crate::desktop::host::UpdateNotes) -> Option<El> {
             }
         })
         .child(
-            text(tr("What's new"))
+            text(tr("Release notes"))
                 .key("label")
                 .font(p.k.ty.small)
                 .color(c.text_muted)

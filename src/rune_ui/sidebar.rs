@@ -81,6 +81,7 @@ pub(super) enum Pane {
     HudLab,
     /// Legacy event-log inspector scene (Playground only).
     Activity,
+    WhatsNew,
 }
 
 impl Pane {
@@ -130,6 +131,7 @@ impl Pane {
             Pane::VoiceFilter => tr("Voice Filter"),
             Pane::HudLab => "HUD Lab",
             Pane::Activity => tr("Activity"),
+            Pane::WhatsNew => tr("What's new"),
         }
     }
 
@@ -147,6 +149,7 @@ impl Pane {
             Pane::VoiceFilter => "nav-voice-filter",
             Pane::HudLab => "nav-hud-lab",
             Pane::Activity => "nav-activity",
+            Pane::WhatsNew => "nav-whats-new",
         }
     }
 
@@ -164,6 +167,7 @@ impl Pane {
             Pane::VoiceFilter => &VOICE_FILTER_ICON,
             Pane::HudLab => &HUD_LAB_ICON,
             Pane::Activity => &ACTIVITY_ICON,
+            Pane::WhatsNew => &icons::BOOK,
         }
     }
 }
@@ -355,12 +359,21 @@ fn footer(ui: &Ui, p: Paint) -> El {
             line("version", &version_label(), p.faint()),
         ))
         .children(status)
-        .children(release_notes_link(ui, p))
+        .child(
+            line(Pane::WhatsNew.key(), Pane::WhatsNew.title(), c.text_muted)
+                .role("button")
+                .label(Pane::WhatsNew.title())
+                .focusable(true)
+                .focus_ring(2.0, -2.0, c.border_focus)
+                .hover(c.hover)
+                .press(c.pressed)
+                .on_press_tx(|ui: &mut Ui, tx: &mut Tx| ui.select_pane(Pane::WhatsNew, tx)),
+        )
 }
 
 /// This build's release notes, under the version and status while Labs ›
 /// Release notes link is on. Unlike What's new, it needs no staged update.
-fn release_notes_link(ui: &Ui, p: Paint) -> Option<El> {
+pub(super) fn release_notes_link(ui: &Ui, p: Paint) -> Option<El> {
     if !crate::labs::Feature::ReleaseNotesLink.on(&ui.settings) {
         return None;
     }

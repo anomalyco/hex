@@ -1299,6 +1299,8 @@ fn release_notes_link_shows_only_with_its_lab() {
 
     rt.state.settings.labs.release_notes_link = true;
     refresh(&mut rt);
+    assert!(rt.find("release-notes").is_none());
+    tap(&mut rt, "nav-whats-new");
     assert!(rt.find("release-notes").is_some());
     assert!(texts(&rt).iter().any(|text| text == "Release notes"));
 
@@ -1327,7 +1329,7 @@ fn a_staged_dev_build_lists_its_first_changes_under_the_update() {
     }
     refresh(&mut rt);
     let shown = texts(&rt);
-    assert!(shown.iter().any(|text| text == "What's new"));
+    assert!(shown.iter().any(|text| text == "Release notes"));
     assert!(shown.iter().any(|text| text == "· Three"));
     assert!(!shown.iter().any(|text| text == "· Four"), "three at most");
     assert!(rt.find("sidebar-update-control/dot").is_some());

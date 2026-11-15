@@ -3291,8 +3291,11 @@ fn gpu() -> Option<std::sync::MutexGuard<'static, Gpu>> {
 }
 
 fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8>)> {
+    render_runtime(runtime(scene, dark, size), size)
+}
+
+fn render_runtime(mut rt: Runtime<Ui>, size: (f32, f32)) -> Option<(u32, u32, Vec<u8>)> {
     let gpu = gpu()?;
-    let mut rt = runtime(scene, dark, size);
     let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
     let (width, height) = (
         (size.0 * GOLDEN_SCALE) as u32,
@@ -3346,8 +3349,12 @@ fn read_png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
 }
 
 fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
+    check_render(scene, dark, render(scene, dark, size));
+}
+
+fn check_render(scene: &str, dark: bool, pixels: Option<(u32, u32, Vec<u8>)>) {
     let name = format!("{scene}-{}", if dark { "dark" } else { "light" });
-    let Some((width, height, pixels)) = render(scene, dark, size) else {
+    let Some((width, height, pixels)) = pixels else {
         assert!(
             std::env::var_os("HEX_REQUIRE_GPU").is_none(),
             "golden {name}: no GPU adapter, and HEX_REQUIRE_GPU is set"
@@ -3422,6 +3429,33 @@ fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
 thread_local! {
     static GOLDEN_MISSES: std::cell::RefCell<Option<Vec<String>>> =
         const { std::cell::RefCell::new(None) };
+}
+
+#[test]
+fn whats_new_opens_controls_without_changing_them() {
+    let _goldens = Goldens::collect();
+    for dark in [true, false] {
+        for (key, scene) in [
+            (None, "whats-new"),
+            (Some("open-lab"), "whats-new-yolo"),
+            (Some("open-sounds"), "whats-new-sounds"),
+        ] {
+            let mut rt = runtime("mac-settings", dark, PANE_SIZE);
+            let before = serde_json::to_value(&rt.state.settings).unwrap();
+            tap(&mut rt, "nav-whats-new");
+            assert_eq!(rt.state.pane, Pane::WhatsNew);
+            if let Some(key) = key {
+                tap(&mut rt, key);
+                if key == "open-lab" {
+                    assert!(rt.state.labs_open && rt.find("lab-card-yolo-mode").is_some());
+                } else {
+                    assert!(rt.find("sound-sets").is_some());
+                }
+            }
+            assert_eq!(serde_json::to_value(&rt.state.settings).unwrap(), before);
+            check_render(scene, dark, render_runtime(rt, PANE_SIZE));
+        }
+    }
 }
 
 /// Collects every golden mismatch in a test and fails once at the end, so
