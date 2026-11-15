@@ -1931,11 +1931,14 @@ the microphone while muted and closes both on hang-up. Once both are off for
 about 3 s, the "left the call" capsule says "Hex stops recording in 30 s
 unless you keep recording."; Keep recording sends
 `ControllerCommand::KeepRecording`, which drops the stop for this absence, and
-the call app coming back drops it too. After 30 s (`AUTO_STOP_GRACE`,
+the call app coming back drops it too, withdrawing the notice
+(`ControllerEvent::CallEndedWithdrawn`) so the recording capsule returns
+instead of a prompt that claims a stop nothing is counting (`AutoStop::disarm`
+says whether one was pending). After 30 s (`AUTO_STOP_GRACE`,
 `AutoStop` in [meeting/detection.rs](../../src/meeting/detection.rs)) the
 controller stops the recording as Stop & Transcribe does and logs it. Manual,
-offered, and calendar recordings never stop, and off, nothing reads the
-output and the capsule and controller are exactly as before.
+offered, and calendar recordings never stop; off, nothing reads the output,
+and a count already under way is dropped with its notice.
 
 A browser that never releases the microphone between calls is the second
 signal (#1775; Arc). Leaving a Google Meet call and opening the next one in
@@ -1954,7 +1957,10 @@ different call; the recording stops after its grace unless kept"), then Stop
 & Transcribe on its own `AutoStop` deadline, logged "meeting recording
 stopped automatically after its page named another call". Its deadline is
 separate from the absence one because a browser still on the microphone keeps
-the call app present, which drops that one every pass. Keep recording
+the call app present, which drops that one every pass. The recorded code
+showing again drops this stop and withdraws its notice
+(`CallEndedWithdrawn`, `withdraw_call_switch_stop`), and so does turning the
+lab off mid-count; the recording capsule returns in its place. Keep recording
 disarms both and `CallSwitch::keep()` remembers the code so it never ends
 this recording, however long it shows; a third code still does, and a
 Keep recording after the microphone-release capsule never forgets it. Hex
@@ -1979,8 +1985,11 @@ in [labs.rs](../../src/labs.rs), and the auto-stop checks listed in
 `a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
 `a_watched_page_is_queried_every_two_seconds_instead_of_backing_off`,
 `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
-`keep_recording_disarms_the_call_switch_stop_too`, and
-`keep_recording_keeps_the_code_that_was_counting`. Not yet observed: a real
+`keep_recording_disarms_the_call_switch_stop_too`,
+`keep_recording_keeps_the_code_that_was_counting`,
+`the_page_naming_the_recorded_call_again_withdraws_a_pending_stop`, and
+`a_withdrawn_stop_brings_back_the_recording_capsule_and_closes_its_notice`.
+Not yet observed: a real
 WhatsApp, Zoom, or Teams call on a Mac with the toggle on, or a real Meet call
 switched in the same Arc window; the row renders only in macOS builds, so no
 golden changes.
