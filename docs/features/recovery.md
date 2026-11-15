@@ -286,6 +286,14 @@ device refuses a stream in its own default format     // #988, Intel Smart Sound
   -> log the refused format (channels, Hz, sample format) // audio/input_format
   -> try the other formats it lists (F32, I16, U16, I32), at most 12
   -> none opens -> the default format's error, with its format, goes to recovery
+device's default format cannot be read                   // cause unconfirmed on hardware
+  -> the error keeps the cpal/WASAPI cause, not just the context line
+  -> Windows: cpal reads a default device's format by activating the endpoint
+     with ActivateAudioInterfaceAsync, where Hex's direct paths use
+     IMMDevice::Activate, so the direct paths are tried next and start the
+     stream
+  -> those fail too -> the config-read error, with a short note and the
+     direct paths' reason in the log
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"

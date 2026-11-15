@@ -980,7 +980,7 @@ impl RecoveringAudioInput {
         let opener = self.opener.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
-            let result = opener(&request).map_err(|error| error.to_string());
+            let result = opener(&request).map_err(|error| format!("{error:#}"));
             let _ = sender.send((revision, result));
         });
         self.replacement = Some(receiver);

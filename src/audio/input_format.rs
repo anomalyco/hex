@@ -39,7 +39,8 @@ const MAX_ALTERNATIVE_INPUT_CONFIGS: usize = 12;
 /// Starts a stream in the device's default format. Some drivers (Intel
 /// Smart Sound on Windows, #988) refuse a stream in the format they report
 /// as their default, so the other formats they list are tried before
-/// failing with the default's error.
+/// failing with the default's error. A device whose default format cannot be
+/// read at all goes straight to Windows' direct WASAPI paths.
 ///
 /// `renegotiate_rate` marks a silence recovery's open: the device's clock can
 /// be stuck, so its rate changes before the real stream opens (#1575).
@@ -49,9 +50,32 @@ pub(super) fn start_stream_with_fallback(
     default_name: Option<String>,
     renegotiate_rate: bool,
 ) -> Result<StartedStream> {
-    let supported = device
-        .default_input_config()
-        .wrap_err("could not read the input device configuration")?;
+    let supported = match device.default_input_config() {
+        Ok(supported) => supported,
+        Err(error) => {
+            let error = eyre!("could not read the input device configuration: {error}");
+            // cpal reads a default device's format by activating the endpoint
+            // with ActivateAudioInterfaceAsync, where these direct paths use
+            // IMMDevice::Activate, so a format read can fail where they would
+            // not.
+            #[cfg(target_os = "windows")]
+            let direct = super::wasapi_capture::start(device, device_name);
+            #[cfg(target_os = "windows")]
+            match direct {
+                Ok(started) => return Ok(started),
+                Err(direct) => {
+                    tracing::warn!(
+                        error = format!("{direct:#}"),
+                        device = %device_name,
+                        "the microphone's default format could not be read; the direct wasapi paths failed too"
+                    );
+                    return Err(eyre!("{error:#}; the direct wasapi paths failed too"));
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            return Err(error);
+        }
+    };
     // A device a call app let go can stay on a clock that delivers only zeros
     // until its rate changes. A throwaway stream at another rate makes the
     // driver renegotiate; the real stream opens in the format remembered
