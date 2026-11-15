@@ -38,6 +38,31 @@ static OVERLAYS: OnceLock<Overlays> = OnceLock::new();
 static PICKER: Mutex<picker::Picker> = Mutex::new(picker::Picker::new());
 /// The picker's window, left out of the shot; 0 before it's made.
 static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
+/// Why the last shot or recording couldn't be saved to the screenshots
+/// folder, which Labs › Screenshots' card shows until a save works or
+/// another folder is chosen.
+static SAVE_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+/// The last failed save, for the card.
+pub(crate) fn save_error() -> Option<String> {
+    SAVE_ERROR
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// Forgets the last failed save: a later one saved fine, or the folder
+/// changed.
+pub(crate) fn clear_save_error() {
+    *SAVE_ERROR.lock().unwrap_or_else(|error| error.into_inner()) = None;
+}
+
+/// Remembers a failed save for the card, bounded so a long path can't
+/// grow the note without limit.
+fn record_save_error(error: &anyhow::Error) {
+    let bounded: String = error.to_string().chars().take(300).collect();
+    *SAVE_ERROR.lock().unwrap_or_else(|error| error.into_inner()) = Some(bounded);
+}
 
 /// Adds the screenshot picker, thumbnail, and editor, hidden. They're made at
 /// launch only while the Lab is on then.
@@ -259,9 +284,12 @@ fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
     let path = save::write(&folder, &png);
     if let Err(error) = &path {
         tracing::warn!(%error, folder = %folder.display(), "could not save the screenshot");
+        record_save_error(error);
     }
     save::copy(&png, path.as_deref().ok())?;
     let path = path?;
+    // The shot reached the folder this time.
+    clear_save_error();
     let (width, height, small) = shrink(image.width, image.height, &image.rgba, THUMB_PX);
     remember(
         Remembered {

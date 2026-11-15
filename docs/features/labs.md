@@ -340,7 +340,9 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   Keep mic open after dictating: Keep open for (30 s, 1/3/5/30 min, in an inline menu);
 │   Appearance: Theme (System, Light mode, Dark mode);
 │   Voice prompt: Phrase (a text field; an invalid draft says why under it while the saved phrase keeps working);
-│   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
+│   Screenshots: its shortcut, Record screen, Saves to (Reveal and the folder's own chooser, which a
+│   failed save or chooser answers under the row), and the macOS-takes-this-shortcut note with Open
+│   Keyboard Settings.
 │   Annotate 15 s replay's shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
 │   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
@@ -2383,10 +2385,36 @@ shortcut uses) opens a second copy of Annotate's capture picker
                       the right edge on the HUD's spring; any card leaves past the right edge
                       (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
                       a dictation while cards show -> pastes as usual, being no shot's talk-over
-                      a failure -> the error tone; there is no success sound (Hex has no shutter cue)
+                      a failure -> the error tone and, for a failed save, the card's name and why;
+                                   there is no success sound (Hex has no shutter cue)
 Another app holds Secure Event Input -> ⌘⇧4 and the record shortcut still open the picker
                   (Carbon hotkeys while it lasts; see dictation.md's Shortcuts Under Secure Input);
                   Space and Escape don't arrive, so window mode and Escape don't work then
+```
+
+Where shots go is the card's Saves to row, not a fixed folder. It reads the
+folder in full with the home folder as `~` ("~/Desktop" until another is
+chosen), and its two Secondary buttons are Reveal, which opens that folder
+in Finder (making it first, as a save would), and the folder itself, which
+opens the one native folder chooser (`desktop/file_dialog`, the seam Labs ›
+Import audio uses) at the folder in use. A pick is saved as
+`screenshots.folder` at once and applies live to the next shot or
+recording; a cancel changes nothing, and a click while a chooser is open
+opens no second one. A chooser that couldn't open reads as a danger note
+under the row, and so does the last save that failed
+("Couldn't save to ~/…: <why>"): `screenshots::save_error` records it when a
+shot or a recording can't be written, bounded at 300 characters, and it is
+cleared when a later save works or another folder is chosen. Choosing a
+folder never moves a shot already saved, and it never changes Annotate's
+captures folder.
+
+```ts
+Saves to  -> the folder, home-shortened          Reveal  -> Finder on it, made first
+          -> a chosen folder -> screenshots.folder (settings.json, live at once)
+          -> a cancel        -> nothing
+          -> a failed chooser, or a failed save -> one danger note under the row
+// check: a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed
+//        (tests/panes.rs): a pick saves and shows, a cancel leaves it, a failure says why
 ```
 
 The cards stack in the corner as CleanShot's Quick Access Overlay does
@@ -2556,7 +2584,8 @@ record shortcut  -> the same picker, "Full screen · Click to record"; area, win
 │                   ├── the movie saves itself: "Hex Recording 2026-11-04 at 14.03.22.mp4" in
 │                   │   screenshots.folder (the Desktop when unset), " (2)" on a clash, as a shot's
 │                   │   PNG does; a clone of Annotate's copy, so instant on one volume. A failed save
-│                   │   plays the error tone and the card shows Annotate's copy
+│                   │   plays the error tone, the card shows Annotate's copy, and Labs › Screenshots'
+│                   │   card names the folder and why
 │                   ├── no clipboard, no router: nothing is sent or copied on its own
 │                   └── the corner card, from the first frame, its length in a pill
 │                       click -> the editor; drag -> the saved movie; a dictation never lands on it
@@ -2702,7 +2731,9 @@ clipboard paste, the thumbnail's drag, the editor on a real display
 shot with a real shortcut and microphone, the card growing in from a real
 capture rectangle, and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
-symbolic hotkeys are dispatched, not tested). The row renders only in
+symbolic hotkeys are dispatched, not tested), and the Saves to row's real
+folder panel (the test applies a chooser's answer and never opens one). The
+row renders only in
 macOS builds, so the settings goldens don't change.
 
 Annotate 15 s replay (`annotate-replay`, macOS 27+ only, group Annotate): keeps

@@ -1347,6 +1347,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It's tiny. It naps in your system tray until you hold the key.", "Он крошечный. Дремлет в системном трее, пока вы не зажмёте клавишу."),
     ("It's tiny. It naps in the background until you tap the key.", "Он крошечный. Дремлет в фоне, пока вы не нажмёте клавишу."),
     ("It's tiny. It naps in the background until you hold the key.", "Он крошечный. Дремлет в фоне, пока вы не зажмёте клавишу."),
+    ("Screenshots folder", "Папка снимков экрана"),
+    ("Couldn't save to {folder}: {error}", "Не удалось сохранить в {folder}: {error}"),
 ];
 
 #[cfg(test)]
