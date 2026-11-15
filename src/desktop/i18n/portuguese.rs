@@ -15,6 +15,10 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("{} days ago", "há {} dias"),
+    ("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", "jan. fev. mar. abr. mai. jun. jul. ago. set. out. nov. dez."),
+    ("{month} {day}", "{day} de {month}"),
+    ("{month} {day}, {year}", "{day} de {month} de {year}"),
     ("Preview the tones Hex plays when you dictate.", "Ouça os sons que o Hex toca durante o ditado."),
     ("Voice prompt", "Instrução por voz"),
     ("Copy captures as a zip", "Copiar capturas como zip"),

@@ -3,6 +3,27 @@
 
 use rune::Icon;
 
+/// A decorative line icon on the small neutral tile shared by Labs and What's new.
+pub(super) fn tile(p: super::Paint, icon: &'static Icon, size: f32) -> rune::El {
+    rune::el()
+        .key("tile")
+        .size(size, size)
+        .center()
+        .radius(if size > 40.0 {
+            p.k.radius.lg
+        } else {
+            p.k.radius.md
+        })
+        .fill(p.k.c.layer_02)
+        .border(p.hair, p.k.c.border_weak)
+        .a11y_hidden()
+        .child(
+            rune::icon(icon, (size * 0.5).round())
+                .key("glyph")
+                .color(p.k.c.icon_base),
+        )
+}
+
 macro_rules! line_icon {
     ($static:ident, $name:literal, [$($d:literal),+ $(,)?]) => {
         pub(super) static $static: Icon = Icon {
@@ -16,6 +37,11 @@ macro_rules! line_icon {
     };
 }
 
+line_icon!(
+    RETURN,
+    "hex-return",
+    ["M20 5v7a2 2 0 0 1-2 2H4", "m9 9-5 5 5 5"]
+);
 line_icon!(
     KEYBOARD,
     "hex-row-keyboard",

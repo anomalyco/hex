@@ -696,7 +696,10 @@ in a real window; the Labs page goldens were regenerated for macOS
 light), and Linux (`linux-labs`, light).
 
 The sidebar footer's **What's new** opens a short feed of shipped features,
-newest first. YOLO mode opens and highlights its Labs card without changing
+newest first. Each entry has a decorative feature icon. Entries shipped on the
+same date share a heading: Today, Yesterday, or 2–6 days ago by local calendar
+day; older entries show the month and day, and the year outside the current
+year. YOLO mode opens and highlights its Labs card without changing
 the switch; Sounds opens General's sound picker without selecting or playing
 a set. `whats_new_opens_controls_without_changing_them` follows both links
 with a fixture and compares the settings before and after.
