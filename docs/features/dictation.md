@@ -497,6 +497,16 @@ what it was. A cancelled capture discards a late read. See [labs.md](labs.md)
 for the prompt wording, bounds, and checks. Not observed: a real Mac reading a
 real text field, or a rewritten word corrected by the text around the cursor.
 
+### OpenCode Rewrite Models
+
+A dictation's OpenCode rewrite or voice prompt with no chosen model walks Hex's
+ranked fast models: the list is cached per service, any one failing drops the
+cache (the next request reads OpenCode's catalog again), and when every ranked
+model fails OpenCode's own default model answers, so a list read while OpenCode
+was still loading no longer fails every request until a restart (#1123). Check:
+`stale_ranked_models_fall_back_to_the_default_model` in
+[dictation/processor.rs](../../src/dictation/processor.rs).
+
 ### Terminal Paste Shortcut (Labs, Windows and Linux)
 
 A third optional dictation shortcut for typing into a terminal while the main

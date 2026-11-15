@@ -13,7 +13,7 @@ use super::Model;
 use crate::desktop::opencode_service::Service;
 
 /// Newest one-shot generation route first; older OpenCode V2 builds only serve the later name.
-pub(super) const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/generate"];
+const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/generate"];
 
 #[derive(Serialize)]
 pub(super) struct Request<'a> {

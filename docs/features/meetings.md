@@ -1570,8 +1570,9 @@ Final publication complete                               // meetings.notes
      ├── Heading -> final title, only while it still reads Hex's last title
      ├── <!-- hex:notes --> ## Summary (one paragraph) above ## Transcript
      │   └── Footer names the writer: "Written on this Mac by Apple
-     │       Intelligence", "Written by <provider/model> through OpenCode", or,
-     │       for older notes without written_by, no writer at all (#1125;
+     │       Intelligence", "Written by <provider/model> through OpenCode",
+     │       "Written by OpenCode's default model", or, for older notes
+     │       without written_by, no writer at all (#1125;
      │       check: the_notes_footer_names_the_writer_that_wrote_them)
      ├── Labs › Separate notes file on (off by default) -> <base>.notes.md
      │   beside the transcript: title, date, duration, app, a relative
