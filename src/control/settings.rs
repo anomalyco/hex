@@ -1306,6 +1306,11 @@ mod tests {
             "{}",
             error.message
         );
+        for name in ["cancel_hotkey", "screenshots.hotkey"] {
+            let error = apply(&settings, name, "microphone", &rules()).unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{name}");
+            assert!(error.message.contains("mic key"), "{}", error.message);
+        }
         let on = apply(&settings, "labs.microphone_key", "on", &rules())
             .unwrap()
             .settings;

@@ -161,11 +161,22 @@ impl AppSettings {
     /// With Labs › Microphone key alone off, a macOS shortcut on the
     /// microphone key, with or without a modifier, goes back to its default
     /// (an optional one is unbound), so the listener never registers one.
+    /// The cancel and screenshot shortcuts are not in `reset_shortcuts`, so
+    /// they are reset here too.
     pub(crate) fn repair_microphone_key(&mut self) {
         if self.microphone_key_allowed() || !cfg!(target_os = "macos") {
             return;
         }
-        if self.reset_shortcuts(HotkeyBinding::uses_microphone_key) {
+        let mut reset = self.reset_shortcuts(HotkeyBinding::uses_microphone_key);
+        if self.cancel_hotkey.uses_microphone_key() {
+            self.cancel_hotkey = HotkeyBinding::cancel_default();
+            reset = true;
+        }
+        if self.screenshots.hotkey.uses_microphone_key() {
+            self.screenshots.hotkey = HotkeyBinding::screenshot_default();
+            reset = true;
+        }
+        if reset {
             tracing::info!("reset microphone-key shortcuts: Labs › Microphone key alone is off");
         }
     }
@@ -518,6 +529,11 @@ mod tests {
         let mut settings = AppSettings {
             dictation_hotkey: microphone.clone(),
             raw_dictation_hotkey: Some(with_control.clone()),
+            cancel_hotkey: microphone.clone(),
+            screenshots: crate::app_settings::ScreenshotSettings {
+                hotkey: with_control.clone(),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let mut on = settings.clone();
@@ -525,14 +541,23 @@ mod tests {
         on.repair_microphone_key();
         assert_eq!(on.dictation_hotkey, microphone);
         assert_eq!(on.raw_dictation_hotkey, Some(with_control.clone()));
+        assert_eq!(on.cancel_hotkey, microphone);
+        assert_eq!(on.screenshots.hotkey, with_control.clone());
         settings.repair_microphone_key();
         if cfg!(target_os = "macos") {
             assert!(on.microphone_key_allowed());
             assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
             assert_eq!(settings.raw_dictation_hotkey, None);
+            assert_eq!(settings.cancel_hotkey, HotkeyBinding::cancel_default());
+            assert_eq!(
+                settings.screenshots.hotkey,
+                HotkeyBinding::screenshot_default()
+            );
         } else {
             assert!(!on.microphone_key_allowed());
             assert_eq!(settings.dictation_hotkey, microphone);
+            assert_eq!(settings.cancel_hotkey, microphone);
+            assert_eq!(settings.screenshots.hotkey, with_control);
             assert_eq!(settings.raw_dictation_hotkey, Some(with_control));
         }
     }

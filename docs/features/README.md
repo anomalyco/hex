@@ -834,7 +834,7 @@ Saved shortcut                           // dictation; Option by default; Window
 ├── Hold modes -> no cancel: Escape reaches the app, every dictation pastes (#786)
 └── macOS recorder: a key alone needs a modifier, except F1–F20 and Home, End,
     Page Up, Page Down, Help (#1138; keys_without_modifiers_need_one_except_function_keys),
-    and the microphone (dictation) key with Labs > Microphone key alone on (#181)
+    and the microphone (dictation) key with Labs › Microphone key alone on (#181)
 
 General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
   -> Modal: each choice with its keys and a looping key/recording timeline
