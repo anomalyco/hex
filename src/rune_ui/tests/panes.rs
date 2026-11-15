@@ -588,8 +588,8 @@ fn summaries_are_a_switch_off_a_mac() {
     }
 }
 
-/// The meeting summary model picks from OpenCode's models, with the
-/// automatic choice first; without OpenCode it offers a retry and keeps the
+/// The meeting summary model picks from OpenCode's models, with OpenCode's
+/// own default model first; without OpenCode it offers a retry and keeps the
 /// saved model (#1301).
 #[test]
 fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
@@ -617,7 +617,7 @@ fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text == "Hex picks a fast model")
+            .any(|text| text == "OpenCode's default model")
     );
 
     let rt = runtime("meetings-summary-model-not-running", true, size);

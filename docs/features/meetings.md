@@ -55,8 +55,11 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │       └── OpenCode -> "Sends the transcript to your OpenCode model";
 │   │           Model nests under it: a searchable picker of the running
 │   │           OpenCode's models (refreshed each time it opens; no Refresh),
-│   │           "Hex picks a fast model" first (clears meetings.opencode_model
-│   │           -> the ranked fast models); a pick is used alone, no fallback.
+│   │           "OpenCode's default model" first (clears
+│   │           meetings.opencode_model, so every title and summary is one
+│   │           request that names no model: OpenCode's own default answers,
+│   │           and the transcript never reaches another provider); a pick is
+│   │           used alone, no fallback.
 │   │           OpenCode missing or failing -> a notice with Check again /
 │   │           Retry, the saved model kept and shown by its ID (#1107, #1301)
 │   │       // checks: summaries_are_one_choice_with_opencode_s_model_under_it,
@@ -1567,8 +1570,9 @@ Final publication complete                               // meetings.notes
      ├── Heading -> final title, only while it still reads Hex's last title
      ├── <!-- hex:notes --> ## Summary (one paragraph) above ## Transcript
      │   └── Footer names the writer: "Written on this Mac by Apple
-     │       Intelligence", "Written by <provider/model> through OpenCode", or,
-     │       for older notes without written_by, no writer at all (#1125;
+     │       Intelligence", "Written by <provider/model> through OpenCode",
+     │       "Written by OpenCode's default model", or, for older notes
+     │       without written_by, no writer at all (#1125;
      │       check: the_notes_footer_names_the_writer_that_wrote_them)
      ├── Labs › Separate notes file on (off by default) -> <base>.notes.md
      │   beside the transcript: title, date, duration, app, a relative
@@ -1579,11 +1583,11 @@ Final publication complete                               // meetings.notes
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
   -> Failure / timeout -> notes_error; Markdown untouched; recording stays Complete
-  -> OpenCode without a chosen model: the ranked models are cached per service;
-     any one failing drops the cache (the next call reads OpenCode's catalog
-     again), and all failing asks OpenCode's own default model, so a list read
-     while OpenCode was still loading no longer fails every call until a
-     restart (#1123; check: stale_ranked_models_fall_back_to_the_default_model)
+  -> OpenCode without a chosen model: every generation asks OpenCode's own
+     default model, with no model field, so the transcript never reaches
+     another provider; the ranked fast models stay for dictation rewrites and
+     voice prompts. With a chosen model, a failure is the notes error
+     (check: a_meeting_generation_posts_one_request_naming_no_model)
 
 Unavailable (not eligible / Apple Intelligence off / model not ready / macOS < 26)
   -> Settings row says why; nothing runs
