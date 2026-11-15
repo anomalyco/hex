@@ -78,6 +78,19 @@ pub fn copy_capture_zip() -> bool {
     COPY_CAPTURE_ZIP.load(Ordering::Acquire) && Feature::CopyCaptureZip.on_this_os()
 }
 
+/// A kept dictation recording may be copied from History and the menu bar or
+/// tray as a file on the clipboard (read as each Copy audio runs and each
+/// menu or tray opens). It needs Labs › Keep recordings, which owns every
+/// file; this lab stores none of its own.
+pub fn copy_dictation_audio() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    COPY_DICTATION_AUDIO.load(Ordering::Acquire)
+        && Feature::CopyDictationAudio.on_this_os()
+        && keep_recordings()
+}
+
 /// A pasted dictation stays on the clipboard rather than the previous
 /// clipboard being restored (read as each paste commits).
 pub fn keep_on_clipboard() -> bool {

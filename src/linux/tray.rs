@@ -200,6 +200,20 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
             let route = published.shortcuts.lock().unwrap().clone();
             crate::linux::service::route_shortcut(route.as_ref(), ShortcutCommand::PasteLast)
         }
+        TrayCommand::CopyLastDictationAudio => {
+            if !(crate::labs::copy_dictation_audio() && crate::labs::keep_recordings()) {
+                return;
+            }
+            host.history()
+                .and_then(|history| history.newest_recording(crate::history::now_ms()))
+                .ok_or_else(|| {
+                    color_eyre::eyre::eyre!("no dictation with kept audio is in History")
+                })
+                .and_then(|path| {
+                    crate::history::recordings::copy_to_clipboard(&path)
+                        .map_err(|error| color_eyre::eyre::eyre!(format!("{error:#}")))
+                })
+        }
         TrayCommand::UseModel(model) => host.request(HostRequest::ChooseModel {
             model,
             language: snapshot.settings.transcription_for_model(model).language,
@@ -239,10 +253,11 @@ fn perform(host: &HostHandle, published: &Published, command: TrayCommand) {
 }
 
 /// What the tray shows for `snapshot`.
-pub(crate) fn view(snapshot: &HostSnapshot) -> TrayView {
+pub(crate) fn view(snapshot: &HostSnapshot, dictation_audio: Option<bool>) -> TrayView {
     let desktop = &snapshot.desktop;
     TrayView {
         meetings: crate::meeting::runtime::tray_state(),
+        dictation_audio,
         ..TrayView::new(
             desktop.listener.running,
             desktop.activity.state,

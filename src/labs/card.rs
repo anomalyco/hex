@@ -91,6 +91,7 @@ impl Feature {
             Self::CopyCaptureZip => "Copy captures as a zip",
             Self::ShellCompletions => "Shell completions",
             Self::YoloMode => "YOLO mode",
+            Self::CopyDictationAudio => "Copy dictation audio",
         }
     }
 
@@ -317,6 +318,9 @@ impl Feature {
                 "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
             }
             Self::YoloMode => "Send dictations automatically",
+            Self::CopyDictationAudio => {
+                "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
+            }
         }
     }
 }

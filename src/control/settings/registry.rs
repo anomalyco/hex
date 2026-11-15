@@ -468,6 +468,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: dictations saved to History keep their audio, so History can transcribe them again with another model; off stops saving, clearing History deletes it",
     ),
     key(
+        "labs.copy_dictation_audio",
+        Kind::Bool,
+        "Labs: History entries with a kept recording offer Copy audio, and the menu bar or tray offers Copy last dictation audio; copies the kept WAV as a file and stores no audio itself, so it needs Labs: keep recordings",
+    ),
+    key(
         "labs.history_stats",
         Kind::Bool,
         "Labs: a summary of retained dictations at the top of History, and hex history stats",

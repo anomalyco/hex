@@ -94,7 +94,8 @@ impl Feature {
             | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
-            | Self::MoreDictationShortcuts => Audience::Everyone,
+            | Self::MoreDictationShortcuts
+            | Self::CopyDictationAudio => Audience::Everyone,
         }
     }
 
@@ -181,6 +182,7 @@ impl Feature {
             | Self::CursorContext
             | Self::CleanUpWithAppleIntelligence => 20261113,
             Self::CalendarMenu => 20261114,
+            Self::CopyDictationAudio => 20261115,
         }
     }
 
@@ -338,7 +340,8 @@ impl Feature {
             | Self::CopyCaptureZip
             | Self::SpeakersOnly
             | Self::ShellCompletions
-            | Self::YoloMode => EVERY,
+            | Self::YoloMode
+            | Self::CopyDictationAudio => EVERY,
         }
     }
 
@@ -428,6 +431,7 @@ impl Feature {
             Self::CursorContext => "cursor-context",
             Self::CalendarMenu => "calendar-menu",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
+            Self::CopyDictationAudio => "copy-dictation-audio",
         }
     }
 
@@ -517,6 +521,7 @@ impl Feature {
             Self::CursorContext => "labs.cursor_context",
             Self::CalendarMenu => "labs.calendar_menu",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
+            Self::CopyDictationAudio => "labs.copy_dictation_audio",
         }
     }
 

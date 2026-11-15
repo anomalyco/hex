@@ -365,6 +365,7 @@ fn run_runtime(
 ) {
     let mut tray_view = None;
     let mut tray_meetings = None;
+    let mut tray_dictation_audio = None;
     indicator.set_position(settings.indicator_position);
     let mut host = WindowsDesktopHost::new(
         event_path,
@@ -410,11 +411,29 @@ fn run_runtime(
             }
         }
         let meetings = crate::meeting::runtime::tray_state();
+        // Labs › Copy dictation audio: listed while the lab is on, and
+        // enabled while a kept recording can be copied. The gate comes
+        // first, and this only reads History with a tray, so an off lab
+        // costs one atomic read; it joins the rebuild condition so a copy
+        // that appears or expires redraws the menu without a publish.
+        let dictation_audio = if tray.is_some() && crate::labs::copy_dictation_audio() {
+            Some(
+                host.history()
+                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
+                    .is_some(),
+            )
+        } else {
+            None
+        };
         if let Some(tray) = tray
-            && (changed || tray_view.is_none() || tray_meetings != meetings)
+            && (changed
+                || tray_view.is_none()
+                || tray_meetings != meetings
+                || tray_dictation_audio != dictation_audio)
         {
             tray_meetings = meetings;
-            let view = tray_view_for(&published);
+            tray_dictation_audio = dictation_audio;
+            let view = tray_view_for(&published, dictation_audio);
             if tray_view.as_ref() != Some(&view) {
                 tray.set_tooltip(view.tooltip());
                 tray.set_menu(view.menu());
@@ -642,9 +661,10 @@ impl crate::control::host::Host for WindowsControl {
 // The tray and the window icon
 
 /// What the tray shows for what the runtime published.
-fn tray_view_for(published: &Published) -> TrayView {
+fn tray_view_for(published: &Published, dictation_audio: Option<bool>) -> TrayView {
     TrayView {
         meetings: crate::meeting::runtime::tray_state(),
+        dictation_audio,
         ..TrayView::new(
             published.listener.running,
             published.state,
@@ -908,6 +928,22 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                     tracing::warn!(%error, ?command, "the tray action failed");
                 }
             }
+            Some(TrayCommand::CopyLastDictationAudio) => {
+                if !(crate::labs::copy_dictation_audio() && crate::labs::keep_recordings()) {
+                    return;
+                }
+                let copied = runtime()
+                    .and_then(|runtime| runtime.history())
+                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
+                    .ok_or_else(|| eyre!("no dictation with kept audio is in History"))
+                    .and_then(|path| {
+                        crate::history::recordings::copy_to_clipboard(&path)
+                            .map_err(|error| eyre!("{error:#}"))
+                    });
+                if let Err(error) = copied {
+                    tracing::warn!(%error, "could not copy the last dictation's audio");
+                }
+            }
             Some(command) => {
                 let Some(runtime) = runtime() else { return };
                 let published = runtime.published();
@@ -933,7 +969,8 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                     | TrayCommand::Quit
                     | TrayCommand::RecordMeeting
                     | TrayCommand::StopMeeting
-                    | TrayCommand::CopyLastMeeting => return,
+                    | TrayCommand::CopyLastMeeting
+                    | TrayCommand::CopyLastDictationAudio => return,
                 };
                 let _ = runtime.send(request);
             }

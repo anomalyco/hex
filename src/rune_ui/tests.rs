@@ -2176,6 +2176,91 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
 }
 
 #[test]
+fn copy_audio_shows_only_with_its_lab_and_keep_recordings() {
+    use crate::history::{
+        History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore, Recording,
+    };
+    let directory =
+        std::env::temp_dir().join(format!("hex-rune-copy-audio-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let history = History::new(HistoryStore::open(
+        directory.join("history.json"),
+        HistoryRetention::Week,
+        crate::history::now_ms(),
+    ));
+    let id = history
+        .record(HistoryDraft {
+            kind: HistoryKind::Dictation,
+            raw_text: "ship it".into(),
+            final_text: "Ship it.".into(),
+            application: None,
+            processing: None,
+            audio_ms: 900,
+            inference_ms: 80,
+            total_ms: 200,
+            recording: Some(Recording::from_samples(vec![0.2; 1_600])),
+            model: Some("Parakeet v3".into()),
+        })
+        .unwrap()
+        .unwrap();
+    let mut rt = runtime("history-empty", true, GOLDEN_SIZE);
+    rt.state.history = history::HistoryPane::shared(Some(history.clone()));
+    rt.state.history.reload();
+    rt.state.history.selected = Some(id);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("again-copy-audio").is_none(),
+        "off, History is unchanged"
+    );
+
+    rt.state.settings.labs.keep_recordings = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("again-copy-audio").is_none(),
+        "Keep recordings alone does not add Copy audio"
+    );
+
+    rt.state.settings.labs.copy_dictation_audio = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("again-copy-audio").is_some(),
+        "both switches on, the kept audio can be copied"
+    );
+
+    // A text Copy waits for a running Copy audio, which still lands the WAV
+    // on the clipboard; the pending state is kept.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    rt.state.history.audio = Some(history::AudioCopy::pending(id, receiver));
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "history-copy");
+    assert_eq!(
+        rt.copy_request.as_deref(),
+        None,
+        "a pending Copy audio wins over a text Copy"
+    );
+    assert!(
+        rt.state.history.audio.is_some(),
+        "the pending Copy audio is kept"
+    );
+    drop(sender);
+    rt.state.history.audio = None;
+
+    rt.state.settings.labs.keep_recordings = false;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("again-copy-audio").is_none(),
+        "turning Keep recordings off hides it again"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
 fn leaving_an_entry_or_turning_off_keep_recordings_stops_playback() {
     use crate::history::playback::Playback;
     let mut rt = runtime("history", true, GOLDEN_SIZE);

@@ -401,7 +401,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2600.0));
     open_labs(&mut rt);
     for row in [
         "lab-mouse-shortcuts",
@@ -415,6 +415,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-clean-up",
         "lab-spoken-symbols",
         "lab-caps-lock-dictation",
+        "lab-copy-dictation-audio",
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
     }
@@ -446,13 +447,16 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.print_start);
     tap(&mut rt, "lab-print-start");
     assert!(rt.state.settings.labs.print_start);
+    assert!(!rt.state.settings.labs.copy_dictation_audio);
+    tap(&mut rt, "lab-copy-dictation-audio");
+    assert!(rt.state.settings.labs.copy_dictation_audio);
     assert!(!rt.state.settings.labs.caps_lock_dictation);
     tap(&mut rt, "lab-caps-lock-dictation");
     assert!(rt.state.settings.labs.caps_lock_dictation);
 
     // Tall enough that the last Labs rows (Share shortcut, Terminal paste)
     // sit inside the window, where a tap reaches them.
-    let mut rt = runtime("windows-settings", true, (980.0, 2400.0));
+    let mut rt = runtime("windows-settings", true, (980.0, 2600.0));
     open_advanced(&mut rt, Pane::General);
     assert!(rt.find("share-dictation-shortcut").is_none());
     open_labs(&mut rt);

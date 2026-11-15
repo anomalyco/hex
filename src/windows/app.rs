@@ -271,6 +271,11 @@ impl WindowsDesktopHost {
         host
     }
 
+    /// The host's retained-history store; one store per process.
+    pub(crate) fn history(&self) -> Option<History> {
+        self.history.clone()
+    }
+
     /// Setup is ready, so the tour's practice can dictate, or the tour
     /// finished without a model.
     fn setup_done(&self) -> bool {

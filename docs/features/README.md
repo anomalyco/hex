@@ -913,11 +913,14 @@ Completed output                         // output
     │   ├── Two or more selected -> "{count} dictations selected": Copy (final texts, oldest first, a blank line between each) / Delete… (asks once)
     │   ├── One selected -> the ordinary card, Copy, Delete… (asks once, then Cancel), Transcribe again with Keep recordings
     │   └── A search, new entries, or a delete prune it; turning the lab off keeps one entry (labs.md)
-    └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
-        -> also "Keep audio too" in the retention menu while the lab is offered
-        -> the card's "Transcribe again" menu runs it through any installed model
-        -> the new text with Copy and Replace; Clear all and retention delete the audio (labs.md, #1032)
-        -> Replace keeps the old text as one of 5 earlier versions: Copy, Use this version (#1177)
+    ├── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
+    │   -> also "Keep audio too" in the retention menu while the lab is offered
+    │   -> the card's "Transcribe again" menu runs it through any installed model
+    │   -> the new text with Copy and Replace; Clear all and retention delete the audio (labs.md, #1032)
+    │   -> Replace keeps the old text as one of 5 earlier versions: Copy, Use this version (#1177)
+    └── Labs > Copy dictation audio (off) -> copies a kept WAV as a file   // labs.copy-dictation-audio
+        -> the card's Copy audio beside Play, and the menu bar or tray's Copy last dictation audio
+        -> needs Keep recordings; it stores no audio itself (labs.md)
 Every entry since #1177 -> "Speech model" fact: the model that made its text (+ language when chosen)
 ```
 

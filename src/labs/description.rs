@@ -230,6 +230,9 @@ impl Feature {
                 "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
             }
             Self::YoloMode => "Send dictations automatically",
+            Self::CopyDictationAudio => {
+                "History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one file on the clipboard, ready to attach. Needs Keep recordings, and copies the kept WAV without storing any audio itself"
+            }
         }
     }
 }

@@ -1050,6 +1050,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   follows its entry's retention, entry cap, Delete, and Clear all, under its
   own 512 MiB cap (oldest audio dropped first, text kept). Turning it off
   stops saving; existing audio stays until it expires or History is cleared.
+  Labs › Copy dictation audio (`copy-dictation-audio`, off by default) only
+  puts a kept file on the clipboard as a file (History's Copy audio, and the
+  menu bar's or tray's Copy last dictation audio): it never records, keeps,
+  or deletes audio itself, and both it and Keep recordings must be on for
+  either to show. The copy runs off the UI thread, since another app can
+  hold the clipboard.
 - Retained dictation history records only successful pasted output: raw and
   final text plus bounded metadata, never full browser URLs or window titles,
   and no audio unless Labs › Keep recordings is on. Entries name their speech

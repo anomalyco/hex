@@ -373,6 +373,26 @@ fn file_uri(path: &Path) -> Result<String> {
     Ok(uri)
 }
 
+/// The process's one paster for copies that outlive the call, such as a file
+/// on the clipboard: on X11 it serves the clipboard for as long as it lives,
+/// so what it copied stays pasteable. Built on first use from the saved
+/// terminal-paste preference.
+pub(crate) fn with_paster(use_it: impl FnOnce(&mut LinuxPaster) -> Result<()>) -> Result<()> {
+    static PASTER: Mutex<Option<LinuxPaster>> = Mutex::new(None);
+    let mut paster = PASTER.lock().unwrap_or_else(|error| error.into_inner());
+    if paster.is_none() {
+        let shift = crate::app_settings::AppSettings::load()
+            .map(|settings| settings.paste_with_shift)
+            .unwrap_or(false);
+        *paster = Some(LinuxPaster::new(
+            Arc::default(),
+            Arc::new(AtomicBool::new(shift)),
+            Default::default(),
+        )?);
+    }
+    use_it(paster.as_mut().expect("made above"))
+}
+
 impl LinuxPaster {
     pub(crate) fn new(
         stop: Arc<AtomicBool>,
