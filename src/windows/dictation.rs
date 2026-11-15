@@ -1053,6 +1053,7 @@ pub fn run(
                 }
                 audio_suppressor.restore();
                 let error = format!("could not open microphone: {error}");
+                tracing::warn!(error = %error, "the microphone would not open");
                 fail(&events, error.clone())?;
                 if let Some(indicator) = &indicator {
                     indicator.send(crate::rune_hud::HudEvent::Failed {

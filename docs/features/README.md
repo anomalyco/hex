@@ -2281,7 +2281,10 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
-│   └── Windows default input changes -> Switch once capture is idle // cpal's default-device report
+│   ├── Windows default input changes -> Switch once capture is idle // cpal's default-device report
+│   └── Windows default input reports no default format -> Hex's own WASAPI paths
+│       (the endpoint by id, as when picked by name), then other formats it lists;
+│       the read error keeps its cause (#1845, unverified on real Windows)
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless
 │   └── Ctrl+V carries scan codes from the foreground layout, so Chromium apps
 │       see KeyboardEvent.code: VS Code's terminal takes it as Paste instead of

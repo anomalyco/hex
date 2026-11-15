@@ -1,14 +1,15 @@
 //! Which format a microphone stream opens in: the device's default, else,
-//! when the driver refuses it, the other formats the device lists. A
-//! silence-triggered open makes the device renegotiate its sample rate first.
+//! when the driver refuses it or cannot report one, the other formats the
+//! device lists (and Windows' own WASAPI paths). A silence-triggered open
+//! makes the device renegotiate its sample rate first.
 
 use std::sync::mpsc::{self, Receiver};
 
-use color_eyre::eyre::{Result, WrapErr, eyre};
+use color_eyre::eyre::{Report, Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{
     BufferSize, Device, SampleFormat, Stream, StreamConfig, SupportedBufferSize,
-    SupportedStreamConfig,
+    SupportedStreamConfig, SupportedStreamConfigRange,
 };
 
 use super::{CaptureInstant, StreamErrorReporter, build_stream};
@@ -41,6 +42,14 @@ const MAX_ALTERNATIVE_INPUT_CONFIGS: usize = 12;
 /// as their default, so the other formats they list are tried before
 /// failing with the default's error.
 ///
+/// A device that will not report a default format at all is no reason to
+/// stop (#1845: Windows' default-input handle activates through
+/// `ActivateAudioInterfaceAsync` rather than the endpoint itself, and some
+/// drivers refuse that while the same microphone by name opens). The direct
+/// WASAPI paths and the formats the device lists are still tried, and the
+/// read failure is kept, with the driver's reason, for the message if every
+/// one of them refuses.
+///
 /// `renegotiate_rate` marks a silence recovery's open: the device's clock can
 /// be stuck, so its rate changes before the real stream opens (#1575).
 pub(super) fn start_stream_with_fallback(
@@ -49,16 +58,29 @@ pub(super) fn start_stream_with_fallback(
     default_name: Option<String>,
     renegotiate_rate: bool,
 ) -> Result<StartedStream> {
-    let supported = device
-        .default_input_config()
-        .wrap_err("could not read the input device configuration")?;
+    let mut configuration_error: Option<Report> = None;
+    let supported = match device.default_input_config() {
+        Ok(supported) => Some(supported),
+        Err(error) => {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                kind = ?error.kind(),
+                device = %device_name,
+                "could not read the microphone's default format; trying the others it lists"
+            );
+            configuration_error = Some(eyre!(
+                "could not read the input device configuration: {error:#}"
+            ));
+            None
+        }
+    };
     // A device a call app let go can stay on a clock that delivers only zeros
     // until its rate changes. A throwaway stream at another rate makes the
     // driver renegotiate; the real stream opens in the format remembered
     // before it, which sets the device back.
     #[cfg(target_os = "macos")]
-    if renegotiate_rate {
-        renegotiate_sample_rate(device, device_name, &supported);
+    if renegotiate_rate && let Some(supported) = &supported {
+        renegotiate_sample_rate(device, device_name, supported);
     }
     #[cfg(not(target_os = "macos"))]
     let _ = renegotiate_rate;
@@ -66,10 +88,11 @@ pub(super) fn start_stream_with_fallback(
     // second of audio per chunk put speech from before the press into the
     // pre-roll (#1309). Ask for about 20 ms first.
     #[cfg(target_os = "linux")]
-    if let Some(&period) =
-        fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size()).first()
+    if let Some(supported) = &supported
+        && let Some(&period) =
+            fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size()).first()
     {
-        match start_stream(device, &supported, period, default_name.clone()) {
+        match start_stream(device, supported, period, default_name.clone()) {
             Ok(started) => return Ok(started),
             Err(error) => tracing::warn!(
                 error = format!("{error:#}"),
@@ -79,20 +102,20 @@ pub(super) fn start_stream_with_fallback(
             ),
         }
     }
-    let error = match start_stream(
-        device,
-        &supported,
-        BufferSize::Default,
-        default_name.clone(),
-    ) {
-        Ok(started) => return Ok(started),
-        Err(error) => error,
-    };
-    tracing::warn!(
-        error = format!("{error:#}"),
-        device = %device_name,
-        "the microphone refused its default format; trying the others it lists"
-    );
+    let mut error = None;
+    if let Some(supported) = &supported {
+        match start_stream(device, supported, BufferSize::Default, default_name.clone()) {
+            Ok(started) => return Ok(started),
+            Err(failure) => {
+                tracing::warn!(
+                    error = format!("{failure:#}"),
+                    device = %device_name,
+                    "the microphone refused its default format; trying the others it lists"
+                );
+                error = Some(failure);
+            }
+        }
+    }
     // Intel Smart Sound refused every stream cpal built, at any format and
     // buffer, so Hex tries its own WASAPI paths next (#988).
     #[cfg(target_os = "windows")]
@@ -109,11 +132,15 @@ pub(super) fn start_stream_with_fallback(
     // (Intel Smart Sound answered E_INVALIDARG for each, #988) yet accept
     // the same format with an explicit buffer duration, so each format is
     // tried with explicit buffers too.
-    let mut candidates = fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size())
-        .into_iter()
-        .map(|buffer| (supported, buffer))
-        .collect::<Vec<_>>();
-    for candidate in alternative_input_configs(device, &supported) {
+    let mut candidates = Vec::new();
+    if let Some(supported) = &supported {
+        candidates.extend(
+            fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size())
+                .into_iter()
+                .map(|buffer| (*supported, buffer)),
+        );
+    }
+    for candidate in alternative_input_configs(device, supported.as_ref()) {
         candidates.push((candidate, BufferSize::Default));
         for fixed in fixed_buffer_sizes(candidate.sample_rate(), candidate.buffer_size()) {
             candidates.push((candidate, fixed));
@@ -138,7 +165,9 @@ pub(super) fn start_stream_with_fallback(
             ),
         }
     }
-    Err(error)
+    Err(error
+        .or(configuration_error)
+        .unwrap_or_else(|| eyre!("the microphone lists no format it will open")))
 }
 
 /// Explicit buffers to try at `rate`: about 20 ms within the range the
@@ -178,19 +207,31 @@ fn describe_config(config: &SupportedStreamConfig) -> String {
     )
 }
 
-/// The other formats `device` lists, at the default rate where they allow
+/// The other formats `device` lists, at the default rate where it allows
 /// it, without `default` and duplicates.
 fn alternative_input_configs(
     device: &Device,
-    default: &SupportedStreamConfig,
+    default: Option<&SupportedStreamConfig>,
 ) -> Vec<SupportedStreamConfig> {
     let ranges = match device.supported_input_configs() {
         Ok(ranges) => ranges,
         Err(error) => {
-            tracing::warn!(%error, "could not list the microphone's formats");
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not list the microphone's formats"
+            );
             return Vec::new();
         }
     };
+    alternative_configs(ranges, default)
+}
+
+/// The other formats `ranges` list, at `default`'s rate where they allow it,
+/// else the range's own standard rate, without `default` and duplicates.
+fn alternative_configs(
+    ranges: impl Iterator<Item = SupportedStreamConfigRange>,
+    default: Option<&SupportedStreamConfig>,
+) -> Vec<SupportedStreamConfig> {
     let mut candidates: Vec<SupportedStreamConfig> = Vec::new();
     for range in ranges {
         if !is_supported_sample_format(range.sample_format()) {
@@ -200,14 +241,19 @@ fn alternative_input_configs(
         if min > max {
             continue;
         }
-        let rate = default.sample_rate().max(min).min(max);
-        let candidate = range.with_sample_rate(rate);
+        let candidate = match default {
+            Some(default) => range.with_sample_rate(default.sample_rate().max(min).min(max)),
+            // Nothing to match: 48 kHz, else 44.1 kHz, else the range's top.
+            None => range
+                .try_with_standard_sample_rate()
+                .unwrap_or_else(|| range.with_max_sample_rate()),
+        };
         let same = |other: &SupportedStreamConfig| {
             other.channels() == candidate.channels()
                 && other.sample_rate() == candidate.sample_rate()
                 && other.sample_format() == candidate.sample_format()
         };
-        if same(default) || candidates.iter().any(same) {
+        if default.is_some_and(same) || candidates.iter().any(same) {
             continue;
         }
         candidates.push(candidate);
@@ -347,7 +393,10 @@ fn other_sample_rate(device: &Device, current: u32) -> Option<u32> {
     let ranges = match device.supported_input_configs() {
         Ok(ranges) => ranges.collect::<Vec<_>>(),
         Err(error) => {
-            tracing::warn!(%error, "could not list the microphone's formats");
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not list the microphone's formats"
+            );
             return None;
         }
     };
@@ -392,6 +441,70 @@ mod tests {
         assert_eq!(
             fixed_buffer_sizes(48_000, &SupportedBufferSize::Unknown),
             vec![BufferSize::Fixed(960), BufferSize::Fixed(4_800)]
+        );
+    }
+
+    /// A listed format range as WASAPI reports one: 2 channels, a short
+    /// period, and the given format and rates.
+    fn range(format: SampleFormat, min: u32, max: u32) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(
+            2,
+            min,
+            max,
+            SupportedBufferSize::Range { min: 144, max: 480 },
+            format,
+        )
+    }
+
+    fn config(format: SampleFormat, rate: u32) -> SupportedStreamConfig {
+        SupportedStreamConfig::new(
+            2,
+            rate,
+            SupportedBufferSize::Range { min: 144, max: 480 },
+            format,
+        )
+    }
+
+    #[test]
+    fn a_device_without_a_default_format_still_offers_the_formats_it_lists() {
+        // #1845: a device whose default format cannot be read still opens in
+        // one of the formats it lists, each at a rate it allows.
+        let formats = vec![
+            range(SampleFormat::F32, 44_100, 48_000),
+            range(SampleFormat::I16, 48_000, 48_000),
+            // Neither standard rate fits, so the range keeps its top.
+            range(SampleFormat::I32, 8_000, 16_000),
+            // Hex cannot decode 64-bit floats, so that range is skipped.
+            range(SampleFormat::F64, 48_000, 48_000),
+            // The first range again, at the rate it resolved to.
+            range(SampleFormat::F32, 48_000, 48_000),
+        ];
+        assert_eq!(
+            alternative_configs(formats.into_iter(), None),
+            vec![
+                config(SampleFormat::F32, 48_000),
+                config(SampleFormat::I16, 48_000),
+                config(SampleFormat::I32, 16_000),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_default_format_sets_the_rate_the_other_formats_are_tried_at() {
+        let formats = vec![
+            range(SampleFormat::F32, 44_100, 48_000),
+            range(SampleFormat::I16, 44_100, 48_000),
+            // A range that does not reach the default's rate keeps its top.
+            range(SampleFormat::I32, 8_000, 16_000),
+        ];
+        let default = config(SampleFormat::F32, 44_100);
+        assert_eq!(
+            alternative_configs(formats.into_iter(), Some(&default)),
+            vec![
+                // The default's own format is not offered again.
+                config(SampleFormat::I16, 44_100),
+                config(SampleFormat::I32, 16_000),
+            ]
         );
     }
 }
