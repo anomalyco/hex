@@ -982,19 +982,43 @@ fn invocation_context(
     }
 }
 
-/// Whether a file's content can change what the script host loads. Declaration
-/// files only describe the API, so editing one never needs a reload.
-fn watched_workspace_file(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    let Some((stem, extension)) = name.rsplit_once('.') else {
-        return false;
-    };
-    let watched = ["ts", "js", "mjs", "mts", "json"]
+/// Extensions the script host loads, in any case, shared with the loader so
+/// every file it can import is one the watcher reloads.
+const SCRIPT_EXTENSIONS: [&str; 5] = ["ts", "js", "mjs", "mts", "json"];
+/// Extensions the script host erases types from, and the ones a TypeScript
+/// declaration file can have.
+const TYPESCRIPT_EXTENSIONS: [&str; 2] = ["ts", "mts"];
+
+/// `.ts, .js, .mjs, .mts, .json` for messages about what can be imported.
+fn script_extension_list() -> String {
+    SCRIPT_EXTENSIONS
         .iter()
-        .any(|candidate| extension.eq_ignore_ascii_case(candidate));
-    watched && !stem.ends_with(".d") && !stem.ends_with(".D")
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The last component's stem and lowercased extension, or None when it has no
+/// extension.
+fn script_name_parts(path: &Path) -> Option<(&str, String)> {
+    let name = path.file_name()?.to_str()?;
+    let (stem, extension) = name.rsplit_once('.')?;
+    Some((stem, extension.to_ascii_lowercase()))
+}
+
+/// Whether `path` names a file the script host loads, and so one the reload
+/// watcher tracks. Declaration files only describe the API, so editing one
+/// never needs a reload.
+fn is_script_file(path: &Path) -> bool {
+    let Some((stem, extension)) = script_name_parts(path) else {
+        return false;
+    };
+    if !SCRIPT_EXTENSIONS.contains(&extension.as_str()) {
+        return false;
+    }
+    let declaration = (stem.ends_with(".d") || stem.ends_with(".D"))
+        && TYPESCRIPT_EXTENSIONS.contains(&extension.as_str());
+    !declaration
 }
 
 fn workspace_fingerprint(root: &Path) -> u64 {
@@ -1030,7 +1054,7 @@ fn workspace_fingerprint(root: &Path) -> u64 {
             }
             if metadata.is_dir() {
                 queue.push_back((path, depth + 1));
-            } else if metadata.is_file() && watched_workspace_file(&path) {
+            } else if metadata.is_file() && is_script_file(&path) {
                 for byte in path.as_os_str().as_encoded_bytes() {
                     hash = hash
                         .wrapping_mul(1099511628211)
@@ -1351,12 +1375,14 @@ mod tests {
             "lib/types.mts",
             "data.json",
             "lib/upper.JS",
+            "lib/foo.d.js",
         ];
         for name in watched {
             fs::write(root.join(name), "first").unwrap();
         }
         fs::write(root.join("notes.md"), "first").unwrap();
         fs::write(root.join("hex.d.ts"), "first").unwrap();
+        fs::write(root.join("lib/x.d.mts"), "first").unwrap();
         let mut fingerprint = workspace_fingerprint(&root);
         for name in watched {
             fs::write(root.join(name), "second").unwrap();
@@ -1373,6 +1399,7 @@ mod tests {
         fingerprint = workspace_fingerprint(&root);
         fs::write(root.join("notes.md"), "changed").unwrap();
         fs::write(root.join("hex.d.ts"), "changed").unwrap();
+        fs::write(root.join("lib/x.d.mts"), "changed").unwrap();
         assert_eq!(workspace_fingerprint(&root), fingerprint);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1748,6 +1775,24 @@ export default defineHexConfig({
             "import { shout } from \"./lib/words\"\nexport default { transformations: { shout: { name: \"Shout\", transform: shout } } }\n",
         );
         assert_eq!(harness.transform(&["shout"], "hi").unwrap(), "HI!");
+
+        fs::write(
+            workspace.join("lib/plain.js"),
+            "export const yell = (text) => text.toUpperCase()\n",
+        )
+        .unwrap();
+        harness.write(
+            "import { yell } from \"./lib/plain.js\"\nexport default { transformations: { yell: { name: \"Yell\", transform: yell } } }\n",
+        );
+        assert_eq!(harness.transform(&["yell"], "hi").unwrap(), "HI");
+
+        fs::write(workspace.join("notes.txt"), "export const x = 1\n").unwrap();
+        harness.write("import { x } from \"./notes.txt\"\nexport default {}\n");
+        assert!(
+            harness.error().contains("./notes.txt"),
+            "a .txt import loaded as JavaScript: {}",
+            harness.error()
+        );
 
         for import in [
             "node:fs",
