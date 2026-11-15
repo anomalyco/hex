@@ -1,6 +1,7 @@
 //! Which format a microphone stream opens in: the device's default, else,
-//! when the driver refuses it, the other formats the device lists. A
-//! silence-triggered open makes the device renegotiate its sample rate first.
+//! when the driver refuses it or cannot report one, the other formats the
+//! device lists (and Windows' own WASAPI paths). A silence-triggered open
+//! makes the device renegotiate its sample rate first.
 
 use std::sync::mpsc::{self, Receiver};
 
@@ -215,7 +216,10 @@ fn alternative_input_configs(
     let ranges = match device.supported_input_configs() {
         Ok(ranges) => ranges,
         Err(error) => {
-            tracing::warn!(%error, "could not list the microphone's formats");
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not list the microphone's formats"
+            );
             return Vec::new();
         }
     };
@@ -389,7 +393,10 @@ fn other_sample_rate(device: &Device, current: u32) -> Option<u32> {
     let ranges = match device.supported_input_configs() {
         Ok(ranges) => ranges.collect::<Vec<_>>(),
         Err(error) => {
-            tracing::warn!(%error, "could not list the microphone's formats");
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not list the microphone's formats"
+            );
             return None;
         }
     };
