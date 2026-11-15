@@ -883,6 +883,7 @@ impl Pump {
                 &self.meeting_state,
                 crate::app_settings::meetings_enabled(),
             );
+            crate::macos_rune::status_item::update_calendar_menu();
             crate::macos_rune::status_item::update_software(&update_status());
             crate::macos_rune::status_item::update_pause();
             self.meeting_menu_at = now + MEETING_MENU_REFRESH;
@@ -927,6 +928,14 @@ impl Pump {
                 if let Err(error) = copied {
                     tracing::warn!(%error, "could not copy a recent dictation");
                 }
+            }
+            // Labs › Upcoming meetings in menu bar: joining opens the link
+            // and never starts a recording.
+            StatusItemAction::OpenCalendarLink(url) => {
+                if !crate::labs::calendar_menu() {
+                    return;
+                }
+                crate::calendar::open_link(&url);
             }
             StatusItemAction::Update => {
                 let Some(updater) = UPDATER.get() else {

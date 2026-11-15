@@ -577,14 +577,24 @@ struct Reminders {
 impl Reminders {
     fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
         let settings = crate::app_settings::calendar_settings();
-        if !enabled || !settings.reminders_active() {
+        // Labs › Upcoming meetings in menu bar lists the same read with
+        // reminders off; while it is off nothing here changes at all.
+        let menu = crate::calendar_menu::wanted();
+        let reminders = settings.reminders_active();
+        if !enabled || !(reminders || menu) {
             self.meetings.clear();
             self.change_count = None;
             self.read_at_ms = None;
+            if menu {
+                crate::calendar_menu::publish(None, crate::calendar::wall_clock_ms());
+            }
             if let Some(occurrence) = self.scheduler.clear() {
                 let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
             }
             return;
+        }
+        if !reminders && let Some(occurrence) = self.scheduler.clear() {
+            let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
         }
         let now_ms = crate::calendar::wall_clock_ms();
         let changes = crate::calendar::change_count();
@@ -598,6 +608,9 @@ impl Reminders {
                 Ok(meetings) => {
                     self.meetings = meetings;
                     self.read_failed = false;
+                    if menu {
+                        crate::calendar_menu::publish(Some(&self.meetings), now_ms);
+                    }
                 }
                 Err(error) => {
                     if !self.read_failed {
@@ -605,8 +618,14 @@ impl Reminders {
                     }
                     self.read_failed = true;
                     self.meetings.clear();
+                    if menu {
+                        crate::calendar_menu::publish(None, now_ms);
+                    }
                 }
             }
+        }
+        if !reminders {
+            return;
         }
         let lead_ms = settings.lead().as_millis() as i64;
         match self.step(recording, now_ms, lead_ms) {

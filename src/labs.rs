@@ -190,6 +190,7 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::ApiBrowserAccess => settings.labs.api_browser_access,
             Self::SpeakersOnly => settings.labs.speakers_only,
+            Self::CalendarMenu => settings.labs.calendar_menu,
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
@@ -279,6 +280,7 @@ impl Feature {
             &mut labs.api_timestamps,
             &mut labs.api_browser_access,
             &mut labs.speakers_only,
+            &mut labs.calendar_menu,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
             &mut labs.print_start,
@@ -377,6 +379,7 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
+            Self::CalendarMenu => settings.labs.calendar_menu = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
@@ -537,6 +540,11 @@ static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 /// written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Upcoming meetings in menu bar's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static CALENDAR_MENU: AtomicBool = AtomicBool::new(false);
+
 /// Labs › YOLO mode's minimum hold in seconds, 0 while the lab is
 /// off, set beside [`STATE`] like [`PRINT_START`]: the state word is full, so
 /// this lab has its own atomic, written by [`state`] and [`apply`].
@@ -584,6 +592,7 @@ fn state() -> u64 {
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
+                CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
@@ -646,6 +655,14 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
     settings.k_quant_models
         && Feature::KQuantModels.shipped()
         && Feature::KQuantModels.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Upcoming meetings in menu bar in this
+/// build, before its managed lock; the state word has no bit for it.
+fn calendar_menu_enabled(settings: &LabsSettings) -> bool {
+    settings.calendar_menu
+        && Feature::CalendarMenu.shipped()
+        && Feature::CalendarMenu.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › YOLO mode in this build,
@@ -744,6 +761,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
+    CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
@@ -1790,6 +1808,28 @@ mod tests {
         assert_eq!(Feature::PauseMenu.group(), Group::Shortcuts);
         assert_eq!(Feature::PauseMenu.settings_key(), "labs.pause_menu");
         assert_eq!(Feature::PauseMenu.name(), "pause-menu");
+    }
+
+    #[test]
+    fn calendar_menu_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!calendar_menu_enabled(&labs));
+        labs.calendar_menu = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(calendar_menu_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PAUSE_MENU, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CalendarMenu.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::CalendarMenu.added(), 20261114);
+        assert_eq!(Feature::CalendarMenu.audience(), Audience::Everyone);
+        assert_eq!(Feature::CalendarMenu.group(), Group::Meetings);
+        assert_eq!(Feature::CalendarMenu.settings_key(), "labs.calendar_menu");
+        assert_eq!(Feature::CalendarMenu.name(), "calendar-menu");
     }
 
     #[test]

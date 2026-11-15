@@ -505,6 +505,11 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::MeetingFinishedEvent, Some(&GLOBE)));
         rows.push(row(Feature::FollowLiveTranscript, None));
         rows.push(row(Feature::MoreCallApps, Some(&GLOBE)));
+        // macOS's status item lists them, from the meeting controller's own
+        // calendar read.
+        if cfg!(target_os = "macos") {
+            rows.push(row(Feature::CalendarMenu, Some(&CLOCK)));
+        }
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
         }
@@ -817,6 +822,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::PauseMenu => "lab-pause-menu",
+        Feature::CalendarMenu => "lab-calendar-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",

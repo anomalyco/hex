@@ -848,6 +848,17 @@
       "title": "Only on speakers"
     },
     {
+      "added": "2026-11-14",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "calendar-menu",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Show your next calendar meetings in the menu bar menu, with a Join item for call links. Joining never starts a recording.",
+      "title": "Upcoming meetings in menu bar"
+    },
+    {
       "added": "2026-11-09",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",

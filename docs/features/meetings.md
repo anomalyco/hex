@@ -69,6 +69,7 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping
 │   │   capsule) and the System Audio Recording row once allowed
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
+│   │   └── Labs › Upcoming meetings in menu bar -> the same meetings in the status menu // labs.calendar_menu
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
 │       │   Gather, Discord (always listed)
@@ -700,6 +701,47 @@ Record path. Sources: [calendar.rs](../../src/calendar.rs),
 [meeting/watcher.rs](../../src/meeting/watcher.rs), `CalendarFeed` in
 [macos_host.rs](../../src/rune_ui/macos_host.rs), and
 [platform_settings.rs](../../src/rune_ui/platform_settings.rs).
+
+### Upcoming meetings in the menu bar
+
+```ts
+Labs › Upcoming meetings in menu bar          // labs.calendar_menu (macOS, off by default)
+├── Prerequisites: Meetings on, a calendar connected with full access
+├── The status menu starts with an Upcoming section
+│   ├── "Upcoming" (disabled header)
+│   ├── Up to 5 rows: "10:30–11:00  Design sync", prefixed "Now · " in progress
+│   │   ├── With a call link -> opens it in its app or browser; no recording starts
+│   │   └── Without one -> informational, disabled
+│   ├── "No upcoming meetings" (disabled) when none are left
+│   └── separator
+└── Off, Meetings off, or not connected -> no section; the menu is as before
+```
+
+The rows are the reminder poll's own filtered list — the same `is_meeting`
+rule and excluded calendars, one bounded EventKit read each minute or on a
+store change, on the controller thread. The controller publishes that list
+(`calendar_menu::publish` in [calendar_menu.rs](../../src/calendar_menu.rs))
+and the status item only formats it on the main thread
+(`status_item::update_calendar_menu`), so EventKit is never read there. While
+the lab is on the read also runs with Reminders switched off, since the
+section does not depend on them; while it is off the poll is unchanged. Times
+are the computer's local wall-clock times, and a meeting that has ended is
+left out on the next 500 ms refresh. The snapshot keeps at most 32 meetings
+and hides when it is more than 10 minutes old, when Meetings are off, or when
+no calendar is connected; a failed read (no access) clears it.
+
+Checks: `an_in_progress_meeting_reads_now`, `ended_meetings_are_left_out`,
+`at_most_five_meetings_show_soonest_first`, `an_empty_section_has_no_rows`,
+and `a_stale_snapshot_never_shows` in
+[calendar_menu.rs](../../src/calendar_menu.rs);
+`calendar_menu_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs); and
+`the_menu_reads_upcoming_then_meetings_then_actions_then_the_app` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) (macOS only).
+Not yet observed: the section in a real Mac's menu bar, a real EventKit read
+reaching it, a click opening a real Zoom or Meet link, and the menu with
+calendar access denied. The rows render only in macOS builds, so no golden
+changes.
 
 ### Record
 
