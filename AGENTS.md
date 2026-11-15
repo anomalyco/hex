@@ -831,7 +831,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   hold threshold returns the press to pending and reopens; on macOS, a later
   failure keeps the audio already delivered as a copy-only dictation, or fails
   the capture when no audio after the start arrived or it is near-silent. Cold
-  opens retry the selected device briefly before falling back. A System default
+  opens retry the selected device briefly before falling back. A microphone
   whose format cannot be read falls through to the direct WASAPI paths on
   Windows.
 - Model inference, optional post-processing, and paste must

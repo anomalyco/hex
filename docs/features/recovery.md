@@ -292,6 +292,9 @@ device's default format cannot be read                   // cause unconfirmed on
      with ActivateAudioInterfaceAsync, where Hex's direct paths use
      IMMDevice::Activate, so the direct paths are tried next and start the
      stream
+  -> that direct stream stays on the endpoint it opened and does not follow a
+     later default change until it fails, like the #988 fallthrough; with
+     release-while-idle every dictation reopens anyway
   -> those fail too -> the config-read error, with a short note and the
      direct paths' reason in the log
 no input device at all (macOS)
