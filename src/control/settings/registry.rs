@@ -726,7 +726,7 @@ pub(super) const KEYS: &[Key] = &[
     optional(
         "meetings.opencode_model",
         Kind::Text,
-        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none lets Hex pick a fast model",
+        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none uses OpenCode's default model",
     ),
     key(
         "meetings.show_recording_indicator",

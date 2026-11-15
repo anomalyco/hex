@@ -358,9 +358,11 @@ Linux under the native title bar. Mode processing, OpenCode rewriting, and trans
 through the same `dictation/processor` and `personal_commands` modules as
 macOS, and Windows reaches the running OpenCode service the same way: its
 registration file and loopback HTTP, never a CLI. Like macOS,
-an unset OpenCode model tries the ranked recommended models before the
-OpenCode default. An OpenCode service running inside WSL2 is found only with
-Labs › OpenCode in WSL on: WSL2 forwards its loopback URL, and the lab adds
+an unset OpenCode model in a mode tries the ranked recommended models before
+the OpenCode default, while meeting notes with no chosen model ask only
+OpenCode's own default model. An OpenCode service running inside WSL2 is
+found only with Labs › OpenCode in WSL on: WSL2 forwards its loopback URL, and
+the lab adds
 the default distribution's registration and a Linux workspace path for
 `x-opencode-directory`. Annotate's capture sends use the same service: the
 prompt's "Recorded at" line names the capture folder as a Linux `/mnt/…` path

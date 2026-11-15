@@ -640,8 +640,9 @@ comma-separated, and `set` (or `apply`) adds the comma-separated names to it;
 `meetings.summaries` chooses who titles and summarizes meetings: `off`, `mac`
 (Apple Intelligence; nothing leaves this Mac, and nothing falls back to
 OpenCode), or `opencode` (sends the transcript to `meetings.opencode_model`,
-or a fast model Hex picks when that is `none`). Off a Mac it is `off` or
-`opencode`. The retired `meetings.summarize_with_apple_intelligence` and
+or OpenCode's own default model when that is `none`, never another provider).
+Off a Mac it is `off` or `opencode`. The retired
+`meetings.summarize_with_apple_intelligence` and
 `meetings.summarize_with_opencode` are refused with the `meetings.summaries`
 command to use instead.
 

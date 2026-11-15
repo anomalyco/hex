@@ -686,7 +686,7 @@ pub(super) fn summary_model_shown(ui: &Ui) -> bool {
 /// use, such as one typed with `hex settings`; `None` when it can.
 pub(super) fn summary_model_problem(saved: &str) -> Option<&'static str> {
     (!saved.trim().is_empty() && crate::meeting::generator::parse_model(saved).is_none()).then(|| {
-        tr("Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex tries its list of fast models")
+        tr("Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex uses OpenCode's default model")
     })
 }
 

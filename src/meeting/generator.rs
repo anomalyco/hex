@@ -271,7 +271,7 @@ fn opencode_reporting<T: DeserializeOwned>(
     );
     let cancelled = AtomicBool::new(false);
     // Exactly the chosen model, whose failure is the meeting's notes error;
-    // otherwise the ranked models.
+    // otherwise OpenCode's own default model, and never the ranked models.
     let generated = match summary_model() {
         Some(model) => {
             crate::dictation::processor::generate_text_with(&request, &model, timeout, &cancelled)
