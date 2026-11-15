@@ -286,6 +286,11 @@ device refuses a stream in its own default format     // #988, Intel Smart Sound
   -> log the refused format (channels, Hz, sample format) // audio/input_format
   -> try the other formats it lists (F32, I16, U16, I32), at most 12
   -> none opens -> the default format's error, with its format, goes to recovery
+device reports no default format at all               // #1845, Windows default input
+  -> log the driver's reason and kind, not just the wrap // audio/input_format
+  -> try the direct WASAPI paths, then the formats it lists
+     (48 kHz, else 44.1 kHz, else the range's top) // unverified on real Windows
+  -> none opens -> the read error, with its cause, goes to recovery
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"
