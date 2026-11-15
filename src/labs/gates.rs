@@ -345,9 +345,10 @@ pub fn pause_menu() -> bool {
     on(PAUSE_MENU) && Feature::PauseMenu.on_this_os()
 }
 
-/// The menu bar lists the next calendar meetings, with a Join row for a call
-/// link (macOS; read each time the status item refreshes and as the menu
-/// opens, and by the meeting controller before it reads its calendar).
+/// The menu bar lists the next calendar meetings, and choosing one with a
+/// call link joins it (macOS; read each time the status item refreshes and
+/// as the menu opens, and by the meeting controller before it reads its
+/// calendar).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn calendar_menu() -> bool {
     // The state word has no bit for it: its own atomic, written by

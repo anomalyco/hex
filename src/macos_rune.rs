@@ -49,7 +49,9 @@ use crate::desktop::host::{
 use crate::dictation::indicator::DictationIndicatorEvent;
 use crate::macos_rune::status_item::StatusItemAction;
 use crate::meeting::MeetingRequest;
-use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState};
+use crate::meeting::watcher::{
+    ControllerCommand, ControllerEvent, ListenerConfig, MeetingMenuState,
+};
 use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
@@ -489,6 +491,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     } else {
         app.windowless()
     };
+    // The menu's Join reaches the same controller path as a reminder's.
+    let calendar_commands = controller_commands.clone();
     let capsules = {
         let window = window.clone();
         crate::rune_ui::meeting_capsules::MeetingCapsules::install(
@@ -546,6 +550,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         hud,
         status_actions: None,
         controller_events,
+        controller_commands: calendar_commands,
         developer_calls: developer_receiver,
         control_calls: pump_call_receiver,
         meeting_waiters: Vec::new(),
@@ -647,6 +652,9 @@ struct Pump {
     hud: crate::rune_hud::HudSender,
     status_actions: Option<Receiver<StatusItemAction>>,
     controller_events: Receiver<ControllerEvent>,
+    /// The meeting controller's commands: the menu's Join takes the same
+    /// path as a reminder's.
+    controller_commands: SyncSender<ControllerCommand>,
     developer_calls: Receiver<crate::control::developer_control::DeveloperCall>,
     control_calls: Receiver<crate::control::ControlCall>,
     meeting_waiters: Vec<control::MeetingWaiter>,
@@ -929,13 +937,20 @@ impl Pump {
                     tracing::warn!(%error, "could not copy a recent dictation");
                 }
             }
-            // Labs › Upcoming meetings in menu bar: joining opens the link
-            // and never starts a recording.
-            StatusItemAction::OpenCalendarLink(url) => {
+            // Labs › Upcoming meetings in menu bar: the row joins exactly as
+            // a reminder's Join does, so the link opens, the occurrence is
+            // marked answered, and no reminder pops afterwards.
+            StatusItemAction::JoinCalendarMeeting(meeting) => {
                 if !crate::labs::calendar_menu() {
                     return;
                 }
-                crate::calendar::open_link(&url);
+                if self
+                    .controller_commands
+                    .try_send(ControllerCommand::JoinMeeting(meeting))
+                    .is_err()
+                {
+                    tracing::warn!("could not reach the meeting controller to join a meeting");
+                }
             }
             StatusItemAction::Update => {
                 let Some(updater) = UPDATER.get() else {

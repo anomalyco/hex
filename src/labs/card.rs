@@ -299,7 +299,7 @@ impl Feature {
                 "Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"
             }
             Self::CalendarMenu => {
-                "Show your next calendar meetings in the menu bar menu, with a Join item for call links. Joining never starts a recording."
+                "Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording."
             }
             Self::PrintStart => {
                 "Let hex dictation start --print answer with the transcript when it ends"

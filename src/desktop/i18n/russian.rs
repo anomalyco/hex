@@ -1350,9 +1350,17 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Screenshots folder", "Папка снимков экрана"),
     ("Couldn't save to {folder}: {error}", "Не удалось сохранить в {folder}: {error}"),
     ("Upcoming meetings in menu bar", "Ближайшие встречи в меню-баре"),
-    ("Show your next calendar meetings in the menu bar menu, with a Join item for call links. Joining never starts a recording.", "Показывает ближайшие встречи календаря в меню меню-бара, с пунктом «Присоединиться» для ссылок на звонки. Присоединение никогда не начинает запись."),
+    ("Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording.", "Показывает ближайшие встречи календаря в меню меню-бара. Выбор встречи со ссылкой на звонок открывает её; этот щелчок не начинает запись."),
     ("Upcoming", "Скоро"),
     ("No upcoming meetings", "Ближайших встреч нет"),
+    ("Now · {}", "Сейчас · {}"),
+    ("Sun", "Вс"),
+    ("Mon", "Пн"),
+    ("Tue", "Вт"),
+    ("Wed", "Ср"),
+    ("Thu", "Чт"),
+    ("Fri", "Пт"),
+    ("Sat", "Сб"),
 ];
 
 #[cfg(test)]

@@ -571,33 +571,70 @@ struct Reminders {
     change_count: Option<u64>,
     /// Wall-clock time of the last read, so a wake from sleep rereads.
     read_at_ms: Option<i64>,
+    /// The last read ran only for the menu snapshot, not for reminders: when
+    /// reminders come back they read at once instead of reusing it.
+    menu_only_read: bool,
     read_failed: bool,
+}
+
+/// Where a successful calendar read goes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReadSources {
+    /// The list reminders schedule from and detected calls are titled by:
+    /// only while reminders are active.
+    meetings: bool,
+    /// Labs › Upcoming meetings in menu bar's own snapshot.
+    menu: bool,
+}
+
+impl ReadSources {
+    fn new(reminders: bool, menu: bool) -> Self {
+        Self {
+            meetings: reminders,
+            menu,
+        }
+    }
 }
 
 impl Reminders {
     fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
         let settings = crate::app_settings::calendar_settings();
         // Labs › Upcoming meetings in menu bar lists the same read with
-        // reminders off; while it is off nothing here changes at all.
-        let menu = crate::calendar_menu::wanted();
+        // reminders off, but only while a calendar is connected; while it is
+        // off nothing here changes at all.
+        let menu_on = crate::calendar_menu::lab_on();
+        let menu = crate::calendar_menu::wanted(settings.connected);
         let reminders = settings.reminders_active();
+        let reads = ReadSources::new(reminders, menu);
         if !enabled || !(reminders || menu) {
             self.meetings.clear();
             self.change_count = None;
             self.read_at_ms = None;
-            if menu {
-                crate::calendar_menu::publish(None, crate::calendar::wall_clock_ms());
+            if menu_on {
+                crate::calendar_menu::clear();
             }
+            self.menu_only_read = false;
             if let Some(occurrence) = self.scheduler.clear() {
                 let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
             }
             return;
         }
-        if !reminders && let Some(occurrence) = self.scheduler.clear() {
-            let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+        if !reminders {
+            // The menu's list is the read's own: with reminders off the read
+            // never feeds the list recordings are titled and reminded from.
+            self.meetings.clear();
+            if let Some(occurrence) = self.scheduler.clear() {
+                let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+            }
         }
         let now_ms = crate::calendar::wall_clock_ms();
         let changes = crate::calendar::change_count();
+        // A read made only for the menu left the titling and reminder list
+        // empty, so reminders read again at once when they come back.
+        if reminders && self.menu_only_read {
+            self.read_at_ms = None;
+            self.menu_only_read = false;
+        }
         let stale = self
             .read_at_ms
             .is_none_or(|read_at| (now_ms - read_at).abs() >= CALENDAR_REREAD_MS);
@@ -606,10 +643,12 @@ impl Reminders {
             self.read_at_ms = Some(now_ms);
             match crate::calendar::read_meetings(&settings, now_ms) {
                 Ok(meetings) => {
-                    self.meetings = meetings;
                     self.read_failed = false;
-                    if menu {
-                        crate::calendar_menu::publish(Some(&self.meetings), now_ms);
+                    if reads.menu {
+                        crate::calendar_menu::publish(Some(&meetings), now_ms);
+                    }
+                    if reads.meetings {
+                        self.meetings = meetings;
                     }
                 }
                 Err(error) => {
@@ -618,11 +657,12 @@ impl Reminders {
                     }
                     self.read_failed = true;
                     self.meetings.clear();
-                    if menu {
-                        crate::calendar_menu::publish(None, now_ms);
+                    if reads.menu {
+                        crate::calendar_menu::clear();
                     }
                 }
             }
+            self.menu_only_read = !reads.meetings;
         }
         if !reminders {
             return;
@@ -1383,6 +1423,20 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_menu_only_read_never_feeds_the_titling_and_reminder_list() {
+        let menu_only = ReadSources::new(false, true);
+        assert!(!menu_only.meetings);
+        assert!(menu_only.menu);
+        // Reminders keep the read they always had.
+        let reminders = ReadSources::new(true, false);
+        assert!(reminders.meetings);
+        assert!(!reminders.menu);
+        let both = ReadSources::new(true, true);
+        assert!(both.meetings);
+        assert!(both.menu);
+    }
 
     #[test]
     fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {

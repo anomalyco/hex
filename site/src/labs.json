@@ -855,7 +855,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Show your next calendar meetings in the menu bar menu, with a Join item for call links. Joining never starts a recording.",
+      "summary": "Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording.",
       "title": "Upcoming meetings in menu bar"
     },
     {

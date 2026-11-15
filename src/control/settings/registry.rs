@@ -687,9 +687,9 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.calendar_menu",
         Kind::Bool,
-        "Labs: the menu bar lists the next calendar meetings, each with a Join item when it has \
-         a call link; joining opens the link and never starts a recording (macOS, with Meetings on \
-         and a calendar connected)",
+        "Labs: the menu bar lists the next calendar meetings, each a local start and end time and \
+         title; choosing one that has a call link opens it, and that click doesn't start a \
+         recording (macOS, with Meetings on and a calendar connected)",
     ),
     key(
         "labs.pause_menu",

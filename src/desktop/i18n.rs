@@ -1723,6 +1723,7 @@ mod tests {
         include_str!("../rune_ui/vocabulary.rs"),
         include_str!("../rune_ui/windows_host.rs"),
         include_str!("tray_menu.rs"),
+        include_str!("../calendar_menu.rs"),
         include_str!("../macos_rune/status_item.rs"),
         include_str!("../rune_ui/onboarding_kit/first_screen.rs"),
         include_str!("../rune_ui/onboarding_kit/login.rs"),

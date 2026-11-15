@@ -12,6 +12,7 @@ use objc2_app_kit::{
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
+use crate::calendar::CalendarMeeting;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::desktop::tray_menu::model_menu_entries;
 use crate::transcription::models::{MODELS, TranscriptionModelId};
@@ -21,7 +22,7 @@ const IDLE_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/menubar-idle@2x.
 const RECORDING_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/menubar-recording@2x.png");
 const STATUS_ICON_POINTS: f64 = 18.0;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StatusItemAction {
     OpenSettings,
     OpenModels,
@@ -30,9 +31,10 @@ pub enum StatusItemAction {
     PasteLast,
     /// Copy History entry `id` (Labs › Copy recent dictations).
     CopyRecentDictation(u64),
-    /// Open a calendar meeting's call link, and never record (Labs ›
-    /// Upcoming meetings in menu bar).
-    OpenCalendarLink(String),
+    /// Join a calendar meeting from the menu: opens its call link without
+    /// recording and marks the occurrence answered (Labs › Upcoming meetings
+    /// in menu bar).
+    JoinCalendarMeeting(CalendarMeeting),
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
@@ -131,10 +133,10 @@ objc2::define_class!(
                     STATUS_ITEM.with(|controller| {
                         controller.borrow().as_ref().is_some_and(|controller| {
                             controller
-                                .upcoming_links
+                                .upcoming_meetings
                                 .borrow()
                                 .get(index)
-                                .is_some_and(|link| link.is_some())
+                                .is_some_and(|meeting| meeting.is_some())
                         })
                     })
                 }
@@ -143,27 +145,28 @@ objc2::define_class!(
         }
 
         /// Labs › Upcoming meetings in menu bar: a meeting with a call link
-        /// opens it in its app or browser, and nothing records.
+        /// joins through the meeting controller, exactly like a reminder's
+        /// Join, and nothing records.
         #[unsafe(method(openCalendarMeeting:))]
         fn open_calendar_meeting(&self, sender: &NSMenuItem) {
             let Ok(index) = usize::try_from(sender.tag()) else {
                 return;
             };
-            let link = STATUS_ITEM.with(|controller| {
+            let meeting = STATUS_ITEM.with(|controller| {
                 controller.borrow().as_ref().and_then(|controller| {
                     controller
-                        .upcoming_links
+                        .upcoming_meetings
                         .borrow()
                         .get(index)
                         .cloned()
                         .flatten()
                 })
             });
-            if let Some(url) = link {
+            if let Some(meeting) = meeting {
                 let _ = self
                     .ivars()
                     .actions
-                    .try_send(StatusItemAction::OpenCalendarLink(url));
+                    .try_send(StatusItemAction::JoinCalendarMeeting(meeting));
             }
         }
 
@@ -493,7 +496,7 @@ struct StatusItemController {
     /// The labels on the slots now, so a refresh writes only changes.
     upcoming_labels: RefCell<Vec<String>>,
     /// The call links behind the slots now, by slot; `None` is informational.
-    upcoming_links: RefCell<Vec<Option<String>>>,
+    upcoming_meetings: RefCell<Vec<Option<CalendarMeeting>>>,
     restore_capture: Retained<NSMenuItem>,
     update: Option<Retained<NSMenuItem>>,
     update_title: RefCell<String>,
@@ -661,7 +664,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             upcoming_empty: row(Row::UpcomingEmpty),
             upcoming_separator: row(Row::UpcomingSeparator),
             upcoming_labels: RefCell::new(Vec::new()),
-            upcoming_links: RefCell::new(Vec::new()),
+            upcoming_meetings: RefCell::new(Vec::new()),
             restore_capture: row(Row::RestoreCapture),
             update: (!update_managed).then(|| row(Row::Update)),
             update_title: RefCell::new(Row::Update.title().unwrap_or_default()),
@@ -970,14 +973,17 @@ fn refresh_upcoming() {
             hide_upcoming(controller);
             return;
         };
+        let labels = rows.iter().map(|row| row.label.clone()).collect::<Vec<_>>();
+        let meetings = rows.into_iter().map(|row| row.meeting).collect::<Vec<_>>();
+        let unchanged = {
+            let current_labels = controller.upcoming_labels.borrow();
+            let current_meetings = controller.upcoming_meetings.borrow();
+            *current_labels == labels && *current_meetings == meetings
+        };
         controller.upcoming_header.setHidden(false);
         controller.upcoming_separator.setHidden(false);
-        controller.upcoming_empty.setHidden(!rows.is_empty());
-        let labels = rows.iter().map(|row| row.label.clone()).collect::<Vec<_>>();
-        let links = rows.iter().map(|row| row.link.clone()).collect::<Vec<_>>();
-        let mut current_labels = controller.upcoming_labels.borrow_mut();
-        let mut current_links = controller.upcoming_links.borrow_mut();
-        if *current_labels == labels && *current_links == links {
+        controller.upcoming_empty.setHidden(!labels.is_empty());
+        if unchanged {
             return;
         }
         for (index, item) in controller.upcoming_slots.iter().enumerate() {
@@ -986,8 +992,10 @@ fn refresh_upcoming() {
                 item.setTitle(&NSString::from_str(label));
             }
         }
-        *current_labels = labels;
-        *current_links = links;
+        // Assign after every AppKit call: no `RefCell` borrow is held across
+        // one, so a menu callback can read the shown rows meanwhile.
+        *controller.upcoming_labels.borrow_mut() = labels;
+        *controller.upcoming_meetings.borrow_mut() = meetings;
     });
 }
 
@@ -1001,7 +1009,7 @@ fn hide_upcoming(controller: &StatusItemController) {
         item.setHidden(true);
     }
     controller.upcoming_labels.borrow_mut().clear();
-    controller.upcoming_links.borrow_mut().clear();
+    controller.upcoming_meetings.borrow_mut().clear();
 }
 
 /// Shows Pause Hex while Labs › Pause from menu bar is on, reads Resume Hex

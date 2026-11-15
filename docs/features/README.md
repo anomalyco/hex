@@ -1607,10 +1607,12 @@ Cancellation / interruption / failure    // recovery
 Menu bar and Settings                    // maintenance
 ├── Menu (macOS), top to bottom: now, things to do, the app
 │   ├── Labs > Upcoming meetings in menu bar (off) -> an Upcoming section first:
-│   │   up to five of the reminder poll's meetings as local start–end time and
-│   │   title ("Now · " in progress, ended left out), a Join row for a call link
-│   │   that opens it and never records, "No upcoming meetings" when none (labs.md,
-│   │   meetings.md)
+│   │   up to five of the reminder poll's meetings, soonest first, as local
+│   │   start–end time and title ("Now · " in progress, "Tomorrow " or the short
+│   │   weekday for a later day, ended left out), "No upcoming meetings" when
+│   │   none; choosing a row with a call link joins it through the reminder's
+│   │   Join path (the click doesn't record), a row without one is informational
+│   │   (labs.md, meetings.md)
 │   ├── Meetings on or a meeting under way: Recording · <title> · 12:34 (opens
 │   │   the Meetings pane), Stop & Transcribe, Copy Section ▸; idle: Record Meeting
 │   ├── Pause Hex (Labs › Pause from menu bar, off, #82) -> every capture
