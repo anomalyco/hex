@@ -22,6 +22,8 @@ pub(crate) mod notes;
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
 mod platform;
 pub mod protocol;
+#[cfg(any(target_os = "macos", test))]
+mod staging;
 mod transport;
 
 use std::path::{Path, PathBuf};
@@ -723,11 +725,17 @@ fn check(
             #[cfg(not(target_os = "windows"))]
             let staged = platform::stage(&file, &version);
             let staged = staged.wrap_err_with(|| format!("could not stage Hex {version}"))?;
+            #[cfg(target_os = "macos")]
+            let superseded = staged.clone();
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
                 sha256: target.sha256,
                 version: version.clone(),
             });
+            // Now that this release is the staged update, the unpacked folder
+            // of the one it replaced (or of the bundle a swap replaced) can go.
+            #[cfg(target_os = "macos")]
+            platform::remove_superseded(&superseded);
             *lock(&shared.notes) = None;
             // Restart to update's final check quits right after; notes
             // would only hold it up.
