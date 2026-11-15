@@ -687,6 +687,13 @@ Hex's own windows                        // capture.own-windows
 ├── Chrome (the capsule, ink, picker, HUDs, meeting capsules: Hex's named
 │   windows and any of its windows above the normal level) -> never recorded,
 │   never in the window log, never the target, clicks on it not logged
+│   ├── While the pen is on, the ink overlay holds the keys, so the window
+│   │   log's system-wide focused-application read names Hex itself; AppKit
+│   │   answers that read on the asking `scrawl-window-log` thread, and the
+│   │   vendored AccessKit macOS adapter now answers such off-main reads as a
+│   │   plain view instead of borrowing its main-thread state. That borrow
+│   │   aborted Hex mid-capture (#1859, Rune #1040); a test would need AppKit
+│   │   and a key window, so none covers it
 │   ├── Other recorders -> the capsule, picker, and ink are left out
 │   │   (sharingType none) while shown; the dictation HUD and meeting
 │   │   capsules show
