@@ -132,6 +132,47 @@ impl AppSettings {
         Self::read_managed_from(path, Policy::current())
     }
 
+    /// Publishes the saved values the embedded transcription service reads:
+    /// the Labs switches transcription checks (Labs › Vocabulary biasing
+    /// gates the list), the vocabulary and its boost, and, on Linux and
+    /// Windows, the speech engine. `hex transcribe` and the TypeScript SDK's
+    /// direct child start that service without the app's launch, so nothing
+    /// else publishes these for it; this writes nothing.
+    pub(crate) fn apply_for_embedded_service() -> Option<Self> {
+        let path = match path() {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::warn!(
+                    error = %format!("{error:#}"),
+                    "could not read settings; transcribing without the saved vocabulary"
+                );
+                return None;
+            }
+        };
+        Self::apply_for_embedded_service_at(&path)
+    }
+
+    /// `apply_for_embedded_service` from `path`, returning the settings it
+    /// published so a test can assert on them without the process globals.
+    pub(crate) fn apply_for_embedded_service_at(path: &Path) -> Option<Self> {
+        let settings = match Self::read_from(path) {
+            Ok((settings, _)) => settings,
+            Err(error) => {
+                tracing::warn!(
+                    error = %format!("{error:#}"),
+                    path = %path.display(),
+                    "could not read settings; transcribing without the saved vocabulary"
+                );
+                return None;
+            }
+        };
+        crate::labs::apply(&settings.labs);
+        crate::dictation::vocabulary::apply(&settings.vocabulary, settings.vocabulary_boost);
+        #[cfg(not(target_os = "macos"))]
+        crate::transcription::local_transcriber::set_device(settings.transcription_device);
+        Some(settings)
+    }
+
     pub(super) fn read_managed_from(path: &Path, policy: Policy) -> Result<(Self, bool)> {
         let mut revision = WRITER.lock().unwrap_or_else(|error| error.into_inner());
         let (mut settings, migrated, issue) = Self::read_managed_checked_from(path, policy)?;
