@@ -248,6 +248,10 @@ pub struct LabsSettings {
     /// A dictation mode's speech model and language follow the foreground
     /// application (macOS and Windows).
     pub app_model_switching: bool,
+    /// The menu bar lists the next calendar meetings, each a local start and
+    /// end time and title; choosing one with a call link opens it (macOS,
+    /// with Meetings on and a calendar connected).
+    pub calendar_menu: bool,
     /// The menu bar offers Pause Hex, which makes every capture shortcut
     /// inert until Resume (macOS).
     pub pause_menu: bool,
@@ -425,6 +429,7 @@ impl Default for LabsSettings {
             api_browser_origins: Vec::new(),
             speakers_only: false,
             app_model_switching: false,
+            calendar_menu: false,
             pause_menu: false,
             print_start: false,
             voice_prompt: false,

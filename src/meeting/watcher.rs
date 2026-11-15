@@ -40,6 +40,9 @@ pub(crate) enum ControllerCommand {
     /// Open the meeting's call link without recording (Always record
     /// starts once the call is detected).
     JoinMeeting(CalendarMeeting),
+    /// Joined from the Labs menu: opens the call link without recording, and
+    /// records the occurrence so no reminder pops (closing the showing one).
+    JoinFromMenu(CalendarMeeting),
     /// Not now, or Don't record: the meeting's call is neither offered nor
     /// recorded automatically.
     DismissReminder(CalendarMeeting),
@@ -447,6 +450,14 @@ fn handle_command(
                 crate::calendar::open_link(&link.url);
             }
         }
+        ControllerCommand::JoinFromMenu(meeting) => {
+            if let Some(occurrence) = reminders.scheduler.joined_elsewhere(&meeting) {
+                let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+            }
+            if let Some(link) = &meeting.link {
+                crate::calendar::open_link(&link.url);
+            }
+        }
         ControllerCommand::DismissReminder(meeting) => {
             reminders.scheduler.answered(&meeting.occurrence());
             snooze_calendar_call(detector, &meeting);
@@ -571,23 +582,84 @@ struct Reminders {
     change_count: Option<u64>,
     /// Wall-clock time of the last read, so a wake from sleep rereads.
     read_at_ms: Option<i64>,
+    /// The last read ran only for the menu snapshot, not for reminders: when
+    /// reminders come back they read at once instead of reusing it.
+    menu_only_read: bool,
+    /// The menu has read since the lab came on: its first poll reads at once
+    /// instead of waiting out the minute.
+    menu_read: bool,
     read_failed: bool,
 }
 
+/// Where a successful calendar read goes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReadSources {
+    /// The list reminders schedule from and detected calls are titled by:
+    /// only while reminders are active.
+    meetings: bool,
+    /// Labs › Upcoming meetings in menu bar's own snapshot.
+    menu: bool,
+}
+
+impl ReadSources {
+    fn new(reminders: bool, menu: bool) -> Self {
+        Self {
+            meetings: reminders,
+            menu,
+        }
+    }
+}
+
 impl Reminders {
+    /// Forces the extra reads a poll needs beyond a stale read or a store
+    /// change: the menu's first read after the lab comes on, and reminders'
+    /// first read after a menu-only one left their list empty.
+    fn prepare_read(&mut self, reminders: bool, menu: bool) {
+        if !menu {
+            self.menu_read = false;
+        } else if !self.menu_read {
+            self.read_at_ms = None;
+        }
+        if reminders && self.menu_only_read {
+            self.read_at_ms = None;
+            self.menu_only_read = false;
+        }
+    }
+
     fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
         let settings = crate::app_settings::calendar_settings();
-        if !enabled || !settings.reminders_active() {
+        // Labs › Upcoming meetings in menu bar lists the same read with
+        // reminders off, but only while a calendar is connected; while it is
+        // off nothing here changes at all.
+        let menu_on = crate::calendar_menu::lab_on();
+        let menu = crate::calendar_menu::wanted(settings.connected);
+        let reminders = settings.reminders_active();
+        let reads = ReadSources::new(reminders, menu);
+        if !enabled || !(reminders || menu) {
             self.meetings.clear();
             self.change_count = None;
             self.read_at_ms = None;
+            if menu_on {
+                crate::calendar_menu::clear();
+            }
+            self.menu_only_read = false;
+            self.menu_read = false;
             if let Some(occurrence) = self.scheduler.clear() {
                 let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
             }
             return;
         }
+        if !reminders {
+            // The menu's list is the read's own: with reminders off the read
+            // never feeds the list recordings are titled and reminded from.
+            self.meetings.clear();
+            if let Some(occurrence) = self.scheduler.clear() {
+                let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+            }
+        }
         let now_ms = crate::calendar::wall_clock_ms();
         let changes = crate::calendar::change_count();
+        self.prepare_read(reminders, menu);
         let stale = self
             .read_at_ms
             .is_none_or(|read_at| (now_ms - read_at).abs() >= CALENDAR_REREAD_MS);
@@ -596,8 +668,13 @@ impl Reminders {
             self.read_at_ms = Some(now_ms);
             match crate::calendar::read_meetings(&settings, now_ms) {
                 Ok(meetings) => {
-                    self.meetings = meetings;
                     self.read_failed = false;
+                    if reads.menu {
+                        crate::calendar_menu::publish(Some(&meetings), now_ms);
+                    }
+                    if reads.meetings {
+                        self.meetings = meetings;
+                    }
                 }
                 Err(error) => {
                     if !self.read_failed {
@@ -605,8 +682,18 @@ impl Reminders {
                     }
                     self.read_failed = true;
                     self.meetings.clear();
+                    if reads.menu {
+                        crate::calendar_menu::clear();
+                    }
                 }
             }
+            self.menu_only_read = !reads.meetings;
+        }
+        if menu {
+            self.menu_read = true;
+        }
+        if !reminders {
+            return;
         }
         let lead_ms = settings.lead().as_millis() as i64;
         match self.step(recording, now_ms, lead_ms) {
@@ -1364,6 +1451,91 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_reminders_keep_the_titling_and_reminder_list() {
+        let menu_only = ReadSources::new(false, true);
+        assert!(!menu_only.meetings);
+        assert!(menu_only.menu);
+        // Reminders keep the read they always had.
+        let reminders = ReadSources::new(true, false);
+        assert!(reminders.meetings);
+        assert!(!reminders.menu);
+        let both = ReadSources::new(true, true);
+        assert!(both.meetings);
+        assert!(both.menu);
+    }
+
+    #[test]
+    fn a_menu_only_read_and_a_new_lab_both_force_an_immediate_read() {
+        // Reminders coming back after a menu-only read must not reuse it:
+        // their titling and reminder list is empty.
+        let mut reminders = Reminders {
+            read_at_ms: Some(1_000),
+            menu_only_read: true,
+            ..Reminders::default()
+        };
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, None);
+        assert!(!reminders.menu_only_read);
+
+        // The menu's first poll after the lab comes on reads at once too.
+        let mut reminders = Reminders {
+            read_at_ms: Some(1_000),
+            ..Reminders::default()
+        };
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, None);
+
+        // Once the menu has read, a fresh read is kept.
+        reminders.menu_read = true;
+        reminders.read_at_ms = Some(2_000);
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, Some(2_000));
+
+        // With the menu off nothing is forced, and its next turn reads.
+        reminders.prepare_read(true, false);
+        assert_eq!(reminders.read_at_ms, Some(2_000));
+        assert!(!reminders.menu_read);
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, None);
+    }
+
+    #[test]
+    fn joining_from_the_menu_withdraws_its_reminder_and_starts_nothing() {
+        let (events, received) = mpsc::sync_channel(4);
+        let mut reminders = Reminders::default();
+        let meeting = meeting("sync", 100, 30);
+        assert!(matches!(
+            reminders
+                .scheduler
+                .poll(std::slice::from_ref(&meeting), 99 * MINUTE, MINUTE),
+            Some(ReminderUpdate::Show(_))
+        ));
+        let mut recording = None;
+        handle_command(
+            &mut recording,
+            &mut None,
+            &mut MeetingDetector::default(),
+            &mut reminders,
+            ControllerCommand::JoinFromMenu(meeting.clone()),
+            true,
+            &events,
+        );
+        assert!(recording.is_none(), "joining from the menu never records");
+        assert!(matches!(
+            received.try_recv(),
+            Ok(ControllerEvent::ReminderWithdrawn { occurrence })
+                if occurrence == meeting.occurrence()
+        ));
+        // It was recorded as reminded, so it never pops later.
+        assert_eq!(
+            reminders
+                .scheduler
+                .poll(std::slice::from_ref(&meeting), 100 * MINUTE, MINUTE),
+            None
+        );
+    }
 
     #[test]
     fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {

@@ -79,6 +79,7 @@ pub enum Feature {
     ApiTimestamps,
     ApiBrowserAccess,
     SpeakersOnly,
+    CalendarMenu,
     MoreDictationShortcuts,
     PauseMenu,
     PrintStart,
@@ -90,7 +91,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 83] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -165,6 +166,7 @@ impl Feature {
         Self::ApiTimestamps,
         Self::ApiBrowserAccess,
         Self::SpeakersOnly,
+        Self::CalendarMenu,
         Self::MoreDictationShortcuts,
         Self::PauseMenu,
         Self::PrintStart,

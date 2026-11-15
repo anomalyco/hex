@@ -1606,6 +1606,14 @@ Cancellation / interruption / failure    // recovery
 
 Menu bar and Settings                    // maintenance
 ├── Menu (macOS), top to bottom: now, things to do, the app
+│   ├── Labs > Upcoming meetings in menu bar (off) -> an Upcoming section first:
+│   │   up to five of the reminder poll's meetings, soonest first, as local
+│   │   start–end time and title ("Now · " in progress, "Tomorrow " or the short
+│   │   weekday for a later day, ended left out), "No upcoming meetings" when
+│   │   none; choosing a row with a call link joins it through its own path
+│   │   (opens the link, records that occurrence so no reminder pops, closes a
+│   │   showing reminder; the click doesn't record), a row without one is
+│   │   informational (labs.md, meetings.md)
 │   ├── Meetings on or a meeting under way: Recording · <title> · 12:34 (opens
 │   │   the Meetings pane), Stop & Transcribe, Copy Section ▸; idle: Record Meeting
 │   ├── Pause Hex (Labs › Pause from menu bar, off, #82) -> every capture
@@ -1624,7 +1632,7 @@ Menu bar and Settings                    // maintenance
 │   │   window's translated labels; fixed rows retitle as the menu opens, state
 │   │   rows (meeting, pause, update) with each update; meeting titles never
 │   │   translate. Check: the_menu_follows_the_interface_language
-│   └── check: the_menu_reads_meeting_then_actions_then_the_app,
+│   └── check: the_menu_reads_upcoming_then_meetings_then_actions_then_the_app,
 │       paste_last_shows_the_saved_binding_or_nothing,
 │       the_pause_row_reads_pause_or_resume (status_item.rs; the
 │       row order and key equivalents only, no native menu is drawn)

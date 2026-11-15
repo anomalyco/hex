@@ -214,6 +214,9 @@ impl Feature {
             Self::PauseMenu => {
                 "Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"
             }
+            Self::CalendarMenu => {
+                "Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording (macOS, with Meetings on and a calendar connected)"
+            }
             Self::PrintStart => {
                 "Let hex dictation start --print hand the transcript to the command that started it, however the recording ends"
             }

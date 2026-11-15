@@ -685,6 +685,13 @@ pub(super) const KEYS: &[Key] = &[
          left alone, and outputs Hex can't classify count as speakers",
     ),
     key(
+        "labs.calendar_menu",
+        Kind::Bool,
+        "Labs: the menu bar lists the next calendar meetings, each a local start and end time and \
+         title; choosing one that has a call link opens it, and that click doesn't start a \
+         recording (macOS, with Meetings on and a calendar connected)",
+    ),
+    key(
         "labs.pause_menu",
         Kind::Bool,
         "Labs: the menu bar offers Pause Hex, which makes every capture shortcut inert until \

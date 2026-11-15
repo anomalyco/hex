@@ -87,6 +87,7 @@ impl Feature {
             | Self::ApiBrowserAccess
             | Self::SpeakersOnly
             | Self::PauseMenu
+            | Self::CalendarMenu
             | Self::PrintStart
             | Self::VoicePrompt
             | Self::CopyCaptureZip
@@ -179,6 +180,7 @@ impl Feature {
             | Self::YoloMode
             | Self::CursorContext
             | Self::CleanUpWithAppleIntelligence => 20261113,
+            Self::CalendarMenu => 20261114,
         }
     }
 
@@ -288,7 +290,8 @@ impl Feature {
             | Self::PrintStart
             | Self::ScreenVocabulary
             | Self::CursorContext
-            | Self::MoreDictationShortcuts => MACOS,
+            | Self::MoreDictationShortcuts
+            | Self::CalendarMenu => MACOS,
             Self::CleanUpWithAppleIntelligence => MACOS,
             Self::CopyOnly => MACOS_WINDOWS,
             Self::ReturnToApp => MACOS,
@@ -423,6 +426,7 @@ impl Feature {
             Self::ShellCompletions => "shell-completions",
             Self::YoloMode => "yolo-mode",
             Self::CursorContext => "cursor-context",
+            Self::CalendarMenu => "calendar-menu",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -511,6 +515,7 @@ impl Feature {
             Self::ShellCompletions => "labs.shell_completions",
             Self::YoloMode => "labs.yolo_mode",
             Self::CursorContext => "labs.cursor_context",
+            Self::CalendarMenu => "labs.calendar_menu",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }

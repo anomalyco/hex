@@ -345,6 +345,18 @@ pub fn pause_menu() -> bool {
     on(PAUSE_MENU) && Feature::PauseMenu.on_this_os()
 }
 
+/// The menu bar lists the next calendar meetings, and choosing one with a
+/// call link joins it (macOS; read each time the status item refreshes and
+/// as the menu opens, and by the meeting controller before it reads its
+/// calendar).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn calendar_menu() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    CALENDAR_MENU.load(Ordering::Acquire) && Feature::CalendarMenu.on_this_os()
+}
+
 /// A physical Caps Lock press starts and stops dictation, and its light
 /// follows Hex's recording and processing (macOS; read by the listener on
 /// every pass and by the event tap and HID tracker through their own flag).

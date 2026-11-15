@@ -1346,6 +1346,18 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("It's tiny. It naps in the background until you hold the key.", "É minúsculo. Fica cochilando em segundo plano até você segurar a tecla."),
     ("Screenshots folder", "Pasta de capturas de tela"),
     ("Couldn't save to {folder}: {error}", "Não foi possível salvar em {folder}: {error}"),
+    ("Upcoming meetings in menu bar", "Próximas reuniões na barra de menus"),
+    ("Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording.", "Mostra as próximas reuniões do calendário no menu da barra de menus. Escolher uma com link de chamada o abre; esse clique não inicia uma gravação."),
+    ("Upcoming", "A seguir"),
+    ("No upcoming meetings", "Sem reuniões próximas"),
+    ("Now · {}", "Agora · {}"),
+    ("Sun", "Dom"),
+    ("Mon", "Seg"),
+    ("Tue", "Ter"),
+    ("Wed", "Qua"),
+    ("Thu", "Qui"),
+    ("Fri", "Sex"),
+    ("Sat", "Sáb"),
 ];
 
 #[cfg(test)]

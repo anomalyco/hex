@@ -191,6 +191,26 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
+├── Upcoming meetings in menu bar no labs.calendar_menu (macOS, with Meetings on and a calendar connected) the status menu starts
+│                                        with an Upcoming section: up to five meetings from the reminder poll's own filtered list, soonest
+│                                        first, each a local start–end time and title, "Now · " while in progress, "Tomorrow " or the
+│                                        short weekday when it starts on a later day, and "No upcoming meetings" when none are left;
+│                                        choosing a row with a call link joins it through the menu's own path, which opens
+│                                        the link, records that occurrence so no reminder pops (closing a showing one), and
+│                                        does not record (a provider set to always record may still record once the call
+│                                        starts); a row without a link is informational
+│                                        // checks: an_in_progress_meeting_reads_now, meetings_on_later_days_read_tomorrow_or_their_weekday,
+│                                        // ended_meetings_are_left_out, at_most_five_meetings_show_soonest_first, an_empty_section_has_no_rows,
+│                                        // a_stale_snapshot_never_shows, publishing_keeps_at_most_32_and_none_clears,
+│                                        // the_section_hides_until_visible_and_fresh, the_menu_read_wants_a_connected_calendar,
+│                                        // a_local_date_parses_the_iso_date_part (calendar_menu.rs);
+│                                        // joining_elsewhere_before_the_lead_time_never_reminds,
+│                                        // joining_elsewhere_while_showing_withdraws_it_for_good (calendar.rs);
+│                                        // only_reminders_keep_the_titling_and_reminder_list,
+│                                        // a_menu_only_read_and_a_new_lab_both_force_an_immediate_read (meeting/watcher.rs);
+│                                        // calendar_menu_is_its_own_switch_and_macos_only (labs.rs);
+│                                        // the_menu_reads_upcoming_then_meetings_then_actions_then_the_app (macos_rune/status_item.rs);
+│                                        // not observed on a real Mac, in a real menu, or opening a real call link
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
@@ -2217,6 +2237,68 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
 
+Upcoming meetings in menu bar (`calendar-menu`, macOS, with Meetings on and a
+calendar connected): the status menu starts with an Upcoming section while
+the lab is on — a disabled "Upcoming" header, up to five meetings from the
+same filtered list the reminders read, soonest first, and a disabled "No
+upcoming meetings" when nothing is left — then a separator. Each row is its
+local start–end time and title (`10:30–11:00  Design sync`), prefixed
+`Now · ` while the meeting is in progress and `Tomorrow ` or its short
+weekday when it starts on a later local day; ended meetings are left out.
+Choosing a row with a call link sends the occurrence to the meeting
+controller's `ControllerCommand::JoinFromMenu`, the menu's own join path
+([meeting/watcher.rs](../../src/meeting/watcher.rs)): it opens the link,
+records that occurrence as already reminded so its reminder never pops, and
+sends `ReminderWithdrawn` when that reminder is currently showing so its
+capsule closes. A moved meeting is a new occurrence and may remind again. The
+click itself starts no recording, though a provider set to Always record may
+still record once the call is detected. A row without a link is informational
+and disabled. The gate, `labs::calendar_menu()`, is read when the meeting
+controller decides to read its calendar, on the status item's 500 ms refresh,
+and as the menu opens.
+
+The meeting controller's reminder poll publishes what it reads
+(`calendar_menu::publish`) and the status item only formats that snapshot on
+the main thread, so EventKit is never touched there. The read stays one
+bounded query each minute or on a store change; while the lab is on, a
+connected calendar is also read with Reminders switched off, since the section
+does not depend on them. That menu-only read never becomes the controller's
+titling and reminder list, so a detected call is not named from the calendar
+while reminders are off; with reminders on the read behaves exactly as
+before. Turning the lab on, or turning reminders back on after a menu-only
+read, reads at once instead of waiting for the next minute. With no calendar
+connected nothing is read for the menu. The snapshot
+keeps at most 32 meetings, and the section hides when no calendar is
+connected, when Meetings are off, and when the snapshot is over 10 minutes
+old (a stopped controller); without access the read fails and clears it, so
+nothing shows until access is granted. Clearing an already empty snapshot
+takes only a read lock, so the lab on with Meetings off costs no write per
+loop. Off, the menu is identical to today, with every Upcoming row hidden.
+
+Checks: `an_in_progress_meeting_reads_now`,
+`meetings_on_later_days_read_tomorrow_or_their_weekday`,
+`ended_meetings_are_left_out`, `at_most_five_meetings_show_soonest_first`,
+`an_empty_section_has_no_rows`, `a_stale_snapshot_never_shows`,
+`publishing_keeps_at_most_32_and_none_clears`,
+`the_section_hides_until_visible_and_fresh`,
+`the_menu_read_wants_a_connected_calendar`, and
+`a_local_date_parses_the_iso_date_part` in
+[calendar_menu.rs](../../src/calendar_menu.rs);
+`joining_elsewhere_before_the_lead_time_never_reminds` and
+`joining_elsewhere_while_showing_withdraws_it_for_good` in
+[calendar.rs](../../src/calendar.rs);
+`joining_from_the_menu_withdraws_its_reminder_and_starts_nothing`,
+`only_reminders_keep_the_titling_and_reminder_list`, and
+`a_menu_only_read_and_a_new_lab_both_force_an_immediate_read` in
+[meeting/watcher.rs](../../src/meeting/watcher.rs);
+`calendar_menu_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs); and
+`the_menu_reads_upcoming_then_meetings_then_actions_then_the_app` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) (macOS only).
+Not yet observed: the section in a real Mac's menu bar, a real EventKit read
+reaching it, a click opening Zoom or Meet, and the menu with calendar access
+denied. The rows render only in macOS builds, so no golden changes.
+
 Pause from menu bar (`pause-menu`, issue 82, macOS): for people whose game or
 another app collides with Hex's shortcuts and who don't want to quit. With the
 lab on, the menu bar's action block starts with Pause Hex; pressing it pauses
@@ -2284,7 +2366,7 @@ Checks: `pause_suspends_and_resume_only_follows_a_neutral_keyboard`,
 `a_pause_cancels_once_and_leaves_a_command_capture_alone` in
 [recognition/hotkeys.rs](../../src/recognition/hotkeys.rs);
 `the_pause_row_reads_pause_or_resume` and
-`the_menu_reads_meeting_then_actions_then_the_app` in
+`the_menu_reads_upcoming_then_meetings_then_actions_then_the_app` in
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs);
 `pause_menu_is_its_own_bit_and_macos_only` in [labs.rs](../../src/labs.rs);
 `a_toggled_caps_lock_still_reads_neutral`, `a_held_key_reads_not_neutral`,
