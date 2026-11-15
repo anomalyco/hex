@@ -140,15 +140,18 @@ System audio                                      // meetings.system-audio
 │   hardware sink it forwards into: the default first among them, each once,
 │   and a name that would change pw-record's property string (a quote, brace,
 │   backslash, or whitespace) is skipped. When no listed sink is a device,
-│   only the default is captured. A capture that ends is dropped while the
-│   others keep recording; the source fails only when none is left (naming
-│   the last one's exit) or when no monitor delivered audio for 3 s. A route
-│   check every 2 s re-reads the sink list and reopens the source when the set
-│   changed, keeping the open captures when the sound server can't be read or
-│   lists nothing (a changed default alone does not reopen); a fallback
-│   capture reopens into one per output once sinks can be read. When that read
-│   fails or lists nothing, one untargeted pw-record follows the default
-│   output as before. No pw-record -> recording refuses with "Install
+│   only the default is captured. A capture that ends while its sink is still
+│   listed is started again on the next 2 s check, backing off 500 ms up to
+│   5 s while it keeps ending (one that ran a second starts the wait over),
+│   and retried until Stop; the other outputs keep recording untouched. The
+│   source fails only when no capture is left (naming the last one's exit) or
+│   when no monitor delivered audio for 3 s. That same check re-reads the
+│   sink list and reopens the source when the set changed, keeping the open
+│   captures when the sound server can't be read or lists nothing (a changed
+│   default alone does not reopen); a fallback capture reopens into one per
+│   output once sinks can be read. When that read fails or lists nothing, one
+│   untargeted pw-record follows the default output as before. No pw-record
+│   -> recording refuses with "Install
 │   PipeWire's pw-record"; --raw only where its help lists it (PipeWire
 │   1.3.81+), since 1.2 and older reject it and already pipe raw audio on -
 │   // checks: every_hardware_output_is_captured_with_the_default_first,
@@ -157,8 +160,11 @@ System audio                                      // meetings.system-audio
 │   // a_sink_listed_twice_is_captured_once, nothing_listed_captures_nothing
 │   // (audio/output_route.rs); a_capture_targets_its_own_sink_and_the_
 │   // fallback_keeps_the_default,
-│   // a_sink_name_that_would_change_the_property_string_is_skipped, and
-│   // a_reordered_sink_list_is_not_a_change (meeting/linux.rs); the mix by
+│   // a_sink_name_that_would_change_the_property_string_is_skipped,
+│   // a_reordered_sink_list_is_not_a_change,
+│   // an_exited_monitor_is_restarted_while_its_sink_keeps_its_name, and
+│   // a_monitor_that_ends_right_after_each_restart_keeps_backing_off
+│   // (meeting/linux.rs); the mix by
 │   // audio_on_any_output_reaches_the_system_track (meeting/capture.rs, now
 │   // run on every platform); NOT verified by hand: no multi-sink capture has
 │   // been recorded on a real PipeWire session, and whether target.object

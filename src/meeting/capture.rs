@@ -20,8 +20,8 @@ use super::warning::{SilenceAction, SilencePolicy, SilenceRecovery, TrackWarning
 use super::{AudioPacket, MeetingSource, SAMPLE_RATE};
 use crate::dictation::StreamingResampler;
 
-const RETRY_INITIAL: Duration = Duration::from_millis(500);
-const RETRY_MAX: Duration = Duration::from_secs(5);
+pub(super) const RETRY_INITIAL: Duration = Duration::from_millis(500);
+pub(super) const RETRY_MAX: Duration = Duration::from_secs(5);
 /// A source that ran this long before failing started; one that dies sooner
 /// keeps backing off instead of reopening at the initial delay.
 const STARTED_AFTER: Duration = Duration::from_secs(1);
@@ -247,7 +247,7 @@ fn supervise(
 /// the initial delay once it genuinely started, else the delay it already
 /// reached, so a source that dies right after every open keeps backing off
 /// instead of spawning and logging twice a second forever.
-fn retry_delay(delay: Duration, ran: Duration) -> Duration {
+pub(super) fn retry_delay(delay: Duration, ran: Duration) -> Duration {
     if ran >= STARTED_AFTER {
         RETRY_INITIAL
     } else {
