@@ -365,6 +365,7 @@ fn run_runtime(
 ) {
     let mut tray_view = None;
     let mut tray_meetings = None;
+    let mut tray_dictation_audio = None;
     indicator.set_position(settings.indicator_position);
     let mut host = WindowsDesktopHost::new(
         event_path,
@@ -410,17 +411,28 @@ fn run_runtime(
             }
         }
         let meetings = crate::meeting::runtime::tray_state();
-        if let Some(tray) = tray
-            && (changed || tray_view.is_none() || tray_meetings != meetings)
-        {
-            tray_meetings = meetings;
-            // Labs › Copy dictation audio: listed while the lab is on, and
-            // enabled while a kept recording can be copied.
-            let dictation_audio = crate::labs::copy_dictation_audio().then(|| {
+        // Labs › Copy dictation audio: listed while the lab is on, and
+        // enabled while a kept recording can be copied. The gate comes
+        // first, and this only reads History with a tray, so an off lab
+        // costs one atomic read; it joins the rebuild condition so a copy
+        // that appears or expires redraws the menu without a publish.
+        let dictation_audio = if tray.is_some() && crate::labs::copy_dictation_audio() {
+            Some(
                 host.history()
                     .and_then(|history| history.newest_recording(crate::history::now_ms()))
-                    .is_some()
-            });
+                    .is_some(),
+            )
+        } else {
+            None
+        };
+        if let Some(tray) = tray
+            && (changed
+                || tray_view.is_none()
+                || tray_meetings != meetings
+                || tray_dictation_audio != dictation_audio)
+        {
+            tray_meetings = meetings;
+            tray_dictation_audio = dictation_audio;
             let view = tray_view_for(&published, dictation_audio);
             if tray_view.as_ref() != Some(&view) {
                 tray.set_tooltip(view.tooltip());

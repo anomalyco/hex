@@ -2231,6 +2231,25 @@ fn copy_audio_shows_only_with_its_lab_and_keep_recordings() {
         "both switches on, the kept audio can be copied"
     );
 
+    // A text Copy waits for a running Copy audio, which still lands the WAV
+    // on the clipboard; the pending state is kept.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    rt.state.history.audio = Some(history::AudioCopy::pending(id, receiver));
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "history-copy");
+    assert_eq!(
+        rt.copy_request.as_deref(),
+        None,
+        "a pending Copy audio wins over a text Copy"
+    );
+    assert!(
+        rt.state.history.audio.is_some(),
+        "the pending Copy audio is kept"
+    );
+    drop(sender);
+    rt.state.history.audio = None;
+
     rt.state.settings.labs.keep_recordings = false;
     rt.invalidate();
     settle(&mut rt);

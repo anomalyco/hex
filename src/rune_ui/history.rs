@@ -22,7 +22,11 @@ use crate::history::stats::{AppCount, HistoryStats};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
+mod audio;
 mod selection;
+
+pub(super) use self::audio::AudioCopy;
+use self::audio::copy_audio;
 
 /// The stats dialog's width and padding.
 const STATS_WIDTH: f32 = 460.0;
@@ -76,26 +80,6 @@ pub(super) struct Pending {
     model: TranscriptionModelId,
     name: &'static str,
     pub(super) language: String,
-}
-
-/// One entry's kept recording going to the clipboard, on a worker: the copy
-/// can wait on another app's clipboard, so the window never does.
-pub(super) struct AudioCopy {
-    pub(super) id: u64,
-    worker: Option<Receiver<Result<(), String>>>,
-    /// The worker's answer: `Ok` once the file is on the clipboard.
-    pub(super) result: Option<Result<(), String>>,
-}
-
-impl AudioCopy {
-    /// A finished copy, as if its worker had answered.
-    pub(super) fn finished(id: u64, result: Result<(), String>) -> Self {
-        Self {
-            id,
-            worker: None,
-            result: Some(result),
-        }
-    }
 }
 
 /// One entry's recording transcribed again with another model.
@@ -277,24 +261,6 @@ impl HistoryPane {
         self.playback
             .as_mut()
             .is_some_and(|playback| playback.poll())
-    }
-
-    /// Takes Copy audio's answer once its worker sends it.
-    fn poll_audio(&mut self) -> bool {
-        let Some(audio) = &mut self.audio else {
-            return false;
-        };
-        let result = match audio.worker.as_ref().map(Receiver::try_recv) {
-            Some(Ok(result)) => result,
-            Some(Err(TryRecvError::Disconnected)) => Err(tr("The clipboard copy stopped.").into()),
-            Some(Err(TryRecvError::Empty)) | None => return false,
-        };
-        audio.worker = None;
-        if let Err(error) = &result {
-            tracing::warn!(%error, id = audio.id, "could not copy a dictation recording");
-        }
-        audio.result = Some(result);
-        true
     }
 
     fn entry(&self, id: u64) -> Option<&HistoryEntry> {
@@ -546,55 +512,6 @@ fn transcribe_again(
         worker: started.is_ok().then_some(receiver),
         result: started.err().map(|error| Err(error.to_string())),
         copied: false,
-    });
-}
-
-/// Labs › Copy dictation audio: entry `id`'s kept WAV goes on the clipboard
-/// as a file, on a worker, since another app can hold the clipboard for a
-/// while. A missing file or a refused clipboard says so under the row, as a
-/// failed Play does; nothing is copied without a recording.
-fn copy_audio(ui: &mut Ui, id: u64) {
-    if !(ui.settings.labs.copy_dictation_audio && ui.settings.labs.keep_recordings) {
-        return;
-    }
-    if ui
-        .history
-        .audio
-        .as_ref()
-        .is_some_and(|audio| audio.worker.is_some())
-    {
-        return;
-    }
-    // One "Copied" at a time: this replaces the text Copy's check.
-    ui.history.copied = None;
-    let Some(path) = ui
-        .history
-        .store
-        .as_ref()
-        .and_then(|store| store.saved_recording(id))
-    else {
-        ui.history.audio = Some(AudioCopy::finished(
-            id,
-            Err(tr("The recording is gone.").into()),
-        ));
-        return;
-    };
-    let (sender, receiver) = channel();
-    let waker = ui.modes.waker.clone();
-    let started = std::thread::Builder::new()
-        .name("hex-copy-audio".into())
-        .spawn(move || {
-            let copied = crate::history::recordings::copy_to_clipboard(&path)
-                .map_err(|error| format!("{error:#}"));
-            let _ = sender.send(copied);
-            if let Some(waker) = &waker {
-                waker();
-            }
-        });
-    ui.history.audio = Some(AudioCopy {
-        id,
-        worker: started.is_ok().then_some(receiver),
-        result: started.err().map(|error| Err(error.to_string())),
     });
 }
 
@@ -1004,6 +921,11 @@ fn copy_action(ui: &Ui, p: Paint, id: u64, in_row: bool) -> El {
         ld::COPY_ICON
     };
     let press = move |ui: &mut Ui, tx: &mut Tx| {
+        // A pending Copy audio still lands on the clipboard when it
+        // finishes, so it wins over a text Copy until then.
+        if ui.history.audio_copy_pending() {
+            return;
+        }
         if let Some(entry) = ui.history.entry(id) {
             tx.copy(entry.final_text.clone());
             ui.history.copied = Some(id);
