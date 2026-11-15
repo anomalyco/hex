@@ -220,6 +220,7 @@ impl AppSettings {
         settings.repair_special_keys();
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         settings.repair_section_key();
+        settings.repair_microphone_key();
         settings.normalize_double_tap_settings();
         settings.repair_extra_dictation_shortcuts();
         // After every repair that can put Annotate back on its default

@@ -386,6 +386,13 @@ pub(super) fn validate(
     {
         return Err(tr("Add a modifier"));
     }
+    // The microphone key alone needs Labs › Microphone key alone (macOS).
+    if cfg!(target_os = "macos")
+        && binding.is_lone_microphone_key()
+        && !settings.microphone_key_allowed()
+    {
+        return Err(tr("Add a modifier"));
+    }
     // A navigation key alone needs Labs › Special keys alone (Windows).
     if cfg!(target_os = "windows")
         && binding.is_lone_navigation_key()
@@ -1359,6 +1366,49 @@ mod section_key_tests {
             validate(&settings, ShortcutTarget::Dictation, &dead_key),
             Ok(())
         );
+    }
+}
+
+/// Issue 181: the microphone (dictation) key alone needs Labs › Microphone
+/// key alone on macOS; with a modifier it records as before. macOS's
+/// recorder records the chord and `validate` refuses it here, before saving.
+#[cfg(all(test, target_os = "macos"))]
+mod microphone_key_tests {
+    use super::*;
+    use crate::app_settings::MICROPHONE_KEY_CODE;
+
+    fn microphone() -> HotkeyKey {
+        HotkeyKey {
+            code: MICROPHONE_KEY_CODE,
+            label: "Mic".into(),
+        }
+    }
+
+    #[test]
+    fn microphone_alone_needs_its_labs_toggle() {
+        let alone = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(microphone()),
+        };
+        let with_control = HotkeyBinding {
+            modifiers: HotkeyModifiers::control_option(),
+            key: Some(microphone()),
+        };
+        let mut settings = AppSettings::default();
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &alone),
+            Err(tr("Add a modifier"))
+        );
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &with_control),
+            Ok(())
+        );
+        settings.labs.microphone_key = true;
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &alone),
+            Ok(())
+        );
+        assert_eq!(alone.keycaps(), ["Mic"]);
     }
 }
 
