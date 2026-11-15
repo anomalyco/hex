@@ -2413,9 +2413,12 @@ note keeps the folder that failed with the error
 `take` records a shot that can't be written, a recording's save records
 its own, and the editor's Save records a shot's PNG or a trimmed
 recording's movie the same way; any later save that works clears it,
-including one whose clipboard copy then fails. Nothing wakes the window
-when a background save records its failure: the visible window's 250 ms
-tick picks the note up, so no extra wake is kept.
+including one whose clipboard copy then fails. Those happen on their own
+threads, and a window's poll that reports nothing redraws nothing, so
+`screenshots::save_error_generation` counts each recorded or cleared error
+and the card's poll reports the difference from what it last drew: the
+visible window's 250 ms tick then draws the note, with no extra wake
+kept.
 
 ```ts
 Saves to  -> the folder, home-shortened          Reveal  -> Finder on it, made first
@@ -2424,6 +2427,8 @@ Saves to  -> the folder, home-shortened          Reveal  -> Finder on it, made f
           -> a cancel        -> nothing
           -> a failed chooser or Reveal, or a failed save (the folder it meant and why)
              -> one danger note under the row, until a save works or a pick is saved
+             the save's error changes on its own thread; the card's poll reports the
+             generation change, and only that makes the next tick redraw
 // check: a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed
 //        (tests/panes.rs): a pick saves and shows, a cancel leaves it, a chooser failure
 //        says why, a save failure names the folder it failed into, and a pick clears it

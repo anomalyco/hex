@@ -2776,10 +2776,11 @@ fn a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed() {
     assert_eq!(rt.state.settings.screenshots.folder, Some(picked.clone()));
 
     // A save that failed into an older folder names that folder, not the
-    // setting that has moved on since.
+    // setting that has moved on since. `settle` runs the window's poll, so
+    // the note has to come from the poll reporting the change.
     let stale = home.join("Old Shots");
     crate::screenshots::record_save_error(&stale, &anyhow::anyhow!("Permission denied"));
-    refresh(&mut rt);
+    settle(&mut rt);
     let shown = texts(&rt).join("\n");
     assert!(rt.find("screenshot-save-error").is_some(), "{shown}");
     assert!(shown.contains("~/Old Shots"), "{shown}");
@@ -2788,12 +2789,12 @@ fn a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed() {
         "the note names the folder that failed: {shown}"
     );
 
-    // A pick that saves clears the note.
+    // A pick that saves clears the note, and its own poll reports that.
     let other = home.join("Pictures/Hex Shots 2");
     rt.update(|ui, _| {
         assert!(apply_chosen_folder(ui, Ok(Some(other.clone()))));
     });
-    refresh(&mut rt);
+    settle(&mut rt);
     assert_eq!(rt.state.settings.screenshots.folder, Some(other.clone()));
     assert!(
         rt.find("screenshot-save-error").is_none(),

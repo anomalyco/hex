@@ -19,7 +19,7 @@ pub(crate) mod save;
 pub(crate) mod system_shortcut;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::app_settings::RuntimeHotkey;
@@ -44,6 +44,10 @@ static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
 /// another folder is chosen. It keeps its own folder: the setting may have
 /// changed since through `hex settings` or `settings.json`.
 static SAVE_ERROR: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
+/// How many times [`SAVE_ERROR`] was recorded or cleared. A window's poll
+/// that reports nothing redraws nothing, so the card compares this count
+/// with the one it last drew and reports the difference.
+static SAVE_ERROR_CHANGES: AtomicU64 = AtomicU64::new(0);
 
 /// The last failed save's folder and reason, for the card.
 pub(crate) fn save_error() -> Option<(PathBuf, String)> {
@@ -53,10 +57,17 @@ pub(crate) fn save_error() -> Option<(PathBuf, String)> {
         .clone()
 }
 
+/// How many times the last failed save changed: a save recorded an error or
+/// cleared one.
+pub(crate) fn save_error_generation() -> u64 {
+    SAVE_ERROR_CHANGES.load(Ordering::Relaxed)
+}
+
 /// Forgets the last failed save: a later one saved fine, or the folder
 /// changed.
 pub(crate) fn clear_save_error() {
     *SAVE_ERROR.lock().unwrap_or_else(|error| error.into_inner()) = None;
+    SAVE_ERROR_CHANGES.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Remembers a failed save of `folder` for the card, bounded so a long path
@@ -65,6 +76,7 @@ pub(crate) fn record_save_error(folder: &Path, error: &anyhow::Error) {
     let bounded: String = error.to_string().chars().take(300).collect();
     *SAVE_ERROR.lock().unwrap_or_else(|error| error.into_inner()) =
         Some((folder.to_path_buf(), bounded));
+    SAVE_ERROR_CHANGES.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Adds the screenshot picker, thumbnail, and editor, hidden. They're made at

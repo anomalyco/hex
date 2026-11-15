@@ -11,9 +11,10 @@ use super::super::{ShortcutTarget, Ui};
 use crate::desktop::file_dialog::{Choice, Dialog, Pending, Target};
 use crate::desktop::i18n::{tr, tr_named};
 
-/// The saves-folder chooser's answer, polled from the window: a picked
-/// folder is saved as `screenshots.folder` and applied live, and a chooser,
-/// reveal, or settings save that fails says why under the row.
+/// The saves-folder chooser's answer and the last save's, polled from the
+/// window: a picked folder is saved as `screenshots.folder` and applied
+/// live, and a chooser, reveal, or settings save that fails says why under
+/// the row.
 #[derive(Default)]
 pub(in crate::rune_ui) struct FolderChoice {
     /// The open dialog, while one is.
@@ -21,6 +22,9 @@ pub(in crate::rune_ui) struct FolderChoice {
     /// Why the last chooser, reveal, or settings save failed, until another
     /// is tried.
     error: Option<String>,
+    /// The save error's generation the card last drew, so a save that
+    /// failed or worked on its own thread redraws the note.
+    seen: u64,
 }
 
 pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
@@ -125,29 +129,39 @@ fn choose_folder(ui: &mut Ui) {
     ));
 }
 
-/// The chooser's answer, polled from the window: a picked folder is saved
-/// and applied live, a cancel changes nothing, and a chooser that couldn't
-/// open shows why. True when the card shows something new.
+/// The chooser's answer and the last save's, polled from the window: a
+/// picked folder is saved and applied live, a cancel changes nothing, a
+/// chooser that couldn't open shows why, and a save that failed or worked
+/// elsewhere redraws the note. True when the card shows something new.
 pub(in crate::rune_ui) fn poll(ui: &mut Ui) -> bool {
-    let Some(choice) = ui
+    let mut changed = false;
+    if let Some(choice) = ui
         .screenshot_folder
         .pending
         .as_ref()
         .and_then(Pending::poll)
-    else {
-        return false;
-    };
-    ui.screenshot_folder.pending = None;
-    apply_chosen_folder(ui, choice)
+    {
+        ui.screenshot_folder.pending = None;
+        changed = apply_chosen_folder(ui, choice);
+    }
+    // A save records or clears its error on its own thread. The poll that
+    // draws it has to say something changed: the window's tick alone
+    // redraws nothing.
+    let generation = crate::screenshots::save_error_generation();
+    if generation != ui.screenshot_folder.seen {
+        ui.screenshot_folder.seen = generation;
+        changed = true;
+    }
+    changed
 }
 
-/// What a chooser's answer does to the card and its settings: only a saved
-/// pick counts, so a failed save leaves the old folder and its note.
+/// What a chooser's answer does to the card and its settings: a pick
+/// redraws the card either way, while only a saved pick clears the last
+/// save's note; a refused settings save reads as the card's danger note.
 pub(in crate::rune_ui) fn apply_chosen_folder(ui: &mut Ui, choice: Choice) -> bool {
     match choice {
         Ok(Some(folder)) => {
-            let saved = ui.update(|settings| settings.screenshots.folder = Some(folder));
-            if saved {
+            if ui.update(|settings| settings.screenshots.folder = Some(folder)) {
                 ui.screenshot_folder.error = None;
                 // A save that failed into the old folder doesn't speak for
                 // the new one.
@@ -155,7 +169,7 @@ pub(in crate::rune_ui) fn apply_chosen_folder(ui: &mut Ui, choice: Choice) -> bo
             } else {
                 ui.screenshot_folder.error = ui.error.clone();
             }
-            saved
+            true
         }
         Ok(None) => false,
         Err(error) => {
