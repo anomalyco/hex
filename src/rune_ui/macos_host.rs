@@ -164,9 +164,7 @@ impl Backend {
         // Presses the listener's session tap took for the recorder: macOS
         // never gave them to the window, so the monitor below cannot see them.
         let captured = crate::suppression::dictation_key::take_captured();
-        let Some(watch) = self.chords.as_mut() else {
-            return None;
-        };
+        let watch = self.chords.as_mut()?;
         for key in captured {
             if let Some(chord) = recorded_microphone_key(&mut *watch.capture.borrow_mut(), key) {
                 watch.taken.push_back(chord);
