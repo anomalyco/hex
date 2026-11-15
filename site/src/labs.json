@@ -940,6 +940,19 @@
       ],
       "summary": "Rewrite uses the text around the cursor to spell names and terms right and fit where it pastes.",
       "title": "Rewrite reads nearby text"
+    },
+    {
+      "added": "2026-11-15",
+      "group": "history",
+      "groupTitle": "History",
+      "id": "copy-dictation-audio",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Copy a dictation's kept audio as a file from History or the menu bar; needs Keep recordings",
+      "title": "Copy dictation audio"
     }
   ]
 }

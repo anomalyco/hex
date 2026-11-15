@@ -193,6 +193,11 @@ impl AppInstance {
 }
 
 impl WindowsDesktopHost {
+    /// The host's retained-history store; one store per process.
+    pub(crate) fn history(&self) -> Option<History> {
+        self.history.clone()
+    }
+
     pub(crate) fn new(
         event_path: PathBuf,
         settings: AppSettings,

@@ -65,6 +65,10 @@ pub(super) struct HistoryPane {
     /// Labs › Keep recordings: the entry playing through the output, if one
     /// started from the card.
     pub(super) playback: Option<Playback>,
+    /// Labs › Copy dictation audio: the entry whose kept audio was copied
+    /// last, and the latest failure for one entry.
+    pub(super) audio_copied: Option<u64>,
+    pub(super) audio_error: Option<(u64, String)>,
 }
 
 /// Transcribe again's chosen model and the language for this one run.
@@ -505,6 +509,33 @@ fn transcribe_again(
         result: started.err().map(|error| Err(error.to_string())),
         copied: false,
     });
+}
+
+/// Labs › Copy dictation audio: entry `id`'s kept WAV goes on the clipboard
+/// as a file. A missing file or a refused clipboard says so under the row,
+/// as a failed Play does; nothing is copied without a recording.
+fn copy_audio(ui: &mut Ui, id: u64) {
+    if !ui.settings.labs.copy_dictation_audio {
+        return;
+    }
+    ui.history.audio_error = None;
+    let copied = ui
+        .history
+        .store
+        .as_ref()
+        .and_then(|store| store.saved_recording(id))
+        .ok_or_else(|| tr("The recording is gone.").to_string())
+        .and_then(|path| {
+            crate::history::recordings::copy_to_clipboard(&path)
+                .map_err(|error| format!("{error:#}"))
+        });
+    match copied {
+        Ok(()) => ui.history.audio_copied = Some(id),
+        Err(error) => {
+            tracing::warn!(%error, id, "could not copy a dictation recording");
+            ui.history.audio_error = Some((id, error));
+        }
+    }
 }
 
 /// Labs › Keep recordings: starts entry `id`'s saved audio, or stops it
@@ -1128,6 +1159,20 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 .gap(8.0)
                 .center_y()
                 .child(section_label(p, "label", tr("Saved recording")).grow(1.0))
+                // Labs › Copy dictation audio: the kept WAV as a file on the
+                // clipboard, ready to attach.
+                .children(ui.settings.labs.copy_dictation_audio.then(|| {
+                    small_button(
+                        p,
+                        "again-copy-audio",
+                        if ui.history.audio_copied == Some(id) {
+                            tr("Copied")
+                        } else {
+                            tr("Copy audio")
+                        },
+                        move |ui: &mut Ui, _| copy_audio(ui, id),
+                    )
+                }))
                 .child(small_button(
                     p,
                     "again-play",
@@ -1145,6 +1190,21 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 )),
         )
         .child(menu);
+    if let Some(error) = ui
+        .history
+        .audio_error
+        .as_ref()
+        .filter(|(error_id, _)| *error_id == id)
+        .map(|(_, error)| error)
+    {
+        section = section.child(
+            text(tr_fill("Could not copy the audio: {}", error))
+                .key("again-copy-audio-error")
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        );
+    }
     if let Some(error) = ui
         .history
         .playback

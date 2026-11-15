@@ -85,7 +85,14 @@ pub(super) fn run_host(
         if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
             tray_meetings = meetings;
             if let Some(tray) = tray {
-                let view = crate::linux::tray::view(&snapshot);
+                // Labs › Copy dictation audio: listed while the lab is on, and
+                // enabled while a kept recording can be copied.
+                let dictation_audio = crate::labs::copy_dictation_audio().then(|| {
+                    host.history()
+                        .and_then(|history| history.newest_recording())
+                        .is_some()
+                });
+                let view = crate::linux::tray::view(&snapshot, dictation_audio);
                 if tray_view.as_ref() != Some(&view) {
                     crate::linux::tray::show(tray, &view);
                     tray_view = Some(view);

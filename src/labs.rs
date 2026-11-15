@@ -199,6 +199,7 @@ impl Feature {
             Self::YoloMode => settings.labs.yolo_mode,
             Self::CursorContext => settings.labs.cursor_context,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
+            Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
         }
     }
 
@@ -290,6 +291,7 @@ impl Feature {
             &mut labs.yolo_mode,
             &mut labs.cursor_context,
             &mut labs.more_dictation_shortcuts,
+            &mut labs.copy_dictation_audio,
         ]
     }
 
@@ -388,6 +390,7 @@ impl Feature {
             Self::YoloMode => settings.labs.yolo_mode = on,
             Self::CursorContext => settings.labs.cursor_context = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
+            Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -530,6 +533,12 @@ static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 /// is full, so this lab has its own atomic.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Copy dictation audio's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: History and the menu bar or tray put an entry's kept WAV
+/// on the clipboard as a file. The state word is full, so this lab has its
+/// own atomic, written by [`state`] and [`apply`].
+static COPY_DICTATION_AUDIO: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Browser access to the local API's switch, set beside [`STATE`]
 /// like [`PRINT_START`]: the state word is full, so this lab has its own
 /// atomic, written by [`state`] and [`apply`].
@@ -591,6 +600,7 @@ fn state() -> u64 {
                 CURSOR_CONTEXT.store(cursor_context_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
+                COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
                 CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
@@ -655,6 +665,14 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
     settings.k_quant_models
         && Feature::KQuantModels.shipped()
         && Feature::KQuantModels.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Copy dictation audio in this build,
+/// before its managed lock; the state word has no bit for it.
+fn copy_dictation_audio_enabled(settings: &LabsSettings) -> bool {
+    settings.copy_dictation_audio
+        && Feature::CopyDictationAudio.shipped()
+        && Feature::CopyDictationAudio.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Upcoming meetings in menu bar in this
@@ -760,6 +778,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     CURSOR_CONTEXT.store(cursor_context_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
+    COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
     CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
@@ -1006,6 +1025,7 @@ pub fn log_launch() {
         screen_vocabulary = screen_vocabulary(),
         cursor_context = cursor_context(),
         history_multi_select = history_multi_select(),
+        copy_dictation_audio = copy_dictation_audio(),
         "labs"
     );
 }
@@ -1925,6 +1945,35 @@ mod tests {
             "labs.copy_capture_zip"
         );
         assert_eq!(Feature::CopyCaptureZip.name(), "copy-capture-zip");
+    }
+
+    #[test]
+    fn copy_dictation_audio_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!copy_dictation_audio_enabled(&labs));
+        labs.copy_dictation_audio = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(copy_dictation_audio_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CopyDictationAudio.on_this_os(),
+            cfg!(any(
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "windows"
+            ))
+        );
+        assert_eq!(Feature::CopyDictationAudio.added(), 20261115);
+        assert_eq!(Feature::CopyDictationAudio.audience(), Audience::Everyone);
+        assert_eq!(Feature::CopyDictationAudio.group(), Group::History);
+        assert_eq!(
+            Feature::CopyDictationAudio.settings_key(),
+            "labs.copy_dictation_audio"
+        );
+        assert_eq!(Feature::CopyDictationAudio.name(), "copy-dictation-audio");
     }
 
     #[test]

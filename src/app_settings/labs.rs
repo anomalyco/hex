@@ -157,6 +157,9 @@ pub struct LabsSettings {
     pub section_key_alone: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
+    /// A kept recording may be copied from History and the menu bar or tray
+    /// as a file on the clipboard; it stores no audio itself.
+    pub copy_dictation_audio: bool,
     /// General's pane starts with a search field that filters its rows.
     pub settings_search: bool,
     /// The sidebar footer links this build's release notes.
@@ -402,6 +405,7 @@ impl Default for LabsSettings {
             picker_downloaded: false,
             section_key_alone: false,
             keep_recordings: false,
+            copy_dictation_audio: false,
             settings_search: false,
             release_notes_link: false,
             hide_menu_bar_icon: false,

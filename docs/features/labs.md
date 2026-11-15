@@ -189,6 +189,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
 │                                        // a sourced script in a real shell
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
+├── Copy dictation audio no labs.copy_dictation_audio  History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one WAV file on the clipboard, ready to attach. Needs Keep recordings and stores no audio itself
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
 ├── Upcoming meetings in menu bar no labs.calendar_menu (macOS, with Meetings on and a calendar connected) the status menu starts
@@ -2228,6 +2229,41 @@ exactly as before: no copy of the clip is made. Checks:
 [history/versions.rs](../../src/history/versions.rs) (newest first, five at
 most, switch back, text cap, Clear all). Not yet observed: a real dictation kept
 and played or transcribed again with another model in a window, on any OS.
+
+Copy dictation audio (`copy-dictation-audio`, every OS, off by default): the
+kept WAV as a file on the clipboard, ready to attach in an app that takes
+files. It needs Keep recordings, and it stores no audio of its own: it only
+copies a file that lab already wrote.
+
+```ts
+Labs › Copy dictation audio on, Keep recordings on   // labs.copy-dictation-audio
+├── History card, entry with a kept recording -> "Saved recording" gains Copy audio beside Play
+│   ├── Copy audio -> the entry's history-audio/<id>.wav goes on the clipboard as one file:
+│   │   macOS an NSURL through Scrawl's handoff::copy_file_to_clipboard, Windows CF_HDROP
+│   │   through win::clipboard::set_file, Linux text/uri-list through the process's
+│   │   one LinuxPaster (linux::paste::with_paster, wl-copy on Wayland, the X11 selection)
+│   │   ├── Done -> the button reads Copied
+│   │   └── Failed (file gone, clipboard refused) -> "Could not copy the audio: <why>"
+│   ├── No kept recording (Keep recordings off, or the entry predates it) -> nothing to press
+│   └── The lab off -> History is exactly as before
+├── Menu bar (macOS) and the Linux and Windows tray -> Copy last dictation audio
+│   ├── The newest History entry that kept its audio and still has its file
+│   │   (HistoryStore::newest_recording; a missing file is skipped, not copied)
+│   ├── Listed only while the lab is on, dimmed while there is nothing to copy
+│   └── Failed -> logged (the menu has no row to say why); nothing is pasted
+└── It never records, keeps, or deletes audio: Keep recordings owns every file
+```
+
+Checks: `the_newest_kept_recording_skips_entries_without_audio_or_without_the_file`
+in [history.rs](../../src/history.rs);
+`copy_dictation_audio_is_its_own_switch_and_everywhere` in
+[labs.rs](../../src/labs.rs); the tray menu's ids and the dimmed
+`copy-last-dictation-audio` item in
+[tray_menu.rs](../../src/desktop/tray_menu.rs); the status menu's row order in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs). Not yet
+observed: a file pasted into a real app from History, the macOS menu bar, or
+the Linux or Windows tray; the Labs page goldens are regenerated with the new
+History row.
 
 Hide menu bar icon (`hide-menu-bar-icon`, issue 1064, macOS): for people
 who only use the shortcut and want the menu-bar space back. The status item

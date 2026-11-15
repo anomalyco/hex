@@ -105,7 +105,8 @@ impl Feature {
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::HistoryMultiSelect
-            | Self::RecentDictations => Group::History,
+            | Self::RecentDictations
+            | Self::CopyDictationAudio => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::SubtitleExport

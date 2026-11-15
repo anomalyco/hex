@@ -414,7 +414,14 @@ fn run_runtime(
             && (changed || tray_view.is_none() || tray_meetings != meetings)
         {
             tray_meetings = meetings;
-            let view = tray_view_for(&published);
+            // Labs › Copy dictation audio: listed while the lab is on, and
+            // enabled while a kept recording can be copied.
+            let dictation_audio = crate::labs::copy_dictation_audio().then(|| {
+                host.history()
+                    .and_then(|history| history.newest_recording())
+                    .is_some()
+            });
+            let view = tray_view_for(&published, dictation_audio);
             if tray_view.as_ref() != Some(&view) {
                 tray.set_tooltip(view.tooltip());
                 tray.set_menu(view.menu());
@@ -642,9 +649,10 @@ impl crate::control::host::Host for WindowsControl {
 // The tray and the window icon
 
 /// What the tray shows for what the runtime published.
-fn tray_view_for(published: &Published) -> TrayView {
+fn tray_view_for(published: &Published, dictation_audio: Option<bool>) -> TrayView {
     TrayView {
         meetings: crate::meeting::runtime::tray_state(),
+        dictation_audio,
         ..TrayView::new(
             published.listener.running,
             published.state,
@@ -908,6 +916,22 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                     tracing::warn!(%error, ?command, "the tray action failed");
                 }
             }
+            Some(TrayCommand::CopyLastDictationAudio) => {
+                if !crate::labs::copy_dictation_audio() {
+                    return;
+                }
+                let copied = runtime()
+                    .and_then(|runtime| runtime.history())
+                    .and_then(|history| history.newest_recording())
+                    .ok_or_else(|| eyre!("no dictation with kept audio is in History"))
+                    .and_then(|path| {
+                        crate::history::recordings::copy_to_clipboard(&path)
+                            .map_err(|error| eyre!("{error:#}"))
+                    });
+                if let Err(error) = copied {
+                    tracing::warn!(%error, "could not copy the last dictation's audio");
+                }
+            }
             Some(command) => {
                 let Some(runtime) = runtime() else { return };
                 let published = runtime.published();
@@ -933,7 +957,8 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
                     | TrayCommand::Quit
                     | TrayCommand::RecordMeeting
                     | TrayCommand::StopMeeting
-                    | TrayCommand::CopyLastMeeting => return,
+                    | TrayCommand::CopyLastMeeting
+                    | TrayCommand::CopyLastDictationAudio => return,
                 };
                 let _ = runtime.send(request);
             }

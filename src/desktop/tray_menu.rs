@@ -57,6 +57,9 @@ mod tray {
     pub(crate) enum TrayCommand {
         Show,
         PasteLast,
+        /// Labs › Copy dictation audio: the newest kept recording as a file
+        /// on the clipboard.
+        CopyLastDictationAudio,
         UseModel(TranscriptionModelId),
         /// The update item: restart into it, download it, or switch channel.
         Update,
@@ -74,6 +77,7 @@ mod tray {
             Some(match id {
                 "show" => Self::Show,
                 "paste-last" => Self::PasteLast,
+                "copy-last-dictation-audio" => Self::CopyLastDictationAudio,
                 "update" => Self::Update,
                 "toggle" => Self::ToggleListening,
                 "quit" => Self::Quit,
@@ -103,6 +107,9 @@ mod tray {
         pub(crate) models: Vec<ModelMenuEntry>,
         /// `None` while Meetings is off.
         pub(crate) meetings: Option<MeetingTray>,
+        /// Labs › Copy dictation audio: `None` hides its item, `Some`
+        /// lists it, enabled while a kept recording can be copied.
+        pub(crate) dictation_audio: Option<bool>,
     }
 
     impl TrayView {
@@ -118,6 +125,7 @@ mod tray {
                 update: update_label(update),
                 models,
                 meetings: None,
+                dictation_audio: None,
             }
         }
 
@@ -159,6 +167,14 @@ mod tray {
             menu.push(
                 TrayItem::action("paste-last", tr("Paste last dictation")).enabled(self.listening),
             );
+            if let Some(has_audio) = self.dictation_audio {
+                // Labs › Copy dictation audio: dimmed while no History entry
+                // kept its audio.
+                menu.push(
+                    TrayItem::action("copy-last-dictation-audio", tr("Copy last dictation audio"))
+                        .enabled(has_audio),
+                );
+            }
             if let Some(meetings) = self.meetings {
                 menu.push(TrayItem::Separator);
                 // The disabled states take ids of their own: some tray hosts
@@ -338,6 +354,34 @@ mod tests {
             TrayCommand::from_id("meeting-stop"),
             Some(TrayCommand::StopMeeting)
         );
+        // Labs › Copy dictation audio lists its item after Paste last
+        // dictation, dimmed while no kept recording can be copied.
+        let audio = TrayView {
+            dictation_audio: Some(false),
+            ..view.clone()
+        };
+        let ids: Vec<String> = audio
+            .menu()
+            .into_iter()
+            .filter_map(|item| match item {
+                rune::TrayItem::Action { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids[2], "paste-last");
+        assert_eq!(ids[3], "copy-last-dictation-audio");
+        assert_eq!(
+            TrayCommand::from_id("copy-last-dictation-audio"),
+            Some(TrayCommand::CopyLastDictationAudio)
+        );
+        // Without a kept recording the item is dimmed rather than hidden.
+        assert!(matches!(
+            audio.menu().into_iter().find(|item| matches!(
+                item,
+                rune::TrayItem::Action { id, .. } if id == "copy-last-dictation-audio"
+            )),
+            Some(rune::TrayItem::Action { enabled: false, .. })
+        ));
         // Disabled meeting states never reuse an enabled item's id (#1287).
         let meeting_id = |state| {
             TrayView {
