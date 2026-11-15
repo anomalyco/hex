@@ -1021,7 +1021,8 @@ impl Pump {
         match event {
             ControllerEvent::Offer(_)
             | ControllerEvent::Reminder { .. }
-            | ControllerEvent::ReminderWithdrawn { .. } => {}
+            | ControllerEvent::ReminderWithdrawn { .. }
+            | ControllerEvent::CallEndedWithdrawn => {}
             ControllerEvent::Starting => self.meeting_state = MeetingMenuState::Starting,
             ControllerEvent::RecordingStarted { id, title, .. } => {
                 self.meeting_state = MeetingMenuState::Recording {

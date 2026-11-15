@@ -218,6 +218,9 @@ impl PillModel {
                 }
             }
             ControllerEvent::CallEnded { .. } => self.call_ended = true,
+            // The call came back before its grace: the notice goes and the
+            // recording capsule returns, as Keep recording does.
+            ControllerEvent::CallEndedWithdrawn => self.call_ended = false,
             ControllerEvent::Offer(_) | ControllerEvent::Reminder { .. } => {
                 self.call_ended = false;
             }
@@ -385,6 +388,24 @@ impl Capsule {
         if let Some(hide) = &self.hide {
             hide();
         }
+    }
+
+    /// The pending stop the notice named was withdrawn: the automatic stop's
+    /// notice goes. The "still recording" notice names no stop, and a newer
+    /// panel of another kind stays, as [`ControllerEvent::ReminderWithdrawn`]
+    /// leaves another reminder alone.
+    fn withdraw_call_ended(&mut self) -> bool {
+        if !matches!(
+            self.kind,
+            Some(Kind::CallEnded {
+                auto_stop: true,
+                ..
+            })
+        ) {
+            return false;
+        }
+        self.kind = None;
+        true
     }
 
     fn press_copy_new(&mut self, tx: &mut Tx) {
@@ -944,6 +965,15 @@ impl MeetingCapsules {
                     },
                     None,
                 );
+            }
+            ControllerEvent::CallEndedWithdrawn => {
+                let (panel, generation) = (self.panel.clone(), self.generation.clone());
+                self.panel.update(move |capsule, _| {
+                    if capsule.withdraw_call_ended() {
+                        generation.fetch_add(1, Ordering::SeqCst);
+                        panel.hide();
+                    }
+                });
             }
             ControllerEvent::Finished(manifest) => {
                 self.show_panel(Kind::Ready(manifest.clone()), Some(READY_TIMEOUT));
@@ -2373,6 +2403,55 @@ mod tests {
         assert!(model.pill(true).is_none());
         model.keep_recording();
         assert!(model.pill(true).is_none());
+    }
+
+    #[test]
+    fn a_withdrawn_stop_brings_back_the_recording_capsule_and_closes_its_notice() {
+        let mut model = PillModel::default();
+        let start = Instant::now();
+        model.apply(&started("m"), start);
+        model.apply(
+            &ControllerEvent::CallEnded {
+                app: "Zoom".into(),
+                auto_stop: true,
+            },
+            start,
+        );
+        assert!(model.pill(true).is_none(), "the notice stands in for it");
+        model.apply(&ControllerEvent::CallEndedWithdrawn, start);
+        assert_eq!(
+            shown(&model, true),
+            Some(("m".into(), "Design sync".into(), start))
+        );
+
+        // The notice itself closes with it.
+        let (mut rt, _, _) = runtime(
+            Kind::CallEnded {
+                app: MeetingSource::WhatsApp.label().into(),
+                auto_stop: true,
+            },
+            false,
+            true,
+            CALL_ENDED,
+        );
+        rt.update(|capsule, _| assert!(capsule.withdraw_call_ended()));
+        assert!(rt.state.kind.is_none());
+
+        // The "still recording" notice names no stop, so it stays.
+        let (mut rt, _, _) = runtime(call_ended(), false, true, CALL_ENDED);
+        rt.update(|capsule, _| assert!(!capsule.withdraw_call_ended()));
+        assert!(matches!(
+            rt.state.kind.as_ref(),
+            Some(Kind::CallEnded {
+                auto_stop: false,
+                ..
+            })
+        ));
+
+        // A newer panel of another kind stays.
+        let (mut rt, _, _) = runtime(live_recording("kept"), false, true, RECORDING);
+        rt.update(|capsule, _| assert!(!capsule.withdraw_call_ended()));
+        assert!(matches!(rt.state.kind.as_ref(), Some(Kind::Recording(_))));
     }
 
     #[test]

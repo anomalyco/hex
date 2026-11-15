@@ -538,7 +538,9 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
 `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
 `keep_recording_disarms_the_call_switch_stop_too`,
-`keep_recording_keeps_the_code_that_was_counting` and
+`keep_recording_keeps_the_code_that_was_counting`,
+`the_page_naming_the_recorded_call_again_withdraws_a_pending_stop`,
+`the_call_coming_back_withdraws_a_pending_absence_stop_once` and
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
 `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
@@ -554,6 +556,7 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `never_offer_saves_the_choice_and_dismisses`,
 `a_browser_on_an_unknown_page_cannot_be_set_to_always_record`,
 `an_offer_names_the_call_without_asking_about_consent`,
+`a_withdrawn_stop_brings_back_the_recording_capsule_and_closes_its_notice`,
 `an_automatic_recording_says_so_at_first`); and
 `meetings_settings_save_and_ask_for_system_audio` (Linux pane tests). The
 controller loop that turns `Detection::Record` into a recording has no
@@ -859,7 +862,9 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      while muted; its output stays open until hang-up)
   -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
      unless you keep recording."
-     ├── App back on the microphone or output within 30 s -> nothing stops
+     ├── App back on the microphone or output within 30 s -> its stop is
+     │   dropped; once no other automatic stop counts the notice is withdrawn
+     │   and the recording capsule returns (CallEndedWithdrawn)
      ├── Keep recording -> nothing stops for this absence; leaving again re-arms
      ├── Stop & transcribe -> stops now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
@@ -876,6 +881,9 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      │   logged "the page named a different call; the recording stops after
      │   its grace unless kept" and "meeting recording stopped automatically
      │   after its page named another call"
+     ├── That page naming the recorded code again within the 30 s drops this
+     │   stop; with no other automatic stop counting the notice is withdrawn,
+     │   once, and the recording capsule returns (CallEndedWithdrawn)
      ├── That grace puts roughly the next call's first half-minute in the
      │   previous recording; the next one starts once this one finishes
      │   transcribing
