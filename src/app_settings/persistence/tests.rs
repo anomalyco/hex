@@ -112,8 +112,8 @@ fn a_delayed_read_cannot_republish_runtime_values_from_before_a_save() {
 }
 
 /// The embedded service `hex transcribe` and the TypeScript SDK start reads
-/// the saved vocabulary, its boost, and the Labs switches through the same
-/// no-write read path a launch uses, and they produce the expected bias.
+/// the saved vocabulary, its boost, and the Labs switches with the decode a
+/// launch uses, writing nothing back. They produce the expected bias.
 #[test]
 fn the_embedded_service_reads_the_saved_vocabulary() {
     let _restore = RestoredRuntime;
