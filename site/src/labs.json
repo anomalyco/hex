@@ -539,7 +539,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Use the microphone (dictation) key on a Mac laptop keyboard by itself as a shortcut; if macOS's own Dictation still opens, set its shortcut in System Settings › Keyboard › Dictation to something else",
+      "summary": "Use the microphone (dictation) key alone as a shortcut on Mac laptops",
       "title": "Microphone key alone"
     },
     {

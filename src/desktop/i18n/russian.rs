@@ -96,7 +96,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Section key alone", "Клавиша § отдельно"),
     ("Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound", "Использовать клавишу слева от 1 на клавиатурах ISO, § или мёртвую клавишу вроде ^, как сочетание без модификатора. Пока она назначена, Hex забирает её у всех приложений"),
     ("Microphone key alone", "Клавиша микрофона отдельно"),
-    ("Use the microphone (dictation) key on a Mac laptop keyboard by itself as a shortcut; if macOS's own Dictation still opens, set its shortcut in System Settings › Keyboard › Dictation to something else", "Использовать клавишу микрофона (диктовки) на клавиатуре ноутбука Mac как сочетание без модификатора. Если встроенная диктовка macOS всё ещё открывается, назначьте ей другое сочетание в Системных настройках › Клавиатура › Диктовка"),
+    ("Use the microphone (dictation) key alone as a shortcut on Mac laptops", "Использовать клавишу микрофона (диктовки) как сочетание на ноутбуках Mac"),
     ("Floating meeting capsules on GNOME", "Плавающие капсулы встреч в GNOME"),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Показывает предложение записи и индикатор записи поверх звонка через XWayland. Работает, только когда XWayland уже запущен"),
     ("Annotate on GNOME", "Annotate в GNOME"),

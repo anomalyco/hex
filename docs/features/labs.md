@@ -1800,43 +1800,46 @@ never match. The lab makes this one key alone a shortcut.
 
 ```ts
 Settings › General › Shortcut, press the microphone key  // labs.microphone_key
-├── Toggle off -> saving the recording is refused: "Add a modifier", as before
+├── Toggle off -> saving a shortcut on it is refused: "Unsupported key", as before
 ├── Toggle on  -> saved as {code: 176, label: "Mic"}; hex settings also takes
 │   `mic` or `microphone`
 ├── macOS recorder -> ChordCapture::key_down lets it stand alone like a
-│   function key; `settings::validate` refuses it while the toggle is off
-├── hex settings set dictation_hotkey microphone, off -> "microphone needs
+│   function key; `settings::validate` refuses it with any modifiers while the
+│   toggle is off
+├── hex settings set dictation_hotkey microphone, off -> "the mic key needs
 │   Labs › Microphone key alone: hex labs on microphone-key"
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
-    it off -> a macOS shortcut on the microphone key alone goes back to its
-    default (Dictate without processing unbound), so the listener never
-    registers it
+    it off -> any macOS shortcut on the microphone key, with or without a
+    modifier, goes back to its default (Dictate without processing unbound),
+    so the listener never registers it
 ```
 
 Matching ignores the SecondaryFn flag for this key only
 (`key_reports_function_flag` in [app_settings/hotkeys.rs](../../src/app_settings/hotkeys.rs)),
-so 176 with the observed `0x800100` matches a lone `{code: 176, label: "Mic"}`
+so 176 with the observed `0x800100` matches a `{code: 176, label: "Mic"}`
 binding, and Shift added does not. Fn stays significant for every other key,
 never stripped globally. The gates are `AppSettings::microphone_key_allowed` in
 the window's `settings::validate` and in `control/settings.rs`'s `apply`
 (`special_key_refusal`), and `AppSettings::repair_microphone_key`
 ([app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs))
-where settings load and where the toggle turns off. Off, Hex is unchanged: a
-lone microphone key is refused everywhere and a saved one is repaired, as with
-the section key. macOS may handle the key itself before Hex's event tap sees
-it; if macOS's own Dictation still opens, set its shortcut in System Settings ›
-Keyboard › Dictation to something else. Windows and Linux don't have it.
-Checks: `microphone_alone_needs_its_labs_toggle` in
+where settings load and where the toggle turns off. Off, Hex is unchanged: any
+shortcut on the microphone key is refused everywhere and a saved one is
+repaired, as with the section key. macOS may handle the key itself before
+Hex's event tap sees it; if macOS's own Dictation still opens, change macOS's
+dictation shortcut in System Settings › Keyboard › Dictation. Windows and
+Linux don't have it.
+Checks: `the_microphone_key_needs_its_labs_toggle` in
 [control/settings.rs](../../src/control/settings.rs) and
 [rune_ui/settings.rs](../../src/rune_ui/settings.rs),
-`a_lone_microphone_key_goes_back_to_its_default_while_its_labs_toggle_is_off`
+`a_microphone_key_shortcut_goes_back_to_its_default_while_its_labs_toggle_is_off`
 in [app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs),
 `the_microphone_key_records_alone` in
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and
 `the_microphone_key_matches_with_the_fn_flag_macos_adds` in
-[suppression/tests.rs](../../src/suppression/tests.rs) (macOS-only tests). Not
-yet observed: a real laptop microphone key recorded end to end, and whether
-macOS's own Dictation intercepts it before the tap on every macOS version.
+[suppression/tests.rs](../../src/suppression/tests.rs) (the recorder and
+suppression checks are macOS-only). Not yet observed: a real laptop microphone
+key recorded end to end, and whether macOS's own Dictation intercepts it
+before the tap on every macOS version.
 
 Dictation stats (`history-stats`, issue 790, every OS): while on, History's
 header shows a Secondary "Stats" button beside its retention select once

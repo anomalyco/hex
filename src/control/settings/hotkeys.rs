@@ -152,13 +152,14 @@ pub(super) fn special_key_refusal(
     {
         return Some("section needs Labs › Section key alone: hex labs on section-key".into());
     }
-    // The microphone key alone needs Labs › Microphone key alone (macOS).
+    // Any shortcut on the microphone key needs Labs › Microphone key alone
+    // (macOS); a modifier doesn't excuse it.
     if cfg!(target_os = "macos")
-        && binding.is_lone_microphone_key()
+        && binding.uses_microphone_key()
         && !settings.microphone_key_allowed()
     {
         return Some(
-            "microphone needs Labs › Microphone key alone: hex labs on microphone-key".into(),
+            "the mic key needs Labs › Microphone key alone: hex labs on microphone-key".into(),
         );
     }
     if cfg!(target_os = "windows") {

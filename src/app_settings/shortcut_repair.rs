@@ -77,9 +77,10 @@ impl HotkeyBinding {
         self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_section)
     }
 
-    /// The microphone key alone (`HotkeyKey::is_microphone`).
-    pub fn is_lone_microphone_key(&self) -> bool {
-        self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_microphone)
+    /// A binding whose key is the microphone key (`HotkeyKey::is_microphone`),
+    /// with or without modifiers.
+    pub fn uses_microphone_key(&self) -> bool {
+        self.key.as_ref().is_some_and(HotkeyKey::is_microphone)
     }
 }
 
@@ -158,17 +159,14 @@ impl AppSettings {
     }
 
     /// With Labs › Microphone key alone off, a macOS shortcut on the
-    /// microphone key alone goes back to its default (an optional one is
-    /// unbound), so the listener never registers one. The microphone key with
-    /// a modifier is unaffected.
+    /// microphone key, with or without a modifier, goes back to its default
+    /// (an optional one is unbound), so the listener never registers one.
     pub(crate) fn repair_microphone_key(&mut self) {
         if self.microphone_key_allowed() || !cfg!(target_os = "macos") {
             return;
         }
-        if self.reset_shortcuts(HotkeyBinding::is_lone_microphone_key) {
-            tracing::info!(
-                "reset microphone-key shortcuts without a modifier: Labs › Microphone key alone is off"
-            );
+        if self.reset_shortcuts(HotkeyBinding::uses_microphone_key) {
+            tracing::info!("reset microphone-key shortcuts: Labs › Microphone key alone is off");
         }
     }
 
@@ -489,11 +487,11 @@ mod tests {
         assert_eq!(settings.dictation_hotkey, dead_key);
     }
 
-    /// Issue 181: off, a saved microphone-key shortcut without a modifier
-    /// goes back to its default on macOS; the microphone key with a
-    /// modifier, and the key with the toggle on, stay.
+    /// Issue 181: off, a saved microphone-key shortcut goes back to its
+    /// default on macOS, with or without a modifier; with the toggle on,
+    /// either stays.
     #[test]
-    fn a_lone_microphone_key_goes_back_to_its_default_while_its_labs_toggle_is_off() {
+    fn a_microphone_key_shortcut_goes_back_to_its_default_while_its_labs_toggle_is_off() {
         let microphone = HotkeyBinding {
             modifiers: Default::default(),
             key: Some(HotkeyKey {
@@ -501,10 +499,7 @@ mod tests {
                 label: "Mic".into(),
             }),
         };
-        assert_eq!(
-            microphone.is_lone_microphone_key(),
-            cfg!(target_os = "macos")
-        );
+        assert_eq!(microphone.uses_microphone_key(), cfg!(target_os = "macos"));
         assert!(
             !HotkeyKey::named("f5").is_microphone(),
             "F5 is not the microphone key"
@@ -516,7 +511,10 @@ mod tests {
                 label: "Mic".into(),
             }),
         };
-        assert!(!with_control.is_lone_microphone_key());
+        assert_eq!(
+            with_control.uses_microphone_key(),
+            cfg!(target_os = "macos")
+        );
         let mut settings = AppSettings {
             dictation_hotkey: microphone.clone(),
             raw_dictation_hotkey: Some(with_control.clone()),
@@ -526,14 +524,16 @@ mod tests {
         on.labs.microphone_key = true;
         on.repair_microphone_key();
         assert_eq!(on.dictation_hotkey, microphone);
+        assert_eq!(on.raw_dictation_hotkey, Some(with_control.clone()));
         settings.repair_microphone_key();
-        assert_eq!(settings.raw_dictation_hotkey, Some(with_control));
         if cfg!(target_os = "macos") {
             assert!(on.microphone_key_allowed());
             assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
+            assert_eq!(settings.raw_dictation_hotkey, None);
         } else {
             assert!(!on.microphone_key_allowed());
             assert_eq!(settings.dictation_hotkey, microphone);
+            assert_eq!(settings.raw_dictation_hotkey, Some(with_control));
         }
     }
 }

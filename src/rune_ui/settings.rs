@@ -386,12 +386,13 @@ pub(super) fn validate(
     {
         return Err(tr("Add a modifier"));
     }
-    // The microphone key alone needs Labs › Microphone key alone (macOS).
+    // Any shortcut on the microphone key needs Labs › Microphone key alone
+    // (macOS); a modifier doesn't excuse it.
     if cfg!(target_os = "macos")
-        && binding.is_lone_microphone_key()
+        && binding.uses_microphone_key()
         && !settings.microphone_key_allowed()
     {
-        return Err(tr("Add a modifier"));
+        return Err(tr("Unsupported key"));
     }
     // A navigation key alone needs Labs › Special keys alone (Windows).
     if cfg!(target_os = "windows")
@@ -1369,9 +1370,10 @@ mod section_key_tests {
     }
 }
 
-/// Issue 181: the microphone (dictation) key alone needs Labs › Microphone
-/// key alone on macOS; with a modifier it records as before. macOS's
-/// recorder records the chord and `validate` refuses it here, before saving.
+/// Issue 181: any shortcut on the microphone (dictation) key needs Labs ›
+/// Microphone key alone on macOS, with or without a modifier. macOS's
+/// recorder records the chord and `validate` refuses it here, before saving,
+/// with the same "Unsupported key" the key gave before.
 #[cfg(all(test, target_os = "macos"))]
 mod microphone_key_tests {
     use super::*;
@@ -1385,7 +1387,7 @@ mod microphone_key_tests {
     }
 
     #[test]
-    fn microphone_alone_needs_its_labs_toggle() {
+    fn the_microphone_key_needs_its_labs_toggle() {
         let alone = HotkeyBinding {
             modifiers: HotkeyModifiers::default(),
             key: Some(microphone()),
@@ -1395,19 +1397,19 @@ mod microphone_key_tests {
             key: Some(microphone()),
         };
         let mut settings = AppSettings::default();
-        assert_eq!(
-            validate(&settings, ShortcutTarget::Dictation, &alone),
-            Err(tr("Add a modifier"))
-        );
-        assert_eq!(
-            validate(&settings, ShortcutTarget::Dictation, &with_control),
-            Ok(())
-        );
+        for binding in [&alone, &with_control] {
+            assert_eq!(
+                validate(&settings, ShortcutTarget::Dictation, binding),
+                Err(tr("Unsupported key"))
+            );
+        }
         settings.labs.microphone_key = true;
-        assert_eq!(
-            validate(&settings, ShortcutTarget::Dictation, &alone),
-            Ok(())
-        );
+        for binding in [&alone, &with_control] {
+            assert_eq!(
+                validate(&settings, ShortcutTarget::Dictation, binding),
+                Ok(())
+            );
+        }
         assert_eq!(alone.keycaps(), ["Mic"]);
     }
 }

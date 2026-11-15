@@ -217,7 +217,7 @@ impl Feature {
                 "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
             }
             Self::MicrophoneKeyAlone => {
-                "Use the microphone (dictation) key on a Mac laptop keyboard by itself as a shortcut; if macOS's own Dictation still opens, set its shortcut in System Settings › Keyboard › Dictation to something else"
+                "Use the microphone (dictation) key alone as a shortcut on Mac laptops"
             }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"

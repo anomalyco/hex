@@ -128,13 +128,13 @@ row may be a shortcut with no modifier. Every press reports virtual key code
 nothing and the recorder refused it as "Unsupported key". The recorder now takes
 it alone and shows `Mic`, and `hex settings set dictation_hotkey mic` (or
 `microphone`) saves it. Only this key ignores the Fn flag it always carries;
-Fn stays significant for every other key. Off, saving the recording is refused
-with "Add a modifier" as before, `hex settings` refuses it, and a saved
-microphone-key shortcut without a modifier goes back to its default when
-settings load or the toggle turns off. macOS itself may act on the key before
-Hex's event tap sees it: set macOS's own dictation shortcut (System Settings ›
-Keyboard › Dictation) to something else if its Dictation still opens. Details
-and checks in [labs.md](labs.md).
+Fn stays significant for every other key. Off, the key is refused as "Unsupported key", as
+before, `hex settings` refuses it pointing at `hex labs on microphone-key`,
+and any saved shortcut on the microphone key, with or without a modifier,
+goes back to its default when settings load or the toggle turns off. macOS
+itself may act on the key before Hex's event tap sees it: set macOS's own
+dictation shortcut (System Settings › Keyboard › Dictation) to something else
+if its Dictation still opens. Details and checks in [labs.md](labs.md).
 
 Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,

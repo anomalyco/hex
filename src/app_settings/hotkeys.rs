@@ -1124,40 +1124,11 @@ impl RuntimeHotkey {
 /// the arrows, Home, End, Page Up, Page Down, Forward Delete, and Help, plus
 /// the microphone (dictation) key on laptop keyboards.
 pub(super) fn key_reports_function_flag(code: u16) -> bool {
-    const CODES: [u16; 31] = [
-        122,
-        120,
-        99,
-        118,
-        96,
-        97,
-        98,
-        100,
-        101,
-        109,
-        103,
-        111,
-        105,
-        107,
-        113,
-        106,
-        64,
-        79,
-        80,
-        90,
-        123,
-        124,
-        125,
-        126,
-        115,
-        119,
-        116,
-        121,
-        117,
-        114,
-        MICROPHONE_KEY_CODE,
+    const CODES: [u16; 30] = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
+        123, 124, 125, 126, 115, 119, 116, 121, 117, 114,
     ];
-    CODES.contains(&code)
+    CODES.contains(&code) || code == MICROPHONE_KEY_CODE
 }
 
 pub fn modifiers_from_flags(flags: u64) -> HotkeyModifiers {

@@ -1285,24 +1285,37 @@ mod tests {
         assert_eq!(off.settings.dictation_hotkey, HotkeyBinding::default());
     }
 
-    /// Issue 181: the microphone (dictation) key alone needs Labs › Microphone
-    /// key alone on macOS. Off it is refused like the section key, and turning
-    /// the toggle off puts a saved one back to its default.
+    /// Issue 181: any shortcut on the microphone (dictation) key needs Labs ›
+    /// Microphone key alone on macOS, with or without a modifier. Off, both
+    /// are refused pointing at the lab, and turning the toggle off puts a
+    /// saved one back to its default.
     #[test]
-    fn microphone_alone_needs_its_labs_toggle() {
+    fn the_microphone_key_needs_its_labs_toggle() {
         let settings = AppSettings::default();
         let without_toggle = apply(&settings, "dictation_hotkey", "microphone", &rules());
         assert_eq!(without_toggle.unwrap_err().code, "invalid-value");
         if !cfg!(target_os = "macos") {
             return;
         }
+        let with_modifier = apply(&settings, "dictation_hotkey", "option+microphone", &rules());
+        let error = with_modifier.unwrap_err();
+        assert_eq!(error.code, "invalid-value");
+        assert!(error.message.contains("mic key"), "{}", error.message);
+        assert!(
+            error.message.contains("microphone-key"),
+            "{}",
+            error.message
+        );
         let on = apply(&settings, "labs.microphone_key", "on", &rules())
             .unwrap()
             .settings;
         assert!(on.labs.microphone_key);
-        let change = apply(&on, "dictation_hotkey", "microphone", &rules()).unwrap();
-        assert!(change.settings.dictation_hotkey.is_lone_microphone_key());
-        assert_eq!(format_hotkey(&change.settings.dictation_hotkey), "mic");
+        let change = apply(&on, "dictation_hotkey", "option+microphone", &rules()).unwrap();
+        assert!(change.settings.dictation_hotkey.uses_microphone_key());
+        assert_eq!(
+            format_hotkey(&change.settings.dictation_hotkey),
+            "option+mic"
+        );
         let off = apply(&change.settings, "labs.microphone_key", "off", &rules()).unwrap();
         assert_eq!(off.settings.dictation_hotkey, HotkeyBinding::default());
     }

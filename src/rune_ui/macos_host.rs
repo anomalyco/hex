@@ -1827,7 +1827,7 @@ mod tests {
                 label: "Mic".into()
             })
         );
-        assert!(binding.is_lone_microphone_key());
+        assert!(binding.uses_microphone_key());
         assert!(
             binding
                 .runtime()

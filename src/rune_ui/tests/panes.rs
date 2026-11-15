@@ -2828,16 +2828,29 @@ fn labs_groups_follow_each_os() {
     let cards = |rt: &Runtime<Ui>| -> Vec<String> {
         rt.elements()
             .into_iter()
-            .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
+            .filter_map(|e| {
+                let key = e.key?;
+                key.strip_prefix("lab-card-")
+                    .or_else(|| key.strip_prefix("lab-featured-"))
+                    .map(str::to_string)
+            })
             .collect()
     };
-    let cases: [(&str, &[&str], &str); 3] = [
-        ("windows-labs", &["terminal-paste"], "mouse-shortcuts"),
-        ("linux-labs", &["section-key"], "terminal-paste"),
+    let cases: [(&str, &[&str], &[&str]); 3] = [
+        (
+            "windows-labs",
+            &["terminal-paste"],
+            &["mouse-shortcuts", "microphone-key"],
+        ),
+        (
+            "linux-labs",
+            &["section-key"],
+            &["terminal-paste", "microphone-key"],
+        ),
         (
             "mac-labs",
-            &["section-key", "mouse-shortcuts"],
-            "terminal-paste",
+            &["section-key", "mouse-shortcuts", "microphone-key"],
+            &["terminal-paste"],
         ),
     ];
     for (scene, shows, hides) in cases {
@@ -2847,7 +2860,9 @@ fn labs_groups_follow_each_os() {
         for id in shows {
             assert!(shown.contains(&id.to_string()), "{scene} shows {id}");
         }
-        assert!(!shown.contains(&hides.to_string()), "{scene} hides {hides}");
+        for id in hides {
+            assert!(!shown.contains(&id.to_string()), "{scene} hides {id}");
+        }
         for group in crate::labs::Group::ALL {
             let any = shown.iter().any(|id| {
                 crate::labs::Feature::from_name(id)
