@@ -15,6 +15,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Preview the tones Hex plays when you dictate.", "Ouça os sons que o Hex toca durante o ditado."),
     ("Voice prompt", "Instrução por voz"),
     ("Copy captures as a zip", "Copiar capturas como zip"),
     ("A finished capture copies as one zip file, without video or audio.", "Uma captura concluída é copiada como um único arquivo zip, sem vídeo e áudio"),

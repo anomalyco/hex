@@ -695,8 +695,14 @@ in a real window; the Labs page goldens were regenerated for macOS
 (`mac-labs`, `mac-labs-link`, light and dark), Windows (`windows-labs`,
 light), and Linux (`linux-labs`, light).
 
+The sidebar footer's **What's new** opens a short feed of shipped features,
+newest first. YOLO mode opens and highlights its Labs card without changing
+the switch; Sounds opens General's sound picker without selecting or playing
+a set. `whats_new_opens_controls_without_changing_them` follows both links
+with a fixture and compares the settings before and after.
+
 Release notes link (`release-notes-link`, every OS): while on, the sidebar
-footer shows a small Release notes link under the version and update status.
+version is a link to the running build's notes.
 Only a release build shows it, and that exclusion is by build kind, not
 version string: local and test builds (`HEX_LOCAL_BUILD=1`,
 `HEX_TEST_BUILD=1`) get no link even when their version is plain. Then
@@ -707,7 +713,7 @@ version (`0.0.0-dev-N`) opens `https://anoma.ly/hex/dev#<version>`, a plain
 version shows no link. The gate is the footer row
 ([sidebar.rs](../../src/rune_ui/sidebar.rs) reads
 `labs::Feature::ReleaseNotesLink`), so off, the footer is exactly as before
-and What's new keeps its place under a staged update. Checks:
+and a staged update still links to its own release notes. Checks:
 `a_dev_build_opens_the_changelog_at_itself`,
 `a_stable_build_opens_its_github_release`, and
 `an_odd_version_has_no_release_notes` in
