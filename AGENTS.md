@@ -1377,7 +1377,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   new version directory and switch `current`/`current-version` atomically at
   staging; macOS unpacks beside the bundle and swaps it in with
   `renamex_np(RENAME_SWAP)` at restart or quit, and the new version removes
-  the old bundle at launch.
+  the old bundle at launch. Staging a newer release removes the unpacked
+  folder of the one it replaces, so a Hex that runs for days keeps one
+  `.Hex-update-<version>` folder, never one per build.
 - The Wayland beta requires compatible clipboard protocols, and layer-shell or
   XWayland for the HUD. Copy and paste need `wl-copy` from `wl-clipboard`,
   which direct installs don't bring; while it's missing Hex warns in Settings

@@ -1798,12 +1798,14 @@ Hex checks the release service            // maintain.updates
 │   ├── Linux -> SHA-256 only -> new version directory, `current` switched
 │   ├── Staged -> checks continue; Restart to update stays offered meanwhile
 │   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
+│   │   │   └── macOS -> its unpacked .Hex-update-<version> folder goes with it
 │   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
 │   └── Sidebar Update, menu bar / tray: Restart to update; a dev build lists its
 │       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
 │       ├── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
+│       │   // one .Hex-update-<version> folder at a time: staging a newer build removes the one it replaces
 │       └── Labs › Release notes link -> a release build's footer carries this build's notes:
 │           anoma.ly/hex/dev#<version> for a dev build, github.com/anomalyco/hex/releases/tag/v<version> for a stable one;
 │           local and test builds show no link (by build kind, not version string)
@@ -1844,7 +1846,15 @@ waiting for confirmation, only a different self-taken release replacing a staged
 update (`only_a_different_release_this_install_takes_replaces_a_staged_update`),
 Restart to update's final check and one-time report
 (`restart_to_update_checks_once_more_and_reports_once`), Linux re-staging keeping
-the running version (`replacing_a_staged_update_keeps_the_running_version`), and
+the running version (`replacing_a_staged_update_keeps_the_running_version`),
+macOS keeping one unpacked folder however many builds it stages
+(`a_newer_staged_release_removes_the_folder_of_the_one_it_replaces`,
+`launch_cleanup_removes_every_unpacked_update_but_the_running_bundle`,
+`the_folder_to_keep_is_recognized_through_a_non_canonical_spelling`), the quit
+race (a release staged after a quit installed one is dropped:
+`a_release_that_finishes_staging_after_a_quit_installed_one_is_discarded`, the
+decision only; a restart never swaps twice after that:
+`a_restart_after_a_quit_installed_the_update_does_not_swap_again`), and
 Windows Authenticode (a Microsoft-signed system file). No test drives the worker
 through a real re-stage and restart; a channel rolled back while an update is
 staged still restarts into the staged release. The
@@ -1856,6 +1866,25 @@ a real install, a real update on any OS from the release service, the macOS
 swap and relaunch of a Developer ID build, a Windows update of a signed build.
 Manifests are unsigned; on Linux a compromised HTTPS origin could serve any
 executable with a matching manifest, which Linux code signing cannot catch.
+
+**Fixed after 0.0.0-dev-1046 (Dev channel):** through that build, every staged
+release unpacked its own `.Hex-update-<version>` folder beside `Hex.app`
+(`stage` in [macos.rs](../../src/updater/macos.rs)) and the only removal was
+`finish_on_launch`, so a Hex that ran for days while the Dev channel (a check
+every ten minutes) published builds left one ~80 MB copy of the app per build in
+`/Applications`. Staging a newer release now removes the folder of the one it
+replaces once the replacement is the staged update, and a release whose download
+finishes after a quit already installed an update is dropped instead of replacing
+it (that folder holds the bundle the installed update replaced), so a restart
+never swaps twice. The launch sweep still takes whatever a swap or an interrupted
+stage left behind. Observed on macOS 26
+with the published 0.0.0-dev-1046 build: the launch sweep removed a folder
+holding an older signed build and one holding a swapped-in peer beside
+`/Applications/Hex.app`, and a folder owned by another user stayed with
+`could not remove an earlier Hex update … Permission denied (os error 13)`,
+which this does not repair. No test drives a live quit through the race: the
+guard is a decision test plus a restart-state test. Neither the staging sweep nor
+the swap was exercised against a real release service on a real install.
 
 **Fixed in 2.1.13:** older releases through 2.1.12 used app-global dispatch from
 inside the sidebar click, losing the action while the active window was borrowed.
