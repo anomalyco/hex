@@ -1,6 +1,7 @@
 //! Shipped highlights, newest first. Opening an entry only reveals its control.
 use super::*;
 use crate::labs::Feature;
+use controls::ButtonKind;
 
 pub(super) fn feed(ui: &Ui, p: Paint) -> El {
     let mut feed = controls::page("whats-new-feed");
@@ -57,5 +58,4 @@ pub(super) fn feed(ui: &Ui, p: Paint) -> El {
             ),
         )],
     ))
-    .children(sidebar::release_notes_link(ui, p))
 }

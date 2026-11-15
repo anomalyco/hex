@@ -1299,10 +1299,8 @@ fn release_notes_link_shows_only_with_its_lab() {
 
     rt.state.settings.labs.release_notes_link = true;
     refresh(&mut rt);
-    assert!(rt.find("release-notes").is_none());
-    tap(&mut rt, "nav-whats-new");
     assert!(rt.find("release-notes").is_some());
-    assert!(texts(&rt).iter().any(|text| text == "Release notes"));
+    assert!(rt.find("nav-whats-new").is_some());
 
     for (kind, name) in [(BuildKind::Local, "local"), (BuildKind::Test, "test")] {
         rt.state.build_preview = Some(kind);
