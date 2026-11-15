@@ -48,7 +48,8 @@ transformations were already native.
 - **No ambient authority:** the context has standard JavaScript only, plus a
   `console` that writes to Hex's log. No filesystem, network, process,
   environment, or timers. Imports resolve to `@hex/commands` or files inside
-  the config folder (`.ts`, `.js`, `.mjs`, `.json`); anything else is refused.
+  the config folder (`.ts`, `.js`, `.mjs`, `.mts`, `.json`, in any case, never
+  `.d.ts` or `.d.mts` declarations); anything else is refused.
 - **Commands return actions.** A handler returns an action, a list, or
   nothing; `hex.*` still exists and queues actions (resolving at once), so
   most existing handlers keep working. Hex validates every action, then runs

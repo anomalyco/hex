@@ -1385,6 +1385,9 @@ their host's refresh. `host_startup_discovers_a_config_without_selecting_a_trans
 in [personal_commands.rs](../../src/personal_commands.rs) covers the shared
 decision, policy denial, built-ins, and custom selection in global and other
 modes. This is a pure decision check, not a live Set up walkthrough.
+`workspace_fingerprint_tracks_every_loaded_file_kind` in
+[personal_commands.rs](../../src/personal_commands.rs) covers which file edits
+trigger the reload watcher; it is not a live filesystem notification.
 
 ```ts
 Transform host APIs                      // personal_commands/{io,fetch,process,trust}.rs
