@@ -33,19 +33,26 @@ const CAPTURED_LIMIT: usize = 8;
 /// [`take_captured`].
 static CAPTURED: Mutex<VecDeque<CapturedMicrophoneKey>> = Mutex::new(VecDeque::new());
 
-/// The window's wake while it listens for a shortcut to record. The tap runs
-/// on its own thread, so a press it takes must ask the window for a frame or
-/// it would wait for the next one.
-static CAPTURE_WAKE: Mutex<Option<(u64, Arc<dyn Fn() + Send + Sync>)>> = Mutex::new(None);
+/// The window's wake: the tap runs on its own thread, so a press it takes
+/// must ask the window for a frame or it would wait for the next one.
+type Wake = Arc<dyn Fn() + Send + Sync>;
+
+/// The recorder watching, and the id that tells it from a replacement.
+struct Watching {
+    id: u64,
+    wake: Wake,
+}
+
+static CAPTURE_WAKE: Mutex<Option<Watching>> = Mutex::new(None);
 static NEXT_WAKE: AtomicU64 = AtomicU64::new(0);
 
 /// Watch the microphone key for the window's recorder, waking the window for
 /// each press it takes. Returns the id [`stop_watching`] takes.
-pub(crate) fn watch(wake: Arc<dyn Fn() + Send + Sync>) -> u64 {
+pub(crate) fn watch(wake: Wake) -> u64 {
     let id = NEXT_WAKE.fetch_add(1, Ordering::Relaxed) + 1;
     *CAPTURE_WAKE
         .lock()
-        .unwrap_or_else(|error| error.into_inner()) = Some((id, wake));
+        .unwrap_or_else(|error| error.into_inner()) = Some(Watching { id, wake });
     id
 }
 
@@ -55,7 +62,7 @@ pub(crate) fn stop_watching(id: u64) {
     let mut slot = CAPTURE_WAKE
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    if slot.as_ref().is_some_and(|(watching, _)| *watching == id) {
+    if slot.as_ref().is_some_and(|watching| watching.id == id) {
         *slot = None;
     }
 }
@@ -63,7 +70,11 @@ pub(crate) fn stop_watching(id: u64) {
 /// Every press the tap took for the recorder since the window last polled.
 pub(crate) fn take_captured() -> Vec<CapturedMicrophoneKey> {
     let mut captured = CAPTURED.lock().unwrap_or_else(|error| error.into_inner());
-    captured.drain(..).collect()
+    let mut keys = Vec::with_capacity(captured.len());
+    while let Some(key) = captured.pop_front() {
+        keys.push(key);
+    }
+    keys
 }
 
 fn capture(key: CapturedMicrophoneKey) {
@@ -77,7 +88,7 @@ fn capture(key: CapturedMicrophoneKey) {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
-            .map(|(_, wake)| wake.clone())
+            .map(|watching| watching.wake.clone())
     };
     // Outside the locks: the window's wake must never run under them.
     if let Some(wake) = wake {

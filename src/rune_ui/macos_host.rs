@@ -166,7 +166,7 @@ impl Backend {
         let captured = crate::suppression::dictation_key::take_captured();
         let watch = self.chords.as_mut()?;
         for key in captured {
-            if let Some(chord) = recorded_microphone_key(&mut *watch.capture.borrow_mut(), key) {
+            if let Some(chord) = recorded_microphone_key(&mut watch.capture.borrow_mut(), key) {
                 watch.taken.push_back(chord);
             }
         }
