@@ -614,11 +614,7 @@ fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
     assert!(rt.state.models.picker.is_open());
     tap(&mut rt, "model-picker-option-0");
     assert_eq!(rt.state.settings.meetings.opencode_model, None);
-    assert!(
-        texts(&rt)
-            .iter()
-            .any(|text| text == "Hex picks a fast model")
-    );
+    assert!(texts(&rt).iter().any(|text| text == "Use OpenCode default"));
 
     let rt = runtime("meetings-summary-model-not-running", true, size);
     assert!(rt.find("opencode-unavailable").is_some());

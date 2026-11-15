@@ -774,14 +774,15 @@ pub(crate) struct Generated {
     pub model: Option<Model>,
 }
 
-/// One generation from OpenCode's default ranked models, for work outside
-/// dictation such as meeting notes.
-pub(crate) fn generate_text(
+/// One generation from OpenCode's own default model alone, for work outside
+/// dictation such as meeting notes: never Hex's ranked models, so the prompt
+/// goes only to the provider OpenCode picked.
+pub(crate) fn generate_text_default(
     prompt: &str,
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<Generated> {
-    generate_cancellable(prompt, None, deadline, cancelled)
+    generate_cancellable(prompt, None, deadline, cancelled, false)
 }
 
 /// One generation from exactly `model`, never another provider's: a failure
@@ -792,7 +793,7 @@ pub(crate) fn generate_text_with(
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<Generated> {
-    generate_cancellable(prompt, Some(model), deadline, cancelled)
+    generate_cancellable(prompt, Some(model), deadline, cancelled, true)
 }
 
 /// Runs one generation and reports it as a processing observation. The text is
@@ -806,7 +807,7 @@ fn generate_observed(
     profile_name: &str,
     started: Instant,
 ) -> (Option<String>, ProcessingObservation) {
-    let result = generate_cancellable(prompt, model, deadline, cancelled);
+    let result = generate_cancellable(prompt, model, deadline, cancelled, true);
     let (text, fallback) = match result.map(|generated| generated.text) {
         Ok(text) if !text.trim().is_empty() => (Some(text.trim().into()), None),
         Ok(_) => (None, Some("processor returned empty text".into())),
@@ -1262,7 +1263,7 @@ struct ResponseData {
 
 #[cfg(test)]
 fn generate(prompt: &str, model: Option<&Model>, deadline: Duration) -> Result<String> {
-    generate_cancellable(prompt, model, deadline, &AtomicBool::new(false))
+    generate_cancellable(prompt, model, deadline, &AtomicBool::new(false), true)
         .map(|generated| generated.text)
 }
 
@@ -1271,6 +1272,7 @@ fn generate_cancellable(
     model: Option<&Model>,
     deadline: Duration,
     cancelled: &AtomicBool,
+    ranked: bool,
 ) -> Result<Generated> {
     let started = Instant::now();
     let lock = crate::policy::Lock::OpenCodeProcessing;
@@ -1293,11 +1295,15 @@ fn generate_cancellable(
         prompt,
         model,
         || {
-            ranked_candidates_for(
-                &service,
-                deadline.saturating_sub(started.elapsed()),
-                cancelled,
-            )
+            if ranked {
+                ranked_candidates_for(
+                    &service,
+                    deadline.saturating_sub(started.elapsed()),
+                    cancelled,
+                )
+            } else {
+                Vec::new()
+            }
         },
         forget_ranked_candidates,
         started,
@@ -2372,6 +2378,7 @@ mod tests {
             None,
             Duration::ZERO,
             &AtomicBool::new(false),
+            true,
         )
         .unwrap_err();
         assert!(error.to_string().contains("exceeded"), "{error}");
@@ -2380,6 +2387,7 @@ mod tests {
             None,
             Duration::from_secs(1),
             &AtomicBool::new(true),
+            true,
         )
         .unwrap_err();
         assert!(error.to_string().contains("cancelled"), "{error}");
@@ -2646,6 +2654,35 @@ mod tests {
                 "id": "claude-haiku-4-5"
             })
         );
+    }
+
+    /// A meeting summary model left unset asks OpenCode's own default model
+    /// once, with no `model` field: no ranked candidate may answer, so the
+    /// transcript goes only where OpenCode picked.
+    #[test]
+    fn default_generation_asks_only_opencode_s_default_model() {
+        let (service, server) = generation_server(vec![(
+            "/api/experimental/generate",
+            200,
+            r#"{"data":{"text":"from OpenCode's default"}}"#,
+        )]);
+        let output = generate_with_candidates(
+            "Summarize.",
+            None,
+            Vec::new,
+            || panic!("a default generation never forgets ranked candidates"),
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+            |data, remaining, cancelled| post_generation(&service, data, remaining, cancelled),
+        )
+        .unwrap();
+        assert_eq!(output.text, "from OpenCode's default");
+        assert_eq!(output.model, None);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        let request: serde_json::Value = serde_json::from_slice(&requests[0]).unwrap();
+        assert!(request.get("model").is_none(), "{request}");
     }
 
     /// A ranked list read while OpenCode was still loading can name models

@@ -32,14 +32,14 @@ const MODEL_FIELD_WIDTH: f32 = 240.0;
 pub(super) enum Target {
     Mode(Selection),
     /// `meetings.opencode_model` (Meetings › Settings › Summaries): no
-    /// thinking variant, and its default entry clears it, so Hex picks one
-    /// of its fast models.
+    /// thinking variant, and its default entry clears it, so OpenCode's own
+    /// default model answers.
     MeetingSummary,
 }
 
 /// The meeting summary picker's default entry, and the field while it is
 /// chosen.
-pub(super) const SUMMARY_AUTOMATIC: &str = "Hex picks a fast model";
+pub(super) const SUMMARY_AUTOMATIC: &str = "Use OpenCode default";
 
 pub(super) struct Models {
     state: ModelCatalogState,
@@ -292,7 +292,7 @@ fn status(models: &Models) -> String {
 pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
     let (model, variant) = selected(&ui.settings, target);
     let meeting = target == Target::MeetingSummary;
-    // Hex, not OpenCode's default, picks a meeting summary model left unset.
+    // OpenCode's own default model answers a meeting summary model left unset.
     let presentation = if meeting && model.is_none() {
         None
     } else {

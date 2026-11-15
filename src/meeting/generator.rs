@@ -271,7 +271,7 @@ fn opencode_reporting<T: DeserializeOwned>(
     );
     let cancelled = AtomicBool::new(false);
     // Exactly the chosen model, whose failure is the meeting's notes error;
-    // otherwise the ranked models.
+    // otherwise OpenCode's own default model, never a list of Hex's.
     let generated = match summary_model() {
         Some(model) => {
             crate::dictation::processor::generate_text_with(&request, &model, timeout, &cancelled)
@@ -279,7 +279,7 @@ fn opencode_reporting<T: DeserializeOwned>(
                 GenerationError::Failed(format!("{}/{}: {error:#}", model.provider, model.id))
             })?
         }
-        None => crate::dictation::processor::generate_text(&request, timeout, &cancelled)
+        None => crate::dictation::processor::generate_text_default(&request, timeout, &cancelled)
             .map_err(|error| GenerationError::Failed(format!("{error:#}")))?,
     };
     Ok((parse_json(&generated.text)?, generated.model))
