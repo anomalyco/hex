@@ -533,11 +533,12 @@ as Arabic, Turkish, and Spanish. `bangla_is_transcribed_by_whisper_with_its_lang
 checks the recommendation, the `bn` hint, and that Qwen3-ASR rejects it. It
 runs no inference, and Bangla accuracy has not been measured.
 
-Khmer (`km`) follows the same route for the same reason: Whisper large-v3-turbo
-was trained on it, no other catalog model supports it, so Whisper is its only,
-recommended choice. `khmer_is_transcribed_by_whisper_with_its_language_hint`
-checks the recommendation, the `km` hint, that Whisper's picker offers it, and
-that Qwen3-ASR rejects it. It runs no inference, and Khmer accuracy has not been
+Khmer (`km`) is offered because Whisper large-v3-turbo was trained on it and no
+other available catalog model supports it, so Whisper is its only, recommended
+choice and a system whose first preferred language is Khmer starts on Whisper.
+`khmer_is_transcribed_by_whisper_with_its_language_hint` checks the
+recommendation, the `km` hint, that Whisper's picker offers it, and that
+Qwen3-ASR rejects it. It runs no inference, and Khmer accuracy has not been
 measured.
 
 Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
