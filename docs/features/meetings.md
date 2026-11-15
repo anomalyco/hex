@@ -862,8 +862,9 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      while muted; its output stays open until hang-up)
   -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
      unless you keep recording."
-     ├── App back on the microphone or output within 30 s -> the notice is
-     │   withdrawn and the recording capsule returns (CallEndedWithdrawn)
+     ├── App back on the microphone or output within 30 s -> its stop is
+     │   dropped; once no other automatic stop counts the notice is withdrawn
+     │   and the recording capsule returns (CallEndedWithdrawn)
      ├── Keep recording -> nothing stops for this absence; leaving again re-arms
      ├── Stop & transcribe -> stops now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
@@ -880,9 +881,9 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      │   logged "the page named a different call; the recording stops after
      │   its grace unless kept" and "meeting recording stopped automatically
      │   after its page named another call"
-     ├── That page naming the recorded code again within the 30 s withdraws
-     │   the notice and the recording capsule returns, once
-     │   (CallEndedWithdrawn)
+     ├── That page naming the recorded code again within the 30 s drops this
+     │   stop; with no other automatic stop counting the notice is withdrawn,
+     │   once, and the recording capsule returns (CallEndedWithdrawn)
      ├── That grace puts roughly the next call's first half-minute in the
      │   previous recording; the next one starts once this one finishes
      │   transcribing

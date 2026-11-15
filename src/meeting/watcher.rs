@@ -1015,8 +1015,10 @@ fn poll_recording(
             detector.keep_snooze_alive();
         }
         // The call came back (or the lab went off mid-count): the stop it
-        // armed is gone, so the notice that named it goes too.
-        if (present || !auto_stop) && withdraw_stop(&mut active.auto_stop, events) {
+        // armed is gone, and its notice goes with the last one counting.
+        if (present || !auto_stop)
+            && withdraw_stop(&mut active.auto_stop, &active.call_stop, events)
+        {
             tracing::info!(application, "the pending automatic stop is withdrawn");
         }
         if active.presence.observe(present) {
@@ -1074,7 +1076,12 @@ fn poll_recording(
                 // The page names the recorded call again (or one the user
                 // kept): whatever change was counting is over. A page that
                 // names no call neither starts nor ends a count.
-                withdraw_call_switch_stop(&active.call_switch, &mut active.call_stop, events);
+                withdraw_call_switch_stop(
+                    &active.call_switch,
+                    &mut active.call_stop,
+                    &active.auto_stop,
+                    events,
+                );
             }
             if active.call_stop.due() {
                 tracing::info!(
@@ -1095,14 +1102,20 @@ fn poll_recording(
     Ok(())
 }
 
-/// Drops an armed stop whose call came back, or whose lab went off mid-count:
-/// nothing stops, so the notice that named it goes with it. Returns whether a
-/// stop was pending.
-fn withdraw_stop(stop: &mut AutoStop, events: &SyncSender<ControllerEvent>) -> bool {
+/// Drops an armed stop whose call came back, or whose lab went off mid-count.
+/// Both automatic stops share one notice, so the notice goes only once no
+/// other stop is still counting. Returns whether this stop was pending.
+fn withdraw_stop(
+    stop: &mut AutoStop,
+    other: &AutoStop,
+    events: &SyncSender<ControllerEvent>,
+) -> bool {
     if !stop.disarm() {
         return false;
     }
-    let _ = events.send(ControllerEvent::CallEndedWithdrawn);
+    if !other.armed() {
+        let _ = events.send(ControllerEvent::CallEndedWithdrawn);
+    }
     true
 }
 
@@ -1111,9 +1124,10 @@ fn withdraw_stop(stop: &mut AutoStop, events: &SyncSender<ControllerEvent>) -> b
 fn withdraw_call_switch_stop(
     switch: &CallSwitch,
     stop: &mut AutoStop,
+    other: &AutoStop,
     events: &SyncSender<ControllerEvent>,
 ) {
-    if !switch.changed() && withdraw_stop(stop, events) {
+    if !switch.changed() && withdraw_stop(stop, other, events) {
         tracing::info!("the page named the recorded call again; its pending stop is withdrawn");
     }
 }
@@ -1127,7 +1141,7 @@ fn disarm_call_stop_unless_watching(
 ) {
     if let Some(active) = recording.as_mut()
         && !watching_call_switch(Some(active), lab_on)
-        && withdraw_stop(&mut active.call_stop, events)
+        && withdraw_stop(&mut active.call_stop, &active.auto_stop, events)
     {
         tracing::info!("the page is no longer watched; its pending stop is dropped");
     }
@@ -1818,7 +1832,12 @@ mod tests {
             Some("abc-defg-hij"),
             base + CALL_CHANGED_AFTER + Duration::from_secs(1)
         ));
-        withdraw_call_switch_stop(&active.call_switch, &mut active.call_stop, &events);
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
         assert!(matches!(
             received.try_recv(),
             Ok(ControllerEvent::CallEndedWithdrawn)
@@ -1828,7 +1847,12 @@ mod tests {
         assert!(!active.stop.load(Ordering::Relaxed));
 
         // Nothing pending: nothing is withdrawn.
-        withdraw_call_switch_stop(&active.call_switch, &mut active.call_stop, &events);
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
         assert!(received.try_recv().is_err());
 
         // A page still naming another call keeps its stop and says nothing.
@@ -1838,20 +1862,55 @@ mod tests {
                 .observe_at(Some("xyz-wxyz-xyz"), base + Duration::from_secs(120))
         );
         active.call_stop.arm();
-        withdraw_call_switch_stop(&active.call_switch, &mut active.call_stop, &events);
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
         assert!(active.call_stop.disarm(), "the stop was dropped mid-count");
         assert!(received.try_recv().is_err());
+
+        // The recorded code back while the absence count runs: the page stop
+        // goes, but the shared notice stays for the other.
+        assert!(
+            !active
+                .call_switch
+                .observe_at(Some("abc-defg-hij"), base + Duration::from_secs(180))
+        );
+        active.call_stop.arm();
+        active.auto_stop.arm();
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
+        assert!(!active.call_stop.disarm(), "the page stop was not dropped");
+        assert!(active.auto_stop.armed(), "the absence stop still counts");
+        assert!(received.try_recv().is_err(), "the notice stays");
     }
 
     #[test]
     fn the_call_coming_back_withdraws_a_pending_absence_stop_once() {
         let (events, received) = mpsc::sync_channel(4);
-        let mut stop = AutoStop::default();
-        assert!(!withdraw_stop(&mut stop, &events), "nothing was counting");
+        let mut absence = AutoStop::default();
+        let mut page = AutoStop::default();
+        assert!(
+            !withdraw_stop(&mut absence, &page, &events),
+            "nothing was counting"
+        );
         assert!(received.try_recv().is_err());
 
-        stop.arm();
-        assert!(withdraw_stop(&mut stop, &events));
+        // Both deadlines count one notice: the first to go leaves it up.
+        absence.arm();
+        page.arm();
+        assert!(withdraw_stop(&mut absence, &page, &events));
+        assert!(page.armed(), "the page stop still counts");
+        assert!(received.try_recv().is_err(), "the notice stays");
+
+        // The last one goes: the notice goes with it, once.
+        assert!(withdraw_stop(&mut page, &absence, &events));
         assert!(matches!(
             received.try_recv(),
             Ok(ControllerEvent::CallEndedWithdrawn)
@@ -1860,7 +1919,7 @@ mod tests {
 
         // The controller disarms every pass while the call is present, and
         // only the pass that dropped a stop says anything.
-        assert!(!withdraw_stop(&mut stop, &events));
+        assert!(!withdraw_stop(&mut absence, &page, &events));
         assert!(received.try_recv().is_err());
     }
 

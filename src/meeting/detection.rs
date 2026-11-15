@@ -379,6 +379,11 @@ impl AutoStop {
         self.deadline = Some(now + AUTO_STOP_GRACE);
     }
 
+    /// Whether a stop is counting: armed, and its grace has not run out.
+    pub fn armed(&self) -> bool {
+        self.deadline.is_some()
+    }
+
     /// The call app came back, the user kept recording, or the toggle is
     /// off: nothing stops. Returns whether a stop was pending.
     pub fn disarm(&mut self) -> bool {

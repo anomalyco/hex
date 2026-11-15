@@ -390,11 +390,18 @@ impl Capsule {
         }
     }
 
-    /// The pending stop the notice named was withdrawn: the notice goes. A
-    /// newer panel of another kind stays, as [`ControllerEvent::ReminderWithdrawn`]
+    /// The pending stop the notice named was withdrawn: the automatic stop's
+    /// notice goes. The "still recording" notice names no stop, and a newer
+    /// panel of another kind stays, as [`ControllerEvent::ReminderWithdrawn`]
     /// leaves another reminder alone.
     fn withdraw_call_ended(&mut self) -> bool {
-        if !matches!(self.kind, Some(Kind::CallEnded { .. })) {
+        if !matches!(
+            self.kind,
+            Some(Kind::CallEnded {
+                auto_stop: true,
+                ..
+            })
+        ) {
             return false;
         }
         self.kind = None;
@@ -2429,6 +2436,17 @@ mod tests {
         );
         rt.update(|capsule, _| assert!(capsule.withdraw_call_ended()));
         assert!(rt.state.kind.is_none());
+
+        // The "still recording" notice names no stop, so it stays.
+        let (mut rt, _, _) = runtime(call_ended(), false, true, CALL_ENDED);
+        rt.update(|capsule, _| assert!(!capsule.withdraw_call_ended()));
+        assert!(matches!(
+            rt.state.kind.as_ref(),
+            Some(Kind::CallEnded {
+                auto_stop: false,
+                ..
+            })
+        ));
 
         // A newer panel of another kind stays.
         let (mut rt, _, _) = runtime(live_recording("kept"), false, true, RECORDING);
