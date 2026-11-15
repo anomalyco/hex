@@ -115,16 +115,30 @@ fn warn_unremoved(failures: Vec<staging::Failure>) {
     }
 }
 
-/// Removes the unpacked updates a newer staged release replaced, and any
-/// folder a swap left holding the bundle it replaced: every sibling with the
-/// staging prefix except the one `staged` unpacks into. Called once `staged`
-/// is the update Hex holds, so a newer build leaves one folder, not one per
-/// build, however long Hex runs.
+/// Removes the unpacked updates a newer staged release replaced: every
+/// sibling with the staging prefix except the one `staged` unpacks into.
+/// Called once `staged` is the update Hex holds, so a newer build leaves one
+/// folder, not one per build, however long Hex runs.
 pub fn remove_superseded(staged: &Staged) {
     let Some(folder) = staged.update.parent() else {
         return;
     };
     warn_unremoved(staging::remove_beside(&staged.installed, Some(folder)));
+}
+
+/// Removes an unpacked update Hex will not use: a check that finished after a
+/// quit had already installed the update it would have replaced.
+pub fn discard(staged: &Staged) {
+    let Some(folder) = staged.update.parent() else {
+        return;
+    };
+    if let Err(error) = fs::remove_dir_all(folder) {
+        tracing::warn!(
+            error = %error,
+            path = %folder.display(),
+            "could not remove an unused Hex update"
+        );
+    }
 }
 
 pub fn stage(archive: &Path, version: &str) -> Result<Staged> {

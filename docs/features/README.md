@@ -1849,7 +1849,12 @@ Restart to update's final check and one-time report
 the running version (`replacing_a_staged_update_keeps_the_running_version`),
 macOS keeping one unpacked folder however many builds it stages
 (`a_newer_staged_release_removes_the_folder_of_the_one_it_replaces`,
-`launch_cleanup_removes_every_unpacked_update_but_the_running_bundle`), and
+`launch_cleanup_removes_every_unpacked_update_but_the_running_bundle`,
+`the_folder_to_keep_is_recognized_through_a_non_canonical_spelling`), the quit
+race (a release staged after a quit installed one is dropped:
+`a_release_that_finishes_staging_after_a_quit_installed_one_is_discarded`, the
+decision only; a restart never swaps twice after that:
+`a_restart_after_a_quit_installed_the_update_does_not_swap_again`), and
 Windows Authenticode (a Microsoft-signed system file). No test drives the worker
 through a real re-stage and restart; a channel rolled back while an update is
 staged still restarts into the staged release. The
@@ -1868,14 +1873,18 @@ release unpacked its own `.Hex-update-<version>` folder beside `Hex.app`
 `finish_on_launch`, so a Hex that ran for days while the Dev channel (a check
 every ten minutes) published builds left one ~80 MB copy of the app per build in
 `/Applications`. Staging a newer release now removes the folder of the one it
-replaces once the replacement is the staged update, and the launch sweep still
-takes whatever a swap or an interrupted stage left behind. Observed on macOS 26
+replaces once the replacement is the staged update, and a release whose download
+finishes after a quit already installed an update is dropped instead of replacing
+it (that folder holds the bundle the installed update replaced), so a restart
+never swaps twice. The launch sweep still takes whatever a swap or an interrupted
+stage left behind. Observed on macOS 26
 with the published 0.0.0-dev-1046 build: the launch sweep removed a folder
 holding an older signed build and one holding a swapped-in peer beside
 `/Applications/Hex.app`, and a folder owned by another user stayed with
 `could not remove an earlier Hex update … Permission denied (os error 13)`,
-which this does not repair. Neither the staging sweep nor the swap was exercised
-against a real release service on a real install.
+which this does not repair. No test drives a live quit through the race: the
+guard is a decision test plus a restart-state test. Neither the staging sweep nor
+the swap was exercised against a real release service on a real install.
 
 **Fixed in 2.1.13:** older releases through 2.1.12 used app-global dispatch from
 inside the sidebar click, losing the action while the active window was borrowed.
