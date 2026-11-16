@@ -41,7 +41,9 @@ use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 use crate::audio::CaptureInstant;
 use crate::transcription::engine::{LiveStream, Partial, TranscriptionEngine};
 
-pub use release_tail::{ReleaseTail, ReleaseWait};
+pub use release_tail::ReleaseTail;
+#[cfg(not(target_os = "macos"))]
+pub use release_tail::ReleaseWait;
 
 #[cfg(target_os = "macos")]
 use crate::audio::recording_environment::{

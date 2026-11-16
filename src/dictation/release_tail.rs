@@ -1,10 +1,15 @@
 //! Where a shortcut finish's tail stands, and the poll a capture loop that
 //! reads microphone chunks does while it waits for the tail's audio.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_os = "macos"))]
+use std::time::Instant;
 
+#[cfg(not(target_os = "macos"))]
 use crate::audio::CaptureInstant;
-use crate::dictation::{DictationCapture, MAX_RELEASE_TAIL, POST_RELEASE_TAIL};
+#[cfg(not(target_os = "macos"))]
+use crate::dictation::DictationCapture;
+use crate::dictation::{MAX_RELEASE_TAIL, POST_RELEASE_TAIL};
 
 /// Where a shortcut finish's tail stands, from the audio recorded so far.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
