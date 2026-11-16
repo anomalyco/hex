@@ -1056,10 +1056,13 @@ impl BrowserPageMemory {
 }
 
 fn is_browser_application(application_lower: &str) -> bool {
-    // Arc's name is too short to match as a substring.
+    // Arc's and Zen's names are too short to match as a substring: `Citizen`
+    // and `Zendesk` are not browsers.
     application_lower == "arc"
+        || application_lower == "zen"
+        || application_lower.starts_with("zen ")
         || [
-            "brave", "chrome", "safari", "firefox", "edge", "vivaldi", "helium",
+            "brave", "chrome", "safari", "firefox", "edge", "vivaldi", "helium", "ardia",
         ]
         .iter()
         .any(|browser| application_lower.contains(browser))
@@ -1086,6 +1089,8 @@ fn context_matches_browser(
         "company.thebrowser.Browser" => lower == "arc",
         "com.vivaldi.Vivaldi" => lower.contains("vivaldi"),
         "net.imput.helium" => lower.contains("helium"),
+        "com.ardia.browser" => lower.contains("ardia"),
+        "app.zen-browser.zen" => lower == "zen" || lower.starts_with("zen "),
         _ => false,
     }
 }
@@ -1152,6 +1157,11 @@ const BROWSER_TITLE_SUFFIXES: &[&str] = &[
     " - Arc",
     " - Vivaldi",
     " - Helium",
+    " - Ardia",
+    // Zen is Firefox-based: titles are `<page> — <brandFullName>` on Windows
+    // and Linux, with no brand suffix on macOS.
+    " — Zen Browser",
+    " — Zen Twilight",
 ];
 
 const GOOGLE_MEET_TITLE_PREFIXES: [&str; 3] = ["Meet - ", "Meet – ", "Meet — "];
@@ -2400,6 +2410,86 @@ mod tests {
         let other = candidate_from_microphone(&helium_helper, &ContextSnapshot::default()).unwrap();
         assert_eq!(other.source, MeetingSource::BrowserCall);
         assert_eq!(other.offer_title(), "Call in Helium");
+    }
+
+    #[test]
+    fn ardia_on_the_microphone_is_a_named_browser_call() {
+        // Ardia's Chromium audio service holds the microphone and reports
+        // `com.ardia.browser.helper`; the main app is `com.ardia.browser`.
+        let ardia_helper = ActiveMicrophoneApplication {
+            pid: 6130,
+            bundle_id: "com.ardia.browser.helper".into(),
+            name: "Ardia Helper".into(),
+        };
+        assert!(ardia_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &ardia_helper,
+            &context(
+                "Ardia",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet – Design sync - Ardia",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(meet.application.as_deref(), Some("com.ardia.browser"));
+        assert_eq!(meet.application_name.as_deref(), Some("Ardia"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        assert_eq!(meet.title, "Design sync");
+
+        // A page on no known call site is still a browser call, named by the
+        // browser.
+        let other = candidate_from_microphone(&ardia_helper, &ContextSnapshot::default()).unwrap();
+        assert_eq!(other.source, MeetingSource::BrowserCall);
+        assert_eq!(other.offer_title(), "Call in Ardia");
+    }
+
+    #[test]
+    fn zen_on_the_microphone_is_a_named_browser_call() {
+        // Zen is Firefox-based, and its media process is its own
+        // `app.zen-browser.plugincontainer`, never `org.mozilla.*`.
+        let zen_helper = ActiveMicrophoneApplication {
+            pid: 6140,
+            bundle_id: "app.zen-browser.plugincontainer".into(),
+            name: "plugin-container".into(),
+        };
+        assert!(zen_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &zen_helper,
+            &context(
+                "Zen",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet – Design sync — Zen Browser",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(meet.application.as_deref(), Some("app.zen-browser.zen"));
+        assert_eq!(meet.application_name.as_deref(), Some("Zen"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        assert_eq!(meet.title, "Design sync");
+
+        // A page on no known call site is still a browser call, named by the
+        // browser.
+        let other = candidate_from_microphone(&zen_helper, &ContextSnapshot::default()).unwrap();
+        assert_eq!(other.source, MeetingSource::BrowserCall);
+        assert_eq!(other.offer_title(), "Call in Zen");
+    }
+
+    #[test]
+    fn zen_matches_its_own_name_not_a_name_that_contains_it() {
+        // `zen` as a substring would also match `Citizen`, so Zen matches its
+        // whole name like Arc. The shared case-sensitive name check above
+        // still accepts `Zendesk` for `Zen`; it runs for every browser and is
+        // unchanged here.
+        let citizen = context("Citizen", None, "");
+        assert!(!context_matches_browser(
+            "app.zen-browser.zen",
+            "Zen",
+            &citizen
+        ));
+        assert!(!is_browser_application("citizen"));
+        assert!(!is_browser_application("zendesk"));
     }
 
     fn brave() -> ActiveMicrophoneApplication {
