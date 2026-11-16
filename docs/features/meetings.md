@@ -1146,6 +1146,31 @@ While recording                                      // meetings.rolling
      ├── First pause after 6 s (pause segmenter; never under 3 s) -> boundary
      ├── No pause by 10 s -> hard cut; next chunk repeats its last 2 s
      │   (so a chunk is at most 12 s of audio)
+     ├── Quiet microphone track (loud level, the 2nd-loudest 20 ms frame of a
+     │   second over the last minute, under -35 dBFS throughout) -> chunks
+     │   raised so that level reaches -20 dBFS, at most 30 dB, each chunk's
+     │   peak under -1 dBFS; the recording, the system track and the echo
+     │   envelope keep their audio, and a chunk the -60 dB silence gate would
+     │   skip is left as captured, so the gate's decision does not change (the
+     │   raise is for the speech detector and the model). Within a minute of
+     │   the track's own normal-level speech nothing is raised; before its
+     │   first word, or after a quiet minute, background and speaker leakage
+     │   can be raised too
+     │   // checks: chunk_level.rs a_normal_track_is_left_alone,
+     │   // background_after_a_normal_word_stays_alone,
+     │   // a_loud_word_leaves_the_window_after_a_minute,
+     │   // a_quiet_track_is_raised_to_the_target,
+     │   // a_near_silent_track_is_left_bit_identical,
+     │   // the_raise_stops_at_thirty_db,
+     │   // a_single_click_does_not_make_a_quiet_track_normal,
+     │   // a_chunk_peak_stays_under_minus_one_dbfs,
+     │   // an_already_loud_chunk_is_not_attenuated, and in transcript.rs
+     │   // a_normal_microphone_track_is_left_bit_identical,
+     │   // a_finished_chunker_starts_its_pause_cuts_over,
+     │   // a_quiet_tracks_silent_chunk_is_left_for_the_silence_gate,
+     │   // a_quiet_microphone_chunk_reaches_the_transcriber_raised_and_a_system_chunk_unchanged;
+     │   // not yet observed on a real call where another app holds the mic
+     │   // with voice processing; the echo replay needs such a recording
      └── Silent chunk (no 20 ms frame ≥ -60 dB) -> skipped, no inference
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
      ├── No speech detected (Silero, once installed) -> empty transcript, no
