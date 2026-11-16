@@ -927,9 +927,9 @@ impl Recording {
 
     /// Clip samples of Hex's own sounds at the capture's head: the pre-roll
     /// (a retracted double-tap first tone, an earlier dictation's stop tone)
-    /// through the press, then the start tone and the output and input latency
-    /// it takes to reach the microphone. A stream that hears them has not lost
-    /// any speech.
+    /// through the press, then the start tone and the margin after it (the
+    /// grace before a provisional tone sounds, plus a little latency). A
+    /// stream that hears them has not lost any speech.
     fn head_ignored(&self) -> usize {
         let tone = crate::feedback::start_tone_length();
         let after_press = if tone.is_zero() {

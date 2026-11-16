@@ -1791,9 +1791,9 @@ mod tests {
 
     #[test]
     fn hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening() {
-        // The pre-roll, the 272 ms Classic start tone, and the tap's click
-        // (0.45-0.82 s) are Hex's own sounds; the first word comes 0.8 s
-        // later. The stream lost nothing, so the clip is kept.
+        // The pre-roll (0-0.45 s), the 272 ms Classic start tone (0.45-0.72 s),
+        // and the tap's click (0.72-0.82 s) are Hex's own sounds; the first
+        // word comes 0.8 s later. The stream lost nothing, so the clip is kept.
         let mut clip = vec![0.0; 7_200]; // 450 ms of pre-roll
         clip.extend(tone(4_352)); // the 272 ms start tone
         clip.extend(tone(1_600)); // the tap's click, 100 ms

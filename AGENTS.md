@@ -862,8 +862,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   plus 100 ms, or 600 ms plus 100 ms once speech grows it, though deciding a
   tone-masked tail keeps capture (and only capture) running until that
   decision; the live stream is capped at the event plus `POST_RELEASE_TAIL`
-  when the finish begins, so audio captured while the tail decides is fed from
-  the finished clip. A release handled late can still have fed the stream past
+  when the finish begins, so the part of the tail audio the clip keeps is fed
+  from the finished clip and the rest is trimmed. A release handled late can
+  still have fed the stream past
   the clip's trimmed end before the finish began, which `MAX_OVERFED_SAMPLES`
   tolerates. A stream
   stall, failure, or gap in the tail finishes with the audio already delivered

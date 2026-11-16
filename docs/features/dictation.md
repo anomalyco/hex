@@ -1738,14 +1738,19 @@ of such speech means the stream lost its opening, so the whole clip is
 transcribed offline (`source=fallback`, reason "the stream's text starts at …
 ms but … ms of speech precedes it, from … to … ms"). Speech inside the press
 window is not counted: the pre-roll through the press, plus the current set's
-start sound (`feedback::start_tone_length`) and the output and input latency
-it takes to reach the microphone (`STOP_TONE_MARGIN`), all of it Hex's own
-audio — a retracted double-tap tone and an earlier dictation's stop tone live
-in the pre-roll, and the start tone follows the press. The clip knows that
-offset (`Recording::head_ignored`, from `pre_press`) and the stream is opened
-with it. Hex's tones are a likely source of false positives on a real
-microphone (the first version of this check, which summed them, rejected
-streams that had lost nothing — see
+start sound (`feedback::start_tone_length`) and the 60 ms margin after it
+(`STOP_TONE_MARGIN`, the 40 ms chord grace before the provisional tone sounds
+and a little latency besides), all of it Hex's own audio — a retracted
+double-tap tone and an earlier dictation's stop tone live in the pre-roll,
+and the start tone follows the press. The clip knows that offset
+(`Recording::head_ignored`, from `pre_press`) and the stream is opened with
+it. With sounds off, the tone's length is zero, so only the pre-roll through
+the press is excluded. With "Release microphone while idle" the start tone
+sounds once the capture is intentional or ready instead of at the press, so
+the window may not cover it there. A short lost opening inside the window,
+including speech in the pre-roll, now goes unseen. Hex's tones are a likely
+source of false positives on a real microphone (the first version of this
+check, which summed them, likely rejected streams that had lost nothing — see
 `hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening`), but that is
 not measured on a device, and the false-positive rate of this check on real
 speech (fillers, coughs, clicks outside the press window) is still unmeasured.
