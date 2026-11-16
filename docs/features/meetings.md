@@ -620,6 +620,9 @@ focus still. It can draw a dummy Slack huddle with a fixed local app-icon
 snapshot or an unknown browser with a neutral call mark. The fixture's icon
 is not a runtime asset. Neither this replay nor its corner traces test native
 overlay placement, OS focus delivery or actual meeting capture.
+`offer_dismissal_faces_keep_named_keyboard_actions` also exercises the two
+proposed dismissal faces with Tab and Space: both decline just the offer,
+with no implicit recording request, policy write or extra timer.
 
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),

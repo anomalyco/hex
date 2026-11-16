@@ -20,6 +20,11 @@ fn offer_navigation_preview() {
         let variant = std::env::var("HEX_OFFER_VARIANT").unwrap_or_default();
         let dark = variant != "quiet-light";
         QUIET.set(variant.starts_with("quiet"));
+        DISMISSAL.set(match variant.as_str() {
+            "quiet-label" => Some(Dismissal::Label),
+            "quiet-cross" => Some(Dismissal::Cross),
+            _ => None,
+        });
         let prototype = variant != "before";
         let candidate = if variant == "quiet-unknown" {
             bare_browser()
@@ -175,8 +180,39 @@ fn offer_navigation_preview() {
 thread_local! { static POSE: Cell<([f32;2], f32)> = const {Cell::new(([0.;2],0.))}; }
 thread_local! { static QUIET: Cell<bool> = const {Cell::new(false)}; }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Dismissal {
+    Label,
+    Cross,
+}
+thread_local! { static DISMISSAL: Cell<Option<Dismissal>> = const {Cell::new(None)}; }
+
 // Same scoped commands as the original; only the faces change in this study.
 fn quiet_face(p: Paint, key: &str, label: &str, primary: bool) -> El {
+    if let Some(choice) = DISMISSAL.get() {
+        let secondary_icon = |glyph, name: &str| {
+            IconButton::new(glyph)
+                .variant(IconButtonVariant::Neutral)
+                .control_size(ControlSize::Large)
+                .help(name)
+                .build(p.k)
+                .w(34.0)
+                .key(key)
+        };
+        match key {
+            "offer-more" => {
+                return secondary_icon(&crate::rune_ui::meetings::MORE_ICON, tr("More"));
+            }
+            "not-now" if choice == Dismissal::Cross => return secondary_icon(CLOSE, label),
+            "record" => {
+                return Button::new(label)
+                    .variant(ButtonVariant::Submit)
+                    .build_push(p.k)
+                    .key(key);
+            }
+            _ => {}
+        }
+    }
     if key == "offer-more" {
         return IconButton::new(&crate::rune_ui::meetings::MORE_ICON)
             .variant(IconButtonVariant::Ghost)
@@ -187,6 +223,75 @@ fn quiet_face(p: Paint, key: &str, label: &str, primary: bool) -> El {
             .key(key);
     }
     button_face(p, key, label, primary)
+}
+
+#[test]
+fn offer_dismissal_faces_keep_named_keyboard_actions() {
+    QUIET.set(true);
+    for style in [Dismissal::Label, Dismissal::Cross] {
+        DISMISSAL.set(Some(style));
+        let widths = [false, true].map(|open| {
+            let (rt, _, _) = runtime_with(offer(slack_huddle()), open, true, MENU, measure_page);
+            rt.elements()
+                .iter()
+                .find(|e| e.key.as_deref() == Some("page"))
+                .unwrap()
+                .rect[2]
+        });
+        for (active, tabs) in [("offer-more", 1), ("not-now", 2), ("record", 3)] {
+            POSE.set((widths, 0.0));
+            let (mut rt, commands, chosen) =
+                runtime_with(offer(slack_huddle()), false, true, MENU, fitted_offer);
+            let (arm, armed) = mpsc::channel();
+            rt.state.set_offer_timer(Some(Box::new(move |delay, fire| {
+                arm.send((delay, fire)).unwrap()
+            })));
+            let (delay, _) = armed.try_recv().unwrap();
+            assert_eq!(delay, OFFER_TIMEOUT);
+            let key = |rt: &mut Runtime<Capsule>, key| {
+                rt.key(rune::KeyEvent {
+                    key,
+                    mods: Default::default(),
+                });
+                rt.frame(0.0);
+            };
+            assert!(!rt.elements().iter().any(|e| e.focused));
+            key(&mut rt, rune::Key::Enter);
+            for (name, id) in [
+                (tr("More"), "offer-more"),
+                (tr("Not now"), "not-now"),
+                (tr("Record"), "record"),
+            ]
+            .into_iter()
+            .take(tabs)
+            {
+                key(&mut rt, rune::Key::Tab);
+                assert!(rt.elements().iter().any(|e| e.focus_visible
+                    && e.key.as_deref() == Some(id)
+                    && e.role == "button"
+                    && e.label.as_deref() == Some(name)
+                    && e.rect[3] == 28.0));
+            }
+            assert!(commands.try_recv().is_err());
+            key(&mut rt, rune::Key::Text(" ".into()));
+            match active {
+                "offer-more" => assert!(rt.state.more_open),
+                "not-now" => assert!(matches!(
+                    commands.try_recv(),
+                    Ok(ControllerCommand::Dismiss)
+                )),
+                _ => assert!(matches!(
+                    commands.try_recv(),
+                    Ok(ControllerCommand::Record(_, Some(_)))
+                )),
+            }
+            assert!(
+                armed.try_recv().is_err()
+                    && commands.try_recv().is_err()
+                    && chosen.lock().unwrap().is_empty()
+            );
+        }
+    }
 }
 
 fn offer_service(candidate: &MeetingCandidate) -> Option<crate::calendar::CallProvider> {

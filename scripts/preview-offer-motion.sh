@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run under a render lease, in a synced checkout. No native windows or audio.
 set -eu
-case "${1:-}" in before|fitted|reduced|quiet|quiet-reduced|quiet-light|quiet-unknown) ;; *) echo 'unknown offer variant' >&2; exit 2;; esac
+case "${1:-}" in before|fitted|reduced|quiet|quiet-reduced|quiet-light|quiet-unknown|quiet-label|quiet-cross) ;; *) echo 'unknown offer variant' >&2; exit 2;; esac
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # scripts/check's code-shape step enumerates tracked sources; a render
     # worker sync may be a disposable source-only copy, without an index.
