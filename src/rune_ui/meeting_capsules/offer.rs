@@ -39,7 +39,25 @@ pub(super) fn actions(
     choosing: bool,
 ) -> (rune::Color, String, String, Vec<El>) {
     let action = |key: &str, label: &str, primary, press: fn(&mut Capsule)| {
-        button(p, key, label, primary, move |c| {
+        let face = match key {
+            "offer-more" => IconButton::new(&crate::rune_ui::meetings::MORE_ICON)
+                .variant(IconButtonVariant::Neutral)
+                .control_size(ControlSize::Large)
+                .help(tr("More"))
+                .build(p.k)
+                .w(34.0),
+            "record" => Button::new(label)
+                .variant(ButtonVariant::Submit)
+                .build_push(p.k),
+            _ => Button::new(label)
+                .variant(if primary {
+                    ButtonVariant::Contrast
+                } else {
+                    ButtonVariant::Neutral
+                })
+                .build_push(p.k),
+        };
+        face.key(key).on_press(move |c: &mut Capsule| {
             if c.more_open == choosing
                 && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
             {
@@ -116,9 +134,6 @@ impl Capsule {
 
     pub(super) fn set_more_open(&mut self, open: bool) {
         self.more_open = open;
-        if let Some(resize) = &self.resize {
-            resize(self.window_size());
-        }
         if !open && std::mem::take(&mut self.expired) {
             self.arm_offer_timeout();
         }

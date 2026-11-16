@@ -57,6 +57,8 @@ use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod offer;
+#[path = "meeting_capsules/offer/surface.rs"]
+mod offer_surface;
 mod panel;
 mod throw;
 mod waveform;
@@ -66,6 +68,7 @@ use panel::{agent_prompt, hex_command, ready, ready_summary, recording};
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
 /// The offer's "…" choices need room for three buttons beside the name.
+#[cfg(test)]
 const MEETING_MENU_WIDTH: f32 = 560.0;
 const MEETING_PANEL_HEIGHT: f32 = 64.0;
 /// Between a capsule's buttons and its right edge.
@@ -276,6 +279,7 @@ struct Capsule {
     more_open: bool,
     /// Arms another 20 s if Cancel returns to an offer whose timer already fired.
     rearm_offer: Option<offer::After>,
+    presentation: offer_surface::Presentation,
     live: Live,
     waveform: Option<Box<waveform::Listening>>,
     commands: SyncSender<ControllerCommand>,
@@ -501,7 +505,7 @@ impl Capsule {
                 recording_window_size(self.hovered, panel::rest_width(shown))
             }
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
-            Some(Kind::Offer(..)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
+            Some(Kind::Offer(..)) => self.presentation.window(),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
@@ -813,6 +817,7 @@ impl MeetingCapsules {
                     kind: None,
                     more_open: false,
                     rearm_offer: None,
+                    presentation: Default::default(),
                     live: Live::default(),
                     waveform: None,
                     commands: commands.clone(),
@@ -1022,7 +1027,17 @@ impl MeetingCapsules {
             crate::app_settings::meeting_indicator_corner,
         );
         place_capsule(&self.panel, corner, 0.0, 0.0);
+        let presentation = offer_surface::Presentation::for_kind(&kind, false);
+        // Only the detected offer reserves space for its wider page. The
+        // other Windows panels retain their original, window-sized input.
+        #[cfg(target_os = "windows")]
+        self.panel.set_input(if matches!(kind, Kind::Offer(..)) {
+            rune::OverlayInput::Regions
+        } else {
+            rune::OverlayInput::All
+        });
         self.panel.resize(match &kind {
+            Kind::Offer(..) => presentation.window(),
             Kind::Ready(manifest) => ready_window_size(manifest),
             kind => (panel_width(kind), MEETING_PANEL_HEIGHT),
         });
@@ -1036,6 +1051,7 @@ impl MeetingCapsules {
             .then(|| offer::timer(self.panel.clone(), self.generation.clone(), generation));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
+            capsule.presentation = presentation;
             capsule.more_open = false;
             capsule.set_offer_timer(rearm);
             capsule.live = Live::default();
@@ -1047,6 +1063,9 @@ impl MeetingCapsules {
         });
         float_on_xwayland(&self.panel);
         self.panel.show();
+        if let Some(id) = self.panel_offer {
+            offer_surface::load_icon(self.panel.clone(), id);
+        }
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
             let (panel, current) = (self.panel.clone(), self.generation.clone());
@@ -1149,6 +1168,15 @@ fn dismiss_button(p: Paint) -> El {
 /// The overlay's frame hook: steps a glide into its corner, a frame at a
 /// time, until it rests, and keeps a recording's waveform fed.
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
+    if matches!(capsule.kind, Some(Kind::Offer(..)))
+        && capsule
+            .presentation
+            .step(capsule.more_open, capsule.reduced.get(), now)
+    {
+        tx.instant();
+        tx.wake_after(Duration::ZERO);
+        return true;
+    }
     let changed = waveform::poll(capsule, now, tx);
     if !capsule.throw.gliding() {
         return changed;
@@ -1197,7 +1225,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Reminder { meeting, automatic } => {
             reminder(p, meeting, *automatic, crate::calendar::wall_clock_ms())
         }
-        Kind::Offer(id, candidate) => offer::actions(p, *id, candidate, capsule.more_open),
+        Kind::Offer(id, candidate) => return offer_surface::view(p, capsule, *id, candidate),
         Kind::CallEnded { app, auto_stop } => (
             p.danger(),
             tr_fill("{} left the call", app),
@@ -1491,10 +1519,18 @@ mod tests {
         let (commands, received) = mpsc::sync_channel(4);
         let chosen = Chosen::default();
         let saved = chosen.clone();
+        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+        let presentation = offer_surface::Presentation::for_kind(&kind, more_open);
+        let size = if matches!(kind, Kind::Offer(..)) {
+            presentation.window()
+        } else {
+            size
+        };
         let capsule = Capsule {
             kind: Some(kind),
             more_open,
             rearm_offer: None,
+            presentation,
             live: Live::default(),
             waveform: None,
             commands,
@@ -1515,7 +1551,6 @@ mod tests {
             system_dark: dark,
             scale: 2.0,
         };
-        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
         let mut rt = crate::rune_ui::offscreen::runtime(capsule, view, size, env, text);
         rt.frame(0.0);
         (rt, received, chosen)
@@ -1540,16 +1575,21 @@ mod tests {
         assert!(rt.find("offer-more").is_some());
     }
 
-    /// Apply the size requested by the real button to the same Rune runtime;
-    /// subsequent clicks hit-test the new layout, not a second fixture.
-    fn press_and_resize(rt: &mut Runtime<Capsule>, key: &str, expected: (f32, f32)) {
-        let (resize, sizes) = mpsc::channel();
-        rt.state.resize = Some(Arc::new(move |size| resize.send(size).unwrap()));
+    /// The offscreen runtime has no host poll. Step the same presentation
+    /// clock the native overlay polls, on the original surface.
+    fn navigate_offer(rt: &mut Runtime<Capsule>, key: &str) {
         tap(rt, key);
-        let size = sizes.try_recv().unwrap();
-        assert_eq!(size, expected);
-        rt.set_viewport(size, 2.0);
-        rt.frame(0.0);
+        for i in 0..60 {
+            advance_offer(rt, i as f64 / 60.0);
+        }
+    }
+
+    fn advance_offer(rt: &mut Runtime<Capsule>, now: f64) {
+        rt.update(|c, tx| {
+            poll(c, now, tx);
+            tx.instant();
+        });
+        rt.frame(1.0 / 60.0);
     }
 
     #[test]
@@ -1562,7 +1602,7 @@ mod tests {
         let (delay, fire) = armed.try_recv().unwrap();
         assert_eq!(delay, Duration::from_secs(20));
         rt.frame(19.0);
-        press_and_resize(&mut rt, "offer-more", MENU);
+        navigate_offer(&mut rt, "offer-more");
         assert!(rt.find("always-record").is_some());
         assert!(commands.try_recv().is_err());
         assert!(chosen.lock().unwrap().is_empty());
@@ -1585,7 +1625,7 @@ mod tests {
     #[test]
     fn always_record_saves_the_choice_and_records_this_call() {
         let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
-        press_and_resize(&mut rt, "offer-more", MENU);
+        navigate_offer(&mut rt, "offer-more");
         rt.update(|c, _| c.expire_offer());
         assert_eq!(texts(&rt)[0], "Slack huddles");
         tap(&mut rt, "always-record");
@@ -1605,13 +1645,14 @@ mod tests {
         let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
         let current = Arc::new(AtomicU64::new(1));
         let queued = offer::delivery(current.clone(), 1, Capsule::expire_offer);
-        press_and_resize(&mut rt, "offer-more", MENU);
+        navigate_offer(&mut rt, "offer-more");
         // A new offer of the very same call replaces the open choices
         // before Rune gets to the first offer's timeout update.
         current.fetch_add(1, Ordering::SeqCst);
         rt.update(|c, _| {
             c.kind = Some(offer(slack_huddle()));
             c.more_open = false;
+            c.presentation = offer_surface::Presentation::for_kind(c.kind.as_ref().unwrap(), false);
         });
         rt.set_viewport(PANEL, 2.0);
         rt.update(queued);
@@ -1646,11 +1687,11 @@ mod tests {
             })));
             let (delay, first_timeout) = armed.try_recv().unwrap();
             assert_eq!(delay, Duration::from_secs(20));
-            press_and_resize(&mut rt, "offer-more", MENU);
+            navigate_offer(&mut rt, "offer-more");
             if deadline_passed {
                 rt.update(|c, _| first_timeout(c));
             }
-            press_and_resize(&mut rt, "offer-cancel", PANEL);
+            navigate_offer(&mut rt, "offer-cancel");
             assert!(rt.find("record").is_some());
             assert!(commands.try_recv().is_err());
             assert!(chosen.lock().unwrap().is_empty());
@@ -2608,6 +2649,7 @@ mod tests {
     }
 
     include!("meeting_capsules/motion_fixture.rs");
+    include!("meeting_capsules/offer/proof.rs");
 
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
@@ -2773,6 +2815,11 @@ mod tests {
         for (name, kind, more_open, size, setup) in states {
             for dark in [false, true] {
                 let (mut rt, _, _) = runtime(kind.clone(), more_open, dark, size);
+                let size = if matches!(kind, Kind::Offer(..)) {
+                    rt.state.presentation.window()
+                } else {
+                    size
+                };
                 rt.update(move |capsule, _| setup(capsule));
                 let (w, h, pixels) = render(&gpu, &mut rt, size);
                 let theme = if dark { "dark" } else { "light" };

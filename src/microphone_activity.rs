@@ -339,7 +339,7 @@ const EXECUTABLES: [(&str, &str); 47] = [
     ("vivaldi-snapshot", "com.vivaldi.Vivaldi"),
 ];
 
-fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'static str> {
+pub(crate) fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'static str> {
     let bundle = bundle_id.to_ascii_lowercase();
     let executable = bundle.strip_suffix(".exe").unwrap_or(&bundle);
     if let Some((_, canonical)) = EXECUTABLES.iter().find(|(known, _)| *known == executable) {
