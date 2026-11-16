@@ -290,7 +290,7 @@ pub(super) fn card_scroll_sticky(p: Paint, key: &str, content: El, stick_bottom:
 
 /// The window's faded scroll body (`super::faded_body`); with
 /// `stick_bottom` it keeps its newest content in view while scrolled to the
-/// bottom (Labs › Follow live transcript).
+/// bottom (a recording meeting's transcript).
 pub(super) fn faded_body_sticky(
     k: &rune_kit::Kit,
     key: &str,

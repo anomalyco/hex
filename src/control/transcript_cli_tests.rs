@@ -676,13 +676,6 @@ fn subtitles_follow_the_range_and_need_the_labs_toggle() {
     assert!(srt.contains("Them: Agreed."), "{srt}");
     assert!(!srt.contains("\n3\n"), "{srt}");
 
-    assert!(require_subtitle_export(true).is_ok());
-    assert!(
-        require_subtitle_export(false)
-            .unwrap_err()
-            .to_string()
-            .contains("hex labs on subtitle-export")
-    );
     assert_eq!(SubtitleFormat::from_flags(false, false), None);
     assert_eq!(
         SubtitleFormat::from_flags(false, true),

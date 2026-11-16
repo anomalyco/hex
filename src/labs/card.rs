@@ -31,7 +31,6 @@ impl Feature {
             Self::SpokenFormatting => "Spoken formatting",
             Self::FillerWords => "Remove filler words",
             Self::CleanUpWithAppleIntelligence => "Clean up with Apple Intelligence",
-            Self::SubtitleExport => "Subtitle export",
             Self::SecondDictationShortcut => "Second dictation shortcut",
             Self::TerminalPasteShortcut => "Terminal paste shortcut",
             Self::SmartSpacing => "Smart spacing",
@@ -47,7 +46,6 @@ impl Feature {
             Self::HistoryMultiSelect => "Select multiple dictations",
             Self::RecentDictations => "Copy recent dictations",
             Self::SkipPauses => "Skip long pauses",
-            Self::StopWhenCallEnds => "Stop when the call ends",
             Self::OutputFixes => "Fix results in Output",
             Self::PickerActiveFirst => "Model in use first",
             Self::ModelInPlace => "Use model files where they are",
@@ -60,23 +58,15 @@ impl Feature {
             Self::Appearance => "Appearance",
             Self::ReleaseNotesLink => "Release notes link",
             Self::HideMenuBarIcon => "Hide menu bar icon",
-            Self::MovableMeetingCapsules => "Movable meeting capsules",
             Self::GnomeClipboardRestore => "Restore clipboard on GNOME",
             Self::TypedText => "Transform typed text",
-            Self::MeetingNotesVocabulary => "Vocabulary in meeting notes",
             Self::NotchIndicator => "Notch indicator",
-            Self::MeetingFinishedEvent => "Meeting finished event",
             Self::GnomeMeetingCapsules => "Floating meeting capsules on GNOME",
             Self::GnomeAnnotate => "Annotate on GNOME",
             Self::Screenshots => "Screenshots",
-            Self::FollowLiveTranscript => "Follow live transcript",
-            Self::MoreCallApps => "More call apps",
             Self::AnnotateReplay => "Annotate 15 s replay",
             Self::MeetingImport => "Import audio",
-            Self::MeetingDescriptiveFilenames => "Descriptive meeting file names",
-            Self::MeetingNotesFile => "Separate notes file",
             Self::QuitClosesWindow => "⌘Q closes Settings",
-            Self::ExpireMeetingAudio => "Expire meeting audio separately",
             Self::CapsLockDictation => "Caps Lock dictation",
             Self::OpenCodeInWsl => "OpenCode in WSL",
             Self::ApiProcessing => "Process API transcripts",
@@ -154,9 +144,6 @@ impl Feature {
             Self::CleanUpWithAppleIntelligence => {
                 "Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence"
             }
-            Self::SubtitleExport => {
-                "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
-            }
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one, such as a key on an external keyboard"
             }
@@ -203,9 +190,6 @@ impl Feature {
             Self::SkipPauses => {
                 "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
             }
-            Self::StopWhenCallEnds => {
-                "Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"
-            }
             Self::OutputFixes => {
                 "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
             }
@@ -236,23 +220,14 @@ impl Feature {
             Self::HideMenuBarIcon => {
                 "Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"
             }
-            Self::MovableMeetingCapsules => {
-                "Drag meeting capsules out of the way; they come back in the corner you left them"
-            }
             Self::GnomeClipboardRestore => {
                 "Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running"
             }
             Self::TypedText => {
                 "Adds a shortcut that runs your Output steps on text you typed and replaces it."
             }
-            Self::MeetingNotesVocabulary => {
-                "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
-            }
             Self::NotchIndicator => {
                 "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"
-            }
-            Self::MeetingFinishedEvent => {
-                "Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API"
             }
             Self::GnomeMeetingCapsules => {
                 "Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running"
@@ -263,27 +238,12 @@ impl Feature {
             Self::Screenshots => {
                 "Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder"
             }
-            Self::FollowLiveTranscript => {
-                "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
-            }
-            Self::MoreCallApps => {
-                "Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."
-            }
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on"
             }
             Self::MeetingImport => "Add an audio file to Meetings and transcribe it on this Mac",
-            Self::MeetingDescriptiveFilenames => {
-                "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"
-            }
-            Self::MeetingNotesFile => {
-                "Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript"
-            }
             Self::QuitClosesWindow => {
                 "⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon"
-            }
-            Self::ExpireMeetingAudio => {
-                "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."
             }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes"

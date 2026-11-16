@@ -1,8 +1,8 @@
-//! Labs › Meeting finished event: tells one local API subscriber
+//! Meeting finished events: tells one local API subscriber
 //! (`GET /meetings/events`) a meeting's id once its final transcript and
 //! Markdown are written. Only the id leaves this module: no title, path,
-//! transcript text, or audio. With the toggle off, or with nobody
-//! subscribed, nothing is queued or kept.
+//! transcript text, or audio. With nobody subscribed, nothing is queued
+//! or kept.
 
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
@@ -23,9 +23,9 @@ pub(crate) fn global() -> &'static Hub {
     &HUB
 }
 
-/// Publishes a finished meeting while Labs › Meeting finished event is on.
+/// Publishes a finished meeting.
 pub(crate) fn publish(id: &str) {
-    HUB.publish(crate::labs::meeting_finished_event(), id);
+    HUB.publish(id);
 }
 
 impl Hub {
@@ -52,11 +52,8 @@ impl Hub {
         })
     }
 
-    /// Hands `id` to the subscriber, if `enabled` and someone listens.
-    pub(crate) fn publish(&self, enabled: bool, id: &str) {
-        if !enabled {
-            return;
-        }
+    /// Hands `id` to the subscriber, if someone listens.
+    pub(crate) fn publish(&self, id: &str) {
         let mut slot = self
             .subscriber
             .lock()
@@ -109,7 +106,7 @@ mod tests {
         static TEST_HUB: Hub = Hub::new();
         let subscription = TEST_HUB.subscribe().unwrap();
         assert!(TEST_HUB.subscribe().is_none(), "one subscriber at a time");
-        TEST_HUB.publish(true, "1700000000000-42");
+        TEST_HUB.publish("1700000000000-42");
         assert_eq!(
             subscription.next(Duration::from_secs(1)).unwrap(),
             "1700000000000-42"
@@ -124,11 +121,10 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_sent_or_kept_while_the_toggle_is_off() {
+    fn nothing_is_kept_before_anyone_subscribes() {
         static TEST_HUB: Hub = Hub::new();
-        TEST_HUB.publish(true, "before-anyone-listened");
+        TEST_HUB.publish("before-anyone-listened");
         let subscription = TEST_HUB.subscribe().unwrap();
-        TEST_HUB.publish(false, "while-off");
         assert_eq!(
             subscription.next(Duration::from_millis(10)),
             Err(RecvTimeoutError::Timeout)

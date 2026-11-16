@@ -959,14 +959,10 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         ))
 }
 
-/// Labs › Follow live transcript: a recording meeting's transcript keeps
-/// its newest line in view while scrolled to the bottom. Off, and for any
-/// meeting not recording, the card scrolls only by hand, as before.
+/// A recording meeting's transcript keeps its newest line in view while
+/// scrolled to the bottom. Any meeting not recording scrolls only by hand.
 fn follows_live_transcript(ui: &Ui, meeting: &Meeting) -> bool {
-    ui.settings.labs.follow_live_transcript
-        && crate::labs::Feature::FollowLiveTranscript.shipped()
-        && matches!(meeting.status, Status::Starting | Status::Recording)
-        && !ui.meetings.stop_pending
+    matches!(meeting.status, Status::Starting | Status::Recording) && !ui.meetings.stop_pending
 }
 
 /// The meeting's chapters, each with its start, name, line, and Copy
@@ -1290,18 +1286,13 @@ mod tests {
         assert_eq!(name("preview-failed"), "hex-row-call");
     }
 
-    /// Labs › Follow live transcript: only a recording meeting's transcript
-    /// follows its newest line, and only with the lab on (#1332).
+    /// Only a recording meeting's transcript follows its newest line (#1332).
     #[test]
-    fn only_a_recording_transcript_follows_and_only_with_its_lab() {
-        let mut settings = crate::app_settings::AppSettings::default();
+    fn only_a_recording_transcript_follows() {
+        let settings = crate::app_settings::AppSettings::default();
         let pane = MeetingsPane::fixture();
         let live = pane.meeting("preview-live").unwrap();
         let finished = pane.meeting("preview-notes").unwrap();
-        let ui = Ui::with(settings.clone(), Service::Fixture(Vec::new()));
-        assert!(!follows_live_transcript(&ui, live));
-        assert!(!follows_live_transcript(&ui, finished));
-        settings.labs.follow_live_transcript = true;
         let mut ui = Ui::with(settings, Service::Fixture(Vec::new()));
         assert!(follows_live_transcript(&ui, live));
         assert!(!follows_live_transcript(&ui, finished));

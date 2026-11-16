@@ -599,10 +599,10 @@ support this lab.
   ago than that to the Trash at launch and hourly, Meetings on or off, and
   `hex meetings` and `hex mcp` no longer list them.
 - `meetings.audio_retention` is `day`, `week`, `month`, `forever`, or `none`
-  (the default). With Labs › Expire meeting audio separately on, a finished
-  meeting's WAVs move to the Trash on that window while its transcript,
-  notes, summary, and Markdown stay; `none` follows `meetings.retention`.
-  With the lab off it does nothing.
+  (the default; Meetings › Settings › After a meeting › Keep audio). A
+  finished meeting's WAVs move to the Trash on that window while its
+  transcript, notes, summary, and Markdown stay; `none` follows
+  `meetings.retention`.
 - `transcription.model` and `transcription.language` are read-only here: use
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).

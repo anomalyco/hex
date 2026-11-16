@@ -109,10 +109,10 @@ pub enum MeetingsCommand {
         md: bool,
         #[arg(long)]
         json: bool,
-        /// SubRip subtitles, one cue per speaker turn (Labs › Subtitle export).
+        /// SubRip subtitles, one cue per speaker turn.
         #[arg(long, conflicts_with_all = ["md", "json", "vtt"])]
         srt: bool,
-        /// WebVTT subtitles, one cue per speaker turn (Labs › Subtitle export).
+        /// WebVTT subtitles, one cue per speaker turn.
         #[arg(long, conflicts_with_all = ["md", "json"])]
         vtt: bool,
         /// Only entries overlapping this offset or later: mm:ss, h:mm:ss, or seconds.
@@ -617,9 +617,6 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
             ..
         } => {
             let subtitles = SubtitleFormat::from_flags(*srt, *vtt);
-            if subtitles.is_some() {
-                require_subtitle_export(crate::labs::subtitle_export())?;
-            }
             let range = OffsetRange::parse(from.as_deref(), to.as_deref())?;
             let meeting = resolve(&library, id)?;
             if let Some(format) = subtitles {
@@ -707,18 +704,6 @@ impl SubtitleFormat {
             (false, true) => Some(Self::Vtt),
             (false, false) => None,
         }
-    }
-}
-
-/// Subtitle export is a Labs feature, refused before any meeting is read
-/// while its toggle is off.
-fn require_subtitle_export(on: bool) -> Result<()> {
-    if on {
-        Ok(())
-    } else {
-        Err(eyre!(
-            "Subtitle export is a Labs feature and is off. Turn it on with `hex labs on subtitle-export` or in Settings › Labs."
-        ))
     }
 }
 

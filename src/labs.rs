@@ -139,7 +139,6 @@ impl Feature {
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
             Self::CleanUpWithAppleIntelligence => settings.labs.clean_up_with_apple_intelligence,
-            Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
@@ -155,7 +154,6 @@ impl Feature {
             Self::HistoryMultiSelect => settings.labs.history_multi_select,
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::SkipPauses => settings.labs.skip_pauses,
-            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
             Self::OutputFixes => settings.labs.output_fixes,
             Self::PickerActiveFirst => settings.labs.picker_active_first,
             Self::ModelInPlace => settings.labs.model_in_place,
@@ -168,23 +166,15 @@ impl Feature {
             Self::Appearance => settings.labs.appearance,
             Self::ReleaseNotesLink => settings.labs.release_notes_link,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
-            Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
             Self::TypedText => settings.labs.typed_text,
-            Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
-            Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
             Self::GnomeAnnotate => settings.labs.gnome_annotate,
             Self::Screenshots => settings.labs.screenshots,
-            Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
-            Self::MoreCallApps => settings.labs.more_call_apps,
             Self::AnnotateReplay => settings.labs.annotate_replay,
             Self::MeetingImport => settings.labs.meeting_import,
-            Self::MeetingDescriptiveFilenames => settings.labs.meeting_descriptive_filenames,
-            Self::MeetingNotesFile => settings.labs.meeting_notes_file,
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
-            Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
             Self::ApiProcessing => settings.labs.api_processing,
@@ -231,7 +221,6 @@ impl Feature {
             &mut labs.spoken_formatting,
             &mut labs.filler_words,
             &mut labs.clean_up_with_apple_intelligence,
-            &mut labs.subtitle_export,
             &mut labs.second_dictation_shortcut,
             &mut labs.terminal_paste_shortcut,
             &mut labs.smart_spacing,
@@ -247,7 +236,6 @@ impl Feature {
             &mut labs.history_multi_select,
             &mut labs.recent_dictations,
             &mut labs.skip_pauses,
-            &mut labs.stop_when_call_ends,
             &mut labs.output_fixes,
             &mut labs.picker_active_first,
             &mut labs.model_in_place,
@@ -260,23 +248,15 @@ impl Feature {
             &mut labs.appearance,
             &mut labs.release_notes_link,
             &mut labs.hide_menu_bar_icon,
-            &mut labs.movable_meeting_capsules,
             &mut labs.gnome_clipboard_restore,
             &mut labs.typed_text,
-            &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
-            &mut labs.meeting_finished_event,
             &mut labs.gnome_meeting_capsules,
             &mut labs.gnome_annotate,
             &mut labs.screenshots,
-            &mut labs.follow_live_transcript,
-            &mut labs.more_call_apps,
             &mut labs.annotate_replay,
             &mut labs.meeting_import,
-            &mut labs.meeting_descriptive_filenames,
-            &mut labs.meeting_notes_file,
             &mut labs.quit_closes_window,
-            &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
             &mut labs.opencode_in_wsl,
             &mut labs.api_processing,
@@ -329,7 +309,6 @@ impl Feature {
             Self::CleanUpWithAppleIntelligence => {
                 settings.labs.clean_up_with_apple_intelligence = on;
             }
-            Self::SubtitleExport => settings.labs.subtitle_export = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
@@ -349,7 +328,6 @@ impl Feature {
             Self::HistoryMultiSelect => settings.labs.history_multi_select = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
-            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
             Self::OutputFixes => settings.labs.output_fixes = on,
             Self::PickerActiveFirst => settings.labs.picker_active_first = on,
             Self::ModelInPlace => settings.labs.model_in_place = on,
@@ -360,23 +338,15 @@ impl Feature {
             Self::Appearance => settings.labs.appearance = on,
             Self::ReleaseNotesLink => settings.labs.release_notes_link = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
-            Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
             Self::TypedText => settings.labs.typed_text = on,
-            Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
-            Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
             Self::GnomeAnnotate => settings.labs.gnome_annotate = on,
             Self::Screenshots => settings.labs.screenshots = on,
-            Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
-            Self::MoreCallApps => settings.labs.more_call_apps = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
-            Self::MeetingDescriptiveFilenames => settings.labs.meeting_descriptive_filenames = on,
-            Self::MeetingNotesFile => settings.labs.meeting_notes_file = on,
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
-            Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
@@ -422,7 +392,7 @@ const KEEP_ON_CLIPBOARD: u64 = 1 << 7;
 const COPY_ONLY: u64 = 1 << 8;
 const SPOKEN_FORMATTING: u64 = 1 << 9;
 const FILLER_WORDS: u64 = 1 << 10;
-const SUBTITLE_EXPORT: u64 = 1 << 11;
+// 1 << 11 is free (Subtitle export graduated).
 const SMART_SPACING: u64 = 1 << 12;
 const SPOKEN_SYMBOLS: u64 = 1 << 13;
 const SIDED_CHORDS: u64 = 1 << 14;
@@ -431,17 +401,15 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
+// 1 << 20 is free (Stop when the call ends moved to Meetings › Settings).
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
-const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
-// Reuses 1 << 24, Labs › Choose meeting summary model before it became
-// Meetings › Summaries.
-const MORE_CALL_APPS: u64 = 1 << 24;
+// 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps
+// graduated).
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
-const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
+// 1 << 26 is free (Vocabulary in meeting notes graduated).
 const NOTCH_INDICATOR: u64 = 1 << 27;
-const MEETING_FINISHED_EVENT: u64 = 1 << 28;
+// 1 << 28 is free (Meeting finished event graduated).
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 const SCREENSHOTS: u64 = 1 << 30;
 const ANNOTATE_REPLAY: u64 = 1 << 31;
@@ -449,17 +417,14 @@ const ANNOTATE_REPLAY: u64 = 1 << 31;
 const MINUTES_SHIFT: u64 = 32;
 const MINUTES_BITS: u32 = 11;
 const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
-/// Bits 1..31 are full, so this switch sits above the minutes.
+/// This switch sits above the minutes.
 const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
 /// The next bit above Import audio's switch, clear of the minutes below it.
 const QUIT_CLOSES_WINDOW: u64 = MEETING_IMPORT << 1;
 /// The next bit above Quit closes Settings, also clear of the minutes below.
-const EXPIRE_MEETING_AUDIO: u64 = QUIT_CLOSES_WINDOW << 1;
-const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
+const LIVE_TYPING: u64 = QUIT_CLOSES_WINDOW << 1;
 /// The next bit above Live typing's switch.
-const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
-/// The next bit above descriptive meeting file names.
-const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
+const FAILURE_NOTICES: u64 = LIVE_TYPING << 1;
 /// The next bit above Failure notices' switch.
 const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 /// The next bit above Caps Lock dictation's switch.
@@ -484,12 +449,9 @@ const RETURN_TO_APP: u64 = DOUBLE_TAP_MODIFIERS << 1;
 /// The next bit above Return to app's switch: "While dictating" applies only
 /// when the default output is speakers.
 const SPEAKERS_ONLY: u64 = RETURN_TO_APP << 1;
-/// The next bit above Only on speakers' switch: a meeting's transcript and
-/// notes export to their own `<stem>.transcript.md` and `<stem>.notes.md`.
-const MEETING_NOTES_FILE: u64 = SPEAKERS_ONLY << 1;
-/// The next bit above Notes' file: a dictation mode's speech model and
-/// language follow the foreground application (macOS, Windows).
-const APP_MODEL_SWITCHING: u64 = MEETING_NOTES_FILE << 1;
+/// The next bit above Only on speakers' switch: a dictation mode's speech
+/// model and language follow the foreground application (macOS, Windows).
+const APP_MODEL_SWITCHING: u64 = SPEAKERS_ONLY << 1;
 /// The next bit above Switch model with app: the menu bar offers Pause Hex,
 /// and every capture shortcut is inert while paused (macOS).
 const PAUSE_MENU: u64 = APP_MODEL_SWITCHING << 1;
@@ -499,11 +461,11 @@ const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
 /// The next bit above API timings: History selects several dictations at
 /// once, to copy or delete them together.
 const HISTORY_MULTI_SELECT: u64 = API_TIMESTAMPS << 1;
-/// The last free bit: with Release microphone while idle on, the microphone
-/// stays open for a while after a capture (Labs › Keep mic open after
-/// dictating). Its window does not fit above the minutes, so it lives in
-/// [`MICROPHONE_LINGER_SECONDS`]. The word is full now, so a new lab needs its
-/// own atomic, as [`PRINT_START`] does.
+/// With Release microphone while idle on, the microphone stays open for a
+/// while after a capture (Labs › Keep mic open after dictating). Its window
+/// does not fit above the minutes, so it lives in
+/// [`MICROPHONE_LINGER_SECONDS`]. A new lab can take one of the free bits
+/// below the minutes.
 const KEEP_MICROPHONE_OPEN: u64 = HISTORY_MULTI_SELECT << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
@@ -515,14 +477,12 @@ static STATE: AtomicU64 = AtomicU64::new(0);
 /// window itself has no room in the word.
 static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 
-/// `hex dictation start --print`'s switch, set beside [`STATE`]: the state
-/// word is full (bit 63 is Keep mic open after dictating), so this lab has its
-/// own atomic, written by [`state`] and [`apply`].
+/// `hex dictation start --print`'s switch, set beside [`STATE`] in its own
+/// atomic, written by [`state`] and [`apply`].
 static PRINT_START: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Screen vocabulary's switch, set beside [`STATE`] like [`PRINT_START`]:
-/// that lab reads the focused window once per dictation and has its own
-/// atomic because the state word is full.
+/// that lab reads the focused window once per dictation.
 static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Rewrite reads nearby text's switch, set beside [`STATE`] like
@@ -530,13 +490,12 @@ static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 /// once per dictation, and the state word has no bit for it.
 static CURSOR_CONTEXT: AtomicBool = AtomicBool::new(false);
 
-/// Labs › Voice prompt's switch: the state word is full too, so it has its
-/// own atomic, written by [`state`] and [`apply`].
+/// Labs › Voice prompt's switch in its own atomic, written by [`state`] and
+/// [`apply`].
 static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Copy captures as a zip's switch, set beside [`STATE`] like
-/// [`PRINT_START`]: a written capture copies as one zip file. The state word
-/// is full, so this lab has its own atomic.
+/// [`PRINT_START`]: a written capture copies as one zip file.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Copy dictation audio's switch, set beside [`STATE`] like
@@ -546,13 +505,11 @@ static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 static COPY_DICTATION_AUDIO: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Browser access to the local API's switch, set beside [`STATE`]
-/// like [`PRINT_START`]: the state word is full, so this lab has its own
-/// atomic, written by [`state`] and [`apply`].
+/// like [`PRINT_START`], written by [`state`] and [`apply`].
 static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Smaller model files' switch, set beside [`STATE`] like
-/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
-/// written by [`state`] and [`apply`].
+/// [`PRINT_START`], written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Upcoming meetings in menu bar's switch, set beside [`STATE`] like
@@ -561,8 +518,8 @@ static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 static CALENDAR_MENU: AtomicBool = AtomicBool::new(false);
 
 /// Labs › YOLO mode's minimum hold in seconds, 0 while the lab is
-/// off, set beside [`STATE`] like [`PRINT_START`]: the state word is full, so
-/// this lab has its own atomic, written by [`state`] and [`apply`].
+/// off, set beside [`STATE`] like [`PRINT_START`], written by [`state`] and
+/// [`apply`].
 static YOLO_MODE_SECONDS: AtomicU32 = AtomicU32::new(0);
 
 /// The apps Labs › YOLO mode sends in (empty: every
@@ -856,11 +813,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             SPOKEN_FORMATTING,
         ),
         (Feature::FillerWords, settings.filler_words, FILLER_WORDS),
-        (
-            Feature::SubtitleExport,
-            settings.subtitle_export,
-            SUBTITLE_EXPORT,
-        ),
         (Feature::SmartSpacing, settings.smart_spacing, SMART_SPACING),
         (
             Feature::SpokenSymbols,
@@ -896,16 +848,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         ),
         (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
         (
-            Feature::StopWhenCallEnds,
-            settings.stop_when_call_ends,
-            STOP_WHEN_CALL_ENDS,
-        ),
-        (
-            Feature::MoreCallApps,
-            settings.more_call_apps,
-            MORE_CALL_APPS,
-        ),
-        (
             Feature::KeepRecordings,
             settings.keep_recordings,
             KEEP_RECORDINGS,
@@ -916,30 +858,15 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             HIDE_MENU_BAR_ICON,
         ),
         (
-            Feature::MovableMeetingCapsules,
-            settings.movable_meeting_capsules,
-            MOVABLE_MEETING_CAPSULES,
-        ),
-        (
             Feature::GnomeClipboardRestore,
             settings.gnome_clipboard_restore,
             GNOME_CLIPBOARD_RESTORE,
         ),
         (Feature::TypedText, settings.typed_text, TYPED_TEXT),
         (
-            Feature::MeetingNotesVocabulary,
-            settings.meeting_notes_vocabulary,
-            MEETING_NOTES_VOCABULARY,
-        ),
-        (
             Feature::NotchIndicator,
             settings.notch_indicator,
             NOTCH_INDICATOR,
-        ),
-        (
-            Feature::MeetingFinishedEvent,
-            settings.meeting_finished_event,
-            MEETING_FINISHED_EVENT,
         ),
         (
             Feature::AnnotateReplay,
@@ -950,16 +877,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingImport,
             settings.meeting_import,
             MEETING_IMPORT,
-        ),
-        (
-            Feature::MeetingDescriptiveFilenames,
-            settings.meeting_descriptive_filenames,
-            MEETING_DESCRIPTIVE_FILENAMES,
-        ),
-        (
-            Feature::MeetingNotesFile,
-            settings.meeting_notes_file,
-            MEETING_NOTES_FILE,
         ),
         (
             Feature::CapsLockDictation,
@@ -980,11 +897,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::QuitClosesWindow,
             settings.quit_closes_window,
             QUIT_CLOSES_WINDOW,
-        ),
-        (
-            Feature::ExpireMeetingAudio,
-            settings.expire_meeting_audio,
-            EXPIRE_MEETING_AUDIO,
         ),
         (
             Feature::ApiProcessing,
@@ -1322,18 +1234,6 @@ mod tests {
     }
 
     #[test]
-    fn subtitle_export_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode(&labs) & SUBTITLE_EXPORT, 0);
-        labs.subtitle_export = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode(&labs);
-        assert_ne!(state & SUBTITLE_EXPORT, 0);
-        assert_eq!(state & FILLER_WORDS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-    }
-
-    #[test]
     fn smart_spacing_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode(&labs) & SMART_SPACING, 0);
@@ -1341,7 +1241,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode(&labs);
         assert_ne!(state & SMART_SPACING, 0);
-        assert_eq!(state & SUBTITLE_EXPORT, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
@@ -1413,7 +1312,7 @@ mod tests {
 
     #[test]
     fn history_multi_select_is_its_own_bit_and_off_by_default() {
-        assert_eq!(HISTORY_MULTI_SELECT, 1 << 62);
+        assert_eq!(HISTORY_MULTI_SELECT, 1 << 59);
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & HISTORY_MULTI_SELECT, 0);
         labs.history_multi_select = true;
@@ -1459,18 +1358,6 @@ mod tests {
     }
 
     #[test]
-    fn stop_when_call_ends_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & STOP_WHEN_CALL_ENDS, 0);
-        labs.stop_when_call_ends = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & STOP_WHEN_CALL_ENDS, 0);
-        assert_eq!(state & RECENT_DICTATIONS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-    }
-
-    #[test]
     fn keep_recordings_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & KEEP_RECORDINGS, 0);
@@ -1478,7 +1365,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & KEEP_RECORDINGS, 0);
-        assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
@@ -1516,7 +1402,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & SCREENSHOTS, 0);
-        assert_eq!(state & MEETING_FINISHED_EVENT, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
@@ -1528,19 +1413,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & NOTCH_INDICATOR, 0);
-        assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-    }
-
-    #[test]
-    fn movable_meeting_capsules_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & MOVABLE_MEETING_CAPSULES, 0);
-        labs.movable_meeting_capsules = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & MOVABLE_MEETING_CAPSULES, 0);
-        assert_eq!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
@@ -1552,7 +1424,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
-        assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
@@ -1567,18 +1438,6 @@ mod tests {
         assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert_eq!(Feature::TypedText.on_this_os(), cfg!(target_os = "linux"));
-    }
-
-    #[test]
-    fn meeting_finished_event_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & MEETING_FINISHED_EVENT, 0);
-        labs.meeting_finished_event = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & MEETING_FINISHED_EVENT, 0);
-        assert_eq!(state & NOTCH_INDICATOR, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
     #[test]
@@ -1619,18 +1478,6 @@ mod tests {
     }
 
     #[test]
-    fn more_call_apps_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & MORE_CALL_APPS, 0);
-        labs.more_call_apps = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & MORE_CALL_APPS, 0);
-        assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-    }
-
-    #[test]
     fn meeting_import_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & MEETING_IMPORT, 0);
@@ -1643,33 +1490,6 @@ mod tests {
     }
 
     #[test]
-    fn meeting_descriptive_filenames_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(
-            encode_where(&labs, |_| true) & MEETING_DESCRIPTIVE_FILENAMES,
-            0
-        );
-        labs.meeting_descriptive_filenames = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
-        assert_eq!(state & LIVE_TYPING, 0);
-        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
-    }
-
-    #[test]
-    fn meeting_notes_file_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & MEETING_NOTES_FILE, 0);
-        labs.meeting_notes_file = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & MEETING_NOTES_FILE, 0);
-        assert_eq!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
-        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
-    }
-
-    #[test]
     fn failure_notices_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & FAILURE_NOTICES, 0);
@@ -1677,21 +1497,7 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & FAILURE_NOTICES, 0);
-        assert_eq!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
         assert_eq!(state & LIVE_TYPING, 0);
-        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
-    }
-
-    #[test]
-    fn expire_meeting_audio_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & EXPIRE_MEETING_AUDIO, 0);
-        labs.expire_meeting_audio = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & EXPIRE_MEETING_AUDIO, 0);
-        assert_eq!(state & MEETING_IMPORT, 0);
-        assert_eq!(state & QUIT_CLOSES_WINDOW, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 
@@ -1703,7 +1509,6 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & CAPS_LOCK_DICTATION, 0);
-        assert_eq!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert_eq!(
             Feature::CapsLockDictation.on_this_os(),
@@ -1806,7 +1611,6 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & API_TIMESTAMPS, 0);
         assert_eq!(state & API_PROCESSING, 0);
-        assert_eq!(state & MEETING_NOTES_FILE, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert!(Feature::ApiTimestamps.on_this_os());
         assert_eq!(Feature::ApiTimestamps.added(), 20261110);
@@ -1815,7 +1619,7 @@ mod tests {
 
     #[test]
     fn speakers_only_is_its_own_bit_and_off_by_default() {
-        assert_eq!(SPEAKERS_ONLY, 1 << 57);
+        assert_eq!(SPEAKERS_ONLY, 1 << 55);
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & SPEAKERS_ONLY, 0);
         labs.speakers_only = true;
@@ -1834,14 +1638,13 @@ mod tests {
 
     #[test]
     fn pause_menu_is_its_own_bit_and_macos_only() {
-        assert_eq!(PAUSE_MENU, 1 << 60);
+        assert_eq!(PAUSE_MENU, 1 << 57);
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & PAUSE_MENU, 0);
         labs.pause_menu = true;
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & PAUSE_MENU, 0);
-        assert_eq!(state & MEETING_NOTES_FILE, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert_eq!(Feature::PauseMenu.on_this_os(), cfg!(target_os = "macos"));
         assert_eq!(Feature::PauseMenu.added(), 20261110);
@@ -2102,7 +1905,7 @@ mod tests {
     #[test]
     fn retired_switches_are_read_and_ignored() {
         let settings: AppSettings = serde_json::from_str(
-            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "transcribe_files": true, "restore_shortcut_default": true, "live_text": true}}"#,
+            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "transcribe_files": true, "restore_shortcut_default": true, "follow_live_transcript": true, "more_call_apps": true, "meeting_notes_vocabulary": true, "meeting_finished_event": true, "subtitle_export": true, "movable_meeting_capsules": true, "live_text": true}}"#,
         )
         .unwrap();
         assert!(settings.labs.live_text);
@@ -2113,5 +1916,15 @@ mod tests {
         assert!(json["labs"].get("meeting_platform_icons").is_none());
         assert!(json["labs"].get("transcribe_files").is_none());
         assert!(json["labs"].get("restore_shortcut_default").is_none());
+        for graduated in [
+            "follow_live_transcript",
+            "more_call_apps",
+            "meeting_notes_vocabulary",
+            "meeting_finished_event",
+            "subtitle_export",
+            "movable_meeting_capsules",
+        ] {
+            assert!(json["labs"].get(graduated).is_none(), "{graduated}");
+        }
     }
 }

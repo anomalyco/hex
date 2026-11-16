@@ -253,17 +253,6 @@
     },
     {
       "added": "2026-10-31",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "subtitle-export",
-      "oses": [
-        "macos"
-      ],
-      "summary": "Export meeting transcripts as SRT or VTT subtitles with hex meetings show",
-      "title": "Subtitle export"
-    },
-    {
-      "added": "2026-10-31",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",
       "id": "second-dictation-shortcut",
@@ -447,17 +436,6 @@
     },
     {
       "added": "2026-11-02",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "stop-when-call-ends",
-      "oses": [
-        "macos"
-      ],
-      "summary": "Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet",
-      "title": "Stop when the call ends"
-    },
-    {
-      "added": "2026-11-02",
       "group": "output",
       "groupTitle": "Output",
       "id": "output-fixes",
@@ -607,17 +585,6 @@
     },
     {
       "added": "2026-11-03",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "movable-meeting-capsules",
-      "oses": [
-        "macos"
-      ],
-      "summary": "Drag meeting capsules out of the way; they come back in the corner you left them",
-      "title": "Movable meeting capsules"
-    },
-    {
-      "added": "2026-11-03",
       "group": "output",
       "groupTitle": "Output",
       "id": "gnome-clipboard-restore",
@@ -640,19 +607,6 @@
     },
     {
       "added": "2026-11-03",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "meeting-notes-vocabulary",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them",
-      "title": "Vocabulary in meeting notes"
-    },
-    {
-      "added": "2026-11-03",
       "group": "dictation",
       "groupTitle": "Dictation",
       "id": "notch-indicator",
@@ -661,19 +615,6 @@
       ],
       "summary": "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar",
       "title": "Notch indicator"
-    },
-    {
-      "added": "2026-11-04",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "meeting-finished-event",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API",
-      "title": "Meeting finished event"
     },
     {
       "added": "2026-11-04",
@@ -698,32 +639,6 @@
       "title": "Annotate on GNOME"
     },
     {
-      "added": "2026-11-04",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "follow-live-transcript",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.",
-      "title": "Follow live transcript"
-    },
-    {
-      "added": "2026-11-06",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "more-call-apps",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites.",
-      "title": "More call apps"
-    },
-    {
       "added": "2026-11-06",
       "group": "meetings",
       "groupTitle": "Meetings",
@@ -736,32 +651,6 @@
     },
     {
       "added": "2026-11-07",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "meeting-descriptive-filenames",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time",
-      "title": "Descriptive meeting file names"
-    },
-    {
-      "added": "2026-11-09",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "meeting-notes-file",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript",
-      "title": "Separate notes file"
-    },
-    {
-      "added": "2026-11-07",
       "group": "dictation",
       "groupTitle": "Dictation",
       "id": "quit-closes-window",
@@ -770,19 +659,6 @@
       ],
       "summary": "⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon",
       "title": "⌘Q closes Settings"
-    },
-    {
-      "added": "2026-11-07",
-      "group": "meetings",
-      "groupTitle": "Meetings",
-      "id": "expire-meeting-audio",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings.",
-      "title": "Expire meeting audio separately"
     },
     {
       "added": "2026-11-07",

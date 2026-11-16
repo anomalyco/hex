@@ -498,20 +498,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::ReleaseNotesLink, None));
     if caps.meetings {
         rows.push(row(Feature::LiveChapters, None));
-        rows.push(row(Feature::SubtitleExport, None));
-        // macOS's meeting controller reads the call app's audio output, so
-        // Linux renders of macOS scenes leave it out.
-        if cfg!(target_os = "macos") {
-            rows.push(row(Feature::StopWhenCallEnds, Some(&TIMER)));
-            // Only macOS's capsules know the screen to snap a drag against.
-            rows.push(row(Feature::MovableMeetingCapsules, None));
-        }
-        rows.push(row(Feature::MeetingNotesVocabulary, Some(&BOOK)));
-        rows.push(row(Feature::MeetingDescriptiveFilenames, None));
-        rows.push(row(Feature::MeetingNotesFile, None));
-        rows.push(row(Feature::MeetingFinishedEvent, Some(&GLOBE)));
-        rows.push(row(Feature::FollowLiveTranscript, None));
-        rows.push(row(Feature::MoreCallApps, Some(&GLOBE)));
         // macOS's status item lists them, from the meeting controller's own
         // calendar read.
         if cfg!(target_os = "macos") {
@@ -520,7 +506,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
         }
-        rows.push(row(Feature::ExpireMeetingAudio, Some(&CLOCK)));
     }
     rows.push(row(Feature::VocabularyBiasing, Some(&BOOK)));
     // macOS reads the focused window through Accessibility as a capture
@@ -806,7 +791,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
         Feature::CleanUpWithAppleIntelligence => "lab-clean-up",
-        Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",
@@ -822,7 +806,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
-        Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
         Feature::OutputFixes => "lab-output-fixes",
         Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
@@ -841,23 +824,15 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CalendarMenu => "lab-calendar-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
-        Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::TypedText => "lab-typed-text",
-        Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
-        Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::GnomeAnnotate => "lab-gnome-annotate",
         Feature::Screenshots => "lab-screenshots",
-        Feature::FollowLiveTranscript => "lab-follow-live-transcript",
-        Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::MeetingImport => "lab-meeting-import",
-        Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
-        Feature::MeetingNotesFile => "lab-meeting-notes-file",
-        Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::ShellCompletions => "lab-shell-completions",
         Feature::YoloMode => "lab-yolo-mode",

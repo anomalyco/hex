@@ -1,7 +1,7 @@
 //! Names of exported meeting Markdown files: `<YYYY-MM-DD HHMM> <title>.md`
-//! in the user's meeting folder. Export and the Labs › Descriptive meeting
-//! file names rename share the same sanitizer and `" (2)"` collision scheme,
-//! so a rename lands on the name export would have chosen.
+//! in the user's meeting folder. Export and Descriptive meeting file names'
+//! rename share the same sanitizer and `" (2)"` collision scheme, so a
+//! rename lands on the name export would have chosen.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -118,7 +118,7 @@ pub(super) fn is_current_file(candidate: &Path, current: &Path) -> bool {
 /// notes file cannot, the transcript is renamed back; if that rollback also
 /// fails, the manifest keeps the paths the files actually have. The bytes do
 /// not change, so `export_sha256` stays valid for retention.
-/// `enabled` is the caller's Labs › Descriptive meeting file names switch.
+/// `enabled` is the caller's Descriptive meeting file names switch.
 pub(super) fn rename_to_title(
     manifest: &mut MeetingManifest,
     title: &str,

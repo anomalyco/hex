@@ -109,18 +109,8 @@ impl Feature {
             | Self::CopyDictationAudio => Group::History,
             Self::Meetings
             | Self::LiveChapters
-            | Self::SubtitleExport
-            | Self::StopWhenCallEnds
-            | Self::MovableMeetingCapsules
-            | Self::MeetingNotesVocabulary
-            | Self::MeetingFinishedEvent
-            | Self::FollowLiveTranscript
-            | Self::MoreCallApps
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
-            | Self::MeetingDescriptiveFilenames
-            | Self::MeetingNotesFile
-            | Self::ExpireMeetingAudio
             | Self::CalendarMenu => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
