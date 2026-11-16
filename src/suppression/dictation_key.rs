@@ -9,9 +9,11 @@
 //!
 //! It passes the key through untouched unless it is one of Hex's shortcuts
 //! (`RuntimeHotkey::matches_key_press`, so modifiers count) or the window is
-//! recording a shortcut. Then it consumes the press *and its release* and hands
-//! it to the listener or to the recorder, so macOS Dictation never opens, the
-//! app never sees a stray key, and no second tap can deliver it twice.
+//! recording a shortcut. Then it consumes the press *and its release* while
+//! this tap is still there, and hands the press to the listener or to the
+//! recorder. The app never sees a press Hex took, and no second tap can deliver
+//! it twice. Whether macOS's own Dictation still opens is unobserved on
+//! hardware; blocking the key here is what handy-keys does to keep it shut.
 
 use super::*;
 
@@ -67,6 +69,14 @@ pub(crate) fn stop_watching(id: u64) {
     }
 }
 
+/// Forget presses a recorder that stopped polling never read.
+pub(crate) fn clear_captured() {
+    CAPTURED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clear();
+}
+
 /// Every press the tap took for the recorder since the window last polled.
 pub(crate) fn take_captured() -> Vec<CapturedMicrophoneKey> {
     let mut captured = CAPTURED.lock().unwrap_or_else(|error| error.into_inner());
@@ -120,16 +130,29 @@ pub(super) unsafe extern "C" fn dictation_key_callback(
     event: EventRef,
     user_info: *mut c_void,
 ) -> EventRef {
-    if user_info.is_null() || event.is_null() {
+    if user_info.is_null() {
         return event;
     }
     // SAFETY: `user_info` points to the context allocated by `run_event_tap`.
     let context = unsafe { &*(user_info.cast::<EventTapContext>()) };
+    // Disable notifications first, like the annotated tap: no real events run
+    // while macOS holds the tap down, so recovery cannot wait on an event.
     if matches!(
         event_type,
         EVENT_TAP_DISABLED_BY_TIMEOUT | EVENT_TAP_DISABLED_BY_USER_INPUT
     ) {
         reenable_disabled_taps(context, event_type, TapKind::DictationKey.as_str());
+        // Events were missed while it was off: a press this tap took may never
+        // see its release.
+        context
+            .microphone_key
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        send_input(context, InputEvent::TapDisabled, CaptureInstant::ZERO);
+        return event;
+    }
+    if event.is_null() {
         return event;
     }
     if !matches!(event_type, EVENT_KEY_DOWN | EVENT_KEY_UP) {
@@ -169,9 +192,21 @@ pub(super) unsafe extern "C" fn dictation_key_callback(
         crate::app_settings::MicrophoneKeyTap::Pass => event,
         // SAFETY: CoreGraphics supplied a valid event.
         crate::app_settings::MicrophoneKeyTap::Listener { down } => {
-            let at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
-            send_input(context, InputEvent::Key { code, down, flags }, at);
-            ptr::null_mut()
+            // SAFETY: CoreGraphics supplied a valid event.
+            let raw = unsafe { CGEventGetTimestamp(event) };
+            let (at, _) = physical_event_instant(raw, CaptureInstant::now());
+            if send_input(context, InputEvent::Key { code, down, flags }, at) {
+                ptr::null_mut()
+            } else {
+                // The listener is gone, so the press is not Hex's after all:
+                // forget it and let the event, and its release, through.
+                context
+                    .microphone_key
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clear();
+                event
+            }
         }
         crate::app_settings::MicrophoneKeyTap::Recorder { down } => {
             if down {

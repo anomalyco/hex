@@ -132,9 +132,12 @@ shortcut among them, before the app and before the annotated-session key tap,
 so Hex takes this one key at a **session** tap
 (`suppression::dictation_key`) while its lab is on. That tap consumes the press
 and its release only while a shortcut is being recorded or one of Hex's
-shortcuts matches the key; then macOS's Dictation never opens and the app never
-sees a stray key. Anything else (the lab off, Hex paused from the menu bar, or
-no shortcut on the key) passes through untouched, so macOS keeps the key. The
+shortcuts matches the key, so Hex sees the key and the app does not. Anything
+else (the lab off, Hex paused from the menu bar, or no shortcut on the key)
+passes through untouched, so macOS keeps the key. Whether macOS's own Dictation
+still opens on a press Hex takes is unobserved on hardware: if it does, change
+its shortcut in System Settings › Keyboard › Dictation. The microphone key is
+refused for the Screenshots shortcuts, whose keys are read after this tap. The
 key joins F1–F20, the arrows, and the navigation keys, whose always-set
 SecondaryFn the matcher already ignores (`key_reports_function_flag` in
 `app_settings/hotkeys.rs`); Fn is never stripped globally, so it stays

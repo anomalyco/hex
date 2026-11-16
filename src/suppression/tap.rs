@@ -364,7 +364,13 @@ impl ManagedTap {
             // The microphone (dictation) key: macOS's own symbolic hot keys are
             // matched before the app and before the annotated-session tap, so
             // only the session boundary still has the press. Filtering, so a
-            // press that is Hex's never reaches macOS's Dictation.
+            // press Hex takes does not also reach the app. handy-computer/
+            // handy-keys ships this key: its `src/platform/macos/listener.rs`
+            // lines 567-569 create the tap with
+            // `CGEventTapLocation::SessionEventTap`,
+            // `CGEventTapPlacement::HeadInsertEventTap`, and
+            // `CGEventTapOptions::Default`, and blocking the press there is
+            // what its users report keeps the system Dictation popup shut.
             TapKind::DictationKey => (
                 SESSION_EVENT_TAP,
                 DEFAULT_EVENT_TAP,
@@ -425,7 +431,15 @@ impl TapSet {
                         .slot(context)
                         .store(ptr::null_mut(), Ordering::Release);
                     tracing::info!(tap = kind, "removed the event tap its lab turned off");
-                    interrupted |= tap.kind.tracks_shortcuts();
+                    // Only this tap comes and goes, and only a press the
+                    // listener took has a release to lose: end that capture.
+                    // Removing the recorder's press cancels nothing.
+                    let mut microphone_key = context
+                        .microphone_key
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    interrupted |= microphone_key.holds_listener_press();
+                    microphone_key.clear();
                 }
                 tap.failing = false;
                 continue;

@@ -9,12 +9,11 @@
 //! suspended meanwhile so the current binding can be recorded again.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
@@ -167,13 +166,12 @@ impl Backend {
         let watch = self.chords.as_mut()?;
         for key in captured {
             if let Some(chord) = recorded_microphone_key(&mut watch.capture.borrow_mut(), key) {
-                watch.taken.push_back(chord);
+                // The same channel the monitor's chords arrive on, so they
+                // read in the order they were recorded.
+                let _ = watch.sender.send(chord);
             }
         }
-        let chord = match watch.taken.pop_front() {
-            Some(chord) => Some(chord),
-            None => watch.results.try_recv().ok(),
-        };
+        let chord = watch.results.try_recv().ok();
         if matches!(chord, Some(Chord::Cancelled)) {
             self.chords = None;
         }
@@ -184,12 +182,13 @@ impl Backend {
 /// Records chords from the window's keyboard events while Settings listens,
 /// with the listener's event tap suspended. Removing the monitor ends it.
 struct ChordWatch {
+    /// The monitor's chords, and the listener's microphone-key presses once
+    /// they are read.
     results: Receiver<Chord>,
+    sender: Sender<Chord>,
     /// The same recorder the monitor feeds, for presses the listener's session
     /// tap took instead (Labs › Microphone key alone).
     capture: Rc<RefCell<ChordCapture>>,
-    /// Chords read from those presses, oldest first.
-    taken: VecDeque<Chord>,
     /// This watch's registration with the session tap's recorder feed.
     watching: u64,
     monitor: Retained<AnyObject>,
@@ -198,8 +197,11 @@ struct ChordWatch {
 impl ChordWatch {
     fn start(wake: Arc<dyn Fn() + Send + Sync>) -> Result<Self> {
         crate::app_settings::set_hotkey_capture_active(true);
+        // A press the listener took for an earlier watch is not this one's.
+        crate::suppression::dictation_key::clear_captured();
         let watching = crate::suppression::dictation_key::watch(wake.clone());
         let (sender, results) = mpsc::channel();
+        let chord_sender = sender.clone();
         // Labs › Sided modifier chords is read once, as recording starts.
         let capture = Rc::new(RefCell::new(ChordCapture::with_sides(
             crate::labs::sided_modifier_chords(),
@@ -264,8 +266,8 @@ impl ChordWatch {
         match monitor {
             Some(monitor) => Ok(Self {
                 results,
+                sender: chord_sender,
                 capture,
-                taken: VecDeque::new(),
                 watching,
                 monitor,
             }),
@@ -283,6 +285,7 @@ impl Drop for ChordWatch {
         // SAFETY: the monitor came from addLocalMonitor on this thread.
         unsafe { NSEvent::removeMonitor(&self.monitor) };
         crate::suppression::dictation_key::stop_watching(self.watching);
+        crate::suppression::dictation_key::clear_captured();
         crate::app_settings::set_hotkey_capture_active(false);
     }
 }

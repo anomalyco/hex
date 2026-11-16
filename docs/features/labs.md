@@ -1808,10 +1808,13 @@ Settings › General › Shortcut, press the microphone key  // labs.microphone_
 │   toggle is off
 ├── macOS session tap (microphone-key tap, only while this lab is on)
 │   ├── Toggle on + a Hex shortcut on the key -> press and release are Hex's:
-│   │   fed to the listener like any key, consumed before macOS's Dictation
+│   │   fed to the listener like any key and consumed at the session
+│   │   boundary, which is where handy-keys also blocks macOS's Dictation
 │   ├── Toggle on + the window records a shortcut -> press and release are
 │   │   consumed and the press is fed to the window's ChordCapture, so the
 │   │   recorder sees a key its own key events never get
+│   ├── Toggle on + the key is the screenshot shortcut -> refused: a shot
+│   │   reads its keys at the annotated session, after this tap
 │   └── Toggle off, Hex paused, or no shortcut on the key -> passed through:
 │       macOS's Dictation and the app keep the key untouched
 ├── hex settings set dictation_hotkey microphone, off -> "the mic key needs
@@ -1843,12 +1846,15 @@ that exists only while the lab is on: it takes a press and its release only
 while the key is one of Hex's shortcuts or a shortcut is being recorded, and
 hands the press to the listener or to the window's recorder through the same
 `ChordCapture`. Everything else passes through, so macOS's Dictation still
-works while the key is not Hex's; there is no need to change macOS's own
-dictation shortcut while it is. The decision is
-`MicrophoneKey::take` in
+works while the key is not Hex's. Whether macOS's own Dictation still opens on
+a press Hex takes is unobserved on hardware: if it does, change its shortcut in
+System Settings › Keyboard › Dictation. The microphone key is refused for the
+Screenshots shortcuts, whose keys are read at the annotated session, after this
+tap has taken the press. The decision is `MicrophoneKey::take` in
 [app_settings/microphone_key.rs](../../src/app_settings/microphone_key.rs),
-which also remembers the presses it took so a release is never handed to the
-app after Hex took the press.
+which remembers the one press it took so its release is taken too while that
+tap is still there, even if the binding or the recording changed in between;
+turning the lab off removes the tap and forgets it.
 Windows and Linux don't have it.
 Checks: `the_microphone_key_needs_its_labs_toggle` in
 [control/settings.rs](../../src/control/settings.rs) and

@@ -30,6 +30,18 @@ pub(super) fn check_shortcut(
     if let Some(why) = special_key_refusal(candidate, binding) {
         return Err(invalid(name, &why));
     }
+    // macOS reads the microphone key at Hex's own session tap, before the
+    // annotated-session tap Screenshots' keys go through, so a shot never sees
+    // it however the labs are set.
+    if cfg!(target_os = "macos")
+        && binding.uses_microphone_key()
+        && matches!(slot, HotkeySlot::Screenshot | HotkeySlot::ScreenshotRecord)
+    {
+        return Err(invalid(
+            name,
+            "the mic key can't be the screenshot shortcut: macOS takes it before Hex sees it",
+        ));
+    }
     (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
     if settings.hotkey_in_use(slot, binding) {
         return Err(crate::control::ControlError::new(

@@ -2,21 +2,19 @@
 //! press this process took is still waiting for its release.
 //!
 //! macOS sends that key as a normal keyDown/keyUp for virtual key code 176
-//! with SecondaryFn set, but its own Dictation shortcut is a symbolic hot key
-//! the window server matches before the app and before Hex's annotated-session
-//! key tap: only a session tap still sees the press
-//! (`suppression::dictation_key`). That tap asks this type what each press is,
-//! and remembers the presses it took so their releases are taken too, whatever
-//! changed in between (a binding removed, a recording finished, the lab turned
-//! off).
+//! with SecondaryFn set. Hex reads it at a session tap
+//! (`suppression::dictation_key`), because macOS's own Dictation shortcut is
+//! matched before Hex's annotated-session key tap and the app. That tap asks
+//! this type what each press is, and remembers the one press it took so the
+//! release is taken too while the tap is still there, even when the binding or
+//! the recording changed in between. Turning the lab off removes the tap and
+//! forgets what it took.
 //!
 //! The decision lives here, away from the tap, so it can be tested on every
 //! OS: a press is Hex's only with Labs › Microphone key alone on, while nothing
 //! pauses Hex, and only when a shortcut is being recorded or one of Hex's
 //! shortcuts matches it. Everything else stays macOS's.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
-
-use std::collections::HashMap;
 
 use super::hotkeys::MICROPHONE_KEY_CODE;
 
@@ -37,10 +35,10 @@ enum Owner {
     Recorder,
 }
 
-/// The microphone key's presses this tap took, waiting for their releases.
+/// The microphone key's press this tap took, waiting for its release.
 #[derive(Debug, Default)]
 pub(crate) struct MicrophoneKey {
-    taken: HashMap<u16, Owner>,
+    taken: Option<Owner>,
 }
 
 impl MicrophoneKey {
@@ -53,9 +51,9 @@ impl MicrophoneKey {
     /// which suspends every shortcut. Recording takes the key before any
     /// binding: the chord being recorded replaces the old one.
     ///
-    /// A release is Hex's only if this key took the press, so a press macOS
-    /// kept keeps its release too, and one Hex took never leaks a stray key-up
-    /// to the app.
+    /// A release is Hex's only if this key took the press. A press that passes
+    /// through forgets anything left behind, so a release that never arrived
+    /// cannot claim a later press's release.
     pub(crate) fn take(
         &mut self,
         code: u16,
@@ -66,13 +64,14 @@ impl MicrophoneKey {
         bound: bool,
     ) -> MicrophoneKeyTap {
         if !down {
-            return match self.taken.remove(&code) {
+            return match self.taken.take() {
                 Some(Owner::Listener) => MicrophoneKeyTap::Listener { down: false },
                 Some(Owner::Recorder) => MicrophoneKeyTap::Recorder { down: false },
                 None => MicrophoneKeyTap::Pass,
             };
         }
         if code != MICROPHONE_KEY_CODE || !lab || paused {
+            self.taken = None;
             return MicrophoneKeyTap::Pass;
         }
         let owner = if capturing {
@@ -80,13 +79,26 @@ impl MicrophoneKey {
         } else if bound {
             Owner::Listener
         } else {
+            self.taken = None;
             return MicrophoneKeyTap::Pass;
         };
-        self.taken.insert(code, owner);
+        self.taken = Some(owner);
         match owner {
             Owner::Listener => MicrophoneKeyTap::Listener { down: true },
             Owner::Recorder => MicrophoneKeyTap::Recorder { down: true },
         }
+    }
+
+    /// Whether a press this tap took belongs to the listener: its release would
+    /// be lost if the tap went away, which ends the capture it started.
+    pub(crate) fn holds_listener_press(&self) -> bool {
+        matches!(self.taken, Some(Owner::Listener))
+    }
+
+    /// Forget the press this tap took: its events end here, so its release is
+    /// the app's again (or was never delivered).
+    pub(crate) fn clear(&mut self) {
+        self.taken = None;
     }
 }
 
@@ -162,8 +174,8 @@ mod tests {
         );
     }
 
-    /// A release after the lab turned off still belongs to the press Hex took,
-    /// so the app never sees half a key.
+    /// A press Hex took keeps its release while the tap that took it is still
+    /// there, even if the lab turns off between the two.
     #[test]
     fn a_taken_press_is_released_by_the_tap_that_took_it() {
         let mut key = MicrophoneKey::default();
@@ -175,6 +187,45 @@ mod tests {
         assert_eq!(
             key.take(mic, false, false, false, false, false),
             MicrophoneKeyTap::Listener { down: false }
+        );
+    }
+
+    /// A press whose release never arrived must not claim a later press's
+    /// release: the next press passes through and clears it.
+    #[test]
+    fn a_pass_through_press_forgets_a_press_whose_release_never_came() {
+        let mut key = MicrophoneKey::default();
+        let mic = MICROPHONE_KEY_CODE;
+        assert_eq!(
+            key.take(mic, true, true, false, false, true),
+            MicrophoneKeyTap::Listener { down: true }
+        );
+        assert_eq!(
+            key.take(mic, true, false, false, false, false),
+            MicrophoneKeyTap::Pass
+        );
+        assert_eq!(
+            key.take(mic, false, false, false, false, false),
+            MicrophoneKeyTap::Pass
+        );
+        assert!(!key.holds_listener_press());
+    }
+
+    /// A tap that goes away forgets its press, so the app keeps the release.
+    #[test]
+    fn a_cleared_press_is_the_apps_again() {
+        let mut key = MicrophoneKey::default();
+        let mic = MICROPHONE_KEY_CODE;
+        assert_eq!(
+            key.take(mic, true, true, false, false, true),
+            MicrophoneKeyTap::Listener { down: true }
+        );
+        assert!(key.holds_listener_press());
+        key.clear();
+        assert!(!key.holds_listener_press());
+        assert_eq!(
+            key.take(mic, false, true, false, false, true),
+            MicrophoneKeyTap::Pass
         );
     }
 }

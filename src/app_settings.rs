@@ -1393,6 +1393,19 @@ pub fn runtime_hotkeys() -> RuntimeHotkeys {
     hotkeys
 }
 
+/// Tests install the shortcuts the listener matches, without a settings file.
+#[cfg(test)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn install_test_hotkeys(hotkeys: RuntimeHotkeys) {
+    *HOTKEYS
+        .get_or_init(Default::default)
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = AppliedHotkeys {
+        runtime: hotkeys,
+        settings: None,
+    };
+}
+
 pub fn dictation_hotkey() -> RuntimeHotkey {
     runtime_hotkeys().dictation
 }
