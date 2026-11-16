@@ -244,6 +244,17 @@ fn stop_handoff_frames() {
                 }
             }
             let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
+            // A removed hit target can still paint during its exit. Sample
+            // the center of the old square, below the status text, against
+            // bare header ink on the same scanline (2× top-right fixture).
+            if frame == 47 || frame == 48 {
+                let pixel = |x: usize| rgba[4 * (62 * 520 + x)];
+                assert_eq!(
+                    pixel(56) != pixel(190),
+                    frame == 47,
+                    "Stop glyph at {frame}"
+                );
+            }
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), 520, 564, &rgba).unwrap();
         }
         std::fs::write(dir.join("trace.csv"), trace).unwrap();
