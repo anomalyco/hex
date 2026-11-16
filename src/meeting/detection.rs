@@ -2358,6 +2358,23 @@ mod tests {
         let other = candidate_from_microphone(&zen_helper, &ContextSnapshot::default()).unwrap();
         assert_eq!(other.source, MeetingSource::BrowserCall);
         assert_eq!(other.offer_title(), "Call in Zen");
+
+        // On Linux the microphone's process names Zen by its binary: `zen` for
+        // the Flatpak and the tarball launcher, `zen-bin` for the tarball's own
+        // executable, content processes included. No site is read there.
+        for binary in ["zen", "zen-bin"] {
+            let zen = ActiveMicrophoneApplication {
+                pid: 6150,
+                bundle_id: binary.into(),
+                name: "Zen".into(),
+            };
+            assert!(zen.is_browser(), "{binary}");
+            let call = candidate_from_microphone(&zen, &ContextSnapshot::default()).unwrap();
+            assert_eq!(call.source, MeetingSource::BrowserCall, "{binary}");
+            assert_eq!(call.application.as_deref(), Some("app.zen-browser.zen"));
+            assert_eq!(call.application_name.as_deref(), Some("Zen"));
+            assert_eq!(call.offer_title(), "Call in Zen");
+        }
     }
 
     #[test]
