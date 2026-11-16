@@ -668,7 +668,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::HistoryStats, None));
     rows.push(row(Feature::KeepRecordings, None));
     rows.push(row(Feature::CopyDictationAudio, None));
-    rows.push(row(Feature::HistoryMultiSelect, None));
     rows.push(row(Feature::OutputFixes, Some(&BOOK)));
     rows.push(row(Feature::VoicePrompt, None));
     // macOS's Accessibility reads the text element's caret and nearby text.
@@ -863,7 +862,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MicrophoneKeyAlone => "lab-microphone-key",
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::CopyDictationAudio => "lab-copy-dictation-audio",
-        Feature::HistoryMultiSelect => "lab-history-multi-select",
         Feature::SettingsSearch => "lab-settings-search",
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",

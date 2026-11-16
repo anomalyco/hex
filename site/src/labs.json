@@ -399,19 +399,6 @@
       "title": "Dictation stats"
     },
     {
-      "added": "2026-11-10",
-      "group": "history",
-      "groupTitle": "History",
-      "id": "history-multi-select",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together",
-      "title": "Select multiple dictations"
-    },
-    {
       "added": "2026-11-01",
       "group": "history",
       "groupTitle": "History",
