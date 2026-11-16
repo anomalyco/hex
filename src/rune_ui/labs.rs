@@ -9,7 +9,7 @@
 mod browser_access;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
-mod screenshots;
+pub(super) mod screenshots;
 mod store;
 mod voice_prompt;
 mod yolo_mode;
@@ -505,6 +505,11 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::MeetingFinishedEvent, Some(&GLOBE)));
         rows.push(row(Feature::FollowLiveTranscript, None));
         rows.push(row(Feature::MoreCallApps, Some(&GLOBE)));
+        // macOS's status item lists them, from the meeting controller's own
+        // calendar read.
+        if cfg!(target_os = "macos") {
+            rows.push(row(Feature::CalendarMenu, Some(&CLOCK)));
+        }
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
         }
@@ -586,6 +591,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
     ) {
         rows.push(row(Feature::SectionKeyAlone, Some(&KEYBOARD)));
     }
+    // The microphone (dictation) key in a laptop keyboard's top row reports
+    // itself as Fn with key code 176, which macOS's recorder otherwise
+    // refuses (Labs › Microphone key alone, macOS).
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(Feature::MicrophoneKeyAlone, Some(&KEYBOARD)));
+    }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
     if caps.os == super::platform::Os::Linux {
         rows.push(row(Feature::StandaloneSpecialKeys, Some(&KEYBOARD)));
@@ -619,6 +630,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     }
     rows.push(row(Feature::HistoryStats, None));
     rows.push(row(Feature::KeepRecordings, None));
+    rows.push(row(Feature::CopyDictationAudio, None));
     rows.push(row(Feature::HistoryMultiSelect, None));
     rows.push(row(Feature::OutputFixes, Some(&BOOK)));
     rows.push(row(Feature::VoicePrompt, None));
@@ -810,13 +822,16 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KQuantModels => "lab-k-quant-models",
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
+        Feature::MicrophoneKeyAlone => "lab-microphone-key",
         Feature::KeepRecordings => "lab-keep-recordings",
+        Feature::CopyDictationAudio => "lab-copy-dictation-audio",
         Feature::HistoryMultiSelect => "lab-history-multi-select",
         Feature::SettingsSearch => "lab-settings-search",
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::PauseMenu => "lab-pause-menu",
+        Feature::CalendarMenu => "lab-calendar-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",

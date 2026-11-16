@@ -283,7 +283,9 @@ pub(crate) fn transcription_bias()
     bias_for(&transcription_entries(), boost)
 }
 
-fn bias_for(
+/// The bias these entries produce, without the Labs switch and globals
+/// [`transcription_bias`] reads first.
+pub(crate) fn bias_for(
     entries: &[VocabularyEntry],
     boost: VocabularyBoost,
 ) -> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {

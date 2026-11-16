@@ -401,7 +401,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2600.0));
     open_labs(&mut rt);
     for row in [
         "lab-mouse-shortcuts",
@@ -415,6 +415,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-clean-up",
         "lab-spoken-symbols",
         "lab-caps-lock-dictation",
+        "lab-copy-dictation-audio",
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
     }
@@ -446,13 +447,16 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.print_start);
     tap(&mut rt, "lab-print-start");
     assert!(rt.state.settings.labs.print_start);
+    assert!(!rt.state.settings.labs.copy_dictation_audio);
+    tap(&mut rt, "lab-copy-dictation-audio");
+    assert!(rt.state.settings.labs.copy_dictation_audio);
     assert!(!rt.state.settings.labs.caps_lock_dictation);
     tap(&mut rt, "lab-caps-lock-dictation");
     assert!(rt.state.settings.labs.caps_lock_dictation);
 
     // Tall enough that the last Labs rows (Share shortcut, Terminal paste)
     // sit inside the window, where a tap reaches them.
-    let mut rt = runtime("windows-settings", true, (980.0, 2400.0));
+    let mut rt = runtime("windows-settings", true, (980.0, 2600.0));
     open_advanced(&mut rt, Pane::General);
     assert!(rt.find("share-dictation-shortcut").is_none());
     open_labs(&mut rt);
@@ -588,8 +592,8 @@ fn summaries_are_a_switch_off_a_mac() {
     }
 }
 
-/// The meeting summary model picks from OpenCode's models, with the
-/// automatic choice first; without OpenCode it offers a retry and keeps the
+/// The meeting summary model picks from OpenCode's models, with OpenCode's
+/// own default model first; without OpenCode it offers a retry and keeps the
 /// saved model (#1301).
 #[test]
 fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
@@ -617,7 +621,7 @@ fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text == "Hex picks a fast model")
+            .any(|text| text == "OpenCode's default model")
     );
 
     let rt = runtime("meetings-summary-model-not-running", true, size);
@@ -2606,7 +2610,6 @@ fn a_lone_lab_card_keeps_half_the_row() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     unfold_labs(&mut rt);
     let mut width = None;
-    let mut lone = false;
     let chips = [
         "chip-all",
         "chip-dictation",
@@ -2628,14 +2631,28 @@ fn a_lone_lab_card_keeps_half_the_row() {
             .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
             .map(|e| e.rect[2])
             .collect();
-        lone |= widths.len() % 2 == 1;
         let width = *width.get_or_insert(widths[0]);
         assert!(
             widths.iter().all(|w| (w - width).abs() < 0.5),
             "{chip}: every card is as wide: {widths:?}"
         );
     }
-    assert!(lone, "some chip leaves a card alone in its row");
+    // A chip's group can come out even as labs are added and removed, so the
+    // lone card is a search that matches exactly one.
+    tap(&mut rt, "chip-all");
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    settle(&mut rt);
+    let lone: Vec<f32> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
+        .map(|e| e.rect[2])
+        .collect();
+    assert_eq!(lone.len(), 1, "the search matches one card: {lone:?}");
+    assert!(
+        (lone[0] - width.expect("a chip shows cards")).abs() < 0.5,
+        "a card alone in its row keeps half the width: {lone:?}"
+    );
 }
 
 #[test]
@@ -2731,22 +2748,122 @@ fn a_saved_record_shortcut_shows_and_clears_while_annotate_is_off() {
     assert!(rt.find("clear-screenshot-record-shortcut").is_none());
 }
 
+/// Labs › Screenshots' saves folder: the row's label is the folder, a picked
+/// one is saved and shown, a cancel changes nothing, a chooser that
+/// couldn't open says why, and the last failed save names the folder it
+/// failed into (not the one chosen since) until another pick clears it. The
+/// dialog itself never opens here: a test would wait on a real panel.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed() {
+    use crate::rune_ui::labs::screenshots::apply_chosen_folder;
+
+    // The last-save error is one process-wide static: only this test writes
+    // it, and it starts and ends clean so a test running beside it never
+    // inherits a note.
+    crate::screenshots::clear_save_error();
+
+    let mut rt = runtime("mac-labs-screenshots", true, (980.0, 4000.0));
+    let shown = element(&rt, "choose-screenshot-folder")
+        .label
+        .unwrap_or_default();
+    assert!(!shown.is_empty(), "the row shows the saves folder");
+
+    let home = crate::app_paths::home_dir().expect("a home folder");
+    let picked = home.join("Pictures/Hex Shots");
+    rt.update(|ui, _| {
+        assert!(apply_chosen_folder(ui, Ok(Some(picked.clone()))));
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.screenshots.folder, Some(picked.clone()));
+    assert_eq!(
+        element(&rt, "choose-screenshot-folder").label.as_deref(),
+        Some("~/Pictures/Hex Shots"),
+        "the card shows the folder it saves to, home-shortened"
+    );
+    assert!(rt.find("screenshot-folder-error").is_none());
+
+    rt.update(|ui, _| {
+        assert!(
+            !apply_chosen_folder(ui, Ok(None)),
+            "a cancel changes nothing"
+        );
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.screenshots.folder, Some(picked.clone()));
+
+    // A save that failed into an older folder names that folder, not the
+    // setting that has moved on since. `settle` runs the window's poll, so
+    // the note has to come from the poll reporting the change.
+    let stale = home.join("Old Shots");
+    crate::screenshots::record_save_error(&stale, &anyhow::anyhow!("Permission denied"));
+    settle(&mut rt);
+    let shown = texts(&rt).join("\n");
+    assert!(rt.find("screenshot-save-error").is_some(), "{shown}");
+    assert!(shown.contains("~/Old Shots"), "{shown}");
+    assert!(
+        !shown.contains("~/Pictures/Hex Shots: "),
+        "the note names the folder that failed: {shown}"
+    );
+
+    // A pick that saves clears the note, and its own poll reports that.
+    let other = home.join("Pictures/Hex Shots 2");
+    rt.update(|ui, _| {
+        assert!(apply_chosen_folder(ui, Ok(Some(other.clone()))));
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.settings.screenshots.folder, Some(other.clone()));
+    assert!(
+        rt.find("screenshot-save-error").is_none(),
+        "a pick clears it"
+    );
+
+    rt.update(|ui, _| {
+        assert!(apply_chosen_folder(
+            ui,
+            Err("no file chooser portal".into())
+        ));
+    });
+    settle(&mut rt);
+    assert!(rt.find("screenshot-folder-error").is_some());
+    assert_eq!(
+        rt.state.settings.screenshots.folder,
+        Some(other),
+        "a failed chooser leaves the folder alone"
+    );
+
+    crate::screenshots::clear_save_error();
+}
+
 /// Each OS shows only its labs, and a group with none of them hides.
 #[test]
 fn labs_groups_follow_each_os() {
     let cards = |rt: &Runtime<Ui>| -> Vec<String> {
         rt.elements()
             .into_iter()
-            .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
+            .filter_map(|e| {
+                let key = e.key?;
+                key.strip_prefix("lab-card-")
+                    .or_else(|| key.strip_prefix("lab-featured-"))
+                    .map(str::to_string)
+            })
             .collect()
     };
-    let cases: [(&str, &[&str], &str); 3] = [
-        ("windows-labs", &["terminal-paste"], "mouse-shortcuts"),
-        ("linux-labs", &["section-key"], "terminal-paste"),
+    let cases: [(&str, &[&str], &[&str]); 3] = [
+        (
+            "windows-labs",
+            &["terminal-paste"],
+            &["mouse-shortcuts", "microphone-key"],
+        ),
+        (
+            "linux-labs",
+            &["section-key"],
+            &["terminal-paste", "microphone-key"],
+        ),
         (
             "mac-labs",
-            &["section-key", "mouse-shortcuts"],
-            "terminal-paste",
+            &["section-key", "mouse-shortcuts", "microphone-key"],
+            &["terminal-paste"],
         ),
     ];
     for (scene, shows, hides) in cases {
@@ -2756,7 +2873,9 @@ fn labs_groups_follow_each_os() {
         for id in shows {
             assert!(shown.contains(&id.to_string()), "{scene} shows {id}");
         }
-        assert!(!shown.contains(&hides.to_string()), "{scene} hides {hides}");
+        for id in hides {
+            assert!(!shown.contains(&id.to_string()), "{scene} hides {id}");
+        }
         for group in crate::labs::Group::ALL {
             let any = shown.iter().any(|id| {
                 crate::labs::Feature::from_name(id)
@@ -2972,7 +3091,7 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text.starts_with("Show provisional words in the focused text field")),
+            .any(|text| text.starts_with("On Wayland, show your words in the text field")),
         "its description stays under the note"
     );
 

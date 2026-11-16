@@ -35,10 +35,12 @@ fn show(bundle: &Path) -> anyhow::Result<()> {
     let movie = match save(&recorded, &folder) {
         Ok(movie) => {
             tracing::info!(path = %movie.display(), "recording saved");
+            super::clear_save_error();
             movie
         }
         Err(error) => {
             tracing::warn!(%error, folder = %folder.display(), "could not save the recording");
+            super::record_save_error(&folder, &error);
             crate::feedback::play(crate::feedback::Tone::Error);
             recorded
         }

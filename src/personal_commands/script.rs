@@ -359,6 +359,12 @@ impl WorkspaceLoader {
             .into_iter()
             .find(|candidate| self.root.join(candidate).is_file())
             .ok_or_else(|| "file not found".to_string())?;
+        if !super::is_script_file(&found) {
+            return Err(format!(
+                "only {} files can be imported",
+                super::script_extension_list()
+            ));
+        }
         let real = self
             .root
             .join(&found)
@@ -387,12 +393,15 @@ impl WorkspaceLoader {
             .borrow_mut()
             .sources
             .push((name.to_owned(), source.clone()));
-        if name.ends_with(".json") {
+        let extension = super::script_name_parts(Path::new(name))
+            .map(|(_, extension)| extension)
+            .unwrap_or_default();
+        if extension == "json" {
             serde_json::from_str::<serde_json::Value>(&source).map_err(|error| {
                 SourceError::Syntax(format!("{}:{}: {error}", error.line(), error.column()))
             })?;
             Ok(format!("export default {source}"))
-        } else if name.ends_with(".ts") || name.ends_with(".mts") {
+        } else if super::TYPESCRIPT_EXTENSIONS.contains(&extension.as_str()) {
             super::typescript::strip(&source).map_err(SourceError::Syntax)
         } else {
             Ok(source)

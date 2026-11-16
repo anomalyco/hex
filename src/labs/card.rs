@@ -54,6 +54,7 @@ impl Feature {
             Self::KQuantModels => "Smaller model files",
             Self::PickerDownloaded => "Downloaded models only",
             Self::SectionKeyAlone => "Section key alone",
+            Self::MicrophoneKeyAlone => "Microphone key alone",
             Self::KeepRecordings => "Keep recordings",
             Self::SettingsSearch => "Settings search",
             Self::Appearance => "Appearance",
@@ -84,12 +85,14 @@ impl Feature {
             Self::SpeakersOnly => "Only on speakers",
             Self::MoreDictationShortcuts => "More dictation shortcuts",
             Self::PauseMenu => "Pause from menu bar",
+            Self::CalendarMenu => "Upcoming meetings in menu bar",
             Self::PrintStart => "Print-only CLI dictation",
             Self::VoicePrompt => "Voice prompt",
             Self::CursorContext => "Rewrite reads nearby text",
             Self::CopyCaptureZip => "Copy captures as a zip",
             Self::ShellCompletions => "Shell completions",
             Self::YoloMode => "YOLO mode",
+            Self::CopyDictationAudio => "Copy dictation audio",
         }
     }
 
@@ -99,30 +102,36 @@ impl Feature {
             Self::Meetings => "Record calls and keep transcripts",
             Self::VoiceFilter => "Hex Microphone virtual input and real-time voice filters",
             Self::Playground => "Scene and story browser in the window",
-            Self::LiveText => "Show provisional words beside the HUD while dictating",
-            Self::FailureNotices => "Show why a dictation failed beside the HUD",
+            Self::LiveText => {
+                "Show your words beside the Dictation HUD as you speak, before the final text is pasted"
+            }
+            Self::FailureNotices => {
+                "When a dictation fails, show the reason beside the Dictation HUD"
+            }
             Self::LiveTyping => {
-                "Show provisional words in the focused text field while dictating on Wayland, then type the final text there"
+                "On Wayland, show your words in the text field as you speak and type the final text there"
             }
             Self::LiveChapters => "Break meeting transcripts into chapters while recording",
             Self::VocabularyBiasing => {
-                "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
+                "Help the Parakeet model hear your Vocabulary words. Rewriting and search use them anyway"
             }
             Self::ScreenVocabulary => {
-                "Window names and terms become temporary vocabulary. Read locally, never saved."
+                "Names in the window you're dictating into help Hex spell them. Never saved"
             }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V so terminals accept it",
             Self::KeyboardModelSwitching => {
-                "Changing input source selects its mapped model and language; manual choices still work"
+                "When you switch keyboard language, Hex switches to the speech model you picked for it"
             }
             Self::AppModelSwitching => {
                 "Each mode can pick a speech model; Hex switches to it when you change apps"
             }
-            Self::MouseShortcuts => "Record mouse buttons as shortcuts",
+            Self::MouseShortcuts => "Use a mouse button, such as a side button, as a shortcut",
             Self::PauseBrowser => {
                 "While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"
             }
-            Self::ShareShortcut => "Lets apps such as Discord detect the same key",
+            Self::ShareShortcut => {
+                "Other apps see your dictation key too, so it can also be push-to-talk in apps like Discord"
+            }
             Self::UnloadIdle => {
                 "Frees the speech model's memory after a while unused; the next dictation reloads it"
             }
@@ -162,13 +171,13 @@ impl Feature {
                 "Sort the Local transcription picker by size or name and show only models for the saved language"
             }
             Self::SidedChords => {
-                "Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥"
+                "Tell left and right modifiers apart, so Right ⌘ + Right ⌥ doesn't fire on the left keys"
             }
             Self::TapOrHold => {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
             }
             Self::DoubleTapModifiers => {
-                "Let Double-tap shortcut mode work when the shortcut has no key, such as Option, Globe, or ⌃⌥"
+                "Let Double-tap mode use a modifier alone, like Option or Globe: tap twice to dictate"
             }
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
@@ -212,6 +221,9 @@ impl Feature {
             }
             Self::SectionKeyAlone => {
                 "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
+            }
+            Self::MicrophoneKeyAlone => {
+                "Use the mic key in F5's spot on Mac laptops as a shortcut; once set, only Hex gets it"
             }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
@@ -297,6 +309,9 @@ impl Feature {
             Self::PauseMenu => {
                 "Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"
             }
+            Self::CalendarMenu => {
+                "Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording."
+            }
             Self::PrintStart => {
                 "Let hex dictation start --print answer with the transcript when it ends"
             }
@@ -313,6 +328,9 @@ impl Feature {
                 "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
             }
             Self::YoloMode => "Send dictations automatically",
+            Self::CopyDictationAudio => {
+                "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
+            }
         }
     }
 }

@@ -427,6 +427,7 @@ pub(super) const SCENES: &[Scene] = &[
     }),
     ("sound-sets-playing", |ui| {
         *ui = mac_fixture();
+        ui.settings.sound_effects = false;
         sound_sets::fixture(
             ui,
             Some((

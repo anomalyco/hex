@@ -31,6 +31,7 @@ pub(super) fn run_host(
     let mut shown: Option<HostSnapshot> = None;
     let mut tray_view = None;
     let mut tray_meetings = None;
+    let mut tray_dictation_audio = None;
     loop {
         let seen = host.refreshed();
         // Arm before taking the lock: a stop that waits on a busy host is
@@ -82,10 +83,29 @@ pub(super) fn run_host(
         let status = host.status(snapshot.clone(), session.clone());
         publish_if_changed(&published.status, status);
         let meetings = crate::meeting::runtime::tray_state();
-        if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
+        // Labs › Copy dictation audio: listed while the lab is on, and
+        // enabled while a kept recording can be copied. The gate comes
+        // first, and this only reads History with a tray, so an off lab
+        // costs one atomic read; it joins the rebuild condition so a copy
+        // that appears or expires redraws the menu without a snapshot
+        // change.
+        let dictation_audio = if tray.is_some() && crate::labs::copy_dictation_audio() {
+            Some(
+                host.history()
+                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
+                    .is_some(),
+            )
+        } else {
+            None
+        };
+        if shown.as_ref() != Some(&snapshot)
+            || tray_meetings != meetings
+            || tray_dictation_audio != dictation_audio
+        {
             tray_meetings = meetings;
+            tray_dictation_audio = dictation_audio;
             if let Some(tray) = tray {
-                let view = crate::linux::tray::view(&snapshot);
+                let view = crate::linux::tray::view(&snapshot, dictation_audio);
                 if tray_view.as_ref() != Some(&view) {
                     crate::linux::tray::show(tray, &view);
                     tray_view = Some(view);

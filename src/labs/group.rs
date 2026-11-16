@@ -105,7 +105,8 @@ impl Feature {
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::HistoryMultiSelect
-            | Self::RecentDictations => Group::History,
+            | Self::RecentDictations
+            | Self::CopyDictationAudio => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::SubtitleExport
@@ -119,7 +120,8 @@ impl Feature {
             | Self::MeetingImport
             | Self::MeetingDescriptiveFilenames
             | Self::MeetingNotesFile
-            | Self::ExpireMeetingAudio => Group::Meetings,
+            | Self::ExpireMeetingAudio
+            | Self::CalendarMenu => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate
@@ -133,6 +135,7 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
+            | Self::MicrophoneKeyAlone
             | Self::ShareShortcut
             | Self::CapsLockDictation
             | Self::PauseMenu => Group::Shortcuts,

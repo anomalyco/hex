@@ -2139,6 +2139,26 @@ mod tests {
     }
 
     #[test]
+    fn khmer_is_transcribed_by_whisper_with_its_language_hint() {
+        let selection = recommended_selection("km");
+        assert_eq!(selection.model, TranscriptionModelId::WhisperLargeV3Turbo);
+        assert_eq!(selection.language, "km");
+        let model = validate(&selection).unwrap();
+        assert_eq!(model.runtime_language_hint("km"), Some("km"));
+        assert!(model.language_choices().contains(&"km"));
+        let choices = choices_for_runtime("km");
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].recommendation, Recommendation::Recommended);
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::Qwen3Asr06B,
+                language: "km".into(),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
     fn whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases() {
         use TranscriptionModelId::*;
         let by = |kind| {

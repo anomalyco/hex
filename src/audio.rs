@@ -616,8 +616,9 @@ impl RecoveringAudioInput {
                 self.after_resolving(now);
             }
             Err(error) => {
+                let error = format!("{error:#}");
                 tracing::warn!(%error, "could not open dictation microphone at startup; retrying");
-                self.outage.get_or_insert(Some(error.to_string()));
+                self.outage.get_or_insert(Some(error));
                 self.recovery.request_stream_recovery(now);
                 self.recovery.failed(now);
             }
@@ -980,7 +981,7 @@ impl RecoveringAudioInput {
         let opener = self.opener.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
-            let result = opener(&request).map_err(|error| error.to_string());
+            let result = opener(&request).map_err(|error| format!("{error:#}"));
             let _ = sender.send((revision, result));
         });
         self.replacement = Some(receiver);
@@ -1354,12 +1355,14 @@ fn open_selected<T>(
             Ok(input) => return Ok(input),
             Err(error) if attempt >= attempts => break error,
             Err(error) => {
+                let error = format!("{error:#}");
                 tracing::debug!(%error, device, attempt, "could not open the selected microphone; retrying");
                 attempt += 1;
                 sleep(SELECTED_MICROPHONE_RETRY_DELAY);
             }
         }
     };
+    let error = format!("{error:#}");
     tracing::debug!(%error, device, "the saved microphone would not open");
     open_default()
 }

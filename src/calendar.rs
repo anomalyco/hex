@@ -445,6 +445,25 @@ impl ReminderScheduler {
         }
     }
 
+    /// The meeting was joined somewhere other than its reminder, such as the
+    /// menu bar. Records the occurrence as already reminded so it never
+    /// pops, and closes the showing reminder when it is this one, returning
+    /// its occurrence so the capsule withdraws.
+    pub fn joined_elsewhere(&mut self, meeting: &CalendarMeeting) -> Option<String> {
+        let occurrence = meeting.occurrence();
+        self.reminded.insert(occurrence.clone(), meeting.end_ms);
+        if self
+            .showing
+            .as_ref()
+            .is_some_and(|(showing, _)| showing.occurrence() == occurrence)
+        {
+            self.showing = None;
+            Some(occurrence)
+        } else {
+            None
+        }
+    }
+
     /// Reminders were turned off or a recording started: forget the showing
     /// one, returning its occurrence.
     pub fn clear(&mut self) -> Option<String> {
@@ -896,6 +915,40 @@ mod tests {
         assert_eq!(scheduler.poll(&meetings, 99 * MINUTE + 500, MINUTE), None);
         scheduler.answered(&meetings[0].occurrence());
         assert_eq!(scheduler.poll(&meetings, 100 * MINUTE, MINUTE), None);
+    }
+
+    #[test]
+    fn joining_elsewhere_before_the_lead_time_never_reminds() {
+        let mut scheduler = ReminderScheduler::default();
+        let meetings = [meeting("sync", 100)];
+        assert_eq!(scheduler.joined_elsewhere(&meetings[0]), None);
+        // The occurrence was joined already: its lead time, start, and late
+        // grace never show a reminder.
+        assert_eq!(scheduler.poll(&meetings, 99 * MINUTE, MINUTE), None);
+        assert_eq!(scheduler.poll(&meetings, 100 * MINUTE, MINUTE), None);
+        assert_eq!(scheduler.poll(&meetings, 104 * MINUTE, MINUTE), None);
+        // A moved meeting is a new occurrence, which may remind again.
+        let moved = [meeting("sync", 110)];
+        assert!(matches!(
+            scheduler.poll(&moved, 109 * MINUTE, MINUTE),
+            Some(ReminderUpdate::Show(_))
+        ));
+    }
+
+    #[test]
+    fn joining_elsewhere_while_showing_withdraws_it_for_good() {
+        let mut scheduler = ReminderScheduler::default();
+        let meetings = [meeting("sync", 100)];
+        assert!(matches!(
+            scheduler.poll(&meetings, 99 * MINUTE, MINUTE),
+            Some(ReminderUpdate::Show(_))
+        ));
+        assert_eq!(
+            scheduler.joined_elsewhere(&meetings[0]),
+            Some(meetings[0].occurrence())
+        );
+        // Nothing shows, and the answered occurrence never comes back.
+        assert_eq!(scheduler.poll(&meetings, 99 * MINUTE + 500, MINUTE), None);
     }
 
     #[test]

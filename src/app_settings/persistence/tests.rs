@@ -111,6 +111,31 @@ fn a_delayed_read_cannot_republish_runtime_values_from_before_a_save() {
     assert!(crate::app_settings::microphone_policy().release_while_idle);
 }
 
+/// The embedded service `hex transcribe` and the TypeScript SDK start reads
+/// the saved vocabulary, its boost, and the Labs switches with the decode a
+/// launch uses, writing nothing back. They produce the expected bias.
+#[test]
+fn the_embedded_service_reads_the_saved_vocabulary() {
+    let _restore = RestoredRuntime;
+    let file = SettingsFile::new(
+        br#"{"vocabulary":["Rune"],"vocabulary_boost":"strong","labs":{"vocabulary_biasing":true}}"#,
+    );
+    let settings = AppSettings::apply_for_embedded_service_at(&file.path).expect("read settings");
+    assert!(settings.labs.vocabulary_biasing);
+    assert_eq!(
+        settings.vocabulary,
+        [VocabularyEntry {
+            term: "Rune".into(),
+            sounds_like: Vec::new(),
+        }]
+    );
+    let bias =
+        crate::dictation::vocabulary::bias_for(&settings.vocabulary, settings.vocabulary_boost)
+            .expect("bias the saved terms");
+    assert_eq!(bias.0, ["Rune"]);
+    assert_eq!(bias.1.boost, Some(4.0));
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[test]
 fn a_revert_before_the_host_reloads_still_publishes_a_new_revision() {

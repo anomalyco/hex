@@ -40,6 +40,9 @@ pub(crate) enum ControllerCommand {
     /// Open the meeting's call link without recording (Always record
     /// starts once the call is detected).
     JoinMeeting(CalendarMeeting),
+    /// Joined from the Labs menu: opens the call link without recording, and
+    /// records the occurrence so no reminder pops (closing the showing one).
+    JoinFromMenu(CalendarMeeting),
     /// Not now, or Don't record: the meeting's call is neither offered nor
     /// recorded automatically.
     DismissReminder(CalendarMeeting),
@@ -86,6 +89,10 @@ pub(crate) enum ControllerEvent {
         app: String,
         auto_stop: bool,
     },
+    /// A pending automatic stop was dropped because the call came back
+    /// (Labs › Stop when the call ends): its notice goes, and the recording
+    /// capsule returns.
+    CallEndedWithdrawn,
     Finished(Box<meeting::MeetingManifest>),
     Failed {
         title: String,
@@ -447,6 +454,14 @@ fn handle_command(
                 crate::calendar::open_link(&link.url);
             }
         }
+        ControllerCommand::JoinFromMenu(meeting) => {
+            if let Some(occurrence) = reminders.scheduler.joined_elsewhere(&meeting) {
+                let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+            }
+            if let Some(link) = &meeting.link {
+                crate::calendar::open_link(&link.url);
+            }
+        }
         ControllerCommand::DismissReminder(meeting) => {
             reminders.scheduler.answered(&meeting.occurrence());
             snooze_calendar_call(detector, &meeting);
@@ -571,23 +586,84 @@ struct Reminders {
     change_count: Option<u64>,
     /// Wall-clock time of the last read, so a wake from sleep rereads.
     read_at_ms: Option<i64>,
+    /// The last read ran only for the menu snapshot, not for reminders: when
+    /// reminders come back they read at once instead of reusing it.
+    menu_only_read: bool,
+    /// The menu has read since the lab came on: its first poll reads at once
+    /// instead of waiting out the minute.
+    menu_read: bool,
     read_failed: bool,
 }
 
+/// Where a successful calendar read goes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReadSources {
+    /// The list reminders schedule from and detected calls are titled by:
+    /// only while reminders are active.
+    meetings: bool,
+    /// Labs › Upcoming meetings in menu bar's own snapshot.
+    menu: bool,
+}
+
+impl ReadSources {
+    fn new(reminders: bool, menu: bool) -> Self {
+        Self {
+            meetings: reminders,
+            menu,
+        }
+    }
+}
+
 impl Reminders {
+    /// Forces the extra reads a poll needs beyond a stale read or a store
+    /// change: the menu's first read after the lab comes on, and reminders'
+    /// first read after a menu-only one left their list empty.
+    fn prepare_read(&mut self, reminders: bool, menu: bool) {
+        if !menu {
+            self.menu_read = false;
+        } else if !self.menu_read {
+            self.read_at_ms = None;
+        }
+        if reminders && self.menu_only_read {
+            self.read_at_ms = None;
+            self.menu_only_read = false;
+        }
+    }
+
     fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
         let settings = crate::app_settings::calendar_settings();
-        if !enabled || !settings.reminders_active() {
+        // Labs › Upcoming meetings in menu bar lists the same read with
+        // reminders off, but only while a calendar is connected; while it is
+        // off nothing here changes at all.
+        let menu_on = crate::calendar_menu::lab_on();
+        let menu = crate::calendar_menu::wanted(settings.connected);
+        let reminders = settings.reminders_active();
+        let reads = ReadSources::new(reminders, menu);
+        if !enabled || !(reminders || menu) {
             self.meetings.clear();
             self.change_count = None;
             self.read_at_ms = None;
+            if menu_on {
+                crate::calendar_menu::clear();
+            }
+            self.menu_only_read = false;
+            self.menu_read = false;
             if let Some(occurrence) = self.scheduler.clear() {
                 let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
             }
             return;
         }
+        if !reminders {
+            // The menu's list is the read's own: with reminders off the read
+            // never feeds the list recordings are titled and reminded from.
+            self.meetings.clear();
+            if let Some(occurrence) = self.scheduler.clear() {
+                let _ = events.send(ControllerEvent::ReminderWithdrawn { occurrence });
+            }
+        }
         let now_ms = crate::calendar::wall_clock_ms();
         let changes = crate::calendar::change_count();
+        self.prepare_read(reminders, menu);
         let stale = self
             .read_at_ms
             .is_none_or(|read_at| (now_ms - read_at).abs() >= CALENDAR_REREAD_MS);
@@ -596,8 +672,13 @@ impl Reminders {
             self.read_at_ms = Some(now_ms);
             match crate::calendar::read_meetings(&settings, now_ms) {
                 Ok(meetings) => {
-                    self.meetings = meetings;
                     self.read_failed = false;
+                    if reads.menu {
+                        crate::calendar_menu::publish(Some(&meetings), now_ms);
+                    }
+                    if reads.meetings {
+                        self.meetings = meetings;
+                    }
                 }
                 Err(error) => {
                     if !self.read_failed {
@@ -605,8 +686,18 @@ impl Reminders {
                     }
                     self.read_failed = true;
                     self.meetings.clear();
+                    if reads.menu {
+                        crate::calendar_menu::clear();
+                    }
                 }
             }
+            self.menu_only_read = !reads.meetings;
+        }
+        if menu {
+            self.menu_read = true;
+        }
+        if !reminders {
+            return;
         }
         let lead_ms = settings.lead().as_millis() as i64;
         match self.step(recording, now_ms, lead_ms) {
@@ -923,8 +1014,12 @@ fn poll_recording(
         if present {
             detector.keep_snooze_alive();
         }
-        if present || !auto_stop {
-            active.auto_stop.disarm();
+        // The call came back (or the lab went off mid-count): the stop it
+        // armed is gone, and its notice goes with the last one counting.
+        if (present || !auto_stop)
+            && withdraw_stop(&mut active.auto_stop, &active.call_stop, events)
+        {
+            tracing::info!(application, "the pending automatic stop is withdrawn");
         }
         if active.presence.observe(present) {
             tracing::info!(
@@ -981,9 +1076,12 @@ fn poll_recording(
                 // The page names the recorded call again (or one the user
                 // kept): whatever change was counting is over. A page that
                 // names no call neither starts nor ends a count.
-                if !active.call_switch.changed() {
-                    active.call_stop.disarm();
-                }
+                withdraw_call_switch_stop(
+                    &active.call_switch,
+                    &mut active.call_stop,
+                    &active.auto_stop,
+                    events,
+                );
             }
             if active.call_stop.due() {
                 tracing::info!(
@@ -1000,16 +1098,50 @@ fn poll_recording(
     // Labs › Stop when the call ends turned off while a page change was
     // counting: the watch is gone, so its deadline goes with it instead of
     // stopping the recording the moment the lab comes back on.
-    disarm_call_stop_unless_watching(recording, crate::labs::stop_when_call_ends());
+    disarm_call_stop_unless_watching(recording, crate::labs::stop_when_call_ends(), events);
     Ok(())
+}
+
+/// Drops an armed stop whose call came back, or whose lab went off mid-count.
+/// Both automatic stops share one notice, so the notice goes only once no
+/// other stop is still counting. Returns whether this stop was pending.
+fn withdraw_stop(
+    stop: &mut AutoStop,
+    other: &AutoStop,
+    events: &SyncSender<ControllerEvent>,
+) -> bool {
+    if !stop.disarm() {
+        return false;
+    }
+    if !other.armed() {
+        let _ = events.send(ControllerEvent::CallEndedWithdrawn);
+    }
+    true
+}
+
+/// The page names the recorded call again (or one the user kept): whatever
+/// change was counting is over, so its stop never fires and its notice goes.
+fn withdraw_call_switch_stop(
+    switch: &CallSwitch,
+    stop: &mut AutoStop,
+    other: &AutoStop,
+    events: &SyncSender<ControllerEvent>,
+) {
+    if !switch.changed() && withdraw_stop(stop, other, events) {
+        tracing::info!("the page named the recorded call again; its pending stop is withdrawn");
+    }
 }
 
 /// Drops an armed call-switch stop whenever nothing watches the page: a
 /// deadline counted under a lab that is now off must not carry over.
-fn disarm_call_stop_unless_watching(recording: &mut Option<ActiveRecording>, lab_on: bool) {
+fn disarm_call_stop_unless_watching(
+    recording: &mut Option<ActiveRecording>,
+    lab_on: bool,
+    events: &SyncSender<ControllerEvent>,
+) {
     if let Some(active) = recording.as_mut()
         && !watching_call_switch(Some(active), lab_on)
-        && active.call_stop.disarm()
+        && withdraw_stop(&mut active.call_stop, &active.auto_stop, events)
     {
         tracing::info!("the page is no longer watched; its pending stop is dropped");
     }
@@ -1366,6 +1498,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_reminders_keep_the_titling_and_reminder_list() {
+        let menu_only = ReadSources::new(false, true);
+        assert!(!menu_only.meetings);
+        assert!(menu_only.menu);
+        // Reminders keep the read they always had.
+        let reminders = ReadSources::new(true, false);
+        assert!(reminders.meetings);
+        assert!(!reminders.menu);
+        let both = ReadSources::new(true, true);
+        assert!(both.meetings);
+        assert!(both.menu);
+    }
+
+    #[test]
+    fn a_menu_only_read_and_a_new_lab_both_force_an_immediate_read() {
+        // Reminders coming back after a menu-only read must not reuse it:
+        // their titling and reminder list is empty.
+        let mut reminders = Reminders {
+            read_at_ms: Some(1_000),
+            menu_only_read: true,
+            ..Reminders::default()
+        };
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, None);
+        assert!(!reminders.menu_only_read);
+
+        // The menu's first poll after the lab comes on reads at once too.
+        let mut reminders = Reminders {
+            read_at_ms: Some(1_000),
+            ..Reminders::default()
+        };
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, None);
+
+        // Once the menu has read, a fresh read is kept.
+        reminders.menu_read = true;
+        reminders.read_at_ms = Some(2_000);
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, Some(2_000));
+
+        // With the menu off nothing is forced, and its next turn reads.
+        reminders.prepare_read(true, false);
+        assert_eq!(reminders.read_at_ms, Some(2_000));
+        assert!(!reminders.menu_read);
+        reminders.prepare_read(true, true);
+        assert_eq!(reminders.read_at_ms, None);
+    }
+
+    #[test]
+    fn joining_from_the_menu_withdraws_its_reminder_and_starts_nothing() {
+        let (events, received) = mpsc::sync_channel(4);
+        let mut reminders = Reminders::default();
+        let meeting = meeting("sync", 100, 30);
+        assert!(matches!(
+            reminders
+                .scheduler
+                .poll(std::slice::from_ref(&meeting), 99 * MINUTE, MINUTE),
+            Some(ReminderUpdate::Show(_))
+        ));
+        let mut recording = None;
+        handle_command(
+            &mut recording,
+            &mut None,
+            &mut MeetingDetector::default(),
+            &mut reminders,
+            ControllerCommand::JoinFromMenu(meeting.clone()),
+            true,
+            &events,
+        );
+        assert!(recording.is_none(), "joining from the menu never records");
+        assert!(matches!(
+            received.try_recv(),
+            Ok(ControllerEvent::ReminderWithdrawn { occurrence })
+                if occurrence == meeting.occurrence()
+        ));
+        // It was recorded as reminded, so it never pops later.
+        assert_eq!(
+            reminders
+                .scheduler
+                .poll(std::slice::from_ref(&meeting), 100 * MINUTE, MINUTE),
+            None
+        );
+    }
+
+    #[test]
     fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {
         assert!(stops_when_call_ends(true, true));
         // Manual, offered, and calendar recordings never stop on their own.
@@ -1564,21 +1781,146 @@ mod tests {
 
     #[test]
     fn turning_the_lab_off_drops_an_armed_call_switch_stop() {
+        let (events, received) = mpsc::sync_channel(4);
         let arc = Some("company.thebrowser.Browser");
         let mut active = active_recording(arc, true, Some("abc-defg-hij"));
         active.call_stop.arm();
         let mut recording = Some(active);
-        disarm_call_stop_unless_watching(&mut recording, false);
+        disarm_call_stop_unless_watching(&mut recording, false, &events);
         let active = recording.as_mut().unwrap();
         assert!(!active.call_stop.disarm(), "the armed stop was kept");
         assert!(!active.stop.load(Ordering::Relaxed));
+        // Its notice would otherwise claim a stop nothing is counting.
+        assert!(matches!(
+            received.try_recv(),
+            Ok(ControllerEvent::CallEndedWithdrawn)
+        ));
+        assert!(received.try_recv().is_err(), "one withdrawal only");
 
         // While the lab is on and the page watched, the deadline stays.
         let mut active = active_recording(arc, true, Some("abc-defg-hij"));
         active.call_stop.arm();
         let mut recording = Some(active);
-        disarm_call_stop_unless_watching(&mut recording, true);
+        disarm_call_stop_unless_watching(&mut recording, true, &events);
         assert!(recording.as_mut().unwrap().call_stop.disarm());
+        assert!(
+            received.try_recv().is_err(),
+            "a watched page keeps its stop"
+        );
+    }
+
+    #[test]
+    fn the_page_naming_the_recorded_call_again_withdraws_a_pending_stop() {
+        use crate::meeting::detection::CALL_CHANGED_AFTER;
+        let (events, received) = mpsc::sync_channel(4);
+        let mut active = active_recording(
+            Some("company.thebrowser.Browser"),
+            true,
+            Some("abc-defg-hij"),
+        );
+        // Another code counted long enough to arm the stop, then the
+        // recorded call's page came back before the deadline.
+        let base = Instant::now();
+        assert!(!active.call_switch.observe_at(Some("xyz-wxyz-xyz"), base));
+        assert!(
+            active
+                .call_switch
+                .observe_at(Some("xyz-wxyz-xyz"), base + CALL_CHANGED_AFTER)
+        );
+        active.call_stop.arm();
+        assert!(!active.call_switch.observe_at(
+            Some("abc-defg-hij"),
+            base + CALL_CHANGED_AFTER + Duration::from_secs(1)
+        ));
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
+        assert!(matches!(
+            received.try_recv(),
+            Ok(ControllerEvent::CallEndedWithdrawn)
+        ));
+        assert!(received.try_recv().is_err(), "one withdrawal only");
+        assert!(!active.call_stop.disarm(), "the stop was left pending");
+        assert!(!active.stop.load(Ordering::Relaxed));
+
+        // Nothing pending: nothing is withdrawn.
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
+        assert!(received.try_recv().is_err());
+
+        // A page still naming another call keeps its stop and says nothing.
+        assert!(
+            !active
+                .call_switch
+                .observe_at(Some("xyz-wxyz-xyz"), base + Duration::from_secs(120))
+        );
+        active.call_stop.arm();
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
+        assert!(active.call_stop.disarm(), "the stop was dropped mid-count");
+        assert!(received.try_recv().is_err());
+
+        // The recorded code back while the absence count runs: the page stop
+        // goes, but the shared notice stays for the other.
+        assert!(
+            !active
+                .call_switch
+                .observe_at(Some("abc-defg-hij"), base + Duration::from_secs(180))
+        );
+        active.call_stop.arm();
+        active.auto_stop.arm();
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &events,
+        );
+        assert!(!active.call_stop.disarm(), "the page stop was not dropped");
+        assert!(active.auto_stop.armed(), "the absence stop still counts");
+        assert!(received.try_recv().is_err(), "the notice stays");
+    }
+
+    #[test]
+    fn the_call_coming_back_withdraws_a_pending_absence_stop_once() {
+        let (events, received) = mpsc::sync_channel(4);
+        let mut absence = AutoStop::default();
+        let mut page = AutoStop::default();
+        assert!(
+            !withdraw_stop(&mut absence, &page, &events),
+            "nothing was counting"
+        );
+        assert!(received.try_recv().is_err());
+
+        // Both deadlines count one notice: the first to go leaves it up.
+        absence.arm();
+        page.arm();
+        assert!(withdraw_stop(&mut absence, &page, &events));
+        assert!(page.armed(), "the page stop still counts");
+        assert!(received.try_recv().is_err(), "the notice stays");
+
+        // The last one goes: the notice goes with it, once.
+        assert!(withdraw_stop(&mut page, &absence, &events));
+        assert!(matches!(
+            received.try_recv(),
+            Ok(ControllerEvent::CallEndedWithdrawn)
+        ));
+        assert!(received.try_recv().is_err(), "one withdrawal only");
+
+        // The controller disarms every pass while the call is present, and
+        // only the pass that dropped a stop says anything.
+        assert!(!withdraw_stop(&mut absence, &page, &events));
+        assert!(received.try_recv().is_err());
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -11,10 +10,14 @@ use crate::dictation::context::{ContextSelector, ContextSnapshot};
 use crate::dictation::text_replacements::ReplacementSet;
 use crate::dictation::vocabulary::VocabularyEntry;
 
+mod generation;
+
+use self::generation::{
+    Request, Response, generate_single_model, post_generation, remaining_generation_deadline,
+};
+
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.\n\nNumbers: keep every number the speaker said. Never drop, merge, reorder, round, or reinterpret a number, and never add thousands separators or other formatting to a number that the transcript already writes in digits.\n\nLists: unless the profile instructions say otherwise, when the speaker enumerates items (for example \"point one ... point two ...\", \"first ... second ...\", or \"number one ... number two ...\"), keep every item and write them as a numbered list, one item per line (\"1. ...\", \"2. ...\"), without the spoken cue words.";
 const CATALOG_DEADLINE: Duration = Duration::from_secs(10);
-/// Newest one-shot generation route first; older OpenCode V2 builds only serve the later name.
-const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/generate"];
 
 pub use crate::app_settings::DictationPostProcessing as PostProcessingSettings;
 
@@ -774,14 +777,36 @@ pub(crate) struct Generated {
     pub model: Option<Model>,
 }
 
-/// One generation from OpenCode's default ranked models, for work outside
-/// dictation such as meeting notes.
+/// One generation from OpenCode's own default model, for work outside
+/// dictation such as meeting notes: a request that names no model, so it
+/// never walks the ranked models into another provider.
 pub(crate) fn generate_text(
     prompt: &str,
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<Generated> {
-    generate_cancellable(prompt, None, deadline, cancelled)
+    let started = Instant::now();
+    let service = generation_service(started, deadline, cancelled)?;
+    generate_default_model(prompt, &service, started, deadline, cancelled)
+}
+
+/// [`generate_text`]'s one request, through the running service.
+fn generate_default_model(
+    prompt: &str,
+    service: &Service,
+    started: Instant,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<Generated> {
+    let text = generate_single_model(
+        prompt,
+        None,
+        started,
+        deadline,
+        cancelled,
+        |data, remaining, cancelled| post_generation(service, data, remaining, cancelled),
+    )?;
+    Ok(Generated { text, model: None })
 }
 
 /// One generation from exactly `model`, never another provider's: a failure
@@ -1241,25 +1266,6 @@ fn vocabulary_lines(vocabulary: &[VocabularyEntry]) -> String {
     format!("Vocabulary (spell these exactly when the speaker means them): {terms}\n\n")
 }
 
-#[derive(Serialize)]
-struct Request<'a> {
-    prompt: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<&'a Model>,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Response {
-    Success { data: ResponseData },
-    Error { message: String },
-}
-
-#[derive(Deserialize)]
-struct ResponseData {
-    text: String,
-}
-
 #[cfg(test)]
 fn generate(prompt: &str, model: Option<&Model>, deadline: Duration) -> Result<String> {
     generate_cancellable(prompt, model, deadline, &AtomicBool::new(false))
@@ -1273,22 +1279,7 @@ fn generate_cancellable(
     cancelled: &AtomicBool,
 ) -> Result<Generated> {
     let started = Instant::now();
-    let lock = crate::policy::Lock::OpenCodeProcessing;
-    if crate::policy::Policy::current().locks(lock) {
-        return Err(eyre!(lock.refusal()));
-    }
-    // Service discovery and the catalog read spend the generation's own
-    // remaining budget, so a stalled OpenCode falls back by the deadline
-    // instead of adding its fixed lookup timeouts on top.
-    let service = crate::desktop::opencode_service::find_cancellable(
-        remaining_generation_deadline(started, deadline)?,
-        cancelled,
-    );
-    if cancelled.load(Ordering::Acquire) {
-        return Err(eyre!("OpenCode generation was cancelled"));
-    }
-    remaining_generation_deadline(started, deadline)?;
-    let service = service.map_err(|missing| eyre!(missing.message()))?;
+    let service = generation_service(started, deadline, cancelled)?;
     generate_with_candidates(
         prompt,
         model,
@@ -1305,6 +1296,30 @@ fn generate_cancellable(
         cancelled,
         |data, remaining, cancelled| post_generation(&service, data, remaining, cancelled),
     )
+}
+
+/// Finds the running OpenCode service, or why it can't answer. Service
+/// discovery spends the generation's own remaining budget, so a stalled
+/// OpenCode falls back by the deadline instead of adding its fixed lookup
+/// timeouts on top.
+fn generation_service(
+    started: Instant,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<Service> {
+    let lock = crate::policy::Lock::OpenCodeProcessing;
+    if crate::policy::Policy::current().locks(lock) {
+        return Err(eyre!(lock.refusal()));
+    }
+    let service = crate::desktop::opencode_service::find_cancellable(
+        remaining_generation_deadline(started, deadline)?,
+        cancelled,
+    );
+    if cancelled.load(Ordering::Acquire) {
+        return Err(eyre!("OpenCode generation was cancelled"));
+    }
+    remaining_generation_deadline(started, deadline)?;
+    service.map_err(|missing| eyre!(missing.message()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1337,18 +1352,6 @@ fn generate_with_candidates(
         text,
         model: model.cloned(),
     })
-}
-
-fn remaining_generation_deadline(started: Instant, deadline: Duration) -> Result<Duration> {
-    let remaining = deadline.saturating_sub(started.elapsed());
-    if remaining.is_zero() {
-        Err(eyre!(
-            "OpenCode generation exceeded {} seconds",
-            deadline.as_secs()
-        ))
-    } else {
-        Ok(remaining)
-    }
 }
 
 /// Walks the ranked models in order. Any failure forgets the cached list so
@@ -1408,108 +1411,13 @@ fn generate_with_ranked_candidates(
     }
 }
 
-fn generate_single_model(
-    prompt: &str,
-    model: Option<&Model>,
-    started: Instant,
-    deadline: Duration,
-    cancelled: &AtomicBool,
-    mut post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
-) -> Result<String> {
-    let request = Request { prompt, model };
-    let data = serde_json::to_string(&request)?;
-    for attempt in 0..2 {
-        let remaining = remaining_generation_deadline(started, deadline)?;
-        match post(&data, remaining, cancelled)? {
-            Response::Success { data } => return Ok(data.text),
-            Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
-                tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
-                wait_for_generation_retry(started, deadline, cancelled)?;
-            }
-            Response::Error { message } => {
-                return Err(eyre!("OpenCode generation failed: {message}"));
-            }
-        }
-    }
-    unreachable!("generation loop returns on its second attempt")
-}
-
-/// Posts to the newest generation route and falls back to the older name only
-/// when the server reports that route missing (a 404 that isn't OpenCode's
-/// own error). Every attempt shares one deadline.
-fn post_generation(
-    service: &Service,
-    data: &str,
-    deadline: Duration,
-    cancelled: &AtomicBool,
-) -> Result<Response> {
-    let started = Instant::now();
-    let mut response = None;
-    for path in GENERATE_ENDPOINTS {
-        let attempt = service.request(
-            "POST",
-            path,
-            Some(data.as_bytes()),
-            None,
-            deadline.saturating_sub(started.elapsed()),
-            cancelled,
-        )?;
-        let missing = route_missing(&attempt);
-        response = Some(attempt);
-        if !missing {
-            break;
-        }
-    }
-    let response = response.expect("at least one generation route");
-    if route_missing(&response) {
-        return Err(eyre!("OpenCode does not serve a generation route"));
-    }
-    serde_json::from_slice(&response.body)
-        .wrap_err("OpenCode returned an invalid generation response")
-}
-
-/// A 404 means the route is missing only when it isn't OpenCode's own tagged
-/// error (such as "Model not found"), which the route answered.
-fn route_missing(response: &crate::desktop::opencode_service::Response) -> bool {
-    response.status == 404
-        && !serde_json::from_slice::<serde_json::Value>(&response.body).is_ok_and(|value| {
-            value.get("_tag").is_some()
-                && value
-                    .get("message")
-                    .is_some_and(serde_json::Value::is_string)
-        })
-}
-
-fn retryable_generation_error(message: &str) -> bool {
-    message.starts_with("Model unavailable:")
-}
-
-fn wait_for_generation_retry(
-    started: Instant,
-    deadline: Duration,
-    cancelled: &AtomicBool,
-) -> Result<()> {
-    let wait_started = Instant::now();
-    while wait_started.elapsed() < Duration::from_millis(1_500) {
-        if cancelled.load(Ordering::Acquire) {
-            return Err(eyre!("OpenCode generation was cancelled"));
-        }
-        if started.elapsed() >= deadline {
-            return Err(eyre!(
-                "OpenCode generation exceeded {} seconds",
-                deadline.as_secs()
-            ));
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::generation::{ResponseData, retryable_generation_error, wait_for_generation_retry};
     use super::*;
     use crate::dictation::caret_text::CaretText;
     use std::net::TcpListener;
+    use std::thread;
 
     use url::Url;
 
@@ -2688,6 +2596,32 @@ mod tests {
         assert_eq!(forgotten, 1);
         assert_eq!(posted.len(), 2);
         assert!(posted[1].get("model").is_none(), "{}", posted[1]);
+    }
+
+    /// Meeting notes with no chosen model ask only OpenCode's own default:
+    /// one request with no `model`, never a ranked candidate's catalog read
+    /// or provider.
+    #[test]
+    fn a_meeting_generation_posts_one_request_naming_no_model() {
+        let (service, server) = generation_server(vec![(
+            "/api/experimental/generate",
+            200,
+            r#"{"data":{"text":"from OpenCode's default"}}"#,
+        )]);
+        let generated = generate_default_model(
+            "Summarize.",
+            &service,
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(generated.text, "from OpenCode's default");
+        assert_eq!(generated.model, None);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1, "one request, with no catalog read");
+        let posted: serde_json::Value = serde_json::from_slice(&requests[0]).unwrap();
+        assert!(posted.get("model").is_none(), "{posted}");
     }
 
     #[test]

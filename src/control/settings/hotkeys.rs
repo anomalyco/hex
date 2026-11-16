@@ -30,6 +30,18 @@ pub(super) fn check_shortcut(
     if let Some(why) = special_key_refusal(candidate, binding) {
         return Err(invalid(name, &why));
     }
+    // macOS reads the microphone key at Hex's own session tap, before the
+    // annotated-session tap Screenshots' keys go through, so a shot never sees
+    // it however the labs are set.
+    if cfg!(target_os = "macos")
+        && binding.uses_microphone_key()
+        && matches!(slot, HotkeySlot::Screenshot | HotkeySlot::ScreenshotRecord)
+    {
+        return Err(invalid(
+            name,
+            "the mic key can't be the screenshot shortcut: macOS takes it before Hex sees it",
+        ));
+    }
     (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
     if settings.hotkey_in_use(slot, binding) {
         return Err(crate::control::ControlError::new(
@@ -126,6 +138,7 @@ pub fn parse_hotkey(
             && !HotkeyKey::special_name(&key.label)
             && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
             && !(cfg!(any(target_os = "linux", target_os = "macos")) && key.is_section())
+            && !(cfg!(target_os = "macos") && key.is_microphone())
         {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -150,6 +163,16 @@ pub(super) fn special_key_refusal(
         && !settings.section_key_allowed()
     {
         return Some("section needs Labs › Section key alone: hex labs on section-key".into());
+    }
+    // Any shortcut on the microphone key needs Labs › Microphone key alone
+    // (macOS); a modifier doesn't excuse it.
+    if cfg!(target_os = "macos")
+        && binding.uses_microphone_key()
+        && !settings.microphone_key_allowed()
+    {
+        return Some(
+            "the mic key needs Labs › Microphone key alone: hex labs on microphone-key".into(),
+        );
     }
     if cfg!(target_os = "windows") {
         let key = binding.key.as_ref()?;

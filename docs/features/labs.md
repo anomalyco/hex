@@ -124,6 +124,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Section key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
+├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations; hex history stats prints it (#790)
 ├── Select multiple dictations no labs.history_multi_select  History selects several dictations with Shift-click, Cmd-click (Ctrl on
 │                                        Windows and Linux), or a drag, and copies or deletes them together
@@ -189,8 +190,29 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
 │                                        // a sourced script in a real shell
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
+├── Copy dictation audio no labs.copy_dictation_audio  History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one WAV file on the clipboard, ready to attach. Needs Keep recordings and stores no audio itself
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
+├── Upcoming meetings in menu bar no labs.calendar_menu (macOS, with Meetings on and a calendar connected) the status menu starts
+│                                        with an Upcoming section: up to five meetings from the reminder poll's own filtered list, soonest
+│                                        first, each a local start–end time and title, "Now · " while in progress, "Tomorrow " or the
+│                                        short weekday when it starts on a later day, and "No upcoming meetings" when none are left;
+│                                        choosing a row with a call link joins it through the menu's own path, which opens
+│                                        the link, records that occurrence so no reminder pops (closing a showing one), and
+│                                        does not record (a provider set to always record may still record once the call
+│                                        starts); a row without a link is informational
+│                                        // checks: an_in_progress_meeting_reads_now, meetings_on_later_days_read_tomorrow_or_their_weekday,
+│                                        // ended_meetings_are_left_out, at_most_five_meetings_show_soonest_first, an_empty_section_has_no_rows,
+│                                        // a_stale_snapshot_never_shows, publishing_keeps_at_most_32_and_none_clears,
+│                                        // the_section_hides_until_visible_and_fresh, the_menu_read_wants_a_connected_calendar,
+│                                        // a_local_date_parses_the_iso_date_part (calendar_menu.rs);
+│                                        // joining_elsewhere_before_the_lead_time_never_reminds,
+│                                        // joining_elsewhere_while_showing_withdraws_it_for_good (calendar.rs);
+│                                        // only_reminders_keep_the_titling_and_reminder_list,
+│                                        // a_menu_only_read_and_a_new_lab_both_force_an_immediate_read (meeting/watcher.rs);
+│                                        // calendar_menu_is_its_own_switch_and_macos_only (labs.rs);
+│                                        // the_menu_reads_upcoming_then_meetings_then_actions_then_the_app (macos_rune/status_item.rs);
+│                                        // not observed on a real Mac, in a real menu, or opening a real call link
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
@@ -340,7 +362,9 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   Keep mic open after dictating: Keep open for (30 s, 1/3/5/30 min, in an inline menu);
 │   Appearance: Theme (System, Light mode, Dark mode);
 │   Voice prompt: Phrase (a text field; an invalid draft says why under it while the saved phrase keeps working);
-│   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
+│   Screenshots: its shortcut, Record screen, Saves to (Reveal and the folder's own chooser, which a
+│   failed save or chooser answers under the row), and the macOS-takes-this-shortcut note with Open
+│   Keyboard Settings.
 │   Annotate 15 s replay's shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
 │   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
@@ -730,9 +754,10 @@ reads `labs::keep_on_clipboard()` as each paste commits: it writes the
 transcript without the nspasteboard.org transient markers (so clipboard
 managers may record it), schedules no 500 ms restore, and drops any earlier
 snapshot and pending restore (`ClipboardRestore::keep`), so a later restoring
-paste never brings back an older clipboard. Into Chromium 155/156, where Hex
-types the text instead of pasting, it also writes the transcript to the
-clipboard after typing. On Windows, `windows::paste::WindowsPaster` reads the
+paste never brings back an older clipboard. Into Chromium 155/156 or Windows
+App, where Hex types the text instead of pasting, it also writes the
+transcript to the clipboard after typing. On Windows,
+`windows::paste::WindowsPaster` reads the
 same gate as each paste commits: it writes an ordinary clipboard entry (not
 marked out of clipboard history or cloud sync), calls its
 `ClipboardRestore::keep`, sends Ctrl+V as usual, and schedules no restore, so
@@ -1767,6 +1792,92 @@ and `a_dead_key_records_its_layout_label` and
 Not yet observed: a real ISO keyboard on X11 or a Wayland portal granting
 `section`, and a German Mac keyboard recorded end to end.
 
+Microphone key alone (`microphone-key`, issue 181, macOS): for push-to-talk on
+the microphone (dictation) key in a laptop keyboard's top row. Every press of
+it is a normal keyDown/keyUp for virtual key code 176 with SecondaryFn always
+set (observed flags `0x800100`), so it has no character to record and the
+recorder refused it as "Unsupported key"; a binding that implied Fn would also
+never match. The lab makes this one key alone a shortcut.
+
+```ts
+Settings › General › Shortcut, press the microphone key  // labs.microphone_key
+├── Toggle off -> saving a shortcut on it is refused: "Unsupported key", as before
+├── Toggle on  -> saved as {code: 176, label: "Mic"}; hex settings also takes
+│   `mic` or `microphone`
+├── macOS recorder -> ChordCapture::key_down lets it stand alone like a
+│   function key; `settings::validate` refuses it with any modifiers while the
+│   toggle is off
+├── macOS session tap (microphone-key tap, only while this lab is on)
+│   ├── Toggle on + a Hex shortcut on the key -> press and release are Hex's:
+│   │   fed to the listener like any key and consumed at the session
+│   │   boundary, which is where handy-keys also blocks macOS's Dictation
+│   ├── Toggle on + the window records a shortcut -> press and release are
+│   │   consumed and the press is fed to the window's ChordCapture, so the
+│   │   recorder sees a key its own key events never get
+│   ├── Toggle on + the key is the screenshot shortcut -> refused: a shot
+│   │   reads its keys at the annotated session, after this tap
+│   └── Toggle off, Hex paused, or no shortcut on the key -> passed through:
+│       macOS's Dictation and the app keep the key untouched
+├── hex settings set dictation_hotkey microphone, off -> "the mic key needs
+│   Labs › Microphone key alone: hex labs on microphone-key"
+└── Toggle turned off (row, hex labs off, hex settings), or settings load with
+    it off -> any macOS shortcut on the microphone key, with or without a
+    modifier (Dictation, Paste last, Cancel, Screenshots, capture, and the
+    Labs rows), goes back to its default (optional ones unbound), so the
+    listener never registers it; the session tap is removed too
+```
+
+The key joins F1–F20, the arrows, and the navigation keys, whose always-set
+SecondaryFn the matcher already ignores (`key_reports_function_flag` in
+[app_settings/hotkeys.rs](../../src/app_settings/hotkeys.rs)), so 176 with the
+observed `0x800100` matches a `{code: 176, label: "Mic"}` binding, and Shift
+added does not. Fn is never stripped globally, so it stays significant for
+every other key. The gates are `AppSettings::microphone_key_allowed` in
+the window's `settings::validate` and in `control/settings.rs`'s `apply`
+(`special_key_refusal`), and `AppSettings::repair_microphone_key`
+([app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs))
+where settings load and where the toggle turns off; it resets the cancel and
+screenshot shortcuts itself because `reset_shortcuts` doesn't own them. Off,
+Hex is unchanged: any shortcut on the microphone key is refused everywhere, a
+saved one is repaired, as with the section key, and no tap is created.
+macOS matches its own Dictation shortcut (a symbolic hot key) before the app
+and before Hex's annotated-session key tap, so this one key is read at a
+session tap ([suppression/dictation_key.rs](../../src/suppression/dictation_key.rs))
+that exists only while the lab is on: it takes a press and its release only
+while the key is one of Hex's shortcuts or a shortcut is being recorded, and
+hands the press to the listener or to the window's recorder through the same
+`ChordCapture`. Everything else passes through, so macOS's Dictation still
+works while the key is not Hex's. Whether macOS's own Dictation still opens on
+a press Hex takes is unobserved on hardware: if it does, change its shortcut in
+System Settings › Keyboard › Dictation. The microphone key is refused for the
+Screenshots shortcuts, whose keys are read at the annotated session, after this
+tap has taken the press. The decision is `MicrophoneKey::take` in
+[app_settings/microphone_key.rs](../../src/app_settings/microphone_key.rs),
+which remembers the one press it took so its release is taken too while that
+tap is still there, even if the binding or the recording changed in between;
+turning the lab off removes the tap and forgets it.
+Windows and Linux don't have it.
+Checks: `the_microphone_key_needs_its_labs_toggle` in
+[control/settings.rs](../../src/control/settings.rs) and
+[rune_ui/settings_microphone_key_tests.rs](../../src/rune_ui/settings_microphone_key_tests.rs),
+`a_microphone_key_shortcut_goes_back_to_its_default_while_its_labs_toggle_is_off`
+in [app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs),
+`the_microphone_key_is_hexs_only_while_its_lab_wants_it` and
+`a_recorded_press_keeps_its_release` in
+[app_settings/microphone_key.rs](../../src/app_settings/microphone_key.rs),
+`the_microphone_key_records_from_the_listener_tap` and
+`the_microphone_key_records_alone` in
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs),
+`the_microphone_key_taken_at_the_session_tap_starts_and_finishes_a_dictation`
+and `the_microphone_key_matches_with_the_fn_flag_macos_adds` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (the rune_ui, suppression,
+and tap checks are macOS-only; the microphone-key and repair checks run on
+every OS). Not yet observed: a real laptop microphone key recorded end to end
+and a real press suppressed before macOS's Dictation; stale-key recovery for it
+(whether `CGEventSourceKeyState(176)` reports it held, and whether SecondaryFn
+lingers after its release); and whether a session tap sees the key while
+macOS's Dictation shortcut is on for every macOS version.
+
 Dictation stats (`history-stats`, issue 790, every OS): while on, History's
 header shows a Secondary "Stats" button beside its retention select once
 anything is retained. It opens a centered "Dictation stats" dialog (Escape, a
@@ -1909,11 +2020,15 @@ the microphone while muted and closes both on hang-up. Once both are off for
 about 3 s, the "left the call" capsule says "Hex stops recording in 30 s
 unless you keep recording."; Keep recording sends
 `ControllerCommand::KeepRecording`, which drops the stop for this absence, and
-the call app coming back drops it too. After 30 s (`AUTO_STOP_GRACE`,
+the call app coming back drops it too; with no other automatic stop counting
+(`AutoStop::armed`) that also withdraws the shared notice
+(`ControllerEvent::CallEndedWithdrawn`) so the recording capsule returns
+instead of a prompt that claims a stop nothing is counting (`AutoStop::disarm`
+says whether this one was pending). After 30 s (`AUTO_STOP_GRACE`,
 `AutoStop` in [meeting/detection.rs](../../src/meeting/detection.rs)) the
 controller stops the recording as Stop & Transcribe does and logs it. Manual,
-offered, and calendar recordings never stop, and off, nothing reads the
-output and the capsule and controller are exactly as before.
+offered, and calendar recordings never stop; off, nothing reads the output,
+and a count already under way is dropped with its notice.
 
 A browser that never releases the microphone between calls is the second
 signal (#1775; Arc). Leaving a Google Meet call and opening the next one in
@@ -1932,7 +2047,11 @@ different call; the recording stops after its grace unless kept"), then Stop
 & Transcribe on its own `AutoStop` deadline, logged "meeting recording
 stopped automatically after its page named another call". Its deadline is
 separate from the absence one because a browser still on the microphone keeps
-the call app present, which drops that one every pass. Keep recording
+the call app present, which drops that one every pass. The recorded code
+showing again drops this stop (`withdraw_call_switch_stop`), and so does
+turning the lab off mid-count; either withdraws the shared notice only once no
+other automatic stop counts too (`AutoStop::armed`), the recording capsule
+returning in its place. Keep recording
 disarms both and `CallSwitch::keep()` remembers the code so it never ends
 this recording, however long it shows; a third code still does, and a
 Keep recording after the microphone-release capsule never forgets it. Hex
@@ -1957,8 +2076,12 @@ in [labs.rs](../../src/labs.rs), and the auto-stop checks listed in
 `a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
 `a_watched_page_is_queried_every_two_seconds_instead_of_backing_off`,
 `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
-`keep_recording_disarms_the_call_switch_stop_too`, and
-`keep_recording_keeps_the_code_that_was_counting`. Not yet observed: a real
+`keep_recording_disarms_the_call_switch_stop_too`,
+`keep_recording_keeps_the_code_that_was_counting`,
+`the_page_naming_the_recorded_call_again_withdraws_a_pending_stop`,
+`the_call_coming_back_withdraws_a_pending_absence_stop_once`, and
+`a_withdrawn_stop_brings_back_the_recording_capsule_and_closes_its_notice`.
+Not yet observed: a real
 WhatsApp, Zoom, or Teams call on a Mac with the toggle on, or a real Meet call
 switched in the same Arc window; the row renders only in macOS builds, so no
 golden changes.
@@ -2195,6 +2318,46 @@ exactly as before: no copy of the clip is made. Checks:
 most, switch back, text cap, Clear all). Not yet observed: a real dictation kept
 and played or transcribed again with another model in a window, on any OS.
 
+Copy dictation audio (`copy-dictation-audio`, every OS, off by default): the
+kept WAV as a file on the clipboard, ready to attach in an app that takes
+files. It needs Keep recordings, and it stores no audio of its own: it only
+copies a file that lab already wrote. Both switches must be on for anything
+to show.
+
+```ts
+Labs › Copy dictation audio on, Keep recordings on   // labs.copy-dictation-audio
+├── History card, entry with a kept recording -> "Saved recording" gains Copy audio beside Play
+│   ├── Copy audio -> the entry's history-audio/<id>.wav goes on the clipboard as one file,
+│   │   on a worker like Transcribe again, so the window never waits:
+│   │   macOS an NSURL through Scrawl's handoff::copy_file_to_clipboard, Windows CF_HDROP
+│   │   through win::clipboard::set_file, Linux text/uri-list through the process's
+│   │   one LinuxPaster (linux::paste::with_paster, wl-copy on Wayland, the X11 selection)
+│   │   ├── While it runs -> "Copying…"; Done -> "Copied" (Copy's own check clears)
+│   │   └── Failed (file gone, clipboard refused) -> "Could not copy the audio: <why>"
+│   ├── No kept recording (Keep recordings off, or the entry predates it) -> nothing to press
+│   └── The lab off, or Keep recordings off -> History is exactly as before
+├── Menu bar (macOS) and the Linux and Windows tray -> Copy last dictation audio
+│   ├── The newest History entry within retention that kept its audio and still has its file
+│   │   (HistoryStore::newest_recording(now); a missing or expired entry is skipped, not copied)
+│   ├── Listed only while the lab and Keep recordings are on, dimmed while there is nothing to copy
+│   └── Failed -> logged, as the menu's other copy actions do; the status menu and tray have
+│       no notice to show, so nothing appears there
+└── It never records, keeps, or deletes audio: Keep recordings owns every file
+```
+
+Checks: `the_newest_kept_recording_skips_entries_without_audio_or_without_the_file`
+in [history.rs](../../src/history.rs), which covers a file deleted behind the
+store, retention's cutoff, and an expired entry;
+`copy_dictation_audio_is_its_own_switch_and_everywhere` in
+[labs.rs](../../src/labs.rs); `copy_audio_shows_only_with_its_lab_and_keep_recordings`
+in [tests.rs](../../src/rune_ui/tests.rs); the tray menu's ids and the dimmed
+`copy-last-dictation-audio` item in
+[tray_menu.rs](../../src/desktop/tray_menu.rs); the status menu's row order in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs). Not yet
+observed: a file pasted into a real app from History, the macOS menu bar, or
+the Linux or Windows tray; the Labs page goldens are regenerated with the new
+History row.
+
 Hide menu bar icon (`hide-menu-bar-icon`, issue 1064, macOS): for people
 who only use the shortcut and want the menu-bar space back. The status item
 stays installed and is only hidden (`NSStatusItem` `setVisible`), so
@@ -2214,6 +2377,68 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
+
+Upcoming meetings in menu bar (`calendar-menu`, macOS, with Meetings on and a
+calendar connected): the status menu starts with an Upcoming section while
+the lab is on — a disabled "Upcoming" header, up to five meetings from the
+same filtered list the reminders read, soonest first, and a disabled "No
+upcoming meetings" when nothing is left — then a separator. Each row is its
+local start–end time and title (`10:30–11:00  Design sync`), prefixed
+`Now · ` while the meeting is in progress and `Tomorrow ` or its short
+weekday when it starts on a later local day; ended meetings are left out.
+Choosing a row with a call link sends the occurrence to the meeting
+controller's `ControllerCommand::JoinFromMenu`, the menu's own join path
+([meeting/watcher.rs](../../src/meeting/watcher.rs)): it opens the link,
+records that occurrence as already reminded so its reminder never pops, and
+sends `ReminderWithdrawn` when that reminder is currently showing so its
+capsule closes. A moved meeting is a new occurrence and may remind again. The
+click itself starts no recording, though a provider set to Always record may
+still record once the call is detected. A row without a link is informational
+and disabled. The gate, `labs::calendar_menu()`, is read when the meeting
+controller decides to read its calendar, on the status item's 500 ms refresh,
+and as the menu opens.
+
+The meeting controller's reminder poll publishes what it reads
+(`calendar_menu::publish`) and the status item only formats that snapshot on
+the main thread, so EventKit is never touched there. The read stays one
+bounded query each minute or on a store change; while the lab is on, a
+connected calendar is also read with Reminders switched off, since the section
+does not depend on them. That menu-only read never becomes the controller's
+titling and reminder list, so a detected call is not named from the calendar
+while reminders are off; with reminders on the read behaves exactly as
+before. Turning the lab on, or turning reminders back on after a menu-only
+read, reads at once instead of waiting for the next minute. With no calendar
+connected nothing is read for the menu. The snapshot
+keeps at most 32 meetings, and the section hides when no calendar is
+connected, when Meetings are off, and when the snapshot is over 10 minutes
+old (a stopped controller); without access the read fails and clears it, so
+nothing shows until access is granted. Clearing an already empty snapshot
+takes only a read lock, so the lab on with Meetings off costs no write per
+loop. Off, the menu is identical to today, with every Upcoming row hidden.
+
+Checks: `an_in_progress_meeting_reads_now`,
+`meetings_on_later_days_read_tomorrow_or_their_weekday`,
+`ended_meetings_are_left_out`, `at_most_five_meetings_show_soonest_first`,
+`an_empty_section_has_no_rows`, `a_stale_snapshot_never_shows`,
+`publishing_keeps_at_most_32_and_none_clears`,
+`the_section_hides_until_visible_and_fresh`,
+`the_menu_read_wants_a_connected_calendar`, and
+`a_local_date_parses_the_iso_date_part` in
+[calendar_menu.rs](../../src/calendar_menu.rs);
+`joining_elsewhere_before_the_lead_time_never_reminds` and
+`joining_elsewhere_while_showing_withdraws_it_for_good` in
+[calendar.rs](../../src/calendar.rs);
+`joining_from_the_menu_withdraws_its_reminder_and_starts_nothing`,
+`only_reminders_keep_the_titling_and_reminder_list`, and
+`a_menu_only_read_and_a_new_lab_both_force_an_immediate_read` in
+[meeting/watcher.rs](../../src/meeting/watcher.rs);
+`calendar_menu_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs); and
+`the_menu_reads_upcoming_then_meetings_then_actions_then_the_app` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) (macOS only).
+Not yet observed: the section in a real Mac's menu bar, a real EventKit read
+reaching it, a click opening Zoom or Meet, and the menu with calendar access
+denied. The rows render only in macOS builds, so no golden changes.
 
 Pause from menu bar (`pause-menu`, issue 82, macOS): for people whose game or
 another app collides with Hex's shortcuts and who don't want to quit. With the
@@ -2282,7 +2507,7 @@ Checks: `pause_suspends_and_resume_only_follows_a_neutral_keyboard`,
 `a_pause_cancels_once_and_leaves_a_command_capture_alone` in
 [recognition/hotkeys.rs](../../src/recognition/hotkeys.rs);
 `the_pause_row_reads_pause_or_resume` and
-`the_menu_reads_meeting_then_actions_then_the_app` in
+`the_menu_reads_upcoming_then_meetings_then_actions_then_the_app` in
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs);
 `pause_menu_is_its_own_bit_and_macos_only` in [labs.rs](../../src/labs.rs);
 `a_toggled_caps_lock_still_reads_neutral`, `a_held_key_reads_not_neutral`,
@@ -2383,10 +2608,53 @@ shortcut uses) opens a second copy of Annotate's capture picker
                       the right edge on the HUD's spring; any card leaves past the right edge
                       (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
                       a dictation while cards show -> pastes as usual, being no shot's talk-over
-                      a failure -> the error tone; there is no success sound (Hex has no shutter cue)
+                      a failure -> the error tone and, for a failed save, the folder and why
+                                   on Labs › Screenshots' card; there is no success sound
+                                   (Hex has no shutter cue)
 Another app holds Secure Event Input -> ⌘⇧4 and the record shortcut still open the picker
                   (Carbon hotkeys while it lasts; see dictation.md's Shortcuts Under Secure Input);
                   Space and Escape don't arrive, so window mode and Escape don't work then
+```
+
+Where shots go is the card's Saves to row, not a fixed folder. It reads the
+folder in full with the home folder as `~` ("~/Desktop" until another is
+chosen), and its two Secondary buttons are Reveal, which opens that folder
+in Finder (making it first, as a save would), and the folder itself, which
+opens the one native folder chooser (`desktop/file_dialog`, the seam Labs ›
+Import audio uses) at the folder in use. A pick counts only once
+`screenshots.folder` is saved, applies live to the next shot or recording,
+and clears the last save's note; a failed settings save reads as a danger
+note instead. A cancel changes nothing, and a click while a chooser is
+open opens no second one.
+
+A danger note under the row says why: the chooser or Reveal couldn't make
+the folder, or the last save failed ("Couldn't save to ~/…: <why>"). The
+note keeps the folder that failed with the error
+(`screenshots::save_error` is an `Option<(PathBuf, String)>`, bounded at
+300 characters per message), so a folder changed since through
+`hex settings` or `settings.json` never makes the note name the wrong one.
+`take` records a shot that can't be written, a recording's save records
+its own, and the editor's Save records a shot's PNG or a trimmed
+recording's movie the same way; any later save that works clears it,
+including one whose clipboard copy then fails. Those happen on their own
+threads, and a window's poll that reports nothing redraws nothing, so
+`screenshots::save_error_generation` counts each recorded or cleared error
+and the card's poll reports the difference from what it last drew: the
+visible window's 250 ms tick then draws the note, with no extra wake
+kept.
+
+```ts
+Saves to  -> the folder, home-shortened          Reveal  -> Finder on it, made first
+          -> a chosen folder -> screenshots.folder (settings.json, live at once) -> clears the note
+          -> a settings save that fails -> its reason under the row, old folder kept
+          -> a cancel        -> nothing
+          -> a failed chooser or Reveal, or a failed save (the folder it meant and why)
+             -> one danger note under the row, until a save works or a pick is saved
+             the save's error changes on its own thread; the card's poll reports the
+             generation change, and only that makes the next tick redraw
+// check: a_chosen_screenshots_folder_is_saved_and_says_why_a_chooser_failed
+//        (tests/panes.rs): a pick saves and shows, a cancel leaves it, a chooser failure
+//        says why, a save failure names the folder it failed into, and a pick clears it
 ```
 
 The cards stack in the corner as CleanShot's Quick Access Overlay does
@@ -2556,7 +2824,8 @@ record shortcut  -> the same picker, "Full screen · Click to record"; area, win
 │                   ├── the movie saves itself: "Hex Recording 2026-11-04 at 14.03.22.mp4" in
 │                   │   screenshots.folder (the Desktop when unset), " (2)" on a clash, as a shot's
 │                   │   PNG does; a clone of Annotate's copy, so instant on one volume. A failed save
-│                   │   plays the error tone and the card shows Annotate's copy
+│                   │   plays the error tone, the card shows Annotate's copy, and Labs › Screenshots'
+│                   │   card names the folder and why
 │                   ├── no clipboard, no router: nothing is sent or copied on its own
 │                   └── the corner card, from the first frame, its length in a pill
 │                       click -> the editor; drag -> the saved movie; a dictation never lands on it
@@ -2702,7 +2971,9 @@ clipboard paste, the thumbnail's drag, the editor on a real display
 shot with a real shortcut and microphone, the card growing in from a real
 capture rectangle, and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
-symbolic hotkeys are dispatched, not tested). The row renders only in
+symbolic hotkeys are dispatched, not tested), and the Saves to row's real
+folder panel (the test applies a chooser's answer and never opens one). The
+row renders only in
 macOS builds, so the settings goldens don't change.
 
 Annotate 15 s replay (`annotate-replay`, macOS 27+ only, group Annotate): keeps
@@ -2847,7 +3118,7 @@ An unknown value, or a repeated parameter, is `400 invalid-request`. With the
 lab off, `segment` and `word` answer `403 timestamps-disabled` before the
 audio body is read, and `none` is unaffected. The running app reads the switch
 live; a `hex service` process without the app reads the saved
-`labs.api_timestamps` once (the embedded helper on its first request), so a
+`labs.api_timestamps` once (the embedded helper as it starts), so a
 change reaches a running helper after it restarts.
 
 When the selected model cannot

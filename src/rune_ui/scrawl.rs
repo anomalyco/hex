@@ -7,8 +7,8 @@ use rune::{El, row};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
-    ButtonKind, Choice, Paint, button, card, described_row, folding, note, page, section,
-    segmented, select, setting_row, step_row, toggle_row,
+    ButtonKind, Choice, Paint, button, card, described_row, folder_label, folding, note, page,
+    section, segmented, select, setting_row, step_row, toggle_row,
 };
 use super::general::keys_button;
 use super::lists::permission_control;
@@ -104,19 +104,6 @@ fn retention_description(policy: Policy) -> String {
         }
         None => tr("Annotations stay until you remove them").into(),
     }
-}
-
-/// The captures folder, with the home folder as `~`.
-fn folder_label(ui: &Ui) -> String {
-    let folder = ui.settings.capture.captures_dir();
-    crate::app_paths::home_dir()
-        .and_then(|home| {
-            folder
-                .strip_prefix(home)
-                .ok()
-                .map(|relative| format!("~/{}", relative.display()))
-        })
-        .unwrap_or_else(|| folder.display().to_string())
 }
 
 /// The steps in order, each with its keys where it has any: one key taps
@@ -393,7 +380,7 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
                 .child(button(
                     p,
                     "choose-capture-folder",
-                    &folder_label(ui),
+                    &folder_label(&ui.settings.capture.captures_dir()),
                     ButtonKind::Secondary,
                     |ui: &mut Ui, _| scrawl_request(ui, ScrawlRequest::ChooseFolder),
                 )),

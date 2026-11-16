@@ -3,8 +3,10 @@
 //! signature must satisfy Anomaly's Developer ID requirement for
 //! `anomaly.hex` and be notarized, and on "Restart to update" (or quit) the
 //! two bundles swap atomically (`renamex_np` with `RENAME_SWAP`). The old
-//! bundle stays beside it until the new version launches and removes it. A
-//! read-only, translocated, or root-owned location links to the DMG instead
+//! bundle stays beside it until the new version launches and removes it; a
+//! newer release staged while one waits removes the folder of the one it
+//! replaces, so a Hex that runs for days keeps one folder, not one per build.
+//! A read-only, translocated, or root-owned location links to the DMG instead
 //! of escalating. Administrators turn updates off with `DisableUpdates` in
 //! the `anomaly.hex` defaults domain.
 
@@ -18,6 +20,7 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use objc2_foundation::{NSString, NSUserDefaults};
 
 use super::Method;
+use super::staging::{self, PREFIX};
 
 pub const TARGET: &str = "macos-arm64";
 pub const DOWNLOAD_TARGET: &str = "macos-arm64-dmg";
@@ -26,9 +29,6 @@ const BUNDLE_ID: &str = "anomaly.hex";
 /// as `anomaly.hex`, and notarized. The release build checks its artifacts
 /// against the same file.
 const REQUIREMENT: &str = include_str!("../../app/update-requirement.txt");
-/// Unpacked updates (and, after a swap, the replaced bundle) live in
-/// `.<name>-update-<version>` beside the installed bundle.
-const STAGING_PREFIX: &str = ".Hex-update-";
 
 /// An unpacked, verified bundle and the installed bundle it replaces.
 #[derive(Clone, Debug)]
@@ -98,26 +98,46 @@ pub fn updates_disabled_by_policy() -> bool {
 /// Removes what an earlier update left beside the bundle: the replaced
 /// bundle once this (new) version runs, or an unpacked update never applied.
 pub fn finish_on_launch() {
-    let Some(parent) = installed_bundle().and_then(|bundle| bundle.parent().map(Path::to_path_buf))
-    else {
+    let Some(bundle) = installed_bundle() else {
         return;
     };
-    remove_staging(&parent);
+    warn_unremoved(staging::remove_beside(&bundle, None));
 }
 
-fn remove_staging(parent: &Path) {
-    let Ok(entries) = fs::read_dir(parent) else {
+/// One warning per folder that stays behind; the rest of the sweep still ran.
+fn warn_unremoved(failures: Vec<staging::Failure>) {
+    for failure in failures {
+        tracing::warn!(
+            error = %failure.error,
+            path = %failure.path.display(),
+            "could not remove an earlier Hex update"
+        );
+    }
+}
+
+/// Removes the unpacked updates a newer staged release replaced: every
+/// sibling with the staging prefix except the one `staged` unpacks into.
+/// Called once `staged` is the update Hex holds, so a newer build leaves one
+/// folder, not one per build, however long Hex runs.
+pub fn remove_superseded(staged: &Staged) {
+    let Some(folder) = staged.update.parent() else {
         return;
     };
-    for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(STAGING_PREFIX))
-            && let Err(error) = fs::remove_dir_all(entry.path())
-        {
-            tracing::warn!(%error, path = %entry.path().display(), "could not remove an earlier Hex update");
-        }
+    warn_unremoved(staging::remove_beside(&staged.installed, Some(folder)));
+}
+
+/// Removes an unpacked update Hex will not use: a check that finished after a
+/// quit had already installed the update it would have replaced.
+pub fn discard(staged: &Staged) {
+    let Some(folder) = staged.update.parent() else {
+        return;
+    };
+    if let Err(error) = fs::remove_dir_all(folder) {
+        tracing::warn!(
+            error = %error,
+            path = %folder.display(),
+            "could not remove an unused Hex update"
+        );
     }
 }
 
@@ -126,7 +146,7 @@ pub fn stage(archive: &Path, version: &str) -> Result<Staged> {
     let parent = installed
         .parent()
         .ok_or_else(|| eyre!("Hex.app has no parent folder"))?;
-    let staging = parent.join(format!("{STAGING_PREFIX}{version}"));
+    let staging = parent.join(format!("{PREFIX}{version}"));
     unpack(archive, &staging)?;
     let update = staging.join("Hex.app");
     let result = verify_bundle(&update, version, REQUIREMENT);
@@ -305,7 +325,7 @@ mod tests {
         let installed = root.join("Hex.app");
         fs::create_dir_all(installed.join("Contents")).unwrap();
         fs::write(installed.join("Contents/version"), "old").unwrap();
-        let staging = root.join(format!("{STAGING_PREFIX}9.9.9"));
+        let staging = root.join(format!("{PREFIX}9.9.9"));
         let update = staging.join("Hex.app");
         fs::create_dir_all(update.join("Contents")).unwrap();
         fs::write(update.join("Contents/version"), "new").unwrap();
@@ -324,8 +344,32 @@ mod tests {
             "old"
         );
 
-        remove_staging(&root);
+        assert!(staging::remove_beside(&installed, None).is_empty());
         assert!(!staging.exists());
+        assert!(installed.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A newer staged release replaces the earlier one, so only one folder
+    /// survives however many builds a long-running Hex stages.
+    #[test]
+    fn a_newer_staged_release_removes_the_folder_of_the_one_it_replaces() {
+        let root = temporary("restage");
+        let installed = root.join("Hex.app");
+        fs::create_dir_all(installed.join("Contents")).unwrap();
+        let replaced = root.join(format!("{PREFIX}0.0.0-dev-1014"));
+        fs::create_dir_all(replaced.join("Hex.app/Contents")).unwrap();
+        let staging = root.join(format!("{PREFIX}0.0.0-dev-1017"));
+        let update = staging.join("Hex.app");
+        fs::create_dir_all(update.join("Contents")).unwrap();
+
+        remove_superseded(&Staged {
+            update: update.clone(),
+            installed: installed.clone(),
+        });
+
+        assert!(!replaced.exists(), "the update it replaces is removed");
+        assert!(update.join("Contents").exists(), "the staged update stays");
         assert!(installed.exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -342,7 +386,7 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
-        let staging = root.join(format!("{STAGING_PREFIX}9.9.9"));
+        let staging = root.join(format!("{PREFIX}9.9.9"));
         fs::create_dir_all(staging.join("stale")).unwrap();
         unpack(&archive, &staging).unwrap();
         assert!(!staging.join("stale").exists());

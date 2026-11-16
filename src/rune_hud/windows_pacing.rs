@@ -1,16 +1,14 @@
-//! Windows' own frame pacing for the HUD: Rune's Windows overlays have no
-//! display link and no swap-chain wait, so Hex asks for one frame at a time on
-//! a fixed ~60 Hz timer while the HUD moves and is still drawing.
+//! Windows' own frame pacing for the HUD: a fixed ~60 Hz cap on top of Rune's
+//! swap-chain slot wait, so a moving HUD asks for one frame at a time instead
+//! of one per loop turn.
 //!
-//! Rune takes an overlay's drawable through wgpu's DX12 swap chain made
-//! `DontWait`, and no display link paces it there (a window has its own
-//! swap-chain slot wait; an overlay has none), so an unpaced overlay draws,
-//! submits and presents as fast as the loop turns. This is Hex's workaround:
-//! ask for one frame each `HUD_FRAME`, a fixed ~60 Hz timer rather than the
-//! display's refresh, and report the HUD through `HudCompositor::animating` as
-//! not display-paced. Suspected, not measured on Windows: presenting faster
-//! than the GPU retires frames keeps their staging chunks and D3D12 allocators
-//! alive, and a hide that waits on the present queue stalls the window.
+//! Rune #985 makes every overlay's frames wait for room in their swap chain,
+//! as a window's do, so frames in flight stay bounded. Before it, a HUD that
+//! drew, submitted and presented as fast as the loop turned grew the swap
+//! chain's queue of presented but unretired frames, and whatever each queued
+//! frame held (about 100 MB/s to 5+ GB, #1796). Hex still asks for one frame
+//! each `HUD_FRAME`, a fixed ~60 Hz timer rather than the display's refresh,
+//! and reports the HUD through `HudCompositor::animating` as not display-paced.
 
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};

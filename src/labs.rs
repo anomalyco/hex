@@ -162,6 +162,7 @@ impl Feature {
             Self::KQuantModels => settings.labs.k_quant_models,
             Self::PickerDownloaded => settings.labs.picker_downloaded,
             Self::SectionKeyAlone => settings.labs.section_key_alone,
+            Self::MicrophoneKeyAlone => settings.labs.microphone_key,
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::SettingsSearch => settings.labs.settings_search,
             Self::Appearance => settings.labs.appearance,
@@ -190,6 +191,7 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::ApiBrowserAccess => settings.labs.api_browser_access,
             Self::SpeakersOnly => settings.labs.speakers_only,
+            Self::CalendarMenu => settings.labs.calendar_menu,
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
@@ -198,6 +200,7 @@ impl Feature {
             Self::YoloMode => settings.labs.yolo_mode,
             Self::CursorContext => settings.labs.cursor_context,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
+            Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
         }
     }
 
@@ -251,6 +254,7 @@ impl Feature {
             &mut labs.k_quant_models,
             &mut labs.picker_downloaded,
             &mut labs.section_key_alone,
+            &mut labs.microphone_key,
             &mut labs.keep_recordings,
             &mut labs.settings_search,
             &mut labs.appearance,
@@ -279,6 +283,7 @@ impl Feature {
             &mut labs.api_timestamps,
             &mut labs.api_browser_access,
             &mut labs.speakers_only,
+            &mut labs.calendar_menu,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
             &mut labs.print_start,
@@ -288,6 +293,7 @@ impl Feature {
             &mut labs.yolo_mode,
             &mut labs.cursor_context,
             &mut labs.more_dictation_shortcuts,
+            &mut labs.copy_dictation_audio,
         ]
     }
 
@@ -377,6 +383,7 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
+            Self::CalendarMenu => settings.labs.calendar_menu = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
@@ -385,6 +392,7 @@ impl Feature {
             Self::YoloMode => settings.labs.yolo_mode = on,
             Self::CursorContext => settings.labs.cursor_context = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
+            Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -393,6 +401,10 @@ impl Feature {
             Self::SectionKeyAlone => {
                 settings.labs.section_key_alone = on;
                 settings.repair_section_key();
+            }
+            Self::MicrophoneKeyAlone => {
+                settings.labs.microphone_key = on;
+                settings.repair_microphone_key();
             }
         }
     }
@@ -527,6 +539,12 @@ static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 /// is full, so this lab has its own atomic.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Copy dictation audio's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: History and the menu bar or tray put an entry's kept WAV
+/// on the clipboard as a file. The state word is full, so this lab has its
+/// own atomic, written by [`state`] and [`apply`].
+static COPY_DICTATION_AUDIO: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Browser access to the local API's switch, set beside [`STATE`]
 /// like [`PRINT_START`]: the state word is full, so this lab has its own
 /// atomic, written by [`state`] and [`apply`].
@@ -536,6 +554,11 @@ static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 /// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
+
+/// Labs › Upcoming meetings in menu bar's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static CALENDAR_MENU: AtomicBool = AtomicBool::new(false);
 
 /// Labs › YOLO mode's minimum hold in seconds, 0 while the lab is
 /// off, set beside [`STATE`] like [`PRINT_START`]: the state word is full, so
@@ -550,6 +573,11 @@ static YOLO_MODE_APPS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::
 /// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
 static CLEAN_UP: AtomicBool = AtomicBool::new(false);
+
+/// Labs › Microphone key alone's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static MICROPHONE_KEY: AtomicBool = AtomicBool::new(false);
 
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
@@ -583,9 +611,12 @@ fn state() -> u64 {
                 CURSOR_CONTEXT.store(cursor_context_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
+                COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
+                CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
+                MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
@@ -648,6 +679,22 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
         && Feature::KQuantModels.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Copy dictation audio in this build,
+/// before its managed lock; the state word has no bit for it.
+fn copy_dictation_audio_enabled(settings: &LabsSettings) -> bool {
+    settings.copy_dictation_audio
+        && Feature::CopyDictationAudio.shipped()
+        && Feature::CopyDictationAudio.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Upcoming meetings in menu bar in this
+/// build, before its managed lock; the state word has no bit for it.
+fn calendar_menu_enabled(settings: &LabsSettings) -> bool {
+    settings.calendar_menu
+        && Feature::CalendarMenu.shipped()
+        && Feature::CalendarMenu.managed().is_none()
+}
+
 /// Whether `settings` turn on Labs › YOLO mode in this build,
 /// before its managed lock; the state word has no bit for it.
 fn yolo_mode_enabled(settings: &LabsSettings) -> bool {
@@ -680,6 +727,14 @@ fn clean_up_enabled(settings: &LabsSettings) -> bool {
     settings.clean_up_with_apple_intelligence
         && Feature::CleanUpWithAppleIntelligence.shipped()
         && Feature::CleanUpWithAppleIntelligence.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Microphone key alone in this build,
+/// before its managed lock; the state word has no bit for it.
+fn microphone_key_enabled(settings: &LabsSettings) -> bool {
+    settings.microphone_key
+        && Feature::MicrophoneKeyAlone.shipped()
+        && Feature::MicrophoneKeyAlone.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Browser access to the local API in this
@@ -743,9 +798,12 @@ pub(crate) fn apply(settings: &LabsSettings) {
     CURSOR_CONTEXT.store(cursor_context_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
+    COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
+    CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
+    MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -988,6 +1046,7 @@ pub fn log_launch() {
         screen_vocabulary = screen_vocabulary(),
         cursor_context = cursor_context(),
         history_multi_select = history_multi_select(),
+        copy_dictation_audio = copy_dictation_audio(),
         "labs"
     );
 }
@@ -1793,6 +1852,28 @@ mod tests {
     }
 
     #[test]
+    fn calendar_menu_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!calendar_menu_enabled(&labs));
+        labs.calendar_menu = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(calendar_menu_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PAUSE_MENU, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CalendarMenu.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::CalendarMenu.added(), 20261114);
+        assert_eq!(Feature::CalendarMenu.audience(), Audience::Everyone);
+        assert_eq!(Feature::CalendarMenu.group(), Group::Meetings);
+        assert_eq!(Feature::CalendarMenu.settings_key(), "labs.calendar_menu");
+        assert_eq!(Feature::CalendarMenu.name(), "calendar-menu");
+    }
+
+    #[test]
     fn print_start_is_its_own_switch_and_macos_only() {
         let mut labs = LabsSettings::default();
         assert!(!print_start_enabled(&labs));
@@ -1885,6 +1966,35 @@ mod tests {
             "labs.copy_capture_zip"
         );
         assert_eq!(Feature::CopyCaptureZip.name(), "copy-capture-zip");
+    }
+
+    #[test]
+    fn copy_dictation_audio_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!copy_dictation_audio_enabled(&labs));
+        labs.copy_dictation_audio = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(copy_dictation_audio_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CopyDictationAudio.on_this_os(),
+            cfg!(any(
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "windows"
+            ))
+        );
+        assert_eq!(Feature::CopyDictationAudio.added(), 20261115);
+        assert_eq!(Feature::CopyDictationAudio.audience(), Audience::Everyone);
+        assert_eq!(Feature::CopyDictationAudio.group(), Group::History);
+        assert_eq!(
+            Feature::CopyDictationAudio.settings_key(),
+            "labs.copy_dictation_audio"
+        );
+        assert_eq!(Feature::CopyDictationAudio.name(), "copy-dictation-audio");
     }
 
     #[test]

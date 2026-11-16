@@ -56,6 +56,17 @@ pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }
 
+/// The microphone (dictation) key in a laptop keyboard's top row may be a
+/// shortcut, alone or with modifiers (macOS; read as the session tap attaches
+/// and by the tap on every press).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn microphone_key() -> bool {
+    // The state word is full: its own atomic, written by `labs::apply`, and
+    // loaded here first in a process that never applied.
+    let _ = state();
+    MICROPHONE_KEY.load(Ordering::Acquire) && Feature::MicrophoneKeyAlone.on_this_os()
+}
+
 /// The mode's OpenCode rewrite is given the text around the cursor as
 /// context, read once as the capture becomes real (macOS; read by the
 /// listener at its hold threshold, its control start, or the released
@@ -76,6 +87,19 @@ pub fn copy_capture_zip() -> bool {
     // `labs::apply`, and loaded here first in a process that never applied.
     let _ = state();
     COPY_CAPTURE_ZIP.load(Ordering::Acquire) && Feature::CopyCaptureZip.on_this_os()
+}
+
+/// A kept dictation recording may be copied from History and the menu bar or
+/// tray as a file on the clipboard (read as each Copy audio runs and each
+/// menu or tray opens). It needs Labs › Keep recordings, which owns every
+/// file; this lab stores none of its own.
+pub fn copy_dictation_audio() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    COPY_DICTATION_AUDIO.load(Ordering::Acquire)
+        && Feature::CopyDictationAudio.on_this_os()
+        && keep_recordings()
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
@@ -343,6 +367,18 @@ pub fn speakers_only() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn pause_menu() -> bool {
     on(PAUSE_MENU) && Feature::PauseMenu.on_this_os()
+}
+
+/// The menu bar lists the next calendar meetings, and choosing one with a
+/// call link joins it (macOS; read each time the status item refreshes and
+/// as the menu opens, and by the meeting controller before it reads its
+/// calendar).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn calendar_menu() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    CALENDAR_MENU.load(Ordering::Acquire) && Feature::CalendarMenu.on_this_os()
 }
 
 /// A physical Caps Lock press starts and stops dictation, and its light

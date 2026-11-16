@@ -15,6 +15,7 @@ use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
 use crate::dictation::{BOTH_SIDES_WINDOW, DOUBLE_TAP_WINDOW, MINIMUM_HOLD_DURATION};
 
+pub(crate) mod dictation_key;
 mod hotkey;
 pub(crate) mod physical_keys;
 pub(crate) mod secure_input;
@@ -46,7 +47,6 @@ const MOUSE_EVENT_BUTTON_NUMBER: u32 = 3;
 const EVENT_MOUSE_MOVED: u32 = 5;
 #[cfg(hex_capture)]
 const EVENT_SCROLL_WHEEL: u32 = 22;
-#[cfg(hex_capture)]
 const KEYBOARD_EVENT_AUTOREPEAT: u32 = 8;
 #[cfg(hex_capture)]
 const SCROLL_WHEEL_DELTA_AXIS_1: u32 = 11;
@@ -59,6 +59,9 @@ const EVENT_SOURCE_USER_DATA: u32 = 42;
 
 // Assistive keyboards inject downstream of HID; observe them alongside hardware input.
 const ANNOTATED_SESSION_EVENT_TAP: u32 = 2;
+// macOS's own symbolic hot keys are matched in the window server before the
+// app and before an annotated-session tap; only a session tap still sees them.
+const SESSION_EVENT_TAP: u32 = 1;
 // Another app's global shortcut (Carbon hotkeys such as a window manager's
 // Option-1) consumes its key before the session, so only HID sees that press.
 const HID_EVENT_TAP: u32 = 0;
@@ -504,6 +507,10 @@ struct EventTapContext {
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
+    /// Labs › Microphone key alone's tap, present only while its lab is on.
+    dictation_key_tap: AtomicPtr<c_void>,
+    /// The microphone key's presses the session tap took, with their releases.
+    microphone_key: Mutex<crate::app_settings::MicrophoneKey>,
     shortcut_suppression: Mutex<ShortcutSuppression>,
 }
 

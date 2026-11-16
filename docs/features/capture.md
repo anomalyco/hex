@@ -226,6 +226,9 @@ On Windows                               // capture.windows
 │   contact sheet, then the summary; with Labs › Copy captures as a zip, the
 │   copy is the light zip as CF_HDROP instead
 ├── Pane -> no Screen Recording row, no transcriber choice
+├── Overlays -> Rune waits for a swap-chain slot before each frame (Rune
+│   #985), so the picker, capsule, and ink's frames in flight stay bounded
+│   through a long annotation (#1833; not measured on Windows)
 └── Gaps: no `hex annotate` (Windows has no control transport yet), no
     iPhone, keys pressed in the app are not logged. Checked only by
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
@@ -684,6 +687,13 @@ Hex's own windows                        // capture.own-windows
 ├── Chrome (the capsule, ink, picker, HUDs, meeting capsules: Hex's named
 │   windows and any of its windows above the normal level) -> never recorded,
 │   never in the window log, never the target, clicks on it not logged
+│   ├── While the pen is on, the ink overlay holds the keys, so the window
+│   │   log's system-wide focused-application read names Hex itself; AppKit
+│   │   answers that read on the asking `scrawl-window-log` thread, and the
+│   │   vendored AccessKit macOS adapter now answers such off-main reads as a
+│   │   plain view instead of borrowing its main-thread state. That borrow
+│   │   aborted Hex mid-capture (#1859, Rune #1040); a test would need AppKit
+│   │   and a key window, so none covers it
 │   ├── Other recorders -> the capsule, picker, and ink are left out
 │   │   (sharingType none) while shown; the dictation HUD and meeting
 │   │   capsules show

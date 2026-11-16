@@ -12,6 +12,7 @@ use objc2_app_kit::{
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
 use crate::app_settings::{AppSettings, HotkeyBinding};
+use crate::calendar::CalendarMeeting;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::desktop::tray_menu::model_menu_entries;
 use crate::transcription::models::{MODELS, TranscriptionModelId};
@@ -21,15 +22,22 @@ const IDLE_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/menubar-idle@2x.
 const RECORDING_ICON_PNG: &[u8] = include_bytes!("../../assets/icons/menubar-recording@2x.png");
 const STATUS_ICON_POINTS: f64 = 18.0;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StatusItemAction {
     OpenSettings,
     OpenModels,
     SelectModel(TranscriptionModelId),
     CancelModelPreparation,
     PasteLast,
+    /// Labs › Copy dictation audio: the newest kept recording as a file on
+    /// the clipboard.
+    CopyLastDictationAudio,
     /// Copy History entry `id` (Labs › Copy recent dictations).
     CopyRecentDictation(u64),
+    /// Join a calendar meeting from the menu: opens its call link without
+    /// recording and records the occurrence so no reminder pops (Labs ›
+    /// Upcoming meetings in menu bar).
+    JoinCalendarMeeting(CalendarMeeting),
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
@@ -86,6 +94,14 @@ objc2::define_class!(
             let _ = self.ivars().actions.try_send(StatusItemAction::PasteLast);
         }
 
+        #[unsafe(method(copyLastDictationAudio:))]
+        fn copy_last_dictation_audio(&self, _sender: &AnyObject) {
+            let _ = self
+                .ivars()
+                .actions
+                .try_send(StatusItemAction::CopyLastDictationAudio);
+        }
+
         #[unsafe(method(copyRecentDictation:))]
         fn copy_recent_dictation(&self, sender: &NSMenuItem) {
             if let Ok(id) = u64::try_from(sender.tag()) {
@@ -109,15 +125,66 @@ objc2::define_class!(
         fn menu_needs_update(&self, _menu: &NSMenu) {
             relabel();
             refresh_recent_dictations();
+            refresh_copy_dictation_audio();
             refresh_restore_capture();
+            refresh_upcoming();
             update_pause();
         }
 
         /// Restore Last Capture is dimmed while no closed card can come
-        /// back; every other item stays enabled.
+        /// back, Copy Last Dictation Audio while no kept recording can be
+        /// copied, and an upcoming meeting without a call link is
+        /// informational; every other item stays enabled.
         #[unsafe(method(validateMenuItem:))]
         fn validate_menu_item(&self, item: &NSMenuItem) -> bool {
-            item.action() != Some(sel!(restoreCapture:)) || restore_capture_enabled()
+            match item.action() {
+                Some(action) if action == sel!(restoreCapture:) => restore_capture_enabled(),
+                Some(action) if action == sel!(copyLastDictationAudio:) => {
+                    copy_last_dictation_audio_enabled()
+                }
+                Some(action) if action == sel!(openCalendarMeeting:) => {
+                    let Ok(index) = usize::try_from(item.tag()) else {
+                        return false.into();
+                    };
+                    STATUS_ITEM.with(|controller| {
+                        controller.borrow().as_ref().is_some_and(|controller| {
+                            controller
+                                .upcoming_meetings
+                                .borrow()
+                                .get(index)
+                                .is_some_and(|meeting| meeting.is_some())
+                        })
+                    })
+                }
+                _ => true,
+            }
+        }
+
+        /// Labs › Upcoming meetings in menu bar: a meeting with a call link
+        /// joins through the meeting controller, which opens the link,
+        /// records the occurrence, and closes its reminder if showing;
+        /// nothing records.
+        #[unsafe(method(openCalendarMeeting:))]
+        fn open_calendar_meeting(&self, sender: &NSMenuItem) {
+            let Ok(index) = usize::try_from(sender.tag()) else {
+                return;
+            };
+            let meeting = STATUS_ITEM.with(|controller| {
+                controller.borrow().as_ref().and_then(|controller| {
+                    controller
+                        .upcoming_meetings
+                        .borrow()
+                        .get(index)
+                        .cloned()
+                        .flatten()
+                })
+            });
+            if let Some(meeting) = meeting {
+                let _ = self
+                    .ivars()
+                    .actions
+                    .try_send(StatusItemAction::JoinCalendarMeeting(meeting));
+            }
         }
 
         #[unsafe(method(startMeeting:))]
@@ -179,10 +246,20 @@ impl StatusItemTarget {
     }
 }
 
-/// One row of the status menu, top to bottom: what's happening now (the
-/// meeting group), then things to do, then the app.
+/// One row of the status menu, top to bottom: what's coming up (Labs ›
+/// Upcoming meetings in menu bar), what's happening now (the meeting group),
+/// then things to do, then the app.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Row {
+    /// Labs › Upcoming meetings in menu bar's disabled header: hidden until
+    /// the menu opens with it on.
+    UpcomingHeader,
+    /// One upcoming meeting, ×[`UPCOMING_ROWS`], hidden until the menu opens
+    /// with one.
+    UpcomingSlot,
+    /// "No upcoming meetings", while the section has none.
+    UpcomingEmpty,
+    UpcomingSeparator,
     MeetingStatus,
     StopMeeting,
     CopySection,
@@ -191,6 +268,8 @@ enum Row {
     /// Labs › Pause from menu bar: hidden until the menu opens with it on.
     PauseHex,
     PasteLast,
+    /// Labs › Copy dictation audio: hidden until the menu opens with it on.
+    CopyLastDictationAudio,
     /// Labs › Copy recent dictations: hidden until the menu opens with it on.
     CopyRecentDictation,
     CopyLastMeetingTranscript,
@@ -203,7 +282,18 @@ enum Row {
     Quit,
 }
 
-const ROWS: [Row; 15] = [
+/// How many upcoming meetings the menu lists at most.
+const UPCOMING_ROWS: usize = crate::calendar_menu::MAX_ROWS;
+
+const ROWS: [Row; 24] = [
+    Row::UpcomingHeader,
+    Row::UpcomingSlot,
+    Row::UpcomingSlot,
+    Row::UpcomingSlot,
+    Row::UpcomingSlot,
+    Row::UpcomingSlot,
+    Row::UpcomingEmpty,
+    Row::UpcomingSeparator,
     Row::MeetingStatus,
     Row::StopMeeting,
     Row::CopySection,
@@ -211,6 +301,7 @@ const ROWS: [Row; 15] = [
     Row::MeetingSeparator,
     Row::PauseHex,
     Row::PasteLast,
+    Row::CopyLastDictationAudio,
     Row::CopyRecentDictation,
     Row::CopyLastMeetingTranscript,
     Row::RestoreCapture,
@@ -226,13 +317,20 @@ impl Row {
     /// a separator.
     fn title(self) -> Option<String> {
         Some(match self {
-            Row::MeetingSeparator | Row::Separator => return None,
+            Row::UpcomingSeparator | Row::MeetingSeparator | Row::Separator => return None,
+            Row::UpcomingHeader => label("Upcoming", tr("Upcoming")),
+            // The section's own refresh titles these.
+            Row::UpcomingSlot => return Some(String::new()),
+            Row::UpcomingEmpty => tr("No upcoming meetings").into(),
             Row::MeetingStatus => tr("Recording").into(),
             Row::StopMeeting => label("Stop & Transcribe", tr("Stop & transcribe")),
             Row::CopySection => label("Copy Section", tr("Copy section")),
             Row::RecordMeeting => label("Record Meeting", tr("Record meeting")),
             Row::PauseHex => pause_title(false),
             Row::PasteLast => label("Paste Last Dictation", tr("Paste last dictation")),
+            Row::CopyLastDictationAudio => {
+                label("Copy Last Dictation Audio", tr("Copy last dictation audio"))
+            }
             Row::CopyRecentDictation => {
                 label("Copy Recent Dictation", tr("Copy recent dictations"))
             }
@@ -250,22 +348,30 @@ impl Row {
 
     /// Rows whose title follows state, set by their own update.
     fn titled_by_state(self) -> bool {
-        matches!(self, Row::MeetingStatus | Row::PauseHex | Row::Update)
+        matches!(
+            self,
+            Row::UpcomingSlot | Row::MeetingStatus | Row::PauseHex | Row::Update
+        )
     }
 
     fn action(self) -> Option<Sel> {
         Some(match self {
+            Row::UpcomingSlot => sel!(openCalendarMeeting:),
             Row::MeetingStatus => sel!(openMeetings:),
             Row::StopMeeting => sel!(stopMeeting:),
             Row::RecordMeeting => sel!(startMeeting:),
             Row::PauseHex => sel!(togglePause:),
             Row::PasteLast => sel!(pasteLast:),
+            Row::CopyLastDictationAudio => sel!(copyLastDictationAudio:),
             Row::CopyLastMeetingTranscript => sel!(copyLastMeetingTranscript:),
             Row::RestoreCapture => sel!(restoreCapture:),
             Row::Settings => sel!(openSettings:),
             Row::Update => sel!(checkForUpdates:),
             Row::Quit => sel!(quit:),
-            Row::MeetingSeparator
+            Row::UpcomingHeader
+            | Row::UpcomingEmpty
+            | Row::UpcomingSeparator
+            | Row::MeetingSeparator
             | Row::Separator
             | Row::CopySection
             | Row::CopyRecentDictation
@@ -287,12 +393,17 @@ impl Row {
     fn starts_hidden(self) -> bool {
         matches!(
             self,
-            Row::MeetingStatus
+            Row::UpcomingHeader
+                | Row::UpcomingSlot
+                | Row::UpcomingEmpty
+                | Row::UpcomingSeparator
+                | Row::MeetingStatus
                 | Row::StopMeeting
                 | Row::CopySection
                 | Row::RecordMeeting
                 | Row::MeetingSeparator
                 | Row::PauseHex
+                | Row::CopyLastDictationAudio
                 | Row::CopyRecentDictation
                 | Row::CopyLastMeetingTranscript
                 | Row::RestoreCapture
@@ -399,10 +510,19 @@ struct StatusItemController {
     meeting_button: RefCell<(String, bool)>,
     paste_last: Retained<NSMenuItem>,
     paste_last_key: RefCell<Option<KeyEquivalent>>,
+    copy_last_dictation_audio: Retained<NSMenuItem>,
     pause: Retained<NSMenuItem>,
     pause_title: RefCell<String>,
     recent: Retained<NSMenuItem>,
     recent_menu: Retained<NSMenu>,
+    upcoming_header: Retained<NSMenuItem>,
+    upcoming_slots: Vec<Retained<NSMenuItem>>,
+    upcoming_empty: Retained<NSMenuItem>,
+    upcoming_separator: Retained<NSMenuItem>,
+    /// The labels on the slots now, so a refresh writes only changes.
+    upcoming_labels: RefCell<Vec<String>>,
+    /// The call links behind the slots now, by slot; `None` is informational.
+    upcoming_meetings: RefCell<Vec<Option<CalendarMeeting>>>,
     restore_capture: Retained<NSMenuItem>,
     update: Option<Retained<NSMenuItem>>,
     update_title: RefCell<String>,
@@ -476,6 +596,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
 
     let update_managed = crate::updater::managed_by_policy();
     let mut rows = Vec::with_capacity(ROWS.len());
+    let mut upcoming_slots = Vec::with_capacity(UPCOMING_ROWS);
     for row in ROWS {
         let item = match (row, row.title()) {
             (_, None) => NSMenuItem::separatorItem(mtm),
@@ -505,6 +626,11 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         }
         item.setHidden(row.starts_hidden());
         menu.addItem(&item);
+        if row == Row::UpcomingSlot {
+            // Its place in the section: the refresh fills that row's link.
+            item.setTag(upcoming_slots.len() as isize);
+            upcoming_slots.push(item.clone());
+        }
         if !row.titled_by_state() && row.title().is_some() {
             fixed.push((
                 item.clone(),
@@ -555,10 +681,17 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             meeting_button: RefCell::new((String::new(), false)),
             paste_last: row(Row::PasteLast),
             paste_last_key: RefCell::new(None),
+            copy_last_dictation_audio: row(Row::CopyLastDictationAudio),
             pause: row(Row::PauseHex),
             pause_title: RefCell::new(pause_title(false)),
             recent: row(Row::CopyRecentDictation),
             recent_menu,
+            upcoming_header: row(Row::UpcomingHeader),
+            upcoming_slots,
+            upcoming_empty: row(Row::UpcomingEmpty),
+            upcoming_separator: row(Row::UpcomingSeparator),
+            upcoming_labels: RefCell::new(Vec::new()),
+            upcoming_meetings: RefCell::new(Vec::new()),
             restore_capture: row(Row::RestoreCapture),
             update: (!update_managed).then(|| row(Row::Update)),
             update_title: RefCell::new(Row::Update.title().unwrap_or_default()),
@@ -838,6 +971,29 @@ fn relabel() {
     });
 }
 
+/// Shows Copy Last Dictation Audio while Labs › Copy dictation audio is on,
+/// as the menu opens; `validateMenuItem:` dims it while nothing kept audio.
+fn refresh_copy_dictation_audio() {
+    let shown = crate::labs::copy_dictation_audio();
+    STATUS_ITEM.with(|controller| {
+        if let Some(controller) = controller.borrow().as_ref() {
+            controller.copy_last_dictation_audio.setHidden(!shown);
+        }
+    });
+}
+
+/// Whether Copy Last Dictation Audio has a kept recording to copy: the lab
+/// is on (the row is hidden otherwise) and the newest History entry that
+/// kept its audio still has its WAV.
+fn copy_last_dictation_audio_enabled() -> bool {
+    crate::labs::copy_dictation_audio()
+        && crate::labs::keep_recordings()
+        && crate::macos_rune::runtime()
+            .and_then(|runtime| runtime.history())
+            .and_then(|history| history.newest_recording(crate::history::now_ms()))
+            .is_some()
+}
+
 /// Shows Restore Last Capture while Labs › Screenshots is on, as the menu
 /// opens.
 fn refresh_restore_capture() {
@@ -847,6 +1003,63 @@ fn refresh_restore_capture() {
             controller.restore_capture.setHidden(!shown);
         }
     });
+}
+
+/// Labs › Upcoming meetings in menu bar's section, refreshed on the meeting
+/// tick and as the menu opens. It only formats the meeting controller's last
+/// calendar read: EventKit is never touched here.
+pub fn update_calendar_menu() {
+    refresh_upcoming();
+}
+
+fn refresh_upcoming() {
+    let section = crate::calendar_menu::section(crate::calendar::wall_clock_ms());
+    STATUS_ITEM.with(|controller| {
+        let controller = controller.borrow();
+        let Some(controller) = controller.as_ref() else {
+            return;
+        };
+        let Some(rows) = section else {
+            hide_upcoming(controller);
+            return;
+        };
+        let labels = rows.iter().map(|row| row.label.clone()).collect::<Vec<_>>();
+        let meetings = rows.into_iter().map(|row| row.meeting).collect::<Vec<_>>();
+        let unchanged = {
+            let current_labels = controller.upcoming_labels.borrow();
+            let current_meetings = controller.upcoming_meetings.borrow();
+            *current_labels == labels && *current_meetings == meetings
+        };
+        controller.upcoming_header.setHidden(false);
+        controller.upcoming_separator.setHidden(false);
+        controller.upcoming_empty.setHidden(!labels.is_empty());
+        if unchanged {
+            return;
+        }
+        for (index, item) in controller.upcoming_slots.iter().enumerate() {
+            item.setHidden(index >= labels.len());
+            if let Some(label) = labels.get(index) {
+                item.setTitle(&NSString::from_str(label));
+            }
+        }
+        // Assign after every AppKit call: no `RefCell` borrow is held across
+        // one, so a menu callback can read the shown rows meanwhile.
+        *controller.upcoming_labels.borrow_mut() = labels;
+        *controller.upcoming_meetings.borrow_mut() = meetings;
+    });
+}
+
+/// Hides the section and forgets what it showed, so showing it again writes
+/// every row anew.
+fn hide_upcoming(controller: &StatusItemController) {
+    controller.upcoming_header.setHidden(true);
+    controller.upcoming_empty.setHidden(true);
+    controller.upcoming_separator.setHidden(true);
+    for item in &controller.upcoming_slots {
+        item.setHidden(true);
+    }
+    controller.upcoming_labels.borrow_mut().clear();
+    controller.upcoming_meetings.borrow_mut().clear();
 }
 
 /// Shows Pause Hex while Labs › Pause from menu bar is on, reads Resume Hex
@@ -1079,7 +1292,7 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_reads_meeting_then_actions_then_the_app() {
+    fn the_menu_reads_upcoming_then_meetings_then_actions_then_the_app() {
         let titles = ROWS
             .iter()
             .map(|row| row.title().unwrap_or_else(|| "—".into()))
@@ -1087,13 +1300,22 @@ mod tests {
         assert_eq!(
             titles,
             [
-                "Recording".to_string(),
+                "Upcoming".to_string(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+                "No upcoming meetings".into(),
+                "—".into(),
+                "Recording".into(),
                 "Stop & Transcribe".into(),
                 "Copy Section".into(),
                 "Record Meeting".into(),
                 "—".into(),
                 "Pause Hex".into(),
                 "Paste Last Dictation".into(),
+                "Copy Last Dictation Audio".into(),
                 "Copy Recent Dictation".into(),
                 "Copy Last Meeting Transcript".into(),
                 "Restore Last Capture".into(),
@@ -1106,15 +1328,17 @@ mod tests {
         );
         assert_eq!(Row::Settings.command_key(), Some(","));
         assert_eq!(Row::Quit.command_key(), Some("q"));
-        // Every row with neither a submenu nor a separator does something.
+        // Every row with neither a submenu, a separator, nor the Upcoming
+        // section's own header or "none" line does something.
         for row in ROWS {
             let opens_submenu = matches!(
                 row,
                 Row::CopySection | Row::CopyRecentDictation | Row::SpeechModel
             );
+            let informational = matches!(row, Row::UpcomingHeader | Row::UpcomingEmpty);
             assert_eq!(
                 row.action().is_some(),
-                row.title().is_some() && !opens_submenu,
+                row.title().is_some() && !opens_submenu && !informational,
                 "{row:?}"
             );
         }

@@ -22,7 +22,11 @@ use crate::history::stats::{AppCount, HistoryStats};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
+mod audio;
 mod selection;
+
+pub(super) use self::audio::AudioCopy;
+use self::audio::copy_audio;
 
 /// The stats dialog's width and padding.
 const STATS_WIDTH: f32 = 460.0;
@@ -65,6 +69,9 @@ pub(super) struct HistoryPane {
     /// Labs › Keep recordings: the entry playing through the output, if one
     /// started from the card.
     pub(super) playback: Option<Playback>,
+    /// Labs › Copy dictation audio: the entry whose kept audio is going to
+    /// the clipboard or last went there.
+    pub(super) audio: Option<AudioCopy>,
 }
 
 /// Transcribe again's chosen model and the language for this one run.
@@ -186,6 +193,7 @@ impl HistoryPane {
         // Playback's answer returns the card to Play; it is not a reason to
         // read the stats again.
         let played = self.poll_playback();
+        let copied = self.poll_audio();
         let mut changed = false;
         // Labs › Select multiple dictations off, History keeps one selected
         // entry: the others fall away.
@@ -218,7 +226,7 @@ impl HistoryPane {
             changed = true;
         }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
-            return answered || played || changed;
+            return answered || played || copied || changed;
         };
         let stale = self.search.text != self.searched || self.revision != Some(store.revision());
         if stale {
@@ -230,7 +238,7 @@ impl HistoryPane {
             self.reload_stats();
             return true;
         }
-        answered || played || changed
+        answered || played || copied || changed
     }
 
     /// Takes Transcribe again's answer once its worker sends it.
@@ -913,9 +921,16 @@ fn copy_action(ui: &Ui, p: Paint, id: u64, in_row: bool) -> El {
         ld::COPY_ICON
     };
     let press = move |ui: &mut Ui, tx: &mut Tx| {
+        // A pending Copy audio still lands on the clipboard when it
+        // finishes, so it wins over a text Copy until then.
+        if ui.history.audio_copy_pending() {
+            return;
+        }
         if let Some(entry) = ui.history.entry(id) {
             tx.copy(entry.final_text.clone());
             ui.history.copied = Some(id);
+            // One "Copied" at a time: this replaces Copy audio's check.
+            ui.history.audio = None;
             ui.history.error = None;
         }
     };
@@ -1128,6 +1143,25 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 .gap(8.0)
                 .center_y()
                 .child(section_label(p, "label", tr("Saved recording")).grow(1.0))
+                // Labs › Copy dictation audio: the kept WAV as a file on the
+                // clipboard, ready to attach.
+                .children(ui.settings.labs.copy_dictation_audio.then(|| {
+                    let audio = ui.history.audio.as_ref().filter(|audio| audio.id == id);
+                    let copying = audio.is_some_and(|audio| audio.worker.is_some());
+                    let copied = audio.is_some_and(|audio| matches!(audio.result, Some(Ok(()))));
+                    small_button(
+                        p,
+                        "again-copy-audio",
+                        if copying {
+                            tr("Copying…")
+                        } else if copied {
+                            tr("Copied")
+                        } else {
+                            tr("Copy audio")
+                        },
+                        move |ui: &mut Ui, _| copy_audio(ui, id),
+                    )
+                }))
                 .child(small_button(
                     p,
                     "again-play",
@@ -1145,6 +1179,22 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 )),
         )
         .child(menu);
+    if let Some(error) = ui
+        .history
+        .audio
+        .as_ref()
+        .filter(|audio| audio.id == id)
+        .and_then(|audio| audio.result.as_ref())
+        .and_then(|result| result.as_ref().err())
+    {
+        section = section.child(
+            text(tr_fill("Could not copy the audio: {}", error))
+                .key("again-copy-audio-error")
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        );
+    }
     if let Some(error) = ui
         .history
         .playback

@@ -152,12 +152,12 @@ avoids Effect and npm packages; their `package.json`, `bun.lock`,
 `node_modules`, `.hex-sdk`, and `.agents` can be deleted.
 
 Hex reloads the config about a third of a second after any `.ts`, `.js`,
-`.mjs`, or `.json` file in the folder changes (not `.d.ts`, dot folders,
-`node_modules`, or symlink targets), activates valid changes, and reports the
-last load error with its file, line, and column in Modes' Transformations
-section. `hex commands check` (macOS) loads the config as Hex would and prints
-what it registers or why it fails. Type checking is optional:
-`npx -y -p typescript tsc` in the folder.
+`.mjs`, `.mts`, or `.json` file in the folder changes, in any case, but not
+declaration files (`.d.ts`, `.d.mts`), `node_modules`, `.git`, or symlink
+targets. It activates valid changes and reports the last load error with its
+file, line, and column in Modes' Transformations section. `hex commands check`
+(macOS) loads the config as Hex would and prints what it registers or why it
+fails. Type checking is optional: `npx -y -p typescript tsc` in the folder.
 
 ## Runtime Boundary
 

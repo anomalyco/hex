@@ -7,10 +7,11 @@ This folder configures custom text transformations for Hex. Edit
 `@hex/commands` module; Hex owns it, so do not edit it.
 
 Hex runs the config itself in an embedded JavaScript engine (QuickJS) and
-reloads it about a third of a second after any `.ts`, `.js`, or `.json` file
-here changes. A config that fails to load keeps the previous one active; the
-error, with its file, line, and column, shows in the Modes pane's
-Transformations section. No install step and no Node, Bun, or npm are involved.
+reloads it about a third of a second after any `.ts`, `.js`, `.mjs`, `.mts`,
+or `.json` file here changes. A config that fails to load keeps the previous
+one active; the error, with its file, line, and column, shows in the Modes
+pane's Transformations section. No install step and no Node, Bun, or npm are
+involved.
 
 ## What a script can do
 

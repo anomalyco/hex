@@ -51,6 +51,7 @@ pub enum Feature {
     KQuantModels,
     PickerDownloaded,
     SectionKeyAlone,
+    MicrophoneKeyAlone,
     KeepRecordings,
     SettingsSearch,
     Appearance,
@@ -79,6 +80,7 @@ pub enum Feature {
     ApiTimestamps,
     ApiBrowserAccess,
     SpeakersOnly,
+    CalendarMenu,
     MoreDictationShortcuts,
     PauseMenu,
     PrintStart,
@@ -87,10 +89,11 @@ pub enum Feature {
     ShellCompletions,
     YoloMode,
     CursorContext,
+    CopyDictationAudio,
 }
 
 impl Feature {
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 85] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -137,6 +140,7 @@ impl Feature {
         Self::KQuantModels,
         Self::PickerDownloaded,
         Self::SectionKeyAlone,
+        Self::MicrophoneKeyAlone,
         Self::KeepRecordings,
         Self::SettingsSearch,
         Self::Appearance,
@@ -165,6 +169,7 @@ impl Feature {
         Self::ApiTimestamps,
         Self::ApiBrowserAccess,
         Self::SpeakersOnly,
+        Self::CalendarMenu,
         Self::MoreDictationShortcuts,
         Self::PauseMenu,
         Self::PrintStart,
@@ -173,5 +178,6 @@ impl Feature {
         Self::ShellCompletions,
         Self::YoloMode,
         Self::CursorContext,
+        Self::CopyDictationAudio,
     ];
 }
