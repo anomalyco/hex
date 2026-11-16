@@ -154,6 +154,12 @@ fn a_light_host_draws_the_dark_recording_from_the_first_frame() {
         rt.set_system_dark(true);
         for _ in 0..16 {
             rt.frame(1.0 / 60.0);
+            // The elapsed label reads the wall clock, and 17 software renders
+            // can straddle a second on a slow runner: hold the clock so only
+            // the host change can alter the pixels.
+            if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+                shown.started = Instant::now() - Duration::from_secs(258);
+            }
             let frame = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
             assert!(
                 frame == first,
