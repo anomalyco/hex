@@ -1600,7 +1600,10 @@ and [rune_ui/fun.rs](../../src/rune_ui/fun.rs). Checks:
 `osascript_failure_classifies_user_cancel_and_errors`,
 `audio_service_restart_interrupts_stream_and_recovers`,
 `voice_filter_saves_the_mode_and_applies_the_tuning_live`,
-`try_it_records_and_plays_through_the_host`, and
+`try_it_records_and_plays_through_the_host`,
+`preview_each_effect_before_install_without_applying_it`,
+`voice_filter_setup_distinguishes_an_available_input_from_a_call`,
+`rapid_auditions_replace_pending_audio_and_invalidate_work_in_flight`, and
 `voice_filter_needs_labs_or_hex_microphone`.
 Scenes: `mac-voice-filter`, `mac-voice-filter-muted`,
 `mac-voice-filter-driver-missing`, `voice-filter`, `voice-filter-unavailable`

@@ -349,7 +349,7 @@ fn effect_grid(ui: &Ui, p: Paint) -> El {
             })
             .variant(rune_kit::IconButtonVariant::Neutral)
             .control_size(rune_kit::ControlSize::Regular)
-            .label(&format!("{action}: {label}"))
+            .label(format!("{action}: {label}"))
             .on_press(move |ui: &mut Ui| {
                 ask_demo(
                     ui,
