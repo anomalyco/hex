@@ -167,7 +167,7 @@ impl Pane {
             Pane::VoiceFilter => &VOICE_FILTER_ICON,
             Pane::HudLab => &HUD_LAB_ICON,
             Pane::Activity => &ACTIVITY_ICON,
-            Pane::WhatsNew => &icons::BOOK,
+            Pane::WhatsNew => &icons::PLAIN_BOOK,
         }
     }
 }
