@@ -413,6 +413,13 @@ fn shown(ui: &Ui) -> Vec<Row> {
         .collect()
 }
 
+pub(super) fn offered(ui: &Ui, feature: Feature) -> bool {
+    feature.audience() == crate::labs::Audience::Everyone
+        && shown(ui)
+            .iter()
+            .any(|row| row.lab.id() == feature.name() && !row.locked)
+}
+
 fn rows(ui: &Ui) -> Vec<Row> {
     let caps = ui.platform.caps;
     let settings = &ui.settings;

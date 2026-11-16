@@ -72,6 +72,7 @@ mod speech_model;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
 mod vocabulary;
+mod whats_new;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1483,6 +1484,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::VoiceFilter => (Vec::new(), fun::pane(ui, p)),
         Pane::HudLab => hud_lab::pane(ui, p),
         Pane::Activity => activity::pane(ui, p),
+        Pane::WhatsNew => (Vec::new(), whats_new::feed(ui, p)),
     };
     let panel = col()
         .key("panel")

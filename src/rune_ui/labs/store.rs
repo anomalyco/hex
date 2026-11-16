@@ -5,7 +5,7 @@
 //! turns its lab on or off; a lab with settings of its own shows them on
 //! its card while on.
 
-use rune::{El, Icon, Tx, col, el, row, text};
+use rune::{El, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Switch, TextInput};
 
 use super::super::Ui;
@@ -298,25 +298,6 @@ fn chip(
     }
 }
 
-/// A rounded neutral square with the lab's icon.
-fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
-    el().key("tile")
-        .size(size, size)
-        .center()
-        .radius(if size > 40.0 {
-            p.k.radius.lg
-        } else {
-            p.k.radius.md
-        })
-        .fill(p.k.c.layer_02)
-        .border(p.hair, p.k.c.border_weak)
-        .child(
-            rune::icon(icon, (size * 0.5).round())
-                .key("glyph")
-                .color(p.k.c.icon_base),
-        )
-}
-
 /// One lab as a card: tile, name and tags on one line, up to two lines of
 /// description, its switch, and while on any settings of its own. A note
 /// under the description may run to three lines, so a caveat such as where
@@ -389,7 +370,7 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut V
         .gap(10.0)
         .items_start()
         .radius(p.k.radius.lg)
-        .child(tile(p, entry.icon, TILE))
+        .child(crate::rune_ui::icons::tile(p, entry.icon, TILE))
         .child(copy)
         .fill(c.bg_base)
         .border(
