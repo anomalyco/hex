@@ -11,7 +11,7 @@ use super::controls::{
     ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folder_label, folding, icon_row,
     icon_toggle_row, note, section, select, setting_row, toggle_row,
 };
-use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
+use super::lists::{PermissionControl, permission_control};
 use super::paste_access::PasteAccess;
 use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, PlatformRequest};
 use super::settings::toggle_menu;
@@ -1036,7 +1036,7 @@ const POLICIES: [MeetingPolicy; 3] = [
 
 /// The virtual microphone driver's row: install, update, or uninstall it.
 pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
-    let title = tr("Virtual microphone driver");
+    let title = tr("Hex Microphone");
     let Some(status) = &ui.platform.hex_microphone else {
         return setting_row(
             p,
@@ -1055,102 +1055,59 @@ pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
             move |ui: &mut Ui, _| ui.ask(request.clone()),
         )
     };
-    let install = || {
-        action(
-            "install",
-            tr("Install"),
-            PlatformRequest::InstallHexMicrophone,
-        )
+    let mut controls = row().key("controls").gap(8.0).center_y().flex_wrap();
+    let in_use = status.driver_loaded && status.mic_in_use;
+    let mut description = if in_use && !status.active_apps.is_empty() {
+        tr_fill("In use by {}", &status.active_apps.join(", "))
+    } else if in_use {
+        tr("In use").into()
+    } else if status.driver_loaded {
+        tr("Select Hex Microphone as the input in your call app").into()
+    } else if status.driver_bundle_installed {
+        tr("Hex Microphone is installed but unavailable").into()
+    } else {
+        tr("Installation briefly restarts system audio").into()
     };
-    let uninstall = || {
-        action(
-            "uninstall",
-            tr("Uninstall"),
-            PlatformRequest::UninstallHexMicrophone,
-        )
-    };
-    let state_tag = |label: &str, tone: Tone| tone_tag(p, "state", label, tone);
-    let controls = row().key("controls").gap(8.0).center_y();
-    let (description, controls) = match &status.action_state {
-        DriverActionState::Installing => (
-            tr("Installing driver and restarting Core Audio…").to_string(),
-            controls.child(state_tag(tr("Installing…"), Tone::Neutral)),
-        ),
-        DriverActionState::Uninstalling => (
-            tr("Removing driver and restarting Core Audio…").to_string(),
-            controls.child(state_tag(tr("Uninstalling…"), Tone::Neutral)),
-        ),
-        state if status.needs_update() => {
-            let installed = status.installed_version.as_deref().unwrap_or("1.0.0");
-            (
-                match state {
-                    DriverActionState::Cancelled => tr("Update cancelled").into(),
-                    DriverActionState::Failed(reason) => {
-                        tr_fill("Could not update driver: {}", reason)
-                    }
-                    _ => tr_fill("Update driver to v{}", &status.bundled_version),
-                },
-                controls
-                    .child(state_tag(
-                        &tr_fill("v{} installed", installed),
-                        Tone::Accent,
-                    ))
-                    .child(action(
+    match &status.action_state {
+        DriverActionState::Installing => {
+            description = tr("Installing driver and restarting Core Audio…").into()
+        }
+        DriverActionState::Uninstalling => {
+            description = tr("Removing driver and restarting Core Audio…").into()
+        }
+        state => {
+            if let DriverActionState::Failed(reason) = state {
+                description = format!("{} · {}", tr("Failed"), reason);
+            }
+            if matches!(state, DriverActionState::Cancelled) {
+                description = format!("{} · {}", tr("Cancelled"), description);
+            }
+            if status.driver_bundle_installed {
+                if status.needs_update() || !status.driver_loaded {
+                    controls = controls.child(action(
                         "update",
-                        tr("Update"),
+                        if status.needs_update() {
+                            tr("Update")
+                        } else {
+                            tr("Retry")
+                        },
                         PlatformRequest::InstallHexMicrophone,
-                    ))
-                    .child(uninstall()),
-            )
+                    ));
+                }
+                controls = controls.child(action(
+                    "uninstall",
+                    tr("Uninstall"),
+                    PlatformRequest::UninstallHexMicrophone,
+                ));
+            } else {
+                controls = controls.child(action(
+                    "install",
+                    tr("Install Hex Microphone"),
+                    PlatformRequest::InstallHexMicrophone,
+                ));
+            }
         }
-        state if status.driver_loaded => {
-            let version = status
-                .installed_version
-                .as_deref()
-                .unwrap_or(&status.bundled_version);
-            (
-                match state {
-                    DriverActionState::Cancelled => tr("Uninstall cancelled").into(),
-                    DriverActionState::Failed(reason) => {
-                        tr_fill("Could not update driver: {}", reason)
-                    }
-                    _ if !status.active_apps.is_empty() => tr_fill(
-                        "Streaming 48 kHz audio to {}",
-                        &status.active_apps.join(", "),
-                    ),
-                    _ => {
-                        tr("Choose Hex Microphone as your input in Slack, Zoom, or Discord").into()
-                    }
-                },
-                controls
-                    .child(state_tag(&tr_fill("Installed v{}", version), Tone::Success))
-                    .child(uninstall()),
-            )
-        }
-        DriverActionState::DoneUninstalled => (
-            tr("Driver removed").into(),
-            controls
-                .child(state_tag(tr("Removed"), Tone::Neutral))
-                .child(install()),
-        ),
-        DriverActionState::Cancelled => (
-            tr("Installation cancelled").into(),
-            controls
-                .child(state_tag(tr("Cancelled"), Tone::Neutral))
-                .child(install()),
-        ),
-        DriverActionState::Failed(reason) => (
-            tr_fill("Could not install driver: {}", reason),
-            controls
-                .child(state_tag(tr("Failed"), Tone::Danger))
-                .child(install()),
-        ),
-        _ => (
-            tr("Install the CoreAudio driver to choose Hex Microphone in Slack, Zoom, or Discord")
-                .into(),
-            controls.child(install()),
-        ),
-    };
+    }
     setting_row(p, "hex-mic-driver", title, Some(&description), controls)
 }
 
