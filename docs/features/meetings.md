@@ -230,9 +230,10 @@ Browser calls -> offered as "Call in <browser>": no site is read yet, so a
     a browser call after 20 s, never the Microsoft Teams (or other service's)
     choice; Always record can't be set for it from an offer
     └── browsers: chrome, chromium, brave, helium (helium-browser), firefox,
-        msedge, vivaldi (vivaldi-bin, vivaldi-stable, vivaldi-snapshot; a
-        Vivaldi web app runs in Vivaldi's process); others are not detected
-        (#1105)
+        zen (zen, zen-bin; the Flatpak or tarball build, content processes
+        included), msedge, vivaldi (vivaldi-bin, vivaldi-stable,
+        vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's process);
+        others are not detected (#1105)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -388,7 +389,8 @@ Brave's), Helium (`net.imput.helium`, helpers included; `helium` and
 `helium-browser` on Linux, `helium.exe` on Windows), Ardia
 (`com.ardia.browser`, its Chromium audio service reports
 `com.ardia.browser.helper`), Zen (`app.zen-browser.zen`; Firefox-based, so its
-helpers are `app.zen-browser.*` rather than `org.mozilla.*`), and Vivaldi
+helpers are `app.zen-browser.*` rather than `org.mozilla.*`, and on Linux the
+microphone's `zen` or `zen-bin` binary maps to it), and Vivaldi
 (`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on Linux, `vivaldi.exe` on
 Windows). Arc was missing until #801, so its Meet calls were never detected;
 Vivaldi was missing until #1105, so its calls

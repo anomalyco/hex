@@ -279,7 +279,7 @@ fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 45] = [
+const EXECUTABLES: [(&str, &str); 47] = [
     // Discord and its Canary and PTB builds, on Windows and Linux (the
     // Flatpak runs the same binary).
     ("discord", "com.hnc.Discord"),
@@ -324,6 +324,11 @@ const EXECUTABLES: [(&str, &str); 45] = [
     ("firefox", "org.mozilla.firefox"),
     ("firefox-bin", "org.mozilla.firefox"),
     ("firefox-esr", "org.mozilla.firefox"),
+    // Zen is Firefox-based. Its Flatpak and tarball launcher run `zen`, the
+    // tarball's binary is `zen-bin`, and every content process keeps the same
+    // executable, so the microphone's binary names the browser.
+    ("zen", "app.zen-browser.zen"),
+    ("zen-bin", "app.zen-browser.zen"),
     ("msedge", "com.microsoft.edgemac"),
     ("microsoft-edge", "com.microsoft.edgemac"),
     ("microsoft-edge-stable", "com.microsoft.edgemac"),
@@ -1178,6 +1183,10 @@ mod tests {
             ),
             ("chrome", "Google Chrome", Some("com.google.Chrome"), true),
             ("firefox.exe", "Firefox", Some("org.mozilla.firefox"), true),
+            // Zen on Linux: the Flatpak and tarball launcher binary, then the
+            // tarball's real `zen-bin`; content processes run the same one.
+            ("zen", "Zen", Some("app.zen-browser.zen"), true),
+            ("zen-bin", "Zen", Some("app.zen-browser.zen"), true),
             (
                 "msedge.exe",
                 "Microsoft Edge",
