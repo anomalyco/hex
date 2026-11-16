@@ -23,7 +23,7 @@ const COLUMNS: usize = 3;
 
 /// The columns: the first three models that speak the language, with the
 /// one being prepared, else the one in use, in the last place when the
-/// three leave it out. `first` (Labs › Model in use first) takes the first
+/// three leave it out. The model in use (`first`) takes the first
 /// column and the rest follow without it.
 fn columns(entries: &[Entry], first: Option<TranscriptionModelId>) -> Vec<&Entry> {
     let pinned = first.and_then(|id| entries.iter().find(|entry| entry.def.id == id));

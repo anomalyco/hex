@@ -109,8 +109,7 @@ pub(super) struct Picker {
     /// The card whose details are open (Parakeet Ultra's credit and
     /// published benchmarks).
     pub(super) details: super::model_details::DetailsState,
-    /// The model in use when the picker opened, which Labs › Model in use
-    /// first lists first; fixed until the picker closes.
+    /// The installed model in use when the picker opened, listed first; fixed until the picker closes.
     in_use_first: Option<TranscriptionModelId>,
 }
 
@@ -215,7 +214,7 @@ fn bytes_label(bytes: u64) -> String {
 }
 
 /// The model the comparison shows first: the one in use when the picker
-/// opened, while Labs › Model in use first is on.
+/// opened.
 fn pinned(ui: &Ui) -> Option<TranscriptionModelId> {
     ui.picker.in_use_first
 }

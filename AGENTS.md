@@ -42,7 +42,7 @@ feature with its own pane joins the sidebar as a normal item while on and is
 hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
 (beta), Voice Filter (Dev; locked on while its macOS driver is installed, and
 a stable build with the driver keeps its pane for Uninstall alone), Playground
-(Dev), Live text, Live chapters, Vocabulary biasing, Screen vocabulary
+(Dev), Live text, Live chapters, Screen vocabulary
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Unload model when idle
@@ -106,8 +106,8 @@ substitute for source inspection or a second roadmap.
   Wayland has no general protocol) and the shared debounced policy that turns a
   mapped source into an installed-only model-picker choice.
 - `transcription/app_model_switching`: the matching debounced policy for a
-  dictation mode's optional speech model and language (Labs › Switch model with
-  app, macOS and Windows): the frontmost app's mode choice becomes an
+  dictation mode's saved speech model and language (the existing per-app opt-in
+  on macOS and Windows): the frontmost app's mode choice becomes an
   installed-only picker preparation once idle. Both OSes match by application,
   never by website, and Hex's own window (or no app in front) is ignored;
   Linux has no host for it.
@@ -585,7 +585,7 @@ substitute for source inspection or a second roadmap.
 - `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
   description, the card's title and line, audience, group, OSes), the
   website's `site/src/labs.json` (`labs::web`), the runtime gates (`labs::live_text`, `live_chapters`,
-  `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
+  `playground`, `mouse_shortcuts`), and
   `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
 - `capture_host`: Scrawl's capture engine (the `scrawl-capture` crate in

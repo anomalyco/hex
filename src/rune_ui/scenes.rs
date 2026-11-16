@@ -99,7 +99,7 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),
-    // Labs › Select multiple dictations: two entries selected, with the card
+    // Two History entries selected, with the card
     // that copies or deletes them.
     ("history-selection", |ui| {
         *ui = portal_fixture();
@@ -710,7 +710,7 @@ pub(super) const SCENES: &[Scene] = &[
         ui.pane = Pane::HudLab;
     }),
     ("mac-labs", labs_with_some_on),
-    // Where hex://labs/vocabulary-biasing lands: its group's chip.
+    // Where hex://labs/live-text lands: its group's chip.
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();
         ui.labs_open = true;

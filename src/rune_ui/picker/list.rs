@@ -62,7 +62,7 @@ struct Groups<'a> {
     others: Vec<&'a Entry>,
 }
 
-/// Sorts `entries` into their groups. `first` (Labs › Model in use first)
+/// Sorts `entries` into their groups. The model in use (`first`)
 /// leads its group, and an imported one puts your model files first.
 fn groups(entries: &[Entry], first: Option<TranscriptionModelId>) -> Groups<'_> {
     let speaking = lead(

@@ -509,7 +509,7 @@ protocol for the active layout, so there Hex keeps the settings but does not
 observe input-source changes or show these controls.
 
 On macOS and Windows, `labs.app_model_switching` opts into switching the
-shared speech-model picker per dictation mode. Each mode, Global included, may
+shared speech-model picker per dictation mode. There is no Settings editor for this saved opt-in. Each mode, Global included, may
 carry `speech`, a model and a language it supports, for example
 `{"model":"parakeet_v3","language":"es"}` in
 `dictation_processing.default_mode` or `dictation_processing.modes[]`; omit it
@@ -520,11 +520,11 @@ recording holds a due switch until it is idle. Matching is by application on
 both macOS and Windows, and a mode's website rules are ignored, so a mode
 chosen only by website never switches. Hex's own window, and a moment with no
 app in front, are ignored: they neither schedule nor cancel a switch, so
-enabling the lab while Hex is in front applies nothing until you next focus
+enabling it while Hex is in front applies nothing until you next focus
 another app. Editing a mode's choice applies when you next focus an app whose
 mode carries it. With keyboard switching also on, the switch that is due
 later wins, and an app switch wins a tie in the same tick. Linux does not
-support this lab.
+support per-app model switching.
 
 - Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
 - Optional settings take `none` to clear them.

@@ -57,9 +57,8 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
     while the fallback is downloaded); the card warns
 ```
 
-With Labs › Model in use first on, an import in use when the picker opens
-leads Every model, and "Your model files" shows above the language's group
-([labs.md](labs.md)).
+An imported model in use when the picker opens leads Compare. In the full
+list, “Your model files” comes first unless you explicitly sort by size or name.
 
 ## Use A Model File Where It Is (Labs)
 
