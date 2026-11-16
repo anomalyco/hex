@@ -1023,9 +1023,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   native Rust and never touch the script engine.
 - Clipboard insertion is the fixed text-insertion path. Restore the previous
   clipboard only if no newer paste or external clipboard change superseded it.
-  The one exception: on macOS, a frontmost app embedding Chromium 155 or 156
+  The first exception: on macOS, a frontmost app embedding Chromium 155 or 156
   (read from its bundle's framework version) gets the text typed, because
   those versions can drop a ⌘V that races their pasteboard notification.
+  A second exception on macOS: Microsoft's Windows App
+  (`com.microsoft.rdc.macos`, `com.microsoft.windowsapp`) gets the text typed
+  one paced key at a time, because that client reads a synthetic ⌘V as a bare
+  "v" (#1048). Both type instead of pasting and leave the clipboard alone.
 - Dictate without processing (`raw_dictation_hotkey`, Output pane) is
   unbound by default and registers, grabs, or reserves nothing until bound
   (on Linux a portal entry and X11 grab exist only while bound). It follows
