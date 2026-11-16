@@ -10,6 +10,7 @@ mod browser_access;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 pub(super) mod screenshots;
+mod stop_phrase;
 mod store;
 mod voice_prompt;
 mod yolo_mode;
@@ -214,6 +215,11 @@ pub(super) struct Store {
     pub(super) phrase: TextEdit,
     /// Whether `phrase` started from the saved phrase.
     pub(super) phrase_synced: bool,
+    /// Labs › Stop phrase's phrase while it's on: a draft, so invalid words
+    /// stay in its field instead of replacing the saved phrase.
+    pub(super) stop_phrase: TextEdit,
+    /// Whether `stop_phrase` started from the saved phrase.
+    pub(super) stop_phrase_synced: bool,
     /// Labs › Browser access to the local API's origins while it's on: a
     /// draft, saved as the comma-separated field shows it.
     pub(super) origins: TextEdit,
@@ -263,6 +269,40 @@ impl Store {
         }
         let draft = self.phrase.text.trim();
         !draft.is_empty() && draft != settings.labs.voice_prompt_phrase
+    }
+
+    /// Starts Stop phrase's field at `saved` when Labs opens or its lab turns
+    /// on.
+    pub(super) fn sync_stop_phrase(&mut self, saved: &str) {
+        self.stop_phrase = TextEdit::new(saved.to_owned());
+        self.stop_phrase_synced = true;
+    }
+
+    /// Adopts a phrase another writer saved, unless the field holds an
+    /// unsaved draft.
+    pub(super) fn rebase_stop_phrase(&mut self, before: &str, after: &str) {
+        if !self.stop_phrase_synced || self.stop_phrase.text.trim() == before {
+            self.sync_stop_phrase(after);
+        }
+    }
+
+    /// The phrase Stop phrase's `settings` should hold: the draft when it
+    /// passes validation. An invalid draft never replaces the saved phrase.
+    pub(super) fn project_stop_phrase(&self, settings: &mut crate::app_settings::AppSettings) {
+        let draft = self.stop_phrase.text.trim();
+        if crate::dictation::voice_prompt::phrase_problem(draft).is_none() {
+            settings.labs.stop_phrase_text = draft.to_owned();
+        }
+    }
+
+    /// Whether Stop phrase's field holds typing the saved settings don't
+    /// have. A lab that's off has no draft to keep.
+    pub(super) fn stop_phrase_dirty(&self, settings: &crate::app_settings::AppSettings) -> bool {
+        if !settings.labs.stop_phrase {
+            return false;
+        }
+        let draft = self.stop_phrase.text.trim();
+        !draft.is_empty() && draft != settings.labs.stop_phrase_text
     }
 
     /// Starts the origins field at the saved origins, normalized.
@@ -378,6 +418,8 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
     ui.lab_store
         .sync_phrase(&ui.settings.labs.voice_prompt_phrase);
     ui.lab_store
+        .sync_stop_phrase(&ui.settings.labs.stop_phrase_text);
+    ui.lab_store
         .sync_origins(&ui.settings.labs.api_browser_origins);
     tx.settle();
 }
@@ -474,6 +516,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         ..live_text
     });
     rows.push(row(Feature::FailureNotices, None));
+    rows.push(row(Feature::StopPhrase, None));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         let live_typing = row(Feature::LiveTyping, Some(&KEYBOARD));
         // An organization's lock and its note already say why the switch is
@@ -844,6 +887,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::PrintStart => "lab-print-start",
         Feature::VoicePrompt => "lab-voice-prompt",
         Feature::CursorContext => "lab-cursor-context",
+        Feature::StopPhrase => "lab-stop-phrase",
     }
 }
 
@@ -891,6 +935,12 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::VoicePrompt => {
             let saved = ui.settings.labs.voice_prompt_phrase.clone();
             ui.lab_store.sync_phrase(&saved);
+        }
+        // Its phrase field starts at the saved phrase, and an invalid draft
+        // leaves with its lab.
+        Feature::StopPhrase => {
+            let saved = ui.settings.labs.stop_phrase_text.clone();
+            ui.lab_store.sync_stop_phrase(&saved);
         }
         // Its origins field starts at (and shows) the saved origins.
         Feature::ApiBrowserAccess => {
@@ -972,6 +1022,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
                 .child(appearance_theme(ui, p)),
         ),
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
+        Lab::Feature(Feature::StopPhrase) => Some(stop_phrase::body(ui, p)),
         Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(

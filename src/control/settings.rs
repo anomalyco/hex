@@ -943,6 +943,45 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_phrase_needs_two_words_and_six_letters() {
+        let change = apply(&AppSettings::default(), "labs.stop_phrase", "on", &rules()).unwrap();
+        assert!(change.settings.labs.stop_phrase);
+        assert_eq!(
+            change.settings.labs.stop_phrase_text,
+            crate::dictation::stop_phrase::DEFAULT_PHRASE
+        );
+        let change = apply(
+            &change.settings,
+            "labs.stop_phrase_text",
+            "  that's all ",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.stop_phrase_text, "that's all",
+            "a saved phrase is trimmed"
+        );
+        for (raw, reason) in [
+            ("stop", "two words"),
+            ("a b c", "six letters"),
+            ("", "two words"),
+        ] {
+            let error =
+                apply(&change.settings, "labs.stop_phrase_text", raw, &rules()).unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{raw}");
+            assert!(error.message.contains(reason), "{raw}: {}", error.message);
+        }
+        assert_eq!(
+            change.settings.labs.stop_phrase_text, "that's all",
+            "a refused draft leaves the saved phrase"
+        );
+        assert_eq!(
+            get(&change.settings, "labs.stop_phrase_text").unwrap()[0].value,
+            Value::String("that's all".into())
+        );
+    }
+
+    #[test]
     fn settings_name_real_capabilities_and_keys() {
         let capabilities = crate::rune_ui::capabilities();
         for (prefix, capability) in NEEDS {

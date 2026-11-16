@@ -21,6 +21,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("{month} {day}, {year}", "{day} de {month} de {year}"),
     ("Preview the tones Hex plays when you dictate.", "Ouça os sons que o Hex toca durante o ditado."),
     ("Voice prompt", "Instrução por voz"),
+    ("Stop phrase", "Frase de parada"),
+    ("Say a phrase to finish a hands-free dictation", "Diga uma frase para terminar um ditado sem usar as mãos"),
     ("Copy captures as a zip", "Copiar capturas como zip"),
     ("A finished capture copies as one zip file, without video or audio.", "Uma captura concluída é copiada como um único arquivo zip, sem vídeo e áudio"),
     ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Diga «rewrite this» em um ditado e depois uma instrução; o Hex aplica com o modelo OpenCode do modo"),

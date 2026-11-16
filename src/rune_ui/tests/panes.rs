@@ -2333,6 +2333,60 @@ fn voice_prompt_shows_its_phrase_on_its_card_while_on() {
 }
 
 #[test]
+fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::StopPhrase.group()));
+    settle(&mut rt);
+    assert!(rt.find("stop-phrase-text").is_none(), "hidden while off");
+    tap(&mut rt, "lab-stop-phrase");
+    assert!(rt.state.settings.labs.stop_phrase);
+    assert!(rt.find("stop-phrase-text").is_some());
+    assert_eq!(
+        rt.state.lab_store.stop_phrase.text,
+        crate::dictation::stop_phrase::DEFAULT_PHRASE,
+        "the field starts at the saved phrase"
+    );
+
+    // A draft that fails validation stays in the field, says why, and leaves
+    // both saved phrases alone.
+    let voice_prompt = rt.state.settings.labs.voice_prompt_phrase.clone();
+    rt.update(|ui, _| ui.lab_store.stop_phrase = rune::TextEdit::new("stop".to_string()));
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.stop_phrase_text,
+        crate::dictation::stop_phrase::DEFAULT_PHRASE
+    );
+    assert_eq!(
+        rt.state.settings.labs.voice_prompt_phrase, voice_prompt,
+        "Voice prompt's phrase is its own"
+    );
+    refresh(&mut rt);
+    assert!(rt.find("stop-phrase-text-error").is_some());
+
+    // A valid draft saves.
+    rt.update(|ui, _| {
+        ui.lab_store.stop_phrase = rune::TextEdit::new("that's all".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.stop_phrase_text, "that's all");
+    refresh(&mut rt);
+    assert!(rt.find("stop-phrase-text-error").is_none());
+
+    // A phrase saved elsewhere updates the field.
+    let mut external = rt.state.settings.clone();
+    external.labs.stop_phrase_text = "end dictation".to_string();
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.stop_phrase.text, "end dictation");
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-stop-phrase");
+    assert!(!rt.state.settings.labs.stop_phrase);
+    assert!(rt.find("stop-phrase-text").is_none());
+}
+
+#[test]
 fn browser_access_shows_its_origins_on_its_card_while_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));

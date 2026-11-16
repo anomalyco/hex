@@ -80,7 +80,8 @@ impl Feature {
             | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::SpeakersOnly
-            | Self::Playground => Group::Dictation,
+            | Self::Playground
+            | Self::StopPhrase => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
             | Self::SpokenSymbols

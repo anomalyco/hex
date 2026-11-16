@@ -83,6 +83,7 @@ impl Feature {
             Self::ShellCompletions => "Shell completions",
             Self::YoloMode => "YOLO mode",
             Self::CopyDictationAudio => "Copy dictation audio",
+            Self::StopPhrase => "Stop phrase",
         }
     }
 
@@ -291,6 +292,7 @@ impl Feature {
             Self::CopyDictationAudio => {
                 "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
             }
+            Self::StopPhrase => "Say a phrase to finish a hands-free dictation",
         }
     }
 }

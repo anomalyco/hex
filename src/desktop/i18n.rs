@@ -1654,6 +1654,7 @@ mod tests {
         include_str!("../rune_ui/labs/group.rs"),
         include_str!("../rune_ui/labs/screenshots.rs"),
         include_str!("../rune_ui/labs/store.rs"),
+        include_str!("../rune_ui/labs/stop_phrase.rs"),
         include_str!("../rune_ui/labs/voice_prompt.rs"),
         include_str!("../rune_ui/linux_host.rs"),
         include_str!("../rune_ui/list_detail.rs"),

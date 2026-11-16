@@ -62,6 +62,9 @@ struct Job {
     /// release; `None` for a `hex dictation` capture (Labs › YOLO
     /// mode).
     held_ms: Option<u64>,
+    /// Labs › Stop phrase: the words its capture ended with, read when the
+    /// phrase was heard and removed from the transcript before processing.
+    stop_phrase: Option<String>,
 }
 
 enum OutputJob {
@@ -91,6 +94,8 @@ struct Finishing {
     /// A shortcut, not a `hex dictation` command, started the capture.
     by_shortcut: bool,
     released: Instant,
+    /// Labs › Stop phrase: the words that ended this capture, when they did.
+    stop_phrase: Option<String>,
 }
 
 struct OutputWorker {
@@ -290,9 +295,18 @@ pub(crate) fn run(
                     "transcribed Linux dictation"
                 );
                 let text = transcribed.text;
+                // Labs › Stop phrase: the words that finished this capture
+                // never reach the text or its processing.
+                let text =
+                    crate::dictation::stop_phrase::strip_finished(text, job.stop_phrase.as_deref());
                 if text.is_empty() {
                     if let Some(print) = job.print.take() {
                         print.send(PrintedTranscript::NoSpeech);
+                    }
+                    if job.stop_phrase.is_some() {
+                        // A capture that was only the phrase: nothing to
+                        // paste, no History, and nothing failed.
+                        return Ok(String::new());
                     }
                     return Err(eyre!("transcription was empty"));
                 }
@@ -412,6 +426,8 @@ pub(crate) fn run(
     // without processing, or Labs › Terminal paste).
     let mut recording_flavour = crate::dictation::DictationFlavour::Normal;
     let mut recording_by_shortcut = false;
+    // Labs › Stop phrase: this capture's detector, fresh for every capture.
+    let mut stop_phrase = crate::dictation::stop_phrase::Detector::new();
     let mut pending = 0_usize;
     // A local API client's dictation, and its transcripts as they finish.
     let mut service = ServiceDictations::default();
@@ -610,6 +626,7 @@ pub(crate) fn run(
                 print,
                 flavour,
                 by_shortcut,
+                stop_phrase,
                 ..
             } = finishing.take().expect("a release is finishing");
             let silent = submit_capture(
@@ -625,6 +642,7 @@ pub(crate) fn run(
                 by_shortcut,
                 &mut active_typing,
                 context,
+                stop_phrase,
             )?;
             if silent
                 && reopen_silent_stream(
@@ -726,10 +744,13 @@ pub(crate) fn run(
                 .as_ref()
                 .and_then(|hotkey| hotkey.events.try_recv().ok())
         {
-            // A printing stop finishes as a stop does; its reply follows.
-            let (action, mut print) = match action {
-                HotkeyEvent::FinishPrinting(reply) => (HotkeyEvent::Finish, Some(reply)),
-                action => (action, None),
+            // A printing stop finishes as a stop does, and Labs › Stop
+            // phrase's finish as a release does; each carries what its job
+            // needs.
+            let (action, mut print, finish_phrase) = match action {
+                HotkeyEvent::FinishPrinting(reply) => (HotkeyEvent::Finish, Some(reply), None),
+                HotkeyEvent::FinishPhrase(phrase) => (HotkeyEvent::Finish, None, Some(phrase)),
+                action => (action, None, None),
             };
             match action {
                 // A client's dictation records: the shortcut and `hex
@@ -757,6 +778,9 @@ pub(crate) fn run(
                     }
                     recording_flavour = flavour;
                     recording_by_shortcut = !command;
+                    // Labs › Stop phrase: a new capture listens for the phrase
+                    // from its own words.
+                    stop_phrase = crate::dictation::stop_phrase::Detector::new();
                     // A short tap or chord must never create an input method;
                     // Live typing starts at the hold threshold (or the Toggle
                     // press), before the stream opens so it can demand text.
@@ -824,6 +848,9 @@ pub(crate) fn run(
                         } else {
                             Default::default()
                         },
+                        // Labs › Stop phrase: the phrase's own finish carries
+                        // its words, which the job removes.
+                        stop_phrase: finish_phrase,
                         ..begin_finishing(&capture, released_at, print.take(), || {
                             suppressor.restore_then(feedback::deferred_stop())
                         })
@@ -1089,6 +1116,16 @@ pub(crate) fn run(
                     }
                     // A client's dictation is the only capture while it records.
                     service.partial(&partial);
+                    // Labs › Stop phrase: words read twice in a row end a
+                    // hands-free capture as its shortcut's press would; the
+                    // state machine refuses anything else.
+                    if !service.is_active() && capture.is_recording() && crate::labs::stop_phrase()
+                    {
+                        let phrase = crate::labs::stop_phrase_text();
+                        if stop_phrase.observe(&partial.stable, &partial.tentative, &phrase) {
+                            commands.finish_hands_free(phrase);
+                        }
+                    }
                 }
             }
             RecoveringAudioInputEvent::Timeout => {}
@@ -1249,6 +1286,7 @@ fn begin_finishing(
         flavour: crate::dictation::DictationFlavour::Normal,
         by_shortcut: false,
         released: Instant::now(),
+        stop_phrase: None,
     }
 }
 
@@ -1266,6 +1304,7 @@ fn submit_capture(
     by_shortcut: bool,
     typing: &mut Option<CaptureTyping>,
     context: crate::linux::context::PendingContext,
+    stop_phrase: Option<String>,
 ) -> Result<bool> {
     // A discarded capture drops this guard without starting or ending a
     // session; a transcribed one moves it into the job.
@@ -1311,6 +1350,7 @@ fn submit_capture(
                 flavour,
                 typing: typing.map(|CaptureTyping { session, .. }| session),
                 held_ms,
+                stop_phrase,
             }));
             match jobs.try_send(job) {
                 Ok(()) => {
@@ -1546,6 +1586,7 @@ mod tests {
             false,
             &mut None,
             Default::default(),
+            None,
         )
         .unwrap();
         assert!(silent);
@@ -1697,6 +1738,7 @@ mod tests {
             false,
             &mut None,
             Default::default(),
+            None,
         )
         .unwrap();
         assert_eq!(pending, 1);
@@ -1768,6 +1810,7 @@ mod tests {
             false,
             &mut None,
             Default::default(),
+            None,
         )
         .unwrap();
 
@@ -1805,6 +1848,7 @@ mod tests {
             false,
             &mut None,
             Default::default(),
+            None,
         )
         .unwrap();
         assert!(queued.try_recv().is_ok());

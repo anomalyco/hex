@@ -276,9 +276,19 @@ impl DictationHotkey {
 
     /// Recording hands-free: locked by a double tap, a Toggle release, or
     /// `hex dictation start`.
-    #[cfg(test)]
     pub fn is_locked(&self) -> bool {
         matches!(self.state, State::Locked)
+    }
+
+    /// Labs › Stop phrase: ends a hands-free capture as its finishing press
+    /// does, leaving the keys to settle as that press's would. A held press
+    /// records on, and an idle machine does nothing.
+    pub fn finish_hands_free(&mut self) -> Option<HotkeyAction> {
+        if !self.is_locked() {
+            return None;
+        }
+        self.state = State::Dirty;
+        Some(HotkeyAction::Finish)
     }
 
     pub fn suppresses_recognition(&self) -> bool {

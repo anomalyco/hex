@@ -206,6 +206,9 @@ impl Feature {
             Self::CopyDictationAudio => {
                 "History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one file on the clipboard, ready to attach. Needs Keep recordings, and copies the kept WAV without storing any audio itself"
             }
+            Self::StopPhrase => {
+                "Say a phrase at the end of a hands-free dictation to finish it; the phrase never reaches the pasted text"
+            }
         }
     }
 }

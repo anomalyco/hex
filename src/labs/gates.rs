@@ -373,6 +373,27 @@ pub fn voice_prompt_phrase() -> String {
         .clone()
 }
 
+/// Labs › Stop phrase: a spoken phrase at the end of a hands-free dictation
+/// finishes it as if the shortcut were pressed again (read as each hands-free
+/// capture starts). The partials it matches are produced while this or Live
+/// text is on; the HUD's live-text line still needs [`live_text`].
+pub fn stop_phrase() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    STOP_PHRASE.load(Ordering::Acquire) && Feature::StopPhrase.on_this_os()
+}
+
+/// The phrase that finishes a hands-free dictation (read where each OS's
+/// listener matches it, and once more when it fires so its job strips exactly
+/// the words it heard).
+pub fn stop_phrase_text() -> String {
+    STOP_PHRASE_TEXT
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

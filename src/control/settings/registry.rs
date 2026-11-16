@@ -677,6 +677,18 @@ pub(super) const KEYS: &[Key] = &[
          \"rewrite this\" by default",
     ),
     key(
+        "labs.stop_phrase",
+        Kind::Bool,
+        "Labs: a spoken phrase at the end of a hands-free dictation finishes it, as if the \
+         shortcut were pressed again",
+    ),
+    key(
+        "labs.stop_phrase_text",
+        Kind::Text,
+        "Labs: the phrase that finishes a hands-free dictation, at least two words and six \
+         letters; \"stop dictation\" by default",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
