@@ -372,8 +372,8 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │       memory clears on a detection, a read naming another call, the
      │       call app leaving the microphone, Keep recording, the page
      │       returning to the recorded call during the 30 s grace (a hand
-     │       stop keeps it), away while Meetings is off, or after 2 minutes
-     │       without a detection
+     │       stop keeps it), while Meetings is off, or two minutes after the
+     │       page named the new call
      └── Stopped by hand, or on its own after its call ended -> the snooze
          ends once the call app has been off the microphone for 3 s (seen
          while transcribing too), so the next call in the same app is offered
@@ -955,8 +955,8 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      │   ends it; a third code still does
      ├── The memory clears on a detection, a read naming another call, the
      │   call app leaving the microphone, Keep recording, the page returning
-     │   to the recorded call during the grace (a hand stop keeps it), away
-     │   while Meetings is off, and 2 minutes without a detection
+     │   to the recorded call during the grace (a hand stop keeps it), while
+     │   Meetings is off, and two minutes after the page named the new call
      └── Only calls whose page names a code (Google Meet today): a browser
          Hex can't read (no Automation, no web area) names one only from a
          code-only tab title, and a named title names none, so it keeps the
