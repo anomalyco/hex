@@ -257,7 +257,7 @@ pub(super) fn driver_installed(ui: &Ui) -> bool {
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
     let mut content = page("content");
     if uninstall_only() {
-        content = content.child(card(p, "microphone", vec![uninstall_row(ui, p)]));
+        content = content.child(card(p, "fun-hex-microphone", vec![uninstall_row(ui, p)]));
     } else {
         let setup = if ui.platform.caps.hex_microphone {
             super::platform_settings::driver_row(ui, p)
@@ -271,7 +271,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 tr("What callers hear"),
                 vec![effect_grid(ui, p), try_it(ui, p)],
             ))
-            .child(card(p, "microphone", vec![setup]));
+            .child(card(p, "fun-hex-microphone", vec![setup]));
         if ui.platform.tuning.mode != VoiceFilterMode::Normal {
             content = content.child(super::general::disclosure_toggle(
                 ui,
