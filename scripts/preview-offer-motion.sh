@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run under a render lease, in a synced checkout. No native windows or audio.
 set -eu
-case "${1:-}" in before|fitted|reduced|quiet|quiet-reduced|quiet-light|quiet-unknown|quiet-label|quiet-cross) ;; *) echo 'unknown offer variant' >&2; exit 2;; esac
+case "${1:-}" in before|fitted|reduced|quiet|quiet-reduced|quiet-light|quiet-unknown|quiet-label|quiet-cross|quiet-label-light|quiet-label-1x|quiet-label-light-1x|quiet-frame|quiet-frame-light|quiet-frame-1x|quiet-frame-light-1x|quiet-frame-fr) ;; *) echo 'unknown offer variant' >&2; exit 2;; esac
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # scripts/check's code-shape step enumerates tracked sources; a render
     # worker sync may be a disposable source-only copy, without an index.
@@ -20,4 +20,4 @@ if [[ $1 == quiet || $1 == fitted ]]; then
     ffmpeg -loglevel error -y -framerate 15 -i "$frames/%03d.png" -frames:v 138 -an -c:v libx264 -crf 17 -pix_fmt yuv420p -movflags +faststart "$out/slow.mp4"
 fi
 cp "$frames/trace.csv" "$out/"
-for f in 023 024 028 036 080 084 088 100 138; do cp "$frames/$f.png" "$out/"; done
+for f in 023 024 028 036 080 081 084 088 100 138; do cp "$frames/$f.png" "$out/"; done

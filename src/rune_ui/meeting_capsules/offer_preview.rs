@@ -10,7 +10,7 @@ fn offer_navigation_preview() {
     let dir = std::path::PathBuf::from(folder);
     std::fs::create_dir_all(&dir).unwrap();
     let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
-    let mut trace = String::from("corner,frame,key,x,y,w,h\n");
+    let mut trace = String::from("corner,frame,key,x,y,w,h,radius\n");
     for corner in [
         MeetingIndicatorCorner::TopRight,
         MeetingIndicatorCorner::TopLeft,
@@ -18,11 +18,20 @@ fn offer_navigation_preview() {
         MeetingIndicatorCorner::BottomLeft,
     ] {
         let variant = std::env::var("HEX_OFFER_VARIANT").unwrap_or_default();
-        let dark = variant != "quiet-light";
+        let dark = !variant.contains("light");
+        let scale = if variant.ends_with("-1x") { 1.0 } else { 2.0 };
+        let frame_study = variant.starts_with("quiet-frame");
+        if variant.ends_with("-fr") {
+            crate::desktop::i18n::apply(Some("fr"));
+        }
+        REFINED.set(frame_study);
         QUIET.set(variant.starts_with("quiet"));
         DISMISSAL.set(match variant.as_str() {
             "quiet-label" => Some(Dismissal::Label),
             "quiet-cross" => Some(Dismissal::Cross),
+            v if v.starts_with("quiet-frame") || v.starts_with("quiet-label-") => {
+                Some(Dismissal::Label)
+            }
             _ => None,
         });
         let prototype = variant != "before";
@@ -32,16 +41,7 @@ fn offer_navigation_preview() {
             slack_huddle()
         };
         if prototype {
-            let widths = [false, true].map(|open| {
-                let (probe, _, _) =
-                    runtime_with(offer(candidate.clone()), open, dark, MENU, measure_page);
-                probe
-                    .elements()
-                    .iter()
-                    .find(|el| el.key.as_deref() == Some("page"))
-                    .unwrap()
-                    .rect[2]
-            });
+            let widths = measure_offer(&candidate, dark, scale);
             POSE.set((widths, 0.0));
         }
         let reduced = variant.ends_with("reduced");
@@ -52,7 +52,8 @@ fn offer_navigation_preview() {
             kit.motion.disclosure
         };
         let mut velocity = 0.0;
-        let mut size = if prototype { MENU } else { PANEL };
+        let mut size = if prototype { preview_viewport() } else { PANEL };
+        let mat_width = MENU.0.max(size.0) + 40.0;
         let (mut rt, commands, chosen) = runtime_with(
             offer(candidate),
             false,
@@ -61,6 +62,7 @@ fn offer_navigation_preview() {
             if prototype { fitted_offer } else { view },
         );
         rt.transparent = true;
+        rt.set_viewport(size, scale);
         rt.update(|c, tx| {
             c.corner = corner;
             tx.instant();
@@ -73,14 +75,21 @@ fn offer_navigation_preview() {
         rt.settle_all();
         rt.frame(0.0);
         for frame in 0..=138 {
-            if frame == 138 {
+            if frame == 138 || (frame == 81 && frame_study) {
                 rt.pointer_move(0.0, 0.0);
+                let (target, name) = if frame == 81 {
+                    ("always-record", tr("Always record"))
+                } else if frame_study {
+                    ("record", tr("Record"))
+                } else {
+                    ("offer-more", tr("More"))
+                };
                 let focused = |rt: &Runtime<Capsule>| {
                     rt.elements().iter().any(|e| {
-                        e.key.as_deref() == Some("offer-more")
+                        e.key.as_deref() == Some(target)
                             && e.focus_visible
                             && e.role == "button"
-                            && e.label.as_deref() == Some(tr("More"))
+                            && e.label.as_deref() == Some(name)
                     })
                 };
                 for _ in 0..5 {
@@ -93,7 +102,7 @@ fn offer_navigation_preview() {
                         break;
                     }
                 }
-                assert!(focused(&rt), "Tab must reach the named More button");
+                assert!(focused(&rt), "Tab must reach {name}");
             }
             let click = match frame {
                 24 => Some("offer-more"),
@@ -108,7 +117,7 @@ fn offer_navigation_preview() {
                 rt.frame(0.0);
                 if let Ok(requested) = sizes.try_recv() {
                     size = requested;
-                    rt.set_viewport(size, 2.0);
+                    rt.set_viewport(size, scale);
                 }
                 assert_eq!(rt.state.more_open, frame == 24);
             }
@@ -126,7 +135,7 @@ fn offer_navigation_preview() {
             }
             rt.frame(1.0 / 60.0);
             let ox = if corner.is_right() {
-                580.0 - size.0
+                mat_width - 20.0 - size.0
             } else {
                 20.0
             };
@@ -140,19 +149,22 @@ fn offer_navigation_preview() {
                     let [x, y, w, h] = el.rect;
                     writeln!(
                         trace,
-                        "{corner:?},{frame},{key},{},{},{w},{h}",
+                        "{corner:?},{frame},{key},{},{},{w},{h},{}",
                         ox + x,
-                        oy + y
+                        oy + y,
+                        el.radius
                     )
                     .unwrap();
                 }
             }
             if corner == MeetingIndicatorCorner::TopRight {
-                let w = (2.0 * size.0) as u32;
-                let h = (2.0 * size.1) as u32;
+                let w = (scale * size.0) as u32;
+                let h = (scale * size.1) as u32;
                 let target = offscreen::target(&gpu.device, w, h);
                 let rgba = offscreen::paint(&gpu, &mut renderer, &target, &mut rt);
-                let mut mat = vec![36u8; 1200 * 192 * 4];
+                let mw = (mat_width * scale) as usize;
+                let mh = 96 * scale as usize;
+                let mut mat = vec![36u8; mw * mh * 4];
                 for p in mat.chunks_exact_mut(4) {
                     p[3] = 255;
                 }
@@ -161,15 +173,20 @@ fn offer_navigation_preview() {
                         .chunks_exact(4)
                         .enumerate()
                     {
-                        let i = 4 * ((y + (oy * 2.0) as usize) * 1200 + x + (ox * 2.0) as usize);
+                        let i = 4 * ((y + (oy * scale) as usize) * mw + x + (ox * scale) as usize);
                         for k in 0..3 {
                             mat[i + k] =
                                 (p[k] as u32 + (255 - p[3]) as u32 * 36 / 255).min(255) as u8;
                         }
                     }
                 }
-                rune::render::write_png(&dir.join(format!("{frame:03}.png")), 1200, 192, &mat)
-                    .unwrap();
+                rune::render::write_png(
+                    &dir.join(format!("{frame:03}.png")),
+                    mw as u32,
+                    mh as u32,
+                    &mat,
+                )
+                .unwrap();
             }
         }
         assert!(commands.try_recv().is_err() && chosen.lock().unwrap().is_empty());
@@ -179,6 +196,110 @@ fn offer_navigation_preview() {
 
 thread_local! { static POSE: Cell<([f32;2], f32)> = const {Cell::new(([0.;2],0.))}; }
 thread_local! { static QUIET: Cell<bool> = const {Cell::new(false)}; }
+thread_local! { static REFINED: Cell<bool> = const {Cell::new(false)}; }
+// Both end controls use the same push metrics. Read the real compact face in
+// the width pass, not a second copy of the kit's Large height and radius.
+thread_local! { static FACE: Cell<(f32,f32)> = const {Cell::new((0.0,0.0))}; }
+
+fn measure_offer(candidate: &MeetingCandidate, dark: bool, scale: f32) -> [f32; 2] {
+    [false, true].map(|open| {
+        let (mut probe, _, _) =
+            runtime_with(offer(candidate.clone()), open, dark, MENU, measure_page);
+        probe.set_viewport(MENU, scale);
+        probe.frame(0.0);
+        probe.settle_all();
+        probe.frame(0.0);
+        let els = probe.elements();
+        if !open {
+            let button = els
+                .iter()
+                .find(|e| e.key.as_deref() == Some("record"))
+                .unwrap();
+            FACE.set((button.rect[3], button.radius));
+        }
+        els.iter()
+            .find(|e| e.key.as_deref() == Some("page"))
+            .unwrap()
+            .rect[2]
+    })
+}
+
+fn shell_height() -> f32 {
+    if REFINED.get() {
+        FACE.get().0 + 2.0 * ACTIONS_INSET
+    } else {
+        56.0
+    }
+}
+
+fn preview_viewport() -> (f32, f32) {
+    let ([a, b], _) = POSE.get();
+    if REFINED.get() {
+        (MENU.0.max((a.max(b) + 2.0 * CAPSULE_INSET).ceil()), MENU.1)
+    } else {
+        MENU
+    }
+}
+
+#[test]
+fn fitted_offer_right_corners_follow_the_real_face() {
+    REFINED.set(true);
+    QUIET.set(true);
+    DISMISSAL.set(Some(Dismissal::Label));
+    let near = |a: f32, b: f32| assert!((a - b).abs() < 0.025, "{a} vs {b}");
+    for lang in ["en", "fr"] {
+        crate::desktop::i18n::apply(Some(lang)); // thread-local in tests
+        for scale in [1.0, 2.0] {
+            let mut c = slack_huddle();
+            c.named = true;
+            c.title = "Product review with the support team".into();
+            let widths = measure_offer(&c, true, scale);
+            for open in [false, true] {
+                POSE.set((widths, if open { 1.0 } else { 0.0 }));
+                let size = preview_viewport();
+                let (mut rt, _, _) = runtime_with(offer(c.clone()), open, true, size, fitted_offer);
+                rt.set_viewport(size, scale);
+                rt.frame(0.0);
+                rt.settle_all();
+                rt.frame(0.0);
+                let els = rt.elements();
+                let get = |key: &str| els.iter().find(|e| e.key.as_deref() == Some(key)).unwrap();
+                let shell = get("pill");
+                let face = get(if open { "always-record" } else { "record" });
+                let [x, y, w, h] = shell.rect;
+                let [bx, by, bw, bh] = face.rect;
+                assert!(
+                    (x + w - bx - bw - ACTIONS_INSET).abs() < 0.025,
+                    "{lang} {scale}x open={open} widths={widths:?}, shell {:?}, control {:?}",
+                    shell.rect,
+                    face.rect
+                );
+                assert!(bh >= 28.0);
+                near(by - y, ACTIONS_INSET);
+                near(y + h - by - bh, ACTIONS_INSET);
+                near(x + w - bx - bw, ACTIONS_INSET);
+                near(shell.radius - face.radius, ACTIONS_INSET);
+                for key in if open {
+                    ["offer-cancel", "never-offer", "always-record"]
+                } else {
+                    ["offer-more", "not-now", "record"]
+                } {
+                    near(get(key).radius, face.radius);
+                }
+                for e in &els {
+                    if e.text.is_some() {
+                        let [u, v, ew, eh] = e.rect;
+                        assert!(
+                            u >= x && u + ew <= x + w + 0.025 && v >= y && v + eh <= y + h + 0.025,
+                            "{:?} outside shell",
+                            e.text
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Dismissal {
@@ -382,6 +503,36 @@ fn offer_page(c: &Capsule, p: Paint, rules: bool) -> El {
                 .font(p.k.ty.small)
                 .color(p.faint())
         }));
+    let mark = if quiet {
+        provider_mark(p, candidate)
+    } else {
+        status_dot(dot)
+    };
+    let actions = row()
+        .key("actions")
+        .center_y()
+        .gap(ACTIONS_INSET)
+        .children(actions);
+    if REFINED.get() {
+        // The 24 pt Slack asset has ~2.5 pt of clear canvas on each side.
+        // Treat mark + name as one object, separated from the controls.
+        return row()
+            .key("page")
+            .h(shell_height())
+            .pl(10.0)
+            .pr(ACTIONS_INSET)
+            .center_y()
+            .gap(16.0)
+            .child(
+                row()
+                    .key("identity")
+                    .center_y()
+                    .gap(5.0)
+                    .child(mark)
+                    .child(label),
+            )
+            .child(actions);
+    }
     row()
         .key("page")
         .h(56.0)
@@ -389,13 +540,9 @@ fn offer_page(c: &Capsule, p: Paint, rules: bool) -> El {
         .pr(ACTIONS_INSET)
         .center_y()
         .gap(12.0)
-        .child(if quiet {
-            provider_mark(p, candidate)
-        } else {
-            status_dot(dot)
-        })
+        .child(mark)
         .child(label)
-        .child(row().key("actions").center_y().gap(8.0).children(actions))
+        .child(actions)
 }
 
 // The shape and page have independent origins. A page is mounted at its
@@ -425,24 +572,34 @@ fn fitted_offer(c: &Capsule, cx: &mut Cx<Capsule>) -> El {
     let width = compact + fraction * (wide - compact);
     let x = |w| {
         if c.corner.is_right() {
-            MENU.0 - CAPSULE_INSET - w
+            preview_viewport().0 - CAPSULE_INSET - w
         } else {
             CAPSULE_INSET
         }
     };
+    let height = shell_height();
+    let y = if c.corner.is_top() {
+        CAPSULE_INSET
+    } else {
+        MENU.1 - CAPSULE_INSET - height
+    };
     let body = row()
         .key("pill")
-        .absolute(x(width), CAPSULE_INSET)
+        .absolute(x(width), y)
         .w(width)
-        .h(56.0)
-        .max_w(MEETING_MENU_WIDTH - 2.0 * CAPSULE_INSET)
-        .radius(panel_radius(p))
+        .h(height)
+        .max_w(preview_viewport().0 - 2.0 * CAPSULE_INSET)
+        .radius(if REFINED.get() {
+            FACE.get().1 + ACTIONS_INSET
+        } else {
+            panel_radius(p)
+        })
         .fill(p.k.c.bg_base)
         .border(p.hair, p.k.c.border_base)
         .hit();
     let w = if rules { wide } else { compact };
     let page = offer_page(c, p, rules)
-        .absolute(x(w), CAPSULE_INSET)
+        .absolute(x(w), y)
         .w(w)
         .opacity(alpha);
     let page = if rules != c.more_open || alpha < 0.2 {

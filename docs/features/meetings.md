@@ -623,6 +623,9 @@ overlay placement, OS focus delivery or actual meeting capture.
 `offer_dismissal_faces_keep_named_keyboard_actions` also exercises the two
 proposed dismissal faces with Tab and Space: both decline just the offer,
 with no implicit recording request, policy write or extra timer.
+`fitted_offer_right_corners_follow_the_real_face` checks the prototype's
+outer radius and three insets against the actual end button, in compact and
+rules layouts, at 1× and 2× with English and French labels.
 
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
