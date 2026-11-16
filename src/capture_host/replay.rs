@@ -965,6 +965,7 @@ impl SealedReplay {
         Ok(Written {
             words,
             gaps,
+            audio_stopped_at_ms: bundle.audio_stopped_at_ms,
             missing_transcript,
         })
     }
