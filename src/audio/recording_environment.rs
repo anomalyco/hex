@@ -21,7 +21,8 @@ use crate::audio::output_route;
 
 mod ducking;
 
-const VIRTUAL_MAIN_VOLUME: u32 = u32::from_be_bytes(*b"vmvc");
+/// Mute's control: macOS's virtual main volume, which it keeps balanced.
+const VIRTUAL_MAIN_VOLUME: [u8; 4] = *b"vmvc";
 
 /// A media player Hex may pause while recording and resume afterwards.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -506,7 +507,7 @@ fn set_output_volume(device: u32, volume: f32) -> bool {
 
 fn volume_address() -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
-        mSelector: VIRTUAL_MAIN_VOLUME,
+        mSelector: u32::from_be_bytes(VIRTUAL_MAIN_VOLUME),
         mScope: kAudioObjectPropertyScopeOutput,
         mElement: kAudioObjectPropertyElementMain,
     }

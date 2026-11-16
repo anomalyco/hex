@@ -4122,7 +4122,7 @@ mod tests {
                 Some(&*self.transcriber),
             )?;
             Ok(Written {
-                words: bundle.transcript.words.len(),
+                words: scrawl_capture::transcribe::word_count(&bundle.transcript),
                 gaps,
                 audio_stopped_at_ms: None,
                 missing_transcript: bundle.transcript.missing.map(|missing| missing.reason),

@@ -16,8 +16,9 @@ use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, CallSwitch, Detection, MeetingCandidate,
-    MeetingDetector, candidate_from_microphone,
+    MeetingDetector, OfferId, candidate_from_microphone,
 };
+use crate::meeting::recovery::PendingFinals;
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
@@ -29,11 +30,11 @@ mod call_switch;
 mod publication;
 
 pub(crate) enum ControllerCommand {
-    Record(MeetingCandidate),
+    Record(MeetingCandidate, Option<OfferId>),
     Dismiss,
     /// The offer's capsule closed on its timeout, unanswered: the call is
     /// offered again once its app releases and retakes the microphone.
-    OfferTimedOut,
+    OfferTimedOut(OfferId),
     Stop,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
@@ -60,7 +61,8 @@ pub(crate) enum ControllerCommand {
 }
 
 pub(crate) enum ControllerEvent {
-    Offer(MeetingCandidate),
+    Offer(OfferId, MeetingCandidate),
+    OfferWithdrawn(OfferId),
     /// A calendar meeting is about to start. `automatic` when its call
     /// service is set to Always record.
     Reminder {
@@ -198,13 +200,14 @@ pub(crate) fn controller_loop(
 
     while !shutdown.load(Ordering::Relaxed) {
         let enabled = crate::app_settings::meetings_enabled();
+        let previous_offer = detector.open_offer();
         poll_import(&mut importing, &events);
         let requested_commands = meeting_requests
             .try_iter()
             .take(8)
             .map(|request| match request {
                 MeetingRequest::Start { title } => {
-                    ControllerCommand::Record(MeetingCandidate::manual_titled(title))
+                    ControllerCommand::Record(MeetingCandidate::manual_titled(title), None)
                 }
                 MeetingRequest::Stop => ControllerCommand::Stop,
                 MeetingRequest::Summarize(id) => ControllerCommand::Summarize(id),
@@ -249,7 +252,9 @@ pub(crate) fn controller_loop(
                     // Offers record by hand, which never watches a page: the
                     // call whose page named this one is not kept for it.
                     detector.take_switched_from();
-                    let _ = events.send(ControllerEvent::Offer(candidate));
+                    if let Some(id) = detector.open_offer() {
+                        let _ = events.send(ControllerEvent::Offer(id, candidate));
+                    }
                 }
                 Ok(Some(Detection::Record(candidate))) => {
                     let mut start = reminders.start_for(&candidate);
@@ -269,6 +274,14 @@ pub(crate) fn controller_loop(
             // back as fresh when detection resumes. A recording that watches
             // its browser's page for another call keeps reading it.
             browser.reset();
+        }
+        if !enabled || recording.is_some() {
+            detector.withdraw_offer();
+        }
+        if let Some(id) = previous_offer
+            && detector.open_offer() != Some(id)
+        {
+            let _ = events.send(ControllerEvent::OfferWithdrawn(id));
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -340,95 +353,6 @@ impl MeetingExpiry {
     }
 }
 
-/// How long finishing pending transcripts waits for the dictation engine
-/// before loading its own model, as a recording without one does.
-const ENGINE_GRACE: Duration = Duration::from_secs(30);
-
-/// Finishes, once per launch, the transcripts of meetings Hex quit while
-/// recording. It waits for the dictation engine so the work borrows its
-/// model rather than loading a second copy.
-struct PendingFinals {
-    since: Instant,
-    /// The launch sweep for abandoned import folders ran.
-    swept: bool,
-    checked: bool,
-    worker: Option<JoinHandle<()>>,
-}
-
-impl PendingFinals {
-    fn new() -> Self {
-        Self {
-            since: Instant::now(),
-            swept: false,
-            checked: false,
-            worker: None,
-        }
-    }
-
-    fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
-        // Before the pending pass, and whatever the Meetings opt-in, remove
-        // folders a crashed or quitting import left without a manifest.
-        if !self.swept {
-            self.swept = true;
-            meeting::sweep::remove_orphaned_imports();
-        }
-        if self.checked
-            || !enabled
-            || recording
-            || (crate::transcription::engine::TranscriptionEngine::shared().is_none()
-                && self.since.elapsed() < ENGINE_GRACE)
-        {
-            return;
-        }
-        self.checked = true;
-        let ids = meeting::pending_final_transcripts();
-        if ids.is_empty() {
-            return;
-        }
-        let events = events.clone();
-        self.worker = thread::Builder::new()
-            .name("meeting-pending-finals".into())
-            .spawn(move || {
-                for id in ids {
-                    if crate::desktop::process_exit::quitting() {
-                        return;
-                    }
-                    match meeting::finish_pending(&id) {
-                        Ok(Some(manifest))
-                            if manifest.status == meeting::MeetingStatus::Complete =>
-                        {
-                            tracing::info!(meeting = id, "finished a pending meeting transcript");
-                            if meeting::notes_wanted() {
-                                start_notes(manifest.id, &events);
-                            }
-                        }
-                        Ok(Some(manifest)) => {
-                            tracing::info!(
-                                meeting = id,
-                                status = ?manifest.status,
-                                "left a pending meeting for the next launch"
-                            );
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            tracing::warn!(%error, meeting = id, "could not finish a pending meeting transcript");
-                        }
-                    }
-                }
-            })
-            .map_err(|error| tracing::error!(%error, "could not start pending meeting transcripts"))
-            .ok();
-    }
-
-    fn join(self) {
-        if let Some(worker) = self.worker
-            && worker.join().is_err()
-        {
-            tracing::error!("pending meeting transcripts panicked");
-        }
-    }
-}
-
 fn handle_command(
     recording: &mut Option<ActiveRecording>,
     importing: &mut Option<ImportWorker>,
@@ -439,7 +363,7 @@ fn handle_command(
     events: &SyncSender<ControllerEvent>,
 ) {
     match command {
-        ControllerCommand::Record(_) | ControllerCommand::RecordMeeting { .. } if !enabled => {
+        ControllerCommand::Record(..) | ControllerCommand::RecordMeeting { .. } if !enabled => {
             tracing::warn!("ignored a meeting recording request while meetings are off");
         }
         ControllerCommand::Import(_) if !enabled => {
@@ -452,7 +376,9 @@ fn handle_command(
             });
         }
         ControllerCommand::Import(path) => start_import(recording, importing, path, events),
-        ControllerCommand::Record(candidate) if recording.is_none() => {
+        ControllerCommand::Record(candidate, offer)
+            if recording.is_none() && (offer.is_none() || offer == detector.open_offer()) =>
+        {
             tracing::info!(
                 source = candidate.source.label(),
                 application = candidate.application.as_deref(),
@@ -522,8 +448,8 @@ fn handle_command(
             }
         }
         ControllerCommand::Summarize(id) => start_notes(id, events),
-        ControllerCommand::OfferTimedOut => detector.offer_timed_out(),
-        ControllerCommand::Dismiss | ControllerCommand::Record(_) => {}
+        ControllerCommand::OfferTimedOut(id) => detector.offer_timed_out(id),
+        ControllerCommand::Dismiss | ControllerCommand::Record(..) => {}
     }
 }
 

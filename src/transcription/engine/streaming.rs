@@ -172,10 +172,12 @@ pub(super) const UNTRANSCRIBED_SPEECH_SAMPLES: usize = 4_800;
 /// offline fallback, keeps every sample.
 ///
 /// It also checks the finalized text covers the speech the stream heard at
-/// both ends: speech well before its start means the stream lost its opening,
-/// speech well past its end means it dropped a phrase (#1101), and the whole
-/// clip decides. A raw decode carrying two different language tags means it
-/// changed language mid-clip, so the whole clip decides too.
+/// both ends: speech before its start that Hex did not itself play means the
+/// stream lost its opening, speech well past its end means it dropped a
+/// phrase (#1101), and the whole clip decides. The capture's own sounds (the
+/// pre-roll, the start tone) are ignored at the head. A raw decode carrying
+/// two different language tags means it changed language mid-clip, so the
+/// whole clip decides too.
 pub(super) struct PauseCap<'a, S> {
     stream: &'a mut S,
     speech: crate::transcription::pause_segmenter::SpeechFrames,
@@ -194,6 +196,9 @@ pub(super) struct PauseCap<'a, S> {
     heard: bool,
     /// Silence fed after the clip, just before finalizing.
     trailing_silence: usize,
+    /// Clip samples of Hex's own sounds at the capture's head: the pre-roll
+    /// and the start tone. Speech there is never a lost opening.
+    head_ignored: usize,
 }
 
 impl<'a, S: StreamFeed> PauseCap<'a, S> {
@@ -209,7 +214,15 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             dropped: 0,
             heard: false,
             trailing_silence,
+            head_ignored: 0,
         }
+    }
+
+    /// Ignores `head` clip samples when it judges a lost opening, as Hex's own
+    /// sounds at the capture's head are not speech the stream lost.
+    pub(super) fn ignoring_head(mut self, head: usize) -> Self {
+        self.head_ignored = head;
+        self
     }
 
     fn frame(&mut self, out: &mut Vec<f32>) {
@@ -287,20 +300,32 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
             && let Some(start_ms) = self.stream.text_start_ms()
         {
             // The trailing check's slack and threshold, on the speech that
-            // ends before the text begins. Unlike the trailing check, a
-            // late-emitted first token moves t0 later, the unsafe direction
-            // here, so the cost is at most a whole-clip run.
+            // ends before the text begins, without Hex's own sounds at the
+            // capture's head. Unlike the trailing check, a late-emitted first
+            // token moves t0 later, the unsafe direction here, so the cost is
+            // at most a whole-clip run.
             let covered = (start_ms as usize * 16).saturating_sub(UNTRANSCRIBED_SLACK_SAMPLES);
-            let untranscribed = self
+            let frame = crate::transcription::pause_segmenter::FRAME_SAMPLES;
+            let (mut first, mut last, mut untranscribed) = (None, 0, 0);
+            for end in self
                 .speech_ends
                 .iter()
-                .filter(|&&end| end < covered)
-                .count()
-                * crate::transcription::pause_segmenter::FRAME_SAMPLES;
-            if untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES {
+                .copied()
+                .filter(|&end| end > self.head_ignored && end < covered)
+            {
+                first.get_or_insert(end);
+                last = end;
+                untranscribed += frame;
+            }
+            if untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES
+                && let Some(first) = first
+            {
                 return Err(format!(
-                    "the stream's text starts at {start_ms} ms but {} ms of speech precedes it",
-                    untranscribed / 16
+                    "the stream's text starts at {start_ms} ms but {} ms of speech precedes it, \
+                     from {} to {} ms",
+                    untranscribed / 16,
+                    (first - frame) / 16,
+                    last / 16
                 ));
             }
         }

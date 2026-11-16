@@ -3111,7 +3111,7 @@ impl SealedCapture {
                     self.host.log(&format!("iPhone capture failed: {error:#}"));
                 }
                 finalized.map(|(dir, bundle, summary)| {
-                    let words = bundle.transcript.words.len();
+                    let words = crate::transcribe::word_count(&bundle.transcript);
                     let duration_ms = bundle.duration_ms;
                     let missing_transcript = bundle
                         .transcript
@@ -3163,7 +3163,7 @@ impl SealedCapture {
                     Some(&self.engine_cfg),
                 )
                 .map(|(dir, bundle, summary)| {
-                    let words = bundle.transcript.words.len();
+                    let words = crate::transcribe::word_count(&bundle.transcript);
                     let missing_transcript = bundle
                         .transcript
                         .missing

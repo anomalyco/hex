@@ -12,7 +12,8 @@
 //! and finishes its transcript at the next launch.
 //!
 //! The drain runs on the main thread, so a worker that never stops would hang
-//! quit, logout, and updates. After [`DEADLINE`] the process ends anyway.
+//! quit, logout, and updates. After [`DEADLINE`] the process ends anyway; a
+//! meeting still recording gets [`MEETING_DEADLINE`] to finalise its audio.
 //! Dropping the transcription engine cancels its job and normally returns at
 //! once; only a wedged native run reaches either bound, and `_exit` is what
 //! makes leaving it running safe.
@@ -20,10 +21,12 @@
 //! Linux's service stop has the same shape with a longer bound: the host arms
 //! [`arm_deadline`] when stopping begins, and a drain still running after
 //! [`STOP_DEADLINE`] ends with the same `_exit`, logging what was pending.
+//! Windows' teardown arms [`arm_windows_deadline`] with the same kind of
+//! bound, since it runs after the loop and has no other deadline.
 
 use std::io::Write;
 use std::sync::Mutex;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -31,11 +34,22 @@ use std::time::Duration;
 /// How long quitting waits for the drain before ending the process anyway.
 const DEADLINE: Duration = Duration::from_secs(5);
 
+/// How long an in-flight meeting recording gets from the quit's start to
+/// finalise its audio and write `final.pending`. Its capture threads can take
+/// longer to stop than the rest of the drain, and ending early loses the
+/// recording.
+const MEETING_DEADLINE: Duration = Duration::from_secs(30);
+
 /// How long a Linux stop may drain before the process ends anyway. Shorter
 /// than the unit's `TimeoutStopSec=30`, with room for a CPU transcription to
 /// finish.
 #[cfg(target_os = "linux")]
 const STOP_DEADLINE: Duration = Duration::from_secs(20);
+
+/// How long a Windows exit may drain before the process ends anyway: the
+/// same bound as Linux's stop, with room for a meeting recording to finalise.
+#[cfg(target_os = "windows")]
+const WINDOWS_DEADLINE: Duration = Duration::from_secs(20);
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -97,10 +111,35 @@ pub(crate) fn finish_with(drain: &Drain, code: i32) -> ! {
 
 fn finish_within(drain: &Drain, deadline: Duration, code: i32) -> ! {
     QUITTING.store(true, Ordering::Release);
+    let started = std::time::Instant::now();
     let _ = std::thread::Builder::new()
         .name("hex-exit-deadline".into())
         .spawn(move || {
             std::thread::sleep(deadline);
+            // A recording in flight may have started just before quitting was
+            // marked (or be finalising its audio now). It gets the meeting
+            // bound from the quit's start, so the recorder can write its WAV
+            // headers and `final.pending` before `_exit`.
+            let bound = started + MEETING_DEADLINE;
+            let mut waiting = false;
+            while crate::meeting::recording() && std::time::Instant::now() < bound {
+                if !waiting {
+                    waiting = true;
+                    tracing::info!("waiting for a meeting recording to finish before stopping");
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if waiting {
+                // The meeting finished, but the drain still has joins, audio
+                // restore, and the event-log flush left. Give it the ordinary
+                // deadline again, capped by the meeting bound from the quit.
+                let grace = bound
+                    .saturating_duration_since(std::time::Instant::now())
+                    .min(DEADLINE);
+                if !grace.is_zero() {
+                    std::thread::sleep(grace);
+                }
+            }
             tracing::warn!("Hex stopped before its workers finished");
             end_process(code);
         });
@@ -158,24 +197,58 @@ fn pending_work() -> &'static str {
 pub(crate) fn arm_deadline() {
     static ARMED: Once = Once::new();
     ARMED.call_once(|| {
-        if let Err(error) = run_deadline(STOP_DEADLINE, pending_work, || end_process(0)) {
+        if let Err(error) = run_deadline(STOP_DEADLINE, false, pending_work, || end_process(0)) {
+            tracing::warn!(%error, "could not arm Hex's exit deadline");
+        }
+    });
+}
+
+/// Bounds a Windows exit's teardown on the main thread, as Linux's stop is
+/// bounded: a worker that never stops cannot hold the process open. Meeting
+/// audio still in flight extends the bound to [`MEETING_DEADLINE`]. Only the
+/// first call arms it.
+#[cfg(target_os = "windows")]
+pub(crate) fn arm_windows_deadline(code: i32) {
+    static ARMED: Once = Once::new();
+    ARMED.call_once(|| {
+        if let Err(error) = run_deadline(
+            WINDOWS_DEADLINE,
+            true,
+            || "the runtime, meetings, local API, or tray",
+            move || end_process(code),
+        ) {
             tracing::warn!(%error, "could not arm Hex's exit deadline");
         }
     });
 }
 
 /// Starts the detached named thread that runs `exit` after `deadline`; the
-/// result reports whether it started.
-#[cfg(target_os = "linux")]
+/// result reports whether it started. With `wait_for_meeting`, meeting audio
+/// still in flight extends the wait to [`MEETING_DEADLINE`], polled rather
+/// than read once so audio that starts during the drain is covered.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn run_deadline(
     deadline: Duration,
+    wait_for_meeting: bool,
     pending: impl Fn() -> &'static str + Send + 'static,
     exit: impl FnOnce() + Send + 'static,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("hex-exit-deadline".into())
         .spawn(move || {
+            let started = std::time::Instant::now();
             std::thread::sleep(deadline);
+            if wait_for_meeting {
+                let bound = started + MEETING_DEADLINE;
+                let mut waiting = false;
+                while crate::meeting::recording() && std::time::Instant::now() < bound {
+                    if !waiting {
+                        waiting = true;
+                        tracing::info!("waiting for meeting audio to finish before stopping");
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
             tracing::warn!(
                 pending = pending(),
                 "Hex's shutdown did not finish before its exit deadline"
@@ -313,6 +386,7 @@ mod tests {
         let (fired, received) = std::sync::mpsc::channel();
         run_deadline(
             Duration::from_millis(100),
+            false,
             || "test",
             move || {
                 let _ = fired.send(());

@@ -264,8 +264,9 @@ fn copy_failed(snapshot: &CaptureSnapshot, shown: Option<&(PathBuf, Stage)>) -> 
 }
 
 /// Whether the shown capture was written with a transcript that has no
-/// words. One that has no transcript at all (the transcriber was missing
-/// or failed) wasn't silence.
+/// words: none timed and none in its text, so only silence reads as "no
+/// speech" for a model that gives no times. One that has no transcript at
+/// all (the transcriber was missing or failed) wasn't silence.
 fn heard_nothing(snapshot: &CaptureSnapshot, shown: Option<&(PathBuf, Stage)>) -> bool {
     snapshot.last.as_ref().is_some_and(|last| {
         shown.is_some_and(|(bundle, _)| *bundle == last.bundle)

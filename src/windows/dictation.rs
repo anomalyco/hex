@@ -14,7 +14,7 @@ use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::dictation::service::{DictationQueue, Effect, MICROPHONE_LOST, ServiceDictations};
-use crate::dictation::{DictationCapture, Finish, ReleaseWait};
+use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL, ReleaseWait};
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription::local_transcriber::LocalTranscriber;
 use crate::transcription::models::TranscriptionSelection;
@@ -786,6 +786,10 @@ pub fn run(
                     }
                     recording = false;
                     recording_feedback_started = false;
+                    // The clip keeps its tail and drops anything captured
+                    // after it, so the live stream must hear no further; the
+                    // engine refuses a stream fed well past the clip.
+                    capture.limit_stream_to(occurred_at, POST_RELEASE_TAIL);
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
                         by_shortcut: recording_by_shortcut,

@@ -52,18 +52,18 @@ use super::controls::{Paint, PushSize, status_dot};
 use crate::app_settings::{MeetingIndicatorCorner, MeetingPolicy, MeetingProviderChoice};
 use crate::calendar::CalendarMeeting;
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::meeting::detection::MeetingCandidate;
+use crate::meeting::detection::{MeetingCandidate, OfferId};
 use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod handoff;
+mod offer;
 mod panel;
 mod throw;
 mod waveform;
 
 use panel::{
-    agent_prompt, hex_command, ready, ready_window_size, recording, recording_notice,
-    recording_window_size,
+    agent_prompt, hex_command, ready, ready_window_size, recording, recording_window_size,
 };
 
 /// The offer, call ended, and ready capsules.
@@ -82,9 +82,9 @@ const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// Between a capsule's window edges and what it draws.
 const CAPSULE_INSET: f32 = 4.0;
-/// Same header at rest and open so the recording dot and timer stay put.
+/// Same header at rest and open so the waveform and timer stay put.
 const REST_HEIGHT: f32 = HEADER_HEIGHT;
-const REST_WIDTH: f32 = 160.0;
+const REST_WIDTH: f32 = 148.0;
 /// The resting pill's sides, and the open panel header's right side, so the
 /// timer stays put as the pill opens.
 const REST_PX: f32 = 11.0;
@@ -111,9 +111,6 @@ const TITLE_LINES: usize = 3;
 const TITLE_INSET: f32 = (REST_HEIGHT - 20.) / 2.;
 const RESULT_HEADER_MAX: f32 = TITLE_LINES as f32 * 20. + 2. * TITLE_INSET;
 const SUMMARY_LINE: f32 = 19.5;
-/// The resting pill fits a timer up to `100:00`.
-#[cfg(target_os = "windows")]
-const REST_WINDOW_WIDTH: f32 = REST_WIDTH + 2.0 * CAPSULE_INSET;
 /// One transparent window with room for the finished panel's longest summary.
 const RECORDING_WINDOW: (f32, f32) = (
     PANEL_WIDTH + 2.0 * CAPSULE_INSET,
@@ -152,7 +149,7 @@ enum Kind {
         meeting: CalendarMeeting,
         automatic: bool,
     },
-    Offer(MeetingCandidate),
+    Offer(OfferId, MeetingCandidate),
     /// `auto_stop` when the recording stops on its own after a grace (Labs
     /// › Stop when the call ends); Keep recording then cancels that.
     CallEnded {
@@ -227,7 +224,7 @@ impl PillModel {
             // The call came back before its grace: the notice goes and the
             // recording capsule returns, as Keep recording does.
             ControllerEvent::CallEndedWithdrawn => self.call_ended = false,
-            ControllerEvent::Offer(_) | ControllerEvent::Reminder { .. } => {
+            ControllerEvent::Offer(..) | ControllerEvent::Reminder { .. } => {
                 self.call_ended = false;
             }
             ControllerEvent::Starting
@@ -237,7 +234,8 @@ impl PillModel {
                 self.recording = None;
                 self.call_ended = false;
             }
-            ControllerEvent::ReminderWithdrawn { .. }
+            ControllerEvent::OfferWithdrawn(_)
+            | ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::Stopping
             | ControllerEvent::Chapters(_)
             | ControllerEvent::ImportFailed { .. }
@@ -289,6 +287,8 @@ struct Capsule {
     /// The offer shows its Never offer / Always record choices in place of
     /// its actions.
     more_open: bool,
+    /// Arms another 20 s if Cancel returns to an offer whose timer already fired.
+    rearm_offer: Option<offer::After>,
     live: Live,
     waveform: Option<Box<waveform::Listening>>,
     commands: SyncSender<ControllerCommand>,
@@ -303,8 +303,8 @@ struct Capsule {
     hovered: bool,
     /// The command was accepted, but the worker has not reported capture stopped.
     stopping: bool,
-    /// The ready panel's time ran out while the pointer was over it; it
-    /// closes when the pointer leaves.
+    /// A timeout arrived while the ready panel was hovered or the offer's
+    /// choices were open. Leaving closes the former; Cancel rearms the latter.
     expired: bool,
     /// Where the capsule rests.
     corner: MeetingIndicatorCorner,
@@ -334,20 +334,6 @@ impl Capsule {
         self.commands.try_send(command).is_ok()
     }
 
-    fn set_more_open(&mut self, open: bool) {
-        self.more_open = open;
-        if let Some(resize) = &self.resize {
-            resize((
-                if open {
-                    MEETING_MENU_WIDTH
-                } else {
-                    MEETING_PANEL_WIDTH
-                },
-                MEETING_PANEL_HEIGHT,
-            ));
-        }
-    }
-
     /// The meeting whose transcript the capsule copies: the recording, or
     /// the ready meeting.
     fn meeting_id(&self) -> Option<&str> {
@@ -366,7 +352,7 @@ impl Capsule {
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
             resize(recording_window_size(
                 self.hovered || self.stopping,
-                recording_notice(shown).is_some(),
+                Some(shown),
             ));
         }
     }
@@ -375,14 +361,14 @@ impl Capsule {
         self.hovered = inside;
         #[cfg(target_os = "windows")]
         self.fit_recording_window();
-        if !inside && self.expired {
+        if !inside && self.expired && matches!(self.kind, Some(Kind::Ready(_))) {
             self.close();
         }
     }
 
     /// Saves the offered provider's choice; returns whether there was one.
     fn choose(&self, policy: MeetingPolicy) -> bool {
-        let Some(Kind::Offer(candidate)) = &self.kind else {
+        let Some(Kind::Offer(_, candidate)) = &self.kind else {
             return false;
         };
         let Some(provider) = candidate.provider() else {
@@ -528,11 +514,11 @@ impl Capsule {
     fn window_size(&self) -> (f32, f32) {
         match &self.kind {
             Some(Kind::Recording(shown)) => {
-                recording_window_size(self.hovered, recording_notice(shown).is_some())
+                recording_window_size(self.hovered || self.stopping, Some(shown))
             }
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
             Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
-            Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
+            Some(Kind::Offer(..)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
@@ -655,6 +641,7 @@ fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
 /// recording capsule in the configured corner.
 pub(crate) struct MeetingCapsules {
     panel: OverlayHandle<Capsule>,
+    panel_offer: Option<OfferId>,
     pill: Pill,
     /// Bumped whenever the panel shows something new, so a stale timeout
     /// doesn't close it.
@@ -712,10 +699,8 @@ impl Pill {
         place_capsule(&self.handle, corner, 0.0, 0.0);
         // Windows: a shown pill starts at rest.
         #[cfg(target_os = "windows")]
-        self.handle.resize(recording_window_size(
-            false,
-            recording_notice(&recording).is_some(),
-        ));
+        self.handle
+            .resize(recording_window_size(false, Some(&recording)));
         self.handle.update(move |capsule, tx| {
             capsule.kind = Some(Kind::Recording(recording));
             capsule.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
@@ -807,6 +792,7 @@ impl MeetingCapsules {
                 Capsule {
                     kind: None,
                     more_open: false,
+                    rearm_offer: None,
                     live: Live::default(),
                     waveform: None,
                     commands: commands.clone(),
@@ -864,7 +850,7 @@ impl MeetingCapsules {
             handle: overlay(
                 app,
                 "Hex meeting recording",
-                recording_window_size(false, false),
+                recording_window_size(false, None),
                 true,
             ),
             model: Arc::default(),
@@ -888,6 +874,7 @@ impl MeetingCapsules {
         });
         Self {
             panel,
+            panel_offer: None,
             pill,
             generation: Arc::default(),
             handoff: None,
@@ -924,14 +911,19 @@ impl MeetingCapsules {
                     }
                 });
             }
-            ControllerEvent::Offer(candidate) => {
+            ControllerEvent::Offer(id, candidate) => {
                 tracing::info!(
                     source = candidate.source.label(),
                     title = %candidate.title,
                     application = ?candidate.application,
                     "meeting recording offer shown"
                 );
-                self.show_panel(Kind::Offer(candidate.clone()), Some(OFFER_TIMEOUT));
+                self.show_panel(Kind::Offer(*id, candidate.clone()), None);
+            }
+            ControllerEvent::OfferWithdrawn(id) => {
+                if self.panel_offer == Some(*id) {
+                    self.close_panel();
+                }
             }
             ControllerEvent::Starting | ControllerEvent::Transcribing => self.close_panel(),
             ControllerEvent::Stopping => self.pill.handle.update(|c, _| c.mark_stopping()),
@@ -1006,7 +998,7 @@ impl MeetingCapsules {
         }
     }
 
-    fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
+    fn show_panel(&mut self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
         // The saved corner, and a finished meeting its recording's corner.
@@ -1021,9 +1013,18 @@ impl MeetingCapsules {
             Kind::Ready(manifest) => ready_window_size(manifest),
             kind => (panel_width(kind), MEETING_PANEL_HEIGHT),
         });
+        self.panel_offer = match kind {
+            Kind::Offer(id, _) => Some(id),
+            _ => None,
+        };
+        let rearm = self
+            .panel_offer
+            .is_some()
+            .then(|| offer::timer(self.panel.clone(), self.generation.clone(), generation));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
+            capsule.set_offer_timer(rearm);
             capsule.live = Live::default();
             capsule.hovered = false;
             capsule.expired = false;
@@ -1074,7 +1075,8 @@ impl MeetingCapsules {
     // Hide through the handle, not `Capsule::close`: a hide requested inside
     // an update runs on the event loop after a show queued in the same batch,
     // so closing then showing a capsule would leave it hidden.
-    fn close_panel(&self) {
+    fn close_panel(&mut self) {
+        self.panel_offer = None;
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.panel.update(|capsule, _| capsule.kind = None);
         self.panel.hide();
@@ -1167,43 +1169,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Reminder { meeting, automatic } => {
             reminder(p, meeting, *automatic, crate::calendar::wall_clock_ms())
         }
-        Kind::Offer(candidate) if capsule.more_open => offer_choices(p, candidate),
-        Kind::Offer(candidate) => {
-            let mut actions = Vec::new();
-            if candidate.provider().is_some() {
-                actions.push(
-                    button(p, "offer-more", "…", false, |c| {
-                        c.set_more_open(true);
-                    })
-                    .label(tr("More")),
-                );
-            }
-            actions.push(button(p, "not-now", tr("Not now"), false, |c| {
-                if let Some(Kind::Offer(candidate)) = &c.kind {
-                    tracing::info!(
-                        source = candidate.source.label(),
-                        title = %candidate.title,
-                        "meeting recording offer dismissed"
-                    );
-                }
-                c.send(ControllerCommand::Dismiss);
-                c.close();
-            }));
-            actions.push(button(p, "record", tr("Record"), true, |c| {
-                let Some(Kind::Offer(candidate)) = &c.kind else {
-                    return;
-                };
-                let command = if candidate.key == "preview" {
-                    ControllerCommand::Dismiss
-                } else {
-                    ControllerCommand::Record(candidate.clone())
-                };
-                if c.send(command) {
-                    c.close();
-                }
-            }));
-            (p.muted(), candidate.offer_title(), String::new(), actions)
-        }
+        Kind::Offer(id, candidate) => offer::actions(p, *id, candidate, capsule.more_open),
         Kind::CallEnded { app, auto_stop } => (
             p.danger(),
             tr_fill("{} left the call", app),
@@ -1347,46 +1313,6 @@ fn reminder(
     (p.accent(), meeting.display_title(), subtitle, actions)
 }
 
-/// The offer's "…": never offer this provider again, or always record it
-/// (which records this call too).
-fn offer_choices(p: Paint, candidate: &MeetingCandidate) -> (rune::Color, String, String, Vec<El>) {
-    let label = candidate
-        .provider()
-        .map_or_else(String::new, |provider| provider.label);
-    let mut actions = vec![
-        button(p, "offer-cancel", tr("Cancel"), false, |c| {
-            c.set_more_open(false);
-        }),
-        button(p, "never-offer", tr("Never offer"), false, |c| {
-            c.choose(MeetingPolicy::NeverOffer);
-            c.send(ControllerCommand::Dismiss);
-            c.close();
-        }),
-    ];
-    if candidate.can_always_record() {
-        actions.push(button(p, "always-record", tr("Always record"), true, |c| {
-            let Some(Kind::Offer(candidate)) = &c.kind else {
-                return;
-            };
-            let command = if candidate.key == "preview" {
-                ControllerCommand::Dismiss
-            } else {
-                ControllerCommand::Record(candidate.clone())
-            };
-            c.choose(MeetingPolicy::AlwaysRecord);
-            if c.send(command) {
-                c.close();
-            }
-        }));
-    }
-    (
-        p.muted(),
-        label,
-        tr("Change anytime in Settings").to_owned(),
-        actions,
-    )
-}
-
 /// The panel capsule (reminder, offer, call ended): status dot, two
 /// truncated lines, and its actions, in a rounded rectangle. It drags to
 /// another corner like the recording capsule.
@@ -1511,6 +1437,10 @@ mod tests {
         }
     }
 
+    fn offer(candidate: MeetingCandidate) -> Kind {
+        Kind::Offer(OfferId::at(Instant::now()), candidate)
+    }
+
     fn bare_browser() -> MeetingCandidate {
         MeetingCandidate {
             key: "meeting-brave".into(),
@@ -1536,6 +1466,7 @@ mod tests {
         let capsule = Capsule {
             kind: Some(kind),
             more_open,
+            rearm_offer: None,
             live: Live::default(),
             waveform: None,
             commands,
@@ -1576,19 +1507,59 @@ mod tests {
 
     #[test]
     fn an_offer_names_the_call_without_asking_about_consent() {
-        let (rt, _, _) = runtime(Kind::Offer(slack_huddle()), false, true, PANEL);
+        let (rt, _, _) = runtime(offer(slack_huddle()), false, true, PANEL);
         assert_eq!(texts(&rt)[0], "Slack huddle detected");
         assert!(rt.find("subtitle").is_none());
         assert!(rt.find("offer-more").is_some());
     }
 
+    /// Apply the size requested by the real button to the same Rune runtime;
+    /// subsequent clicks hit-test the new layout, not a second fixture.
+    fn press_and_resize(rt: &mut Runtime<Capsule>, key: &str, expected: (f32, f32)) {
+        let (resize, sizes) = mpsc::channel();
+        rt.state.resize = Some(Arc::new(move |size| resize.send(size).unwrap()));
+        tap(rt, key);
+        let size = sizes.try_recv().unwrap();
+        assert_eq!(size, expected);
+        rt.set_viewport(size, 2.0);
+        rt.frame(0.0);
+    }
+
+    #[test]
+    fn the_offer_menu_stays_usable_past_the_unanswered_deadline() {
+        let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
+        let (arm, armed) = mpsc::channel();
+        rt.state.set_offer_timer(Some(Box::new(move |delay, fire| {
+            arm.send((delay, fire)).unwrap()
+        })));
+        let (delay, fire) = armed.try_recv().unwrap();
+        assert_eq!(delay, Duration::from_secs(20));
+        rt.frame(19.0);
+        press_and_resize(&mut rt, "offer-more", MENU);
+        assert!(rt.find("always-record").is_some());
+        assert!(commands.try_recv().is_err());
+        assert!(chosen.lock().unwrap().is_empty());
+
+        // Deliver the original 20 s timer on this same widened capsule.
+        rt.frame(delay.as_secs_f64() - 19.0);
+        rt.update(|c, _| fire(c));
+        rt.frame(0.0);
+        assert!(rt.find("always-record").is_some(), "menu closed at expiry");
+        assert!(commands.try_recv().is_err());
+        assert!(chosen.lock().unwrap().is_empty());
+        tap(&mut rt, "never-offer");
+        assert_eq!(chosen.lock().unwrap()[0].policy, MeetingPolicy::NeverOffer);
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ControllerCommand::Dismiss)
+        ));
+    }
+
     #[test]
     fn always_record_saves_the_choice_and_records_this_call() {
-        let (mut rt, _, _) = runtime(Kind::Offer(slack_huddle()), false, true, PANEL);
-        tap(&mut rt, "offer-more");
-        assert!(rt.state.more_open);
-        // The overlay widens for the choices; render them at that width.
-        let (mut rt, commands, chosen) = runtime(Kind::Offer(slack_huddle()), true, true, MENU);
+        let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
+        press_and_resize(&mut rt, "offer-more", MENU);
+        rt.update(|c, _| c.expire_offer());
         assert_eq!(texts(&rt)[0], "Slack huddles");
         tap(&mut rt, "always-record");
         let chosen = chosen.lock().unwrap();
@@ -1597,14 +1568,91 @@ mod tests {
         assert_eq!(chosen[0].policy, MeetingPolicy::AlwaysRecord);
         assert!(matches!(
             commands.try_recv(),
-            Ok(ControllerCommand::Record(candidate)) if candidate.key == "meeting-slack"
+            Ok(ControllerCommand::Record(candidate, Some(_))) if candidate.key == "meeting-slack"
         ));
         assert!(rt.state.kind.is_none());
     }
 
     #[test]
+    fn an_old_offer_timeout_cannot_close_a_replacement() {
+        let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
+        let current = Arc::new(AtomicU64::new(1));
+        let queued = offer::delivery(current.clone(), 1, Capsule::expire_offer);
+        press_and_resize(&mut rt, "offer-more", MENU);
+        // A new offer of the very same call replaces the open choices
+        // before Rune gets to the first offer's timeout update.
+        current.fetch_add(1, Ordering::SeqCst);
+        rt.update(|c, _| {
+            c.kind = Some(offer(slack_huddle()));
+            c.more_open = false;
+        });
+        rt.set_viewport(PANEL, 2.0);
+        rt.update(queued);
+        rt.frame(0.0);
+        assert!(rt.find("offer-more").is_some());
+        assert!(rt.find("always-record").is_none());
+        assert!(commands.try_recv().is_err());
+        assert!(chosen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_untouched_offer_times_out_without_a_choice() {
+        let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
+        rt.update(|c, _| c.expire_offer());
+        rt.frame(0.0);
+        assert!(rt.find("offer-more").is_none());
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ControllerCommand::OfferTimedOut(_))
+        ));
+        assert!(commands.try_recv().is_err());
+        assert!(chosen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cancel_returns_to_a_timed_clickable_offer() {
+        for deadline_passed in [false, true] {
+            let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
+            let (arm, armed) = mpsc::channel();
+            rt.state.set_offer_timer(Some(Box::new(move |delay, fire| {
+                arm.send((delay, fire)).unwrap()
+            })));
+            let (delay, first_timeout) = armed.try_recv().unwrap();
+            assert_eq!(delay, Duration::from_secs(20));
+            press_and_resize(&mut rt, "offer-more", MENU);
+            if deadline_passed {
+                rt.update(|c, _| first_timeout(c));
+            }
+            press_and_resize(&mut rt, "offer-cancel", PANEL);
+            assert!(rt.find("record").is_some());
+            assert!(commands.try_recv().is_err());
+            assert!(chosen.lock().unwrap().is_empty());
+            if deadline_passed {
+                let (delay, new_timeout) =
+                    armed.try_recv().expect("Cancel rearms the expired timer");
+                assert_eq!(delay, Duration::from_secs(20));
+                rt.update(|c, _| new_timeout(c));
+                assert!(matches!(
+                    commands.try_recv(),
+                    Ok(ControllerCommand::OfferTimedOut(_))
+                ));
+            } else {
+                assert!(armed.try_recv().is_err(), "original timer is still pending");
+                tap(&mut rt, "not-now");
+                assert!(matches!(
+                    commands.try_recv(),
+                    Ok(ControllerCommand::Dismiss)
+                ));
+                rt.update(|c, _| first_timeout(c));
+            }
+            assert!(rt.state.kind.is_none());
+            assert!(commands.try_recv().is_err());
+        }
+    }
+
+    #[test]
     fn never_offer_saves_the_choice_and_dismisses() {
-        let (mut rt, commands, chosen) = runtime(Kind::Offer(slack_huddle()), true, true, MENU);
+        let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), true, true, MENU);
         tap(&mut rt, "never-offer");
         assert_eq!(chosen.lock().unwrap()[0].policy, MeetingPolicy::NeverOffer);
         assert!(matches!(
@@ -1615,7 +1663,7 @@ mod tests {
 
     #[test]
     fn a_browser_on_an_unknown_page_cannot_be_set_to_always_record() {
-        let (rt, _, _) = runtime(Kind::Offer(bare_browser()), true, true, MENU);
+        let (rt, _, _) = runtime(offer(bare_browser()), true, true, MENU);
         assert!(rt.find("never-offer").is_some());
         assert!(rt.find("always-record").is_none());
     }
@@ -2421,7 +2469,10 @@ mod tests {
             },
             start,
         );
-        model.apply(&ControllerEvent::Offer(slack_huddle()), start);
+        model.apply(
+            &ControllerEvent::Offer(OfferId::at(start), slack_huddle()),
+            start,
+        );
         assert!(model.pill(true).is_some());
 
         // Stop & transcribe leaves it closed until the recording ends.
@@ -2551,9 +2602,9 @@ mod tests {
         google_meet.title = "Design sync".into();
         google_meet.named = true;
         let states = [
-            ("offer", Kind::Offer(slack_huddle()), false, PANEL),
-            ("offer-choices", Kind::Offer(slack_huddle()), true, MENU),
-            ("offer-choices-site", Kind::Offer(google_meet), true, MENU),
+            ("offer", offer(slack_huddle()), false, PANEL),
+            ("offer-choices", offer(slack_huddle()), true, MENU),
+            ("offer-choices-site", offer(google_meet), true, MENU),
             ("reminder", reminder(true, false), false, REMINDER),
             ("reminder-no-link", reminder(false, false), false, REMINDER),
             ("reminder-automatic", reminder(true, true), false, REMINDER),

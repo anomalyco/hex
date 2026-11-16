@@ -20,6 +20,8 @@ use super::controls::{METRICS, Paint};
 use super::list_detail as ld;
 use crate::desktop::i18n::{event_age, tr};
 use crate::history::annotations::{self, Annotation};
+#[cfg(any(target_os = "macos", test))]
+use crate::history::captures::CaptureWord;
 use crate::history::captures::{self, CaptureEntry, CaptureKind};
 
 pub(super) static CAPTURES_ICON: Icon = Icon {
@@ -325,27 +327,30 @@ fn open(ui: &mut Ui, id: u64) {
     #[cfg(target_os = "macos")]
     {
         use super::screenshot_thumbnail::editor;
-        use crate::history::captures::CaptureWord;
-        let words = |timed: &[CaptureWord]| {
-            timed
-                .iter()
+        let words = |text: &str, timed: &[CaptureWord], duration_ms: u64| {
+            words_for_editor(text, timed, duration_ms)
+                .into_iter()
                 .map(|word| editor::clip::Word {
                     t0: word.t0,
                     t1: word.t1,
-                    text: word.text.clone(),
+                    text: word.text,
                 })
                 .collect()
         };
         match entry {
             Listed::Saved(entry) => match entry.kind {
                 CaptureKind::Shot => editor::open_with(entry.file.clone(), entry.words.clone()),
-                CaptureKind::Recording => {
-                    editor::open_recording(entry.file.clone(), words(&entry.timed));
-                }
+                CaptureKind::Recording => editor::open_recording(
+                    entry.file.clone(),
+                    words(&entry.words, &entry.timed, entry.duration_ms),
+                ),
             },
             Listed::Annotated(annotation) => {
                 if let Some(movie) = &annotation.movie {
-                    editor::open_recording(movie.clone(), words(&annotation.timed));
+                    editor::open_recording(
+                        movie.clone(),
+                        words(&annotation.words, &annotation.timed, annotation.duration_ms),
+                    );
                 } else if let Some(picture) = &annotation.picture {
                     editor::open_with(picture.clone(), annotation.words.clone());
                 }
@@ -354,6 +359,27 @@ fn open(ui: &mut Ui, id: u64) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = entry;
+}
+
+/// An entry's words for the editor: its own when the model timed them, else
+/// its text spread over its length as estimated times, the way the words path
+/// fills them for a model that gives none (GigaAM v3). A capture already
+/// written without times still opens with its words instead of reading
+/// "Nothing was said".
+#[cfg(any(target_os = "macos", test))]
+fn words_for_editor(text: &str, timed: &[CaptureWord], duration_ms: u64) -> Vec<CaptureWord> {
+    if !timed.is_empty() {
+        return timed.to_vec();
+    }
+    scrawl_capture::transcribe::spread_words(text, 0, duration_ms)
+        .1
+        .into_iter()
+        .map(|word| CaptureWord {
+            t0: word.t0,
+            t1: word.t1,
+            text: word.text,
+        })
+        .collect()
 }
 
 /// Copies entry `id` as its card or Annotate would; its Copy shows a check
@@ -599,4 +625,37 @@ fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
                 .map(|entry| rune::DragItem::new().file(entry.file().to_path_buf()))
         });
     super::lists::source_item(row_el, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A capture whose model gave no word times still opens in the editor
+    /// with its words spread over its length, rather than "Nothing was said".
+    #[test]
+    fn an_untimed_capture_gets_its_words_spread_over_its_length() {
+        let spread = words_for_editor("make it blue", &[], 4_000);
+        assert_eq!(
+            spread
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>(),
+            ["make", "it", "blue"]
+        );
+        assert_eq!((spread[0].t0, spread[2].t1), (0, 4_000));
+
+        assert!(words_for_editor("   ", &[], 4_000).is_empty(), "silence");
+
+        let timed = vec![CaptureWord {
+            t0: 100,
+            t1: 300,
+            text: "make".into(),
+        }];
+        assert_eq!(
+            words_for_editor("make it blue", &timed, 4_000),
+            timed,
+            "a model's own times stay"
+        );
+    }
 }

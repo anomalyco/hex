@@ -859,10 +859,18 @@ CoreAudio formats, AppleScript details, or event serialization.
   to grow it, and the stop tone cannot: speech must also be heard once the
   tone's own length plus 60 ms has passed. The event timestamp is never moved;
   the hold threshold uses it alone. The audio owner waits at most the base tail
-  plus 100 ms, or 600 ms plus 100 ms once speech grows it, and a stream stall,
-  failure, or gap in the tail finishes with the audio already delivered instead
-  of failing the capture. Escape, short taps, programmatic stops, and meetings
-  get no tail. A press during the tail is handled after the old clip finishes.
+  plus 100 ms, or 600 ms plus 100 ms once speech grows it, though deciding a
+  tone-masked tail keeps capture (and only capture) running until that
+  decision; the live stream is capped at the event plus `POST_RELEASE_TAIL`
+  when the finish begins, so the part of the tail audio the clip keeps is fed
+  from the finished clip and the rest is trimmed. A release handled late can
+  still have fed the stream past
+  the clip's trimmed end before the finish began, which `MAX_OVERFED_SAMPLES`
+  tolerates. A stream
+  stall, failure, or gap in the tail finishes with the audio already delivered
+  instead of failing the capture. Escape, short taps, programmatic stops, and
+  meetings get no tail. A press during the tail is handled after the old clip
+  finishes.
 - Active dictation capture is lossless with respect to event, UI,
   context, and worker stalls.
 - The dictation shortcut has a persisted `shortcut_mode`: `hold` (default)
@@ -872,9 +880,16 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Streaming dictation is speculative on every OS: a hotkey capture's stream
   receives the capture's 16 kHz audio with each pause cut to its first 2.5 s
   and last 0.3 s (Parakeet drops words after pauses past its left context),
-  the finish always carries the complete clip, and a failed, empty, overfed, late, or interrupted stream
-  falls back to the whole clip, as does one whose text ends well before the
-  speech it heard (a dropped late phrase, #1101). Nothing pastes or reaches the focused app
+  and a finish caps live feeding at the release plus `POST_RELEASE_TAIL`: the
+  rest of the clip (a grown tail, the wait for the stop tone) is fed only once
+  the clip exists, and audio that arrived before the finish began is what
+  `MAX_OVERFED_SAMPLES` tolerates. The finish
+  always carries the complete clip, and a failed, empty, overfed, late, or
+  interrupted stream falls back to the whole clip, as does one whose text ends
+  well before the speech it heard (a dropped late phrase, #1101) or one whose
+  text starts well after speech it heard outside the capture's own sounds at
+  the head (a likely lost opening; the pre-roll and the start tone are
+  excluded). Nothing pastes or reaches the focused app
   before the final text. With Labs › Live text on, a hotkey capture's
   stream publishes its provisional text for Hex's own HUD only; it is never
   pasted, copied, or kept in History or Paste Last. One engine thread runs every inference because a live

@@ -87,9 +87,16 @@ impl Transcriber for HexTranscriber {
                 .map_err(|error| anyhow::anyhow!(error))?
         };
         let (_, selection) = crate::app_settings::transcription_selection();
+        let duration_ms = (samples.len() as u64) * 1_000 / u64::from(SAMPLE_RATE);
         let (text, words) = transcribe_words(engine, &selection, samples)
             .map_err(|error| anyhow::anyhow!("{error:#}"))?;
-        Ok(Some(transcript(text, words, &selection)))
+        Ok(Some(transcript(
+            text,
+            words,
+            duration_ms,
+            false,
+            &selection,
+        )))
     }
 
     /// Reads `audio.wav` a piece at a time, so a capture of hours holds about
@@ -120,38 +127,61 @@ impl Transcriber for HexTranscriber {
                 ));
             }
         };
-        let (text, words) = transcribe_pieces(&mut pieces, |piece| {
+        let (text, words, duration_ms, estimated) = transcribe_pieces(&mut pieces, |piece| {
             transcribe_words(engine, &selection, piece)
         })
         .map_err(|error| anyhow::anyhow!("{error:#}"))?;
-        Ok(Some(transcript(text, words, &selection)))
+        Ok(Some(transcript(
+            text,
+            words,
+            duration_ms,
+            estimated,
+            &selection,
+        )))
     }
 }
 
 fn transcript(
     text: String,
     words: Vec<TimedWord>,
+    duration_ms: u64,
+    spread: bool,
     selection: &crate::transcription::models::TranscriptionSelection,
 ) -> TranscriptData {
+    // A model that gives no word times (GigaAM v3 asks for none) still said
+    // the text: `transcribe_pieces` spreads each untimed piece over its own
+    // audio, and a clip held in memory is spread over the whole of it, as
+    // `hex` does out of process. Both are estimates, never the model's times.
+    let (words, estimated) = if !words.is_empty() {
+        (corrected_words(words, word_lag(selection.model)), spread)
+    } else if text.trim().is_empty() {
+        (Vec::new(), false)
+    } else {
+        let (_, whole) = scrawl_capture::transcribe::spread_words(&text, 0, duration_ms);
+        (whole, true)
+    };
     TranscriptData {
         source: "hex".into(),
         model: Some(selection.model.as_str().into()),
         text,
-        words: corrected_words(words, word_lag(selection.model)),
+        words,
+        estimated,
         ..TranscriptData::default()
     }
 }
 
 /// Transcribes saved pieces in order, moving each piece's words onto the
 /// capture's clock by the audio before it and joining their text with one
-/// space.
+/// space. A piece with text but no word times is spread over that piece's own
+/// audio, never the whole capture, and `true` says an estimate was made.
 fn transcribe_pieces(
     pieces: &mut Pieces,
     mut transcribe: impl FnMut(Vec<f32>) -> Result<(String, Vec<TimedWord>)>,
-) -> Result<(String, Vec<TimedWord>)> {
+) -> Result<(String, Vec<TimedWord>, u64, bool)> {
     let mut texts = Vec::new();
     let mut words = Vec::new();
     let mut total_frames = 0_usize;
+    let mut estimated = false;
     loop {
         let piece = match pieces.next() {
             Ok(Some(piece)) => piece,
@@ -167,6 +197,23 @@ fn transcribe_pieces(
         if !text.is_empty() {
             texts.push(text.to_string());
         }
+        if piece_words.is_empty() && !text.is_empty() {
+            // A model that gives no word times (GigaAM v3) still said this
+            // piece: its text goes over the piece's own audio, so a long
+            // capture's words stay where they were said.
+            let next_ms = ((total_frames + piece_frames) as i64) * 1_000 / i64::from(SAMPLE_RATE);
+            words.extend(
+                scrawl_capture::transcribe::spread_words(text, 0, (next_ms - offset_ms) as u64)
+                    .1
+                    .into_iter()
+                    .map(|word| TimedWord {
+                        start_ms: word.t0 as i64 + offset_ms,
+                        end_ms: word.t1 as i64 + offset_ms,
+                        text: word.text,
+                    }),
+            );
+            estimated = true;
+        }
         for word in piece_words {
             words.push(TimedWord {
                 start_ms: word.start_ms + offset_ms,
@@ -176,7 +223,8 @@ fn transcribe_pieces(
         }
         total_frames += piece_frames;
     }
-    Ok((texts.join(" "), words))
+    let duration_ms = (total_frames as u64) * 1_000 / u64::from(SAMPLE_RATE);
+    Ok((texts.join(" "), words, duration_ms, estimated))
 }
 
 /// The clip's text and words on the dictation engine's warm model.
@@ -283,7 +331,7 @@ mod tests {
         let path = wav("offset", &paced(61));
         let mut pieces = Pieces::open(&path).unwrap();
         let mut frames = Vec::new();
-        let (text, words) = transcribe_pieces(&mut pieces, |piece| {
+        let (text, words, duration_ms, estimated) = transcribe_pieces(&mut pieces, |piece| {
             frames.push(piece.len());
             Ok((
                 format!("piece {}", frames.len()),
@@ -300,6 +348,8 @@ mod tests {
         assert_eq!(frames.len(), 3, "61 s is three pieces");
         assert_eq!(text, "piece 1 piece 2 piece 3");
         assert_eq!(words.len(), 3);
+        assert_eq!(duration_ms, 61_000, "the clip's whole length");
+        assert!(!estimated, "the model timed every piece");
         // Every word sits at the total audio before its piece, whole
         // milliseconds of the running frame count: adding each piece's
         // truncated duration instead would drift whenever a cut lands off a
@@ -320,5 +370,107 @@ mod tests {
             "the second window is past 28 s"
         );
         assert!(words[2].start_ms >= 57_000, "the third window is past 57 s");
+    }
+
+    /// A model that gives no word times (GigaAM v3) said the text, so the
+    /// capture's words are spread over the clip as estimated times rather
+    /// than left empty for the editor and the keyframes.
+    #[test]
+    fn a_model_without_word_times_spreads_its_text_over_the_clip() {
+        let selection = crate::transcription::models::TranscriptionSelection {
+            model: crate::transcription::models::TranscriptionModelId::GigaAmV3,
+            ..Default::default()
+        };
+        let untimed = transcript("make it blue".into(), Vec::new(), 4_000, false, &selection);
+        assert!(untimed.estimated, "spread times are estimates");
+        assert_eq!(untimed.text, "make it blue");
+        assert_eq!(
+            untimed
+                .words
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>(),
+            ["make", "it", "blue"]
+        );
+        assert_eq!(untimed.words[0].t0, 0);
+        assert_eq!(untimed.words[2].t1, 4_000, "the words tile the clip");
+
+        let silent = transcript("  ".into(), Vec::new(), 4_000, false, &selection);
+        assert!(silent.words.is_empty() && !silent.estimated);
+
+        // A piece the pieces path already spread is kept, never spread again.
+        let pieced = transcript(
+            "late words".into(),
+            vec![TimedWord {
+                start_ms: 31_000,
+                end_ms: 32_000,
+                text: "late".into(),
+            }],
+            61_000,
+            true,
+            &selection,
+        );
+        assert!(pieced.estimated, "the pieces' spread stays an estimate");
+        assert_eq!(pieced.words.len(), 1, "already spread");
+
+        let timed = transcript(
+            "make it blue".into(),
+            vec![TimedWord {
+                start_ms: 100,
+                end_ms: 300,
+                text: "make".into(),
+            }],
+            4_000,
+            false,
+            &selection,
+        );
+        assert!(!timed.estimated, "a model's own times stay measured");
+        assert_eq!(timed.words.len(), 1);
+    }
+
+    /// A piece with text but no word times is spread over that piece's own
+    /// 30 s of audio, never the whole capture: a minute in, its words start a
+    /// minute in, and a silent piece between adds nothing.
+    #[test]
+    fn an_untimed_piece_spreads_over_its_own_audio_only() {
+        let path = wav("untimed", &paced(61));
+        let mut pieces = Pieces::open(&path).unwrap();
+        let mut frames = Vec::new();
+        let mut said = ["first piece said", "", "late words"].into_iter();
+        let (text, words, duration_ms, estimated) = transcribe_pieces(&mut pieces, |piece| {
+            frames.push(piece.len());
+            Ok((said.next().unwrap_or_default().to_string(), Vec::new()))
+        })
+        .unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(frames.len(), 3, "61 s is three pieces");
+        assert_eq!(text, "first piece said late words", "silence adds nothing");
+        assert!(estimated, "spread times are estimates");
+        assert_eq!(
+            words
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "piece", "said", "late", "words"]
+        );
+
+        let at = |frames: usize| (frames as u64) * 1_000 / 16_000;
+        let first_end = at(frames[0]);
+        let last_start = at(frames[0] + frames[1]);
+        assert_eq!(words[0].start_ms, 0);
+        assert_eq!(
+            words[2].end_ms, first_end as i64,
+            "the first piece's words tile its own audio"
+        );
+        assert_eq!(
+            words[3].start_ms, last_start as i64,
+            "the last piece's words start at its own offset"
+        );
+        assert_eq!(words[4].end_ms, duration_ms as i64);
+        assert!(
+            (30_000..61_000).contains(&last_start),
+            "the last piece sits past the first: {last_start}"
+        );
     }
 }

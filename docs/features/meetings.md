@@ -339,11 +339,14 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          ├── Record -> Start recording
          ├── Not now -> Close
          ├── … -> "<provider>" · "Change anytime in Settings" (capsule widens)
+         │   │   No rule is saved and no recording starts. The choices stay
+         │   │   open past the timeout, until answered or the offer is withdrawn.
          │   ├── Never offer -> saved, close
          │   ├── Always record -> saved, records this call too
          │   │   └── not offered for a browser on an unknown page
-         │   └── Cancel
-         └── 20 s timeout -> Close                     // never records on timeout
+         │   └── Cancel -> Back to Record / Not now; if the original timer
+         │       already fired, the compact offer gets another 20 s
+         └── 20 s timeout while compact -> Close       // never records on timeout
              └── unanswered -> the snooze ends the moment the call app leaves
                  the microphone, so a call joined after its pre-join screen is
                  offered again when it retakes it (#1267; check
@@ -600,6 +603,17 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 controller loop that turns `Detection::Record` into a recording has no
 automated test; it shares the manual Record path.
 
+`the_offer_menu_stays_usable_past_the_unanswered_deadline` presses … on a
+fixture Slack huddle, resizes that same Rune surface and delivers the scheduled
+20 s timeout. The choices remain clickable; no controller command or policy
+write comes from opening them. `cancel_returns_to_a_timed_clickable_offer` and
+`an_untouched_offer_times_out_without_a_choice` check the compact path.
+The detector withdraws a held offer when its call's snooze ends, another
+detection replaces it, Meetings turns off, or recording begins. The timeout
+and the Record request refer to that offer, not just its app: a late one
+cannot answer a later huddle. These checks exercise fixture input, timers and
+requests, not a native overlay, a live Slack call or a recorder.
+
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
 [dictation/context.rs](../../src/dictation/context.rs), the controller in
@@ -837,12 +851,17 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
      ├── Always dark in either host appearance, including the open Stop and copy rows
-     ├── At rest: a steady recording dot, Dot scope and elapsed time
+     ├── At rest: Dot scope and elapsed time, with no separate recording dot;
+     │   the accessible status names the recording and its title
      │   ├── The dictation HUD's listening field follows the louder fresh RMS
      │   │   from microphone or system audio (not individual speakers). Missing
-     │   │   buffers and those over 300 ms old read as zero. In silence the
-     │   │   beam settles to a still dotted line; the recording dot stays visible.
-     │   │   Reduce Motion holds the HUD's braid still
+     │   │   buffers and those over 300 ms old read as zero. When speech pauses
+     │   │   the beam narrows and dims into a still dotted line; a returning
+     │   │   voice opens it from its current height. The timer keeps ticking.
+     │   │   Reduce Motion holds the braid still
+     │   │   and fades its light without squeezing the rows. Checks:
+     │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
+     │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
      ├── Hover -> the pill reveals a panel: Stop opposite the meter and time
@@ -851,7 +870,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   corner opens upward, its header nearest the screen edge
      ├── Stop -> the icon, label and padding are one button at least 44 pt tall.
      │   A click queues one stop immediately. The pill stays open and says
-     │   “Stopping…” with its recording dot and elapsed time until capture ends.
+     │   “Stopping…” with its waveform and elapsed time until capture ends.
      │   The worker closing its sources, not the click, switches the header to
      │   “Transcribing…”. Publication brings back the copies and Close on the
      │   same surface; it does not wait for notes or a minimum animation time.
@@ -1290,22 +1309,59 @@ Stop & Transcribe
   -> Join on one timeline -> Echo suppression -> Final publication
 
 Hex quits while recording                           // meetings.quit
-  -> Capture stops; WAVs and manifest finalized; no chunk starts, no model loads
-  -> Interrupted with its rolling draft + final.pending beside the manifest
+  -> The drain installs any staged update, then joins the meeting controller;
+     capture stops, no chunk starts
+  -> WAVs and manifest finalized; Interrupted with its rolling draft and
+     final.pending beside the manifest
 Hex quits during Stop & Transcribe's final pass (#1284)
   -> Same: Interrupted + final.pending, never Failed with "Hex is quitting"
-  -> Next launch, Meetings on, no recording, once the dictation engine is up
-     (or 30 s without one) -> full-WAV final pass -> Complete + Markdown + notes
-     ├── Quit again or model not installed -> stays pending
-     └── Other failure -> stays Interrupted with the error and its draft
+Hex or Hex's process dies mid-recording (no final.pending)   // meetings.recovery
+  -> Next launch selects every unlocked folder whose manifest is Starting,
+     Recording, or Transcribing, or Interrupted with no error and no published
+     final transcript; a final.pending or recovery.attempt marker is finished
+     even beside a published transcript. Failed meetings are never touched
+  -> Each track whose data size is unset with audio behind it or overlong is
+     repaired from its file length (whole blocks, synced, no trailing chunk
+     absorbed); an empty finalised track is left as it is. The manifest's
+     sample counts, duration, and ended_at come from the audio and replace
+     list_all's relabel, which stamps the relaunch time
+  -> recovery.attempt counts the attempts, written durably before the pass.
+     A process that dies during it leaves the count: the next launch retries
+     once, and after the second death marks the meeting Interrupted
+     ("recovery did not finish") and never retries that audio
+  -> The pass holds the same in-flight flag as a recording, so a quit gives it
+     the meeting bound and Restart to update waits for it
+  -> final.pending -> the same next-launch final pass as a quit
+Any of the above, next launch, Meetings on, no recording, engine up (or 30 s)
+  -> A pass stops between meetings if a recording starts, and is offered
+     again when Hex is next idle
+  -> Full-WAV final pass -> Complete + Markdown export + notes
+  ├── Quit again or model not installed -> stays pending
+  └── Other failure -> stays Interrupted with the error and its draft
 ```
 
-Quitting gives its workers 5 s before `_exit`, and the final pass of a long
-meeting can take longer, or load a model once the dictation engine is gone.
-Sources: `record`, `finish_pending` in [meeting.rs](../../src/meeting.rs),
-`PendingFinals` in [meeting/watcher.rs](../../src/meeting/watcher.rs). Check:
-`quitting_mid_meeting_loads_no_model_and_finishes_in_time`. No repeatable
-driver quits a real recording and relaunches.
+Quitting gives its workers 5 s before `_exit`, extended up to 30 s from the
+quit's start while a recording or recovery is in flight
+(`meeting::recording`), and the final pass of a long meeting can take longer,
+or load a model once the dictation engine is gone. Retention waits for a
+`final.pending` draft, and for a stranded meeting only while Meetings is on
+and its model is installed (`recovery::can_recover`, which a CLI or MCP
+reader answers from `settings.json`); with Meetings off, stranded meetings
+expire like any other, as the expiry pass already documents.
+Sources: `record` in [meeting.rs](../../src/meeting.rs), `recording` in
+[meeting/recording.rs](../../src/meeting/recording.rs), and `PendingFinals`,
+`recover`, `repair_wav` in [meeting/recovery.rs](../../src/meeting/recovery.rs).
+Checks: `quitting_mid_meeting_loads_no_model_and_finishes_in_time`,
+`a_zeroed_wav_header_is_repaired_from_its_file_length`,
+`an_empty_finalised_track_is_finished_not_unfinalised`,
+`a_trailing_chunk_is_not_absorbed_into_the_audio`,
+`a_stranded_recording_is_selected_for_recovery`,
+`a_published_transcript_with_a_pending_marker_is_still_selected`,
+`a_recovery_that_died_twice_is_marked_and_never_retried`,
+`a_relabelled_meeting_takes_its_duration_from_the_audio`,
+`recovery_fills_the_manifest_from_the_repaired_audio`, and
+`restart_to_update_waits_while_a_meeting_records`. No repeatable driver quits a
+real recording and relaunches.
 
 Design choice: chunks are background jobs on the dictation transcription engine
 (`TranscriptionEngine::background`), using whatever model dictation has loaded,

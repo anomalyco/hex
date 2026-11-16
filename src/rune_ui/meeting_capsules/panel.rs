@@ -414,7 +414,11 @@ fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
         .key("caption")
         .min_w(0.)
         .my(TITLE_INSET)
-        .transition(replace(c))
+        .transition(if stopping {
+            Transition::none()
+        } else {
+            replace(c)
+        })
         .child(label);
     if c.corner.is_top() {
         slot.self_start()
@@ -423,7 +427,18 @@ fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
     }
 }
 
-/// The recording: at rest only its status, levels and time; under the
+/// Only grow the compact header for a notice or another minute digit.
+/// Its 13 pt monospaced digits each occupy 8 pt at layout resolution.
+pub(super) fn rest_width(shown: &Recording) -> f32 {
+    if recording_notice(shown).is_some() {
+        return PANEL_WIDTH;
+    }
+    let minutes = shown.started.elapsed().as_secs() / 60;
+    let extra = minutes.max(1).ilog10().saturating_sub(1);
+    (REST_WIDTH + extra as f32 * 8.).min(PANEL_WIDTH)
+}
+
+/// The recording: at rest only its levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
@@ -445,7 +460,6 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .h(REST_HEIGHT)
         .gap(6.0)
         .center_y()
-        .child(status_dot(p.danger()).size(6.0, 6.0))
         .child(waveform::slot())
         .child(
             text(elapsed)
@@ -469,7 +483,9 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         Some(
             row()
                 .key("stop")
-                .transition(Transition::identity())
+                // The accepted command replaces this hit target in the same
+                // frame. A presence fade would draw Stop under Stopping….
+                .transition(Transition::none())
                 .h(STOP_TARGET)
                 .min_w(STOP_TARGET)
                 .px(ROW_PX + 4.)
@@ -497,11 +513,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         + FIRST_ROW_GAP
         + PANEL_PAD
         + if notice.is_some() { NOTICE_HEIGHT } else { 0.0 };
-    let width = if open || notice.is_some() {
-        PANEL_WIDTH
-    } else {
-        REST_WIDTH
-    };
+    let width = if open { PANEL_WIDTH } else { rest_width(shown) };
     let height = if open { panel_height } else { REST_HEIGHT };
     // The full-size layout exists before the first hover. Its origin cancels
     // the moving clip's origin so neither the rows nor the meter ride its edge.
@@ -579,7 +591,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let body = col()
         .key("pill")
         .role("status")
-        .label(&shown.title)
+        .label(format!("{} · {}", tr("Recording"), shown.title))
         .radius(radius)
         .fill(p.k.c.bg_base)
         .border(p.hair, p.k.c.border_base)
@@ -650,15 +662,11 @@ pub(super) fn agent_prompt(hex: &str, id: &str, title: &str, recording: Option<u
 /// `noticed`), then the open panel. Elsewhere it stays at its largest, and
 /// only the `.hit()` pill takes the pointer.
 #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
-pub(super) fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
+pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f32, f32) {
     #[cfg(target_os = "windows")]
     {
         if !open {
-            let width = if noticed {
-                RECORDING_WINDOW.0
-            } else {
-                REST_WINDOW_WIDTH
-            };
+            let width = shown.map_or(REST_WIDTH, rest_width) + 2. * CAPSULE_INSET;
             return (width, REST_HEIGHT + 2.0 * CAPSULE_INSET);
         }
         (
@@ -668,7 +676,11 @@ pub(super) fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
                 + FIRST_ROW_GAP
                 + PANEL_PAD
                 + 2. * CAPSULE_INSET
-                + if noticed { NOTICE_HEIGHT } else { 0. },
+                + if shown.and_then(recording_notice).is_some() {
+                    NOTICE_HEIGHT
+                } else {
+                    0.
+                },
         )
     }
     #[cfg(not(target_os = "windows"))]

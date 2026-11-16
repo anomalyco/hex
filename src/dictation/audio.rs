@@ -700,6 +700,11 @@ impl Owner {
                 let _ = reply.send(became_intentional);
             }
             Command::Finish { at, tail, reply } => {
+                // The clip keeps audio through `at + tail` (a grown tail only
+                // ever keeps more), so the live stream must hear no further:
+                // everything past it is audio the clip trims away, and the
+                // engine treats a stream fed well past the clip as unusable.
+                self.capture.limit_stream_to(at, tail);
                 self.drain_through(at);
                 let announced = self.pending_capture.is_none()
                     && !tail.is_zero()

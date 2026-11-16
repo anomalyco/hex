@@ -144,12 +144,16 @@ fn stop_handoff_frames() {
     };
     let folder = std::path::PathBuf::from(folder);
     let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
+    let selected = std::env::var("HEX_STOP_CASE").ok();
     for (name, stopped, published, notes, long, failed) in [
         ("short", 53, 55, 58, false, false),
         ("delayed", 68, 108, 138, false, false),
         ("localized", 60, 86, 118, true, false),
         ("failure", 60, 100, 118, false, true),
     ] {
+        if selected.as_deref().is_some_and(|s| s != name) {
+            continue;
+        }
         let dir = folder.join(name);
         std::fs::create_dir_all(&dir).unwrap();
         let size = (260., 282.);
@@ -228,6 +232,7 @@ fn stop_handoff_frames() {
                 "elapsed",
                 "stop",
                 "header",
+                "meeting-listening-field",
                 "title",
                 "summary",
                 "copy-new",
@@ -242,6 +247,7 @@ fn stop_handoff_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), 520, 564, &rgba).unwrap();
         }
         std::fs::write(dir.join("trace.csv"), trace).unwrap();
+        assert!(commands.try_recv().is_err(), "one Stop per handoff");
     }
 }
 
@@ -601,6 +607,56 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
             } else {
                 (header - OPEN_HEADER).abs() < 0.02
             });
+        }
+    }
+}
+
+#[test]
+fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
+        for (sec, warning, width) in [
+            (258, false, REST_WIDTH),
+            (123 * 60 + 45, false, REST_WIDTH + 8.),
+            (123 * 60 + 45, true, PANEL_WIDTH),
+        ] {
+            let (mut rt, received, _) = runtime(live_recording("fixture"), false, true, RECORDING);
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                if let Some(Kind::Recording(shown)) = &mut c.kind {
+                    shown.started = Instant::now() - Duration::from_secs(sec);
+                    shown.warning = warning.then_some(meeting::TrackWarning::DigitalSilence);
+                }
+                tx.instant();
+            });
+            rt.settle_all();
+            rt.frame(0.);
+            let rect = |rt: &Runtime<Capsule>, key| {
+                rt.elements()
+                    .into_iter()
+                    .find(|e| e.key.as_deref() == Some(key))
+                    .unwrap()
+                    .rect
+            };
+            let [px, _, pw, ph] = rect(&rt, "pill");
+            let [sx, _, sw, _] = rect(&rt, "meeting-listening-field");
+            let [tx, _, tw, _] = rect(&rt, "elapsed");
+            assert_eq!((pw, ph), (width, REST_HEIGHT));
+            assert!(sx - px >= 9. && px + pw - tx - tw >= 9. && tx - (sx + sw) >= 5.);
+            if warning {
+                let [x, _, w, _] = rect(&rt, "notice");
+                assert!(w > 0. && (x + w <= sx || x >= tx + tw));
+            }
+            let timer = rt.find("elapsed").unwrap();
+            rt.pointer_move(timer.0, timer.1);
+            for _ in 0..48 {
+                rt.frame(1. / 60.);
+            }
+            assert_eq!(rt.find("elapsed"), Some(timer));
+            let [x, _, w, h] = rect(&rt, "stop");
+            assert!(w >= 44. && h >= 26. && (x + w <= sx || x >= tx + tw));
+            tap(&mut rt, "stop");
+            assert!(matches!(received.try_recv(), Ok(ControllerCommand::Stop)));
         }
     }
 }

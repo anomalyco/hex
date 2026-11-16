@@ -51,7 +51,7 @@ impl MeetingCapsules {
             ControllerEvent::Starting
                 | ControllerEvent::RecordingStarted { .. }
                 | ControllerEvent::Reminder { .. }
-                | ControllerEvent::Offer(_)
+                | ControllerEvent::Offer(..)
                 | ControllerEvent::Failed { .. }
         ) && self.handoff.take().is_some()
         {
@@ -88,7 +88,7 @@ impl MeetingCapsules {
         });
     }
 
-    pub(super) fn finish_meeting(&self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {
+    pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {
         if self.handoff.as_ref() != Some(&manifest.id) {
             self.show_panel(Kind::Ready(Box::new(manifest.clone())), Some(READY_TIMEOUT));
             return self.panel.clone();
@@ -142,18 +142,6 @@ impl MeetingCapsules {
                     // have been shown since.
                     if current.load(Ordering::SeqCst) != generation {
                         return;
-                    }
-                    if let Some(Kind::Offer(candidate)) = &capsule.kind {
-                        tracing::info!(
-                            source = candidate.source.label(),
-                            title = %candidate.title,
-                            "meeting recording offer timed out"
-                        );
-                        // Unanswered: offered again when the call app
-                        // retakes the microphone (#1267).
-                        if candidate.key != "preview" {
-                            capsule.send(ControllerCommand::OfferTimedOut);
-                        }
                     }
                     // A ready panel waits for the pointer to leave it.
                     if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
