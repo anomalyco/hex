@@ -1115,7 +1115,8 @@ occur.
 Which insertion?                                       // paste.rs
 ├── Chromium 155/156 frontmost -> type instead (#212)
 ├── Windows App frontmost -> type one paced key at a time (#1048)
-│       // both leave the clipboard alone: no publish and no restore
+│       // both skip the paste; Keep dictation on clipboard still writes the
+│       // typed text to the clipboard afterwards
 └── else -> publish clipboard -> post Paste
     ├── settle for 100 ms -> allow next output
     └── schedule restore after 500 ms -> restore only if still owned

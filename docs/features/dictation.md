@@ -1978,30 +1978,33 @@ differently from a paste. Remove the typing path once Chrome 157 is the floor.
 
 **Microsoft's Windows App (#1048):** this client (formerly Microsoft Remote
 Desktop; bundle identifiers `com.microsoft.rdc.macos` and
-`com.microsoft.windowsapp`) drops the modifiers of a shortcut it didn't see a
-real keyboard send, so Hex's posted ⌘V reaches its Windows session as a bare
-"v". Sending ⌘ as flags-changed events 15 ms apart, which other remote desktop
-clients need, did not help. When the frontmost app has one of those
-identifiers, Hex types the dictation instead: one Unicode scalar per key
-down/up pair, each carrying the key the active layout types that character
-with, Shift as its own flags-changed events around a character that needs it,
-4 ms between every posted event, and every line break as Shift-Return. The
-clipboard isn't touched, so nothing is captured or restored; ordering,
-continuation joins, Send's trailing Return, and Paste Last behave as for a
-paste. A character the active layout has no key for falls back to key code 0
-and only its Unicode string, which is how the Chromium path types everything.
-The layout keys come from the snapshot `initialize_layout` publishes on the
-main thread, so the paste worker never enters TIS. Limits: in the client's
-Scancode keyboard mode the session translates each key with its own layout, so
-characters the Mac layout can't type, and possibly uppercase letters when the
-client also drops synthetic Shift, may arrive wrong; its Unicode keyboard mode
-(Connections › Keyboard Mode › Unicode) types exactly. Not verified against a
-live Windows App session.
-Source: `type_text_paced` and `paced_typing_events` in
-[keyboard.rs](../../src/keyboard.rs), `typing_for_frontmost` in
-[paste.rs](../../src/paste.rs). Checks:
+`com.microsoft.windowsapp`) receives Hex's posted ⌘V as a bare "v". Sending ⌘
+as flags-changed events 15 ms apart did not help. When the frontmost app has
+one of those identifiers, Hex types the dictation instead: one Unicode scalar
+per key down/up pair, each carrying the key the active layout types that
+character with, Shift as its own flags-changed events around a character that
+needs it, 4 ms between every posted event, and every line break as
+Shift-Return. Nothing is captured for a clipboard restore, so the clipboard is
+left as it was; Labs › Keep dictation on clipboard still writes the typed text
+to it. Ordering, continuation joins, Send's trailing Return, and Paste Last
+behave as for a paste. Typing stops between characters when another app comes
+in front: what was typed stays typed, nothing further goes to the new app, and
+the dictation is reported failed so its whole text stays for Paste last
+dictation and History records nothing. The layout keys come from the snapshot
+`initialize_layout` publishes on the main thread, so the paste worker never
+enters TIS; a character the active layout has no key for keeps key code 0 and
+only its Unicode string, which is how the Chromium path types everything.
+Limits: in the client's Scancode keyboard mode the session translates each key
+with its own layout, so such a character arrives as key code 0 (the "a" key on
+a U.S. layout), and uppercase letters may arrive wrong when the client also
+drops synthetic Shift; its Unicode keyboard mode (Connections › Keyboard Mode ›
+Unicode) types exactly. Not verified against a live Windows App session.
+Source: `type_text_paced` and `paced_typing_groups` in
+[keyboard.rs](../../src/keyboard.rs), `typing_for_frontmost` and
+`remote_desktop_client_in_front` in [paste.rs](../../src/paste.rs). Checks:
 `paced_typing_sends_one_key_pair_per_character`,
 `paced_typing_sends_each_line_break_as_one_shift_return`,
+`paced_typing_stops_between_characters`,
 `typing_resolves_the_key_and_whether_it_needs_shift`, and
 `recognises_the_remote_desktop_clients_by_bundle_identifier` cover the event
 sequence and the identifier match, not insertion into a real session.

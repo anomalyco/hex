@@ -1029,7 +1029,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   A second exception on macOS: Microsoft's Windows App
   (`com.microsoft.rdc.macos`, `com.microsoft.windowsapp`) gets the text typed
   one paced key at a time, because that client reads a synthetic ⌘V as a bare
-  "v" (#1048). Both type instead of pasting and leave the clipboard alone.
+  "v" (#1048). Typing stops between characters once another app is in front.
+  Neither publishes or restores the clipboard; Labs › Keep dictation on
+  clipboard still writes the typed text to it.
 - Dictate without processing (`raw_dictation_hotkey`, Output pane) is
   unbound by default and registers, grabs, or reserves nothing until bound
   (on Linux a portal entry and X11 grab exist only while bound). It follows

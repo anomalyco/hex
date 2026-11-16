@@ -58,8 +58,8 @@ enum Typing {
     /// Type the text as fast as its events post: Chromium 155 and 156 can drop
     /// a ⌘V that races their own pasteboard change notification.
     Burst,
-    /// Type one character at a time, paced: Microsoft's Windows App loses the
-    /// modifier of a synthetic shortcut (#1048) and a burst of keys with it.
+    /// Type one character at a time, paced: Microsoft's Windows App reads a
+    /// synthetic shortcut as its bare key (#1048), so it gets typed text.
     Paced,
 }
 
@@ -122,10 +122,9 @@ const PASTE_SETTLE_DELAY: Duration = Duration::from_millis(100);
 // change notification, however long Hex waits first (#136, #212). The bug
 // arrived with Chromium CL 8217390 and is fixed by CL 8503629 in 157.
 const CLIPBOARD_RACE_CHROMIUM: RangeInclusive<u32> = 155..=156;
-// Microsoft's Windows App (formerly Microsoft Remote Desktop) drops the
-// modifiers of a shortcut it didn't see a real keyboard send, so Hex's
-// synthetic ⌘V reaches its Windows session as a bare "v" (#1048). Hex types
-// its dictation instead, one paced key at a time.
+// Microsoft's Windows App (formerly Microsoft Remote Desktop) reads Hex's
+// synthetic ⌘V as a bare "v" (#1048), so Hex types its dictation instead,
+// one paced key at a time.
 const REMOTE_DESKTOP_CLIENTS: &[&str] = &["com.microsoft.rdc.macos", "com.microsoft.windowsapp"];
 const SYSTEM_TRANSLATED_FLAVOR: u32 = 1 << 8;
 
@@ -271,9 +270,9 @@ impl Paster {
     }
 
     /// Inserts `text` as synthesized key events instead of a clipboard paste,
-    /// for the apps [`typing_for_frontmost`] names. The clipboard is left
-    /// alone, so nothing is captured or restored; Labs › Keep dictation on
-    /// clipboard still leaves the text there for a manual paste.
+    /// for the apps [`typing_for_frontmost`] names. Nothing is captured for a
+    /// restore; Labs › Keep dictation on clipboard still leaves the text on
+    /// the clipboard after typing.
     fn type_into_frontmost(&mut self, text: &str, mode: PasteMode, typing: Typing) -> Result<()> {
         if matches!(mode, PasteMode::Standalone) {
             self.continuation = None;
@@ -285,7 +284,17 @@ impl Paster {
             }
             Typing::Paced => {
                 tracing::debug!("typing instead of pasting into Windows App");
-                keyboard::type_text_paced(text)?;
+                // Typing a transcript takes seconds, so the app in front is
+                // watched at each character: keys the user meant for another
+                // app never land there, and stopping keeps the text for Paste
+                // last dictation instead of pasting it a second time.
+                keyboard::type_text_paced(text, || {
+                    let in_front = remote_desktop_client_in_front();
+                    if !in_front {
+                        tracing::warn!("stopped typing into Windows App: another app is in front");
+                    }
+                    in_front
+                })?;
             }
         }
         if crate::labs::keep_on_clipboard() {
@@ -401,14 +410,18 @@ impl Paster {
 /// bundle identifier decides first, so a remote desktop client never pays for
 /// the Chromium check; every other app keeps it.
 fn typing_for_frontmost() -> Option<Typing> {
-    if crate::dictation::context::frontmost_bundle_id()
-        .as_deref()
-        .is_some_and(is_remote_desktop_client)
-    {
+    if remote_desktop_client_in_front() {
         return Some(Typing::Paced);
     }
     let bundle = crate::dictation::context::frontmost_bundle_path()?;
     has_clipboard_race(&bundle).then_some(Typing::Burst)
+}
+
+/// Whether the app in front is a remote desktop client that gets typed text.
+fn remote_desktop_client_in_front() -> bool {
+    crate::dictation::context::frontmost_bundle_id()
+        .as_deref()
+        .is_some_and(is_remote_desktop_client)
 }
 
 fn is_remote_desktop_client(bundle_id: &str) -> bool {

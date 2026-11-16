@@ -30,12 +30,11 @@ const RETURN_KEY_CODE: u16 = 36;
 const MODIFIER_KEY_CODES: std::ops::RangeInclusive<u16> = 54..=63;
 const FLAGS_CHANGED_EVENT: u32 = 12;
 /// Pause between a posted shortcut's events. Remote desktop and VM clients
-/// (Microsoft's Windows App, #1048) track modifiers from their own events and
-/// can read a burst posted in one instant as the bare key, typing "v".
+/// track modifiers from their own events and can read a burst posted in one
+/// instant as the bare key, typing "v".
 const SHORTCUT_EVENT_GAP: std::time::Duration = std::time::Duration::from_millis(15);
-/// Pause between a paced typing's events. Microsoft's Windows App (#1048)
-/// forwards each key it takes from its own event stream, so a transcript
-/// posted in one burst loses some of them.
+/// Pause between a paced typing's events, so a client that takes each key from
+/// its own event stream has time to forward one before the next arrives.
 const PACED_TYPING_GAP: std::time::Duration = std::time::Duration::from_millis(4);
 /// Quartz keeps at most 20 UTF-16 units of a keyboard event's Unicode string.
 const MAX_UNICODE_UNITS: usize = 20;
@@ -452,25 +451,62 @@ fn typing_strokes(text: &str) -> Vec<Stroke> {
 /// scancodes gets the right key, and Shift goes down and up around a character
 /// the layout needs it for. Line breaks are Shift-Return, as `type_text`
 /// sends them.
-pub fn type_text_paced(text: &str) -> Result<()> {
-    let events = paced_typing_events(text, typing_key)
+///
+/// `keep_going` is asked before each character's events. Typing can take
+/// seconds, so a caller watches the app in front with it; when it says stop,
+/// nothing further is posted, no character is left half posted, and the text
+/// already typed stays typed. Every event is built before the first posts, so
+/// a creation failure posts nothing.
+pub fn type_text_paced(text: &str, keep_going: impl FnMut() -> bool) -> Result<()> {
+    let groups = paced_typing_groups(text, typing_key)
         .into_iter()
-        .map(|event| {
-            let created = KeyboardEvent::new((event.key_code, event.down, event.flags))?;
-            if let Some(character) = event.typed {
-                let mut units = [0; 2];
-                created.set_unicode(character.encode_utf16(&mut units));
-            }
-            Ok(created)
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|event| {
+                    let created = KeyboardEvent::new((event.key_code, event.down, event.flags))?;
+                    if let Some(character) = event.typed {
+                        let mut units = [0; 2];
+                        created.set_unicode(character.encode_utf16(&mut units));
+                    }
+                    Ok(created)
+                })
+                .collect::<Result<Vec<_>>>()
         })
         .collect::<Result<Vec<_>>>()?;
-    for (index, event) in events.iter().enumerate() {
-        if index > 0 {
-            std::thread::sleep(PACED_TYPING_GAP);
-        }
-        event.post();
+    let completed = post_paced_typing(&groups, keep_going, KeyboardEvent::post, || {
+        std::thread::sleep(PACED_TYPING_GAP)
+    });
+    if !completed {
+        return Err(eyre!("typing stopped before the text was finished"));
     }
     Ok(())
+}
+
+/// Posts `groups` in order, every event after the first `wait` apart, and
+/// asks `keep_going` before each group. A group is one character's events, so
+/// a stop never leaves a Shift down without its up. Returns whether every
+/// group was posted.
+fn post_paced_typing<E>(
+    groups: &[Vec<E>],
+    mut keep_going: impl FnMut() -> bool,
+    mut post: impl FnMut(&E),
+    mut wait: impl FnMut(),
+) -> bool {
+    let mut posted = 0;
+    for group in groups {
+        if !keep_going() {
+            return false;
+        }
+        for event in group {
+            if posted > 0 {
+                wait();
+            }
+            posted += 1;
+            post(event);
+        }
+    }
+    true
 }
 
 /// The key that types `character` on the active layout, and whether it needs
@@ -491,15 +527,16 @@ struct PacedTypingEvent {
     typed: Option<char>,
 }
 
-/// Splits `text` into one key down/up pair per character, each carrying the
-/// key `key_for` resolves for it, with Shift as its own flags-changed events
-/// when that key needs it. A character no key types keeps key code 0 and its
-/// Unicode string alone. `\r\n`, `\n`, and `\r` each become one Shift-Return.
-fn paced_typing_events(
+/// Splits `text` into one group of key events per character: its key down/up
+/// pair, each carrying the key `key_for` resolves for it, with Shift as its
+/// own flags-changed events when that key needs it. A character no key types
+/// keeps key code 0 and its Unicode string alone. `\r\n`, `\n`, and `\r` each
+/// become one Shift-Return group.
+fn paced_typing_groups(
     text: &str,
     key_for: impl Fn(char) -> Option<(u16, bool)>,
-) -> Vec<PacedTypingEvent> {
-    let mut events = Vec::new();
+) -> Vec<Vec<PacedTypingEvent>> {
+    let mut groups = Vec::new();
     let mut characters = text.chars().peekable();
     while let Some(character) = characters.next() {
         if matches!(character, '\r' | '\n') {
@@ -507,14 +544,16 @@ fn paced_typing_events(
                 characters.next_if_eq(&'\n');
             }
             let modifiers = [(SHIFT_FLAG, SHIFT_KEY_CODE)];
-            events.extend(shortcut_event_specs(RETURN_KEY_CODE, &modifiers, 1).map(
-                |(key_code, down, flags)| PacedTypingEvent {
-                    key_code,
-                    down,
-                    flags,
-                    typed: None,
-                },
-            ));
+            groups.push(
+                shortcut_event_specs(RETURN_KEY_CODE, &modifiers, 1)
+                    .map(|(key_code, down, flags)| PacedTypingEvent {
+                        key_code,
+                        down,
+                        flags,
+                        typed: None,
+                    })
+                    .collect(),
+            );
             continue;
         }
         let (key_code, shift) = key_for(character).unwrap_or((0, false));
@@ -523,18 +562,18 @@ fn paced_typing_events(
         } else {
             &[]
         };
-        events.extend(
-            shortcut_event_specs(key_code, modifiers, 1).map(|(key, down, flags)| {
-                PacedTypingEvent {
+        groups.push(
+            shortcut_event_specs(key_code, modifiers, 1)
+                .map(|(key, down, flags)| PacedTypingEvent {
                     key_code: key,
                     down,
                     flags,
                     typed: (key == key_code).then_some(character),
-                }
-            }),
+                })
+                .collect(),
         );
     }
-    events
+    groups
 }
 
 /// One press of a key that types nothing, under the modifier `flags` held
@@ -821,22 +860,27 @@ mod tests {
         );
     }
 
-    /// A layout's typing keys, as the assertions below read them: the key,
-    /// its edge, the modifiers held, and the character it types.
+    /// A layout's typing groups, as the assertions below read them: each
+    /// character's key, edge, modifiers held, and typed character.
     fn paced(
         text: &str,
         key_for: impl Fn(char) -> Option<(u16, bool)>,
-    ) -> Vec<(u16, bool, u64, Option<char>)> {
-        paced_typing_events(text, key_for)
+    ) -> Vec<Vec<(u16, bool, u64, Option<char>)>> {
+        paced_typing_groups(text, key_for)
             .into_iter()
-            .map(|event| (event.key_code, event.down, event.flags, event.typed))
+            .map(|group| {
+                group
+                    .into_iter()
+                    .map(|event| (event.key_code, event.down, event.flags, event.typed))
+                    .collect()
+            })
             .collect()
     }
 
-    /// Each character is one key down/up pair carrying its own Unicode string
-    /// and, when its key needs Shift, the layout's Shift key as flags-changed
-    /// events around it. A character no key types keeps key code 0 and its
-    /// Unicode string alone, a surrogate pair whole in one pair of events.
+    /// Each character is one group: a key down/up pair carrying its own
+    /// Unicode string and, when its key needs Shift, the layout's Shift key as
+    /// flags-changed events around it. A character no key types keeps key code
+    /// 0 and its Unicode string alone, a surrogate pair whole in one group.
     #[test]
     fn paced_typing_sends_one_key_pair_per_character() {
         let layout = |character| match character {
@@ -847,17 +891,18 @@ mod tests {
         assert_eq!(
             paced("vA", layout),
             [
-                (9, true, 0, Some('v')),
-                (9, false, 0, Some('v')),
-                (SHIFT_KEY_CODE, true, SHIFT_FLAG, None),
-                (0, true, SHIFT_FLAG, Some('A')),
-                (0, false, SHIFT_FLAG, Some('A')),
-                (SHIFT_KEY_CODE, false, 0, None),
+                [(9, true, 0, Some('v')), (9, false, 0, Some('v'))],
+                [
+                    (SHIFT_KEY_CODE, true, SHIFT_FLAG, None),
+                    (0, true, SHIFT_FLAG, Some('A')),
+                    (0, false, SHIFT_FLAG, Some('A')),
+                    (SHIFT_KEY_CODE, false, 0, None),
+                ],
             ]
         );
         assert_eq!(
             paced("😀", |_| None),
-            [(0, true, 0, Some('😀')), (0, false, 0, Some('😀'))]
+            [[(0, true, 0, Some('😀')), (0, false, 0, Some('😀'))]]
         );
     }
 
@@ -865,13 +910,66 @@ mod tests {
     fn paced_typing_sends_each_line_break_as_one_shift_return() {
         assert_eq!(
             paced("\r\n", |_| Some((9, false))),
-            [
+            [[
                 (SHIFT_KEY_CODE, true, SHIFT_FLAG, None),
                 (RETURN_KEY_CODE, true, SHIFT_FLAG, None),
                 (RETURN_KEY_CODE, false, SHIFT_FLAG, None),
                 (SHIFT_KEY_CODE, false, 0, None),
-            ]
+            ]]
         );
+    }
+
+    /// Typing can take seconds, so a caller can stop it between characters:
+    /// whole groups only, so a Shift down is never left without its up, and
+    /// nothing posts once the callback says stop.
+    #[test]
+    fn paced_typing_stops_between_characters() {
+        let groups = vec![vec![1_u8, 2], vec![3, 4], vec![5]];
+        let typed = std::cell::Cell::new(0_usize);
+        let mut posts = Vec::new();
+        let mut waits = 0;
+        let completed = post_paced_typing(
+            &groups,
+            || typed.get() < 2,
+            |event| {
+                typed.set(typed.get() + 1);
+                posts.push(*event);
+            },
+            || waits += 1,
+        );
+        assert!(!completed);
+        assert_eq!(posts, [1, 2], "the second character never starts");
+        assert_eq!(waits, 1, "a wait between every post after the first");
+
+        let asked = std::cell::Cell::new(0_usize);
+        let mut posts = Vec::new();
+        let mut waits = 0;
+        assert!(!post_paced_typing(
+            &groups,
+            || {
+                asked.set(asked.get() + 1);
+                false
+            },
+            |event| posts.push(*event),
+            || waits += 1,
+        ));
+        assert!(
+            posts.is_empty(),
+            "a stop before the first character types nothing"
+        );
+        assert_eq!(asked.get(), 1, "asked once, before the first character");
+        assert_eq!(waits, 0);
+
+        let mut posts = Vec::new();
+        let mut waits = 0;
+        assert!(post_paced_typing(
+            &groups,
+            || true,
+            |event| posts.push(*event),
+            || waits += 1,
+        ));
+        assert_eq!(posts, [1, 2, 3, 4, 5]);
+        assert_eq!(waits, 4);
     }
 
     /// Typing resolves a character exactly as it stands: `a` and `A` are the
