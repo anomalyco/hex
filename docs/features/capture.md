@@ -9,11 +9,12 @@ PipeWire (`capture.linux`), on Windows Windows.Graphics.Capture
 (`capture.windows`), (or a cabled iPhone through `scrawl-helper`'s
 mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
 macOS and Windows, or the Annotate key held or the pen), transcribes the narration with word timestamps on
-Hex's loaded model (a model that gives none, GigaAM v3 say, still counts the
-words in its text), writes a Scrawl bundle into Scrawl's captures folder,
-copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
-router (`crates/router`), run in Hex's process. Settings › Annotate (under
-Labs in the sidebar) holds its settings. Scrawl's capsule (switch
+Hex's loaded model (a model that gives none, GigaAM v3 say, has its text
+spread over the clip as estimated times), writes a Scrawl bundle into
+Scrawl's captures folder, copies it to the clipboard, and sends it to an
+OpenCode session with Scrawl's router (`crates/router`), run in Hex's
+process. Settings › Annotate (under Labs in the sidebar) holds its settings.
+Scrawl's capsule (switch
 chips, the on-screen picker, route chips) and its ink and laser overlay are
 Rune overlays.
 
@@ -807,6 +808,12 @@ hex capture stop                         // capture.stop
     ├── Word times moved earlier by the model's measured lag (Parakeet Unified
     │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
     │   other models and Apple keep their own times
+    ├── A model that gives no word times (GigaAM v3) has its text spread over
+    │   the clip as estimated times, so keyframes and the editor have
+    │   somewhere to put it; a bundle already on disk without them counts and
+    │   spreads its own text
+    │   (`scrawl_capture::transcribe::word_count`, the Captures pane's
+    │   `words_on_clock`)
     ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
     │   guard, never a memory bound (iPhone and replay narration are decoded in
     │   memory and so are not covered by it), and scrawl.json's
@@ -1107,7 +1114,10 @@ Checks:
   In capture_host/wav_file.rs: `a_finished_file_reads_back_and_can_be_trimmed`,
   `a_keep_past_the_written_samples_keeps_them_all`, and
   `the_file_is_owner_only`.
-  In capture_host/words.rs: `pieces_past_the_first_window_keep_their_place_on_the_clock`.
+  In capture_host/words.rs: `pieces_past_the_first_window_keep_their_place_on_the_clock`
+  and `a_model_without_word_times_spreads_its_text_over_the_clip`;
+  `an_untimed_capture_gets_its_words_spread_over_the_movie` in
+  [rune_ui/captures.rs](../../src/rune_ui/captures.rs).
 - The audio-stopped notice: `summary_says_where_a_captures_audio_stopped` in
   [sketch.rs](../../crates/capture/src/sketch.rs);
   `lengths_read_as_clocks_at_an_hour` and
