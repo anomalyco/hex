@@ -107,6 +107,9 @@ const FIRST_ROW_GAP: f32 = 2.0;
 const NOTICE_HEIGHT: f32 = 20.0;
 /// The ready panel's summary: Apple Intelligence's two sentences.
 const SUMMARY_LINES: usize = 3;
+const TITLE_LINES: usize = 3;
+const TITLE_INSET: f32 = (REST_HEIGHT - 20.) / 2.;
+const RESULT_HEADER_MAX: f32 = TITLE_LINES as f32 * 20. + 2. * TITLE_INSET;
 const SUMMARY_LINE: f32 = 19.5;
 /// The resting pill fits a timer up to `100:00`.
 #[cfg(target_os = "windows")]
@@ -114,7 +117,7 @@ const REST_WINDOW_WIDTH: f32 = REST_WIDTH + 2.0 * CAPSULE_INSET;
 /// One transparent window with room for the finished panel's longest summary.
 const RECORDING_WINDOW: (f32, f32) = (
     PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-    HEADER_HEIGHT
+    RESULT_HEADER_MAX
         + SUMMARY_LINE * SUMMARY_LINES as f32
         + ROW_PX
         + FIRST_ROW_GAP

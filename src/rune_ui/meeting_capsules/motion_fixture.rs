@@ -142,75 +142,107 @@ fn stop_handoff_frames() {
     let Some(folder) = std::env::var_os("HEX_STOP_FRAMES") else {
         return;
     };
-    let dir = std::path::PathBuf::from(folder);
-    std::fs::create_dir_all(&dir).unwrap();
-    let size = (260., 244.);
-    let (mut rt, commands, _) = runtime(live_recording("ready-snap"), false, false, size);
-    rt.transparent = true;
-    rt.update(|c, tx| {
-        c.live.entries = call();
-        c.corner = MeetingIndicatorCorner::TopRight;
-        tx.instant();
-    });
-    rt.frame(0.);
+    let folder = std::path::PathBuf::from(folder);
     let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
-    let mut renderer = offscreen::renderer(&gpu.device);
-    let target = offscreen::target(&gpu.device, 520, 488);
-    let mut ink = waveform::Ink::default();
-    let mut trace = String::from("frame,key,x,y,w,h\n");
-    let start = Instant::now();
-    rt.state.waveform = Some(Box::new(waveform::Listening::new(start)));
-    for frame in 0..180 {
-        if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
-            shown.started = Instant::now() - Duration::from_secs(258);
-            rt.state.waveform.as_mut().unwrap().sample(
-                start + Duration::from_secs_f64(frame as f64 / 60.),
-                fixture_levels(frame),
-            );
-        }
-        match frame {
-            12 => rt.pointer_move(225., 22.),
-            47 => {
-                let (x, y) = rt.find("stop").unwrap();
-                rt.pointer_move(x, y);
+    for (name, stopped, published, notes, long, failed) in [
+        ("short", 53, 55, 58, false, false),
+        ("delayed", 68, 108, 138, false, false),
+        ("localized", 60, 86, 118, true, false),
+        ("failure", 60, 100, 118, false, true),
+    ] {
+        let dir = folder.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let size = (260., 282.);
+        let (mut rt, commands, _) = runtime(live_recording("ready-snap"), false, false, size);
+        rt.transparent = true;
+        rt.update(|c, tx| {
+            c.live.entries = call();
+            c.corner = MeetingIndicatorCorner::TopRight;
+            tx.instant();
+        });
+        rt.frame(0.);
+        let mut renderer = offscreen::renderer(&gpu.device);
+        let target = offscreen::target(&gpu.device, 520, 564);
+        let mut ink = waveform::Ink::default();
+        let mut trace = String::from("frame,key,x,y,w,h\n");
+        let start = Instant::now();
+        rt.state.waveform = Some(Box::new(waveform::Listening::new(start)));
+        for frame in 0..180 {
+            if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+                shown.started = Instant::now() - Duration::from_secs(258);
+                rt.state.waveform.as_mut().unwrap().sample(
+                    start + Duration::from_secs_f64(frame as f64 / 60.),
+                    fixture_levels(frame),
+                );
             }
-            48 => {
-                let (x, y) = rt.find("stop").unwrap();
-                rt.pointer_down(x, y);
-                rt.pointer_up(x, y);
+            match frame {
+                12 => rt.pointer_move(225., 22.),
+                47 => {
+                    let (x, y) = rt.find("stop").unwrap();
+                    rt.pointer_move(x, y);
+                }
+                48 => {
+                    let (x, y) = rt.find("stop").unwrap();
+                    rt.pointer_down(x, y);
+                    rt.pointer_up(x, y);
+                }
+                52 => rt.update(|c, _| c.mark_stopping()),
+                62 => rt.pointer_leave(),
+                f if f == stopped => rt.update(|c, _| c.capture_stopped()),
+                f if f == published && failed => rt.update(|c, tx| {
+                    c.kind = None;
+                    tx.instant();
+                }), // host opens Meetings with the failure
+                f if f == published => rt.update(|c, _| {
+                    let Kind::Ready(mut m) = ready_transcript() else {
+                        unreachable!()
+                    };
+                    m.duration_ms = Some(258_000);
+                    if long {
+                        m.title =
+                            "Planification trimestrielle — lancement et préparation des équipes"
+                                .into();
+                    }
+                    c.published(m);
+                }),
+                f if f == notes && !failed => rt.update(|c, _| {
+                    let Kind::Ready(mut m) = ready_summarized() else {
+                        unreachable!()
+                    };
+                    m.duration_ms = Some(258_000);
+                    if long {
+                        m.notes.as_mut().unwrap().title =
+                            "Planification trimestrielle — lancement et préparation des équipes"
+                                .into();
+                    }
+                    c.refresh_ready(m);
+                }),
+                _ => (),
             }
-            52 => rt.update(|c, _| c.mark_stopping()),
-            62 => rt.pointer_leave(),
-            68 => rt.update(|c, _| c.capture_stopped()),
-            108 => rt.update(|c, _| {
-                let Kind::Ready(mut m) = ready_transcript() else {
-                    unreachable!()
-                };
-                m.duration_ms = Some(258_000);
-                c.published(m);
-            }),
-            138 => rt.update(|c, _| {
-                let Kind::Ready(mut m) = ready_summarized() else {
-                    unreachable!()
-                };
-                m.duration_ms = Some(258_000);
-                c.refresh_ready(m);
-            }),
-            _ => (),
-        }
-        rt.frame(1. / 60.);
-        if frame == 48 {
-            assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
-        }
-        for key in ["pill", "elapsed", "stop", "summary", "copy-new"] {
-            if let Some(([x, y, w, h], _)) = rt.presented(key) {
-                writeln!(trace, "{frame},{key},{x},{y},{w},{h}").unwrap();
+            rt.frame(1. / 60.);
+            if frame == 48 {
+                assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
             }
+            for key in [
+                "pill",
+                "elapsed",
+                "stop",
+                "header",
+                "title",
+                "summary",
+                "copy-new",
+                "copy-all",
+                "copy-prompt",
+            ] {
+                if let Some(([x, y, w, h], _)) = rt.presented(key) {
+                    writeln!(trace, "{frame},{key},{x},{y},{w},{h}").unwrap();
+                }
+            }
+            let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
+            rune::render::write_png(&dir.join(format!("{frame:03}.png")), 520, 564, &rgba).unwrap();
         }
-        let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
-        rune::render::write_png(&dir.join(format!("{frame:03}.png")), 520, 488, &rgba).unwrap();
+        std::fs::write(dir.join("trace.csv"), trace).unwrap();
     }
-    std::fs::write(dir.join("trace.csv"), trace).unwrap();
 }
 
 #[test]
@@ -475,6 +507,100 @@ fn capture_end_and_publication_retarget_one_anchored_surface() {
                 assert!(rt.find("elapsed").is_some());
                 assert_eq!(rt.find("dismiss").is_some(), frame >= 12 + delay);
             }
+        }
+    }
+}
+
+/// Measure what Rune presented, not just Taffy's destination. In particular,
+/// a transient but perfectly anchored 18 pt dip used to pass the anchor test.
+#[test]
+fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopRight, BottomLeft, BottomRight, TopLeft] {
+        for (delay, reduced, long) in [
+            (1, false, false),
+            (60, false, false),
+            (2, false, true),
+            (1, true, true),
+        ] {
+            let (mut rt, _, _) = runtime(live_recording("ready-snap"), false, true, RECORDING);
+            rt.reduced_motion = reduced;
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                tx.instant();
+            });
+            rt.frame(0.);
+            open_recording(&mut rt);
+            let rect = |rt: &Runtime<Capsule>, k| rt.presented(k).unwrap().0;
+            let clock = rect(&rt, "elapsed");
+            let rows = ["copy-new", "copy-all", "copy-prompt"];
+            let at = rows.map(|k| rect(&rt, k));
+            let mut height = rect(&rt, "pill")[3];
+            let mut title_width = None;
+            let mut last_clock_x = clock[0];
+            rt.update(|c, _| c.mark_stopping());
+            for frame in 0..delay + 100 {
+                if frame == 1 {
+                    rt.update(|c, _| c.capture_stopped());
+                }
+                if frame == 1 + delay {
+                    rt.update(|c,_| {
+                        let Kind::Ready(mut m) = ready_transcript() else { unreachable!() };
+                        m.duration_ms = Some(258_000);
+                        if long { m.title = "Planification trimestrielle — lancement et préparation des équipes".into(); }
+                        c.published(m);
+                    });
+                }
+                if frame == 4 + delay {
+                    rt.update(|c,_| {
+                        let Kind::Ready(mut m) = ready_summarized() else { unreachable!() };
+                        m.duration_ms = Some(258_000);
+                        if long { m.notes.as_mut().unwrap().title = "Planification trimestrielle — lancement et préparation des équipes".into(); }
+                        c.refresh_ready(m);
+                    });
+                }
+                rt.frame(1. / 60.);
+                let now = rect(&rt, "pill")[3];
+                assert!(
+                    now >= height - 0.02,
+                    "{corner:?} f{frame}: {height} → {now}"
+                );
+                height = now;
+                let t = rect(&rt, "elapsed");
+                assert!(
+                    (t[1] - clock[1]).abs() < 0.02 && t[2..] == clock[2..],
+                    "{corner:?} f{frame} timer {t:?} / {clock:?}"
+                );
+                if corner.is_right() {
+                    assert!((t[0] - clock[0]).abs() < 0.02);
+                } else {
+                    assert!(t[0] <= last_clock_x + 0.02, "timer reversed at {frame}");
+                }
+                last_clock_x = t[0];
+                if frame >= delay + 1 {
+                    let w = rect(&rt, "title")[2];
+                    assert!(
+                        (w - *title_width.get_or_insert(w)).abs() < 0.02,
+                        "title wrapped at a moving width"
+                    );
+                }
+                for (key, original) in rows.into_iter().zip(at) {
+                    let row = rect(&rt, key);
+                    assert_eq!(row[2..], original[2..]);
+                    if !long {
+                        assert!(
+                            (row[1] - original[1]).abs() < 0.02,
+                            "{corner:?} f{frame} {key}: {row:?} / {original:?}"
+                        );
+                    }
+                }
+            }
+            let header = rect(&rt, "header")[3];
+            assert!(if long {
+                header > OPEN_HEADER
+            } else {
+                (header - OPEN_HEADER).abs() < 0.02
+            });
         }
     }
 }

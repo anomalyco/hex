@@ -67,7 +67,7 @@ pub(super) fn ready_summary(manifest: &MeetingManifest) -> Option<(String, bool)
 
 /// The timer: elapsed while recording, the length once finished.
 fn timer_style() -> TextStyle {
-    TextStyle::new(14.0, 600.0).mono().lh(18.0)
+    TextStyle::new(13.0, 500.0).mono().lh(18.0)
 }
 
 /// "4 min new", "Up to date", "Transcribing…", or ✓ Copied: what Copy new
@@ -310,37 +310,66 @@ fn result(
     duration: Option<u64>,
     manifest: Option<&MeetingManifest>,
 ) -> El {
+    let top = capsule.corner.is_top();
+    let right = capsule.corner.is_right();
     let header = row()
         .key("header")
-        .h(HEADER_HEIGHT)
-        .pl(PANEL_PAD + ROW_PX)
-        .pr(PANEL_PAD)
-        .gap(8.0)
-        .center_y()
-        .child(
-            text(title.clone())
-                .key(if manifest.is_some() {
-                    "title"
-                } else {
-                    "finalizing"
-                })
-                .transition(replace(capsule))
-                .font(TextStyle::new(13.0, 600.0).lh(20.0))
-                .color(p.text())
-                .truncate()
-                .grow(1.0)
-                .min_w(0.0)
-                .a11y_hidden(),
-        )
-        .children(duration.map(|duration| {
-            row().key("meter").center_y().child(
-                text(meeting::format_duration(duration))
-                    .key("elapsed")
-                    .font(timer_style())
-                    .color(p.muted()),
-            )
-        }))
+        .min_h(OPEN_HEADER)
+        .clip_rounded(0.)
+        .px(REST_PX)
+        .gap(6.0)
+        .center_y();
+    // The title has its final column even before Close is available. It may
+    // grow vertically without moving the time off the recording baseline.
+    let label = text(title.clone())
+        .key(if manifest.is_some() {
+            "title"
+        } else {
+            "finalizing"
+        })
+        .transition(replace(capsule))
+        .font(TextStyle::new(13.0, 600.0).lh(20.0))
+        .color(p.text())
+        .wrap_anywhere()
+        .max_lines(TITLE_LINES)
+        .grow(1.0)
+        .min_w(0.0)
+        .my(TITLE_INSET)
+        .a11y_hidden();
+    let label = if top {
+        label.self_start()
+    } else {
+        label.self_end()
+    };
+    let clock = duration.map(|duration| {
+        let meter = row().key("meter").h(REST_HEIGHT).center_y().child(
+            text(meeting::format_duration(duration))
+                .key("elapsed")
+                .font(timer_style())
+                .color(p.muted()),
+        );
+        if top {
+            meter.self_start()
+        } else {
+            meter.self_end()
+        }
+    });
+    let close = row()
+        .key("close-slot")
+        .w(32.)
+        .h(REST_HEIGHT)
+        .center()
         .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
+    let close = if top {
+        close.self_start()
+    } else {
+        close.self_end()
+    };
+    let header = if right {
+        header.child(label).child(close).children(clock)
+    } else {
+        header.children(clock).child(close).child(label)
+    };
     let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
         text(summary)
             .key("summary")
@@ -358,18 +387,24 @@ fn result(
     let rows = col()
         .key("rows")
         .px(PANEL_PAD)
-        .pb(PANEL_PAD)
         .children(copy_rows(p, capsule, false));
+    let rows = if top {
+        rows.pb(PANEL_PAD)
+    } else {
+        rows.pt(PANEL_PAD)
+    };
     let rows = if manifest.is_none() {
         rows.disabled(true).opacity(0.48)
     } else {
         rows
     };
     let contents = col().key("panel-contents").w(PANEL_WIDTH);
-    let contents = if capsule.corner.is_top() {
-        contents.child(header).child(summary).child(rows)
+    // New notes grow from the free edge, not between the pointer and its
+    // copy row. A bottom corner mirrors the bands, not their reading order.
+    let contents = if top {
+        contents.child(header).child(rows).child(summary)
     } else {
-        contents.child(rows).child(summary).child(header)
+        contents.child(summary).child(rows).child(header)
     };
     let body = panel_body(p, &title)
         .motion(RECORDING_OPEN)
@@ -407,7 +442,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .child(
             text(elapsed)
                 .key("elapsed")
-                .font(TextStyle::new(13.0, 500.0).mono().lh(18.0))
+                .font(timer_style())
                 .color(p.muted()),
         );
     let meter = if top {
@@ -649,7 +684,7 @@ pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
     };
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        HEADER_HEIGHT
+        RESULT_HEADER_MAX
             + summary
             + 3.0 * ROW_HEIGHT
             + FIRST_ROW_GAP

@@ -855,6 +855,10 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   The worker closing its sources, not the click, switches the header to
      │   “Transcribing…”. Publication brings back the copies and Close on the
      │   same surface; it does not wait for notes or a minimum animation time.
+     │   Short titles keep the open recording header's height. Longer ones
+     │   wrap at their final width (up to three lines). The timer keeps its
+     │   baseline. Notes grow from the outer edge, past the copy rows, without
+     │   moving a copy button away from the pointer.
      │   A recorder failure yields to the Meetings error instead of showing a
      │   finished transcript. Check: `stop_handoff_frames` (offscreen Rune).
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest

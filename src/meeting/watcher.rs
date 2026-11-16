@@ -27,7 +27,6 @@ use call_switch::{
 
 mod call_switch;
 mod publication;
-use publication::start_notes;
 
 pub(crate) enum ControllerCommand {
     Record(MeetingCandidate),
@@ -1463,6 +1462,21 @@ fn detect_meeting(
         );
     }
     Ok(detection)
+}
+
+/// Writes notes on a background thread; the UI refreshes from the manifest
+/// whether generation succeeds or fails.
+pub(super) fn start_notes(id: String, events: &SyncSender<ControllerEvent>) {
+    let finished = events.clone();
+    let pending = id.clone();
+    if meeting::spawn_summary(id.clone(), move |result| {
+        let _ = finished.send(match result {
+            Ok(manifest) => ControllerEvent::NotesFinished(Box::new(manifest)),
+            Err(_) => ControllerEvent::NotesProgress(pending),
+        });
+    }) {
+        let _ = events.send(ControllerEvent::NotesProgress(id));
+    }
 }
 
 #[cfg(debug_assertions)]
