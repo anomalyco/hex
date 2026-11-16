@@ -116,15 +116,15 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "sound_theme",
         Kind::Choice(&[
-            "signature",
             "classic",
+            "signature",
             "click",
             "soft",
             "wood",
             "analog",
             "thock",
         ]),
-        "Which sounds play; classic, Hex's original tones, is the default",
+        "Which sounds play; classic (Classic keys) is the default, signature selects Kalimba",
     ),
     optional(
         "microphone",

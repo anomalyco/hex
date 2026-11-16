@@ -2540,7 +2540,7 @@ Linux General > Sound volume              // dictate.feedback.linux; X11 + Wayla
 ├── Slider at 0 -> No recording tones; the last level is kept
 └── Release above 0 -> Save and apply live; preview the start sound
 Linux General > Sounds                    // dictate.sound-theme
-└── Signature / Classic -> Save and apply live; preview the start sound
+└── Classic keys (default), Kalimba, and five more sets -> Choose to save and preview; Play only previews
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
