@@ -790,23 +790,27 @@ hex capture stop                         // capture.stop
 │   written beside it; only the steps that read the movie wait for it, and it
 │   starts where its first frame was shown (video_offset_ms)
 └── In the background, on one capture-finish thread, one capture at a time:
-    ├── 16 kHz audio streamed to audio.wav.partial as it records (renamed to
-    │   audio.wav when the capture stops, so no live capture looks recoverable):
-    │   leading start offset and gaps written as silence, so WAV time stays
-    │   capture time
-    ├── Words: audio.wav read in 30 s pieces, each a foreground job on the
-    │   dictation engine's model, after queued dictation, before meeting chunks;
-    │   waits while dictation records or transcribes; never interrupts a live stream
+    ├── 16 kHz audio streamed to audio.wav.partial as it records, and renamed to
+    │   audio.wav only once this build writes the capture's unfinished.json:
+    │   audio.wav never exists without a journal, so a capture still recording
+    │   or waiting its turn never looks recoverable. Leading start offset and
+    │   gaps are written as silence, so WAV time stays capture time
+    ├── Words: on the Parakeet and GGUF paths, audio.wav read in 30 s pieces
+    │   (iPhone and replay narration are decoded in memory), each a foreground
+    │   job on the dictation engine's model, after queued dictation, before
+    │   meeting chunks; waits while dictation records or transcribes; never
+    │   interrupts a live stream. Apple reads the file itself
     ├── Word times moved earlier by the model's measured lag (Parakeet Unified
     │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
     │   other models and Apple keep their own times
     ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
-    │   guard, never a memory bound, and scrawl.json's audioStoppedAtMs makes
-    │   summary.md say "Audio stopped at 8:00:00; the rest of this capture has
-    │   no audio" (a failed audio write says where too)
-    ├── Cancel or a failed start -> the partial audio is closed and removed
-    │   with the bundle; a crash leaves it, and retention trashes it like
-    │   any other media (a movie and a partial are never a bundle recover
+    │   guard, never a memory bound (iPhone and replay narration are decoded in
+    │   memory and so are not covered by it), and scrawl.json's
+    │   audioStoppedAtMs makes summary.md say "Audio stopped at 8:00:00; the
+    │   rest of this capture has no audio" (a failed audio write says where too)
+    ├── Cancel or a failed screen source -> the partial audio is closed and
+    │   removed with the bundle; a crash leaves it, and retention trashes it
+    │   like any other media (a movie and a partial are never a bundle recover
     │   rebuilds)
     ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
     │   summary.md; then every file 0600 and folder 0700
@@ -1087,6 +1091,7 @@ Checks:
   `past_the_guard_the_file_stops_and_the_rest_is_one_gap`,
   `the_guard_records_where_the_audio_stopped`,
   `a_write_failure_stops_the_audio_where_the_file_stopped`,
+  `a_mid_capture_write_failure_stops_where_the_file_stopped`,
   `captures_finish_one_at_a_time_and_starts_wait_for_room`,
   `a_capture_queued_behind_a_slow_finish_has_already_stopped`,
   `a_failed_start_raced_by_stop_never_wedges_later_starts`,
@@ -1128,8 +1133,11 @@ Checks:
   [audio.rs](../../crates/capture/src/audio.rs). The mirror, its
   `--no-microphone`, and the camera prompt have not run in Hex.
 - Streaming and recovery, in [recover.rs](../../crates/capture/src/recover.rs):
-  `a_capture_streaming_its_audio_is_never_owed_a_rebuild` (and the live case
+  `a_capture_that_has_not_been_journaled_is_never_owed_a_rebuild` (and the
+  live case
   of `recover_picks_up_old_video_and_audio_without_a_journal_but_never_a_live_capture`);
+  `a_streamed_audio_takes_its_final_name_only_when_its_build_settles_it` in
+  [pipeline.rs](../../crates/capture/src/pipeline.rs);
   `a_crashed_capture_with_only_partial_audio_is_cleaned_up` in
   [retention.rs](../../crates/capture/src/retention.rs).
 - Routing, in [routing.rs](../../src/capture_host/routing.rs):

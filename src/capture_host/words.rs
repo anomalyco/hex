@@ -243,12 +243,15 @@ fn transcribe_words(
 mod tests {
     use super::*;
 
-    /// A WAV of `seconds` with one second of silence every five, so a piece
-    /// cut has somewhere quiet to land.
+    /// A tone with one quiet 100 ms at 28.0 s: the quietest window in the first
+    /// piece's last five seconds, at an odd sample, so its cut lands off a
+    /// whole-millisecond boundary.
     fn paced(seconds: usize) -> Vec<f32> {
-        (0..16_000 * seconds)
-            .map(|sample| if sample / 16_000 % 5 == 4 { 0.0 } else { 0.25 })
-            .collect()
+        let mut samples = vec![0.25_f32; 16_000 * seconds];
+        for sample in &mut samples[448_001..448_001 + 1_600] {
+            *sample = 0.0;
+        }
+        samples
     }
 
     fn wav(name: &str, samples: &[f32]) -> std::path::PathBuf {
@@ -297,17 +300,25 @@ mod tests {
         assert_eq!(frames.len(), 3, "61 s is three pieces");
         assert_eq!(text, "piece 1 piece 2 piece 3");
         assert_eq!(words.len(), 3);
-        let mut offset_ms = 0_i64;
+        // Every word sits at the total audio before its piece, whole
+        // milliseconds of the running frame count: adding each piece's
+        // truncated duration instead would drift whenever a cut lands off a
+        // millisecond boundary.
+        assert!(
+            frames.iter().any(|&frames| frames % 16 != 0),
+            "the fixture cuts pieces at odd sample counts: {frames:?}"
+        );
+        let mut total = 0_usize;
         for (index, word) in words.iter().enumerate() {
+            let offset_ms = (total as i64) * 1_000 / 16_000;
             assert_eq!(word.start_ms, offset_ms, "word {index} stays on the clock");
             assert_eq!(word.end_ms, offset_ms + 500);
-            offset_ms +=
-                crate::audio::duration_for_frames(frames[index], 16_000).as_millis() as i64;
+            total += frames[index];
         }
         assert!(
-            words[1].start_ms >= 29_000,
-            "the second window is past 30 s"
+            words[1].start_ms >= 28_000,
+            "the second window is past 28 s"
         );
-        assert!(words[2].start_ms >= 59_000, "the third window is past 60 s");
+        assert!(words[2].start_ms >= 57_000, "the third window is past 57 s");
     }
 }

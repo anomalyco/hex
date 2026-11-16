@@ -382,8 +382,9 @@ pub fn finalize_capture_bundle_for_config(
         duration_ms,
         no_screen,
     } = recording;
-    // A capture that streamed its samples to `audio.wav` already has the file:
-    // encoding an empty recording here would replace it with a 44-byte one.
+    // A capture that streamed its samples to a partial file already has the
+    // audio: encoding an empty recording here would replace it with a 44-byte
+    // one. `settle_streamed_audio` publishes it after the journal is written.
     if let Some(ref audio) = recorded_audio
         && !audio.is_on_disk()
         && let Ok(wav_bytes) = audio.wav_bytes_16k()
@@ -394,7 +395,6 @@ pub fn finalize_capture_bundle_for_config(
         let _ = crate::routing::undo::write_private(&wav_path, &wav_bytes);
     }
     let wav_path = bundle_dir.join("audio.wav");
-    let has_wav = wav_path.exists();
     let journal = |video: Option<&Path>, video_offset_ms: u64| {
         recover::write(
             bundle_dir,
@@ -417,10 +417,15 @@ pub fn finalize_capture_bundle_for_config(
     let hint = movie
         .as_ref()
         .map(|m| (m.path().to_path_buf(), m.offset_hint_ms()));
+    // The journal comes first: a movie and a finished `audio.wav` with no
+    // journal is what recovery rebuilds, so the streamed audio may only take
+    // its final name once this bundle is journaled.
     journal(
         hint.as_ref().map(|(path, _)| path.as_path()),
         hint.as_ref().map_or(0, |h| h.1),
     );
+    let recorded_audio = settle_streamed_audio(bundle_dir, recorded_audio, &wav_path);
+    let has_wav = wav_path.exists();
     let crop_settings = (target.mode == CaptureMode::Display)
         .then(|| match engine_cfg {
             Some(cfg) => autocrop::Settings::from_engine_config(cfg),
@@ -557,6 +562,41 @@ pub fn finalize_capture_bundle_for_config(
         recover::finished(bundle_dir);
     }
     built
+}
+
+/// Gives a streamed capture's audio its final `audio.wav` name, now that the
+/// journal which recovery reads exists. A file that cannot take the name is
+/// read back so this build writes the audio itself, and its partial name is
+/// removed either way: nothing may leave a partial file that claims to be a
+/// capture's audio.
+fn settle_streamed_audio(
+    bundle_dir: &Path,
+    recorded: Option<RecordedAudio>,
+    wav_path: &Path,
+) -> Option<RecordedAudio> {
+    let Some(audio) = recorded else {
+        return None;
+    };
+    if !audio.is_on_disk() {
+        return Some(audio);
+    }
+    if audio.publish_audio(bundle_dir) {
+        return Some(audio);
+    }
+    crate::log::scrawl_log(format!(
+        "audio: could not give {} its final name; writing it from memory",
+        wav_path.display()
+    ));
+    let in_memory = audio.clone().into_memory().ok();
+    audio.discard_streamed();
+    if let Some(audio) = &in_memory
+        && let Ok(bytes) = audio.wav_bytes_16k()
+        && !bytes.is_empty()
+    {
+        let _ = std::fs::create_dir_all(bundle_dir);
+        let _ = crate::routing::undo::write_private(wav_path, &bytes);
+    }
+    in_memory
 }
 
 /// Builds a Screen capture's bundle in `out`, which holds its video and `audio.wav`, from them
@@ -1149,6 +1189,35 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBund
 mod tests {
     use super::*;
     use crate::capture::write_bundle_artifacts;
+
+    #[test]
+    fn a_streamed_audio_takes_its_final_name_only_when_its_build_settles_it() {
+        let dir = std::env::temp_dir().join(format!("hex-pipeline-publish-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let partial = dir.join(crate::recover::PARTIAL_AUDIO);
+        let samples = vec![0.25_f32; 1_600];
+        std::fs::write(&partial, crate::audio::encode_wav_16k(&samples).unwrap()).unwrap();
+        let wav = dir.join("audio.wav");
+        // Before the build settles it, the audio waits under its partial name.
+        assert!(!wav.exists() && partial.is_file());
+
+        let audio = RecordedAudio::on_disk(&partial, samples.len(), 16_000, 0, Vec::new());
+        let settled = settle_streamed_audio(&dir, Some(audio), &wav).expect("audio kept");
+        assert!(settled.is_on_disk());
+        assert!(
+            wav.is_file() && !partial.exists(),
+            "the partial took its final name"
+        );
+
+        // A partial that cannot be renamed is read back instead, so it never
+        // stands in as the bundle's audio.
+        let gone = dir.join("missing.wav.partial");
+        let audio = RecordedAudio::on_disk(&gone, 1_600, 16_000, 0, Vec::new());
+        let settled = settle_streamed_audio(&dir, Some(audio), &wav);
+        assert!(settled.is_some_and(|audio| !audio.is_on_disk()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn artifact_failures_do_not_publish_a_manifest() {

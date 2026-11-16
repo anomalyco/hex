@@ -59,8 +59,7 @@ impl WavFile {
         }
         block.flush().map_err(broken)?;
         self.written += samples.len();
-        self.update_header_if_due();
-        Ok(())
+        self.update_header_if_due()
     }
 
     /// Appends `samples` of digital silence in bounded blocks.
@@ -75,8 +74,7 @@ impl WavFile {
             self.written += block;
             samples -= block;
         }
-        self.update_header_if_due();
-        Ok(())
+        self.update_header_if_due()
     }
 
     /// Finalises the header, drops everything past `keep` samples, and returns
@@ -96,14 +94,15 @@ impl WavFile {
         Ok(keep)
     }
 
-    fn update_header_if_due(&mut self) {
+    /// Writes the header every few seconds, so a crash leaves a WAV that reads
+    /// up to there. A failed flush is a write failure: the capture's collector
+    /// records the rest as a gap rather than trusting a file it cannot update.
+    fn update_header_if_due(&mut self) -> io::Result<()> {
         if self.flushed.elapsed() < HEADER_EVERY {
-            return;
+            return Ok(());
         }
         self.flushed = Instant::now();
-        if let Err(error) = self.writer.flush() {
-            tracing::warn!(%error, "could not update the capture's audio header");
-        }
+        self.writer.flush().map_err(broken)
     }
 }
 

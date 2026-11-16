@@ -8,9 +8,10 @@
 //! Captures from before the journal (0.3.10 on Windows crashed the same way) left only
 //! `recording.mp4` and `audio.wav`. Once those have sat untouched for `ORPHAN_SETTLE` they are
 //! rebuilt too, from the video and audio alone: the whole frame, no ink or clicks, keyframes from
-//! scene changes and the transcript. A live capture never looks like that: its audio streams to
-//! `audio.wav.partial` while it records, and `audio.wav` is renamed into place only when the
-//! recording has stopped, just before `unfinished.json`.
+//! scene changes and the transcript. A capture Hex has not journaled yet never looks like that:
+//! its audio streams to `audio.wav.partial` while it records and while it waits for its build, and
+//! `audio.wav` is renamed into place only once `unfinished.json` is written, so `audio.wav` never
+//! exists without a journal.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -467,19 +468,36 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_streaming_its_audio_is_never_owed_a_rebuild() {
+    fn a_capture_that_has_not_been_journaled_is_never_owed_a_rebuild() {
         let captures = temp_dir("streaming");
         let dir = captures.join("live.scrawl");
         std::fs::create_dir_all(&dir).unwrap();
+        // Recording, or stopped and waiting for its build: the movie and the
+        // audio under its partial name, and no journal.
         std::fs::write(dir.join(VIDEO), b"movie").unwrap();
         std::fs::write(dir.join(PARTIAL_AUDIO), b"half a wav").unwrap();
         assert!(
             !owed(&dir),
-            "a movie and a partial WAV are a capture still recording"
+            "a movie and a partial WAV are a capture that has not stopped its build"
         );
         assert!(
             pending(&captures, SystemTime::now() + ORPHAN_SETTLE * 2).is_empty(),
             "never rebuilt, however long it settles"
+        );
+
+        // A build publishes `audio.wav` only after journaling the capture: a
+        // movie with a finished audio and no journal is the recovery case.
+        let audio = crate::audio::RecordedAudio::on_disk(
+            &dir.join(PARTIAL_AUDIO),
+            16_000,
+            16_000,
+            0,
+            Vec::new(),
+        );
+        assert!(audio.publish_audio(&dir));
+        assert!(
+            owed(&dir),
+            "audio.wav without a journal is exactly what recovery rebuilds"
         );
     }
 

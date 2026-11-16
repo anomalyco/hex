@@ -971,17 +971,26 @@ impl SealedReplay {
 }
 
 /// The replay's narration moves later by the exported clip's length, which
-/// needs samples: read the streamed `audio.wav` back. A narration hold is
-/// seconds long, so this does not grow with anything.
+/// needs samples: read the streamed partial back. A narration hold is seconds
+/// long, so this does not grow with anything. The partial is removed once read
+/// (or unreadable): the build writes the shifted narration itself, so a stale
+/// unshifted file must never stand in as the bundle's `audio.wav`.
 #[cfg(target_os = "macos")]
 fn narration_on_clock(path: &Path, audio: RecordedAudio) -> RecordedAudio {
-    match audio.into_memory() {
+    let shifted = match audio.into_memory() {
         Ok(audio) => audio,
         Err(error) => {
             tracing::warn!(%error, path = %path.display(), "could not read the replay's narration");
             RecordedAudio::default()
         }
+    };
+    if let Err(error) =
+        std::fs::remove_file(path.with_file_name(scrawl_capture::recover::PARTIAL_AUDIO))
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, "could not remove the replay's streamed narration");
     }
+    shifted
 }
 
 /// Aligns optional post-press voice narration after the frozen replay video on

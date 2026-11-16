@@ -626,7 +626,8 @@ substitute for source inspection or a second roadmap.
   `ConfigSource`, and Parakeet or Apple `Transcriber` for the engine, the
   listener-owned `CaptureHost` behind `hex capture` and the capture shortcut,
   its 16 kHz gap-padded timeline streamed to `audio.wav.partial` as it records,
-  renamed to `audio.wav` when the capture stops, and handed to the engine as
+  renamed to `audio.wav` only once its build writes the capture's
+  `unfinished.json`, and handed to the engine as
   `AudioIn::External`,
   the tap's pointer input forwarded to `Capture::input()`, Scrawl.app
   coexistence, the retention thread, and the `CaptureSnapshot` every view

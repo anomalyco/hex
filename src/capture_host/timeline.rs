@@ -1,8 +1,9 @@
 //! A capture's audio on its own 16 kHz clock, streamed to `audio.wav.partial`
-//! and renamed to `audio.wav` when the capture finishes.
+//! until the capture's build journals it and gives it its final `audio.wav`
+//! name.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use scrawl_capture::audio::{GapSpan, RecordedAudio};
@@ -16,16 +17,15 @@ use crate::dictation::StreamingResampler;
 /// A capture's audio at 16 kHz on its own clock: resampled as it arrives and
 /// written to the capture's `audio.wav.partial` as it goes, with missing spans
 /// padded with silence so positions stay on the clock. Nothing is kept in
-/// memory beyond the chunk being written. `finish` gives the file its final
-/// name, which is the only name readers know.
+/// memory beyond the chunk being written. The file keeps its partial name when
+/// the capture stops: only the build that journals a capture may publish
+/// `audio.wav`, so a stopped capture waiting its turn never looks recoverable.
 pub(super) struct Timeline {
     t0: CaptureInstant,
     /// Where `audio.wav` starts on the clock, once audio arrived.
     first: Option<CaptureInstant>,
     /// Where the capture's audio goes: made when the first sound arrives.
     file: Option<WavFile>,
-    /// The file's final name, `audio.wav`, which a later reader opens.
-    path: PathBuf,
     /// Where the file grows while the capture records.
     partial: PathBuf,
     /// Set by a write failure: the rest of the capture is one gap.
@@ -44,13 +44,11 @@ impl Timeline {
     }
 
     pub(super) fn with_limit(t0: CaptureInstant, path: PathBuf, limit: Duration) -> Self {
-        let partial = path.with_file_name(PARTIAL_AUDIO);
         Self {
             t0,
             first: None,
             file: None,
-            path,
-            partial,
+            partial: path.with_file_name(PARTIAL_AUDIO),
             failed: false,
             resampler: None,
             gaps: Vec::new(),
@@ -159,27 +157,17 @@ impl Timeline {
             }
         };
         let stopped_at = self.truncated_at.map(|at| self.clock_ms(at));
-        let recorded = |path: &Path| {
-            RecordedAudio::on_disk(
-                path,
-                kept.saturating_sub(self.lead()),
-                SAMPLE_RATE,
-                self.clock_ms(first),
-                self.gaps.clone(),
-            )
-            .stopping_audio_at(stopped_at)
-        };
-        // Only a finished capture has `audio.wav`: nothing else may match the
-        // name an orphaned bundle is recognized by.
-        if let Err(error) = publish(&self.partial, &self.path) {
-            tracing::error!(
-                %error,
-                path = %self.path.display(),
-                "could not publish the capture's audio; reading it from the partial file"
-            );
-            return recorded(&self.partial).into_memory().unwrap_or_default();
-        }
-        recorded(&self.path)
+        // The file keeps its partial name. `audio.wav` may only appear once the
+        // capture's build is journaled, so a stopped capture waiting its turn
+        // never looks like a bundle recovery has to rebuild.
+        RecordedAudio::on_disk(
+            &self.partial,
+            kept.saturating_sub(self.lead()),
+            SAMPLE_RATE,
+            self.clock_ms(first),
+            self.gaps,
+        )
+        .stopping_audio_at(stopped_at)
     }
 
     /// Ends a capture that will not be written: closes the file and removes the
@@ -302,6 +290,13 @@ impl Timeline {
         self.truncated_at.get_or_insert(stopped);
     }
 
+    /// Records a failed write where a real one would land, for a test that
+    /// needs a disk which fails after a few successful writes.
+    #[cfg(test)]
+    pub(super) fn write_failed(&mut self, through: CaptureInstant) {
+        self.fail(through, io::Error::other("the test's disk refused a write"));
+    }
+
     fn written(&self) -> usize {
         self.file.as_ref().map_or(0, WavFile::written)
     }
@@ -323,18 +318,6 @@ impl Timeline {
 
 fn position(first: CaptureInstant, at: CaptureInstant) -> usize {
     (at.duration_since(first).as_nanos() * u128::from(SAMPLE_RATE) / 1_000_000_000) as usize
-}
-
-/// Gives the streamed file its final name, so no reader has to know the
-/// partial one. A folder on the same filesystem renames; anything else copies.
-fn publish(partial: &Path, path: &Path) -> io::Result<()> {
-    match std::fs::rename(partial, path) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            std::fs::copy(partial, path)?;
-            std::fs::remove_file(partial)
-        }
-    }
 }
 
 fn duration_for(samples: usize) -> Duration {

@@ -108,6 +108,37 @@ impl RecordedAudio {
         self.audio_stopped_at_ms
     }
 
+    /// Gives a streamed recording its final `audio.wav` name in `bundle_dir`,
+    /// now that its bundle is journaled. A folder on the same filesystem
+    /// renames; anything else copies. The partial file stays if this fails, so
+    /// the caller can read it back itself.
+    pub fn publish_audio(&self, bundle_dir: &std::path::Path) -> bool {
+        let Some(streamed) = &self.streamed else {
+            return false;
+        };
+        let path = bundle_dir.join("audio.wav");
+        if *streamed == path {
+            return path.is_file();
+        }
+        if std::fs::rename(streamed, &path).is_ok() {
+            return true;
+        }
+        std::fs::copy(streamed, &path).is_ok_and(|_| std::fs::remove_file(streamed).is_ok())
+    }
+
+    /// Removes a streamed recording's partial file once its samples are in
+    /// memory or its final file is written. Only a partial name is removed,
+    /// never a finished `audio.wav`.
+    pub fn discard_streamed(&self) {
+        if let Some(path) = &self.streamed
+            && path
+                .file_name()
+                .is_some_and(|name| name == crate::recover::PARTIAL_AUDIO)
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     /// Whether its samples are already in `audio.wav` on disk, so they are
     /// never encoded into `wav_bytes` or read from `samples`.
     pub fn is_on_disk(&self) -> bool {

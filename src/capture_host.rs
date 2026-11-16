@@ -3767,6 +3767,14 @@ mod tests {
             .unwrap()
     }
 
+    /// The samples a finished timeline's build publishes: the partial takes its
+    /// final name when the build journals the capture, not when it stops.
+    fn published_wav(audio: &RecordedAudio, path: &Path) -> Vec<i16> {
+        assert!(audio.is_on_disk());
+        assert!(audio.publish_audio(path.parent().unwrap()));
+        wav_samples(path)
+    }
+
     fn remove_wav(path: &Path) {
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
@@ -3813,7 +3821,9 @@ mod tests {
         // 500 + 300 + 500 ms of audio, cut 100 ms before the last chunk.
         assert_eq!(audio.duration_ms(), 100 + 1_200);
         assert_eq!(audio.sample_count(), 1_200 * 16);
-        let samples = wav_samples(&path);
+        // A stopped capture keeps its partial name until its build journals it.
+        assert!(!path.exists(), "audio.wav waits for the journal");
+        let samples = published_wav(&audio, &path);
         assert_eq!(samples.len(), 100 * 16 + 1_200 * 16);
         // The WAV keeps the leading 100 ms and the 300 ms gap as silence.
         assert!(samples[..1_600].iter().all(|&sample| sample == 0));
@@ -3865,7 +3875,7 @@ mod tests {
             ]
         );
         assert_eq!(audio.sample_count(), 9_600);
-        assert_eq!(wav_samples(&path).len(), 9_600);
+        assert_eq!(published_wav(&audio, &path).len(), 9_600);
         remove_wav(&path);
     }
 
@@ -3884,7 +3894,7 @@ mod tests {
                 end_ms: 400
             }]
         );
-        let samples = wav_samples(&path);
+        let samples = published_wav(&audio, &path);
         assert_eq!(samples.len(), 8_000);
         assert!(samples[..1_600].iter().all(|&sample| sample == pcm16(0.5)));
         assert!(samples[1_600..6_400].iter().all(|&sample| sample == 0));
@@ -3909,7 +3919,7 @@ mod tests {
         assert!(audio.is_on_disk() && audio.samples.is_empty());
         assert!(audio.gaps.is_empty());
         assert_eq!(audio.audio_stopped_at_ms(), None);
-        assert_eq!(wav_samples(&path).len(), expected);
+        assert_eq!(published_wav(&audio, &path).len(), expected);
         remove_wav(&path);
     }
 
@@ -4379,7 +4389,7 @@ mod tests {
         timeline.push(&[0.5; 1_600], 16_000, t(6 * 60 * 60 * 1_000 + 100));
         let audio = timeline.finish(t(6 * 60 * 60 * 1_000 + 100), None);
         assert_eq!(audio.sample_count(), 16_000);
-        assert_eq!(wav_samples(&path).len(), 16_000);
+        assert_eq!(published_wav(&audio, &path).len(), 16_000);
         assert_eq!(
             audio.gaps,
             [
@@ -4406,7 +4416,7 @@ mod tests {
         let audio = timeline.finish(t(1_100), None);
         assert_eq!(audio.audio_stopped_at_ms(), Some(1_000));
         assert_eq!(audio.sample_count(), 16_000);
-        assert_eq!(wav_samples(&path).len(), 16_000);
+        assert_eq!(published_wav(&audio, &path).len(), 16_000);
         remove_wav(&path);
 
         // A capture that stays inside the guard says nothing.
@@ -4416,6 +4426,23 @@ mod tests {
         let audio = timeline.finish(t(100), None);
         assert_eq!(audio.audio_stopped_at_ms(), None);
         assert_eq!(audio.sample_count(), 1_600);
+        remove_wav(&path);
+    }
+
+    #[test]
+    fn a_mid_capture_write_failure_stops_where_the_file_stopped() {
+        let path = temp_wav("mid-failure");
+        let mut timeline = Timeline::new(t(0), path.clone());
+        timeline.push(&[0.5; 1_600], 16_000, t(100));
+        timeline.push(&[0.5; 1_600], 16_000, t(200));
+        // The disk refuses the next chunk: 200 ms reached the file.
+        timeline.write_failed(t(250));
+        timeline.push(&[0.5; 1_600], 16_000, t(300));
+        let audio = timeline.finish(t(300), None);
+        assert_eq!(audio.audio_stopped_at_ms(), Some(200));
+        assert_eq!(audio.sample_count(), 3_200);
+        assert_eq!(published_wav(&audio, &path).len(), 3_200);
+        assert_eq!(audio.gaps.last().map(|gap| gap.end_ms), Some(300));
         remove_wav(&path);
     }
 
