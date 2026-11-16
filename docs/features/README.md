@@ -394,7 +394,8 @@ Choose a supported language              // setup.language-conditioning; macOS +
 ├── Norwegian -> NB-Whisper Medium, always with the `no` hint (Bokmål is all
 │   Hex measured); stock Whisper turbo also offers it (#1150)
 ├── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
-└── Khmer -> Whisper only, with the `km` hint; Auto lets Whisper guess per clip
+├── Khmer -> Whisper only, with the `km` hint; Auto lets Whisper guess per clip
+└── Azerbaijani -> Whisper only, with the `az` hint; Auto lets Whisper guess per clip
 ```
 
 Whisper and Qwen3-ASR (including QwenCleo) read the shared
@@ -540,6 +541,14 @@ choice and a system whose first preferred language is Khmer starts on Whisper.
 recommendation, the `km` hint, that Whisper's picker offers it, and that
 Qwen3-ASR rejects it. It runs no inference, and Khmer accuracy has not been
 measured.
+
+Azerbaijani (`az`) is offered because Whisper large-v3-turbo was trained on it
+and no other available catalog model supports it, so Whisper is its only,
+recommended choice and a system whose first preferred language is Azerbaijani
+starts on Whisper. `azerbaijani_is_transcribed_by_whisper_with_its_language_hint`
+checks the recommendation, the `az` hint, that Whisper's picker offers it, and
+that Qwen3-ASR rejects it. It runs no inference, and Azerbaijani accuracy has
+not been measured.
 
 Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
