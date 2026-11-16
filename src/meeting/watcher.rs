@@ -128,6 +128,17 @@ struct ActiveRecording {
     worker: JoinHandle<Result<meeting::MeetingManifest>>,
 }
 
+impl ActiveRecording {
+    /// Ends this recording and its call's snooze as a hand stop does: a call
+    /// app back after leaving it is a new call (Always record starts again).
+    fn end(&self, detector: &mut MeetingDetector, events: &SyncSender<ControllerEvent>) {
+        if !self.stop.swap(true, Ordering::Relaxed) {
+            detector.recording_stopped();
+            let _ = events.send(ControllerEvent::Transcribing);
+        }
+    }
+}
+
 /// The meeting state mirrored into the menu bar.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MeetingMenuState {
@@ -471,13 +482,8 @@ fn handle_command(
             tracing::info!("calendar meeting reminder dismissed");
         }
         ControllerCommand::Stop => {
-            if let Some(active) = recording.as_ref()
-                && !active.stop.swap(true, Ordering::Relaxed)
-            {
-                // Stopped by hand: the next call in the same app is offered
-                // once this one has left the microphone for a few seconds.
-                detector.recording_stopped();
-                let _ = events.send(ControllerEvent::Transcribing);
+            if let Some(active) = recording.as_ref() {
+                active.end(detector, events);
             }
         }
         ControllerCommand::KeepRecording => {
@@ -942,9 +948,7 @@ fn poll_recording(
                     let _ = events.send(ControllerEvent::SourceWarning { warning });
                 }
                 meeting::RecordingUpdate::Transcribing => {
-                    if !active.stop.swap(true, Ordering::Relaxed) {
-                        let _ = events.send(ControllerEvent::Transcribing);
-                    }
+                    active.end(detector, events);
                 }
             }
         }
@@ -1046,9 +1050,7 @@ fn poll_recording(
                 application,
                 "meeting recording stopped automatically after its call ended"
             );
-            if !active.stop.swap(true, Ordering::Relaxed) {
-                let _ = events.send(ControllerEvent::Transcribing);
-            }
+            active.end(detector, events);
         }
 
         // Stop when the call ends, in a browser that never releases
@@ -1096,9 +1098,7 @@ fn poll_recording(
                     application,
                     "meeting recording stopped automatically after its page named another call"
                 );
-                if !active.stop.swap(true, Ordering::Relaxed) {
-                    let _ = events.send(ControllerEvent::Transcribing);
-                }
+                active.end(detector, events);
             }
         }
     }

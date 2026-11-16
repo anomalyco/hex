@@ -350,7 +350,8 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
                  `a_timed_out_offer_is_offered_again_when_the_call_retakes_the_microphone`;
                  not observed on a real Meet call)
   -> Same call is snoozed by key and app until off the microphone for 60 s,
-     offered or recorded; stopping an automatic recording does not restart it
+     offered or recorded; a call still on the microphone after its recording
+     was stopped (by hand, or on its own) is not started again
      └── Absence counts from the last time the call app was on the microphone,
          a gap included (sleep, Meetings off, a recording): an app that left
          the microphone during a recording is not snoozed for another minute
@@ -363,14 +364,19 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │   └── While that recording is an automatic one with Stop when the
      │       call ends on, the page is still read every 2 s: another code
      │       showing for 4 s ends the recording's call (see Record)
-     └── Stopped by hand -> the snooze ends once the call app has been off
-         the microphone for 3 s (seen while transcribing too), so the next
-         call in the same app is offered; a dismissed offer keeps the minute
-         for a muted call dropping off mid-call. Checks:
+     └── Stopped by hand, or on its own after its call ended -> the snooze
+         ends once the call app has been off the microphone for 3 s (seen
+         while transcribing too), so the next call in the same app is offered
+         or recorded again; an app already gone that long when its recording
+         stops ends the snooze at once, so retaking the microphone is a new
+         call. A dismissed offer keeps the minute for a muted call dropping
+         off mid-call. Checks:
          `a_different_meet_call_in_the_same_browser_is_not_snoozed_by_the_first`,
          `meet_prefixed_addresses_are_snoozed_by_their_own_codes`,
          `extracts_a_meet_code_from_a_meet_prefixed_address`,
-         `a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds`
+         `a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds`,
+         `an_automatic_call_ended_stop_offers_the_call_again_when_it_returns`,
+         `a_hand_stopped_call_still_on_the_microphone_stays_snoozed`
   -> "Left the call" prompt after the call app is off the microphone for 3 s
   -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
      stalled loop) start a stability run again instead of counting the gap
@@ -887,7 +893,12 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      ├── Keep recording -> nothing stops for this absence; leaving again re-arms
      ├── Stop & transcribe -> stops now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
-         "meeting recording stopped automatically after its call ended"
+         "meeting recording stopped automatically after its call ended";
+         its call's snooze ends as after a hand stop, so the app retaking the
+         microphone (a mute or an audio restart that outlasted the grace) is
+         a new call Always record records again rather than the call staying
+         snoozed for the rest of it. Check:
+         `an_automatic_call_ended_stop_offers_the_call_again_when_it_returns`
   -> A browser that never releases the microphone between calls (Arc, #1775):
      the microphone and output stay open after leaving one call and joining
      the next, so the absence above never comes

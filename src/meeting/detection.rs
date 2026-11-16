@@ -570,9 +570,10 @@ pub struct MeetingDetector {
     /// The offered call's meeting code, when its page named one: another
     /// code in the same app is a different call, not this one returning.
     offered_call: Option<String>,
-    /// The offered call's recording was stopped by hand: the snooze ends
-    /// once its app has been off the microphone for [`CALL_ENDED_AFTER`],
-    /// not a minute, so the next call is offered (#1113).
+    /// The offered call's recording was stopped, by hand or on its own after
+    /// its call ended: the snooze ends once its app has been off the
+    /// microphone for [`CALL_ENDED_AFTER`], not a minute, so the next call is
+    /// offered (#1113).
     stopped: bool,
     /// The offer's capsule closed on its timeout without an answer: the
     /// snooze ends as soon as the call app leaves the microphone, so a call
@@ -639,9 +640,30 @@ impl MeetingDetector {
         self.last_present = Some(now);
     }
 
-    /// The snoozed call's recording was stopped by hand.
+    /// The snoozed call's recording stopped: by hand, or on its own once its
+    /// call ended (Stop when the call ends). Its app being off the
+    /// microphone is no longer that call, so the next call in the same app is
+    /// offered, or recorded under Always record (#1113). A call already gone
+    /// for [`CALL_ENDED_AFTER`] when its recording stops ends its snooze at
+    /// once, so the app retaking the microphone is a new call rather than the
+    /// snoozed one returning.
     pub fn recording_stopped(&mut self) {
-        if self.offered.is_some() {
+        self.recording_stopped_at(Instant::now());
+    }
+
+    fn recording_stopped_at(&mut self, now: Instant) {
+        if self.offered.is_none() {
+            return;
+        }
+        // An automatic stop waits out the call's absence: the short absence
+        // that ends a hand-stopped call's snooze has already lasted, so there
+        // is nothing left to wait for.
+        if self
+            .last_present
+            .is_some_and(|seen| now.saturating_duration_since(seen) >= CALL_ENDED_AFTER)
+        {
+            self.end_snooze();
+        } else {
             self.stopped = true;
         }
     }
@@ -694,11 +716,7 @@ impl MeetingDetector {
     fn absent_at(&mut self, now: Instant) {
         let since = *self.last_present.get_or_insert(now);
         if self.timed_out {
-            self.offered = None;
-            self.offered_application = None;
-            self.offered_call = None;
-            self.stopped = false;
-            self.timed_out = false;
+            self.end_snooze();
             return;
         }
         let reset_after = if self.stopped {
@@ -707,12 +725,17 @@ impl MeetingDetector {
             ABSENT_FOR_RESET
         };
         if now.saturating_duration_since(since) >= reset_after {
-            self.offered = None;
-            self.offered_application = None;
-            self.offered_call = None;
-            self.stopped = false;
-            self.timed_out = false;
+            self.end_snooze();
         }
+    }
+
+    /// Forgets the snoozed call: the next one is offered as new.
+    fn end_snooze(&mut self) {
+        self.offered = None;
+        self.offered_application = None;
+        self.offered_call = None;
+        self.stopped = false;
+        self.timed_out = false;
     }
 
     /// One observation under the user's choices. A Never offer call shows
@@ -2218,11 +2241,58 @@ mod tests {
     }
 
     #[test]
+    fn an_automatic_call_ended_stop_offers_the_call_again_when_it_returns() {
+        let zoom = zoom();
+        let always = [choice("us.zoom.xos", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        // Always record starts the recording on its own.
+        assert_eq!(
+            watch.stable(&zoom, &always),
+            Some(Detection::Record(zoom.clone()))
+        );
+        // The call app drops off the microphone, long enough to be a call
+        // ended (a mute or an audio restart that outlasts it). The watcher
+        // stops the recording after its grace and tells the detector the
+        // recording ended.
+        let away = (CALL_ENDED_AFTER + AUTO_STOP_GRACE).as_millis() as u64;
+        assert!(watch.run(None, &always, away).is_empty());
+        let stopped_at = watch.base + Duration::from_millis(watch.elapsed_ms);
+        watch.detector.recording_stopped_at(stopped_at);
+        // Back on the microphone: a new call, recorded again, rather than the
+        // snoozed one returning for the rest of the call.
+        assert_eq!(
+            watch.stable(&zoom, &always),
+            Some(Detection::Record(zoom.clone()))
+        );
+    }
+
+    #[test]
+    fn a_hand_stopped_call_still_on_the_microphone_stays_snoozed() {
+        let zoom = zoom();
+        let always = [choice("us.zoom.xos", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&zoom, &always),
+            Some(Detection::Record(zoom.clone()))
+        );
+        // As a running recording's present poll does, then the hand stop: the
+        // app is still on the microphone.
+        let now = watch.base + Duration::from_millis(watch.elapsed_ms);
+        watch.detector.keep_snooze_alive_at(now);
+        watch.detector.recording_stopped_at(now);
+        // The app never leaves, so this is not a new call: no second
+        // recording while it holds the microphone.
+        assert!(watch.run(Some(&zoom), &always, 120_000).is_empty());
+    }
+
+    #[test]
     fn a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds() {
         let slack = slack_huddle();
         let mut watch = Watch::new();
         assert!(watch.stable(&slack, &[]).is_some());
-        watch.detector.recording_stopped();
+        watch
+            .detector
+            .recording_stopped_at(watch.base + Duration::from_millis(watch.elapsed_ms));
         // A moment off the microphone: still the same call.
         assert!(watch.run(None, &[], 2_000).is_empty());
         assert!(watch.run(Some(&slack), &[], 5_000).is_empty());
@@ -2240,7 +2310,9 @@ mod tests {
         // The absence is seen while the stopped recording transcribes.
         let mut watch = Watch::new();
         assert!(watch.stable(&slack, &[]).is_some());
-        watch.detector.recording_stopped();
+        watch
+            .detector
+            .recording_stopped_at(watch.base + Duration::from_millis(watch.elapsed_ms));
         for _ in 0..8 {
             let now = watch.base + Duration::from_millis(watch.elapsed_ms);
             watch.detector.observe_call_app_at(false, now);
@@ -2524,6 +2596,16 @@ mod tests {
         );
         assert!(banshee.can_always_record());
         assert!(slack.can_always_record());
+    }
+
+    fn zoom() -> MeetingCandidate {
+        // Zoom's audio host process holds the microphone; the call is Zoom.
+        let helper = ActiveMicrophoneApplication {
+            pid: 9010,
+            bundle_id: "us.zoom.CptHost".into(),
+            name: "CptHost".into(),
+        };
+        candidate_from_microphone(&helper, &ContextSnapshot::default()).unwrap()
     }
 
     fn slack_huddle() -> MeetingCandidate {
