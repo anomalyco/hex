@@ -1146,6 +1146,9 @@ While recording                                      // meetings.rolling
      ├── First pause after 6 s (pause segmenter; never under 3 s) -> boundary
      ├── No pause by 10 s -> hard cut; next chunk repeats its last 2 s
      │   (so a chunk is at most 12 s of audio)
+     ├── Quiet microphone chunk (95th-percentile 20 ms frame under -35 dBFS)
+     │   -> raised to -25 dBFS, at most 30 dB; near-silent chunks stay as
+     │   captured; the system track, the WAVs and the echo envelope keep theirs
      └── Silent chunk (no 20 ms frame ≥ -60 dB) -> skipped, no inference
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
      ├── No speech detected (Silero, once installed) -> empty transcript, no
