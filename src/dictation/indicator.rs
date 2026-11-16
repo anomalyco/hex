@@ -516,6 +516,7 @@ mod tests {
         assert_eq!(fill_island(tuning, None), tuning);
         let island = Island {
             notch: [185.0, 32.0],
+            bar: 0.0,
             width: 241.0,
             top: -64.0,
             ears: false,
@@ -736,6 +737,7 @@ mod tests {
         };
         let ears = Island {
             notch: [185.0, 32.0],
+            bar: 34.0,
             width: 253.0,
             top: -64.0,
             ears: true,

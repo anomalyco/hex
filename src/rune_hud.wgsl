@@ -163,11 +163,11 @@ fn exclamation(p: vec2f) -> f32 {
 }
 
 // Labs' notch indicator, in the Dynamic Island's compact style: the notch
-// widened sideways at its own height, one glyph either side of the camera.
-// Recording: an orange mic (the colour macOS and iOS use for a microphone
-// in use) and capsule level bars that move with the voice. Working: the
-// macOS 12-spoke spinner and the bars at rest with light running through
-// them. Done: a green checkmark pops in. Failed: a red
+// widened sideways and grown from the housing's height to the menu bar's, one
+// glyph either side of the camera. Recording: an orange mic (the colour macOS
+// and iOS use for a microphone in use) and capsule level bars that move with
+// the voice. Working: the macOS 12-spoke spinner and the bars at rest with
+// light running through them. Done: a green checkmark pops in. Failed: a red
 // exclamationmark.circle.fill. Glyphs scale and unblur in as the ears open.
 fn ears(window_point: vec2f, island_shape: f32) -> vec4f {
     let notch_half = u.field.x;

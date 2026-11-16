@@ -2540,10 +2540,12 @@ real Mac; the row renders only in macOS builds, so no golden changes.
 
 Notch indicator (`notch-indicator`, macOS only): for MacBooks with a
 notch, a recording indicator in the Dynamic Island's compact style that
-reads as part of the Mac. It is not Dot scope: the notch keeps its height
-and widens by `hud_placement::EAR_WIDTH` (34 pt) on each side, with fully
-rounded bottom corners, and draws one SF Symbols–style glyph beside the
-camera on each side in Apple's dark system colours (`ears` in
+reads as part of the Mac. It is not Dot scope: the ears widen the notch by
+`hud_placement::EAR_WIDTH` (34 pt) on each side, with fully rounded bottom
+corners, and grow from the housing's own height to the menu bar's, so open they
+end on the bar's bottom edge and folded back they are the notch again. They
+draw one SF Symbols–style glyph beside the camera on each side in Apple's dark
+system colours (`ears` in
 [rune_hud.wgsl](../../src/rune_hud.wgsl)):
 
 ```ts
@@ -2566,9 +2568,12 @@ external display keeps honoring Top and Bottom, and with the lab off HUD
 Lab's placement stands. Linux and Windows have no row,
 `hex labs on notch-indicator` doesn't know it there, and `hex settings set
 labs.notch_indicator` answers `unsupported` (as any `labs.` switch for
-another OS now does). Checks: `ears_widen_the_notch_sideways_at_its_own_height`
-and `the_notch_indicator_wins_at_top_or_bottom_but_still_needs_a_notch`
+another OS now does). Checks: `ears_widen_the_notch_sideways_only`,
+`the_ears_reach_the_menu_bars_bottom_edge`, and
+`the_notch_indicator_wins_at_top_or_bottom_but_still_needs_a_notch`
 in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
+`the_ears_grow_from_the_housing_to_the_menu_bar` in
+[rune_hud/tests.rs](../../src/rune_hud/tests.rs);
 `the_notch_indicator_holds_done_for_its_checkmark` in
 [dictation/indicator.rs](../../src/dictation/indicator.rs);
 `a_labs_switch_for_another_os_is_refused` in
