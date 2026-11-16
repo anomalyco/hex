@@ -568,15 +568,25 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // will-terminate notification finishes there instead.
     DRAIN.set(move || {
         shutdown.store(true, Ordering::Relaxed);
-        // A recording finalises its WAVs and writes `final.pending` itself;
-        // nothing may cut that short, and installing the staged update is
-        // free to happen afterwards.
+        // A recording finalises its WAVs and writes `final.pending` itself, so
+        // it is joined before the staged update is installed. With nothing
+        // recording, the install goes first: it must never wait on a slow
+        // controller against the drain's shorter deadline.
+        let recording = crate::meeting::recording();
+        let install = || {
+            if let Some(updater) = UPDATER.get() {
+                updater.stop();
+                updater.install_on_quit();
+            }
+        };
+        if !recording {
+            install();
+        }
         if controller.join().is_err() {
             tracing::error!("meeting controller worker panicked during shutdown");
         }
-        if let Some(updater) = UPDATER.get() {
-            updater.stop();
-            updater.install_on_quit();
+        if recording {
+            install();
         }
         drop(requests);
         local_api.shutdown();

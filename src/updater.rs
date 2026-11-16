@@ -619,7 +619,8 @@ fn finish_restart(shared: &Shared, next: State, hold: Option<&'static str>) -> b
         return true;
     }
     if let Some(hold) = hold {
-        *state = State::Ready;
+        let staged = lock(&shared.staged).is_some();
+        *state = if staged { State::Ready } else { next };
         *lock(&shared.restart) = Restart::Done(Err(hold.into()));
         tracing::info!(reason = hold, "Restart to update waits for a meeting");
         return false;
@@ -1226,10 +1227,11 @@ mod tests {
             "a refused restart is not left pending"
         );
 
-        // A meeting that started after the click keeps the update staged, so
-        // Restart to update is offered again once it finishes.
-        assert!(!finish_restart(&updater.shared, State::Ready, hold));
-        assert!(matches!(*lock(&updater.shared.state), State::Ready));
+        // A meeting that started after the click keeps the restart waiting.
+        // Nothing is staged in this test, so the state follows the check's
+        // result rather than claiming an update is ready.
+        assert!(!finish_restart(&updater.shared, State::Current, hold));
+        assert!(matches!(*lock(&updater.shared.state), State::Current));
         assert!(matches!(
             *lock(&updater.shared.restart),
             Restart::Done(Err(_))

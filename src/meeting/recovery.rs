@@ -22,6 +22,11 @@ use super::{
     stamp_ended, write_manifest,
 };
 
+/// Beside a meeting whose launch recovery started: a process that dies during
+/// the pass leaves it, and the next launch never hands the same audio to Hex
+/// again.
+const RECOVERY_ATTEMPT_FILE: &str = "recovery.attempt";
+
 /// How long finishing pending transcripts waits for the dictation engine
 /// before loading its own model, as a recording without one does.
 const ENGINE_GRACE: Duration = Duration::from_secs(30);
@@ -131,7 +136,10 @@ fn stranded_in(root: &Path) -> Vec<String> {
         .filter(|entry| entry.path().is_dir())
         .filter(|entry| {
             let directory = entry.path();
-            meeting_is_active(&directory) == Some(false) && needs_recovery(&directory)
+            if meeting_is_active(&directory) != Some(false) {
+                return false;
+            }
+            read_manifest(&directory).is_ok_and(|manifest| wants_recovery(&directory, &manifest))
         })
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect::<Vec<_>>();
@@ -139,11 +147,54 @@ fn stranded_in(root: &Path) -> Vec<String> {
     ids
 }
 
-fn needs_recovery(directory: &Path) -> bool {
-    read_manifest(directory).is_ok_and(|manifest| recoverable(directory, &manifest))
+/// The same selection over manifests an earlier scan already read, so
+/// retention does not read every folder twice.
+pub(super) fn stranded_among(meetings: &[MeetingManifest]) -> Vec<String> {
+    let Ok(root) = super::root() else {
+        return Vec::new();
+    };
+    let mut ids = meetings
+        .iter()
+        .filter(|manifest| {
+            let directory = root.join(&manifest.id);
+            meeting_is_active(&directory) == Some(false) && wants_recovery(&directory, manifest)
+        })
+        .map(|manifest| manifest.id.clone())
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
 }
 
-fn recoverable(directory: &Path, manifest: &MeetingManifest) -> bool {
+/// Whether the launch pass could finish this meeting now. Retention only
+/// waits for unfinished meetings while it can: with Meetings off or no
+/// installed model they expire like any other.
+pub(super) fn can_recover() -> bool {
+    crate::app_settings::meetings_enabled() && model_installed()
+}
+
+fn model_installed() -> bool {
+    let (_, selection) = crate::app_settings::transcription_selection();
+    crate::transcription::models::validate(&selection)
+        .is_ok_and(|model| crate::transcription::models::is_installed(model, &selection.language))
+}
+
+/// Whether one folder is waiting for the launch pass, for read-only readers
+/// that decide retention without repairing anything.
+pub(super) fn awaiting(directory: &Path) -> bool {
+    read_manifest(directory).is_ok_and(|manifest| wants_recovery(directory, &manifest))
+}
+
+fn wants_recovery(directory: &Path, manifest: &MeetingManifest) -> bool {
+    if manifest.status == MeetingStatus::Failed {
+        return false;
+    }
+    // A recovery that died before clearing its marker, or a final pass that
+    // stopped before removing `final.pending`, is finished or settled even
+    // when a transcript is already published.
+    if directory.join(RECOVERY_ATTEMPT_FILE).exists() || directory.join(FINAL_PENDING_FILE).exists()
+    {
+        return true;
+    }
     if final_transcript_exists(directory) {
         return false;
     }
@@ -165,7 +216,15 @@ pub(super) fn recover(id: &str) -> Result<Option<MeetingManifest>> {
         return Ok(None);
     };
     let mut manifest = read_manifest(&directory)?;
-    if !recoverable(&directory, &manifest) {
+    if manifest.status == MeetingStatus::Failed {
+        return Ok(None);
+    }
+    // A marker from a process that died during this meeting's last recovery
+    // attempt: settle it now and never feed the same audio to Hex again.
+    if settle_attempt(&directory, &mut manifest)? {
+        return Ok(None);
+    }
+    if !wants_recovery(&directory, &manifest) {
         return Ok(None);
     }
     let (_, selection) = crate::app_settings::transcription_selection();
@@ -178,34 +237,112 @@ pub(super) fn recover(id: &str) -> Result<Option<MeetingManifest>> {
         status = ?manifest.status,
         "recovering a meeting left unfinished"
     );
-    if repair_tracks(&directory, &mut manifest)? {
+    // Durable before the pass, so a native abort leaves evidence that this
+    // audio already killed a recovery, and the next launch does not retry it.
+    write_attempt(&directory)?;
+    let finished = (|| -> Result<Option<MeetingManifest>> {
+        if recover_timeline(&directory, &mut manifest)? {
+            write_manifest(&directory, &manifest)?;
+        }
+        if !has_recorded_audio(&manifest) {
+            manifest.status = MeetingStatus::Interrupted;
+            manifest.error = Some("no meeting audio was captured".into());
+            stamp_ended(&mut manifest, now_ms());
+            write_manifest(&directory, &manifest)?;
+            tracing::warn!(
+                meeting = id,
+                "a meeting left unfinished has no recoverable audio"
+            );
+            return Ok(Some(manifest));
+        }
+        manifest.status = MeetingStatus::Transcribing;
+        manifest.error = None;
+        manifest.export_error = None;
         write_manifest(&directory, &manifest)?;
+        // So a crash during this pass is settled by the next launch, and a
+        // normal quit leaves it for the next launch to finish.
+        fs::write(directory.join(FINAL_PENDING_FILE), b"")?;
+        super::finish::finish_transcription(&directory, manifest, &selection).map(Some)
+    })();
+    clear_attempt(&directory);
+    finished
+}
+
+/// Whether this folder holds a recovery attempt a process never finished.
+fn attempt_path(directory: &Path) -> std::path::PathBuf {
+    directory.join(RECOVERY_ATTEMPT_FILE)
+}
+
+fn write_attempt(directory: &Path) -> Result<()> {
+    if attempt_path(directory).exists() {
+        return Ok(());
     }
-    stamp_from_audio(&mut manifest);
-    if !has_recorded_audio(&manifest) {
-        manifest.status = MeetingStatus::Interrupted;
-        manifest.error = Some("no meeting audio was captured".into());
-        stamp_ended(&mut manifest, now_ms());
-        write_manifest(&directory, &manifest)?;
-        tracing::warn!(
-            meeting = id,
-            "a meeting left unfinished has no recoverable audio"
+    let path = attempt_path(directory);
+    let mut file = File::create(&path)?;
+    super::set_owner_only(&path, false)?;
+    file.write_all(b"")?;
+    file.sync_all()?;
+    crate::durable::sync_directory(directory)?;
+    Ok(())
+}
+
+fn clear_attempt(directory: &Path) {
+    if fs::remove_file(attempt_path(directory)).is_ok() {
+        let _ = crate::durable::sync_directory(directory);
+    }
+}
+
+/// Settles a marker left by a recovery that died. The meeting keeps its audio
+/// but is never handed to the model again; a finished one just loses the
+/// stale marker.
+fn settle_attempt(directory: &Path, manifest: &mut MeetingManifest) -> Result<bool> {
+    if !attempt_path(directory).exists() {
+        return Ok(false);
+    }
+    if manifest.status == MeetingStatus::Complete {
+        let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
+        clear_attempt(directory);
+        tracing::info!(
+            meeting = manifest.id,
+            "cleared a finished meeting's recovery attempt"
         );
-        return Ok(Some(manifest));
+        return Ok(true);
     }
-    manifest.status = MeetingStatus::Transcribing;
-    manifest.error = None;
-    manifest.export_error = None;
-    write_manifest(&directory, &manifest)?;
-    // So a crash during this pass is finished by the next launch's marker.
-    fs::write(directory.join(FINAL_PENDING_FILE), b"")?;
-    super::finish::finish_transcription(&directory, manifest, &selection).map(Some)
+    manifest.status = MeetingStatus::Interrupted;
+    manifest.error = Some("recovery did not finish".into());
+    stamp_ended(manifest, now_ms());
+    write_manifest(directory, manifest)?;
+    let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
+    clear_attempt(directory);
+    tracing::warn!(
+        meeting = manifest.id,
+        "a meeting's recovery did not finish; it will not be retried"
+    );
+    Ok(true)
+}
+
+/// Repairs every track whose WAV header still says its data chunk is empty,
+/// fills the manifest from the repaired audio, and returns whether this
+/// meeting's stop never finalised its tracks.
+fn recover_timeline(directory: &Path, manifest: &mut MeetingManifest) -> Result<bool> {
+    let repaired = repair_tracks(directory, manifest)?;
+    if repaired.changed {
+        write_manifest(directory, manifest)?;
+    }
+    stamp_from_audio(manifest, repaired.unfinalised);
+    Ok(repaired.unfinalised)
+}
+
+#[derive(Default)]
+struct Repaired {
+    changed: bool,
+    unfinalised: bool,
 }
 
 /// Repairs every track whose WAV header still says its data chunk is empty,
 /// and fills the manifest from the repaired audio.
-fn repair_tracks(directory: &Path, manifest: &mut MeetingManifest) -> Result<bool> {
-    let mut repaired = false;
+fn repair_tracks(directory: &Path, manifest: &mut MeetingManifest) -> Result<Repaired> {
+    let mut repaired = Repaired::default();
     for track in [&mut manifest.system, &mut manifest.microphone] {
         let path = directory.join(&track.file);
         if !path.is_file() {
@@ -214,13 +351,14 @@ fn repair_tracks(directory: &Path, manifest: &mut MeetingManifest) -> Result<boo
         let Some(facts) = repair_wav(&path)? else {
             continue;
         };
+        repaired.unfinalised |= facts.unfinalised;
         if track.samples != facts.samples {
             track.samples = facts.samples;
-            repaired = true;
+            repaired.changed = true;
         }
         if track.sample_rate != Some(facts.sample_rate) {
             track.sample_rate = Some(facts.sample_rate);
-            repaired = true;
+            repaired.changed = true;
         }
     }
     Ok(repaired)
@@ -230,11 +368,12 @@ fn repair_tracks(directory: &Path, manifest: &mut MeetingManifest) -> Result<boo
 struct WavFacts {
     samples: u64,
     sample_rate: u32,
+    /// Its sizes were rewritten from the file length: the stop never ran.
+    unfinalised: bool,
 }
 
 /// What a WAV's own headers say about it.
 struct WavLayout {
-    riff_size: u64,
     data_offset: u64,
     data_size: u64,
     block_align: u16,
@@ -250,20 +389,32 @@ fn repair_wav(path: &Path) -> Result<Option<WavFacts>> {
     let Some(layout) = read_wav_layout(path, file_len)? else {
         return Ok(None);
     };
-    let available = file_len.saturating_sub(layout.data_offset);
-    let data_size = available / u64::from(layout.block_align) * u64::from(layout.block_align);
-    let Some(riff_size) = layout
-        .data_offset
-        .checked_add(data_size)
-        .and_then(|end| end.checked_sub(8))
-        .and_then(|size| u32::try_from(size).ok())
-    else {
-        return Err(eyre!("{} is too large for a WAV", path.display()));
+    // Only an unset or overlong data size is repaired. A file with a valid
+    // data chunk and something after it (another chunk, a pad byte) keeps its
+    // header, so no trailing bytes become audio.
+    let declared_end = layout.data_offset.saturating_add(layout.data_size);
+    let unfinalised = layout.data_size == 0 || declared_end > file_len;
+    let data_size = if unfinalised {
+        let available = file_len.saturating_sub(layout.data_offset);
+        // A recorder's data chunk is the last one it writes, so the file
+        // length is the audio; whole blocks only.
+        available / u64::from(layout.block_align) * u64::from(layout.block_align)
+    } else {
+        layout.data_size
     };
-    let Ok(data_size) = u32::try_from(data_size) else {
-        return Err(eyre!("{} is too large for a WAV", path.display()));
-    };
-    if layout.data_size != u64::from(data_size) || layout.riff_size != u64::from(riff_size) {
+    let samples = data_size / u64::from(layout.block_align);
+    if unfinalised {
+        let Some(riff_size) = layout
+            .data_offset
+            .checked_add(data_size)
+            .and_then(|end| end.checked_sub(8))
+            .and_then(|size| u32::try_from(size).ok())
+        else {
+            return Err(eyre!("{} is too large for a WAV", path.display()));
+        };
+        let Ok(data_size) = u32::try_from(data_size) else {
+            return Err(eyre!("{} is too large for a WAV", path.display()));
+        };
         let mut file = OpenOptions::new().write(true).open(path)?;
         file.seek(SeekFrom::Start(4))?;
         file.write_all(&riff_size.to_le_bytes())?;
@@ -272,13 +423,14 @@ fn repair_wav(path: &Path) -> Result<Option<WavFacts>> {
         file.sync_all()?;
         tracing::info!(
             path = %path.display(),
-            samples = u64::from(data_size) / u64::from(layout.block_align),
+            samples,
             "repaired a meeting WAV left unfinalised"
         );
     }
     Ok(Some(WavFacts {
-        samples: u64::from(data_size) / u64::from(layout.block_align),
+        samples,
         sample_rate: layout.sample_rate,
+        unfinalised,
     }))
 }
 
@@ -291,7 +443,6 @@ fn read_wav_layout(path: &Path, file_len: u64) -> Result<Option<WavLayout>> {
     if file.read_exact(&mut header).is_err() || &header[..4] != b"RIFF" || &header[8..] != b"WAVE" {
         return Ok(None);
     }
-    let riff_size = u32::from_le_bytes(header[4..8].try_into().unwrap_or_default());
     let mut offset = 12u64;
     let mut sample_rate = 0;
     let mut block_align = 0;
@@ -326,7 +477,6 @@ fn read_wav_layout(path: &Path, file_len: u64) -> Result<Option<WavLayout>> {
                     return Ok(None);
                 }
                 return Ok(Some(WavLayout {
-                    riff_size: u64::from(riff_size),
                     data_offset: body,
                     data_size: size,
                     block_align,
@@ -340,8 +490,10 @@ fn read_wav_layout(path: &Path, file_len: u64) -> Result<Option<WavLayout>> {
 }
 
 /// The recovered audio's own length, for a manifest whose stop never wrote
-/// one. A stop that did write them keeps its values.
-fn stamp_from_audio(manifest: &mut MeetingManifest) {
+/// one. A stop that did write them keeps its values, unless the tracks had to
+/// be repaired from unfinalised headers: then the stop never ran, and a
+/// relabel before this pass (such as `list_all`'s now-based stamp) is wrong.
+fn stamp_from_audio(manifest: &mut MeetingManifest, unfinalised: bool) {
     let longest = [&manifest.system, &manifest.microphone]
         .into_iter()
         .map(|track: &TrackManifest| {
@@ -353,6 +505,11 @@ fn stamp_from_audio(manifest: &mut MeetingManifest) {
         })
         .max()
         .unwrap_or(0);
+    if unfinalised && longest > 0 {
+        manifest.duration_ms = Some(longest);
+        manifest.ended_at_ms = Some(manifest.created_at_ms.saturating_add(longest));
+        return;
+    }
     manifest.duration_ms.get_or_insert(longest);
     manifest
         .ended_at_ms
@@ -431,6 +588,7 @@ mod tests {
             writer.write_sample(sample as f32 / 16_000.0).unwrap();
         }
         writer.flush().unwrap();
+        drop(writer);
         let file_len = fs::metadata(path).unwrap().len();
         let mut file = OpenOptions::new().write(true).open(path).unwrap();
         file.seek(SeekFrom::Start(4)).unwrap();
@@ -450,9 +608,12 @@ mod tests {
         let facts = repair_wav(&path).unwrap().unwrap();
         assert_eq!(facts.samples, 16_000);
         assert_eq!(facts.sample_rate, 16_000);
+        assert!(facts.unfinalised);
         assert_eq!(WavReader::open(&path).unwrap().duration(), 16_000);
         // Reopening a repaired file leaves its sizes alone.
-        assert_eq!(repair_wav(&path).unwrap().unwrap().samples, 16_000);
+        let again = repair_wav(&path).unwrap().unwrap();
+        assert_eq!(again.samples, 16_000);
+        assert!(!again.unfinalised);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -473,8 +634,44 @@ mod tests {
         writer.write_sample(0.5).unwrap();
         writer.finalize().unwrap();
         let before = fs::read(&path).unwrap();
-        assert_eq!(repair_wav(&path).unwrap().unwrap().samples, 1);
+        let facts = repair_wav(&path).unwrap().unwrap();
+        assert_eq!(facts.samples, 1);
+        assert!(!facts.unfinalised);
         assert_eq!(fs::read(&path).unwrap(), before);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_trailing_chunk_is_not_absorbed_into_the_audio() {
+        let directory = temporary("trailing-chunk");
+        let path = directory.join("system.wav");
+        let mut writer = WavWriter::create(
+            &path,
+            WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 32,
+                sample_format: SampleFormat::Float,
+            },
+        )
+        .unwrap();
+        writer.write_sample(0.5).unwrap();
+        writer.finalize().unwrap();
+        // An odd-sized chunk after the data, with its pad byte.
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.extend_from_slice(b"LIST");
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&[1, 2, 3, 0]);
+        fs::write(&path, &bytes).unwrap();
+        let before = fs::read(&path).unwrap();
+        let facts = repair_wav(&path).unwrap().unwrap();
+        assert_eq!(facts.samples, 1);
+        assert!(!facts.unfinalised);
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "a valid data chunk keeps its header"
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -518,16 +715,80 @@ mod tests {
     }
 
     #[test]
+    fn a_published_transcript_with_a_pending_marker_is_still_selected() {
+        let root = temporary("published-pending");
+        let directory = root.join("published");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("transcript.ndjson"), b"").unwrap();
+        fs::write(directory.join("transcript.md"), b"").unwrap();
+        fs::write(directory.join(FINAL_PENDING_FILE), b"").unwrap();
+        write_manifest(&directory, &manifest("published", MeetingStatus::Complete)).unwrap();
+
+        // The pass stopped between publishing and removing the marker: the
+        // old finish_pending would still redo its export and clear it.
+        assert!(wants_recovery(
+            &directory,
+            &read_manifest(&directory).unwrap()
+        ));
+        assert_eq!(stranded_in(&root), ["published"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_recovery_that_died_is_marked_and_never_retried() {
+        let directory = temporary("attempt");
+        write_manifest(&directory, &manifest("died", MeetingStatus::Recording)).unwrap();
+        write_attempt(&directory).unwrap();
+        assert!(attempt_path(&directory).exists());
+
+        let mut meeting = read_manifest(&directory).unwrap();
+        assert!(settle_attempt(&directory, &mut meeting).unwrap());
+        let settled = read_manifest(&directory).unwrap();
+        assert_eq!(settled.status, MeetingStatus::Interrupted);
+        assert_eq!(settled.error.as_deref(), Some("recovery did not finish"));
+        assert!(!attempt_path(&directory).exists());
+        assert!(
+            !wants_recovery(&directory, &settled),
+            "the audio that killed a recovery is never tried again"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_relabelled_meeting_takes_its_duration_from_the_audio() {
+        let directory = temporary("relabelled");
+        unfinalised_track(&directory.join("system.wav"), 32_000);
+        let mut meeting = manifest("relabelled", MeetingStatus::Recording);
+        write_manifest(&directory, &meeting).unwrap();
+        // `list_all` relabels a stranded meeting before the launch pass runs.
+        meeting.status = MeetingStatus::Interrupted;
+        stamp_ended(&mut meeting, now_ms());
+        write_manifest(&directory, &meeting).unwrap();
+
+        let mut meeting = read_manifest(&directory).unwrap();
+        assert!(
+            recover_timeline(&directory, &mut meeting).unwrap(),
+            "the stop never finalised the track"
+        );
+        assert_eq!(meeting.duration_ms, Some(2_000));
+        assert_eq!(
+            meeting.ended_at_ms,
+            Some(meeting.created_at_ms + 2_000),
+            "the audio's length wins over the relabel's time"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn recovery_fills_the_manifest_from_the_repaired_audio() {
         let directory = temporary("repair-tracks");
         unfinalised_track(&directory.join("system.wav"), 32_000);
         unfinalised_track(&directory.join("microphone.wav"), 8_000);
         let mut meeting = manifest("tracks", MeetingStatus::Recording);
-        assert!(repair_tracks(&directory, &mut meeting).unwrap());
+        assert!(recover_timeline(&directory, &mut meeting).unwrap());
         assert_eq!(meeting.system.samples, 32_000);
         assert_eq!(meeting.microphone.samples, 8_000);
         assert_eq!(meeting.system.sample_rate, Some(16_000));
-        stamp_from_audio(&mut meeting);
         assert_eq!(meeting.duration_ms, Some(2_000));
         assert_eq!(
             meeting.ended_at_ms,

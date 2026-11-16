@@ -308,6 +308,10 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     // targets, which would skip the stop below; take the error, stop
     // everything, then report it.
     let result = app.try_run();
+    // The teardown below runs after the loop, with no deadline of its own;
+    // bound it like Linux's stop so a worker that never stops cannot hold the
+    // process open.
+    crate::desktop::process_exit::arm_windows_deadline();
     if result.is_ok() {
         // A frame reached the screen, or Hex quit cleanly: this launch's GPU
         // works. A failed start is neither, and keeps the marker so the next

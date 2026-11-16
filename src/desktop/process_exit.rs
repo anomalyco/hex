@@ -21,10 +21,12 @@
 //! Linux's service stop has the same shape with a longer bound: the host arms
 //! [`arm_deadline`] when stopping begins, and a drain still running after
 //! [`STOP_DEADLINE`] ends with the same `_exit`, logging what was pending.
+//! Windows' teardown arms [`arm_windows_deadline`] with the same kind of
+//! bound, since it runs after the loop and has no other deadline.
 
 use std::io::Write;
 use std::sync::Mutex;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -42,6 +44,11 @@ const MEETING_DEADLINE: Duration = Duration::from_secs(30);
 /// finish.
 #[cfg(target_os = "linux")]
 const STOP_DEADLINE: Duration = Duration::from_secs(20);
+
+/// How long a Windows exit may drain before the process ends anyway: the
+/// same bound as Linux's stop, with room for a meeting recording to finalise.
+#[cfg(target_os = "windows")]
+const WINDOWS_DEADLINE: Duration = Duration::from_secs(20);
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -180,9 +187,26 @@ pub(crate) fn arm_deadline() {
     });
 }
 
+/// Bounds a Windows exit's teardown on the main thread, as Linux's stop is
+/// bounded: a worker that never stops cannot hold the process open. Only the
+/// first call arms it.
+#[cfg(target_os = "windows")]
+pub(crate) fn arm_windows_deadline() {
+    static ARMED: Once = Once::new();
+    ARMED.call_once(|| {
+        if let Err(error) = run_deadline(
+            WINDOWS_DEADLINE,
+            || "the runtime, meetings, local API, or tray",
+            || end_process(0),
+        ) {
+            tracing::warn!(%error, "could not arm Hex's exit deadline");
+        }
+    });
+}
+
 /// Starts the detached named thread that runs `exit` after `deadline`; the
 /// result reports whether it started.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn run_deadline(
     deadline: Duration,
     pending: impl Fn() -> &'static str + Send + 'static,

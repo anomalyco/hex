@@ -1286,10 +1286,15 @@ Hex quits during Stop & Transcribe's final pass (#1284)
 Hex or Hex's process dies mid-recording (no final.pending)   // meetings.recovery
   -> Next launch selects every unlocked folder whose manifest is Starting,
      Recording, or Transcribing, or Interrupted with no error and no published
-     final transcript; Failed and completed meetings are never touched
-  -> Each track whose RIFF/data size is 0 or wrong is repaired from its file
-     length (chunk walk, block-aligned, synced), then the manifest's sample
-     counts, duration, and ended_at come from the repaired audio
+     final transcript; a final.pending or recovery.attempt marker is finished
+     even beside a published transcript. Failed meetings are never touched
+  -> Each track whose RIFF/data size is 0 or overlong is repaired from its file
+     length (whole blocks, synced, no trailing chunk absorbed); the manifest's
+     sample counts, duration, and ended_at come from the repaired audio and
+     replace list_all's relabel, which stamps the relaunch time
+  -> recovery.attempt is written durably before the pass. A process that dies
+     during it leaves the marker: the next launch marks the meeting Interrupted
+     ("recovery did not finish") and never retries that audio
   -> final.pending -> the same next-launch final pass as a quit
 Any of the above, next launch, Meetings on, no recording, engine up (or 30 s)
   -> Full-WAV final pass -> Complete + Markdown export + notes
@@ -1299,13 +1304,22 @@ Any of the above, next launch, Meetings on, no recording, engine up (or 30 s)
 
 Quitting gives its workers 5 s, or 30 s while a meeting records
 (`meeting::recording`), before `_exit`, and the final pass of a long meeting
-can take longer, or load a model once the dictation engine is gone.
+can take longer, or load a model once the dictation engine is gone. Retention
+waits for a `final.pending` draft, and for a stranded meeting only while
+Meetings is on and its model is installed (`recovery::can_recover`); with
+Meetings off, stranded meetings expire like any other, as the expiry pass
+already documents.
 Sources: `record` in [meeting.rs](../../src/meeting.rs), `recording` in
 [meeting/recording.rs](../../src/meeting/recording.rs), and `PendingFinals`,
 `recover`, `repair_wav` in [meeting/recovery.rs](../../src/meeting/recovery.rs).
 Checks: `quitting_mid_meeting_loads_no_model_and_finishes_in_time`,
 `a_zeroed_wav_header_is_repaired_from_its_file_length`,
-`a_stranded_recording_is_selected_for_recovery`, and
+`a_trailing_chunk_is_not_absorbed_into_the_audio`,
+`a_stranded_recording_is_selected_for_recovery`,
+`a_published_transcript_with_a_pending_marker_is_still_selected`,
+`a_recovery_that_died_is_marked_and_never_retried`,
+`a_relabelled_meeting_takes_its_duration_from_the_audio`,
+`recovery_fills_the_manifest_from_the_repaired_audio`, and
 `restart_to_update_waits_while_a_meeting_records`. No repeatable driver quits a
 real recording and relaunches.
 

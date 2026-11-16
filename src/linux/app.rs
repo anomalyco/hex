@@ -1454,14 +1454,16 @@ impl LinuxDesktopHost {
             | DesktopAction::RestartIntoUpdate
             | DesktopAction::ConfirmUpdateSwitch
             | DesktopAction::WindowFocused => {
+                if let Err(error) = self.updater.act(&action) {
+                    self.error = Some(format!("Could not restart Hex: {error:#}"));
+                    return Err(error);
+                }
+                // Only an accepted restart relaunches with the window open;
+                // a refused one leaves the next launch as it was.
                 if matches!(action, DesktopAction::RestartIntoUpdate)
                     && let Some(marker) = reopen_marker()
                 {
                     let _ = std::fs::write(marker, b"");
-                }
-                if let Err(error) = self.updater.act(&action) {
-                    self.error = Some(format!("Could not restart Hex: {error:#}"));
-                    return Err(error);
                 }
             }
             DesktopAction::SetDictationShortcut(shortcut) => {
