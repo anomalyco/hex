@@ -5,8 +5,9 @@ use std::mem::{offset_of, size_of};
 use std::ptr::NonNull;
 
 use objc2_core_audio::{
-    AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectIsPropertySettable,
-    AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioObjectPropertyScopeOutput,
+    AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectHasProperty,
+    AudioObjectIsPropertySettable, AudioObjectPropertyAddress, AudioObjectSetPropertyData,
+    kAudioObjectPropertyScopeOutput,
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
 
@@ -22,11 +23,13 @@ pub(super) fn start(factor: f32) -> Option<Guard> {
 /// What one channel of an output reports for its volume scalar.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum VolumeScalar {
-    /// Readable and settable: Lower audio can ramp it and put it back.
+    /// Present, readable, and settable: Lower audio can ramp it and put it back.
     Settable,
-    /// Readable but not settable, so its balance cannot be restored.
+    /// Present but unusable, because it cannot be set or its value cannot be
+    /// read, so its balance cannot be restored.
     ReadOnly,
-    /// No volume scalar at all: a stream channel without its own control.
+    /// The property is not present at all: a stream channel without its own
+    /// volume control.
     Absent,
 }
 
@@ -38,11 +41,11 @@ struct Control {
 
 impl Control {
     /// The settable channels when every channel that reports a volume can be
-    /// set. A readable channel that cannot be set rules out both a per-channel
-    /// subset and the plain main volume, so only the virtual main volume, which
-    /// macOS keeps balanced, is left. Channels with no volume control at all
-    /// are skipped; with none readable, the main volume and then the virtual
-    /// main volume are the fallbacks.
+    /// set. A channel whose volume is present but unusable rules out both a
+    /// per-channel subset and the plain main volume, so only the virtual main
+    /// volume, which macOS keeps balanced, is left. Channels with no volume
+    /// property at all are skipped; with none present, the main volume and then
+    /// the virtual main volume are the fallbacks.
     fn select(channels: u32, mut scalar: impl FnMut([u8; 4], u32) -> VolumeScalar) -> Option<Self> {
         let mut elements = Vec::new();
         let mut read_only = false;
@@ -92,12 +95,18 @@ fn address(selector: [u8; 4], element: u32) -> AudioObjectPropertyAddress {
 
 /// What the output reports for this volume: absent, read-only, or settable.
 fn scalar(device: u32, address: AudioObjectPropertyAddress) -> VolumeScalar {
+    let mut property = address;
+    // SAFETY: The property address refers to an initialized, correctly typed value.
+    if !unsafe { AudioObjectHasProperty(device, NonNull::from(&mut property)) } {
+        return VolumeScalar::Absent;
+    }
+    // A property that exists but cannot be read is still one we must not
+    // disturb, so it counts as read-only rather than absent.
     let readable = super::read_property::<f32>(device, address)
         .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value));
     if !readable {
-        return VolumeScalar::Absent;
+        return VolumeScalar::ReadOnly;
     }
-    let mut property = address;
     let mut settable = 0;
     // SAFETY: Both output pointers refer to initialized, correctly typed values.
     let settable = unsafe {
@@ -123,7 +132,7 @@ impl Output {
             match device {
                 Some(device) => tracing::warn!(
                     device,
-                    "lower audio: no controllable output volume on the default output, leaving it unchanged"
+                    "lower audio: no controllable output volume on the default output, or its stream layout could not be read; leaving it unchanged"
                 ),
                 None => tracing::warn!(
                     "lower audio: no default output device to lower, leaving it unchanged"
