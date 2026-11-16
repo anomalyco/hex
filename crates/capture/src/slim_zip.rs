@@ -162,6 +162,7 @@ fn collect(root: &Path, relative: &Path, out: &mut Vec<Entry>) -> Result<()> {
 /// earlier copy.
 fn excluded(name: &str) -> bool {
     HEAVY_MEDIA.contains(&name)
+        || name == crate::recover::PARTIAL_AUDIO
         || name == MEDIA_PENDING
         || name == MEDIA_SENDING
         || name == scrawl_router::delivery::PENDING

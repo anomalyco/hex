@@ -795,6 +795,12 @@ pub fn summary_markdown_with(
         out.push_str(LOOK_AT_IMAGES);
         out.push('\n');
     }
+    if let Some(at) = bundle.audio_stopped_at_ms {
+        out.push_str(&format!(
+            "Audio stopped at {}; the rest of this capture has no audio.\n",
+            format_length(at)
+        ));
+    }
     // The screen at the start and the app's own values, on one line.
     let start_screen = bundle.screen_at(0);
     let context: Vec<String> = start_screen
@@ -2099,6 +2105,7 @@ mod tests {
             video: None,
             video_offset_ms: 0,
             audio: None,
+            audio_stopped_at_ms: None,
             source: None,
             device: None,
             context: Default::default(),
@@ -2235,6 +2242,35 @@ mod tests {
         let summary_with_action =
             summary_markdown(&phone, std::path::Path::new("/recordings/phone"));
         assert!(summary_with_action.contains("- #3 (0:11) [swiped up] “And then I scroll up.”"));
+    }
+
+    #[test]
+    fn summary_says_where_a_captures_audio_stopped() {
+        let mut bundle: ScrawlBundle = serde_json::from_value(serde_json::json!({
+            "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 28_800_000,
+            "target": {"mode": "display", "displayId": 0,
+                "frame": {"x": 0.0, "y": 0.0, "width": 2560.0, "height": 1440.0, "scale": 2.0}},
+            "transcript": {"source": "test", "text": "", "segments": []},
+            "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png",
+            "audio": "audio.wav", "audioStoppedAtMs": 28_800_000
+        }))
+        .unwrap();
+        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/long"));
+        assert!(
+            summary.contains("Audio stopped at 8:00:00; the rest of this capture has no audio."),
+            "summary: {summary}"
+        );
+        bundle.audio_stopped_at_ms = None;
+        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/long"));
+        assert!(!summary.contains("Audio stopped"));
+
+        // A minute-long one keeps the shorter clock.
+        bundle.audio_stopped_at_ms = Some(754_000);
+        let summary = summary_markdown(&bundle, std::path::Path::new("/recordings/long"));
+        assert!(
+            summary.contains("Audio stopped at 12:34;"),
+            "summary: {summary}"
+        );
     }
 
     #[test]

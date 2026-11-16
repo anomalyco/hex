@@ -503,7 +503,7 @@ impl Controller {
             tracing::warn!(%error, "could not close replay narration sink");
             None
         });
-        let mut timeline = super::Timeline::new(active.press_at);
+        let mut timeline = super::Timeline::new(active.press_at, active.bundle.join("audio.wav"));
         while let Ok(chunk) = active.chunks.try_recv() {
             match chunk {
                 CaptureAudio::Samples {
@@ -516,8 +516,10 @@ impl Controller {
         }
         let held = release_at.duration_since(active.press_at);
         let recorded = if held >= MIN_NARRATION_HOLD {
-            timeline.finish(release_at, closed)
+            let audio = timeline.finish(release_at, closed);
+            narration_on_clock(&active.bundle.join("audio.wav"), audio)
         } else {
+            timeline.discard();
             RecordedAudio::default()
         };
         lock(outcomes).stopped(&active.bundle, End::Finish);
@@ -962,8 +964,24 @@ impl SealedReplay {
         Ok(Written {
             words,
             gaps,
+            audio_stopped_at_ms: bundle.audio_stopped_at_ms,
             missing_transcript,
         })
+    }
+}
+
+/// The replay's narration moves later by the exported clip's length, which
+/// needs samples: read the streamed partial back. A narration hold is seconds
+/// long, so this does not grow with anything. Reading it consumes the partial,
+/// so the build's shifted narration is the only audio the bundle keeps.
+#[cfg(target_os = "macos")]
+fn narration_on_clock(path: &Path, audio: RecordedAudio) -> RecordedAudio {
+    match audio.into_memory() {
+        Ok(audio) => audio,
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "could not read the replay's narration");
+            RecordedAudio::default()
+        }
     }
 }
 
@@ -979,6 +997,9 @@ fn shift_audio_after_video(
         return (None, video_duration_ms);
     }
     let shifted_start = video_duration_ms.saturating_add(audio.start_offset_ms);
+    let shifted_stop = audio
+        .audio_stopped_at_ms()
+        .map(|at| video_duration_ms.saturating_add(at));
     let shifted_gaps = audio
         .gaps
         .into_iter()
@@ -992,7 +1013,8 @@ fn shift_audio_after_video(
         audio.sample_rate,
         shifted_start,
         shifted_gaps,
-    );
+    )
+    .stopping_audio_at(shifted_stop);
     let total_ms = video_duration_ms.max(shifted.total_duration_ms());
     (Some(shifted), total_ms)
 }
@@ -1299,7 +1321,8 @@ mod tests {
                 start_ms: 200,
                 end_ms: 350,
             }],
-        );
+        )
+        .stopping_audio_at(Some(1_800));
         let (shifted, total) = shift_audio_after_video(raw, 15_000);
         let shifted = shifted.expect("narrated audio preserved");
         assert_eq!(shifted.start_offset_ms, 15_120);
@@ -1309,6 +1332,11 @@ mod tests {
                 start_ms: 15_200,
                 end_ms: 15_350
             }]
+        );
+        assert_eq!(
+            shifted.audio_stopped_at_ms(),
+            Some(16_800),
+            "the narration's stop point moves with its clock"
         );
         assert_eq!(total, 17_120);
     }

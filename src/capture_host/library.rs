@@ -54,6 +54,7 @@ pub fn show(capture: &str) -> Result<ControlReply, ControlError> {
             transcript: bundle.transcript.text.clone(),
             note: bundle.note.clone(),
             missing_transcript: bundle.transcript.missing.as_ref().map(|m| m.reason.clone()),
+            audio_stopped_at_ms: bundle.audio_stopped_at_ms,
             marks: bundle.marks.len(),
             keyframes: bundle.keyframes.len(),
             video: file(&bundle.video),

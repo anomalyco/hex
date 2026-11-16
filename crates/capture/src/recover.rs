@@ -8,8 +8,10 @@
 //! Captures from before the journal (0.3.10 on Windows crashed the same way) left only
 //! `recording.mp4` and `audio.wav`. Once those have sat untouched for `ORPHAN_SETTLE` they are
 //! rebuilt too, from the video and audio alone: the whole frame, no ink or clicks, keyframes from
-//! scene changes and the transcript. A live capture never looks like that: `audio.wav` is written
-//! only when the recording has stopped, just before `unfinished.json`.
+//! scene changes and the transcript. A streamed capture's `audio.wav` never exists without a
+//! journal: its audio waits under `audio.wav.partial` while it records and until its build writes
+//! `unfinished.json`, and a crash while recording or queued is cleaned up by retention, not
+//! recovered. A journal whose `audio.wav` is still missing adopts the partial instead.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -33,6 +35,10 @@ const SETTLE: Duration = Duration::from_secs(15);
 const ORPHAN_SETTLE: Duration = Duration::from_secs(10 * 60);
 const VIDEO: &str = "recording.mp4";
 const AUDIO: &str = "audio.wav";
+/// Where a capture streams its audio while it records. `audio.wav` appears (by rename) only once
+/// its build writes `unfinished.json`, so a capture still recording or waiting to be written never
+/// looks like an orphan owed a rebuild.
+pub const PARTIAL_AUDIO: &str = "audio.wav.partial";
 /// The movie starts this much after the audio at most (measured: 50–500 ms).
 const MAX_VIDEO_OFFSET_MS: u64 = 1_000;
 
@@ -80,7 +86,8 @@ pub fn read(bundle_dir: &Path) -> Result<Unfinished> {
 }
 
 /// A bundle with a Screen capture's video and audio and no journal: its build never ran. A phone
-/// recording's (`timeline.json`) is left to the phone, which sends it again.
+/// recording's (`timeline.json`) is left to the phone, which sends it again. A capture still
+/// recording has `audio.wav.partial`, not `audio.wav`, so it is never one of these.
 fn orphaned(dir: &Path) -> bool {
     dir.join(VIDEO).is_file()
         && dir.join(AUDIO).is_file()
@@ -436,10 +443,11 @@ mod tests {
     fn recover_picks_up_old_video_and_audio_without_a_journal_but_never_a_live_capture() {
         let captures = temp_dir("orphans");
         let lost = orphan(&captures, "a.scrawl");
-        // Recording now: the movie grows, the audio is still in memory.
+        // Recording now: the movie grows and the audio streams to its partial.
         let live = captures.join("b.scrawl");
         std::fs::create_dir_all(&live).unwrap();
         std::fs::write(live.join(VIDEO), b"movie").unwrap();
+        std::fs::write(live.join(PARTIAL_AUDIO), b"half a wav").unwrap();
         let built = orphan(&captures, "c.scrawl");
         std::fs::write(built.join("scrawl.json"), "{}").unwrap();
         let tried = orphan(&captures, "d.scrawl");
@@ -458,6 +466,68 @@ mod tests {
         let later = now + ORPHAN_SETTLE + Duration::from_secs(1);
         assert_eq!(pending(&captures, later), vec![lost.clone(), journaled]);
         assert!(owed(&lost) && !owed(&live) && !owed(&built) && !owed(&tried) && !owed(&phone));
+    }
+
+    #[test]
+    fn a_capture_that_has_not_been_journaled_is_never_owed_a_rebuild() {
+        let captures = temp_dir("streaming");
+        let dir = captures.join("live.scrawl");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Recording, or stopped and waiting for its build: the movie and the
+        // audio under its partial name, and no journal.
+        std::fs::write(dir.join(VIDEO), b"movie").unwrap();
+        std::fs::write(dir.join(PARTIAL_AUDIO), b"half a wav").unwrap();
+        assert!(
+            !owed(&dir),
+            "a movie and a partial WAV are a capture that has not stopped its build"
+        );
+        assert!(
+            pending(&captures, SystemTime::now() + ORPHAN_SETTLE * 2).is_empty(),
+            "never rebuilt, however long it settles"
+        );
+
+        // A build publishes `audio.wav` only after journaling the capture: a
+        // movie with a finished audio and no journal is the recovery case.
+        let mut audio = crate::audio::RecordedAudio::on_disk(
+            &dir.join(PARTIAL_AUDIO),
+            16_000,
+            16_000,
+            0,
+            Vec::new(),
+        );
+        assert!(audio.publish_audio(&dir));
+        assert!(
+            owed(&dir),
+            "audio.wav without a journal is exactly what recovery rebuilds"
+        );
+    }
+
+    #[test]
+    fn a_journaled_capture_adopts_its_streamed_audio() {
+        let captures = temp_dir("adopt");
+        let dir = captures.join("streamed.scrawl");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(VIDEO), b"movie").unwrap();
+        let tone: Vec<f32> = (0..16_000 * 3 + 1_600)
+            .map(|i| (i as f32 * 0.05).sin() * 0.2)
+            .collect();
+        std::fs::write(
+            dir.join(PARTIAL_AUDIO),
+            crate::audio::encode_wav_16k(&tone).unwrap(),
+        )
+        .unwrap();
+        write(&dir, &unfinished());
+        // The build died after journaling, before the audio's final name.
+        rebuild(&dir, &FAKE).unwrap();
+        let bundle: crate::model::ScrawlBundle =
+            serde_json::from_slice(&std::fs::read(dir.join("scrawl.json")).unwrap()).unwrap();
+        assert_eq!(bundle.audio.as_deref(), Some(AUDIO));
+        assert!(dir.join(AUDIO).is_file());
+        assert!(
+            !dir.join(PARTIAL_AUDIO).exists(),
+            "the journal adopted the streamed audio"
+        );
+        assert!(!dir.join(UNFINISHED).exists());
     }
 
     #[test]

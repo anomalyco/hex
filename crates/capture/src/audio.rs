@@ -1,9 +1,7 @@
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "mic")]
-use anyhow::Context;
-use anyhow::{Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 #[cfg(feature = "mic")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -25,6 +23,12 @@ pub struct RecordedAudio {
     pub sample_rate: u32,
     pub start_offset_ms: u64,
     pub gaps: Vec<GapSpan>,
+    /// Where the samples live when they were streamed to disk: reading them
+    /// back is only needed by a path that shifts or rewrites the audio.
+    pub(crate) streamed: Option<std::path::PathBuf>,
+    /// Where the audio stops on the capture's clock (ms), when Hex had to stop
+    /// keeping it: a streamed capture's disk guard, or a failed write.
+    pub(crate) audio_stopped_at_ms: Option<u64>,
     pub(crate) sample_count: usize,
     pub(crate) duration_ms: u64,
     pub(crate) wav_bytes: Vec<u8>,
@@ -50,6 +54,8 @@ impl RecordedAudio {
             sample_rate: rate,
             start_offset_ms,
             gaps,
+            streamed: None,
+            audio_stopped_at_ms: None,
             sample_count,
             duration_ms,
             wav_bytes: Vec::new(),
@@ -57,6 +63,130 @@ impl RecordedAudio {
         }
     }
 
+    /// A recording whose samples stay in `audio.wav` on disk: a capture streams
+    /// them while it records instead of holding the whole session in memory.
+    /// `sample_count` counts the samples after `start_offset_ms`, as `samples`
+    /// would.
+    pub fn on_disk(
+        path: &std::path::Path,
+        sample_count: usize,
+        sample_rate: u32,
+        start_offset_ms: u64,
+        gaps: Vec<GapSpan>,
+    ) -> Self {
+        let rate = if sample_rate == 0 {
+            SAMPLE_RATE
+        } else {
+            sample_rate
+        };
+        Self {
+            samples: Vec::new(),
+            sample_rate: rate,
+            start_offset_ms,
+            gaps,
+            streamed: Some(path.to_path_buf()),
+            audio_stopped_at_ms: None,
+            sample_count,
+            duration_ms: start_offset_ms + (sample_count as u64 * 1_000) / u64::from(rate),
+            wav_bytes: Vec::new(),
+            live: Default::default(),
+        }
+    }
+
+    /// Records where the audio stops on the capture's clock, when Hex had to
+    /// stop keeping it: a streamed capture's disk guard, or a failed write.
+    #[must_use]
+    pub fn stopping_audio_at(mut self, ms: Option<u64>) -> Self {
+        self.audio_stopped_at_ms = ms;
+        self
+    }
+
+    /// Where the capture's audio stops, when it does not run to the end.
+    pub fn audio_stopped_at_ms(&self) -> Option<u64> {
+        self.audio_stopped_at_ms
+    }
+
+    /// Gives a streamed recording its final `audio.wav` name in `bundle_dir`,
+    /// now that its bundle is journaled. A folder on the same filesystem
+    /// renames; anything else copies. The partial file stays if this fails, so
+    /// the caller can read it back itself. On success the recording points at
+    /// the published file from then on.
+    pub fn publish_audio(&mut self, bundle_dir: &std::path::Path) -> bool {
+        let Some(streamed) = &self.streamed else {
+            return false;
+        };
+        let path = bundle_dir.join("audio.wav");
+        if *streamed == path {
+            return path.is_file();
+        }
+        if std::fs::rename(streamed, &path).is_ok() {
+            self.streamed = Some(path);
+            return true;
+        }
+        // A copy that lands is a published audio.wav even if the partial cannot
+        // be deleted: the file is there, and a stale partial is harmless.
+        match std::fs::copy(streamed, &path) {
+            Ok(_) => {
+                if let Err(error) = std::fs::remove_file(streamed) {
+                    crate::log::scrawl_log(format!(
+                        "audio: copied {} but could not remove it: {error}",
+                        streamed.display()
+                    ));
+                }
+                self.streamed = Some(path);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Removes a streamed recording's partial file once its samples are in
+    /// memory or its final file is written. Only a partial name is removed,
+    /// never a finished `audio.wav`.
+    pub fn discard_streamed(&self) {
+        if let Some(path) = &self.streamed {
+            consume_partial(path);
+        }
+    }
+
+    /// Whether its samples are already in `audio.wav` on disk, so they are
+    /// never encoded into `wav_bytes` or read from `samples`.
+    pub fn is_on_disk(&self) -> bool {
+        self.streamed.is_some()
+    }
+
+    /// Its samples in memory, read back from the streamed file when they are
+    /// on disk and kept as they are otherwise. A streamed recording is decoded
+    /// in full into memory, so only a path that must shift or rewrite the
+    /// audio (an iPhone narration, a replay) asks for this. Once read, the
+    /// partial file is removed: its samples are this recording's now.
+    pub fn into_memory(self) -> Result<Self> {
+        let Some(path) = self.streamed.clone() else {
+            return Ok(self);
+        };
+        let audio = self.read_streamed()?;
+        consume_partial(&path);
+        Ok(audio)
+    }
+
+    /// The same samples as [`Self::into_memory`], without touching the file: a
+    /// build that must write them elsewhere removes the partial only after its
+    /// own write succeeded, so a failed write never leaves the audio nowhere.
+    pub fn read_streamed(&self) -> Result<Self> {
+        let Some(path) = &self.streamed else {
+            return Ok(self.clone());
+        };
+        let expected = self.sample_count;
+        let audio = self.clone().shifted_from_file(path, 0)?;
+        if audio.samples.len() != expected {
+            bail!(
+                "{} holds {} samples, not the {expected} it recorded",
+                path.display(),
+                audio.samples.len()
+            );
+        }
+        Ok(audio)
+    }
     pub fn sample_count(&self) -> usize {
         if !self.samples.is_empty() {
             self.samples.len()
@@ -119,8 +249,35 @@ impl RecordedAudio {
     }
 
     /// The same audio on a clock that starts `ms` later (a phone movie's first frame): what came
-    /// before is dropped, and the gaps move with the clock.
+    /// before is dropped, and the gaps move with the clock. A streamed recording is decoded into
+    /// memory to do it, and its partial file is removed once read.
     pub fn since(self, ms: u64) -> Result<Self> {
+        if let Some(path) = self.streamed.clone() {
+            let start_offset_ms = self.start_offset_ms;
+            let gaps = self.gaps.clone();
+            let stopped = self.audio_stopped_at_ms;
+            return match self.shifted_from_file(&path, ms) {
+                Ok(audio) => {
+                    consume_partial(&path);
+                    Ok(audio)
+                }
+                // No audio to shift (gone or unreadable): a phone capture still
+                // finishes with its video and transcript.
+                Err(error) => {
+                    crate::log::scrawl_log(format!(
+                        "audio: could not read {}: {error:#}",
+                        path.display()
+                    ));
+                    Ok(Self::new(
+                        Vec::new(),
+                        SAMPLE_RATE,
+                        start_offset_ms.saturating_sub(ms),
+                        shifted_gaps(gaps, ms),
+                    )
+                    .stopping_audio_at(stopped.map(|at| at.saturating_sub(ms))))
+                }
+            };
+        }
         if ms == 0 {
             return Ok(self);
         }
@@ -138,16 +295,28 @@ impl RecordedAudio {
         let skip_ms = ms.saturating_sub(self.start_offset_ms);
         let skip = usize::try_from(skip_ms * u64::from(rate) / 1_000).unwrap_or(usize::MAX);
         samples.drain(..skip.min(samples.len()));
-        let gaps = self
-            .gaps
-            .iter()
-            .filter(|gap| gap.end_ms > ms)
-            .map(|gap| GapSpan {
-                start_ms: gap.start_ms.saturating_sub(ms),
-                end_ms: gap.end_ms - ms,
-            })
-            .collect();
-        Ok(Self::new(samples, rate, start_offset_ms, gaps))
+        let gaps = shifted_gaps(self.gaps, ms);
+        let stopped = self.audio_stopped_at_ms.map(|at| at.saturating_sub(ms));
+        Ok(Self::new(samples, rate, start_offset_ms, gaps).stopping_audio_at(stopped))
+    }
+
+    /// [`Self::since`] for a recording streamed to `path`: reads it back into
+    /// memory and drops the audio before `ms`, exactly as the in-memory shift
+    /// does. A file that cannot be read or decoded is an error; each caller
+    /// decides whether that is no audio (an iPhone) or a failed read (a build).
+    fn shifted_from_file(self, path: &std::path::Path, ms: u64) -> Result<Self> {
+        let bytes =
+            std::fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+        let mut samples = decode_wav_16k(&bytes)?;
+        let lead = (self.start_offset_ms * u64::from(SAMPLE_RATE) / 1_000) as usize;
+        samples.drain(..lead.min(samples.len()));
+        let skip_ms = ms.saturating_sub(self.start_offset_ms);
+        let skip = usize::try_from(skip_ms * u64::from(SAMPLE_RATE) / 1_000).unwrap_or(usize::MAX);
+        samples.drain(..skip.min(samples.len()));
+        let start_offset_ms = self.start_offset_ms.saturating_sub(ms);
+        let gaps = shifted_gaps(self.gaps, ms);
+        let stopped = self.audio_stopped_at_ms.map(|at| at.saturating_sub(ms));
+        Ok(Self::new(samples, SAMPLE_RATE, start_offset_ms, gaps).stopping_audio_at(stopped))
     }
 
     pub fn set_live(&self, live: Option<crate::live_transcribe::Live>) {
@@ -156,6 +325,27 @@ impl RecordedAudio {
 
     pub fn take_live(&self) -> Option<crate::live_transcribe::Live> {
         self.live.take()
+    }
+}
+
+fn shifted_gaps(gaps: Vec<GapSpan>, ms: u64) -> Vec<GapSpan> {
+    gaps.iter()
+        .filter(|gap| gap.end_ms > ms)
+        .map(|gap| GapSpan {
+            start_ms: gap.start_ms.saturating_sub(ms),
+            end_ms: gap.end_ms - ms,
+        })
+        .collect()
+}
+
+/// Removes a streamed recording's file once its samples were read into memory.
+/// Only the partial name goes: a published `audio.wav` is the bundle's.
+fn consume_partial(path: &std::path::Path) {
+    if path
+        .file_name()
+        .is_some_and(|name| name == crate::recover::PARTIAL_AUDIO)
+    {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -377,6 +567,8 @@ impl AudioRecorder {
             sample_rate: SAMPLE_RATE,
             start_offset_ms: 0,
             gaps: Vec::new(),
+            streamed: None,
+            audio_stopped_at_ms: None,
             sample_count,
             duration_ms,
             wav_bytes,
@@ -461,6 +653,8 @@ pub fn recorded_audio_from_wav(wav_bytes: Vec<u8>) -> Result<RecordedAudio> {
         sample_rate: SAMPLE_RATE,
         start_offset_ms: 0,
         gaps: Vec::new(),
+        streamed: None,
+        audio_stopped_at_ms: None,
         sample_count,
         duration_ms: sample_count as u64 * 1_000 / u64::from(SAMPLE_RATE),
         wav_bytes,
@@ -763,5 +957,94 @@ mod tests {
         assert_eq!(decoded.len(), 1_760);
         assert!(decoded[..1_600].iter().all(|&s| s == 0.0));
         assert!(decoded[1_600..].iter().all(|&s| (s - 0.5).abs() < 0.01));
+    }
+
+    #[test]
+    fn audio_streamed_to_disk_counts_its_samples_and_can_be_read_back() {
+        let dir = std::env::temp_dir().join(format!("hex-audio-streamed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(crate::recover::PARTIAL_AUDIO);
+        // 250 ms of leading silence and 1 s of audio at 16 kHz.
+        let mut padded = vec![0.0_f32; 4_000];
+        padded.extend(vec![0.5_f32; 16_000]);
+        // Each read consumes the file, so a fresh one is written before every
+        // case, as a later capture would.
+        let write = || std::fs::write(&path, encode_wav_16k(&padded).unwrap()).unwrap();
+        let streamed = || {
+            RecordedAudio::on_disk(
+                &path,
+                16_000,
+                16_000,
+                250,
+                vec![GapSpan {
+                    start_ms: 1_000,
+                    end_ms: 2_000,
+                }],
+            )
+        };
+        write();
+        let audio = streamed();
+        assert!(audio.is_on_disk());
+        assert!(audio.samples.is_empty() && audio.wav_bytes.is_empty());
+        assert_eq!(audio.sample_count(), 16_000);
+        // 250 ms before the first sample + 1 s of samples.
+        assert_eq!(audio.duration_ms(), 1_250);
+        assert_eq!(audio.gaps.len(), 1);
+
+        let read_back = audio.clone().into_memory().unwrap();
+        assert!(!read_back.is_on_disk());
+        assert_eq!(read_back.samples.len(), 16_000);
+        assert_eq!(read_back.start_offset_ms, 250);
+        assert!(!path.exists(), "reading it consumed the partial file");
+
+        // A zero shift still reads it back, because the caller rewrites the
+        // file (the phone path) rather than keeping the streamed one.
+        write();
+        let unchanged = streamed().since(0).unwrap();
+        assert!(!unchanged.is_on_disk());
+        assert_eq!(unchanged.samples.len(), 16_000);
+        assert_eq!(unchanged.start_offset_ms, 250);
+        assert!(!path.exists(), "reading it consumed the partial file");
+
+        // The phone path drops the first 300 ms: 50 ms of samples go, and the
+        // gaps move with the clock.
+        write();
+        let shifted = streamed().since(300).unwrap();
+        assert!(!shifted.is_on_disk());
+        assert_eq!(shifted.start_offset_ms, 0);
+        assert_eq!(shifted.samples.len(), 15_200);
+        assert_eq!(
+            shifted.gaps,
+            vec![GapSpan {
+                start_ms: 700,
+                end_ms: 1_700
+            }]
+        );
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!RecordedAudio::new(vec![0.5; 160], 16_000, 0, Vec::new()).is_on_disk());
+    }
+
+    #[test]
+    fn a_streamed_recording_whose_file_is_gone_has_no_samples() {
+        let missing =
+            std::env::temp_dir().join(format!("hex-audio-gone-{}.wav", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        // A phone capture's narration can outlive its streamed file (or never
+        // have one): that is no audio, not a failed capture.
+        let shifted = RecordedAudio::on_disk(&missing, 16_000, 16_000, 0, Vec::new())
+            .since(500)
+            .unwrap();
+        assert!(shifted.samples.is_empty());
+        assert!(!shifted.is_on_disk());
+        assert_eq!(shifted.sample_count(), 0);
+        // A build that needs the audio itself is told the read failed, so it
+        // can keep the partial instead of writing an empty `audio.wav`.
+        assert!(
+            RecordedAudio::on_disk(&missing, 16_000, 16_000, 0, Vec::new())
+                .into_memory()
+                .is_err()
+        );
     }
 }
