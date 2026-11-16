@@ -1144,8 +1144,11 @@ preserving balance and silent channels, then restore on finish, cancel, or
 orderly shutdown by easing back over one second. Changes apply to the next
 capture. The stop tone waits for restoration. A manually changed volume after
 settling is left alone;
-a newly selected output device is not lowered. Fixed-volume devices and outputs
-whose channel balance cannot be safely restored are left unchanged. Meetings do
+a newly selected output device is not lowered. On macOS, a channel with no
+volume control is left at its level, and a channel that can be read but not set
+sends lowering to the virtual main volume so the balance stays intact; an
+output with no controllable volume at all is left unchanged and logs a
+warning. Meetings do
 not acquire this dictation environment. Linux lowers the default sink's
 channels through `pactl` (one volume through `wpctl` without it), so Hex's own
 tones are lowered too and the stop tone waits, as on macOS. Windows lowers
@@ -1176,6 +1179,25 @@ restored. Checks: `ducking_preserves_balance_silence_and_restores` and
 that module, and `suppressing_audio_while_dictating_keeps_no_pre_roll` in
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
 or physical output).
+
+**Changed November 16, 2026 (issue 1915):** on macOS, Lower audio needed every
+one of the output's stream channels to carry a settable volume scalar, so a USB
+adapter reporting two buffers of two channels where only the first pair has one
+was left unchanged, silently; Mute worked there because it uses the virtual main
+volume. Lower audio now ramps the channels that can be read and set and leaves
+channels without a volume control at their level, then falls back to the main
+volume and then to the virtual main volume Mute uses when no channel reports a
+volume at all. A channel that can be read but not set rules out both the
+per-channel ramp and the plain main volume, since either could leave it
+lopsided or flatten a balance that cannot be restored: the virtual main volume,
+which macOS keeps balanced, is the only choice then. Restore writes the same
+control it lowered, at the value it read. An output with no controllable volume
+at all now logs a warning instead of doing nothing quietly. Checks:
+`channels_without_a_volume_scalar_are_skipped_not_fatal`,
+`a_read_only_channel_leaves_the_balance_to_the_virtual_main_volume`, and
+`the_main_then_the_virtual_main_volume_are_the_fallbacks` in
+[ducking.rs](../../src/audio/recording_environment/ducking.rs) (selection only;
+not run on a device).
 
 On 2026-10-25, the macOS logic/settings checks and strict Clippy passed.
 The seven reference images were regenerated on Ubuntu 24.04 ARM64 with Mesa
