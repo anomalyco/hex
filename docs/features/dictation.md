@@ -2465,24 +2465,31 @@ a later frame-less start hides again. The hide is queued for Rune's thread, so
 it carries the attempt and the present count it was decided with and does
 nothing if a start opened a later attempt or a frame presented since: a hide
 decided for a HUD that was only late never takes away one that is up. Every
-start also asks Rune for the HUD again, on Windows as well as Linux, clearing
+start also asks Rune for the HUD again, on macOS, Windows, and Linux, clearing
 `shown` first. `shown` is Hex's record of a request, not of Rune's state: it
 is set before Rune applies the show, and `show_fading` gives up when the window
 or surface it has to make fails. A `ShowWindow` Windows leaves cloaked is the
 other reason not to trust it, but re-asking does not help there: Rune ignores a
 show while it counts the overlay shown, so only the 1.5 s recovery hide and the
 rebuild after it get a cloaked or stuck surface back. What re-asking does
-recover is a show that failed in setup, one Hex hid, and a layer surface the
-compositor closed (#1663), and Rune's show is a no-op while the overlay is
-visible, so it costs nothing. `fade_out` and `hide` both clear `shown`, so a
-start during the exit fade already reached Rune before this. While a recording
-runs, the HUD also asks on its own: a recording's own events are meters, so
-once its frames have stopped for `RESHOW_AFTER` (250 ms) it clears `shown` and
-asks. That is one ask, and the recovery hide frees exactly one more by
-restarting the clock and the ask together, so one rebuild follows the hide and
-a HUD that can never show does not rebuild its window and surface on every
-meter. Checked by `rune_hud::tests`' first-frame and
-recovery tests
+recover is a show that failed in setup, one Hex hid, a layer surface the
+compositor closed (#1663), and on macOS an overlay Rune hid because its surface
+wouldn't reconfigure or its GPU device was lost, which is also a show that
+re-applies the panel's collection behaviors and orders it back in. Rune's show
+is a no-op while the overlay is visible, so the ask costs nothing and cannot
+flicker or make a second panel; `fade_out` and `hide` both clear `shown`, so a
+start during the exit fade already reached Rune before this. A panel that
+AppKit itself orders out while Rune still counts the overlay shown is not
+repaired by the ask (Rune ignores a show then), and the pump's `rehome` leaves
+a panel it finds hidden alone. Rune counts it shown but occluded, so frames
+don't step and `fade_out` never runs: it can stay missing until Hex restarts
+(unproven on hardware). On Windows, while a recording runs, the HUD also asks
+on its own: a recording's own events are meters, so once its frames have
+stopped for `RESHOW_AFTER` (250 ms) it clears `shown` and asks. That is one
+ask, and the recovery hide frees exactly one more by restarting the clock and
+the ask together, so one rebuild follows the hide and a HUD that can never
+show does not rebuild its window and surface on every meter. Checked by
+`rune_hud::tests`' first-frame and recovery tests
 (`a_frame_less_start_hides_once`,
 `a_new_start_does_not_hide_on_the_previous_reason`,
 `a_second_start_while_pending_restarts_the_attempt`,

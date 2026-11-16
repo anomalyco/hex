@@ -742,6 +742,16 @@ fn the_timer_arms_from_a_start_and_stops_when_frames_stop() {
     assert!(!hud.armed);
 }
 
+/// Every start asks Rune for the HUD again, macOS included: `handle` clears
+/// `shown` before `show` asks, so a start isn't gated to the OSes whose own
+/// recovery needed it. Re-adding that gate would strand a HUD Rune hid itself.
+#[test]
+fn a_start_clears_shown_on_every_os() {
+    let mut hud = hud(true);
+    hud.handle(HudEvent::Started);
+    assert!(!hud.shown.load(Ordering::Acquire));
+}
+
 /// Rune runs a poll before the frame's render, so a stall longer than
 /// `RESHOW_AFTER` leaves the next poll looking at a stale `last_drawn` even
 /// though the frame it is part of draws: that frame is the one the previous

@@ -497,14 +497,16 @@ impl Hud {
         }
         // Rune can take the HUD away without telling Hex: it drops an overlay
         // whose layer surface the compositor closed (a monitor unplugged, or a
-        // KVM switching away and back, #1663), and `show_fading` gives up when
-        // the window or surface it has to make fails (#1793). Ask Rune for the
-        // HUD at each capture's start instead of trusting `shown`: it is Hex's
-        // record of a request, not of Rune's state. A cloaked `ShowWindow` is
-        // why: Rune still counts the overlay shown then, so it ignores a show
-        // and only the first-frame recovery hide gets it back. Rune's show is a
+        // KVM switching away and back, #1663), hides one whose surface won't
+        // reconfigure or whose GPU device was lost, and `show_fading` gives up
+        // when the window or surface it has to make fails (#1793). Ask Rune
+        // for the HUD at each capture's start instead of trusting `shown`: it
+        // is Hex's record of a request, not of Rune's state. A cloaked
+        // `ShowWindow` is why: Rune still counts the overlay shown then, so it
+        // ignores a show and only the first-frame recovery hide gets it back.
+        // The start's ask also brings back an overlay Rune hid itself,
+        // re-applying the panel's Space behavior as it shows. Rune's show is a
         // no-op while the overlay is visible, and it cancels an exit fade.
-        #[cfg(any(target_os = "linux", target_os = "windows"))]
         if starts {
             self.shown.store(false, Ordering::Release);
         }
@@ -588,6 +590,10 @@ impl Hud {
                 let plate_start = TOP_OFFSET + (WINDOW.1 - PLATE_HEIGHT) / 2.0;
                 set_live_text(Spot::Edge(ScreenEdge::Top, plate_start));
             }
+            // A start clears `shown` before `show`, so `hide` alone can think
+            // the overlay is already gone and leave Rune's panel up. Rune's
+            // hide on a hidden overlay is harmless (`overlay/presence.rs`).
+            overlay.hide();
             self.hide();
             return;
         }
