@@ -1804,6 +1804,9 @@ Hex checks the release service            // maintain.updates
 │   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
 │   └── Sidebar Update, menu bar / tray: Restart to update; a dev build lists its
 │       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
+│       ├── A meeting is recording -> refused with that reason; the update stays
+│       │   staged and Ready, so the next click after it ends restarts. The macOS
+│       │   status item dims Restart to update while it would be refused
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
 │       ├── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
@@ -1836,6 +1839,24 @@ reads it once at launch, so a forced value wins and a change applies after
 relaunch. Speech-model downloads are unaffected. Releases through 2.3.1 read
 `com.kitlangton.hex2`; there is no fallback to it, so profiles must name
 `anomaly.hex`.
+
+Every quit Hex starts ends through its own drain: Rune is told the app has work
+after its loop (`rune::orderly_exit`, called by `macos_rune::run`,
+`windows::rune::open`, and `rune_ui::run_app`), so Quit Hex, `hex quit`, and
+Restart to update stop and join the meeting controller. The staged bundle is
+installed before that join (the swap is atomic and touches no meeting files),
+and a quit that begins during Restart to update's final check never swaps a
+second time. On macOS the AppKit terminate notification drains the same way,
+with 5 s before `_exit` (`DEADLINE`), extended up to 30 s from the quit's
+start while a recording or recovery is in flight (`MEETING_DEADLINE`), plus up
+to 5 s more after it ends (still within the 30 s bound) for the rest of the
+drain, so a finalising meeting is never cut off. Linux's service stop has its
+own 20 s bound (`STOP_DEADLINE`) under the unit's 30 s `TimeoutStopSec`;
+Windows marks quitting and arms 20 s around its post-loop teardown, extended to
+30 s while meeting audio is in flight and polled rather than read once
+(`arm_windows_deadline`), exiting 1 when the window failed. Restart to update
+refuses while meeting audio is in flight (`updater::restart_hold`), re-checks
+after its final manifest check, and keeps the release staged.
 
 [updater.rs](../../src/updater.rs) owns the worker and the shared status the
 window, menu bar, and tray show; `updater/protocol.rs` passes the release
@@ -1876,10 +1897,11 @@ release unpacked its own `.Hex-update-<version>` folder beside `Hex.app`
 every ten minutes) published builds left one ~80 MB copy of the app per build in
 `/Applications`. Staging a newer release now removes the folder of the one it
 replaces once the replacement is the staged update, and a release whose download
-finishes after a quit already installed an update is dropped instead of replacing
-it (that folder holds the bundle the installed update replaced), so a restart
-never swaps twice. The launch sweep still takes whatever a swap or an interrupted
-stage left behind. Observed on macOS 26
+finishes after a quit installed an update is dropped instead of replacing it
+(that folder holds the bundle the installed update replaced), so a restart never
+swaps twice. A quit that has not installed one keeps the older staged update
+Ready, so the quit still installs it. The launch sweep still takes whatever a
+swap or an interrupted stage left behind. Observed on macOS 26
 with the published 0.0.0-dev-1046 build: the launch sweep removed a folder
 holding an older signed build and one holding a swapped-in peer beside
 `/Applications/Hex.app`, and a folder owned by another user stayed with

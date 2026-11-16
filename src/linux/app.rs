@@ -869,8 +869,12 @@ impl LinuxDesktopHost {
     fn refresh(&mut self) {
         self.switch_with_keyboard();
         // Restart to update asks systemd to restart Hex after the updater's
-        // final check; only a failure needs showing.
+        // final check; only a failure needs showing, and a restart that never
+        // happened must not reopen the window on the next launch.
         if let Some(Err(error)) = self.updater.take_restart() {
+            if let Some(marker) = reopen_marker() {
+                let _ = std::fs::remove_file(marker);
+            }
             self.error = Some(format!("Could not restart Hex: {error:#}"));
         }
         // Settings may set up the transformations workspace at any time.
@@ -1454,14 +1458,16 @@ impl LinuxDesktopHost {
             | DesktopAction::RestartIntoUpdate
             | DesktopAction::ConfirmUpdateSwitch
             | DesktopAction::WindowFocused => {
+                if let Err(error) = self.updater.act(&action) {
+                    self.error = Some(format!("Could not restart Hex: {error:#}"));
+                    return Err(error);
+                }
+                // Only an accepted restart relaunches with the window open;
+                // a refused one leaves the next launch as it was.
                 if matches!(action, DesktopAction::RestartIntoUpdate)
                     && let Some(marker) = reopen_marker()
                 {
                     let _ = std::fs::write(marker, b"");
-                }
-                if let Err(error) = self.updater.act(&action) {
-                    self.error = Some(format!("Could not restart Hex: {error:#}"));
-                    return Err(error);
                 }
             }
             DesktopAction::SetDictationShortcut(shortcut) => {

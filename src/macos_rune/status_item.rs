@@ -133,7 +133,8 @@ objc2::define_class!(
 
         /// Restore Last Capture is dimmed while no closed card can come
         /// back, Copy Last Dictation Audio while no kept recording can be
-        /// copied, and an upcoming meeting without a call link is
+        /// copied, Restart to update while a meeting records (the updater
+        /// would refuse it), and an upcoming meeting without a call link is
         /// informational; every other item stays enabled.
         #[unsafe(method(validateMenuItem:))]
         fn validate_menu_item(&self, item: &NSMenuItem) -> bool {
@@ -142,6 +143,10 @@ objc2::define_class!(
                 Some(action) if action == sel!(copyLastDictationAudio:) => {
                     copy_last_dictation_audio_enabled()
                 }
+                Some(action) if action == sel!(checkForUpdates:) => update_enabled(
+                    crate::meeting::recording(),
+                    &crate::macos_rune::update_status(),
+                ),
                 Some(action) if action == sel!(openCalendarMeeting:) => {
                     let Ok(index) = usize::try_from(item.tag()) else {
                         return false.into();
@@ -1105,6 +1110,17 @@ fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
     }
 }
 
+/// While a meeting records, the updater refuses Restart to update, so the
+/// item that would ask for it is dimmed instead. Every other update row
+/// (Check for updates, Download update, a channel switch) stays usable.
+fn update_enabled(recording: bool, status: &crate::desktop::host::DesktopUpdateStatus) -> bool {
+    !(recording
+        && matches!(
+            status,
+            crate::desktop::host::DesktopUpdateStatus::ReadyToRestart
+        ))
+}
+
 /// Shows the saved Paste Last binding beside Paste Last Dictation, or
 /// nothing when it is unbound.
 pub fn update_paste_last(settings: &AppSettings) {
@@ -1412,6 +1428,16 @@ mod tests {
         );
         assert_eq!(update_title(&DesktopUpdateStatus::Current), "检查更新…");
         i18n::apply(Some("en"));
+    }
+
+    #[test]
+    fn restart_to_update_is_dimmed_only_while_a_meeting_records() {
+        use crate::desktop::host::DesktopUpdateStatus;
+        assert!(!update_enabled(true, &DesktopUpdateStatus::ReadyToRestart));
+        assert!(update_enabled(false, &DesktopUpdateStatus::ReadyToRestart));
+        // Checking and downloading stay usable during a meeting.
+        assert!(update_enabled(true, &DesktopUpdateStatus::Current));
+        assert!(update_enabled(true, &DesktopUpdateStatus::Available));
     }
 
     #[test]

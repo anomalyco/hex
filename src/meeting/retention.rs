@@ -12,12 +12,27 @@ use super::{
 };
 use crate::app_settings::MeetingRetention;
 
+/// Every meeting whose final transcript is still owed: one with a
+/// `final.pending` marker, or one the launch recovery will finish while it
+/// can actually run. With Meetings off or no installed model, unfinished
+/// meetings expire like any other.
+fn awaiting_final_transcript(meetings: &[MeetingManifest]) -> Vec<String> {
+    let mut ids = pending_final_transcripts();
+    if super::recovery::can_recover() {
+        ids.extend(super::recovery::stranded_among(meetings));
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// User-facing readers omit expired meetings even before the Trash sweep.
 pub fn list() -> Result<Vec<MeetingManifest>> {
     let chosen = crate::app_settings::meeting_retention();
     let now = now_ms();
-    let pending = pending_final_transcripts();
-    Ok(list_all()?
+    let meetings = list_all()?;
+    let pending = awaiting_final_transcript(&meetings);
+    Ok(meetings
         .into_iter()
         .filter(|meeting| {
             readable(
@@ -70,7 +85,7 @@ pub(super) fn readable(
 /// for a later pass. Returns how many moved.
 pub fn expire(chosen: Option<MeetingRetention>) -> Result<usize> {
     let meetings = list_all()?;
-    let pending = pending_final_transcripts();
+    let pending = awaiting_final_transcript(&meetings);
     let root = root()?;
     let mut moved = 0;
     for id in expired_meetings(&meetings, chosen, &pending, now_ms()) {
@@ -175,7 +190,7 @@ pub fn expire_audio(chosen: Option<MeetingRetention>) -> Result<usize> {
         return Ok(0);
     };
     let meetings = list_all()?;
-    let pending = pending_final_transcripts();
+    let pending = awaiting_final_transcript(&meetings);
     let root = root()?;
     let mut removed = 0;
     for id in audio_expired_meetings(&meetings, chosen, &pending, now_ms()) {
