@@ -1325,6 +1325,9 @@ Release or locked finishing press                     // dictate.release-tail
   -> Wait for audio through release + 200 ms (POST_RELEASE_TAIL)
      ├── Arrives -> Clip ends exactly at release + 200 ms
      └── Stream stalls/fails -> Finish within tail + 100 ms with what arrived
+  -> The live stream is capped there when the finish begins (limit_stream_to):
+     a tail that grows to 600 ms, or a wait for the stop tone to pass, is fed
+     to the stream as the finished clip's remainder, never as live audio
   -> Not short taps, voice controls, programmatic stop, or meetings
   -> Linux and Windows wait the same tail; Linux ends at the release it observes
      (an X11 key release, a portal Deactivated, or `hex dictation stop`)
@@ -1427,8 +1430,15 @@ passed, so a release followed only by the tone waits until then and keeps
 200 ms. The release event stays exact. The macOS audio owner and the Linux
 and Windows loops (`ReleaseWait`) wait at most the base tail plus 100 ms, or
 700 ms once speech grows it; a lost microphone finishes with what arrived.
+
+**The tail's wait can outlast the base tail** (a 428 ms Classic stop sound
+plus 160 ms of speech after it), so every finish caps the live stream at the
+release plus `POST_RELEASE_TAIL` when it begins (`limit_stream_to`): audio
+captured during the wait is audio the clip trims, and `finish_stream` feeds
+the remainder of the clip, so the stream never hears past what the clip
+keeps. Check: `a_long_release_tail_never_feeds_the_stream_past_the_clip`.
 Escape, short taps, voice controls, programmatic stops, and meetings still
-get no tail. Checks in dictation.rs:
+get no tail. Other checks in dictation.rs:
 `a_word_said_through_the_release_keeps_the_tail_open_until_it_ends`,
 `a_release_after_the_speech_keeps_the_base_tail_without_waiting_longer`,
 `speech_that_carries_on_stops_the_tail_at_its_cap`, and
@@ -1450,11 +1460,13 @@ Model advertises streaming, GPU device             // dictate.streaming
   Release -> Collect the release tail (200 ms, up to 600 ms while speech goes on)
     -> Finish with the complete clip
     -> Feed any unfed remainder
+    -> The finish caps the stream at release + 200 ms when it begins
+       // audio captured while the tail decides is trimmed from the clip
     -> Unified English: feed 400 ms of silence, as the whole clip gets (every OS)
     -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
-       ├── ≥ 300 ms of speech the stream heard ends > 400 ms before its text's start
+       ├── ≥ 300 ms of one run of speech that runs into the text's start
        │   -> Transcribe the whole clip offline (source=fallback)   // lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
@@ -1717,23 +1729,30 @@ macOS or a microphone.
 
 **Guard, November 7, 2026 (opening and language):** the coverage check now
 also runs at the start. `PauseCap` takes the first token with letters or
-digits (`spoken_text_start_ms`, the minimum `t0_ms`) and counts the speech
+digits (`spoken_text_start_ms`, the minimum `t0_ms`) and looks at the speech
 frames the stream heard that end more than 400 ms before it; at least 300 ms
-of such speech means the stream lost its opening, so the whole clip is
-transcribed offline (`source=fallback`, reason "the stream's text starts at …
-ms but … ms of speech precedes it"). A short click before the speech is
-shorter than that. Hesitation fillers, coughs, or clicks that together reach
-300 ms before the first word would trip it too, and that false-positive rate
-is unmeasured; a false positive costs only the whole clip's latency, since its
-text is the fallback's. This check cannot see an opening that was garbled
-rather than dropped: a garbled opening still yields word tokens at the speech
-onset. The stream's unfiltered raw decode also keeps Nemotron 3.5's `<ll-RR>`
-language tags, which the public text drops; two distinct tags in one stream
-mean it changed language mid-clip, and the whole clip decides too
-(`language_tags`). That catches a garbled opening only when the garbled part
-carries a different tag, and neither check catches a stream that stays in one
-wrong language for the whole clip. Checks:
+in one run of such speech means the stream lost its opening, so the whole clip
+is transcribed offline (`source=fallback`, reason "the stream's text starts at …
+ms but … ms of speech precedes it, running from … to … ms"). Only one run of
+speech counts: the contiguous run that ends nearest that boundary, bridging
+syllable gaps of up to 40 ms (`BRIDGE_GAP_FRAMES`), and only while it ends
+within that same 400 ms of the boundary — the slack a first token may be
+emitted late by. Sounds that sit at the clip's head as their own run, seconds
+before the first word, never decide: Hex's own start tone (98–272 ms) and the
+double tap's click, a cough, or two taps adding up to 300 ms all stay short
+runs of their own, which is the false positive the first version had
+(`an_isolated_burst_before_a_late_first_token_does_not_discard_the_stream`,
+`a_split_burst_that_reaches_the_threshold_is_not_a_lost_opening`). This check
+cannot see an opening that was garbled rather than dropped: a garbled opening
+still yields word tokens at the speech onset. The stream's unfiltered raw
+decode also keeps Nemotron 3.5's `<ll-RR>` language tags, which the public
+text drops; two distinct tags in one stream mean it changed language
+mid-clip, and the whole clip decides too (`language_tags`). That catches a
+garbled opening only when the garbled part carries a different tag, and
+neither check catches a stream that stays in one wrong language for the whole
+clip. Checks:
 `a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip`,
+`speech_running_into_the_texts_start_is_still_a_lost_opening`,
 `a_short_click_before_the_text_does_not_discard_the_stream`,
 `a_punctuation_token_does_not_start_the_streams_text`, and
 `a_stream_that_switched_language_falls_back_to_the_whole_clip` (synthetic

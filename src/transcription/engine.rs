@@ -38,8 +38,10 @@ pub(crate) type Background = Box<dyn FnOnce(Option<&mut Model>) + Send>;
 /// A healthy finish decodes at most a couple of seconds of buffered audio.
 /// Past this the stream is aborted and the clip is transcribed offline.
 const STREAM_FINISH_DEADLINE: Duration = Duration::from_millis(1_500);
-/// Audio fed past the clip's trimmed end (a release handled late) that the
-/// stream may still keep. Beyond it, the offline clip is authoritative.
+/// Audio fed past the clip's trimmed end that the stream may still keep.
+/// The audio owner caps live feeding at the release plus the base tail
+/// (`DictationCapture::limit_stream_to`), so only a caller that feeds more
+/// than its clip keeps trips this. Beyond it, the offline clip is authoritative.
 const MAX_OVERFED_SAMPLES: usize = 16_000 / 4;
 /// How long a job may run once the engine starts it, before the clip's own
 /// share. It covers activating and prewarming the largest model inside the
@@ -1750,6 +1752,59 @@ mod tests {
         assert_eq!(
             finish_with_text_bounds(&clip, Some(500), 4_200),
             Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn an_isolated_burst_before_a_late_first_token_does_not_discard_the_stream() {
+        // Hex's own start tone is 98-272 ms and its click is shorter, but a
+        // tone plus the mic's decay reaches the 300 ms the check counts. It
+        // sits at the clip's head; the first word comes 2 s later. That is a
+        // sound on its own, not an opening the stream lost.
+        let mut clip = vec![0.0; 8_000]; // 500 ms of room
+        clip.extend(tone(6_400)); // 400 ms of tone at 0.5-0.9 s
+        clip.extend(vec![0.0; 32_000]); // 2 s before the first word
+        clip.extend(tone(16_000)); // the dictation itself, 2.9-3.9 s
+        clip.extend(vec![0.0; 3_200]);
+        assert_eq!(
+            finish_with_text_bounds(&clip, Some(2_900), 3_900),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_split_burst_that_reaches_the_threshold_is_not_a_lost_opening() {
+        // Two 200 ms bursts (two taps, or a tone and a click) add up to more
+        // than 300 ms and the second ends 190 ms before the text's slack, but
+        // they are not one run of speech: only a run that runs into the text
+        // can be a lost opening.
+        let mut clip = vec![0.0; 23_200]; // 1.45 s of room
+        clip.extend(tone(3_200)); // 200 ms
+        clip.extend(vec![0.0; 4_960]); // 310 ms between the bursts
+        clip.extend(tone(3_200)); // 200 ms, ending 190 ms before the slack
+        clip.extend(vec![0.0; 9_600]); // 600 ms
+        clip.extend(tone(16_000)); // the dictation itself, 2.75-3.75 s
+        clip.extend(vec![0.0; 3_200]);
+        assert_eq!(
+            finish_with_text_bounds(&clip, Some(2_750), 3_750),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn speech_running_into_the_texts_start_is_still_a_lost_opening() {
+        // 1.5 s of speech, 1.1 s of it before the text's slack: it runs
+        // straight into the first token, so the whole clip decides.
+        let mut clip = vec![0.0; 24_000];
+        clip.extend(tone(24_000)); // 1.5-3.0 s
+        clip.extend(vec![0.0; 3_200]);
+        let result = finish_with_text_bounds(&clip, Some(3_000), 3_000);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("precedes")
+                    && reason.contains("running from 1500 to 2580 ms")),
+            "{result:?}"
         );
     }
 

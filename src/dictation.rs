@@ -860,6 +860,9 @@ struct Recording {
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
+    /// Clip samples a live stream may hear once a finish begins: the clip is
+    /// authoritative, so the stream never hears audio the clip trims.
+    feed_limit: Option<usize>,
     /// This capture already logged why it has no live stream, so the retry
     /// on every audio chunk never repeats it.
     stream_refusal_logged: bool,
@@ -940,6 +943,7 @@ impl Recording {
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             stream: None,
+            feed_limit: None,
             stream_refusal_logged: false,
             show_live_text: false,
             voice: VoiceTrack::default(),
@@ -1012,14 +1016,18 @@ impl Recording {
     }
 
     /// Hands the stream every complete block of audio it has not seen, in
-    /// final-clip coordinates (after the resampler delay).
+    /// final-clip coordinates (after the resampler delay), and never past the
+    /// clip a finish will keep: the limit is in those same coordinates.
     fn feed_stream(&mut self) {
         let delay = self.resampler.as_ref().map_or(0, Fft::output_delay);
         let Some(stream) = &mut self.stream else {
             return;
         };
         let recorded = &self.samples[delay.min(self.samples.len())..];
-        let fresh = &recorded[stream.fed().min(recorded.len())..];
+        let available = self
+            .feed_limit
+            .map_or(recorded.len(), |limit| limit.min(recorded.len()));
+        let fresh = &recorded[stream.fed().min(available)..available];
         if fresh.len() >= STREAM_FEED_SAMPLES {
             stream.feed(fresh);
         }
@@ -1433,6 +1441,18 @@ impl DictationCapture {
             recording.intentional
                 || ended_at.duration_since(recording.started_at) >= MINIMUM_HOLD_DURATION
         })
+    }
+
+    /// Caps the live stream at the audio this finish keeps: everything through
+    /// `ended_at + tail`, in final-clip coordinates. A grown tail and the wait
+    /// for the stop tone are fed from the finished clip instead, so the stream
+    /// never hears samples the clip trims away.
+    pub fn limit_stream_to(&mut self, ended_at: CaptureInstant, tail: Duration) {
+        let Some(recording) = &mut self.recording else {
+            return;
+        };
+        let through = recording.pre_press + ended_at.duration_since(recording.started_at) + tail;
+        recording.feed_limit = Some(samples_for(through, PARAKEET_SAMPLE_RATE));
     }
 
     /// The tail a shortcut finish at `ended_at` keeps, judged on the audio
@@ -2081,6 +2101,60 @@ mod tests {
         assert_eq!(clip.tail_samples, 3_200);
         // Press to release: no pre-roll, no tail.
         assert_eq!(clip.held_ms(), 1_000);
+    }
+
+    #[test]
+    fn a_long_release_tail_never_feeds_the_stream_past_the_clip() {
+        // A release whose last word runs into the tail makes the audio owner
+        // wait for the stop tone plus speech after it before it keeps the base
+        // tail (the default Classic stop sound is 428 ms). Everything captured
+        // meanwhile is audio the clip trims, so the stream must not hear it:
+        // the engine refuses a stream fed well past the clip and transcribes
+        // the whole clip instead.
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let origin = capture_time();
+        let mut capture = DictationCapture::new(16_000);
+        capture.ingest(&vec![0.0; 16_000], origin);
+        capture.start_at(origin);
+        let released = origin + Duration::from_secs(1);
+        let mut through = origin;
+        while through < released {
+            through = through + Duration::from_millis(20);
+            capture.ingest(&tone(0.3, 320).collect::<Vec<_>>(), through);
+        }
+        assert!(capture.become_intentional(origin + MINIMUM_HOLD_DURATION));
+        capture.begin_stream(&engine);
+        // The finish begins here, as the audio owner's does.
+        capture.limit_stream_to(released, POST_RELEASE_TAIL);
+        let stop_tone = Duration::from_millis(428);
+        while through < released + stop_tone {
+            through = through + Duration::from_millis(20);
+            capture.ingest(&tone(0.3, 320).collect::<Vec<_>>(), through);
+        }
+        let mut tail = None;
+        while through < released + MAX_RELEASE_TAIL {
+            if let ReleaseTail::Through(kept) = capture.release_tail(released, stop_tone) {
+                tail = Some(kept);
+                break;
+            }
+            through = through + Duration::from_millis(20);
+            capture.ingest(&vec![0.0; 320], through);
+        }
+        // Speech ran into the tail, and the tail still settled on its base
+        // once the tone was over.
+        assert_eq!(tail, Some(POST_RELEASE_TAIL));
+        let Finish::Transcribe(clip) = capture.finish_with_tail(released, POST_RELEASE_TAIL) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 1_650);
+        let (fed, begun, _) = stream_traffic(&commands);
+        assert_eq!(begun, 1);
+        assert!(
+            fed.len() <= clip.samples.len(),
+            "the stream heard {} samples but the clip keeps {}",
+            fed.len(),
+            clip.samples.len()
+        );
     }
 
     /// Records `sound(ms)` (milliseconds from the release, which is 1 s after
