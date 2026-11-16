@@ -448,9 +448,8 @@ impl CallSwitch {
     /// the page kept naming is already kept, so it never ends this recording.
     pub fn with_kept(recorded: Option<String>, kept: Option<String>) -> Self {
         Self {
-            recorded,
             kept,
-            changed: None,
+            ..Self::new(recorded)
         }
     }
 
