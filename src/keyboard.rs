@@ -860,12 +860,12 @@ mod tests {
         );
     }
 
-    /// A layout's typing groups, as the assertions below read them: each
-    /// character's key, edge, modifiers held, and typed character.
-    fn paced(
-        text: &str,
-        key_for: impl Fn(char) -> Option<(u16, bool)>,
-    ) -> Vec<Vec<(u16, bool, u64, Option<char>)>> {
+    /// One paced typing event as the assertions below read it: the key, its
+    /// edge, the modifiers held, and the character it types.
+    type PacedEvent = (u16, bool, u64, Option<char>);
+
+    /// A layout's typing groups, as the assertions below read them.
+    fn paced(text: &str, key_for: impl Fn(char) -> Option<(u16, bool)>) -> Vec<Vec<PacedEvent>> {
         paced_typing_groups(text, key_for)
             .into_iter()
             .map(|group| {
@@ -890,9 +890,9 @@ mod tests {
         };
         assert_eq!(
             paced("vA", layout),
-            [
-                [(9, true, 0, Some('v')), (9, false, 0, Some('v'))],
-                [
+            vec![
+                vec![(9, true, 0, Some('v')), (9, false, 0, Some('v'))],
+                vec![
                     (SHIFT_KEY_CODE, true, SHIFT_FLAG, None),
                     (0, true, SHIFT_FLAG, Some('A')),
                     (0, false, SHIFT_FLAG, Some('A')),
@@ -902,7 +902,7 @@ mod tests {
         );
         assert_eq!(
             paced("😀", |_| None),
-            [[(0, true, 0, Some('😀')), (0, false, 0, Some('😀'))]]
+            vec![vec![(0, true, 0, Some('😀')), (0, false, 0, Some('😀'))]]
         );
     }
 
@@ -910,7 +910,7 @@ mod tests {
     fn paced_typing_sends_each_line_break_as_one_shift_return() {
         assert_eq!(
             paced("\r\n", |_| Some((9, false))),
-            [[
+            vec![vec![
                 (SHIFT_KEY_CODE, true, SHIFT_FLAG, None),
                 (RETURN_KEY_CODE, true, SHIFT_FLAG, None),
                 (RETURN_KEY_CODE, false, SHIFT_FLAG, None),
