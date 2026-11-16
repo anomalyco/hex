@@ -987,8 +987,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   time limit to the desktop portal's advertised budget, which can be zero, and
   the kernel then kills Hex. Hex never takes realtime scheduling through the
   portal or rtkit.
-- Feedback volume is persisted from zero through one; zero disables tones.
-  Volume changes apply immediately and preview one recording-start tone.
+- Sound volume Off silences automatic tones and the slider. Explicit Sounds
+  sheet previews use the default level while Off, without changing the setting.
+  Nonzero volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
   `NotRegistered` and `NotFound` as disabled before registration, represent
   `RequiresApproval` with a link to Login Items settings, and poll macOS as the

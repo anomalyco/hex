@@ -2178,7 +2178,8 @@ Settings > Sounds (next to Sound volume)                    // dictate.sound-set
 │   │   ├── Play -> Plays its dictation without choosing it; again stops it
 │   │   └── Press the set -> Save and apply live; play its dictation
 │   ├── Any playback -> Stops the one before it (20 ms fade)
-│   ├── Sound volume -> Plays at it; Off plays nothing, the HUD still shows
+│   ├── Sound volume -> Previews use the chosen level, or 50% while Off;
+│   │   the slider stays Off, ordinary cues stay silent, and OS mute still applies
 │   └── Close / Escape / scrim / leaving the pane -> Stops playback
 ├── hex settings set sound_theme <signature|classic|click|soft|wood|analog|thock>
 └── Every set -> Same loudness per sound at a given volume
@@ -2187,6 +2188,7 @@ Settings > Sounds (next to Sound volume)                    // dictate.sound-set
 The sheet is a modal like the shortcut explainer, opened from a
 `sheet_button` because its choices need room to be heard, not a menu. Checks:
 `auditions_play_each_sound_at_its_moment`,
+`picker_previews_render_at_the_default_only_while_off` (in-memory PCM, not speakers),
 `stopping_an_audition_fades_all_of_it`,
 `each_moment_shows_from_its_sound_to_the_next`,
 `the_hud_shows_a_dictation_and_then_leaves`,
