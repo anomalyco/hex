@@ -354,6 +354,11 @@ pub const AUTO_STOP_GRACE: Duration = Duration::from_secs(30);
 /// on the way to another one never stops anything.
 pub const CALL_CHANGED_AFTER: Duration = Duration::from_secs(4);
 
+/// How long detection keeps the call a page named just before a call-switch
+/// stop: the browser stays on the microphone, so a recording has to start
+/// that call well within this even though its reads still name the ended one.
+const SWITCHED_CALL_MEMORY: Duration = Duration::from_secs(120);
+
 /// Stop when the call ends: the deadline at which a recording Hex
 /// started on its own stops, armed when [`CallPresence`] reports the call
 /// ended (or [`CallSwitch`] reports another call's page) and dropped when the
@@ -436,6 +441,15 @@ impl CallSwitch {
         Self {
             recorded,
             ..Self::default()
+        }
+    }
+
+    /// A recording detected in place of another call's stopped one: the code
+    /// the page kept naming is already kept, so it never ends this recording.
+    pub fn with_kept(recorded: Option<String>, kept: Option<String>) -> Self {
+        Self {
+            kept,
+            ..Self::new(recorded)
         }
     }
 
@@ -570,6 +584,16 @@ pub struct MeetingDetector {
     /// The offered call's meeting code, when its page named one: another
     /// code in the same app is a different call, not this one returning.
     offered_call: Option<String>,
+    /// The call a recording's page named just before its call-switch stop:
+    /// the browser can stay on the microphone and keep naming the ended call
+    /// (or none), so detection starts this call rather than snoozing it as
+    /// the ended one. Dropped after [`SWITCHED_CALL_MEMORY`] without a
+    /// detection using it.
+    switched: Option<SwitchedCall>,
+    /// The code of the call that stopped, handed to the recording detection
+    /// starts in its place: that recording keeps it so the page still naming
+    /// it never ends the new one.
+    switched_from: Option<String>,
     /// The offered call's recording was stopped, by hand or on its own after
     /// its call ended: the snooze ends once its app has been off the
     /// microphone for [`CALL_ENDED_AFTER`], not a minute, so the next call is
@@ -592,6 +616,22 @@ struct Pending {
     /// A browser call whose page is not known (yet).
     unresolved: bool,
     run: Run,
+}
+
+/// The call a browser's page named just before a call-switch stop (#1775):
+/// the browser keeps the microphone, and its next reads can still name the
+/// ended call or none, so detection uses this candidate until the page names
+/// a call of its own or the call app leaves.
+struct SwitchedCall {
+    /// The code of the call whose recording stopped, when its page named one.
+    ended: Option<String>,
+    candidate: MeetingCandidate,
+    /// When the page named it; the memory lapses
+    /// [`SWITCHED_CALL_MEMORY`] later if no detection uses it.
+    noted: Instant,
+    /// The substitution was logged: a page that keeps naming the ended call
+    /// says so once per switch, not every 500 ms pass.
+    logged: bool,
 }
 
 /// A call the user already answered a calendar reminder for: recorded it,
@@ -668,6 +708,50 @@ impl MeetingDetector {
         }
     }
 
+    /// The page named `candidate` just before the recording of the call whose
+    /// code is `ended` stopped: the browser never left the microphone, so
+    /// detection starts this call even while its reads still name the ended
+    /// call or none.
+    pub fn call_switched(&mut self, ended: Option<String>, candidate: MeetingCandidate) {
+        self.call_switched_at(ended, candidate, Instant::now());
+    }
+
+    fn call_switched_at(
+        &mut self,
+        ended: Option<String>,
+        candidate: MeetingCandidate,
+        now: Instant,
+    ) {
+        self.switched = Some(SwitchedCall {
+            ended,
+            candidate,
+            noted: now,
+            logged: false,
+        });
+        self.switched_from = None;
+    }
+
+    /// The code of the call whose page named the one detection just started,
+    /// taken once by the watcher: the new recording keeps it, so the page
+    /// still naming it never ends the new one.
+    pub fn take_switched_from(&mut self) -> Option<String> {
+        self.switched_from.take()
+    }
+
+    /// The page came back to the recorded call, or the user kept recording:
+    /// nothing starts on the switched call's behalf.
+    pub fn forget_switched_call(&mut self) {
+        self.switched = None;
+        self.switched_from = None;
+    }
+
+    /// The call a page named before a call-switch stop, while it is
+    /// remembered.
+    #[cfg(test)]
+    pub(crate) fn switched_call(&self) -> Option<&MeetingCandidate> {
+        self.switched.as_ref().map(|switched| &switched.candidate)
+    }
+
     /// The offer's capsule closed on its timeout, unanswered.
     pub fn offer_timed_out(&mut self) {
         if self.offered.is_some() {
@@ -711,6 +795,50 @@ impl MeetingDetector {
                 && self.offered_call != candidate.call)
     }
 
+    /// After a call-switch stop the browser can keep naming the ended call
+    /// (or none) while it stays on the microphone: the call it named before
+    /// the stop is the one to detect. A different application, a page that
+    /// names a call of its own, or a memory older than
+    /// [`SWITCHED_CALL_MEMORY`] is left alone.
+    fn substitute_switched(
+        &mut self,
+        candidate: Option<MeetingCandidate>,
+        now: Instant,
+    ) -> Option<MeetingCandidate> {
+        if self.switched.as_ref().is_some_and(|switched| {
+            now.saturating_duration_since(switched.noted) >= SWITCHED_CALL_MEMORY
+        }) {
+            self.switched = None;
+        }
+        let candidate = candidate?;
+        let Some(switched) = self.switched.as_ref() else {
+            return Some(candidate);
+        };
+        if candidate.application.is_none()
+            || candidate.application != switched.candidate.application
+        {
+            return Some(candidate);
+        }
+        if candidate.call.is_some() && candidate.call != switched.ended {
+            self.switched = None;
+            return Some(candidate);
+        }
+        if !switched.logged {
+            tracing::info!(
+                application = switched.candidate.application.as_deref(),
+                ended = switched.ended.as_deref().unwrap_or_default(),
+                call = switched.candidate.call.as_deref().unwrap_or_default(),
+                "the page still names the ended call; detecting the call it named before the stop"
+            );
+            if let Some(switched) = self.switched.as_mut() {
+                switched.logged = true;
+            }
+        }
+        self.switched
+            .as_ref()
+            .map(|switched| switched.candidate.clone())
+    }
+
     /// No candidate is on the microphone: the snooze ends once that has
     /// lasted long enough.
     fn absent_at(&mut self, now: Instant) {
@@ -736,6 +864,8 @@ impl MeetingDetector {
         self.offered_call = None;
         self.stopped = false;
         self.timed_out = false;
+        self.switched = None;
+        self.switched_from = None;
     }
 
     /// One observation under the user's choices. A Never offer call shows
@@ -762,6 +892,7 @@ impl MeetingDetector {
         now: Instant,
         now_ms: i64,
     ) -> Option<Detection> {
+        let candidate = self.substitute_switched(candidate, now);
         if candidate
             .as_ref()
             .is_some_and(|candidate| candidate.policy(choices) == MeetingPolicy::NeverOffer)
@@ -851,6 +982,7 @@ impl MeetingDetector {
             }
             return None;
         }
+        self.switched_from = self.switched.take().and_then(|switched| switched.ended);
         Some(candidate)
     }
 }
@@ -1320,6 +1452,17 @@ mod tests {
         /// Time passes with no observation, as when the Mac sleeps.
         fn skip(&mut self, ms: u64) {
             self.elapsed_ms += ms;
+        }
+
+        /// The detector's clock, as `detect_at` sees it.
+        fn now(&self) -> Instant {
+            self.base + Duration::from_millis(self.elapsed_ms)
+        }
+
+        /// The page named `candidate` just before a call-switch stop.
+        fn switch_to(&mut self, ended: Option<String>, candidate: MeetingCandidate) {
+            let now = self.now();
+            self.detector.call_switched_at(ended, candidate, now);
         }
 
         /// Observes until the candidate has been stable for just under its
@@ -2153,6 +2296,159 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_call_switched_to_before_the_stop_is_detected_while_the_page_still_names_the_ended_one() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        // The first call's recording stopped after its page named the second
+        // while the browser never left the microphone; every read since still
+        // names the ended call, and the call the page named before the stop is
+        // the one Hex starts.
+        watch.switch_to(first.call.clone(), second.clone());
+        let detected = watch
+            .stable(&first, &[])
+            .unwrap_or_else(|| panic!("the switched call was snoozed as the ended one"));
+        let Detection::Offer(candidate) = detected else {
+            panic!("expected an offer, got {detected:?}");
+        };
+        assert_eq!(candidate.call.as_deref(), second.call.as_deref());
+        assert_eq!(candidate.call.as_deref(), Some("xyz-wxyz-xyz"));
+    }
+
+    #[test]
+    fn a_call_switched_to_before_the_stop_is_detected_from_a_page_that_names_no_call() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let fallback = candidate_from_microphone(&brave(), &ContextSnapshot::default()).unwrap();
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        watch.switch_to(first.call.clone(), second.clone());
+        // The browser's next reads name no call at all (its active tab is no
+        // call's page), and the call it named before the stop still starts.
+        let found = watch.run(Some(&fallback), &[], 2_500);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let Detection::Offer(candidate) = &found[0].1 else {
+            panic!("expected an offer, got {:?}", found[0].1);
+        };
+        assert_eq!(candidate.call.as_deref(), second.call.as_deref());
+        assert_eq!(candidate.call.as_deref(), Some("xyz-wxyz-xyz"));
+    }
+
+    #[test]
+    fn forgetting_a_switched_call_snoozes_the_ended_calls_page_again() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        watch.switch_to(first.call.clone(), second.clone());
+        watch.detector.forget_switched_call();
+        // Kept recording, or the page came back to the recorded call: the
+        // ended call's page is snoozed again, even though the browser never
+        // left the microphone.
+        assert!(watch.run(Some(&first), &[], 25_000).is_empty());
+    }
+
+    #[test]
+    fn a_read_naming_a_third_call_clears_the_switched_call_and_offers_it() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let third = meet_in_brave("https://meet.google.com/qqq-qqqq-qqq", "Meet - Retro");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        watch.switch_to(first.call.clone(), second.clone());
+        // The page moves on from the ended call to a third one: the live read
+        // wins, the remembered call goes, and the third is offered.
+        let detected = watch
+            .stable(&third, &[])
+            .unwrap_or_else(|| panic!("the third call was not offered"));
+        let Detection::Offer(candidate) = detected else {
+            panic!("expected an offer, got {detected:?}");
+        };
+        assert_eq!(candidate.call.as_deref(), third.call.as_deref());
+        assert!(watch.detector.switched_call().is_none());
+    }
+
+    #[test]
+    fn the_snooze_ending_clears_the_switched_call() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        watch.switch_to(first.call.clone(), second.clone());
+        // The page names nothing and the browser leaves the microphone: the
+        // snooze ends, and the remembered call goes with it.
+        watch.leave();
+        assert!(watch.detector.switched_call().is_none());
+    }
+
+    #[test]
+    fn a_switched_call_is_forgotten_after_two_minutes_without_a_detection() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        watch.switch_to(first.call.clone(), second.clone());
+        watch.skip(SWITCHED_CALL_MEMORY.as_millis() as u64 + STEP_MS);
+        // The page still names the ended call, but the call it named before
+        // the stop is not started two minutes later.
+        assert!(watch.run(Some(&first), &[], 25_000).is_empty());
+        assert!(watch.detector.switched_call().is_none());
+    }
+
+    #[test]
+    fn a_recording_started_for_a_switched_call_keeps_the_ended_code() {
+        let first = meet_in_brave("https://meet.google.com/abc-defg-hij", "Meet - Design sync");
+        let second = meet_in_brave("https://meet.google.com/xyz-wxyz-xyz", "Meet - Standup");
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        watch.switch_to(first.call.clone(), second.clone());
+        // The page keeps naming the ended call: detection starts the call it
+        // named and hands the ended code to the recording.
+        let detected = watch
+            .stable(&first, &[])
+            .unwrap_or_else(|| panic!("the switched call was snoozed as the ended one"));
+        let Detection::Offer(candidate) = detected else {
+            panic!("expected an offer, got {detected:?}");
+        };
+        assert_eq!(candidate.call.as_deref(), second.call.as_deref());
+        let ended = watch.detector.take_switched_from();
+        assert_eq!(ended.as_deref(), first.call.as_deref());
+
+        // The recording starts for the second call with the ended code kept:
+        // 40 s of reads naming it never end the recording, and a third call
+        // still does.
+        let mut switching = Switching::with_kept(second.call.clone(), ended);
+        assert!(
+            switching.run(Some("abc-defg-hij"), 40_000).is_empty(),
+            "the ended call's page ended the new recording"
+        );
+        assert_eq!(switching.run(Some("qqq-qqqq-qqq"), 4_500), vec![44_000]);
+        assert!(switching.switch.changed());
+    }
+
     /// A `CallSwitch` fed on a fake monotonic clock, like the watcher feeds
     /// it from its page reads.
     struct Switching {
@@ -2165,6 +2461,16 @@ mod tests {
         fn new(recorded: Option<&str>) -> Self {
             Self {
                 switch: CallSwitch::new(recorded.map(str::to_string)),
+                base: Instant::now(),
+                elapsed_ms: 0,
+            }
+        }
+
+        /// A recording of `recorded` that treats `kept` as already kept, as
+        /// one detected in place of that call's stopped one does.
+        fn with_kept(recorded: Option<String>, kept: Option<String>) -> Self {
+            Self {
+                switch: CallSwitch::with_kept(recorded, kept),
                 base: Instant::now(),
                 elapsed_ms: 0,
             }
