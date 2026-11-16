@@ -732,13 +732,27 @@ fn sound_set() -> SoundSet {
 /// How long the current set's stop sound lasts, or zero while sounds are
 /// off. A dictation's release tail must not take it for speech.
 pub fn stop_tone_length() -> Duration {
+    tone_length(BUNDLED_SETS[sound_set() as usize].stop)
+}
+
+/// How long the current set's start sound lasts, or zero while sounds are
+/// off. The clip's head holds it, and it is not speech a stream lost.
+pub fn start_tone_length() -> Duration {
+    tone_length(BUNDLED_SETS[sound_set() as usize].start)
+}
+
+fn tone_length(sound: &[u8]) -> Duration {
     if !sounds_enabled() {
         return Duration::ZERO;
     }
-    let stop = BUNDLED_SETS[sound_set() as usize].stop;
-    hound::WavReader::new(std::io::Cursor::new(stop)).map_or(Duration::from_millis(450), |reader| {
-        Duration::from_secs_f64(f64::from(reader.duration()) / f64::from(reader.spec().sample_rate))
-    })
+    hound::WavReader::new(std::io::Cursor::new(sound)).map_or(
+        Duration::from_millis(450),
+        |reader| {
+            Duration::from_secs_f64(
+                f64::from(reader.duration()) / f64::from(reader.spec().sample_rate),
+            )
+        },
+    )
 }
 
 /// Plays `what` of `set` in the picker, at the usual level or the default

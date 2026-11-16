@@ -17,7 +17,7 @@ use crate::desktop::events::{
 };
 use crate::desktop::host::DesktopShortcuts;
 use crate::dictation::service::{DictationQueue, Effect, MICROPHONE_LOST, ServiceDictations};
-use crate::dictation::{DictationCapture, Finish, ReleaseWait};
+use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL, ReleaseWait};
 use crate::feedback::{self, Tone};
 use crate::linux::input::{
     CommandQueue, HotkeyEvent, HotkeyOptions, HotkeyStatus, LinuxHotkey, LinuxHotkeyMonitor,
@@ -868,6 +868,10 @@ pub(crate) fn run(
                 }
                 HotkeyEvent::Finish if capture.is_recording() => {
                     let released_at = clock.at(Instant::now()).unwrap_or(CaptureInstant::ZERO);
+                    // The clip keeps its tail and drops anything captured
+                    // after it, so the live stream must hear no further; the
+                    // engine refuses a stream fed well past the clip.
+                    capture.limit_stream_to(released_at, POST_RELEASE_TAIL);
                     finishing = Some(Finishing {
                         flavour: recording_flavour,
                         by_shortcut: recording_by_shortcut,
