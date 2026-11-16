@@ -981,14 +981,21 @@ impl DotUniforms {
 fn island_shape(island: Island, pose: &dot_scope::Pose) -> [f32; 4] {
     let [notch_width, notch_height] = island.notch;
     if island.ears {
-        // The notch's height throughout, widening to the island's width.
+        // Grows from the housing's height to the menu bar's, widening to the
+        // island's width; folded back, it is the notch itself again.
         let half_width = notch_width / 2.0;
         let grow = pose.reveal;
+        let bar = if island.bar > 0.0 {
+            island.bar
+        } else {
+            notch_height
+        };
+        let height = notch_height + (bar - notch_height) * grow.min(1.0);
         return [
             half_width + (island.width / 2.0 - half_width) * grow,
-            notch_height,
+            height,
             island.top,
-            (NOTCH_RADIUS + (EARS_RADIUS - NOTCH_RADIUS) * grow.min(1.0)).min(notch_height / 2.0),
+            (NOTCH_RADIUS + (EARS_RADIUS - NOTCH_RADIUS) * grow.min(1.0)).min(height / 2.0),
         ];
     }
     let pad = ISLAND_PAD as f32;

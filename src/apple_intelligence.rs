@@ -109,7 +109,8 @@ pub fn availability() -> Availability {
     availability
 }
 
-/// The model's context window in tokens, or zero when unavailable.
+/// The model's context window in tokens, or zero when unavailable or
+/// unknown to this build's SDK.
 pub fn context_tokens() -> usize {
     // SAFETY: A synchronous property read without arguments.
     usize::try_from(unsafe { hex_apple_intelligence_context_size() }).unwrap_or(0)
