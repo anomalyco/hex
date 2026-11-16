@@ -147,7 +147,7 @@ const SINK_CAPACITY: usize = 512;
 const EVENT_CAPACITY: usize = 64;
 const SAMPLE_RATE: u32 = 16_000;
 /// A capture keeps at most this much audio; the rest is recorded as a gap.
-/// It bounds disk use only: the audio streams to `audio.wav`, never memory.
+/// It bounds disk use only: the audio streams to `audio.wav.partial`, never memory.
 const MAX_CAPTURE: Duration = Duration::from_secs(8 * 60 * 60);
 const GAP_TOLERANCE: Duration = Duration::from_millis(50);
 /// How long shutdown waits for capture threads, inside the quit deadline.
@@ -3480,8 +3480,8 @@ fn collect(
                 tracing::error!(error, "the capture's screen source failed");
                 input.detach(&bundle);
                 drop(chunks);
-                // Close `audio.wav` before the bundle (and the file) is removed.
-                drop(timeline);
+                // Close and remove the partial audio before the bundle is removed.
+                timeline.discard();
                 capture.cancel();
                 remove_bundle(&bundle);
                 lock(outcomes).fail(bundle, error);
@@ -3525,8 +3525,8 @@ fn collect(
             }
         }
         Ok(Seal::Cancel) | Err(_) => {
-            // Close `audio.wav` before the bundle (and the file) is removed.
-            drop(timeline);
+            // Close and remove the partial audio before the bundle is removed.
+            timeline.discard();
             capture.cancel();
         }
     }
@@ -3817,6 +3817,12 @@ mod tests {
         assert_eq!(samples.len(), 100 * 16 + 1_200 * 16);
         // The WAV keeps the leading 100 ms and the 300 ms gap as silence.
         assert!(samples[..1_600].iter().all(|&sample| sample == 0));
+        assert!(
+            !path
+                .with_file_name(scrawl_capture::recover::PARTIAL_AUDIO)
+                .exists(),
+            "the streamed file is renamed, never left partial"
+        );
         assert!(
             samples[1_600 + 8_000..1_600 + 8_000 + 4_800]
                 .iter()
@@ -4413,6 +4419,26 @@ mod tests {
         remove_wav(&path);
     }
 
+    #[test]
+    fn a_write_failure_stops_the_audio_where_the_file_stopped() {
+        let dir = temp_dir("write-failure");
+        fs::create_dir_all(&dir).unwrap();
+        // A regular file where the bundle folder should be: `audio.wav.partial`
+        // cannot be opened under it.
+        let blocked = dir.join("blocked");
+        fs::write(&blocked, b"not a folder").unwrap();
+        let mut timeline = Timeline::new(t(0), blocked.join("audio.wav"));
+        timeline.push(&[0.5; 1_600], 16_000, t(100));
+        timeline.push(&[0.5; 1_600], 16_000, t(200));
+        let audio = timeline.finish(t(200), None);
+        // The first sound was at 0 ms and nothing reached the disk, so the audio
+        // stops there instead of claiming a file.
+        assert_eq!(audio.audio_stopped_at_ms(), Some(0));
+        assert!(!audio.is_on_disk());
+        assert_eq!(audio.sample_count(), 0);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Holds every transcription until the test lets it through.
     struct GatedTranscriber(Mutex<Receiver<()>>);
 
@@ -4719,7 +4745,7 @@ mod tests {
             (recording.target, recording.worked),
             (TargetKind::Pointer, false)
         );
-        // Some audio, so discarding also closes and removes its `audio.wav`.
+        // Some audio, so discarding also closes and removes its partial file.
         audio.feed(160, recording.since + Duration::from_millis(10));
         thread::sleep(Duration::from_millis(20));
 
@@ -4736,7 +4762,7 @@ mod tests {
         wait_until_idle(&host);
         assert!(!first.exists());
         assert!(
-            !first.join("audio.wav").exists(),
+            !first.join("audio.wav").exists() && !first.join("audio.wav.partial").exists(),
             "the streamed file is gone"
         );
         assert_eq!(lock(&host.outcomes).snapshot(), CaptureSnapshot::default());

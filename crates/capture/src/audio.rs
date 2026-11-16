@@ -115,8 +115,9 @@ impl RecordedAudio {
     }
 
     /// Its samples in memory, read back from the streamed file when they are
-    /// on disk and kept as they are otherwise. A caller that shifts or
-    /// rewrites the audio needs them.
+    /// on disk and kept as they are otherwise. A streamed recording is decoded
+    /// in full into memory, so only a path that must shift or rewrite the
+    /// audio (an iPhone narration, a replay) asks for this.
     pub fn into_memory(self) -> Result<Self> {
         match self.streamed.clone() {
             Some(path) => self.shifted_from_file(&path, 0),
@@ -186,7 +187,8 @@ impl RecordedAudio {
     }
 
     /// The same audio on a clock that starts `ms` later (a phone movie's first frame): what came
-    /// before is dropped, and the gaps move with the clock.
+    /// before is dropped, and the gaps move with the clock. A streamed recording is decoded into
+    /// memory to do it.
     pub fn since(self, ms: u64) -> Result<Self> {
         if let Some(path) = self.streamed.clone() {
             return self.shifted_from_file(&path, ms);
@@ -213,12 +215,23 @@ impl RecordedAudio {
         Ok(Self::new(samples, rate, start_offset_ms, gaps).stopping_audio_at(stopped))
     }
 
-    /// [`Self::since`] for a recording streamed to `path`: reads it back and
-    /// drops the audio before `ms`, exactly as the in-memory shift does.
+    /// [`Self::since`] for a recording streamed to `path`: reads it back into
+    /// memory and drops the audio before `ms`, exactly as the in-memory shift
+    /// does. A file that is gone or unreadable is no audio, so a phone capture
+    /// still finishes with its video and transcript.
     fn shifted_from_file(self, path: &std::path::Path, ms: u64) -> Result<Self> {
-        let decoded = decode_wav_16k(&std::fs::read(path)?)?;
+        let mut samples = match std::fs::read(path) {
+            Ok(bytes) => decode_wav_16k(&bytes)?,
+            Err(error) => {
+                crate::log::scrawl_log(format!(
+                    "audio: could not read {}: {error}",
+                    path.display()
+                ));
+                Vec::new()
+            }
+        };
         let lead = (self.start_offset_ms * u64::from(SAMPLE_RATE) / 1_000) as usize;
-        let mut samples = decoded.get(lead..).unwrap_or_default().to_vec();
+        samples.drain(..lead.min(samples.len()));
         let skip_ms = ms.saturating_sub(self.start_offset_ms);
         let skip = usize::try_from(skip_ms * u64::from(SAMPLE_RATE) / 1_000).unwrap_or(usize::MAX);
         samples.drain(..skip.min(samples.len()));
@@ -910,5 +923,24 @@ mod tests {
         );
         let _ = std::fs::remove_file(&path);
         assert!(!RecordedAudio::new(vec![0.5; 160], 16_000, 0, Vec::new()).is_on_disk());
+    }
+
+    #[test]
+    fn a_streamed_recording_whose_file_is_gone_has_no_samples() {
+        let missing =
+            std::env::temp_dir().join(format!("hex-audio-gone-{}.wav", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        // A phone capture's narration can outlive its streamed file (or never
+        // have one): that is no audio, not a failed capture.
+        let shifted = RecordedAudio::on_disk(&missing, 16_000, 16_000, 0, Vec::new())
+            .since(500)
+            .unwrap();
+        assert!(shifted.samples.is_empty());
+        assert!(!shifted.is_on_disk());
+        assert_eq!(shifted.sample_count(), 0);
+        let read_back = RecordedAudio::on_disk(&missing, 16_000, 16_000, 0, Vec::new())
+            .into_memory()
+            .unwrap();
+        assert!(read_back.samples.is_empty() && !read_back.is_on_disk());
     }
 }

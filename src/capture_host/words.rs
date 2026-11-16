@@ -105,7 +105,14 @@ impl Transcriber for HexTranscriber {
         let (_, selection) = crate::app_settings::transcription_selection();
         let mut pieces = match Pieces::open(wav_path) {
             Ok(pieces) => pieces,
-            Err(PieceError::Empty) => return Ok(Some(TranscriptData::default())),
+            // The same answer `transcribe_with` gives for a capture with no audio
+            // at all, rather than an empty transcript with no source.
+            Err(PieceError::Empty) => {
+                return Ok(Some(TranscriptData {
+                    source: "none".into(),
+                    ..TranscriptData::default()
+                }));
+            }
             Err(error) => {
                 return Err(anyhow::anyhow!(
                     "could not read {}: {error:?}",
@@ -144,14 +151,17 @@ fn transcribe_pieces(
 ) -> Result<(String, Vec<TimedWord>)> {
     let mut texts = Vec::new();
     let mut words = Vec::new();
-    let mut offset_ms = 0_i64;
+    let mut total_frames = 0_usize;
     loop {
         let piece = match pieces.next() {
             Ok(Some(piece)) => piece,
             Ok(None) => break,
             Err(error) => return Err(eyre!("could not read the capture's audio: {error:?}")),
         };
-        let frames = piece.len();
+        let piece_frames = piece.len();
+        // One running frame total, so a piece's truncated milliseconds never
+        // accumulate into drift.
+        let offset_ms = (total_frames as i64) * 1_000 / i64::from(SAMPLE_RATE);
         let (text, piece_words) = transcribe(piece)?;
         let text = text.trim();
         if !text.is_empty() {
@@ -164,7 +174,7 @@ fn transcribe_pieces(
                 text: word.text,
             });
         }
-        offset_ms += crate::audio::duration_for_frames(frames, SAMPLE_RATE).as_millis() as i64;
+        total_frames += piece_frames;
     }
     Ok((texts.join(" "), words))
 }

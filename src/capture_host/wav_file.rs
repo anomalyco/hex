@@ -1,5 +1,6 @@
-//! A capture's `audio.wav`: 16 kHz mono PCM16 on the capture's clock, written
-//! while it records so memory does not grow with the recording.
+//! A capture's audio: 16 kHz mono PCM16 on the capture's clock, written to
+//! `audio.wav.partial` while it records so memory does not grow with it, then
+//! given its final `audio.wav` name by [`super::timeline::Timeline::finish`].
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
@@ -17,7 +18,7 @@ const SILENCE_BLOCK: usize = 4_096;
 /// that reads up to there instead of one whose header says it holds nothing.
 const HEADER_EVERY: Duration = Duration::from_secs(5);
 
-/// `audio.wav`, open for the whole capture.
+/// `audio.wav.partial`, open for the whole capture.
 pub(super) struct WavFile {
     path: PathBuf,
     writer: hound::WavWriter<BufWriter<File>>,

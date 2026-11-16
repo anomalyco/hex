@@ -519,8 +519,7 @@ impl Controller {
             let audio = timeline.finish(release_at, closed);
             narration_on_clock(&active.bundle.join("audio.wav"), audio)
         } else {
-            drop(timeline);
-            let _ = fs::remove_file(active.bundle.join("audio.wav"));
+            timeline.discard();
             RecordedAudio::default()
         };
         lock(outcomes).stopped(&active.bundle, End::Finish);
@@ -997,6 +996,9 @@ fn shift_audio_after_video(
         return (None, video_duration_ms);
     }
     let shifted_start = video_duration_ms.saturating_add(audio.start_offset_ms);
+    let shifted_stop = audio
+        .audio_stopped_at_ms()
+        .map(|at| video_duration_ms.saturating_add(at));
     let shifted_gaps = audio
         .gaps
         .into_iter()
@@ -1010,7 +1012,8 @@ fn shift_audio_after_video(
         audio.sample_rate,
         shifted_start,
         shifted_gaps,
-    );
+    )
+    .stopping_audio_at(shifted_stop);
     let total_ms = video_duration_ms.max(shifted.total_duration_ms());
     (Some(shifted), total_ms)
 }
@@ -1317,7 +1320,8 @@ mod tests {
                 start_ms: 200,
                 end_ms: 350,
             }],
-        );
+        )
+        .stopping_audio_at(Some(1_800));
         let (shifted, total) = shift_audio_after_video(raw, 15_000);
         let shifted = shifted.expect("narrated audio preserved");
         assert_eq!(shifted.start_offset_ms, 15_120);
@@ -1327,6 +1331,11 @@ mod tests {
                 start_ms: 15_200,
                 end_ms: 15_350
             }]
+        );
+        assert_eq!(
+            shifted.audio_stopped_at_ms(),
+            Some(16_800),
+            "the narration's stop point moves with its clock"
         );
         assert_eq!(total, 17_120);
     }

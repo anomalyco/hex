@@ -327,6 +327,8 @@ pub fn plan(captures: &Path, policy: &Policy, now: SystemTime) -> Vec<Action> {
             let items: Vec<PathBuf> = crate::handoff::HEAVY_MEDIA
                 .iter()
                 .chain(&DERIVED_MEDIA)
+                // A capture that crashed mid-recording leaves its streamed audio here.
+                .chain(std::iter::once(&crate::recover::PARTIAL_AUDIO))
                 .map(|rel| dir.join(rel))
                 .filter(|p| p.exists())
                 .collect();
@@ -1121,6 +1123,35 @@ mod tests {
             later() - STALE_MARKER - Duration::from_secs(60),
         );
         assert!(planned(&tmp.0, &Policy::default()).contains(&Action::TrashBundle(pending)));
+    }
+
+    #[test]
+    fn a_crashed_capture_with_only_partial_audio_is_cleaned_up() {
+        let tmp = TempDir::new("crashed");
+        let dir = bundle(&tmp.0, "scrawl-crashed", 0.5, false);
+        // A capture that died while recording: no manifest, no journal, and the audio it was
+        // streaming is still under its partial name.
+        std::fs::remove_file(dir.join("scrawl.json")).unwrap();
+        std::fs::rename(
+            dir.join("audio.wav"),
+            dir.join(crate::recover::PARTIAL_AUDIO),
+        )
+        .unwrap();
+        let policy = Policy {
+            media_days: Some(1),
+            bundle_days: None,
+        };
+        assert_eq!(
+            planned(&tmp.0, &policy),
+            vec![Action::TrashMedia {
+                bundle: dir.clone(),
+                items: vec![
+                    dir.join("recording.mp4"),
+                    dir.join(crate::recover::PARTIAL_AUDIO),
+                ],
+            }],
+            "not owed a rebuild, so retention takes its media like any other bundle"
+        );
     }
 
     #[test]

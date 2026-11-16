@@ -790,8 +790,10 @@ hex capture stop                         // capture.stop
 │   written beside it; only the steps that read the movie wait for it, and it
 │   starts where its first frame was shown (video_offset_ms)
 └── In the background, on one capture-finish thread, one capture at a time:
-    ├── 16 kHz audio streamed to audio.wav as it records: leading start offset
-    │   and gaps written as silence, so WAV time stays capture time
+    ├── 16 kHz audio streamed to audio.wav.partial as it records (renamed to
+    │   audio.wav when the capture stops, so no live capture looks recoverable):
+    │   leading start offset and gaps written as silence, so WAV time stays
+    │   capture time
     ├── Words: audio.wav read in 30 s pieces, each a foreground job on the
     │   dictation engine's model, after queued dictation, before meeting chunks;
     │   waits while dictation records or transcribes; never interrupts a live stream
@@ -802,6 +804,10 @@ hex capture stop                         // capture.stop
     │   guard, never a memory bound, and scrawl.json's audioStoppedAtMs makes
     │   summary.md say "Audio stopped at 8:00:00; the rest of this capture has
     │   no audio" (a failed audio write says where too)
+    ├── Cancel or a failed start -> the partial audio is closed and removed
+    │   with the bundle; a crash leaves it, and retention trashes it like
+    │   any other media (a movie and a partial are never a bundle recover
+    │   rebuilds)
     ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
     │   summary.md; then every file 0600 and folder 0700
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
@@ -1080,6 +1086,7 @@ Checks:
   `a_capture_longer_than_twenty_minutes_keeps_all_of_its_audio`,
   `past_the_guard_the_file_stops_and_the_rest_is_one_gap`,
   `the_guard_records_where_the_audio_stopped`,
+  `a_write_failure_stops_the_audio_where_the_file_stopped`,
   `captures_finish_one_at_a_time_and_starts_wait_for_room`,
   `a_capture_queued_behind_a_slow_finish_has_already_stopped`,
   `a_failed_start_raced_by_stop_never_wedges_later_starts`,
@@ -1116,9 +1123,15 @@ Checks:
   capture.rs `a_shift_click_is_part_of_the_drawing`.
 - iPhone: `an_iphone_capture_narrates_with_hex_audio_and_finishes_when_its_mirror_ends`
   and `a_mirror_ending_never_stops_a_screen_capture` in capture_host.rs;
-  `since_moves_audio_and_gaps_onto_a_later_clock` in
+  `since_moves_audio_and_gaps_onto_a_later_clock` and
+  `a_streamed_recording_whose_file_is_gone_has_no_samples` in
   [audio.rs](../../crates/capture/src/audio.rs). The mirror, its
   `--no-microphone`, and the camera prompt have not run in Hex.
+- Streaming and recovery, in [recover.rs](../../crates/capture/src/recover.rs):
+  `a_capture_streaming_its_audio_is_never_owed_a_rebuild` (and the live case
+  of `recover_picks_up_old_video_and_audio_without_a_journal_but_never_a_live_capture`);
+  `a_crashed_capture_with_only_partial_audio_is_cleaned_up` in
+  [retention.rs](../../crates/capture/src/retention.rs).
 - Routing, in [routing.rs](../../src/capture_host/routing.rs):
   `only_a_saved_rule_sends_on_its_own`,
   `a_rule_sends_and_lists_the_rest`,
