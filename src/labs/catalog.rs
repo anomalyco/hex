@@ -121,21 +121,15 @@ impl Feature {
             | Self::HistoryStats
             | Self::RecentDictations
             | Self::SkipPauses => 20261101,
-            Self::StopWhenCallEnds
-            | Self::OutputFixes
+            Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
             | Self::KeepRecordings
             | Self::HideMenuBarIcon => 20261102,
-            Self::MovableMeetingCapsules | Self::GnomeClipboardRestore | Self::NotchIndicator => {
-                20261103
-            }
-            Self::MeetingFinishedEvent
-            | Self::GnomeMeetingCapsules
-            | Self::Screenshots
-            | Self::AnnotateReplay => 20261104,
+            Self::GnomeClipboardRestore | Self::NotchIndicator => 20261103,
+            Self::GnomeMeetingCapsules | Self::Screenshots | Self::AnnotateReplay => 20261104,
             Self::SettingsSearch | Self::MeetingImport => 20261106,
             Self::LiveTyping
             | Self::QuitClosesWindow
