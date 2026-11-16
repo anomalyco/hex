@@ -840,6 +840,19 @@
       ],
       "summary": "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings",
       "title": "Copy dictation audio"
+    },
+    {
+      "added": "2026-11-16",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "stop-phrase",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Say a phrase to finish a hands-free dictation",
+      "title": "Stop phrase"
     }
   ]
 }

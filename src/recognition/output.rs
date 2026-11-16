@@ -38,8 +38,8 @@ pub(super) fn interrupted_dictation(
     if let Some((clip, context)) = salvaged {
         let reply = print.take();
         let submit = |clip| match reply {
-            Some(reply) => worker.transcribe_printed(clip, reply, raw, context),
-            None => worker.transcribe(clip, target, context),
+            Some(reply) => worker.transcribe_printed(clip, reply, raw, context, None),
+            None => worker.transcribe(clip, target, context, None),
         };
         if salvage_dictation(clip, submit, device, events, indicator)?.is_some() {
             // The capture ended with a job, not a failure: the HUD keeps
@@ -99,6 +99,7 @@ pub(super) fn finish_dictation(
     device: &str,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
+    stop_phrase: Option<String>,
 ) -> Result<FinishResult> {
     finish_dictation_with(
         capture,
@@ -110,7 +111,7 @@ pub(super) fn finish_dictation(
                 TranscriptionTarget::RawPaste if salvaged => TranscriptionTarget::RawCopyOnlyPaste,
                 target => target,
             };
-            worker.transcribe(clip, target, context.clone())
+            worker.transcribe(clip, target, context.clone(), stop_phrase)
         },
         device,
         events,

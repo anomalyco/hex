@@ -86,7 +86,8 @@ impl Feature {
             | Self::YoloMode
             | Self::CursorContext
             | Self::MoreDictationShortcuts
-            | Self::CopyDictationAudio => Audience::Everyone,
+            | Self::CopyDictationAudio
+            | Self::StopPhrase => Audience::Everyone,
         }
     }
 
@@ -162,6 +163,7 @@ impl Feature {
             | Self::CleanUpWithAppleIntelligence => 20261113,
             Self::CalendarMenu => 20261114,
             Self::CopyDictationAudio | Self::MicrophoneKeyAlone => 20261115,
+            Self::StopPhrase => 20261116,
         }
     }
 
@@ -190,6 +192,9 @@ impl Feature {
         }
         if key == "labs.voice_prompt_phrase" {
             return Some(Self::VoicePrompt);
+        }
+        if key == "labs.stop_phrase_text" {
+            return Some(Self::StopPhrase);
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
@@ -308,7 +313,8 @@ impl Feature {
             | Self::SpeakersOnly
             | Self::ShellCompletions
             | Self::YoloMode
-            | Self::CopyDictationAudio => EVERY,
+            | Self::CopyDictationAudio
+            | Self::StopPhrase => EVERY,
         }
     }
 
@@ -390,6 +396,7 @@ impl Feature {
             Self::CalendarMenu => "calendar-menu",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
             Self::CopyDictationAudio => "copy-dictation-audio",
+            Self::StopPhrase => "stop-phrase",
         }
     }
 
@@ -471,6 +478,7 @@ impl Feature {
             Self::CalendarMenu => "labs.calendar_menu",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
             Self::CopyDictationAudio => "labs.copy_dictation_audio",
+            Self::StopPhrase => "labs.stop_phrase",
         }
     }
 

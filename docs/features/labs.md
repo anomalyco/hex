@@ -54,6 +54,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating; its card says when the selected speech model can't stream (Linux: or Speech engine is CPU), so no words would show
+├── Stop phrase     no    labs.stop_phrase + labs.stop_phrase_text ("stop dictation", every OS)
+│                                        saying the phrase at the end of a hands-free dictation finishes it, as if the
+│                                        shortcut were pressed again, and the phrase never reaches the pasted text;
+│                                        needs a speech model that streams on a GPU, as Live text does
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
@@ -393,7 +397,8 @@ Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
 `labs::microphone_linger()`,
-`labs::voice_prompt()`, `app_settings::meetings_enabled()`, or
+`labs::voice_prompt()`, `labs::stop_phrase()`,
+`app_settings::meetings_enabled()`, or
 `app_settings::hex_microphone_enabled()`.
 Add a new feature to `labs::Feature` (name, settings key, description, audience), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
@@ -1006,6 +1011,120 @@ in [control/settings.rs](../../src/control/settings.rs);
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the lab on, and a request against a live model; the Labs page
 goldens were regenerated for the new card.
+
+Stop phrase (`stop-phrase`, every OS): while a hands-free dictation records,
+saying a configurable phrase at the end of your speech finishes it as if the
+shortcut were pressed again (the Toggle press, or the press that ends a locked
+Hold capture), and the phrase never reaches the pasted text. Only hands-free
+captures listen: Toggle mode, or a Hold capture locked by the double-tap. An
+ordinary Hold capture, where letting go is the end, is unaffected, and so are
+meetings and the local API's `/dictations`. A `hex dictation start` capture,
+printing or not, is hands-free too, so the phrase ends it like any locked one,
+and a printing start answers its command with the words minus the phrase.
+
+Detection uses the provisional words the streaming engine already produces for
+Labs › Live text: with only Stop phrase on, the engine's `live_text` closure is
+also true, so each dictation's live stream publishes `Partial`s (`stable` and
+`tentative`) for the phrase matcher. It does not turn on the HUD's live-text
+plate: `DictationCapture::begin_stream`'s `show_live_text` still reads only
+`labs::live_text()` and Live typing's board. So the lab needs a speech model
+that can stream on a GPU, exactly as Live text does; with no stream the words
+never arrive and the capture ends only by shortcut. The phrase fires as soon
+as the model commits it (a partial's `stable` words end with it), or once two
+observations in a row whose `stable` and `tentative` words together end with
+it agree, so a flickering tentative word can't finish a dictation, and a
+capture finishes at most once. Committed words matter because the engine
+publishes only changes (`Partials::publish` drops a partial identical to the
+last): a phrase the model committed and the speaker then left quiet is often
+the capture's last observation, and waiting for it to be published twice
+would never finish that dictation.
+
+```ts
+Dictate "we ship friday. stop dictation."       // labs.stop_phrase + labs.stop_phrase_text
+├── Phrase absent -> the capture records until the shortcut ends it, as before
+├── Phrase in the last words, hands-free capture -> it finishes as its press would;
+│   its job strips the words -> pasted "we ship friday."
+├── Only the phrase -> empty: nothing pasted, no History, no error tone
+├── An ordinary Hold capture -> the release still ends it; the phrase is just words
+├── /dictations client capture, meeting -> unaffected
+└── A model that can't stream -> no partials, so it never fires
+```
+
+Matching is whole-word and case- and punctuation-insensitive, the same
+`words()` tokenizer a voice prompt uses, so "Stop Dictation.", "stop
+dictation!", and "stop dictation" match while "stops dictation", "stop
+dictations", "unstoppable dictation", and "stop-dictation" don't (a hyphen
+joins a word, so it isn't the two-word phrase). The phrase leaves the text with
+the whitespace and joins a voice prompt drops next to its phrase (`, ; :` and
+en/em dashes), so "we ship friday. stop dictation." leaves "we ship friday."
+while "we ship friday — stop dictation" leaves "we ship friday"; the sentence's
+own final `.?!` stays. A capture that is only the phrase leaves an empty
+string, which pastes nothing.
+
+The phrase is `labs.stop_phrase_text` ("stop dictation" by default), also
+`hex settings set labs.stop_phrase_text "<phrase>"`. It follows the voice
+prompt's rules: at least two words and at least six letters counted after
+normalization, so one common word can't finish a dictation. An invalid value is
+an `invalid-value` error; settings load falls back to the default without
+changing the saved file and keeps the switch. While the lab is on, its card
+shows Phrase: a draft that fails validation stays in the field with the reason
+under it in danger color, and the saved phrase keeps working; a valid draft
+saves once typing pauses, like the window's other text fields. A phrase saved
+elsewhere updates the field without resetting its focus, and an invalid draft
+leaves when the lab is turned off.
+
+Every OS finishes the capture itself, never by injecting keys. Each
+listener owns a `dictation::stop_phrase::Detector`, fresh for every capture,
+and feeds it each live partial. When it fires the words are read once more and
+travel with the job, and the capture ends through its own shortcut state
+machine: macOS sends the fire (with its capture generation) through the audio
+owner's events to `recognition`, whose `stop_phrase` module has the machine
+recording hands-free finish itself (`DictationHotkey::finish_hands_free`: the
+`HotkeyAction::Finish` its own press makes, then straight back to Idle, as the
+Caps Lock finish and a suspend leave it, since no key is down and no stale-key
+recovery is owed; then the ordinary `finish_hotkey_dictation`); Windows asks
+the keyboard hook to emit that ordinary `HotkeyAction::Finish`
+(`WindowsHotkeyMonitor::finish_hands_free` under `CALLBACK_STATE`), whose
+words only that action takes; Linux sends
+`ListenerCommand::FinishPhrase` into the queue its monitor already drains, and
+`ShortcutState::finish_hands_free` answers with `HotkeyEvent::FinishPhrase`.
+The words ride with the job (`Finishing`/`Job` on Linux and Windows,
+`InferenceJob` on macOS) and `dictation::stop_phrase::strip_finished` removes
+them from the final transcript before any processing, raw captures included.
+A capture that is only the phrase reads as a plain discard in Activity on
+every OS: not a paste, not History, no error tone, and not a voice prompt that
+asked nothing.
+
+A request that arrives after its capture ended is ignored: macOS drops it by
+capture generation before the listener sees it, and both other platforms ask
+the state machine, which finishes only a capture still locked.
+
+Checks: `the_phrase_matches_the_last_words_in_any_case`,
+`words_that_only_contain_the_phrase_never_match`,
+`stripping_keeps_a_sentences_final_punctuation_and_drops_the_joins`,
+`a_capture_that_is_only_the_phrase_strips_to_nothing`,
+`stripping_leaves_a_dictation_without_the_phrase_alone`,
+`a_committed_phrase_fires_the_detector_at_once`,
+`a_tentative_phrase_fires_once_after_two_observations_in_a_row`,
+`a_flickering_tentative_word_never_fires_the_detector`,
+`an_ordinary_dictation_never_fires_the_detector`, and
+`a_finished_job_strips_its_phrase_and_leaves_every_other_transcript_alone` in
+[dictation/stop_phrase.rs](../../src/dictation/stop_phrase.rs);
+`a_stop_phrase_finishes_a_locked_capture_and_leaves_the_next_press_free` in
+[suppression/tests.rs](../../src/suppression/tests.rs);
+`a_stop_phrase_finishes_only_a_hands_free_capture` and
+`a_stop_phrase_request_finishes_only_a_locked_capture` in
+[linux/input.rs](../../src/linux/input.rs), the first also in
+[windows/input.rs](../../src/windows/input.rs);
+`stop_phrase_is_its_own_atomic_and_carries_its_phrase` in
+[labs.rs](../../src/labs.rs); `a_stop_phrase_needs_two_words_and_six_letters`
+in [control/settings.rs](../../src/control/settings.rs);
+`an_invalid_stop_phrase_loads_the_default_and_keeps_its_switch` in
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs); and
+`stop_phrase_shows_its_phrase_on_its_card_while_on` in
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation with the lab on, and the Mac and Windows builds, which the Linux host
+cannot compile.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

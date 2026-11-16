@@ -24,6 +24,7 @@ pub(crate) mod screen_vocabulary;
 pub(crate) mod service;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
+pub(crate) mod stop_phrase;
 pub(crate) mod text_replacements;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod vocabulary;
@@ -1352,8 +1353,10 @@ impl DictationCapture {
     }
 
     /// The active recording's text so far when its live stream published a
-    /// change since the last call: only with live text on, and only for
-    /// display. The finished clip's transcript replaces it.
+    /// change since the last call: only while something asks the engine for
+    /// partials (Labs › Live text, Live typing, a `/dictations` client, the
+    /// first run's practice, or Stop phrase), and only for display or Stop
+    /// phrase's matching. The finished clip's transcript replaces it.
     pub fn take_partial(&mut self) -> Option<Partial> {
         self.recording.as_mut()?.stream.as_mut()?.take_partial()
     }
@@ -1362,9 +1365,10 @@ impl DictationCapture {
     /// (or the first run's practice) wants it, and logs at debug how far it
     /// has got: word counts against the audio fed, never the words (the
     /// engine logs each stream's count of changes). Every OS's capture loop
-    /// calls it after ingesting audio; it does nothing without live text. The
-    /// change is also returned, so a host can send it to Live typing's input
-    /// method or a `/dictations` client without showing the plate.
+    /// calls it after ingesting audio; it takes nothing without a live stream.
+    /// The change is also returned, so a host can send it to Live typing's
+    /// input method, a `/dictations` client, or Stop phrase's matching, without
+    /// showing the plate.
     pub fn report_live_text(&mut self) -> Option<Partial> {
         let partial = self.take_partial()?;
         let recording = self.recording.as_mut()?;

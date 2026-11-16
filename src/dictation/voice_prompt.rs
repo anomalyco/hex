@@ -117,27 +117,39 @@ pub fn phrase_problem(phrase: &str) -> Option<PhraseProblem> {
 /// `phrase` as the runtime should hold it: trimmed when valid, else the
 /// default, so an invalid saved value never turns matching off.
 pub fn accepted_phrase(phrase: &str) -> String {
+    accepted_phrase_or(phrase, DEFAULT_PHRASE)
+}
+
+/// [`accepted_phrase`] with another feature's default, so Labs › Stop phrase
+/// falls back to its own words when a saved one fails the same rules.
+pub(crate) fn accepted_phrase_or(phrase: &str, default: &str) -> String {
     let phrase = phrase.trim();
     if phrase_problem(phrase).is_none() {
         phrase.to_owned()
     } else {
-        DEFAULT_PHRASE.to_owned()
+        default.to_owned()
     }
 }
 
+/// [`text`] without the whitespace and joining marks that only set a phrase
+/// off, so the words' own final sentence punctuation stays.
+pub(crate) fn trim_joining_end(text: &str) -> &str {
+    text.trim_end_matches(is_joining)
+}
+
 /// A word of a transcript or phrase and where its bytes sit in the original.
-struct Word {
+pub(crate) struct Word {
     /// Letters and digits, lowercased, with apostrophes and hyphens dropped.
-    key: String,
-    start: usize,
-    end: usize,
+    pub(crate) key: String,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 /// The words of `text` at their byte offsets. Letters, digits, apostrophes,
 /// and hyphens make a word; everything else separates words. Apostrophes
 /// and hyphens stay in the span but leave the key, so "don't" and "dont"
 /// compare equal while "this's" stays different from "this".
-fn words(text: &str) -> Vec<Word> {
+pub(crate) fn words(text: &str) -> Vec<Word> {
     let mut words = Vec::new();
     let mut current: Option<(String, usize, usize)> = None;
     for (index, character) in text.char_indices() {

@@ -77,6 +77,14 @@ pub enum DictationAudioEvent {
         /// A programmatic capture's audio delivered before the gap.
         kept: Option<DictationClip>,
     },
+    /// Labs › Stop phrase: the capture's live text ended with the phrase
+    /// (committed, or read twice in a row), so its listener finishes it as the
+    /// shortcut's press would. The words are the ones that matched, and the
+    /// generation keeps a request from outliving its capture.
+    StopPhrase {
+        capture_generation: u64,
+        phrase: String,
+    },
 }
 
 /// A capture the microphone ended before its finish reached the owner.
@@ -184,6 +192,9 @@ struct Owner {
     stream_opened_at: Option<Instant>,
     /// When the timeline last had a gap or the stream last failed.
     discontinuity_at: Option<Instant>,
+    /// Labs › Stop phrase: this capture's detector, fresh for every capture
+    /// (a finished one never counts toward the next).
+    stop_phrase: crate::dictation::stop_phrase::Detector,
     /// The `capture` experiment's sink. While set, the microphone stays open
     /// even with release-while-idle and switches only once it closes.
     #[cfg(hex_capture)]
@@ -482,6 +493,9 @@ impl DictationAudio {
                 }
                 | DictationAudioEvent::CaptureDiscontinuity {
                     capture_generation, ..
+                }
+                | DictationAudioEvent::StopPhrase {
+                    capture_generation, ..
                 } => Some(*capture_generation),
                 _ => None,
             };
@@ -588,6 +602,7 @@ impl Owner {
             keep_on_loss: false,
             stream_opened_at,
             discontinuity_at: None,
+            stop_phrase: crate::dictation::stop_phrase::Detector::new(),
             #[cfg(hex_capture)]
             capture_sink: None,
         };
@@ -634,6 +649,9 @@ impl Owner {
     fn handle(&mut self, command: Command) -> bool {
         match command {
             Command::Start { at, kind, reply } => {
+                // Labs › Stop phrase: a new capture listens for the phrase
+                // from its own words.
+                self.stop_phrase = crate::dictation::stop_phrase::Detector::new();
                 // Draining can discover a failure belonging to the previous capture or idle
                 // period. Validate and advance the new capture only after that drain.
                 if self.input.is_open() && !self.input.is_recovering() {
@@ -917,7 +935,27 @@ impl Owner {
                 {
                     self.capture.begin_stream(engine);
                 }
-                self.capture.report_live_text();
+                if let Some(partial) = self.capture.report_live_text()
+                    && crate::labs::stop_phrase()
+                {
+                    // Labs › Stop phrase: a capture whose committed words, or
+                    // words read twice in a row, end with the phrase asks its
+                    // listener to finish it; the listener decides whether it is
+                    // still hands-free. The words ride along, read once here.
+                    let phrase = crate::labs::stop_phrase_text();
+                    if self
+                        .stop_phrase
+                        .observe(&partial.stable, &partial.tentative, &phrase)
+                    {
+                        let _ = self.events.send(DictationAudioEvent::StopPhrase {
+                            capture_generation: self
+                                .state
+                                .capture_generation
+                                .load(Ordering::Acquire),
+                            phrase,
+                        });
+                    }
+                }
                 #[cfg(hex_capture)]
                 {
                     let sample_rate = self.sample_rate();

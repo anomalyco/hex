@@ -22,8 +22,10 @@ use crate::windows::input::WindowsHotkey;
 use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
 use crate::windows::paste::WindowsPaster;
 
+mod finish;
 mod shortcuts;
 
+use finish::submit_capture;
 use shortcuts::{Shortcuts, next_action};
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
@@ -70,6 +72,9 @@ struct Job {
     /// release; `None` for a `hex dictation` capture (Labs › YOLO
     /// mode).
     held_ms: Option<u64>,
+    /// Labs › Stop phrase: the words its capture ended with, read when the
+    /// phrase was heard and removed from the transcript before processing.
+    stop_phrase: Option<String>,
 }
 
 /// A release whose capture is still collecting its post-release tail.
@@ -80,6 +85,8 @@ struct Finishing {
     flavour: crate::dictation::DictationFlavour,
     /// A shortcut, not a `hex dictation` command, started the capture.
     by_shortcut: bool,
+    /// Labs › Stop phrase: the words that ended this capture, when they did.
+    stop_phrase: Option<String>,
 }
 
 enum OutputJob {
@@ -99,6 +106,9 @@ struct JobResult {
     text: Option<String>,
     latency_ms: u32,
     result: Result<(), String>,
+    /// Labs › Stop phrase took every word the capture heard: an empty result
+    /// reads as a plain discard, not a voice prompt that asked for nothing.
+    stop_phrase_only: bool,
 }
 
 pub struct WindowsDictationConfig {
@@ -344,6 +354,8 @@ pub fn run(
     let mut recording_feedback_started = false;
     // Whether this capture's start tone already played on its press.
     let mut start_tone_played = false;
+    // Labs › Stop phrase: this capture's detector, fresh for every capture.
+    let mut stop_phrase = crate::dictation::stop_phrase::Detector::new();
     let mut pending = 0_usize;
     // The worker drains its queue in order, so a FIFO of ids pairs each
     // result with the HUD job it belongs to. Repaste jobs get ids too (to
@@ -522,6 +534,7 @@ pub fn run(
                 print,
                 flavour,
                 by_shortcut,
+                stop_phrase,
             }) = finishing.take()
             else {
                 unreachable!("checked above");
@@ -538,6 +551,7 @@ pub fn run(
                 flavour,
                 by_shortcut,
                 context,
+                stop_phrase,
             )?;
             if submitted {
                 next_job_id += 1;
@@ -642,6 +656,13 @@ pub fn run(
                 &mut print,
             )
         {
+            // Labs › Stop phrase: only the finish its words ended keeps them;
+            // any other action leaves them for that finish.
+            let finish_phrase = if matches!(action, HotkeyAction::Finish) {
+                hotkey.take_stop_phrase()
+            } else {
+                None
+            };
             match action {
                 // A client's dictation records: the shortcut and `hex
                 // dictation` neither start nor end anything.
@@ -677,6 +698,9 @@ pub fn run(
                 {
                     recording_flavour = flavour;
                     recording_by_shortcut = !deliberate;
+                    // Labs › Stop phrase: a new capture listens for the
+                    // phrase from its own words.
+                    stop_phrase = crate::dictation::stop_phrase::Detector::new();
                     if deliberate {
                         hotkey.command_capture(Some(flavour));
                     }
@@ -766,6 +790,9 @@ pub fn run(
                         flavour: recording_flavour,
                         by_shortcut: recording_by_shortcut,
                         print: print.take(),
+                        // Labs › Stop phrase: the phrase's own finish carries
+                        // its words, which the job removes.
+                        stop_phrase: finish_phrase,
                         context: if capture.would_transcribe(occurred_at) {
                             crate::windows::context::begin_capture(
                                 !recording_flavour.raw()
@@ -836,6 +863,11 @@ pub fn run(
                 });
             }
             match result.result {
+                // A capture that heard only Labs › Stop phrase's words ends
+                // as any silent one, not as a voice prompt that asked nothing.
+                Ok(()) if nothing && result.stop_phrase_only => {
+                    events.dictation(DictationPhase::Discarded, "")?;
+                }
                 Ok(()) if nothing => events.discarded_voice_prompt()?,
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
@@ -989,7 +1021,17 @@ pub fn run(
                     if recording_feedback_started {
                         capture.begin_stream(&engine);
                     }
-                    capture.report_live_text();
+                    if let Some(partial) = capture.report_live_text()
+                        && crate::labs::stop_phrase()
+                    {
+                        // Labs › Stop phrase: a phrase the model committed, or
+                        // words read twice in a row, end a hands-free capture
+                        // as its shortcut's press would.
+                        let phrase = crate::labs::stop_phrase_text();
+                        if stop_phrase.observe(&partial.stable, &partial.tentative, &phrase) {
+                            hotkey.finish_hands_free(phrase);
+                        }
+                    }
                 }
             }
             RecoveringAudioInputEvent::Timeout => {}
@@ -1111,7 +1153,18 @@ fn process_dictation_job(
     let context = job.context.finish();
     let application = context.application.clone();
     let mut sent = false;
+    let mut stop_phrase_only = false;
     let result = transcription.and_then(|raw_text| {
+        // Labs › Stop phrase: the words that finished this capture never
+        // reach the text or its processing.
+        let raw_text =
+            crate::dictation::stop_phrase::strip_finished(raw_text, job.stop_phrase.as_deref());
+        if raw_text.is_empty() && job.stop_phrase.is_some() {
+            // A capture that was only the phrase: nothing to paste, no
+            // History, and nothing failed.
+            stop_phrase_only = true;
+            return Ok(String::new());
+        }
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
         }
@@ -1192,15 +1245,18 @@ fn process_dictation_job(
         latency_ms,
         "completed Windows dictation job"
     );
-    if let Some(print) = job.print.take() {
+    let mut done = if let Some(print) = job.print.take() {
         print.send(match &result {
             Ok(text) if text.trim().is_empty() => PrintedTranscript::NoSpeech,
             Ok(text) => PrintedTranscript::Text(text.clone()),
             Err(error) => PrintedTranscript::Failed(error.clone()),
         });
-        return job_result(OutputKind::Printed, result, latency_ms);
-    }
-    job_result(OutputKind::Dictation, result, latency_ms)
+        job_result(OutputKind::Printed, result, latency_ms)
+    } else {
+        job_result(OutputKind::Dictation, result, latency_ms)
+    };
+    done.stop_phrase_only = stop_phrase_only;
+    done
 }
 
 fn process_paste_last(
@@ -1233,12 +1289,14 @@ fn job_result(kind: OutputKind, result: Result<String, String>, latency_ms: u32)
             text: Some(text),
             latency_ms,
             result: Ok(()),
+            stop_phrase_only: false,
         },
         Err(error) => JobResult {
             kind,
             text: None,
             latency_ms,
             result: Err(error),
+            stop_phrase_only: false,
         },
     }
 }
@@ -1332,74 +1390,6 @@ fn end_service_capture(
     {
         indicator.send(crate::rune_hud::HudEvent::Cancelled);
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn submit_capture(
-    capture: &mut DictationCapture,
-    ended_at: CaptureInstant,
-    tail: Duration,
-    engine: &TranscriptionEngine,
-    jobs: &SyncSender<OutputJob>,
-    events: &mut EventLog,
-    pending: &mut usize,
-    print: Option<PrintReply>,
-    flavour: crate::dictation::DictationFlavour,
-    by_shortcut: bool,
-    context: crate::windows::context::PendingContext,
-) -> Result<bool> {
-    let mut submitted = false;
-    let no_speech = |print: Option<PrintReply>| {
-        if let Some(print) = print {
-            print.send(PrintedTranscript::NoSpeech);
-        }
-    };
-    match capture.finish_with_tail(ended_at, tail) {
-        Finish::Discard => {
-            no_speech(print);
-            events.dictation(DictationPhase::Discarded, "")?
-        }
-        Finish::Transcribe(clip) if clip.is_near_silent() => {
-            no_speech(print);
-            events.dictation(DictationPhase::Discarded, "")?
-        }
-        Finish::Transcribe(mut clip) => {
-            let audio_ms = clip.duration_ms();
-            // Labs › YOLO mode judges only a shortcut's processed
-            // paste, on how long the shortcut was held.
-            let held_ms =
-                (by_shortcut && !flavour.raw() && print.is_none()).then(|| clip.held_ms());
-            let stream = clip.take_stream();
-            let samples = clip.into_transcription_samples();
-            let language = engine
-                .held_selection()
-                .unwrap_or_else(|| crate::app_settings::transcription_selection().1)
-                .language;
-            let recording = crate::history::Recording::keep(&samples);
-            let job = OutputJob::Dictation(Box::new(Job {
-                context,
-                transcript: engine.finish(stream, samples)?,
-                audio_ms,
-                language,
-                recording,
-                print,
-                flavour,
-                held_ms,
-            }));
-            match jobs.try_send(job) {
-                Ok(()) => {
-                    *pending += 1;
-                    submitted = true;
-                    events.dictation(DictationPhase::Transcribing, "")?;
-                }
-                Err(TrySendError::Full(_)) => fail(events, "dictation queue is full")?,
-                Err(TrySendError::Disconnected(_)) => {
-                    return Err(eyre!("Windows dictation worker is unavailable"));
-                }
-            }
-        }
-    }
-    Ok(submitted)
 }
 
 /// Logs a failed dictation or paste with the sound set's error sound.

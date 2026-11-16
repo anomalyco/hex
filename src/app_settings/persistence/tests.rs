@@ -455,6 +455,24 @@ fn an_invalid_voice_prompt_phrase_loads_the_default_and_keeps_its_switch() {
 }
 
 #[test]
+fn an_invalid_stop_phrase_loads_the_default_and_keeps_its_switch() {
+    let original = br#"{"labs":{"stop_phrase":true,"stop_phrase_text":"nope","live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(
+        settings.labs.stop_phrase,
+        "the switch stays as saved; only the phrase falls back"
+    );
+    assert_eq!(
+        settings.labs.stop_phrase_text,
+        crate::dictation::stop_phrase::DEFAULT_PHRASE
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
 fn browser_origins_load_normalized_and_ignore_anything_that_is_not_one() {
     let file = SettingsFile::new(
         br#"{"labs":{"api_browser_access":true,"api_browser_origins":["HTTPS://Example.com:443/","*","not an origin","http://localhost:5173"]}}"#,

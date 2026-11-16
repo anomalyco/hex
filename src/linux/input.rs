@@ -249,6 +249,9 @@ pub(crate) enum HotkeyEvent {
     /// `hex dictation stop --print` finished the dictation: its transcript
     /// goes to the reply instead of being pasted.
     FinishPrinting(crate::control::PrintReply),
+    /// Labs › Stop phrase heard its words: the hands-free capture ends as the
+    /// shortcut's finishing press would, and its job strips them.
+    FinishPhrase(String),
     Cancel,
     PasteLast,
     /// Labs › Transform typed text: the focused field's text is processed
@@ -284,6 +287,10 @@ pub(crate) enum ShortcutCommand {
 pub(crate) enum ListenerCommand {
     Shortcut(ShortcutCommand),
     StopAndPrint(crate::control::PrintReply),
+    /// Labs › Stop phrase: the listener heard its words twice and asks the
+    /// state machine to finish the capture if it is still hands-free. Its
+    /// words come back with the finish, so its job strips the right ones.
+    FinishPhrase(String),
 }
 
 impl From<ShortcutCommand> for ListenerCommand {
@@ -768,6 +775,18 @@ impl ShortcutState {
         Some(HotkeyEvent::Finish)
     }
 
+    /// Labs › Stop phrase: only a hands-free capture (a Toggle press released,
+    /// or a completed double tap) ends this way; a held press records on, and
+    /// so does an idle machine.
+    fn finish_hands_free(&mut self) -> Option<HotkeyEvent> {
+        if !matches!(self.capture, Capture::Locked) {
+            return None;
+        }
+        self.capture = Capture::Idle;
+        self.last_release = None;
+        Some(HotkeyEvent::Finish)
+    }
+
     fn update(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
         match input {
             // Escape while Annotate draws stops drawing, never the recording,
@@ -922,6 +941,10 @@ impl ShortcutState {
 #[derive(Clone)]
 pub(crate) struct CommandQueue {
     commands: Arc<Mutex<Receiver<ListenerCommand>>>,
+    /// The listener's own requests into the same state machine (Labs › Stop
+    /// phrase finishing a hands-free capture); nothing outside sends these.
+    self_sender: mpsc::Sender<ListenerCommand>,
+    self_commands: Arc<Mutex<Receiver<ListenerCommand>>>,
     /// Whether `hex` commands reach this listener: they go to the service,
     /// never to a foreground `hex dictate` process.
     connected: bool,
@@ -929,8 +952,11 @@ pub(crate) struct CommandQueue {
 
 impl From<Receiver<ListenerCommand>> for CommandQueue {
     fn from(receiver: Receiver<ListenerCommand>) -> Self {
+        let (self_sender, self_commands) = mpsc::channel();
         Self {
             commands: Arc::new(Mutex::new(receiver)),
+            self_sender,
+            self_commands: Arc::new(Mutex::new(self_commands)),
             connected: true,
         }
     }
@@ -939,8 +965,11 @@ impl From<Receiver<ListenerCommand>> for CommandQueue {
 impl CommandQueue {
     /// A queue nothing sends to: the foreground `hex dictate` listener.
     pub(crate) fn disconnected() -> Self {
+        let (self_sender, self_commands) = mpsc::channel();
         Self {
             commands: Arc::new(Mutex::new(mpsc::channel().1)),
+            self_sender,
+            self_commands: Arc::new(Mutex::new(self_commands)),
             connected: false,
         }
     }
@@ -948,6 +977,12 @@ impl CommandQueue {
     /// Whether this listener's `hex` commands arrive through this queue.
     pub(crate) fn connected(&self) -> bool {
         self.connected
+    }
+
+    /// Labs › Stop phrase: this capture heard `phrase` and ends as its
+    /// shortcut's finishing press would, if it still records hands-free.
+    pub(crate) fn finish_hands_free(&self, phrase: String) {
+        let _ = self.self_sender.send(ListenerCommand::FinishPhrase(phrase));
     }
 }
 
@@ -997,15 +1032,25 @@ impl Dispatcher {
         self.pending.extend(event);
     }
 
-    /// Feeds every queued `hex` command.
+    /// Feeds every queued `hex` command, and the listener's own requests.
     fn commands(&mut self) {
-        // `hex dictate` has no queue anything sends to: only shortcuts remain.
-        if !self.commands.connected() {
-            return;
+        // `hex dictate` has no queue anything sends to: only its own requests
+        // and shortcuts remain.
+        if self.commands.connected() {
+            let commands = self
+                .commands
+                .commands
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let queued: Vec<_> = commands.try_iter().collect();
+            drop(commands);
+            for command in queued {
+                self.command(command);
+            }
         }
         let commands = self
             .commands
-            .commands
+            .self_commands
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let queued: Vec<_> = commands.try_iter().collect();
@@ -1045,6 +1090,13 @@ impl Dispatcher {
                 Some(_) => self.pending.push(HotkeyEvent::FinishPrinting(reply)),
                 None => reply.send(crate::control::PrintedTranscript::NotRecording),
             },
+            // Labs › Stop phrase finishes only what still records hands-free,
+            // and its words come back with that finish for its job.
+            ListenerCommand::FinishPhrase(phrase) => {
+                if self.state.finish_hands_free().is_some() {
+                    self.pending.push(HotkeyEvent::FinishPhrase(phrase));
+                }
+            }
         }
     }
 
@@ -1502,6 +1554,44 @@ mod tests {
             assert_eq!(self.state.capture, Capture::Locked);
             self.events.clear();
         }
+    }
+
+    /// Labs › Stop phrase ends only a hands-free capture, as the shortcut's
+    /// finishing press would; a held press records on.
+    #[test]
+    fn a_stop_phrase_finishes_only_a_hands_free_capture() {
+        let mut idle = Test::new(true);
+        assert_eq!(idle.state.finish_hands_free(), None, "nothing records");
+
+        let mut held = Test::new(true);
+        held.press(Shortcut::Dictation);
+        assert_eq!(held.state.capture, Capture::Held { second_tap: false });
+        assert_eq!(
+            held.state.finish_hands_free(),
+            None,
+            "a held press reads the phrase as speech"
+        );
+        assert_eq!(held.state.capture, Capture::Held { second_tap: false });
+
+        let mut locked = Test::new(true);
+        locked.lock();
+        assert_eq!(locked.state.finish_hands_free(), Some(Finish));
+        assert_eq!(locked.state.capture, Capture::Idle);
+        assert_eq!(
+            locked.state.finish_hands_free(),
+            None,
+            "a capture finishes once"
+        );
+
+        // Toggle mode locks on its release, so the phrase ends that capture.
+        let mut toggle = Test::with(HotkeyOptions {
+            toggle: true,
+            ..HotkeyOptions::default()
+        });
+        toggle.press(Shortcut::Dictation);
+        toggle.release(Shortcut::Dictation);
+        assert_eq!(toggle.state.capture, Capture::Locked);
+        assert_eq!(toggle.state.finish_hands_free(), Some(Finish));
     }
 
     #[test]
@@ -3035,6 +3125,48 @@ mod tests {
             printed.try_recv().unwrap(),
             PrintedTranscript::Text("Ship it.".into())
         );
+    }
+
+    /// Labs › Stop phrase's request rides the listener's own queue into the
+    /// state machine, and finishes only a capture still recording hands-free.
+    #[test]
+    fn a_stop_phrase_request_finishes_only_a_locked_capture() {
+        let (sender, events) = mpsc::sync_channel(4);
+        let (_, receiver) = mpsc::sync_channel(4);
+        let queue = CommandQueue::from(receiver);
+        let mut dispatcher = Dispatcher::new(
+            &HotkeyOptions {
+                toggle: true,
+                ..HotkeyOptions::default()
+            },
+            sender,
+            queue.clone(),
+            ShortcutKeys::default(),
+        );
+        // Nothing records: the request does nothing.
+        queue.finish_hands_free("stop dictation".into());
+        dispatcher.commands();
+        assert!(dispatcher.flush().unwrap());
+        assert!(events.try_recv().is_err());
+
+        // A press still held records on.
+        dispatcher.input(Input::Pressed(Shortcut::Dictation));
+        queue.finish_hands_free("stop dictation".into());
+        dispatcher.commands();
+        assert!(dispatcher.flush().unwrap());
+        assert_eq!(events.try_recv().unwrap(), START);
+
+        // Toggle's release locks the capture: the request finishes it and
+        // carries the words its job strips.
+        dispatcher.input(Input::Released(Shortcut::Dictation));
+        queue.finish_hands_free("stop dictation".into());
+        dispatcher.commands();
+        assert!(dispatcher.flush().unwrap());
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HotkeyEvent::FinishPhrase("stop dictation".into())
+        );
+        assert_eq!(dispatcher.state.capture, Capture::Idle);
     }
 
     #[test]

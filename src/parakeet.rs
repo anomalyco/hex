@@ -126,6 +126,9 @@ struct InferenceJob {
     held_ms: Option<u64>,
     /// See [`JobTimings::send_gate`].
     send_gate: crate::dictation::yolo_mode::SendGate,
+    /// Labs › Stop phrase: the words its capture ended with, read when the
+    /// phrase was heard, removed from the transcript before processing.
+    stop_phrase: Option<String>,
 }
 
 struct ProcessorJob {
@@ -396,8 +399,9 @@ impl DictationWorker {
         clip: DictationClip,
         target: TranscriptionTarget,
         context: ContextSnapshot,
+        stop_phrase: Option<String>,
     ) -> Result<DictationJobId, &'static str> {
-        self.submit(clip, target, context, None)
+        self.submit(clip, target, context, None, stop_phrase)
     }
 
     /// Like a paste, but the transcript (processed unless `raw`) goes to
@@ -408,13 +412,14 @@ impl DictationWorker {
         print: crate::control::PrintReply,
         raw: bool,
         context: ContextSnapshot,
+        stop_phrase: Option<String>,
     ) -> Result<DictationJobId, &'static str> {
         let target = if raw {
             TranscriptionTarget::RawPrint
         } else {
             TranscriptionTarget::Print
         };
-        self.submit(clip, target, context, Some(print))
+        self.submit(clip, target, context, Some(print), stop_phrase)
     }
 
     fn submit(
@@ -423,6 +428,7 @@ impl DictationWorker {
         target: TranscriptionTarget,
         context: ContextSnapshot,
         print: Option<crate::control::PrintReply>,
+        stop_phrase: Option<String>,
     ) -> Result<DictationJobId, &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let job_id = DictationJobId(state.next_output_sequence()?);
@@ -491,6 +497,7 @@ impl DictationWorker {
             recording,
             held_ms,
             send_gate,
+            stop_phrase,
         })
         .map(|()| {
             state.next_sequence += 1;
@@ -844,6 +851,11 @@ fn run_inference_worker(
                 "transcribed dictation"
             );
             let text = transcribed.text;
+            // Labs › Stop phrase: the words that finished this capture never
+            // reach the text, and a capture that was only the phrase reads as
+            // empty.
+            let text =
+                crate::dictation::stop_phrase::strip_finished(text, job.stop_phrase.as_deref());
             let corrected = if matches!(job.target, TranscriptionTarget::Service) {
                 text.clone()
             } else {

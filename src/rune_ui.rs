@@ -721,6 +721,7 @@ struct Drafts {
     modes: bool,
     vocabulary: bool,
     phrase: bool,
+    stop_phrase: bool,
     origins: bool,
 }
 
@@ -899,6 +900,10 @@ impl Ui {
             &submitted.labs.voice_prompt_phrase,
             &candidate.labs.voice_prompt_phrase,
         );
+        self.lab_store.rebase_stop_phrase(
+            &submitted.labs.stop_phrase_text,
+            &candidate.labs.stop_phrase_text,
+        );
         self.lab_store.rebase_origins(
             &submitted.labs.api_browser_origins,
             &candidate.labs.api_browser_origins,
@@ -924,6 +929,7 @@ impl Ui {
         self.modes.project(&mut candidate);
         candidate.vocabulary = self.vocabulary.project();
         self.lab_store.project_phrase(&mut candidate);
+        self.lab_store.project_stop_phrase(&mut candidate);
         self.lab_store.project_origins(&mut candidate);
         candidate
     }
@@ -937,6 +943,7 @@ impl Ui {
             modes: modes.dictation_processing != settings.dictation_processing,
             vocabulary: self.vocabulary.project() != settings.vocabulary,
             phrase: self.lab_store.phrase_dirty(settings),
+            stop_phrase: self.lab_store.stop_phrase_dirty(settings),
             origins: self.lab_store.origins_dirty(settings),
         }
     }
@@ -1129,6 +1136,19 @@ impl Ui {
                 self.lab_store.rebase_phrase(
                     &self.settings.labs.voice_prompt_phrase,
                     &service.labs.voice_prompt_phrase,
+                );
+            }
+            // Stop phrase's field follows its lab and its saved phrase the
+            // same way.
+            if service.labs.stop_phrase != self.settings.labs.stop_phrase {
+                self.lab_store
+                    .sync_stop_phrase(&service.labs.stop_phrase_text);
+            } else if !drafts.stop_phrase
+                && service.labs.stop_phrase_text != self.settings.labs.stop_phrase_text
+            {
+                self.lab_store.rebase_stop_phrase(
+                    &self.settings.labs.stop_phrase_text,
+                    &service.labs.stop_phrase_text,
                 );
             }
             // The origins field follows its lab and its saved list the same

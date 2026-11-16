@@ -588,7 +588,11 @@ impl TranscriptionEngine {
             stalled,
             requests,
             streams,
-            live_text: || crate::labs::live_text() || crate::dictation::live_text::demanded(),
+            live_text: || {
+                crate::labs::live_text()
+                    || crate::labs::stop_phrase()
+                    || crate::dictation::live_text::demanded()
+            },
             held,
             dictating,
             next_stream: AtomicU64::new(0),

@@ -1191,6 +1191,12 @@ the Windows build was compiled and tested locally (2026-10-19); macOS relies on
 CI. The Linux state machine and X11 grab tests ran on 2026-10-22 (the grabs on
 an isolated Xwayland display). No physical keyboard check yet.
 
+A hands-free capture (Toggle, or a Hold one locked by the double-tap) can also
+end on its own words: Labs › Stop phrase listens to the capture's live partials
+and finishes it through this same state machine when they end with its phrase,
+as that shortcut's next press would. A held Hold capture is untouched, and
+details are in [labs.md](labs.md).
+
 ```ts
 General > Shortcut mode                               // dictate.shortcut-explainer
   -> Modal: the four choices, each its name and one line beside the

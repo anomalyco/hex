@@ -1989,6 +1989,34 @@ mod tests {
         }
     }
 
+    /// Labs › Stop phrase ends only a hands-free capture, as the shortcut's
+    /// finishing press would; a held press records on.
+    #[test]
+    fn a_stop_phrase_finishes_only_a_hands_free_capture() {
+        let mut idle = CaptureState::default();
+        assert!(!idle.finish_hands_free());
+
+        // A held press is speech, not a finish.
+        let mut held = CaptureState::default();
+        assert_eq!(held.press(true, false, 100), Some(HotkeyAction::Start));
+        assert!(!held.finish_hands_free());
+        assert!(held.active && held.recording);
+
+        // A Toggle press released locks, and the phrase ends that capture.
+        let mut locked = CaptureState {
+            toggle: true,
+            ..CaptureState::default()
+        };
+        assert_eq!(locked.press(true, false, 100), Some(HotkeyAction::Start));
+        assert_eq!(locked.release(true, 140), None);
+        assert!(locked.locked);
+        assert!(locked.finish_hands_free());
+        assert!(!locked.locked && !locked.recording);
+        assert!(!locked.finish_hands_free(), "a capture finishes once");
+        // The next press starts a fresh capture, as after a finishing press.
+        assert_eq!(locked.press(true, false, 5_000), Some(HotkeyAction::Start));
+    }
+
     #[test]
     fn inhibiting_shortcuts_cancels_a_toggled_capture() {
         let mut state = CaptureState {

@@ -247,8 +247,16 @@ pub struct LabsSettings {
     /// The words that start a voice prompt: at least two words and six
     /// letters, or the default. Another value fails to load, so the field
     /// returns to its default.
-    #[serde(deserialize_with = "deserialize_voice_prompt_phrase")]
+    #[serde(deserialize_with = "deserialize_phrase")]
     pub voice_prompt_phrase: String,
+    /// A spoken phrase at the end of a hands-free dictation finishes it as if
+    /// the shortcut were pressed again, and never reaches the pasted text.
+    pub stop_phrase: bool,
+    /// The phrase that finishes a hands-free dictation: at least two words
+    /// and six letters, or the default. Another value fails to load, so the
+    /// field returns to its default.
+    #[serde(deserialize_with = "deserialize_phrase")]
+    pub stop_phrase_text: String,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -335,10 +343,10 @@ where
     }
 }
 
-/// A saved `voice_prompt_phrase` must pass
+/// A saved phrase (`voice_prompt_phrase`, `stop_phrase_text`) must pass
 /// [`crate::dictation::voice_prompt::phrase_problem`]; another value fails to
 /// load, so the field returns to the default with the usual launch note.
-fn deserialize_voice_prompt_phrase<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_phrase<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -425,6 +433,8 @@ impl Default for LabsSettings {
             print_start: false,
             voice_prompt: false,
             voice_prompt_phrase: crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned(),
+            stop_phrase: false,
+            stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,

@@ -20,17 +20,18 @@ use crate::dictation::service::{
 };
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
 use crate::feedback::{self, Tone};
-use crate::parakeet::{
-    DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
-};
+use crate::parakeet::{DictationWorker, TranscriptionTarget, WorkerEvent};
 use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonitor};
 
 mod context_watch;
+mod events;
 mod guards;
 mod hotkeys;
 mod output;
+mod stop_phrase;
 
 use context_watch::ContextWatch;
+use events::handle_dictation_event;
 use guards::{
     caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
 };
@@ -519,6 +520,7 @@ pub fn listen(
                                     clip,
                                     TranscriptionTarget::Service,
                                     ContextSnapshot::default(),
+                                    None,
                                 ) {
                                     Ok(job_id) => {
                                         programmatic_results.insert(
@@ -1031,6 +1033,20 @@ pub fn listen(
                         emit_state(&mut events, false, &input.device_name())?;
                     }
                 }
+                // Labs › Stop phrase: the capture heard its phrase twice and
+                // ends as its shortcut's finishing press would.
+                DictationAudioEvent::StopPhrase { phrase, .. } => {
+                    stop_phrase::finish(
+                        phrase,
+                        &mut hotkeys,
+                        &input,
+                        &dictation_worker,
+                        &mut context,
+                        &mut events,
+                        indicator,
+                        microphone_policy.release_while_idle,
+                    )?;
+                }
                 DictationAudioEvent::Interrupted {
                     was_recording,
                     kept,
@@ -1274,6 +1290,7 @@ fn handle_hotkey_action(
                 release_while_idle,
                 print,
                 raw,
+                None,
             )
             .map(drop)
         }
@@ -1330,6 +1347,7 @@ fn finish_hotkey_dictation(
     release_while_idle: bool,
     print: Option<PrintReply>,
     raw: bool,
+    stop_phrase: Option<String>,
 ) -> Result<FinishResult> {
     if dictation.become_intentional(action_at)? && release_while_idle {
         feedback::play(Tone::DictationStart);
@@ -1358,13 +1376,14 @@ fn finish_hotkey_dictation(
             device,
             events,
             indicator,
+            stop_phrase,
         )?,
         Some(print) => finish_dictation_with(
             dictation,
             action_at,
             POST_RELEASE_TAIL,
             // Narration lands on its screenshot either way, never pasted.
-            |clip, _| worker.transcribe_printed(clip, print, raw, context.clone()),
+            |clip, _| worker.transcribe_printed(clip, print, raw, context.clone(), stop_phrase),
             device,
             events,
             indicator,
@@ -1545,6 +1564,7 @@ fn control_dictation(
                 release_while_idle,
                 print,
                 hotkeys.raw_capture,
+                None,
             )?;
             match finished {
                 FinishResult::Discarded | FinishResult::Silent if printing => {
@@ -1662,95 +1682,6 @@ fn emit_voice_state(
         },
         device: device.into(),
     })?;
-    Ok(())
-}
-
-fn handle_dictation_event(
-    event: WorkerEvent,
-    events: &mut EventLog,
-    indicator: DictationSink<'_>,
-) -> Result<()> {
-    match event {
-        WorkerEvent::Completed {
-            job_id,
-            result: Ok(text),
-            ..
-        } if text.trim().is_empty() => {
-            events.dictation(DictationPhase::Discarded, "")?;
-            indicator.send(DictationIndicatorEvent::JobCompleted {
-                job_id: job_id.value(),
-            });
-        }
-        WorkerEvent::Completed {
-            job_id,
-            target,
-            result: Ok(text),
-            processing,
-        } => {
-            let phase = match target {
-                TranscriptionTarget::Paste
-                | TranscriptionTarget::CopyOnlyPaste
-                | TranscriptionTarget::RawCopyOnlyPaste
-                | TranscriptionTarget::RawPaste => DictationPhase::Pasted,
-                TranscriptionTarget::Print | TranscriptionTarget::RawPrint => {
-                    DictationPhase::Printed
-                }
-                TranscriptionTarget::Service => return Ok(()),
-            };
-            feedback::play(Tone::DictationDone);
-            events.processed_dictation(phase, text, processing)?;
-            indicator.send(DictationIndicatorEvent::JobCompleted {
-                job_id: job_id.value(),
-            });
-        }
-        WorkerEvent::Completed {
-            job_id,
-            result: Err(error),
-            ..
-        } => {
-            tracing::error!(%error, "dictation failed");
-            feedback::play(Tone::Error);
-            events.dictation(DictationPhase::Failed(error.clone()), "")?;
-            indicator.send(DictationIndicatorEvent::JobFailed {
-                job_id: job_id.value(),
-                message: Some(error),
-            });
-        }
-        WorkerEvent::Stage { job_id, stage } => {
-            indicator.send(match stage {
-                DictationJobStage::Transcribing => DictationIndicatorEvent::Transcribing {
-                    job_id: job_id.value(),
-                },
-                DictationJobStage::Processing => DictationIndicatorEvent::Processing {
-                    job_id: job_id.value(),
-                },
-            });
-        }
-        WorkerEvent::ModelFailed(error) => {
-            tracing::error!(%error, "dictation failed");
-            feedback::play(Tone::Error);
-            events.dictation(DictationPhase::Failed(error.clone()), "")?;
-            indicator.send(DictationIndicatorEvent::Failed {
-                message: Some(error),
-            });
-        }
-        WorkerEvent::Pasted {
-            kind,
-            result: Ok(text),
-        } => {
-            let phase = match kind {
-                PasteKind::LastTranscript => DictationPhase::Repasted,
-                PasteKind::MeetingDelta => DictationPhase::MeetingPasted,
-            };
-            events.dictation(phase, text)?;
-        }
-        WorkerEvent::Pasted {
-            result: Err(error), ..
-        } => {
-            feedback::play(Tone::Error);
-            events.dictation(DictationPhase::Failed(error), "")?;
-        }
-    }
     Ok(())
 }
 

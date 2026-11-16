@@ -2341,6 +2341,44 @@ fn programmatic_lock_finishes_on_the_next_press() {
 }
 
 #[test]
+fn a_stop_phrase_finishes_a_locked_capture_and_leaves_the_next_press_free() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let press = InputEvent::Flags(OPTION_KEY_MASK);
+    let release = InputEvent::Flags(NO_FLAGS);
+
+    // An idle machine has nothing to finish.
+    let mut hotkey = toggle_hotkey(now, false);
+    assert_eq!(hotkey.finish_hands_free(), None);
+    // A held press records on: the words are speech.
+    let mut held = toggle_hotkey(now, false);
+    assert_eq!(held.process(press, ms(0)), Some(HotkeyAction::Start));
+    assert_eq!(held.finish_hands_free(), None);
+    assert!(held.is_recording());
+
+    // Toggle's release locks the capture; the words finish it with no key
+    // down, so the next press starts afresh instead of recovering stale keys.
+    let mut hotkey = toggle_hotkey(now, false);
+    assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+    assert_eq!(hotkey.process(release, ms(80)), None);
+    assert!(hotkey.is_locked());
+    assert_eq!(hotkey.finish_hands_free(), Some(HotkeyAction::Finish));
+    assert!(!hotkey.is_recording());
+    assert!(!hotkey.suppresses_recognition());
+    assert_eq!(hotkey.process(press, ms(2_000)), Some(HotkeyAction::Start));
+
+    // A completed double tap locks the same way.
+    let mut hotkey = test_hotkey(false, now);
+    assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+    assert_eq!(hotkey.process(release, ms(80)), Some(HotkeyAction::Finish));
+    assert_eq!(hotkey.process(press, ms(180)), Some(HotkeyAction::Start));
+    assert_eq!(hotkey.process(release, ms(260)), None);
+    assert!(hotkey.is_locked());
+    assert_eq!(hotkey.finish_hands_free(), Some(HotkeyAction::Finish));
+    assert_eq!(hotkey.process(press, ms(1_000)), Some(HotkeyAction::Start));
+}
+
+#[test]
 fn locked_dictation_finishes_after_a_missing_key_release() {
     let now = capture_time();
     let mut hotkey = test_hotkey(false, now);

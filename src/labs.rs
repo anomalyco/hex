@@ -7,7 +7,8 @@
 //! feature (Live text, Live chapters, Vocabulary biasing, Screen vocabulary,
 //! the rewrite reading the text around the cursor (macOS),
 //! keyboard-language
-//! model switching, mouse shortcuts, pausing the browser, restoring Paste
+//! model switching, mouse shortcuts, pausing the browser, a spoken phrase
+//! that finishes a hands-free dictation, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard, only copying it instead (macOS and Windows), a second
 //! dictation shortcut,
@@ -185,6 +186,7 @@ impl Feature {
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
+            Self::StopPhrase => settings.labs.stop_phrase,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::ShellCompletions => settings.labs.shell_completions,
             Self::YoloMode => settings.labs.yolo_mode,
@@ -268,6 +270,7 @@ impl Feature {
             &mut labs.pause_menu,
             &mut labs.print_start,
             &mut labs.voice_prompt,
+            &mut labs.stop_phrase,
             &mut labs.copy_capture_zip,
             &mut labs.shell_completions,
             &mut labs.yolo_mode,
@@ -357,6 +360,7 @@ impl Feature {
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
+            Self::StopPhrase => settings.labs.stop_phrase = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::ShellCompletions => settings.labs.shell_completions = on,
             Self::YoloMode => settings.labs.yolo_mode = on,
@@ -494,6 +498,11 @@ static CURSOR_CONTEXT: AtomicBool = AtomicBool::new(false);
 /// [`apply`].
 static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Stop phrase's switch, set beside [`STATE`] like [`VOICE_PROMPT`]:
+/// the state word is full, so this lab has its own atomic, written by
+/// [`state`] and [`apply`].
+static STOP_PHRASE: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Copy captures as a zip's switch, set beside [`STATE`] like
 /// [`PRINT_START`]: a written capture copies as one zip file.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
@@ -547,6 +556,11 @@ static API_BROWSER_ORIGINS: LazyLock<RwLock<Vec<String>>> =
 static VOICE_PROMPT_PHRASE: LazyLock<RwLock<String>> =
     LazyLock::new(|| RwLock::new(crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned()));
 
+/// The words that finish a hands-free dictation, set beside [`STATE`] by
+/// [`state`] and [`apply`]. An invalid saved phrase reads as the default.
+static STOP_PHRASE_TEXT: LazyLock<RwLock<String>> =
+    LazyLock::new(|| RwLock::new(crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned()));
+
 fn on(bit: u64) -> bool {
     state() & bit != 0
 }
@@ -567,6 +581,7 @@ fn state() -> u64 {
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
                 CURSOR_CONTEXT.store(cursor_context_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
+                STOP_PHRASE.store(stop_phrase_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
@@ -576,6 +591,7 @@ fn state() -> u64 {
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
+                store_stop_phrase_text(&saved.stop_phrase_text);
             }
             STATE.load(Ordering::Acquire)
         }
@@ -618,6 +634,12 @@ fn voice_prompt_enabled(settings: &LabsSettings) -> bool {
     settings.voice_prompt
         && Feature::VoicePrompt.shipped()
         && Feature::VoicePrompt.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Stop phrase in this build, before its
+/// managed lock; the state word has no bit for it.
+fn stop_phrase_enabled(settings: &LabsSettings) -> bool {
+    settings.stop_phrase && Feature::StopPhrase.shipped() && Feature::StopPhrase.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Copy captures as a zip in this build,
@@ -728,6 +750,18 @@ fn store_voice_prompt_phrase(phrase: &str) {
         crate::dictation::voice_prompt::accepted_phrase(phrase);
 }
 
+/// Records the phrase that finishes a hands-free dictation; an invalid value
+/// never turns matching off.
+fn store_stop_phrase_text(phrase: &str) {
+    *STOP_PHRASE_TEXT
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) =
+        crate::dictation::voice_prompt::accepted_phrase_or(
+            phrase,
+            crate::dictation::stop_phrase::DEFAULT_PHRASE,
+        );
+}
+
 /// Whether the main window draws dark: the OS's appearance, unless Labs ›
 /// Appearance is on and names one. Resolved for each view, so System keeps
 /// following the OS live. Overlay windows (the HUD, capsules, live text) keep
@@ -754,6 +788,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     CURSOR_CONTEXT.store(cursor_context_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
+    STOP_PHRASE.store(stop_phrase_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
@@ -763,6 +798,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
+    store_stop_phrase_text(&settings.stop_phrase_text);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
     crate::shortcut_pause::reconcile(pause_menu());
@@ -1160,6 +1196,31 @@ mod tests {
         assert_eq!(
             Feature::for_settings_key("labs.voice_prompt_phrase"),
             Some(Feature::VoicePrompt)
+        );
+    }
+
+    #[test]
+    fn stop_phrase_is_its_own_atomic_and_carries_its_phrase() {
+        let labs = LabsSettings::default();
+        assert!(!stop_phrase_enabled(&labs));
+        assert_eq!(
+            labs.stop_phrase_text,
+            crate::dictation::stop_phrase::DEFAULT_PHRASE
+        );
+        let on = LabsSettings {
+            stop_phrase: true,
+            ..LabsSettings::default()
+        };
+        assert!(stop_phrase_enabled(&on));
+        assert!(Feature::StopPhrase.on_this_os());
+        assert_eq!(Feature::StopPhrase.added(), 20261116);
+        assert_eq!(Feature::StopPhrase.audience(), Audience::Everyone);
+        assert_eq!(Feature::StopPhrase.group(), Group::Dictation);
+        assert_eq!(Feature::StopPhrase.settings_key(), "labs.stop_phrase");
+        assert_eq!(Feature::StopPhrase.name(), "stop-phrase");
+        assert_eq!(
+            Feature::for_settings_key("labs.stop_phrase_text"),
+            Some(Feature::StopPhrase)
         );
     }
 
