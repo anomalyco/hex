@@ -283,7 +283,9 @@ same queue (`unsupported` outside macOS 27+, `feature-off` while
 `labs.annotate_replay` is off); `capture status`
 lists bundles still writing and the last outcome (`last`: `bundle`, `stage`
 of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,
-and `missing_transcript`, why it has no words). A start or replay while two captures
+`missing_transcript` (why it has no words), and `audio_stopped_at_ms` when Hex
+had to stop keeping its audio, a streamed capture past its 8 h disk guard or a
+failed audio write). A start or replay while two captures
 are still writing is refused with `busy`. Every action is idempotent.
 
 `<capture>` is a bundle name (`1792933491953.scrawl`, the extension

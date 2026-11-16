@@ -335,6 +335,10 @@ pub struct ScrawlCaptureOutcome {
     /// Spans of a written capture's audio that went missing.
     #[serde(default)]
     pub gaps: Option<usize>,
+    /// Where a written capture's audio stops (ms on its clock), when Hex had
+    /// to stop keeping it; the rest is silence.
+    #[serde(default)]
+    pub audio_stopped_at_ms: Option<u64>,
     /// Why a written capture has no transcript: `no_audio`, or the engine's
     /// reason.
     #[serde(default)]
@@ -376,6 +380,10 @@ pub struct ScrawlCaptureDetail {
     pub note: Option<String>,
     /// Why there is no transcript although there was audio.
     pub missing_transcript: Option<String>,
+    /// Where the capture's audio stops (ms on its clock), when Hex had to
+    /// stop keeping it; the rest is silence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_stopped_at_ms: Option<u64>,
     pub marks: usize,
     pub keyframes: usize,
     pub video: Option<std::path::PathBuf>,
@@ -1440,6 +1448,7 @@ mod tests {
                     stage: "done".into(),
                     words: Some(3),
                     gaps: Some(1),
+                    audio_stopped_at_ms: None,
                     missing_transcript: None,
                 }),
             })),

@@ -201,6 +201,9 @@ pub struct SourceExtras {
     pub agent_context: Option<bool>,
     /// Why there is no picture of the screen (`ScreenRecording::no_screen`).
     pub no_screen: Option<String>,
+    /// Where the capture's audio stops on the bundle's clock (ms), when Hex had to stop
+    /// keeping it (a streamed capture's disk guard, or a failed write).
+    pub audio_stopped_at_ms: Option<u64>,
     /// Decodes the chosen keyframes again at full quality, for sources that select on small
     /// candidate frames (phone movies).
     pub full_frames: Option<FullFrames>,
@@ -535,6 +538,9 @@ pub fn finalize_capture_bundle_for_config(
             autocrop: Some(crop_settings),
             agent_context,
             no_screen,
+            audio_stopped_at_ms: recorded_audio
+                .as_ref()
+                .and_then(RecordedAudio::audio_stopped_at_ms),
             full_frames: video_path
                 .map(|movie| movie_keyframes_with_cache(movie, video_offset_ms, predecoded)),
             prepared,
@@ -833,6 +839,7 @@ pub fn build_bundle_from_parts(
         video: video_rel,
         video_offset_ms: extras.video_offset_ms,
         audio: audio_rel,
+        audio_stopped_at_ms: extras.audio_stopped_at_ms,
         source: extras.source,
         device: extras.device,
         context: extras.context,

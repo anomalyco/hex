@@ -885,6 +885,7 @@ mod tests {
             video: None,
             video_offset_ms: 0,
             audio: None,
+            audio_stopped_at_ms: None,
             source: None,
             device: None,
             context: Default::default(),

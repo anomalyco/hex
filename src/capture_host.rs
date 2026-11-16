@@ -351,6 +351,8 @@ struct Written {
     words: usize,
     /// Spans of its audio that went missing.
     gaps: usize,
+    /// Where its audio stops, when Hex had to stop keeping it.
+    audio_stopped_at_ms: Option<u64>,
     /// Why it has no transcript, if it has none.
     missing_transcript: Option<String>,
 }
@@ -400,6 +402,7 @@ impl Sealed for scrawl_capture::capture::SealedCapture {
         Ok(Written {
             words: finished.words,
             gaps: finished.gaps,
+            audio_stopped_at_ms: finished.bundle.audio_stopped_at_ms,
             missing_transcript: finished.missing_transcript,
         })
     }
@@ -1011,6 +1014,8 @@ pub struct SettledCapture {
     /// no transcript, if it has none.
     pub words: Option<usize>,
     pub gaps: Option<usize>,
+    /// Where a written capture's audio stops, when Hex had to stop keeping it.
+    pub audio_stopped_at_ms: Option<u64>,
     pub missing_transcript: Option<String>,
     /// Why a capture failed, when Hex knows.
     pub error: Option<String>,
@@ -1029,6 +1034,7 @@ impl SettledCapture {
             stage: self.stage.label().into(),
             words: self.words,
             gaps: self.gaps,
+            audio_stopped_at_ms: self.audio_stopped_at_ms,
             missing_transcript: self.missing_transcript.clone(),
         }
     }
@@ -1273,6 +1279,7 @@ impl Outcomes {
             stage: Stage::Failed,
             words: None,
             gaps: None,
+            audio_stopped_at_ms: None,
             missing_transcript: None,
             error: Some(error),
             copy_error: None,
@@ -1319,6 +1326,9 @@ impl Outcomes {
                 stage,
                 words: written.as_ref().map(|written| written.words),
                 gaps: written.as_ref().map(|written| written.gaps),
+                audio_stopped_at_ms: written
+                    .as_ref()
+                    .and_then(|written| written.audio_stopped_at_ms),
                 missing_transcript: written.and_then(|written| written.missing_transcript),
                 error,
                 copy_error,
@@ -3892,6 +3902,7 @@ mod tests {
         assert_eq!(audio.sample_count(), expected);
         assert!(audio.is_on_disk() && audio.samples.is_empty());
         assert!(audio.gaps.is_empty());
+        assert_eq!(audio.audio_stopped_at_ms(), None);
         assert_eq!(wav_samples(&path).len(), expected);
         remove_wav(&path);
     }
@@ -4097,6 +4108,7 @@ mod tests {
             Ok(Written {
                 words: bundle.transcript.words.len(),
                 gaps,
+                audio_stopped_at_ms: None,
                 missing_transcript: bundle.transcript.missing.map(|missing| missing.reason),
             })
         }
@@ -4375,6 +4387,29 @@ mod tests {
                 }
             ]
         );
+        remove_wav(&path);
+    }
+
+    #[test]
+    fn the_guard_records_where_the_audio_stopped() {
+        let path = temp_wav("guard-point");
+        let mut timeline = Timeline::with_limit(t(0), path.clone(), Duration::from_secs(1));
+        timeline.push(&[0.5; 1_600], 16_000, t(100));
+        // Past the guard: the first second is kept, the rest is one gap.
+        timeline.push(&[0.5; 16_000], 16_000, t(1_100));
+        let audio = timeline.finish(t(1_100), None);
+        assert_eq!(audio.audio_stopped_at_ms(), Some(1_000));
+        assert_eq!(audio.sample_count(), 16_000);
+        assert_eq!(wav_samples(&path).len(), 16_000);
+        remove_wav(&path);
+
+        // A capture that stays inside the guard says nothing.
+        let path = temp_wav("guard-point-short");
+        let mut timeline = Timeline::with_limit(t(0), path.clone(), Duration::from_secs(1));
+        timeline.push(&[0.5; 1_600], 16_000, t(100));
+        let audio = timeline.finish(t(100), None);
+        assert_eq!(audio.audio_stopped_at_ms(), None);
+        assert_eq!(audio.sample_count(), 1_600);
         remove_wav(&path);
     }
 
@@ -5420,6 +5455,7 @@ mod tests {
             Some(Written {
                 words: 3,
                 gaps: 0,
+                audio_stopped_at_ms: None,
                 missing_transcript: None,
             }),
         );

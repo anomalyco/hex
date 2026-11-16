@@ -28,6 +28,9 @@ pub struct RecordedAudio {
     /// Where the samples live when they were streamed to disk: reading them
     /// back is only needed by a path that shifts or rewrites the audio.
     pub(crate) streamed: Option<std::path::PathBuf>,
+    /// Where the audio stops on the capture's clock (ms), when Hex had to stop
+    /// keeping it: a streamed capture's disk guard, or a failed write.
+    pub(crate) audio_stopped_at_ms: Option<u64>,
     pub(crate) sample_count: usize,
     pub(crate) duration_ms: u64,
     pub(crate) wav_bytes: Vec<u8>,
@@ -54,6 +57,7 @@ impl RecordedAudio {
             start_offset_ms,
             gaps,
             streamed: None,
+            audio_stopped_at_ms: None,
             sample_count,
             duration_ms,
             wav_bytes: Vec::new(),
@@ -83,11 +87,25 @@ impl RecordedAudio {
             start_offset_ms,
             gaps,
             streamed: Some(path.to_path_buf()),
+            audio_stopped_at_ms: None,
             sample_count,
             duration_ms: start_offset_ms + (sample_count as u64 * 1_000) / u64::from(rate),
             wav_bytes: Vec::new(),
             live: Default::default(),
         }
+    }
+
+    /// Records where the audio stops on the capture's clock, when Hex had to
+    /// stop keeping it: a streamed capture's disk guard, or a failed write.
+    #[must_use]
+    pub fn stopping_audio_at(mut self, ms: Option<u64>) -> Self {
+        self.audio_stopped_at_ms = ms;
+        self
+    }
+
+    /// Where the capture's audio stops, when it does not run to the end.
+    pub fn audio_stopped_at_ms(&self) -> Option<u64> {
+        self.audio_stopped_at_ms
     }
 
     /// Whether its samples are already in `audio.wav` on disk, so they are
@@ -191,7 +209,8 @@ impl RecordedAudio {
         let skip = usize::try_from(skip_ms * u64::from(rate) / 1_000).unwrap_or(usize::MAX);
         samples.drain(..skip.min(samples.len()));
         let gaps = shifted_gaps(self.gaps, ms);
-        Ok(Self::new(samples, rate, start_offset_ms, gaps))
+        let stopped = self.audio_stopped_at_ms.map(|at| at.saturating_sub(ms));
+        Ok(Self::new(samples, rate, start_offset_ms, gaps).stopping_audio_at(stopped))
     }
 
     /// [`Self::since`] for a recording streamed to `path`: reads it back and
@@ -205,7 +224,8 @@ impl RecordedAudio {
         samples.drain(..skip.min(samples.len()));
         let start_offset_ms = self.start_offset_ms.saturating_sub(ms);
         let gaps = shifted_gaps(self.gaps, ms);
-        Ok(Self::new(samples, SAMPLE_RATE, start_offset_ms, gaps))
+        let stopped = self.audio_stopped_at_ms.map(|at| at.saturating_sub(ms));
+        Ok(Self::new(samples, SAMPLE_RATE, start_offset_ms, gaps).stopping_audio_at(stopped))
     }
 
     pub fn set_live(&self, live: Option<crate::live_transcribe::Live>) {
@@ -446,6 +466,7 @@ impl AudioRecorder {
             start_offset_ms: 0,
             gaps: Vec::new(),
             streamed: None,
+            audio_stopped_at_ms: None,
             sample_count,
             duration_ms,
             wav_bytes,
@@ -531,6 +552,7 @@ pub fn recorded_audio_from_wav(wav_bytes: Vec<u8>) -> Result<RecordedAudio> {
         start_offset_ms: 0,
         gaps: Vec::new(),
         streamed: None,
+        audio_stopped_at_ms: None,
         sample_count,
         duration_ms: sample_count as u64 * 1_000 / u64::from(SAMPLE_RATE),
         wav_bytes,

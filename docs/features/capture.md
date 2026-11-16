@@ -799,7 +799,9 @@ hex capture stop                         // capture.stop
     │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
     │   other models and Apple keep their own times
     ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
-    │   guard, never a memory bound
+    │   guard, never a memory bound, and scrawl.json's audioStoppedAtMs makes
+    │   summary.md say "Audio stopped at 8:00:00; the rest of this capture has
+    │   no audio" (a failed audio write says where too)
     ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
     │   summary.md; then every file 0600 and folder 0700
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
@@ -977,7 +979,8 @@ Where it goes                            // capture.route; capture.routing's aut
 hex capture list|show|send|route         // capture.cli; docs/cli.md
 ├── list [--limit N] -> the newest bundles in the captures folder: mode, words,
 │   where it went
-├── show <capture> -> one capture's words, files, and send
+├── show <capture> -> one capture's words, files, and send; a capture whose
+│   audio stopped early (the 8 h disk guard, or a failed write) says where
 ├── send <capture> [--to <session>] [--always] -> needs a listening Hex
 │   ├── The last routed capture -> as the capsule's pick (no --to: the Rule's
 │   │   session, a Guess's first suggestion, or the recorded destination), so
@@ -990,7 +993,8 @@ hex capture list|show|send|route         // capture.cli; docs/cli.md
 
 hex capture cancel -> engine cancelled, sink closed, bundle removed
 hex capture status -> recording (bundle, elapsed), bundles still writing, last outcome
-                      (words, audio gaps, or why it has no transcript)
+                      (words, audio gaps, or why it has no transcript, and where
+                      its audio stopped if it did)
 Hex quits mid-capture -> cancelled, bundle removed; captures still writing stop
 transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
 
@@ -1075,6 +1079,7 @@ Checks:
   `a_gap_is_digital_silence_where_it_happened`,
   `a_capture_longer_than_twenty_minutes_keeps_all_of_its_audio`,
   `past_the_guard_the_file_stops_and_the_rest_is_one_gap`,
+  `the_guard_records_where_the_audio_stopped`,
   `captures_finish_one_at_a_time_and_starts_wait_for_room`,
   `a_capture_queued_behind_a_slow_finish_has_already_stopped`,
   `a_failed_start_raced_by_stop_never_wedges_later_starts`,
@@ -1084,6 +1089,13 @@ Checks:
   `a_keep_past_the_written_samples_keeps_them_all`, and
   `the_file_is_owner_only`.
   In capture_host/words.rs: `pieces_past_the_first_window_keep_their_place_on_the_clock`.
+- The audio-stopped notice: `summary_says_where_a_captures_audio_stopped` in
+  [sketch.rs](../../crates/capture/src/sketch.rs);
+  `lengths_read_as_clocks_at_an_hour` and
+  `old_bundles_load_without_app_context_and_new_ones_round_trip` (which proves
+  `audioStoppedAtMs` is absent until it happens) in
+  [model.rs](../../crates/router/src/model.rs);
+  `the_guard_records_where_the_audio_stopped` above.
 - Shortcut and input, in capture_host.rs: `the_host_is_absent_while_captures_are_off`,
   `the_shortcut_starts_and_a_later_press_stops`,
   `input_reaches_only_the_capture_that_is_recording`, `tap_flags_become_modifiers`,

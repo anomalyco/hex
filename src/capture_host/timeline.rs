@@ -137,6 +137,7 @@ impl Timeline {
             },
             None => 0,
         };
+        let stopped_at = self.truncated_at.map(|at| self.clock_ms(at));
         RecordedAudio::on_disk(
             &self.path,
             kept.saturating_sub(self.lead()),
@@ -144,6 +145,7 @@ impl Timeline {
             self.clock_ms(first),
             self.gaps,
         )
+        .stopping_audio_at(stopped_at)
     }
 
     fn flush(&mut self) {

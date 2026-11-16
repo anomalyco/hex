@@ -32,6 +32,21 @@ pub fn format_clock(ms: u64) -> String {
     format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
 }
 
+/// Formats a recording's length as `H:MM:SS` once it reaches an hour, and
+/// `M:SS` below that (e.g. `0:04`, `12:07`, `1:00:00`).
+pub fn format_length(ms: u64) -> String {
+    let seconds = ms / 1_000;
+    if seconds < 3_600 {
+        return format!("{}:{:02}", seconds / 60, seconds % 60);
+    }
+    format!(
+        "{}:{:02}:{:02}",
+        seconds / 3_600,
+        seconds % 3_600 / 60,
+        seconds % 60
+    )
+}
+
 /// Parses a `M:SS` or `SS` or `SS.mmm` string into milliseconds.
 pub fn parse_clock_ms(input: &str) -> Option<u64> {
     let trimmed = input.trim();
@@ -76,6 +91,11 @@ pub struct ScrawlBundle {
     pub video_offset_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<String>,
+    /// Where the capture's audio stops on the bundle's clock (ms), when Hex had to stop
+    /// keeping it (a streamed capture's disk guard, or a failed write). Everything after
+    /// it is silence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_stopped_at_ms: Option<u64>,
     /// Where the pictures came from when it isn't this Mac's screen (`"iphone"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -621,6 +641,16 @@ mod tests {
     }
 
     #[test]
+    fn lengths_read_as_clocks_at_an_hour() {
+        assert_eq!(format_length(4_000), "0:04");
+        assert_eq!(format_length(754_000), "12:34");
+        assert_eq!(format_length(3_599_000), "59:59");
+        assert_eq!(format_length(3_600_000), "1:00:00");
+        assert_eq!(format_length(28_800_000), "8:00:00");
+        assert_eq!(format_length(45_296_000), "12:34:56");
+    }
+
+    #[test]
     fn screen_spans_close_at_the_next_change_and_at_the_end() {
         let some = |s: &str| Some(s.to_owned());
         let changes = [
@@ -662,6 +692,7 @@ mod tests {
         assert_eq!(bundle.device.as_ref().unwrap().app_short_version, None);
         let json = serde_json::to_value(&bundle).unwrap();
         assert!(json.get("context").is_none() && json.get("screens").is_none());
+        assert!(json.get("audioStoppedAtMs").is_none());
 
         bundle.screens = vec![span(0, 5_000, "Home"), span(5_000, 20_000, "Settings")];
         bundle.context.insert("server".into(), "studio".into());

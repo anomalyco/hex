@@ -662,6 +662,7 @@ mod tests {
                 stage,
                 words: Some(12),
                 gaps: Some(0),
+                audio_stopped_at_ms: None,
                 missing_transcript: None,
                 error: None,
                 copy_error: None,
