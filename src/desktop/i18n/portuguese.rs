@@ -157,7 +157,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Labs", "Labs"),
     ("Tap or hold", "Tocar ou segurar"),
     ("Double-tap on a lone modifier", "Duplo toque em um modificador sozinho"),
-    ("Let Double-tap mode use only modifiers, such as Option or Globe: tap twice to dictate", "Permite que o modo Duplo toque use só modificadores, como Option ou Globe: toque duas vezes para ditar"),
+    ("Let Double-tap mode use a modifier alone, like Option or Globe: tap twice to dictate", "Permite que o modo Tocar duas vezes use um modificador sozinho, como Option ou Globe: toque duas vezes para ditar"),
     ("Skip long pauses", "Pular pausas longas"),
     ("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner", "Encurta pausas longas antes de um ditado inteiro ir para o modelo, para que computadores lentos colem mais cedo"),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "No modo alternar, segure o atalho para ditar até soltar; um toque curto continua iniciando e parando"),

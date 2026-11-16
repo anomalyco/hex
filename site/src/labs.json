@@ -355,7 +355,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Let Double-tap mode use only modifiers, such as Option or Globe: tap twice to dictate",
+      "summary": "Let Double-tap mode use a modifier alone, like Option or Globe: tap twice to dictate",
       "title": "Double-tap on a lone modifier"
     },
     {

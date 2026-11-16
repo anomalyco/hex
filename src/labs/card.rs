@@ -177,7 +177,7 @@ impl Feature {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
             }
             Self::DoubleTapModifiers => {
-                "Let Double-tap mode use only modifiers, such as Option or Globe: tap twice to dictate"
+                "Let Double-tap mode use a modifier alone, like Option or Globe: tap twice to dictate"
             }
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
