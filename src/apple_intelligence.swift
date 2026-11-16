@@ -227,8 +227,17 @@ public func hexAppleIntelligenceAvailability() -> Int32 {
 @_cdecl("hex_apple_intelligence_context_size")
 public func hexAppleIntelligenceContextSize() -> Int {
     #if canImport(FoundationModels)
+    // `contextSize` arrived with the macOS 26.4 SDK (Swift 6.3). An older
+    // Xcode then builds without it and reports no context size, and the Rust
+    // excerpt budget falls back to the on-device model's documented
+    // 4,096-token window (`meeting/notes.rs`'s `FALLBACK_CONTEXT_TOKENS`), so
+    // notes still work.
+    #if compiler(>=6.3)
     guard #available(macOS 26.0, *) else { return 0 }
     return SystemLanguageModel.default.contextSize
+    #else
+    return 0
+    #endif
     #else
     return 0
     #endif

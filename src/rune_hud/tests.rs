@@ -41,6 +41,54 @@ fn dot_scope_window_fits_the_largest_plate() {
     assert!(largest("dot-height") / 2.0 + 19.0 <= WINDOW.1 / 2.0);
 }
 
+/// A pose at `reveal`, the rest settled.
+fn revealed(reveal: f32) -> dot_scope::Pose {
+    dot_scope::Pose {
+        width: 112.0,
+        height: 26.0,
+        opacity: 1.0,
+        scale: 1.0,
+        softness: 0.0,
+        cool: 0.0,
+        fail: 0.0,
+        glow: 0.0,
+        grid: 1.0,
+        live: 0.0,
+        reveal,
+        level: 0.0,
+        clock: 0.0,
+        done: 0.0,
+    }
+}
+
+/// Labs' ears grow from the housing's height to the menu bar's as they open,
+/// so folded back (a window shown for the frame before it grows, or ordered
+/// out after it folded) they are the notch itself, with no black lip under
+/// the camera, and open they end on the bar's bottom edge.
+#[test]
+fn the_ears_grow_from_the_housing_to_the_menu_bar() {
+    let ears = Island {
+        notch: [185.0, 32.0],
+        bar: 34.0,
+        width: 253.0,
+        top: -64.0,
+        ears: true,
+    };
+    let shape = |reveal| island_shape(ears, &revealed(reveal));
+    assert_eq!(shape(0.0)[1], 32.0, "folded, it is the housing");
+    assert_eq!(shape(0.0)[3], NOTCH_RADIUS, "with the notch's corners");
+    assert_eq!(shape(1.0)[1], 34.0, "open, it reaches the menu bar's edge");
+    assert_eq!(shape(1.0)[3], EARS_RADIUS);
+    assert_eq!(shape(1.4)[1], 34.0, "a bounce past full stops there");
+    assert!(
+        (shape(0.5)[1] - 33.0).abs() < 1e-6,
+        "and halfway is halfway"
+    );
+    // Without a menu bar to open to, it keeps the housing's height.
+    let unmeasured = Island { bar: 0.0, ..ears };
+    assert_eq!(island_shape(unmeasured, &revealed(1.0))[1], 32.0);
+}
+
 /// The macOS HUD's window, which the captures use on every OS so they line
 /// up with the Metal reference frames.
 const CAPTURE_DOT_WINDOW: (f32, f32) = (320.0, 128.0);
@@ -76,7 +124,8 @@ fn schedule(model: &mut IndicatorModel, start: Instant) -> Vec<DotFrame> {
         .collect()
 }
 
-/// A 1512 × 982 point 14-inch MacBook Pro: a 32 pt notch 185 pt wide.
+/// A 1512 × 982 point 14-inch MacBook Pro: a 32 pt housing under a 34 pt
+/// menu bar, 185 pt wide.
 fn macbook() -> crate::rune_hud::hud_placement::Screen {
     crate::rune_hud::hud_placement::Screen {
         frame: crate::rune_hud::hud_placement::Rect {
@@ -89,7 +138,7 @@ fn macbook() -> crate::rune_hud::hud_placement::Screen {
             x: 0.0,
             y: 0.0,
             width: 1512.0,
-            height: 950.0,
+            height: 948.0,
         },
         safe_top: 32.0,
         aux_left: 663.5,
