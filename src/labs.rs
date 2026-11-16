@@ -574,6 +574,11 @@ static YOLO_MODE_APPS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::
 /// written by [`state`] and [`apply`].
 static CLEAN_UP: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Microphone key alone's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static MICROPHONE_KEY: AtomicBool = AtomicBool::new(false);
+
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
 /// and empty while the lab is off.
@@ -611,6 +616,7 @@ fn state() -> u64 {
                 CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
+                MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
             }
@@ -723,6 +729,14 @@ fn clean_up_enabled(settings: &LabsSettings) -> bool {
         && Feature::CleanUpWithAppleIntelligence.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Microphone key alone in this build,
+/// before its managed lock; the state word has no bit for it.
+fn microphone_key_enabled(settings: &LabsSettings) -> bool {
+    settings.microphone_key
+        && Feature::MicrophoneKeyAlone.shipped()
+        && Feature::MicrophoneKeyAlone.managed().is_none()
+}
+
 /// Whether `settings` turn on Labs › Browser access to the local API in this
 /// build, before its managed lock; the state word has no bit for it.
 fn api_browser_access_enabled(settings: &LabsSettings) -> bool {
@@ -789,6 +803,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
+    MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     // Labs › Pause from menu bar: turning it off resumes at once, without

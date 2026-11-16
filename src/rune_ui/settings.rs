@@ -394,6 +394,12 @@ pub(super) fn validate(
     {
         return Err(tr("Unsupported key"));
     }
+    // macOS reads the microphone key at Hex's own session tap, before the
+    // annotated-session tap Screenshots' keys go through, so a shot never sees
+    // it however the labs are set.
+    if cfg!(target_os = "macos") && binding.uses_microphone_key() && is_screenshot(target) {
+        return Err(tr("Unsupported key"));
+    }
     // A navigation key alone needs Labs › Special keys alone (Windows).
     if cfg!(target_os = "windows")
         && binding.is_lone_navigation_key()
@@ -406,6 +412,21 @@ pub(super) fn validate(
         return Err(tr("Already in use"));
     }
     Ok(())
+}
+
+/// Whether `target` is one of the Screenshots keys, which read the keyboard at
+/// the annotated session, after Hex's microphone-key tap has taken the press.
+#[cfg(target_os = "macos")]
+fn is_screenshot(target: ShortcutTarget) -> bool {
+    matches!(
+        target,
+        ShortcutTarget::Screenshot | ShortcutTarget::ScreenshotRecord
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_screenshot(_: ShortcutTarget) -> bool {
+    false
 }
 
 /// Whether `binding` overlaps a shortcut `target` must not share: the other

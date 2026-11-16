@@ -1,7 +1,8 @@
 use super::*;
 use crate::app_settings::{
     COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, LEFT_COMMAND_MASK, LEFT_CONTROL_MASK,
-    LEFT_OPTION_MASK, MICROPHONE_KEY_CODE, OPTION_KEY_MASK, RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
+    LEFT_OPTION_MASK, MICROPHONE_KEY_CODE, MicrophoneKey, MicrophoneKeyTap, OPTION_KEY_MASK,
+    RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
 };
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -23,6 +24,8 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
+        dictation_key_tap: AtomicPtr::new(ptr::null_mut()),
+        microphone_key: Mutex::new(crate::app_settings::MicrophoneKey::default()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
     };
     (context, receiver)
@@ -443,6 +446,54 @@ fn the_microphone_key_matches_with_the_fn_flag_macos_adds() {
         key_code: Some(49),
     };
     assert!(!space.matches_key_press(49, FUNCTION_KEY_MASK));
+}
+
+/// Issue 181: the session tap takes a bound microphone key's press and its
+/// release, and those feed the same dictation state machine every other key
+/// does.
+#[test]
+fn the_microphone_key_taken_at_the_session_tap_starts_and_finishes_a_dictation() {
+    const OBSERVED: u64 = 0x800100;
+    let mut microphone_key = MicrophoneKey::default();
+    let mut hotkey = DictationHotkey::with_binding(
+        false,
+        capture_time(),
+        false,
+        RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::default(),
+            key_code: Some(MICROPHONE_KEY_CODE),
+        },
+    );
+    // Lab on, bound, not recording.
+    let press = microphone_key.take(MICROPHONE_KEY_CODE, true, true, false, false, true);
+    assert_eq!(press, MicrophoneKeyTap::Listener { down: true });
+    let now = capture_time();
+    assert_eq!(
+        hotkey.process(
+            InputEvent::Key {
+                code: MICROPHONE_KEY_CODE,
+                down: true,
+                flags: OBSERVED,
+            },
+            now + Duration::from_millis(10),
+        ),
+        Some(HotkeyAction::Start)
+    );
+    // The release is the tap's even though nothing is bound by the time it
+    // arrives.
+    let release = microphone_key.take(MICROPHONE_KEY_CODE, false, true, false, false, false);
+    assert_eq!(release, MicrophoneKeyTap::Listener { down: false });
+    assert_eq!(
+        hotkey.process(
+            InputEvent::Key {
+                code: MICROPHONE_KEY_CODE,
+                down: false,
+                flags: OBSERVED,
+            },
+            now + Duration::from_secs(1),
+        ),
+        Some(HotkeyAction::Finish)
+    );
 }
 
 #[test]
@@ -3604,6 +3655,221 @@ fn marked_chord_breaker_never_reaches_the_shortcut_machines_or_the_app() {
             assert_eq!(observed, 3, "an unmarked key is the user's chord");
         }
     }
+}
+
+/// Labs › Microphone key alone: these drive the session tap's callback with
+/// real CGEvents, like the annotated tap's own callback tests above. The labs
+/// gate, the process-wide hotkeys, and the recorder feed are global, so the
+/// tests share one lock and put them back.
+static MICROPHONE_KEY_TESTS: Mutex<()> = Mutex::new(());
+
+/// The microphone key's flags as observed: SecondaryFn and NonCoalesced.
+const MICROPHONE_KEY_FLAGS: u64 = 0x800100;
+
+struct MicrophoneKeyTest {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl MicrophoneKeyTest {
+    /// Turns Labs › Microphone key alone on (or off) and clears everything the
+    /// callback reads.
+    fn new(lab: bool) -> Self {
+        let lock = MICROPHONE_KEY_TESTS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        crate::labs::apply(&crate::app_settings::LabsSettings {
+            microphone_key: lab,
+            ..Default::default()
+        });
+        crate::app_settings::install_test_hotkeys(RuntimeHotkeys::default());
+        crate::app_settings::set_hotkey_capture_active(false);
+        crate::shortcut_pause::reconcile(false);
+        crate::suppression::dictation_key::clear_captured();
+        Self { _lock: lock }
+    }
+
+    /// Binds the microphone key to Dictation alone, like the recorder saves.
+    fn bind_dictation(&self) {
+        crate::app_settings::install_test_hotkeys(RuntimeHotkeys {
+            dictation: RuntimeHotkey {
+                modifiers: crate::app_settings::HotkeyModifiers::default(),
+                key_code: Some(MICROPHONE_KEY_CODE),
+            },
+            ..RuntimeHotkeys::default()
+        });
+    }
+}
+
+impl Drop for MicrophoneKeyTest {
+    fn drop(&mut self) {
+        crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        crate::app_settings::install_test_hotkeys(RuntimeHotkeys::default());
+        crate::app_settings::set_hotkey_capture_active(false);
+        crate::shortcut_pause::reconcile(false);
+        crate::suppression::dictation_key::clear_captured();
+    }
+}
+
+/// One microphone-key event as macOS sends it, released by the caller.
+fn microphone_key_event(event_type: u32) -> EventRef {
+    // SAFETY: a locally created event, released by the caller.
+    unsafe {
+        let event = CGEventCreate(ptr::null_mut());
+        assert!(!event.is_null());
+        CGEventSetType(event, event_type);
+        CGEventSetFlags(event, MICROPHONE_KEY_FLAGS);
+        CGEventSetTimestamp(event, 0);
+        CGEventSetIntegerValueField(
+            event,
+            KEYBOARD_EVENT_KEYCODE,
+            i64::from(MICROPHONE_KEY_CODE),
+        );
+        event
+    }
+}
+
+fn run_dictation_callback(
+    context: &mut EventTapContext,
+    event_type: u32,
+    event: EventRef,
+) -> EventRef {
+    // SAFETY: the context and event live through the call.
+    unsafe {
+        dictation_key::dictation_key_callback(
+            ptr::null_mut(),
+            event_type,
+            event,
+            (context as *mut EventTapContext).cast(),
+        )
+    }
+}
+
+/// Whether the tap consumed a fresh microphone-key event of this type.
+fn dictation_press(context: &mut EventTapContext, event_type: u32) -> bool {
+    let event = microphone_key_event(event_type);
+    let consumed = run_dictation_callback(context, event_type, event).is_null();
+    // SAFETY: the event was created here and is released once.
+    unsafe { CFRelease(event.cast_const()) };
+    consumed
+}
+
+fn dictation_events(receiver: &mpsc::Receiver<ObservedInputEvent>) -> Vec<InputEvent> {
+    receiver.try_iter().map(|observed| observed.event).collect()
+}
+
+/// A bound press is consumed and drives the listener; its release follows it
+/// even after the state changes, so the app never sees half a key.
+#[test]
+fn the_dictation_tap_takes_a_bound_microphone_key_and_its_release() {
+    let test = MicrophoneKeyTest::new(true);
+    test.bind_dictation();
+    let (mut context, receiver) = test_tap_context(false);
+    assert!(dictation_press(&mut context, EVENT_KEY_DOWN));
+    // The binding is gone by the release, and the press this tap took still
+    // owns it.
+    crate::app_settings::install_test_hotkeys(RuntimeHotkeys::default());
+    assert!(dictation_press(&mut context, EVENT_KEY_UP));
+    let events = dictation_events(&receiver);
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events[0],
+        InputEvent::Key {
+            code: MICROPHONE_KEY_CODE,
+            down: true,
+            flags: MICROPHONE_KEY_FLAGS,
+        }
+    ));
+    assert!(matches!(
+        events[1],
+        InputEvent::Key {
+            code: MICROPHONE_KEY_CODE,
+            down: false,
+            ..
+        }
+    ));
+}
+
+/// With the lab on but nothing bound, macOS keeps the key: both events pass.
+#[test]
+fn the_dictation_tap_passes_an_unbound_microphone_key_through() {
+    let _test = MicrophoneKeyTest::new(true);
+    let (mut context, receiver) = test_tap_context(false);
+    assert!(!dictation_press(&mut context, EVENT_KEY_DOWN));
+    assert!(!dictation_press(&mut context, EVENT_KEY_UP));
+    assert!(dictation_events(&receiver).is_empty());
+}
+
+/// Labs › Pause from menu bar suspends every shortcut, microphone key too.
+#[test]
+fn the_dictation_tap_passes_a_paused_microphone_key_through() {
+    let test = MicrophoneKeyTest::new(true);
+    test.bind_dictation();
+    crate::shortcut_pause::toggle();
+    assert!(crate::shortcut_pause::suspended());
+    let (mut context, receiver) = test_tap_context(false);
+    assert!(!dictation_press(&mut context, EVENT_KEY_DOWN));
+    assert!(!dictation_press(&mut context, EVENT_KEY_UP));
+    assert!(dictation_events(&receiver).is_empty());
+}
+
+/// While the window records a shortcut, the press goes to the recorder and
+/// the listener never sees it; the release is consumed and queued nothing.
+#[test]
+fn the_dictation_tap_queues_a_recording_press_for_the_recorder() {
+    let test = MicrophoneKeyTest::new(true);
+    // Recording takes the key before the binding it is replacing.
+    test.bind_dictation();
+    crate::app_settings::set_hotkey_capture_active(true);
+    let (mut context, receiver) = test_tap_context(false);
+    assert!(dictation_press(&mut context, EVENT_KEY_DOWN));
+    assert!(dictation_press(&mut context, EVENT_KEY_UP));
+    assert!(dictation_events(&receiver).is_empty());
+    let captured = crate::suppression::dictation_key::take_captured();
+    assert_eq!(captured.len(), 1, "one press, no release");
+    assert_eq!(captured[0].code, MICROPHONE_KEY_CODE);
+    assert_eq!(captured[0].flags, MICROPHONE_KEY_FLAGS);
+    assert!(!captured[0].repeat);
+}
+
+/// Hex's own synthetic events are not the user's key, even when it is bound.
+#[test]
+fn the_dictation_tap_passes_hexs_own_synthetic_microphone_key_through() {
+    let test = MicrophoneKeyTest::new(true);
+    test.bind_dictation();
+    let (mut context, receiver) = test_tap_context(false);
+    let event = microphone_key_event(EVENT_KEY_DOWN);
+    // SAFETY: the event was created here and is released once.
+    unsafe {
+        CGEventSetIntegerValueField(
+            event,
+            EVENT_SOURCE_USER_DATA,
+            crate::keyboard::SYNTHETIC_EVENT_MARKER,
+        );
+    }
+    let consumed = run_dictation_callback(&mut context, EVENT_KEY_DOWN, event);
+    // SAFETY: as above.
+    unsafe { CFRelease(event.cast_const()) };
+    assert!(!consumed.is_null());
+    assert!(dictation_events(&receiver).is_empty());
+}
+
+/// macOS can disable the tap at any moment; the pseudo event has no event to
+/// read, and a press whose release may have been missed is forgotten.
+#[test]
+fn the_dictation_tap_recovers_from_a_disable_and_forgets_its_press() {
+    let test = MicrophoneKeyTest::new(true);
+    test.bind_dictation();
+    let (mut context, receiver) = test_tap_context(false);
+    assert!(dictation_press(&mut context, EVENT_KEY_DOWN));
+    let returned =
+        run_dictation_callback(&mut context, EVENT_TAP_DISABLED_BY_TIMEOUT, ptr::null_mut());
+    assert!(returned.is_null());
+    // The press is forgotten, so its release passes to the app.
+    assert!(!dictation_press(&mut context, EVENT_KEY_UP));
+    assert!(matches!(
+        dictation_events(&receiver).last(),
+        Some(InputEvent::TapDisabled)
+    ));
 }
 
 #[test]

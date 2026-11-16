@@ -1321,6 +1321,15 @@ mod tests {
             format_hotkey(&change.settings.dictation_hotkey),
             "option+mic"
         );
+        // Screenshots never take it: their keys are read after Hex's session
+        // tap has taken the press.
+        let error = apply(&on, "screenshots.hotkey", "microphone", &rules()).unwrap_err();
+        assert_eq!(error.code, "invalid-value");
+        assert!(
+            error.message.contains("mic key") && error.message.contains("screenshot"),
+            "{}",
+            error.message
+        );
         let off = apply(&change.settings, "labs.microphone_key", "off", &rules()).unwrap();
         assert_eq!(off.settings.dictation_hotkey, HotkeyBinding::default());
     }

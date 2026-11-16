@@ -11,8 +11,9 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::ptr::NonNull;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
@@ -22,6 +23,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
+use super::hotkey_keys::hotkey_key;
 use super::meetings::Meeting;
 use super::meetings_host::MeetingFeed;
 use super::platform::{
@@ -158,7 +160,18 @@ impl Backend {
     }
 
     pub(super) fn take_chord(&mut self) -> Option<Chord> {
-        let chord = self.chords.as_ref()?.results.try_recv().ok();
+        // Presses the listener's session tap took for the recorder: macOS
+        // never gave them to the window, so the monitor below cannot see them.
+        let captured = crate::suppression::dictation_key::take_captured();
+        let watch = self.chords.as_mut()?;
+        for key in captured {
+            if let Some(chord) = recorded_microphone_key(&mut watch.capture.borrow_mut(), key) {
+                // The same channel the monitor's chords arrive on, so they
+                // read in the order they were recorded.
+                let _ = watch.sender.send(chord);
+            }
+        }
+        let chord = watch.results.try_recv().ok();
         if matches!(chord, Some(Chord::Cancelled)) {
             self.chords = None;
         }
@@ -169,18 +182,31 @@ impl Backend {
 /// Records chords from the window's keyboard events while Settings listens,
 /// with the listener's event tap suspended. Removing the monitor ends it.
 struct ChordWatch {
+    /// The monitor's chords, and the listener's microphone-key presses once
+    /// they are read.
     results: Receiver<Chord>,
+    sender: Sender<Chord>,
+    /// The same recorder the monitor feeds, for presses the listener's session
+    /// tap took instead (Labs › Microphone key alone).
+    capture: Rc<RefCell<ChordCapture>>,
+    /// This watch's registration with the session tap's recorder feed.
+    watching: u64,
     monitor: Retained<AnyObject>,
 }
 
 impl ChordWatch {
     fn start(wake: Arc<dyn Fn() + Send + Sync>) -> Result<Self> {
         crate::app_settings::set_hotkey_capture_active(true);
+        // A press the listener took for an earlier watch is not this one's.
+        crate::suppression::dictation_key::clear_captured();
+        let watching = crate::suppression::dictation_key::watch(wake.clone());
         let (sender, results) = mpsc::channel();
+        let chord_sender = sender.clone();
         // Labs › Sided modifier chords is read once, as recording starts.
-        let capture = RefCell::new(ChordCapture::with_sides(
+        let capture = Rc::new(RefCell::new(ChordCapture::with_sides(
             crate::labs::sided_modifier_chords(),
-        ));
+        )));
+        let events = capture.clone();
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit passes a live event for the handler's duration.
             let event_ref = unsafe { event.as_ref() };
@@ -195,14 +221,14 @@ impl ChordWatch {
                     let characters = event_ref
                         .charactersIgnoringModifiers()
                         .map(|characters| characters.to_string());
-                    capture.borrow_mut().key_down(
+                    events.borrow_mut().key_down(
                         event_ref.keyCode(),
                         event_ref.isARepeat(),
                         characters.as_deref(),
                         flags,
                     )
                 }
-                NSEventType::FlagsChanged => capture.borrow_mut().flags_changed(flags),
+                NSEventType::FlagsChanged => events.borrow_mut().flags_changed(flags),
                 // Mouse buttons record only with Labs › Mouse shortcuts on;
                 // otherwise the click reaches the window as usual.
                 NSEventType::LeftMouseDown
@@ -210,7 +236,7 @@ impl ChordWatch {
                 | NSEventType::OtherMouseDown
                     if crate::labs::mouse_shortcuts() =>
                 {
-                    capture
+                    events
                         .borrow_mut()
                         .mouse_down(event_ref.buttonNumber(), flags)
                 }
@@ -238,8 +264,15 @@ impl ChordWatch {
             )
         };
         match monitor {
-            Some(monitor) => Ok(Self { results, monitor }),
+            Some(monitor) => Ok(Self {
+                results,
+                sender: chord_sender,
+                capture,
+                watching,
+                monitor,
+            }),
             None => {
+                crate::suppression::dictation_key::stop_watching(watching);
                 crate::app_settings::set_hotkey_capture_active(false);
                 Err(eyre!("could not watch the keyboard to record a shortcut"))
             }
@@ -251,8 +284,20 @@ impl Drop for ChordWatch {
     fn drop(&mut self) {
         // SAFETY: the monitor came from addLocalMonitor on this thread.
         unsafe { NSEvent::removeMonitor(&self.monitor) };
+        crate::suppression::dictation_key::stop_watching(self.watching);
+        crate::suppression::dictation_key::clear_captured();
         crate::app_settings::set_hotkey_capture_active(false);
     }
+}
+
+/// The chord a press the listener's session tap took records, through the same
+/// capture the window's own key events use (Labs › Microphone key alone: macOS
+/// never dispatches that key to the window).
+fn recorded_microphone_key(
+    capture: &mut ChordCapture,
+    key: crate::suppression::dictation_key::CapturedMicrophoneKey,
+) -> Option<Chord> {
+    capture.key_down(key.code, key.repeat, None, key.flags)
 }
 
 /// Turns key and modifier events into a chord: a key with its held
@@ -389,142 +434,6 @@ fn is_function_key(label: &str) -> bool {
 /// as it could before (#1138).
 fn is_navigation_key(code: u16) -> bool {
     matches!(code, 115 | 119 | 116 | 121 | 114)
-}
-
-/// The key a virtual key code records, and its label. AppKit gives no
-/// characters for a dead key (`^`, `´`, `` ` ``), so `layout_label` names it
-/// from the active layout instead.
-fn hotkey_key(
-    code: u16,
-    characters: Option<&str>,
-    layout_label: impl FnOnce() -> Option<String>,
-) -> Result<HotkeyKey, &'static str> {
-    let special = match code {
-        49 => Some("Space"),
-        48 => Some("Tab"),
-        36 => Some("Return"),
-        51 => Some(tr("Delete")),
-        126 => Some("Up"),
-        125 => Some("Down"),
-        123 => Some(tr("Left")),
-        124 => Some(tr("Right")),
-        116 => Some("Page Up"),
-        121 => Some("Page Down"),
-        115 => Some("Home"),
-        119 => Some("End"),
-        117 => Some("Forward Delete"),
-        114 => Some("Help"),
-        122 => Some("F1"),
-        120 => Some("F2"),
-        99 => Some("F3"),
-        118 => Some("F4"),
-        96 => Some("F5"),
-        97 => Some("F6"),
-        98 => Some("F7"),
-        100 => Some("F8"),
-        101 => Some("F9"),
-        109 => Some("F10"),
-        103 => Some("F11"),
-        111 => Some("F12"),
-        105 => Some("F13"),
-        107 => Some("F14"),
-        113 => Some("F15"),
-        106 => Some("F16"),
-        64 => Some("F17"),
-        79 => Some("F18"),
-        80 => Some("F19"),
-        90 => Some("F20"),
-        176 => Some("Mic"),
-        _ => None,
-    };
-    if let Some(label) = special {
-        return Ok(HotkeyKey {
-            code,
-            label: label.into(),
-        });
-    }
-    let character = match single_key_character(characters) {
-        Some(character) => Some(character),
-        None => layout_label().and_then(|label| single_key_character(Some(label.as_str()))),
-    };
-    match character {
-        Some(character) => Ok(HotkeyKey {
-            code,
-            label: character.to_uppercase().collect(),
-        }),
-        None => Err(tr("Unsupported key")),
-    }
-}
-
-/// The one visible character `text` holds, if it is exactly one non-control
-/// character.
-fn single_key_character(text: Option<&str>) -> Option<char> {
-    let mut characters = text.unwrap_or_default().chars();
-    match (characters.next(), characters.next()) {
-        (Some(character), None) if !character.is_control() => Some(character),
-        _ => None,
-    }
-}
-
-/// The key a typed name records, with the label recording it would show.
-pub(super) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
-    let normalized: String = name
-        .chars()
-        .filter(|character| !matches!(character, ' ' | '-' | '_'))
-        .flat_map(char::to_lowercase)
-        .collect();
-    if let Some(number) = normalized.strip_prefix("mouse") {
-        return number
-            .parse::<u16>()
-            .ok()
-            .and_then(|number| number.checked_sub(1))
-            .and_then(HotkeyKey::mouse)
-            .ok_or(tr("Unsupported key"));
-    }
-    let code = match normalized.as_str() {
-        "space" => Some(49),
-        "tab" => Some(48),
-        "return" | "enter" => Some(36),
-        "delete" | "backspace" => Some(51),
-        "up" => Some(126),
-        "down" => Some(125),
-        "left" => Some(123),
-        "right" => Some(124),
-        "pageup" => Some(116),
-        "pagedown" => Some(121),
-        "home" => Some(115),
-        "end" => Some(119),
-        "forwarddelete" => Some(117),
-        "help" => Some(114),
-        "mic" | "microphone" => Some(176),
-        function => function
-            .strip_prefix('f')
-            .and_then(|number| number.parse::<u8>().ok())
-            .and_then(|number| {
-                const CODES: [u16; 20] = [
-                    122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64,
-                    79, 80, 90,
-                ];
-                CODES.get(usize::from(number).checked_sub(1)?).copied()
-            }),
-    };
-    if let Some(code) = code {
-        return hotkey_key(code, None, || None);
-    }
-    let mut characters = name.chars();
-    match (characters.next(), characters.next()) {
-        (Some(character), None) => {
-            let character = character.to_lowercase().next().unwrap_or(character);
-            // A dead key (`^`, `´`, `` ` ``) names itself on the active
-            // layout even though it types nothing until the next key.
-            let code = crate::keyboard::key_code_for(character)
-                .ok()
-                .or_else(|| crate::keyboard::key_code_for_base_label(character))
-                .ok_or(tr("Unsupported key"))?;
-            hotkey_key(code, Some(&character.to_string()), || None)
-        }
-        _ => Err(tr("Unsupported key")),
-    }
 }
 
 /// macOS accepts every binding the capture can produce, except that Paste
@@ -1487,6 +1396,7 @@ fn notes_availability() -> NotesAvailability {
 
 #[cfg(test)]
 mod tests {
+    use super::super::hotkey_keys::hotkey_key_named;
     use super::*;
     use crate::app_settings::{ISO_SECTION_KEY_CODE, MICROPHONE_KEY_CODE, ModifierSide};
 
@@ -1811,6 +1721,47 @@ mod tests {
         );
     }
 
+    /// The microphone key reaches the recorder through the listener's session
+    /// tap: macOS takes the key before the window's own key events, so
+    /// `recorded_microphone_key` is the whole capture for it, and it records
+    /// the same chord the monitor would.
+    #[test]
+    fn the_microphone_key_records_from_the_listener_tap() {
+        let mut capture = ChordCapture::default();
+        let press = crate::suppression::dictation_key::CapturedMicrophoneKey {
+            code: MICROPHONE_KEY_CODE,
+            repeat: false,
+            flags: FUNCTION,
+        };
+        let binding = captured(recorded_microphone_key(&mut capture, press)).unwrap();
+        assert!(binding.modifiers.is_empty());
+        assert_eq!(
+            binding.key,
+            Some(HotkeyKey {
+                code: MICROPHONE_KEY_CODE,
+                label: "Mic".into()
+            })
+        );
+        assert!(
+            recorded_microphone_key(
+                &mut ChordCapture::default(),
+                crate::suppression::dictation_key::CapturedMicrophoneKey {
+                    repeat: true,
+                    ..press
+                }
+            )
+            .is_none(),
+            "a held key's repeat records nothing"
+        );
+        // One press records one chord, and its release records nothing more.
+        let mut capture = ChordCapture::default();
+        assert!(recorded_microphone_key(&mut capture, press).is_some());
+        assert!(
+            capture.flags_changed(0).is_none(),
+            "the release is not a modifier-only chord"
+        );
+    }
+
     /// The recorder takes the microphone (dictation) key alone, as it takes
     /// the section key; Labs › Microphone key alone is enforced by
     /// `settings::validate` before saving, not by the recorder.
@@ -1874,10 +1825,6 @@ mod tests {
             captured(capture.key_down(0, false, Some("a"), 0)),
             Err(tr("Add a modifier"))
         );
-        assert_eq!(single_key_character(Some("^")), Some('^'));
-        assert_eq!(single_key_character(Some("ab")), None);
-        assert_eq!(single_key_character(Some("\u{0}")), None);
-        assert_eq!(single_key_character(None), None);
     }
 
     /// Plain ⌫ and Forward Delete reach the window, which turns an optional

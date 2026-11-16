@@ -56,6 +56,17 @@ pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
 }
 
+/// The microphone (dictation) key in a laptop keyboard's top row may be a
+/// shortcut, alone or with modifiers (macOS; read as the session tap attaches
+/// and by the tap on every press).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn microphone_key() -> bool {
+    // The state word is full: its own atomic, written by `labs::apply`, and
+    // loaded here first in a process that never applied.
+    let _ = state();
+    MICROPHONE_KEY.load(Ordering::Acquire) && Feature::MicrophoneKeyAlone.on_this_os()
+}
+
 /// The mode's OpenCode rewrite is given the text around the cursor as
 /// context, read once as the capture becomes real (macOS; read by the
 /// listener at its hold threshold, its control start, or the released

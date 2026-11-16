@@ -24,6 +24,7 @@ mod hotkeys;
 mod labs;
 mod meeting_folder;
 mod meetings;
+mod microphone_key;
 mod persistence;
 mod screenshots;
 #[cfg(target_os = "linux")]
@@ -42,6 +43,8 @@ pub use hotkeys::*;
 pub use labs::*;
 pub use meeting_folder::default_meeting_output_folder;
 pub use meetings::*;
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub(crate) use microphone_key::{MicrophoneKey, MicrophoneKeyTap};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{
     ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey, screenshot_settings,
@@ -1388,6 +1391,19 @@ pub fn runtime_hotkeys() -> RuntimeHotkeys {
         hotkeys.capture_replay = None;
     }
     hotkeys
+}
+
+/// Tests install the shortcuts the listener matches, without a settings file.
+#[cfg(test)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn install_test_hotkeys(hotkeys: RuntimeHotkeys) {
+    *HOTKEYS
+        .get_or_init(Default::default)
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = AppliedHotkeys {
+        runtime: hotkeys,
+        settings: None,
+    };
 }
 
 pub fn dictation_hotkey() -> RuntimeHotkey {
