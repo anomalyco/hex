@@ -37,7 +37,11 @@ pub(super) fn disarm_call_stop_unless_watching(
         && !watching_call_switch(Some(active), lab_on)
         && withdraw_stop(&mut active.call_stop, &active.auto_stop, events)
     {
-        detector.forget_switched_call();
+        // A recording already stopping (Stop, or the worker transcribing)
+        // keeps the call its page named: the next recording starts it.
+        if !active.stop.load(Ordering::Relaxed) {
+            detector.forget_switched_call();
+        }
         tracing::info!("the page is no longer watched; its pending stop is dropped");
     }
 }

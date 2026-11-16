@@ -224,6 +224,12 @@ pub(crate) fn controller_loop(
         pending_finals.poll(enabled, recording.is_some(), &events);
         expiry.poll();
 
+        // Meetings off: detection never runs, so a remembered switch must not
+        // outlive the setting and start a call when it comes back.
+        if recording.is_none() && !enabled {
+            detector.forget_switched_call();
+        }
+
         if recording.is_none() && enabled {
             let choices = crate::app_settings::meeting_provider_choices();
             match detect_meeting(
@@ -237,10 +243,17 @@ pub(crate) fn controller_loop(
                     continue;
                 }
                 Ok(Some(Detection::Offer(candidate))) => {
+                    // Offers record by hand, which never watches a page: the
+                    // call whose page named this one is not kept for it.
+                    detector.take_switched_from();
                     let _ = events.send(ControllerEvent::Offer(candidate));
                 }
                 Ok(Some(Detection::Record(candidate))) => {
-                    let start = reminders.start_for(&candidate);
+                    let mut start = reminders.start_for(&candidate);
+                    // Detected while the page still named the stopped call:
+                    // this recording keeps that code, so the page naming it
+                    // never ends this one (#1896).
+                    start.switched_from = detector.take_switched_from();
                     start_recording(&mut recording, &mut reminders, start, true, &events);
                 }
                 Ok(None) => {}
@@ -523,6 +536,10 @@ struct Start {
     /// that browser's page for another call under Stop when the call
     /// ends. Calendar and manual recordings have none.
     call: Option<String>,
+    /// The code of the call whose recording stopped while its page kept
+    /// naming it, when this recording was detected in its place: it is kept,
+    /// so the page still naming it never ends this one.
+    switched_from: Option<String>,
 }
 
 impl Start {
@@ -532,6 +549,7 @@ impl Start {
             title: candidate.title.clone(),
             app_label: candidate.source.label().into(),
             call: candidate.call.clone(),
+            switched_from: None,
         }
     }
 }
@@ -554,6 +572,7 @@ fn calendar_start(meeting: &CalendarMeeting) -> Start {
             .map_or("Meeting", |provider| provider.label())
             .into(),
         call: None,
+        switched_from: None,
     }
 }
 
@@ -905,7 +924,7 @@ fn start_recording(
     // Stop can send six updates before the controller next drains them.
     let (update_sender, updates) = mpsc::sync_channel(16);
     let application = start.meeting.application.clone();
-    let call_switch = CallSwitch::new(start.call);
+    let call_switch = CallSwitch::with_kept(start.call, start.switched_from);
     let meeting_start = start.meeting;
     let worker =
         thread::spawn(move || meeting::record(meeting_start, &worker_stop, Some(update_sender)));
@@ -1803,6 +1822,72 @@ mod tests {
     }
 
     #[test]
+    fn the_page_returning_during_the_grace_forgets_the_switched_call() {
+        use crate::meeting::detection::CALL_CHANGED_AFTER;
+        let (events, _received) = mpsc::sync_channel(4);
+        let mut detector = MeetingDetector::default();
+        detector.call_switched(Some("abc-defg-hij".into()), meet_candidate());
+        let mut active = active_recording(
+            Some("company.thebrowser.Browser"),
+            true,
+            Some("abc-defg-hij"),
+        );
+        // The page named the next call long enough to arm the stop, then came
+        // back to the recorded one before the grace ran out.
+        let base = Instant::now();
+        assert!(!active.call_switch.observe_at(Some("xyz-wxyz-xyz"), base));
+        assert!(
+            active
+                .call_switch
+                .observe_at(Some("xyz-wxyz-xyz"), base + CALL_CHANGED_AFTER)
+        );
+        active.call_stop.arm();
+        assert!(!active.call_switch.observe_at(
+            Some("abc-defg-hij"),
+            base + CALL_CHANGED_AFTER + Duration::from_secs(1)
+        ));
+        withdraw_call_switch_stop(
+            &active.call_switch,
+            &mut active.call_stop,
+            &active.auto_stop,
+            &mut detector,
+            &events,
+        );
+        assert!(!active.call_stop.disarm(), "the stop was left pending");
+        assert!(
+            detector.switched_call().is_none(),
+            "the withdrawn stop kept the call its page named"
+        );
+    }
+
+    #[test]
+    fn a_hand_stop_keeps_the_switched_call() {
+        let (events, _received) = mpsc::sync_channel(4);
+        let mut detector = MeetingDetector::default();
+        detector.call_switched(Some("abc-defg-hij".into()), meet_candidate());
+        let mut active = active_recording(
+            Some("company.thebrowser.Browser"),
+            true,
+            Some("abc-defg-hij"),
+        );
+        active.call_stop.arm();
+        // Stop pressed during the grace: the recording is already stopping,
+        // so its armed page stop goes without forgetting the call its page
+        // named, and the next recording starts that call.
+        active.stop.store(true, Ordering::Relaxed);
+        let mut recording = Some(active);
+        disarm_call_stop_unless_watching(&mut recording, false, &mut detector, &events);
+        assert!(
+            !recording.as_mut().unwrap().call_stop.disarm(),
+            "the armed stop was kept"
+        );
+        assert!(
+            detector.switched_call().is_some(),
+            "the hand stop forgot the call its page named"
+        );
+    }
+
+    #[test]
     fn the_page_naming_the_recorded_call_again_withdraws_a_pending_stop() {
         use crate::meeting::detection::CALL_CHANGED_AFTER;
         let (events, received) = mpsc::sync_channel(4);
@@ -1976,6 +2061,18 @@ mod tests {
             window_title: Some("Standup".into()),
             ..ContextSnapshot::default()
         }
+    }
+
+    /// A Google Meet call's page in the test browser, for the call-switch
+    /// checks.
+    fn meet_candidate() -> MeetingCandidate {
+        let tab = ContextSnapshot {
+            application: Some("Brave Browser".into()),
+            browser_url: Some(url::Url::parse("https://meet.google.com/xyz-wxyz-xyz").unwrap()),
+            window_title: Some("Meet - Standup".into()),
+            ..ContextSnapshot::default()
+        };
+        candidate_from_microphone(&brave(), &tab).unwrap()
     }
 
     fn brave() -> ActiveMicrophoneApplication {

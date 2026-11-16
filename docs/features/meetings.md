@@ -364,11 +364,16 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │   └── While that recording is an automatic one with Stop when the
      │       call ends on, the page is still read every 2 s: another code
      │       showing for 4 s ends the recording's call (see Record). The code
-     │       the page named is remembered, because the browser never left the
-     │       microphone: reads that still name the ended call or none cannot
-     │       snooze it, so its call starts once the recording finishes, until
-     │       the page names a call of its own, the call app leaves, the switch
-     │       stop is withdrawn, or Keep recording is pressed
+     │       the page named is remembered while the browser stays on the
+     │       microphone: a read that still names the ended call, or none, is
+     │       taken as the new call, so going back to the old call in that
+     │       window is recorded under the new call's name. The new recording
+     │       keeps the ended code, so its page naming it never ends it. The
+     │       memory clears on a detection, a read naming another call, the
+     │       call app leaving the microphone, Keep recording, the page
+     │       returning to the recorded call during the 30 s grace (a hand
+     │       stop keeps it), away while Meetings is off, or after 2 minutes
+     │       without a detection
      └── Stopped by hand, or on its own after its call ended -> the snooze
          ends once the call app has been off the microphone for 3 s (seen
          while transcribing too), so the next call in the same app is offered
@@ -507,6 +512,9 @@ answer alone, never the remembered page, so one glimpse of another call cannot
 be replayed. The call it names is kept when the recording stops: the browser
 never left the microphone, so later reads that still name the ended call or
 none cannot snooze it, and Hex starts the call the page named before the stop.
+A read still naming the ended call is taken as that new call (going back to
+the old call in that window is recorded under the new call's name), and the
+new recording keeps the ended code, so its page naming it never ends it.
 When a browser's page is found for a run already
 under way (the first pass had no answer yet), the run keeps counting, now
 toward the known service's 2 s. When no answer names a page, the last page a browser showed while
@@ -560,6 +568,12 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_call_switched_to_before_the_stop_is_detected_while_the_page_still_names_the_ended_one`,
 `a_call_switched_to_before_the_stop_is_detected_from_a_page_that_names_no_call`,
 `forgetting_a_switched_call_snoozes_the_ended_calls_page_again`,
+`a_read_naming_a_third_call_clears_the_switched_call_and_offers_it`,
+`the_snooze_ending_clears_the_switched_call`,
+`a_switched_call_is_forgotten_after_two_minutes_without_a_detection`,
+`a_recording_started_for_a_switched_call_keeps_the_ended_code`,
+`the_page_returning_during_the_grace_forgets_the_switched_call`,
+`a_hand_stop_keeps_the_switched_call`,
 `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
 `keep_recording_disarms_the_call_switch_stop_too`,
 `keep_recording_keeps_the_code_that_was_counting`,
@@ -933,11 +947,16 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      ├── The next call is detected normally once the recording finishes: the
      │   new code is not snoozed by the old one (#1113)
      ├── The call the page named is remembered when the stop comes: the
-     │   browser never left the microphone, so reads that still name the ended
-     │   call or none cannot snooze it, and that call is started once the
-     │   recording finishes. The page naming a call of its own clears it; so
-     │   do a detection, the call app leaving the microphone, a withdrawn
-     │   stop, and Keep recording
+     │   browser never left the microphone, so a read that still names the
+     │   ended call, or none, is taken as that new call, and it starts once
+     │   the recording finishes. Going back to the old call in that window is
+     │   recorded under the new call's name
+     ├── The new recording keeps the ended code: its page naming it never
+     │   ends it; a third code still does
+     ├── The memory clears on a detection, a read naming another call, the
+     │   call app leaving the microphone, Keep recording, the page returning
+     │   to the recorded call during the grace (a hand stop keeps it), away
+     │   while Meetings is off, and 2 minutes without a detection
      └── Only calls whose page names a code (Google Meet today): a browser
          Hex can't read (no Automation, no web area) names one only from a
          code-only tab title, and a named title names none, so it keeps the
