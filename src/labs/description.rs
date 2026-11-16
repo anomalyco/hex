@@ -16,18 +16,18 @@ impl Feature {
             Self::LiveText => "Show provisional words beside the HUD while dictating",
             Self::FailureNotices => "Show why a dictation failed beside the HUD",
             Self::LiveTyping => {
-                "Show provisional words in the focused text field while dictating on Wayland, then type the final text there"
+                "On Wayland, show your words in the focused text field as you speak and type the final text there"
             }
             Self::LiveChapters => "Break meeting transcripts into chapters while recording",
             Self::VocabularyBiasing => {
-                "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
+                "Help the Parakeet model hear your Vocabulary words; rewriting and search use them anyway"
             }
             Self::ScreenVocabulary => {
-                "Window names and terms become temporary vocabulary. Read locally, never saved. Parakeet needs Vocabulary biasing, and a dictation with terms runs after release instead of from the live stream."
+                "Names in the window you're dictating into help Hex spell them. Never saved. Parakeet needs Vocabulary biasing, and a dictation with terms runs after release instead of from the live stream."
             }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V, for apps that ignore Ctrl+V",
             Self::KeyboardModelSwitching => {
-                "Changing the keyboard language switches the speech model and language"
+                "Changing the keyboard language switches to the speech model you picked for it"
             }
             Self::AppModelSwitching => {
                 "Each dictation mode's speech model and language follow the app in front"
@@ -77,13 +77,13 @@ impl Feature {
                 "Sort the Local transcription picker by size or name and show only models for the saved language"
             }
             Self::SidedChords => {
-                "Record which side each modifier of a shortcut is on, such as Right Command + Right Option"
+                "Tell left and right modifiers apart, so Right Command + Right Option doesn't fire on the left keys"
             }
             Self::TapOrHold => {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
             }
             Self::DoubleTapModifiers => {
-                "Double-tap shortcut mode accepts any shortcut without a key, such as Option, Globe, or ⌃⌥"
+                "Double-tap shortcut mode also accepts a shortcut with no key, such as Option, Globe, or ⌃⌥: tap twice to dictate"
             }
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
@@ -129,7 +129,7 @@ impl Feature {
                 "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
             }
             Self::MicrophoneKeyAlone => {
-                "Use the microphone (dictation) key in a Mac laptop keyboard's top row on its own as a shortcut; while it's bound, Hex takes the key from other apps. If macOS's own Dictation still opens, change macOS's dictation shortcut in System Settings › Keyboard › Dictation."
+                "Use the mic key in F5's spot on a Mac laptop keyboard as a shortcut; once set, Hex takes the key from other apps. If macOS's own Dictation still opens, change macOS's dictation shortcut in System Settings › Keyboard › Dictation."
             }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"

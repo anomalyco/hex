@@ -21,7 +21,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Show provisional words beside the HUD while dictating",
+      "summary": "Show your words beside the Dictation HUD as you speak, before the final text is pasted",
       "title": "Live text"
     },
     {
@@ -34,7 +34,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Show why a dictation failed beside the HUD",
+      "summary": "When a dictation fails, show the reason beside the Dictation HUD",
       "title": "Failure notices"
     },
     {
@@ -45,7 +45,7 @@
       "oses": [
         "linux"
       ],
-      "summary": "Show provisional words in the focused text field while dictating on Wayland, then type the final text there",
+      "summary": "On Wayland, show your words in the text field as you speak and type the final text there",
       "title": "Live typing"
     },
     {
@@ -69,7 +69,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way",
+      "summary": "Help the Parakeet model hear your Vocabulary words. Rewriting and search use them anyway",
       "title": "Vocabulary biasing"
     },
     {
@@ -80,7 +80,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Window names and terms become temporary vocabulary. Read locally, never saved.",
+      "summary": "Names in the window you're dictating into help Hex spell them. Never saved",
       "title": "Screen vocabulary"
     },
     {
@@ -104,7 +104,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Changing input source selects its mapped model and language; manual choices still work",
+      "summary": "When you switch keyboard language, Hex switches to the speech model you picked for it",
       "title": "Switch model with keyboard language"
     },
     {
@@ -127,7 +127,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Record mouse buttons as shortcuts",
+      "summary": "Use a mouse button, such as a side button, as a shortcut",
       "title": "Mouse shortcuts"
     },
     {
@@ -149,7 +149,7 @@
       "oses": [
         "windows"
       ],
-      "summary": "Lets apps such as Discord detect the same key",
+      "summary": "Other apps see your dictation key too, so it can also be push-to-talk in apps like Discord",
       "title": "Share dictation shortcut with other apps"
     },
     {
@@ -332,7 +332,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥",
+      "summary": "Tell left and right modifiers apart, so Right ⌘ + Right ⌥ doesn't fire on the left keys",
       "title": "Sided modifier chords"
     },
     {
@@ -355,7 +355,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Let Double-tap shortcut mode work when the shortcut has no key, such as Option, Globe, or ⌃⌥",
+      "summary": "Let Double-tap mode use a modifier alone, like Option or Globe: tap twice to dictate",
       "title": "Double-tap on a lone modifier"
     },
     {
@@ -539,7 +539,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Use the microphone (dictation) key alone as a shortcut on Mac laptops",
+      "summary": "Use the mic key in F5's spot on Mac laptops as a shortcut; once set, only Hex gets it",
       "title": "Microphone key alone"
     },
     {
