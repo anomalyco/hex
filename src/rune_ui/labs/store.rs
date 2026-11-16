@@ -544,6 +544,32 @@ mod tests {
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
     #[test]
+    fn a_link_to_an_overflow_category_puts_it_on_the_single_chip_row() {
+        let mut ui = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        SCENES
+            .iter()
+            .find(|(name, _)| *name == "mac-labs")
+            .unwrap()
+            .1(&mut ui);
+        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+        let mut rt = offscreen::runtime(ui, view, (860.0, 560.0), Env::new(true, 2.0), text);
+        settle(&mut rt);
+        assert!(rt.find("chip-more").is_some());
+        assert!(rt.find("chip-models").is_none());
+        let target = deep_link::parse("hex://labs?category=models&tab=on&search=model", "hex")
+            .unwrap()
+            .unwrap();
+        rt.update(|ui, tx| deep_link::open(ui, target, tx));
+        settle(&mut rt);
+        assert_eq!(rt.state.lab_store.group, Some(Group::Models));
+        assert_eq!(rt.state.lab_store.tab, Tab::On);
+        assert_eq!(rt.state.lab_store.search.text, "model");
+        let (_, y) = rt.find("chip-all").unwrap();
+        assert_eq!(rt.find("chip-models").unwrap().1, y);
+        assert_eq!(rt.find("chip-more").unwrap().1, y);
+    }
+
+    #[test]
     fn labs_search_clears_across_the_titlebar_button_and_keeps_typing() {
         // Unlike the Linux golden suite, this runs on macOS too, with the
         // real pane_header's window_drag region. The native band overlaps
