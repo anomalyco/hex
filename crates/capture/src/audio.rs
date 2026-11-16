@@ -119,12 +119,25 @@ impl RecordedAudio {
         if *streamed == path {
             return path.is_file();
         }
-        let published = std::fs::rename(streamed, &path).is_ok()
-            || std::fs::copy(streamed, &path).is_ok_and(|_| std::fs::remove_file(streamed).is_ok());
-        if published {
+        if std::fs::rename(streamed, &path).is_ok() {
             self.streamed = Some(path);
+            return true;
         }
-        published
+        // A copy that lands is a published audio.wav even if the partial cannot
+        // be deleted: the file is there, and a stale partial is harmless.
+        match std::fs::copy(streamed, &path) {
+            Ok(_) => {
+                if let Err(error) = std::fs::remove_file(streamed) {
+                    crate::log::scrawl_log(format!(
+                        "audio: copied {} but could not remove it: {error}",
+                        streamed.display()
+                    ));
+                }
+                self.streamed = Some(path);
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Removes a streamed recording's partial file once its samples are in
@@ -151,8 +164,20 @@ impl RecordedAudio {
         let Some(path) = self.streamed.clone() else {
             return Ok(self);
         };
+        let audio = self.read_streamed()?;
+        consume_partial(&path);
+        Ok(audio)
+    }
+
+    /// The same samples as [`Self::into_memory`], without touching the file: a
+    /// build that must write them elsewhere removes the partial only after its
+    /// own write succeeded, so a failed write never leaves the audio nowhere.
+    pub fn read_streamed(&self) -> Result<Self> {
+        let Some(path) = &self.streamed else {
+            return Ok(self.clone());
+        };
         let expected = self.sample_count;
-        let audio = self.shifted_from_file(&path, 0)?;
+        let audio = self.clone().shifted_from_file(path, 0)?;
         if audio.samples.len() != expected {
             bail!(
                 "{} holds {} samples, not the {expected} it recorded",
@@ -160,7 +185,6 @@ impl RecordedAudio {
                 audio.samples.len()
             );
         }
-        consume_partial(&path);
         Ok(audio)
     }
     pub fn sample_count(&self) -> usize {
