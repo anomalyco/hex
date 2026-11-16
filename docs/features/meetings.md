@@ -336,7 +336,10 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      └── Ask -> Capsule below the menu bar, focus-free  // meetings.offer
          ├── Title: "Google Meet call detected", "Call on meet.jit.si",
          │   "Call in Brave Browser" (site unknown), or the meeting's name
-         ├── Record -> Start recording
+          ├── The app's local icon, or the website's bundled service mark when
+          │   known. Otherwise a neutral call icon, never the hosting browser's.
+          │   The same 24 pt slot keeps the title aligned as a local icon loads.
+          ├── Record -> Start recording
          ├── Not now -> Close
          ├── … -> "<provider>" · "Change anytime in Settings" (capsule widens)
          │   │   No rule is saved and no recording starts. The choices stay
@@ -604,7 +607,7 @@ controller loop that turns `Detection::Record` into a recording has no
 automated test; it shares the manual Record path.
 
 `the_offer_menu_stays_usable_past_the_unanswered_deadline` presses … on a
-fixture Slack huddle, resizes that same Rune surface and delivers the scheduled
+fixture Slack huddle, opens the rules on that same Rune surface and delivers the scheduled
 20 s timeout. The choices remain clickable; no controller command or policy
 write comes from opening them. `cancel_returns_to_a_timed_clickable_offer` and
 `an_untouched_offer_times_out_without_a_choice` check the compact path.
@@ -613,6 +616,17 @@ detection replaces it, Meetings turns off, or recording begins. The timeout
 and the Record request refer to that offer, not just its app: a late one
 cannot answer a later huddle. These checks exercise fixture input, timers and
 requests, not a native overlay, a live Slack call or a recorder.
+
+The compact offer and the rules fit their labels around 28 pt controls inside
+a 44 pt surface. More and Cancel move the shell's free edge; its corner and
+native window stay put. Reduce motion fades between resting widths instead.
+`the_offer_keeps_its_corner_controls_and_clear_input_margin` checks both
+motions, English and French, the rounded input region and the three 8 pt
+clearances at the end action. `the_offer_has_no_default_key_and_names_each_focus_target`
+checks the Rune actions (native panels do not take keyboard focus).
+`HEX_DETECTED_OFFERS=<folder>` with the `detected_offer_sheet` test renders
+the production view for each detected source on a GPU, using synthetic detector
+inputs and the rendering computer's installed app icons. No network or call is needed.
 
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),

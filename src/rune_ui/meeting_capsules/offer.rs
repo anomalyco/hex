@@ -41,10 +41,21 @@ pub(super) fn actions(
     let action = |key: &str, label: &str, primary, press: fn(&mut Capsule)| {
         let face = match key {
             "offer-more" => IconButton::new(&crate::rune_ui::meetings::MORE_ICON)
-                .variant(IconButtonVariant::Neutral).control_size(ControlSize::Large)
-                .help(tr("More")).build(p.k).w(34.0),
-            "record" => Button::new(label).variant(ButtonVariant::Submit).build_push(p.k),
-            _ => Button::new(label).variant(if primary {ButtonVariant::Contrast} else {ButtonVariant::Neutral}).build_push(p.k),
+                .variant(IconButtonVariant::Neutral)
+                .control_size(ControlSize::Large)
+                .help(tr("More"))
+                .build(p.k)
+                .w(34.0),
+            "record" => Button::new(label)
+                .variant(ButtonVariant::Submit)
+                .build_push(p.k),
+            _ => Button::new(label)
+                .variant(if primary {
+                    ButtonVariant::Contrast
+                } else {
+                    ButtonVariant::Neutral
+                })
+                .build_push(p.k),
         };
         face.key(key).on_press(move |c: &mut Capsule| {
             if c.more_open == choosing

@@ -57,6 +57,7 @@ use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod offer;
+#[path = "meeting_capsules/offer/surface.rs"]
 mod offer_surface;
 mod panel;
 mod throw;
@@ -1026,7 +1027,15 @@ impl MeetingCapsules {
             crate::app_settings::meeting_indicator_corner,
         );
         place_capsule(&self.panel, corner, 0.0, 0.0);
-        let presentation = offer_surface::Presentation::for_kind(&kind,false);
+        let presentation = offer_surface::Presentation::for_kind(&kind, false);
+        // Only the detected offer reserves space for its wider page. The
+        // other Windows panels retain their original, window-sized input.
+        #[cfg(target_os = "windows")]
+        self.panel.set_input(if matches!(kind, Kind::Offer(..)) {
+            rune::OverlayInput::Regions
+        } else {
+            rune::OverlayInput::All
+        });
         self.panel.resize(match &kind {
             Kind::Offer(..) => presentation.window(),
             Kind::Ready(manifest) => ready_window_size(manifest),
@@ -1054,7 +1063,9 @@ impl MeetingCapsules {
         });
         float_on_xwayland(&self.panel);
         self.panel.show();
-        if let Some(id) = self.panel_offer {offer_surface::load_icon(self.panel.clone(),id);}
+        if let Some(id) = self.panel_offer {
+            offer_surface::load_icon(self.panel.clone(), id);
+        }
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
             let (panel, current) = (self.panel.clone(), self.generation.clone());
@@ -1157,8 +1168,14 @@ fn dismiss_button(p: Paint) -> El {
 /// The overlay's frame hook: steps a glide into its corner, a frame at a
 /// time, until it rests, and keeps a recording's waveform fed.
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
-    if matches!(capsule.kind,Some(Kind::Offer(..))) && capsule.presentation.step(capsule.more_open,capsule.reduced.get(),now) {
-        tx.instant();tx.wake_after(Duration::ZERO);return true;
+    if matches!(capsule.kind, Some(Kind::Offer(..)))
+        && capsule
+            .presentation
+            .step(capsule.more_open, capsule.reduced.get(), now)
+    {
+        tx.instant();
+        tx.wake_after(Duration::ZERO);
+        return true;
     }
     let changed = waveform::poll(capsule, now, tx);
     if !capsule.throw.gliding() {
@@ -1208,7 +1225,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Reminder { meeting, automatic } => {
             reminder(p, meeting, *automatic, crate::calendar::wall_clock_ms())
         }
-        Kind::Offer(id, candidate) => return offer_surface::view(p,capsule,*id,candidate),
+        Kind::Offer(id, candidate) => return offer_surface::view(p, capsule, *id, candidate),
         Kind::CallEnded { app, auto_stop } => (
             p.danger(),
             tr_fill("{} left the call", app),
@@ -1502,8 +1519,13 @@ mod tests {
         let (commands, received) = mpsc::sync_channel(4);
         let chosen = Chosen::default();
         let saved = chosen.clone();
-        let presentation=offer_surface::Presentation::for_kind(&kind,more_open);
-        let size=if matches!(kind,Kind::Offer(..)){presentation.window()}else{size};
+        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+        let presentation = offer_surface::Presentation::for_kind(&kind, more_open);
+        let size = if matches!(kind, Kind::Offer(..)) {
+            presentation.window()
+        } else {
+            size
+        };
         let capsule = Capsule {
             kind: Some(kind),
             more_open,
@@ -1529,7 +1551,6 @@ mod tests {
             system_dark: dark,
             scale: 2.0,
         };
-        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
         let mut rt = crate::rune_ui::offscreen::runtime(capsule, view, size, env, text);
         rt.frame(0.0);
         (rt, received, chosen)
@@ -1558,10 +1579,18 @@ mod tests {
     /// clock the native overlay polls, on the original surface.
     fn navigate_offer(rt: &mut Runtime<Capsule>, key: &str) {
         tap(rt, key);
-        for i in 0..60 { advance_offer(rt,i as f64/60.0); }
+        for i in 0..60 {
+            advance_offer(rt, i as f64 / 60.0);
+        }
     }
 
-    fn advance_offer(rt:&mut Runtime<Capsule>,now:f64){rt.update(|c,tx|{poll(c,now,tx);tx.instant();});rt.frame(1.0/60.0);}
+    fn advance_offer(rt: &mut Runtime<Capsule>, now: f64) {
+        rt.update(|c, tx| {
+            poll(c, now, tx);
+            tx.instant();
+        });
+        rt.frame(1.0 / 60.0);
+    }
 
     #[test]
     fn the_offer_menu_stays_usable_past_the_unanswered_deadline() {
@@ -1623,7 +1652,7 @@ mod tests {
         rt.update(|c, _| {
             c.kind = Some(offer(slack_huddle()));
             c.more_open = false;
-            c.presentation=offer_surface::Presentation::for_kind(c.kind.as_ref().unwrap(),false);
+            c.presentation = offer_surface::Presentation::for_kind(c.kind.as_ref().unwrap(), false);
         });
         rt.set_viewport(PANEL, 2.0);
         rt.update(queued);
@@ -2620,7 +2649,7 @@ mod tests {
     }
 
     include!("meeting_capsules/motion_fixture.rs");
-    include!("meeting_capsules/offer_proof.rs");
+    include!("meeting_capsules/offer/proof.rs");
 
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
@@ -2786,6 +2815,11 @@ mod tests {
         for (name, kind, more_open, size, setup) in states {
             for dark in [false, true] {
                 let (mut rt, _, _) = runtime(kind.clone(), more_open, dark, size);
+                let size = if matches!(kind, Kind::Offer(..)) {
+                    rt.state.presentation.window()
+                } else {
+                    size
+                };
                 rt.update(move |capsule, _| setup(capsule));
                 let (w, h, pixels) = render(&gpu, &mut rt, size);
                 let theme = if dark { "dark" } else { "light" };
