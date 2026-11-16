@@ -1,6 +1,6 @@
 //! A capture's audio: 16 kHz mono PCM16 on the capture's clock, written to
 //! `audio.wav.partial` while it records so memory does not grow with it, then
-//! given its final `audio.wav` name by [`super::timeline::Timeline::finish`].
+//! given its final `audio.wav` name once its build writes `unfinished.json`.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};

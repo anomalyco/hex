@@ -574,7 +574,7 @@ fn settle_streamed_audio(
     recorded: Option<RecordedAudio>,
     wav_path: &Path,
 ) -> Option<RecordedAudio> {
-    let Some(audio) = recorded else {
+    let Some(mut audio) = recorded else {
         return None;
     };
     if !audio.is_on_disk() {
@@ -584,19 +584,31 @@ fn settle_streamed_audio(
         return Some(audio);
     }
     crate::log::scrawl_log(format!(
-        "audio: could not give {} its final name; writing it from memory",
+        "audio: could not give {} its final name; reading it back",
         wav_path.display()
     ));
-    let in_memory = audio.clone().into_memory().ok();
-    audio.discard_streamed();
-    if let Some(audio) = &in_memory
-        && let Ok(bytes) = audio.wav_bytes_16k()
-        && !bytes.is_empty()
-    {
-        let _ = std::fs::create_dir_all(bundle_dir);
-        let _ = crate::routing::undo::write_private(wav_path, &bytes);
+    // Only trust a read that produced every sample the recording had; a failed
+    // read keeps the partial, the only copy of the audio, and never leaves a
+    // half-copied `audio.wav` behind.
+    match audio.clone().into_memory() {
+        Ok(memory) => {
+            if let Ok(bytes) = memory.wav_bytes_16k()
+                && !bytes.is_empty()
+            {
+                let _ = std::fs::create_dir_all(bundle_dir);
+                let _ = crate::routing::undo::write_private(wav_path, &bytes);
+            }
+            Some(memory)
+        }
+        Err(error) => {
+            crate::log::scrawl_log(format!(
+                "audio: could not read {}: {error:#}",
+                wav_path.display()
+            ));
+            let _ = std::fs::remove_file(wav_path);
+            Some(audio)
+        }
     }
-    in_memory
 }
 
 /// Builds a Screen capture's bundle in `out`, which holds its video and `audio.wav`, from them
@@ -620,6 +632,12 @@ pub fn rebuild_screen_bundle_with(
         .filter(|p| p.is_file())
         .context("The bundle has no video")?;
     let wav = out.join("audio.wav");
+    // A crash between the journal and the audio's final name leaves every
+    // sample under the partial name: adopt it before rebuilding.
+    let partial = out.join(crate::recover::PARTIAL_AUDIO);
+    if !wav.is_file() && partial.is_file() {
+        let _ = std::fs::rename(&partial, &wav);
+    }
     let recorded = if wav.is_file() {
         Some(audio::recorded_audio_from_wav(std::fs::read(&wav)?)?)
     } else {
@@ -1210,12 +1228,25 @@ mod tests {
             "the partial took its final name"
         );
 
-        // A partial that cannot be renamed is read back instead, so it never
-        // stands in as the bundle's audio.
-        let gone = dir.join("missing.wav.partial");
-        let audio = RecordedAudio::on_disk(&gone, 1_600, 16_000, 0, Vec::new());
-        let settled = settle_streamed_audio(&dir, Some(audio), &wav);
-        assert!(settled.is_some_and(|audio| !audio.is_on_disk()));
+        // A rename that cannot happen (a non-empty directory holds the name)
+        // reads the audio back instead, consumes the partial, and leaves no
+        // half-written `audio.wav`.
+        std::fs::remove_file(&wav).unwrap();
+        std::fs::create_dir_all(wav.join("occupied")).unwrap();
+        std::fs::write(&partial, crate::audio::encode_wav_16k(&samples).unwrap()).unwrap();
+        let audio = RecordedAudio::on_disk(&partial, samples.len(), 16_000, 0, Vec::new());
+        let settled = settle_streamed_audio(&dir, Some(audio), &wav).expect("audio kept");
+        assert!(!settled.is_on_disk(), "read back into memory");
+        assert_eq!(settled.sample_count(), samples.len());
+        assert!(!partial.exists(), "the partial was consumed");
+        assert!(wav.is_dir(), "the blocked name was left alone");
+
+        // A partial that cannot be read is kept: it is the only copy left.
+        std::fs::write(&partial, b"not a wav").unwrap();
+        let audio = RecordedAudio::on_disk(&partial, 1_600, 16_000, 0, Vec::new());
+        let settled = settle_streamed_audio(&dir, Some(audio), &wav).expect("audio kept");
+        assert!(settled.is_on_disk(), "an unreadable partial is kept");
+        assert!(partial.is_file(), "and not deleted");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -3769,7 +3769,7 @@ mod tests {
 
     /// The samples a finished timeline's build publishes: the partial takes its
     /// final name when the build journals the capture, not when it stops.
-    fn published_wav(audio: &RecordedAudio, path: &Path) -> Vec<i16> {
+    fn published_wav(audio: &mut RecordedAudio, path: &Path) -> Vec<i16> {
         assert!(audio.is_on_disk());
         assert!(audio.publish_audio(path.parent().unwrap()));
         wav_samples(path)
@@ -3804,7 +3804,7 @@ mod tests {
             through = through + Duration::from_millis(10);
             timeline.push(&[0.5; 160], 16_000, through);
         }
-        let audio = timeline.finish(
+        let mut audio = timeline.finish(
             through.checked_sub(Duration::from_millis(100)).unwrap(),
             None,
         );
@@ -3823,7 +3823,7 @@ mod tests {
         assert_eq!(audio.sample_count(), 1_200 * 16);
         // A stopped capture keeps its partial name until its build journals it.
         assert!(!path.exists(), "audio.wav waits for the journal");
-        let samples = published_wav(&audio, &path);
+        let samples = published_wav(&mut audio, &path);
         assert_eq!(samples.len(), 100 * 16 + 1_200 * 16);
         // The WAV keeps the leading 100 ms and the 300 ms gap as silence.
         assert!(samples[..1_600].iter().all(|&sample| sample == 0));
@@ -3854,7 +3854,7 @@ mod tests {
         let path = temp_wav("pending");
         let mut timeline = Timeline::new(t(0), path.clone());
         timeline.push(&[0.5; 1_600], 16_000, t(100));
-        let audio = timeline.finish(
+        let mut audio = timeline.finish(
             t(600),
             Some(CaptureSinkClosed {
                 pending_gap: Some((t(100), t(300))),
@@ -3875,7 +3875,7 @@ mod tests {
             ]
         );
         assert_eq!(audio.sample_count(), 9_600);
-        assert_eq!(published_wav(&audio, &path).len(), 9_600);
+        assert_eq!(published_wav(&mut audio, &path).len(), 9_600);
         remove_wav(&path);
     }
 
@@ -3886,7 +3886,7 @@ mod tests {
         timeline.push(&[0.5; 1_600], 16_000, t(100));
         timeline.gap(t(100), t(400));
         timeline.push(&[0.5; 1_600], 16_000, t(500));
-        let audio = timeline.finish(t(500), None);
+        let mut audio = timeline.finish(t(500), None);
         assert_eq!(
             audio.gaps,
             [GapSpan {
@@ -3894,7 +3894,7 @@ mod tests {
                 end_ms: 400
             }]
         );
-        let samples = published_wav(&audio, &path);
+        let samples = published_wav(&mut audio, &path);
         assert_eq!(samples.len(), 8_000);
         assert!(samples[..1_600].iter().all(|&sample| sample == pcm16(0.5)));
         assert!(samples[1_600..6_400].iter().all(|&sample| sample == 0));
@@ -3913,13 +3913,13 @@ mod tests {
             through = through + Duration::from_secs(5);
             timeline.push(&chunk, 16_000, through);
         }
-        let audio = timeline.finish(through, None);
+        let mut audio = timeline.finish(through, None);
         let expected = 21 * 60 * 16_000;
         assert_eq!(audio.sample_count(), expected);
         assert!(audio.is_on_disk() && audio.samples.is_empty());
         assert!(audio.gaps.is_empty());
         assert_eq!(audio.audio_stopped_at_ms(), None);
-        assert_eq!(published_wav(&audio, &path).len(), expected);
+        assert_eq!(published_wav(&mut audio, &path).len(), expected);
         remove_wav(&path);
     }
 
@@ -4387,9 +4387,9 @@ mod tests {
         timeline.gap(t(100), t(3 * 60 * 60 * 1_000));
         timeline.gap(t(3 * 60 * 60 * 1_000), t(6 * 60 * 60 * 1_000));
         timeline.push(&[0.5; 1_600], 16_000, t(6 * 60 * 60 * 1_000 + 100));
-        let audio = timeline.finish(t(6 * 60 * 60 * 1_000 + 100), None);
+        let mut audio = timeline.finish(t(6 * 60 * 60 * 1_000 + 100), None);
         assert_eq!(audio.sample_count(), 16_000);
-        assert_eq!(published_wav(&audio, &path).len(), 16_000);
+        assert_eq!(published_wav(&mut audio, &path).len(), 16_000);
         assert_eq!(
             audio.gaps,
             [
@@ -4413,10 +4413,10 @@ mod tests {
         timeline.push(&[0.5; 1_600], 16_000, t(100));
         // Past the guard: the first second is kept, the rest is one gap.
         timeline.push(&[0.5; 16_000], 16_000, t(1_100));
-        let audio = timeline.finish(t(1_100), None);
+        let mut audio = timeline.finish(t(1_100), None);
         assert_eq!(audio.audio_stopped_at_ms(), Some(1_000));
         assert_eq!(audio.sample_count(), 16_000);
-        assert_eq!(published_wav(&audio, &path).len(), 16_000);
+        assert_eq!(published_wav(&mut audio, &path).len(), 16_000);
         remove_wav(&path);
 
         // A capture that stays inside the guard says nothing.
@@ -4438,10 +4438,10 @@ mod tests {
         // The disk refuses the next chunk: 200 ms reached the file.
         timeline.write_failed(t(250));
         timeline.push(&[0.5; 1_600], 16_000, t(300));
-        let audio = timeline.finish(t(300), None);
+        let mut audio = timeline.finish(t(300), None);
         assert_eq!(audio.audio_stopped_at_ms(), Some(200));
         assert_eq!(audio.sample_count(), 3_200);
-        assert_eq!(published_wav(&audio, &path).len(), 3_200);
+        assert_eq!(published_wav(&mut audio, &path).len(), 3_200);
         assert_eq!(audio.gaps.last().map(|gap| gap.end_ms), Some(300));
         remove_wav(&path);
     }
@@ -4842,12 +4842,19 @@ mod tests {
         let start = engine.starts.lock().unwrap()[0].clone();
         assert!(matches!(start.target, Target::Phone { .. }));
         assert_eq!(start.audio, AudioIn::External);
+        // Some narration, so the finish has a streamed partial to publish.
+        audio.feed(1_600, recording.since + Duration::from_millis(100));
 
         // Unplugged: the next look at the host finishes what it recorded.
         lock(&host.outcomes).phone_ended = true;
         assert_eq!(host.recording_since(&audio), None);
         let last = wait_for_last(&mut host, &audio, &bundle, true);
         assert_eq!(last.stage, "done");
+        assert!(bundle.join("audio.wav").is_file());
+        assert!(
+            !bundle.join(scrawl_capture::recover::PARTIAL_AUDIO).exists(),
+            "a finished iPhone bundle keeps no streamed partial"
+        );
         host.shutdown(&audio);
         fs::remove_dir_all(dir).ok();
     }

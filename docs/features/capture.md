@@ -791,10 +791,12 @@ hex capture stop                         // capture.stop
 │   starts where its first frame was shown (video_offset_ms)
 └── In the background, on one capture-finish thread, one capture at a time:
     ├── 16 kHz audio streamed to audio.wav.partial as it records, and renamed to
-    │   audio.wav only once this build writes the capture's unfinished.json:
-    │   audio.wav never exists without a journal, so a capture still recording
-    │   or waiting its turn never looks recoverable. Leading start offset and
-    │   gaps are written as silence, so WAV time stays capture time
+    │   audio.wav only once this build writes the capture's unfinished.json: a
+    │   streamed capture's audio.wav never exists without a journal, so one
+    │   still recording or waiting its turn never looks recoverable (a crash
+    │   there leaves the partial, which retention cleans up like any other
+    │   media). Leading start offset and gaps are written as silence, so WAV
+    │   time stays capture time
     ├── Words: on the Parakeet and GGUF paths, audio.wav read in 30 s pieces
     │   (iPhone and replay narration are decoded in memory), each a foreground
     │   job on the dictation engine's model, after queued dictation, before
@@ -1128,7 +1130,9 @@ Checks:
   capture.rs `a_shift_click_is_part_of_the_drawing`.
 - iPhone: `an_iphone_capture_narrates_with_hex_audio_and_finishes_when_its_mirror_ends`
   and `a_mirror_ending_never_stops_a_screen_capture` in capture_host.rs;
-  `since_moves_audio_and_gaps_onto_a_later_clock` and
+  `since_moves_audio_and_gaps_onto_a_later_clock`,
+  `audio_streamed_to_disk_counts_its_samples_and_can_be_read_back` (reading a
+  streamed recording consumes its partial), and
   `a_streamed_recording_whose_file_is_gone_has_no_samples` in
   [audio.rs](../../crates/capture/src/audio.rs). The mirror, its
   `--no-microphone`, and the camera prompt have not run in Hex.
@@ -1138,6 +1142,9 @@ Checks:
   of `recover_picks_up_old_video_and_audio_without_a_journal_but_never_a_live_capture`);
   `a_streamed_audio_takes_its_final_name_only_when_its_build_settles_it` in
   [pipeline.rs](../../crates/capture/src/pipeline.rs);
+  `a_journaled_capture_adopts_its_streamed_audio` in
+  [recover.rs](../../crates/capture/src/recover.rs) (a crash between the
+  journal and `audio.wav`);
   `a_crashed_capture_with_only_partial_audio_is_cleaned_up` in
   [retention.rs](../../crates/capture/src/retention.rs).
 - Routing, in [routing.rs](../../src/capture_host/routing.rs):
