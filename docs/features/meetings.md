@@ -381,14 +381,20 @@ rewritten as `providers` on the next load.
 Call detection knows Brave, Chrome, Safari, Firefox, Edge, Arc
 (`company.thebrowser.Browser`, foreground name `Arc`; its tab is read like
 Brave's), Helium (`net.imput.helium`, helpers included; `helium` and
-`helium-browser` on Linux, `helium.exe` on Windows), and Vivaldi
+`helium-browser` on Linux, `helium.exe` on Windows), Ardia
+(`com.ardia.browser`, its Chromium audio service reports
+`com.ardia.browser.helper`), Zen (`app.zen-browser.zen`; Firefox-based, so its
+helpers are `app.zen-browser.*` rather than `org.mozilla.*`), and Vivaldi
 (`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on Linux, `vivaldi.exe` on
 Windows). Arc was missing until #801, so its Meet calls were never detected;
 Vivaldi was missing until #1105, so its calls
-(Teams in a Vivaldi web app included) were never offered. Checks:
+(Teams in a Vivaldi web app included) were never offered; Ardia and Zen were
+missing until #1875, so their calls were never offered. Checks:
 `a_google_meet_call_in_arc_records_after_about_two_seconds`,
-`vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
-Vivaldi call.
+`vivaldi_on_the_microphone_is_a_browser_call`,
+`ardia_on_the_microphone_is_a_named_browser_call`, and
+`zen_on_the_microphone_is_a_named_browser_call`. Not observed on a real
+Vivaldi, Ardia, or Zen call.
 
 Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
 `teams.live.com`) are known call sites without the lab: a browser on one is a
@@ -439,12 +445,12 @@ Checks: `more_call_apps_are_unknown_until_their_lab_is_on`,
 of these apps or websites on a real call, the Phone app's Continuity audio in
 particular.
 
-Chromium and Electron apps (Brave, Chrome, Helium, Edge, Arc, Slack, Teams)
-capture microphone audio in sandboxed `audio.mojom.AudioService` utility
+Chromium and Electron apps (Brave, Chrome, Helium, Ardia, Edge, Arc, Slack,
+Teams) capture microphone audio in sandboxed `audio.mojom.AudioService` utility
 processes (`*.helper`) that do not register with `NSRunningApplication`; Zoom
-uses `us.zoom.CptHost`, Firefox uses `org.mozilla.plugincontainer`, Safari uses
-`com.apple.WebKit.GPU` (`Safari Graphics and Media`), and FaceTime uses
-`com.apple.avconferenced`.
+uses `us.zoom.CptHost`, Firefox uses `org.mozilla.plugincontainer`, Zen uses
+`app.zen-browser.plugincontainer`, Safari uses `com.apple.WebKit.GPU` (`Safari
+Graphics and Media`), and FaceTime uses `com.apple.avconferenced`.
 [microphone_activity.rs](../../src/microphone_activity.rs) attributes each input
 process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
