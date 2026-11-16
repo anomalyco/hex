@@ -85,6 +85,16 @@ enum OutputKind {
     TypedText,
 }
 
+/// One finished output job. An empty result is either a voice prompt that
+/// asked nothing or a capture that was only the stop phrase, and the two read
+/// differently in Activity.
+struct OutputResult {
+    kind: OutputKind,
+    result: Result<String, String>,
+    /// Labs › Stop phrase took every word the capture heard.
+    stop_phrase_only: bool,
+}
+
 /// A release whose capture is still collecting its post-release tail.
 struct Finishing {
     release: ReleaseWait,
@@ -259,7 +269,14 @@ pub(crate) fn run(
                         })
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
-                    if result_sender.send((OutputKind::PasteLast, result)).is_err() {
+                    if result_sender
+                        .send(OutputResult {
+                            kind: OutputKind::PasteLast,
+                            result,
+                            stop_phrase_only: false,
+                        })
+                        .is_err()
+                    {
                         break;
                     }
                     continue;
@@ -278,13 +295,21 @@ pub(crate) fn run(
                         })
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
-                    if result_sender.send((OutputKind::TypedText, result)).is_err() {
+                    if result_sender
+                        .send(OutputResult {
+                            kind: OutputKind::TypedText,
+                            result,
+                            stop_phrase_only: false,
+                        })
+                        .is_err()
+                    {
                         break;
                     }
                     continue;
                 }
             };
             let started = Instant::now();
+            let mut stop_phrase_only = false;
             let result = (|| -> Result<String> {
                 let transcribed = job.transcript.wait().map_err(|error| eyre!(error))?;
                 let inference_ms = started.elapsed().as_millis() as u64;
@@ -306,6 +331,7 @@ pub(crate) fn run(
                     if job.stop_phrase.is_some() {
                         // A capture that was only the phrase: nothing to
                         // paste, no History, and nothing failed.
+                        stop_phrase_only = true;
                         return Ok(String::new());
                     }
                     return Err(eyre!("transcription was empty"));
@@ -362,7 +388,14 @@ pub(crate) fn run(
                 elapsed_ms = started.elapsed().as_millis(),
                 "completed Linux dictation job"
             );
-            if result_sender.send((kind, result)).is_err() {
+            if result_sender
+                .send(OutputResult {
+                    kind,
+                    result,
+                    stop_phrase_only,
+                })
+                .is_err()
+            {
                 break;
             }
         }
@@ -906,7 +939,12 @@ pub(crate) fn run(
                 _ => {}
             }
         }
-        while let Ok((kind, result)) = results.try_recv() {
+        while let Ok(done) = results.try_recv() {
+            let OutputResult {
+                kind,
+                result,
+                stop_phrase_only,
+            } = done;
             let phase = if kind == OutputKind::Printed {
                 DictationPhase::Printed
             } else {
@@ -928,6 +966,12 @@ pub(crate) fn run(
             }
             pending = pending.saturating_sub(1);
             match result {
+                // A capture that heard only Labs › Stop phrase's words ends
+                // as any silent one: a plain discard, with no done tone.
+                Ok(text) if text.is_empty() && stop_phrase_only => {
+                    indicator.discarded();
+                    events.dictation(DictationPhase::Discarded, "")?;
+                }
                 // A voice prompt that asked nothing ends as a discard: no
                 // done tone and no empty pasted transcript. The HUD closes
                 // the submitted job as cancelled in `update` below.
@@ -1116,9 +1160,10 @@ pub(crate) fn run(
                     }
                     // A client's dictation is the only capture while it records.
                     service.partial(&partial);
-                    // Labs › Stop phrase: words read twice in a row end a
-                    // hands-free capture as its shortcut's press would; the
-                    // state machine refuses anything else.
+                    // Labs › Stop phrase: a phrase the model committed, or
+                    // words read twice in a row, end a hands-free capture as
+                    // its shortcut's press would; the state machine refuses
+                    // anything else.
                     if !service.is_active() && capture.is_recording() && crate::labs::stop_phrase()
                     {
                         let phrase = crate::labs::stop_phrase_text();

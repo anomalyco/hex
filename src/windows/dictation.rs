@@ -106,6 +106,9 @@ struct JobResult {
     text: Option<String>,
     latency_ms: u32,
     result: Result<(), String>,
+    /// Labs › Stop phrase took every word the capture heard: an empty result
+    /// reads as a plain discard, not a voice prompt that asked for nothing.
+    stop_phrase_only: bool,
 }
 
 pub struct WindowsDictationConfig {
@@ -653,9 +656,13 @@ pub fn run(
                 &mut print,
             )
         {
-            // Labs › Stop phrase: taking its words clears them whichever
-            // action this is; only the finish they ended keeps them.
-            let finish_phrase = hotkey.take_stop_phrase();
+            // Labs › Stop phrase: only the finish its words ended keeps them;
+            // any other action leaves them for that finish.
+            let finish_phrase = if matches!(action, HotkeyAction::Finish) {
+                hotkey.take_stop_phrase()
+            } else {
+                None
+            };
             match action {
                 // A client's dictation records: the shortcut and `hex
                 // dictation` neither start nor end anything.
@@ -856,6 +863,11 @@ pub fn run(
                 });
             }
             match result.result {
+                // A capture that heard only Labs › Stop phrase's words ends
+                // as any silent one, not as a voice prompt that asked nothing.
+                Ok(()) if nothing && result.stop_phrase_only => {
+                    events.dictation(DictationPhase::Discarded, "")?;
+                }
                 Ok(()) if nothing => events.discarded_voice_prompt()?,
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
@@ -1012,8 +1024,9 @@ pub fn run(
                     if let Some(partial) = capture.report_live_text()
                         && crate::labs::stop_phrase()
                     {
-                        // Labs › Stop phrase: words read twice in a row end a
-                        // hands-free capture as its shortcut's press would.
+                        // Labs › Stop phrase: a phrase the model committed, or
+                        // words read twice in a row, end a hands-free capture
+                        // as its shortcut's press would.
                         let phrase = crate::labs::stop_phrase_text();
                         if stop_phrase.observe(&partial.stable, &partial.tentative, &phrase) {
                             hotkey.finish_hands_free(phrase);
@@ -1140,6 +1153,7 @@ fn process_dictation_job(
     let context = job.context.finish();
     let application = context.application.clone();
     let mut sent = false;
+    let mut stop_phrase_only = false;
     let result = transcription.and_then(|raw_text| {
         // Labs › Stop phrase: the words that finished this capture never
         // reach the text or its processing.
@@ -1148,6 +1162,7 @@ fn process_dictation_job(
         if raw_text.is_empty() && job.stop_phrase.is_some() {
             // A capture that was only the phrase: nothing to paste, no
             // History, and nothing failed.
+            stop_phrase_only = true;
             return Ok(String::new());
         }
         if raw_text.is_empty() {
@@ -1230,15 +1245,18 @@ fn process_dictation_job(
         latency_ms,
         "completed Windows dictation job"
     );
-    if let Some(print) = job.print.take() {
+    let mut done = if let Some(print) = job.print.take() {
         print.send(match &result {
             Ok(text) if text.trim().is_empty() => PrintedTranscript::NoSpeech,
             Ok(text) => PrintedTranscript::Text(text.clone()),
             Err(error) => PrintedTranscript::Failed(error.clone()),
         });
-        return job_result(OutputKind::Printed, result, latency_ms);
-    }
-    job_result(OutputKind::Dictation, result, latency_ms)
+        job_result(OutputKind::Printed, result, latency_ms)
+    } else {
+        job_result(OutputKind::Dictation, result, latency_ms)
+    };
+    done.stop_phrase_only = stop_phrase_only;
+    done
 }
 
 fn process_paste_last(
@@ -1271,12 +1289,14 @@ fn job_result(kind: OutputKind, result: Result<String, String>, latency_ms: u32)
             text: Some(text),
             latency_ms,
             result: Ok(()),
+            stop_phrase_only: false,
         },
         Err(error) => JobResult {
             kind,
             text: None,
             latency_ms,
             result: Err(error),
+            stop_phrase_only: false,
         },
     }
 }

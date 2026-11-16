@@ -12,7 +12,8 @@ use super::{
 /// Labs › Stop phrase: the words the finish request carries, set just before
 /// its event and taken by the listener that handles it. It rides beside the
 /// hook's state because a `String` can't live in the `Copy` events themselves;
-/// the listener takes it for every action, so one never outlives its finish.
+/// only a `HotkeyAction::Finish` takes it, so no other action queued ahead of
+/// the finish can steal its words, and no other action carries them.
 static STOP_PHRASE: Mutex<Option<String>> = Mutex::new(None);
 
 impl CaptureState {
@@ -76,7 +77,7 @@ impl WindowsHotkeyMonitor {
     }
 
     /// The words the finish being handled carries, when Labs › Stop phrase
-    /// ended it. Taking them clears them for the next action.
+    /// ended it. Only that finish takes them, and taking them clears them.
     pub(crate) fn take_stop_phrase(&self) -> Option<String> {
         STOP_PHRASE.lock().unwrap_or_else(|e| e.into_inner()).take()
     }

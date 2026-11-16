@@ -1029,9 +1029,15 @@ also true, so each dictation's live stream publishes `Partial`s (`stable` and
 plate: `DictationCapture::begin_stream`'s `show_live_text` still reads only
 `labs::live_text()` and Live typing's board. So the lab needs a speech model
 that can stream on a GPU, exactly as Live text does; with no stream the words
-never arrive and the capture ends only by shortcut. The phrase matcher requires
-two observations in a row to end with the phrase, so a flickering tentative
-word can't finish a dictation, and a capture finishes at most once.
+never arrive and the capture ends only by shortcut. The phrase fires as soon
+as the model commits it (a partial's `stable` words end with it), or once two
+observations in a row whose `stable` and `tentative` words together end with
+it agree, so a flickering tentative word can't finish a dictation, and a
+capture finishes at most once. Committed words matter because the engine
+publishes only changes (`Partials::publish` drops a partial identical to the
+last): a phrase the model committed and the speaker then left quiet is often
+the capture's last observation, and waiting for it to be published twice
+would never finish that dictation.
 
 ```ts
 Dictate "we ship friday. stop dictation."       // labs.stop_phrase + labs.stop_phrase_text
@@ -1067,22 +1073,27 @@ saves once typing pauses, like the window's other text fields. A phrase saved
 elsewhere updates the field without resetting its focus, and an invalid draft
 leaves when the lab is turned off.
 
-Every OS now finishes the capture itself, never by injecting keys. Each
+Every OS finishes the capture itself, never by injecting keys. Each
 listener owns a `dictation::stop_phrase::Detector`, fresh for every capture,
 and feeds it each live partial. When it fires the words are read once more and
 travel with the job, and the capture ends through its own shortcut state
 machine: macOS sends the fire (with its capture generation) through the audio
 owner's events to `recognition`, whose `stop_phrase` module has the machine
 recording hands-free finish itself (`DictationHotkey::finish_hands_free`: the
-same `Locked` → `Dirty` transition and `HotkeyAction::Finish` its own press
-makes, then the ordinary `finish_hotkey_dictation`); Windows asks the keyboard
-hook to emit that ordinary `HotkeyAction::Finish`
-(`WindowsHotkeyMonitor::finish_hands_free` under `CALLBACK_STATE`); Linux sends
+`HotkeyAction::Finish` its own press makes, then straight back to Idle, as the
+Caps Lock finish and a suspend leave it, since no key is down and no stale-key
+recovery is owed; then the ordinary `finish_hotkey_dictation`); Windows asks
+the keyboard hook to emit that ordinary `HotkeyAction::Finish`
+(`WindowsHotkeyMonitor::finish_hands_free` under `CALLBACK_STATE`), whose
+words only that action takes; Linux sends
 `ListenerCommand::FinishPhrase` into the queue its monitor already drains, and
 `ShortcutState::finish_hands_free` answers with `HotkeyEvent::FinishPhrase`.
 The words ride with the job (`Finishing`/`Job` on Linux and Windows,
 `InferenceJob` on macOS) and `dictation::stop_phrase::strip_finished` removes
 them from the final transcript before any processing, raw captures included.
+A capture that is only the phrase reads as a plain discard in Activity on
+every OS: not a paste, not History, no error tone, and not a voice prompt that
+asked nothing.
 
 A request that arrives after its capture ended is ignored: macOS drops it by
 capture generation before the listener sees it, and both other platforms ask
@@ -1093,13 +1104,17 @@ Checks: `the_phrase_matches_the_last_words_in_any_case`,
 `stripping_keeps_a_sentences_final_punctuation_and_drops_the_joins`,
 `a_capture_that_is_only_the_phrase_strips_to_nothing`,
 `stripping_leaves_a_dictation_without_the_phrase_alone`,
-`the_detector_fires_once_after_two_observations_in_a_row`,
+`a_committed_phrase_fires_the_detector_at_once`,
+`a_tentative_phrase_fires_once_after_two_observations_in_a_row`,
 `a_flickering_tentative_word_never_fires_the_detector`,
 `an_ordinary_dictation_never_fires_the_detector`, and
 `a_finished_job_strips_its_phrase_and_leaves_every_other_transcript_alone` in
 [dictation/stop_phrase.rs](../../src/dictation/stop_phrase.rs);
-`a_stop_phrase_finishes_only_a_hands_free_capture` in
-[linux/input.rs](../../src/linux/input.rs) and
+`a_stop_phrase_finishes_a_locked_capture_and_leaves_the_next_press_free` in
+[suppression/tests.rs](../../src/suppression/tests.rs);
+`a_stop_phrase_finishes_only_a_hands_free_capture` and
+`a_stop_phrase_request_finishes_only_a_locked_capture` in
+[linux/input.rs](../../src/linux/input.rs), the first also in
 [windows/input.rs](../../src/windows/input.rs);
 `stop_phrase_is_its_own_atomic_and_carries_its_phrase` in
 [labs.rs](../../src/labs.rs); `a_stop_phrase_needs_two_words_and_six_letters`
@@ -1109,8 +1124,7 @@ in [control/settings.rs](../../src/control/settings.rs);
 `stop_phrase_shows_its_phrase_on_its_card_while_on` in
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the lab on, and the Mac and Windows builds, which the Linux host
-cannot compile; the Labs page goldens need regenerating on Linux for the new
-card.
+cannot compile.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

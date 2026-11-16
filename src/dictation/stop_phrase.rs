@@ -58,9 +58,15 @@ pub(crate) fn strip_finished(text: String, phrase: Option<&str>) -> String {
     }
 }
 
-/// One capture's stop-phrase detector. The phrase finishes the capture only
-/// after two observations in a row end with it, so a flickering tentative
-/// word can't fire it, and it never fires twice.
+/// One capture's stop-phrase detector. The phrase fires on the observation
+/// that commits it (a stable partial ends with it), or after two observations
+/// in a row whose stable and tentative words together end with it, so a
+/// flickering tentative word can't finish a capture; it never fires twice.
+///
+/// The engine publishes only changes (`Partials::publish` drops a partial
+/// identical to the last), so a commit that the speaker then leaves quiet is
+/// often the capture's last observation: waiting for it twice would never
+/// fire.
 #[derive(Debug, Default)]
 pub(crate) struct Detector {
     /// The previous observation ended with the phrase.
@@ -76,13 +82,15 @@ impl Detector {
 
     /// Reads one live partial: `stable` is what the model committed and
     /// `tentative` is its volatile hypothesis after it. Returns true once,
-    /// when two consecutive observations end with `phrase`.
+    /// when the committed words end with `phrase`, or when two consecutive
+    /// observations' committed and tentative words do.
     pub(crate) fn observe(&mut self, stable: &str, tentative: &str, phrase: &str) -> bool {
         if self.fired {
             return false;
         }
+        let committed = ends_with_phrase(stable, phrase);
         let ended = ends_with_phrase(&format!("{stable} {tentative}"), phrase);
-        let fire = ended && self.ended;
+        let fire = committed || (ended && self.ended);
         self.ended = ended;
         if fire {
             self.fired = true;
@@ -213,12 +221,25 @@ mod tests {
     }
 
     #[test]
-    fn the_detector_fires_once_after_two_observations_in_a_row() {
+    fn a_committed_phrase_fires_the_detector_at_once() {
+        let mut detector = Detector::new();
+        assert!(
+            detector.observe("we ship friday. stop dictation.", "", DEFAULT_PHRASE),
+            "the model committed the phrase"
+        );
+        assert!(
+            !detector.observe("we ship friday. stop dictation.", "", DEFAULT_PHRASE),
+            "a capture finishes once"
+        );
+    }
+
+    #[test]
+    fn a_tentative_phrase_fires_once_after_two_observations_in_a_row() {
         let mut detector = Detector::new();
         assert!(!detector.observe("we ship friday. stop", "dictation", DEFAULT_PHRASE));
         assert!(
             detector.observe("we ship friday. stop", "dictation.", DEFAULT_PHRASE),
-            "the second observation in a row fires"
+            "a second partial that still ends with the phrase fires"
         );
         assert!(
             !detector.observe("we ship friday. stop", "dictation.", DEFAULT_PHRASE),
@@ -229,10 +250,10 @@ mod tests {
     #[test]
     fn a_flickering_tentative_word_never_fires_the_detector() {
         let mut detector = Detector::new();
-        assert!(!detector.observe("we ship friday. stop dictation", "", DEFAULT_PHRASE));
-        assert!(!detector.observe("we ship friday. stop dictation", "please", DEFAULT_PHRASE));
-        assert!(!detector.observe("we ship friday. stop dictation", "", DEFAULT_PHRASE));
-        assert!(detector.observe("we ship friday. stop dictation", "", DEFAULT_PHRASE));
+        assert!(!detector.observe("we ship friday.", "stop dictation", DEFAULT_PHRASE));
+        assert!(!detector.observe("we ship friday.", "stop dictation please", DEFAULT_PHRASE));
+        assert!(!detector.observe("we ship friday.", "stop dictation", DEFAULT_PHRASE));
+        assert!(!detector.observe("we ship friday.", "stops dictation", DEFAULT_PHRASE));
     }
 
     #[test]

@@ -78,9 +78,9 @@ pub enum DictationAudioEvent {
         kept: Option<DictationClip>,
     },
     /// Labs › Stop phrase: the capture's live text ended with the phrase
-    /// twice, so its listener finishes it as the shortcut's press would. The
-    /// words are the ones that matched, and the generation keeps a request
-    /// from outliving its capture.
+    /// (committed, or read twice in a row), so its listener finishes it as the
+    /// shortcut's press would. The words are the ones that matched, and the
+    /// generation keeps a request from outliving its capture.
     StopPhrase {
         capture_generation: u64,
         phrase: String,
@@ -938,10 +938,10 @@ impl Owner {
                 if let Some(partial) = self.capture.report_live_text()
                     && crate::labs::stop_phrase()
                 {
-                    // Labs › Stop phrase: a capture that just ended its words
-                    // with the phrase asks its listener to finish it; the
-                    // listener decides whether it is still hands-free. The
-                    // words ride along, read once here.
+                    // Labs › Stop phrase: a capture whose committed words, or
+                    // words read twice in a row, end with the phrase asks its
+                    // listener to finish it; the listener decides whether it is
+                    // still hands-free. The words ride along, read once here.
                     let phrase = crate::labs::stop_phrase_text();
                     if self
                         .stop_phrase

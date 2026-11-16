@@ -15,7 +15,7 @@ use crate::desktop::events::EventLog;
 use crate::dictation::audio::DictationAudio;
 use crate::parakeet::DictationWorker;
 
-/// The capture heard `phrase` twice and ends now, exactly as a press would:
+/// The capture heard `phrase` and ends now, exactly as a press would:
 /// its tone, HUD, context and release tail, and a job that removes the words.
 /// Nothing happens when nothing records hands-free (the capture already ended,
 /// its press is still held, or a client's dictation owns the microphone).
