@@ -14,7 +14,7 @@ use rune::{El, LineCap, Shape, canvas, col, row, text};
 use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, METRICS, Paint, button, card, page, pulsing_dot, segmented,
-    setting_row, status_dot, toggle_row,
+    setting_row, toggle_row,
 };
 use super::lists::{Tone, slider, small_button, tone_tag};
 use super::platform::{DemoRequest, PlatformRequest};
@@ -146,34 +146,10 @@ pub(super) fn mode_label(mode: VoiceFilterMode) -> &'static str {
     }
 }
 
-pub(super) fn mode_description(mode: VoiceFilterMode) -> &'static str {
-    match mode {
-        VoiceFilterMode::Muffled => tr("Sounds like a hand over the microphone while you dictate"),
-        VoiceFilterMode::Muted => tr("Silences your voice with soft room tone while you dictate"),
-        VoiceFilterMode::Quiet => tr("Turns your voice down to a whisper while you dictate"),
-        VoiceFilterMode::Normal => tr("Passes your voice through unchanged while you dictate"),
-        VoiceFilterMode::Chipmunk => tr("Sounds pitched up while you dictate"),
-        VoiceFilterMode::Robot => tr("Sounds robotic while you dictate"),
-        VoiceFilterMode::Walkie => tr("Sounds like a handheld radio while you dictate"),
-        VoiceFilterMode::Underwater => tr("Sounds submerged while you dictate"),
-        VoiceFilterMode::Far => tr("Sounds like you are across the room while you dictate"),
-    }
-}
-
-/// The pane's own state: the last mode other than Normal, whose sliders
-/// stay in place while Normal is chosen.
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct FunPane {
-    last_mode: VoiceFilterMode,
-}
-
 /// Saves a mode, comfort noise, or strength and applies the tuning live.
 pub(super) fn set_tuning(ui: &mut Ui, change: impl FnOnce(&mut TunedFilterConfig), save: bool) {
     let mut cfg = ui.platform.tuning.clone();
     change(&mut cfg);
-    if cfg.mode != VoiceFilterMode::Normal {
-        ui.fun.last_mode = cfg.mode;
-    }
     if save {
         let (mode, comfort, strength) = (cfg.mode, cfg.comfort_noise, cfg.strength);
         ui.update(|settings| {
@@ -190,40 +166,6 @@ fn ask_demo(ui: &mut Ui, request: DemoRequest) {
     ui.ask(PlatformRequest::HexMicrophoneDemo(request));
 }
 
-/// The driver's state in the card header.
-fn header_status(ui: &Ui, p: Paint) -> El {
-    let Some(status) = &ui.platform.hex_microphone else {
-        return tone_tag(p, "driver-status", tr("Checking…"), Tone::Neutral);
-    };
-    if !ui.platform.caps.hex_microphone {
-        let (label, tone) = source_state(status);
-        return tone_tag(p, "driver-status", label, tone);
-    }
-    let (label, tone) = match &status.action_state {
-        DriverActionState::Installing => (tr("Installing…").to_string(), Tone::Neutral),
-        DriverActionState::Uninstalling => (tr("Uninstalling…").to_string(), Tone::Neutral),
-        _ if !status.driver_loaded => (tr("Driver not installed").to_string(), Tone::Neutral),
-        _ if status.needs_update() => {
-            (tr_fill("Update v{}", &status.bundled_version), Tone::Accent)
-        }
-        _ if !status.active_apps.is_empty() => (
-            tr_fill("In use by {}", &status.active_apps.join(", ")),
-            Tone::Success,
-        ),
-        _ => (
-            tr_fill(
-                "Installed v{}",
-                status
-                    .installed_version
-                    .as_deref()
-                    .unwrap_or(&status.bundled_version),
-            ),
-            Tone::Success,
-        ),
-    };
-    tone_tag(p, "driver-status", &label, tone)
-}
-
 /// Hex Microphone's state where Hex creates it rather than a driver
 /// (`Capabilities::hex_microphone` off): starting, available, or failed.
 fn source_state(status: &HexMicrophoneStatus) -> (&'static str, Tone) {
@@ -237,7 +179,7 @@ fn source_state(status: &HexMicrophoneStatus) -> (&'static str, Tone) {
 /// Hex Microphone as a virtual input Hex creates (Linux): what to do with
 /// it, or why it could not start. The header shows its state.
 fn source_row(ui: &Ui, p: Paint) -> El {
-    let title = tr("Virtual microphone");
+    let title = tr("Hex Microphone");
     let Some(status) = &ui.platform.hex_microphone else {
         return setting_row(
             p,
@@ -250,7 +192,7 @@ fn source_row(ui: &Ui, p: Paint) -> El {
     let description = match &status.action_state {
         DriverActionState::Failed(reason) => tr_fill("Could not start Hex Microphone: {}", reason),
         _ if status.driver_loaded => {
-            tr("Choose Hex Microphone as your input in Slack, Zoom, or Discord").to_string()
+            tr("Select Hex Microphone as the input in your call app").to_string()
         }
         _ => tr("Starting Hex Microphone…").to_string(),
     };
@@ -259,7 +201,12 @@ fn source_row(ui: &Ui, p: Paint) -> El {
         "hex-mic-source",
         title,
         Some(&description),
-        row().key("none"),
+        tone_tag(
+            p,
+            "source-state",
+            source_state(status).0,
+            source_state(status).1,
+        ),
     )
 }
 
@@ -308,25 +255,125 @@ pub(super) fn driver_installed(ui: &Ui) -> bool {
 }
 
 pub(super) fn pane(ui: &Ui, p: Paint) -> El {
+    let mut content = page("content");
     if uninstall_only() {
-        return section(ui, p, vec![uninstall_row(ui, p)]);
+        content = content.child(card(p, "fun-hex-microphone", vec![uninstall_row(ui, p)]));
+    } else {
+        let setup = if ui.platform.caps.hex_microphone {
+            super::platform_settings::driver_row(ui, p)
+        } else {
+            source_row(ui, p)
+        };
+        content = content
+            .child(super::controls::section(
+                p,
+                "effect",
+                tr("What callers hear"),
+                vec![effect_grid(ui, p), try_it(ui, p)],
+            ))
+            .child(card(p, "fun-hex-microphone", vec![setup]));
+        if ui.platform.tuning.mode != VoiceFilterMode::Normal {
+            content = content.child(super::general::disclosure_toggle(
+                ui,
+                p,
+                super::Pane::VoiceFilter,
+                tr("Adjust effect"),
+            ));
+            if super::general::advanced_open(ui, super::Pane::VoiceFilter) {
+                content = content.child(tuning_card(ui, p));
+            }
+        }
     }
+    super::scroll_body(p.k, "fun-scroll", content)
+}
+
+fn effect_grid(ui: &Ui, p: Paint) -> El {
+    let c = &p.k.c;
+    let mut grid = row().key("fun-mode").gap(8.0).flex_wrap();
+    for mode in VoiceFilterMode::ALL {
+        let label = mode_label(mode);
+        let applied = ui.platform.tuning.mode == mode;
+        let track = DemoPlaybackTrack::Effect(mode);
+        let playing = ui
+            .platform
+            .demo
+            .as_ref()
+            .is_some_and(|d| d.playing == Some(track));
+        let mut choice = row()
+            .key("apply")
+            .role("radio")
+            .label(label)
+            .checked(applied)
+            .grow(1.0)
+            .shrink()
+            .px(10.0)
+            .min_h(36.0)
+            .gap(6.0)
+            .center_y()
+            .focusable(true)
+            .focus_ring(2.0, 0.0, c.border_focus)
+            .hover(c.hover)
+            .press(c.pressed)
+            .radius(p.k.radius.md)
+            .on_press(move |ui: &mut Ui| set_tuning(ui, |cfg| cfg.mode = mode, true))
+            .child(
+                text(label)
+                    .key("name")
+                    .font(p.k.ty.ui)
+                    .color(p.text())
+                    .wrap(),
+            );
+        if applied {
+            choice = choice.child(
+                rune::icon(&rune_theme_opencode::icons::CHECK_SMALL, 16.0)
+                    .key("check")
+                    .color(p.accent()),
+            );
+        }
+        let mut tile = row()
+            .key(mode.id())
+            .min_w(180.0)
+            .grow(1.0)
+            .center_y()
+            .pr(4.0)
+            .border(p.hair, if applied { p.accent() } else { c.border_weak })
+            .radius(p.k.radius.md)
+            .fill(if applied { c.layer_01 } else { c.bg_base })
+            .child(choice);
+        if ui.platform.demo.is_some() {
+            let action = if playing { tr("Stop") } else { tr("Play") };
+            let play = rune_kit::IconButton::new(if playing {
+                &rune_theme_opencode::icons::STOP
+            } else {
+                &super::controls::PLAY
+            })
+            .variant(rune_kit::IconButtonVariant::Neutral)
+            .control_size(rune_kit::ControlSize::Regular)
+            .label(format!("{action}: {label}"))
+            .on_press(move |ui: &mut Ui| {
+                ask_demo(
+                    ui,
+                    if playing {
+                        DemoRequest::StopPlayback
+                    } else {
+                        DemoRequest::Play(track)
+                    },
+                )
+            })
+            .build(p.k)
+            .key("play");
+            tile = tile.child(play);
+        }
+        grid = grid.child(tile);
+    }
+    col().key("effects").px(METRICS.row_px).py(12.0).gap(12.0)
+        .child(text(tr("Select an effect for dictation. Play previews it without changing your call. Your voice sounds normal between dictations.")).key("description").font(DESCRIPTION).color(p.muted()).wrap()).child(grid)
+}
+
+fn tuning_card(ui: &Ui, p: Paint) -> El {
     let cfg = &ui.platform.tuning;
     let mode = cfg.mode;
-    let labels: Vec<&str> = VoiceFilterMode::ALL
-        .iter()
-        .map(|m| mode_label(*m))
-        .collect();
-    let selected = VoiceFilterMode::ALL
-        .iter()
-        .position(|m| *m == mode)
-        .unwrap_or(0);
-    let shown = if mode == VoiceFilterMode::Normal {
-        ui.fun.last_mode
-    } else {
-        mode
-    };
-    let (primary, primary_label) = match shown {
+    let (primary, primary_label) = match mode {
         VoiceFilterMode::Muffled | VoiceFilterMode::Normal => (Tunable::MuffledWall, tr("Wall")),
         VoiceFilterMode::Muted => (Tunable::MutedRoomTone, tr("Room tone")),
         VoiceFilterMode::Quiet => (Tunable::QuietLevel, tr("Level")),
@@ -348,24 +395,10 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 .center_y()
                 .justify_between()
                 .child(
-                    col()
-                        .key("copy")
-                        .grow(1.0)
-                        .shrink()
-                        .gap(2.0)
-                        .child(
-                            text(tr("Mode while dictating"))
-                                .key("label")
-                                .font(p.k.ty.ui)
-                                .color(p.text()),
-                        )
-                        .child(
-                            text(mode_description(mode))
-                                .key("description")
-                                .font(DESCRIPTION)
-                                .color(p.muted())
-                                .wrap(),
-                        ),
+                    text(mode_label(mode))
+                        .key("mode")
+                        .font(p.k.ty.ui)
+                        .color(p.text()),
                 )
                 .child(small_button(
                     p,
@@ -384,19 +417,6 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                         );
                     },
                 )),
-        )
-        // Nine modes share the card's width rather than sizing to the
-        // longest label.
-        .child(
-            rune_kit::SegmentedControl::new(&labels, Some(selected))
-                .width(None)
-                .on_pick(|ui: &mut Ui, index: usize, _: &mut rune::Tx| {
-                    let mode = VoiceFilterMode::ALL[index];
-                    set_tuning(ui, |cfg| cfg.mode = mode, true);
-                })
-                .build(p.k)
-                .key("fun-mode")
-                .role("segmented"),
         );
     if mode != VoiceFilterMode::Normal {
         tuning = tuning.child(
@@ -418,12 +438,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 .child(tunable(ui, p, Tunable::MuffledLevel, tr("Level"))),
         );
     }
-    let microphone = if ui.platform.caps.hex_microphone {
-        super::platform_settings::driver_row(ui, p)
-    } else {
-        source_row(ui, p)
-    };
-    let mut rows = vec![microphone, tuning];
+    let mut rows = vec![tuning];
     if mode == VoiceFilterMode::Muted {
         rows.push(toggle_row(
             p,
@@ -437,32 +452,12 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
             },
         ));
     }
-    rows.push(try_it(ui, p));
-    section(ui, p, rows)
-}
-
-/// The Hex Microphone section around `rows`, in the pane's scroll body.
-fn section(ui: &Ui, p: Paint, rows: Vec<El>) -> El {
-    let section = col()
-        .key("fun-hex-microphone")
-        .gap(METRICS.label_gap)
-        .child(
-            row()
-                .key("header-row")
-                .mx(METRICS.row_px)
-                .gap(8.0)
-                .center_y()
-                .justify_between()
-                .child(p.section_label(tr("Hex Microphone")))
-                .child(header_status(ui, p)),
-        )
-        .child(card(p, "card", rows));
-    let content = page("content").child(section);
-    super::scroll_body(p.k, "fun-scroll", content)
+    card(p, "adjustments", rows)
 }
 
 /// A stable build's only Voice Filter row: Uninstall the driver it left.
 fn uninstall_row(ui: &Ui, p: Paint) -> El {
+    let status = ui.platform.hex_microphone.as_ref();
     let uninstalling = ui
         .platform
         .hex_microphone
@@ -479,13 +474,16 @@ fn uninstall_row(ui: &Ui, p: Paint) -> El {
             |ui: &mut Ui, _| ui.ask(PlatformRequest::UninstallHexMicrophone),
         )
     };
+    let hint = match status.map(|s| &s.action_state) {
+        Some(DriverActionState::Failed(reason)) => format!("{} · {}", tr("Failed"), reason),
+        Some(DriverActionState::Cancelled) => tr("Uninstall cancelled").into(),
+        _ => tr("Voice Filter isn't in this version of Hex. Uninstall its driver to remove Hex Microphone from your inputs.").into(),
+    };
     setting_row(
         p,
         "hex-mic-driver",
         tr("Virtual microphone driver"),
-        Some(tr(
-            "Voice Filter isn't in this version of Hex. Uninstall its driver to remove Hex Microphone from your inputs.",
-        )),
+        Some(&hint),
         row().key("controls").gap(8.0).center_y().child(control),
     )
 }
@@ -523,124 +521,89 @@ fn try_it(ui: &Ui, p: Paint) -> El {
             },
         ));
     }
-    controls = controls.child(
-        row()
-            .key("record")
-            .gap(8.0)
-            .center_y()
-            .child(if demo.is_recording {
-                pulsing_dot(p.danger())
-            } else {
-                status_dot(p.danger())
-            })
-            .child(if demo.is_recording {
-                button(
-                    p,
-                    "fun-demo-record",
-                    tr("Stop recording"),
-                    ButtonKind::Danger,
-                    |ui: &mut Ui, _| ask_demo(ui, DemoRequest::StopRecording),
-                )
-            } else {
-                button(
-                    p,
-                    "fun-demo-record",
-                    tr("Record 5s"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ask_demo(ui, DemoRequest::Record),
-                )
-            }),
-    );
-    let play_button = |key: &str, label: &str, kind: ButtonKind, track: DemoPlaybackTrack| {
-        let playing = demo.playing == Some(track);
-        button(
-            p,
-            key,
-            if playing { tr("Stop") } else { label },
-            kind,
-            move |ui: &mut Ui, _| {
-                ask_demo(
-                    ui,
-                    if playing {
-                        DemoRequest::StopPlayback
-                    } else {
-                        DemoRequest::Play(track)
-                    },
-                );
-            },
-        )
-    };
-    let play = row()
-        .key("play")
-        .gap(8.0)
-        .center_y()
-        .justify_between()
-        .child(
-            row()
-                .key("buttons")
-                .gap(8.0)
-                .child(play_button(
-                    "fun-play-call-hears",
-                    tr("Play what call hears"),
-                    ButtonKind::Primary,
-                    DemoPlaybackTrack::CallHears,
-                ))
-                .child(play_button(
-                    "fun-play-you",
-                    tr("Play your voice"),
-                    ButtonKind::Secondary,
-                    DemoPlaybackTrack::You,
-                )),
-        )
-        .child(
-            text(tr("Stays in memory"))
-                .key("memory")
-                .font(p.k.ty.small)
-                .color(p.faint()),
+    if !demo.has_recording {
+        controls = controls.child(
+            text(tr("Example"))
+                .key("source")
+                .font(p.k.ty.ui)
+                .color(p.text()),
         );
+    }
+    let original = demo.playing == Some(DemoPlaybackTrack::You);
+    controls = controls.child(small_button(
+        p,
+        "fun-play-you",
+        if original {
+            tr("Stop")
+        } else {
+            tr("Play original")
+        },
+        move |ui, _| {
+            ask_demo(
+                ui,
+                if original {
+                    DemoRequest::StopPlayback
+                } else {
+                    DemoRequest::Play(DemoPlaybackTrack::You)
+                },
+            )
+        },
+    ));
+    let mut record = row().key("record").center_y().gap(8.0).child(
+        text(tr("Stays in memory"))
+            .key("memory")
+            .font(p.k.ty.small)
+            .color(p.muted()),
+    );
+    if demo.is_recording {
+        record = record.child(pulsing_dot(p.danger()));
+    }
+    let recording = demo.is_recording;
+    record = record.child(small_button(
+        p,
+        "fun-demo-record",
+        if recording {
+            tr("Stop recording")
+        } else {
+            tr("Record 5s")
+        },
+        move |ui, _| {
+            ask_demo(
+                ui,
+                if recording {
+                    DemoRequest::StopRecording
+                } else {
+                    DemoRequest::Record
+                },
+            )
+        },
+    ));
     col()
         .key("fun-try-it")
         .px(METRICS.row_px)
         .py(10.0)
-        .gap(12.0)
+        .gap(10.0)
         .child(
             row()
-                .key("heading")
-                .gap(16.0)
-                .center_y()
+                .key("sources")
                 .justify_between()
+                .center_y()
+                .gap(8.0)
                 .flex_wrap()
-                .child(
-                    col()
-                        .key("copy")
-                        .grow(1.0)
-                        .shrink()
-                        .min_w(200.0)
-                        .gap(2.0)
-                        .child(text(tr("Try it")).key("label").font(p.k.ty.ui).color(p.text()))
-                        .child(
-                            text(tr("Compare your raw microphone with what the call hears during dictation"))
-                                .key("description")
-                                .font(DESCRIPTION)
-                                .color(p.muted())
-                                .wrap(),
-                        ),
-                )
-                .child(controls),
+                .child(controls)
+                .child(record),
         )
-        .child(waveforms(p, demo))
-        .child(play)
+        .child(waveforms(p, demo, ui.platform.tuning.mode))
 }
 
 /// The clip's two tracks as bars, the dictated span highlighted, and the
 /// recording or playback progress under them.
-fn waveforms(p: Paint, demo: &DemoSnapshot) -> El {
+fn waveforms(p: Paint, demo: &DemoSnapshot, applied: VoiceFilterMode) -> El {
     let c = &p.k.c;
-    let clip = match demo.source {
-        DemoSourceKind::Example => {
-            "“Yeah, I’m looking at the new layout now — Reply to Olive: pick up dinner…”"
-        }
-        DemoSourceKind::Recording => tr("Your 5s sample"),
+    let clip = tr("While dictating");
+    let effect = match demo.playing {
+        Some(DemoPlaybackTrack::Effect(mode)) => mode,
+        _ => applied,
     };
     let span = format!(
         "{:.1}s – {:.1}s",
@@ -715,8 +678,8 @@ fn waveforms(p: Paint, demo: &DemoSnapshot) -> El {
                         .color(p.faint()),
                 ),
         )
-        .child(track("you", tr("You"), false, &demo.peaks_you))
-        .child(track("call", tr("Call hears"), true, &demo.peaks_call));
+        .child(track("you", tr("Original"), false, &demo.peaks_you))
+        .child(track("call", mode_label(effect), true, &demo.peaks_call));
     if active {
         card = card.child(
             rune_kit::Progress::new(Some(progress))
