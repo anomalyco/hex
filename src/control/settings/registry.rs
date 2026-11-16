@@ -463,6 +463,12 @@ pub(super) const KEYS: &[Key] = &[
          with no modifier (Linux, macOS); off puts such a shortcut back to its default",
     ),
     key(
+        "labs.microphone_key",
+        Kind::Bool,
+        "Labs: a shortcut may be the microphone (dictation) key in a laptop keyboard's top row \
+         with no modifier (macOS); off puts such a shortcut back to its default",
+    ),
+    key(
         "labs.keep_recordings",
         Kind::Bool,
         "Labs: dictations saved to History keep their audio, so History can transcribe them again with another model; off stops saving, clearing History deletes it",

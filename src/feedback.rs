@@ -200,7 +200,8 @@ enum Request {
 static DICTATION_PLAYER: OnceLock<SyncSender<Request>> = OnceLock::new();
 static LOADER_STARTED: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(true);
-static VOLUME: AtomicU32 = AtomicU32::new(0.5_f32.to_bits());
+pub(crate) const DEFAULT_VOLUME: f32 = 0.5;
+static VOLUME: AtomicU32 = AtomicU32::new(DEFAULT_VOLUME.to_bits());
 
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
@@ -215,7 +216,12 @@ fn volume() -> f32 {
 }
 
 fn sounds_enabled() -> bool {
-    ENABLED.load(Ordering::Relaxed) && volume() > 0.0
+    feedback_volume().is_some()
+}
+
+fn feedback_volume() -> Option<f32> {
+    let level = volume();
+    (ENABLED.load(Ordering::Relaxed) && level > 0.0).then_some(level)
 }
 
 /// How long the output device stays open after the last tone finishes. Holding
@@ -401,14 +407,25 @@ pub fn preload() -> Result<()> {
                 };
                 let received_at = Instant::now();
                 let timed_out = request.is_none();
-                let enabled = sounds_enabled();
-                output.release_when_idle(enabled, received_at);
-                if !enabled {
+                let level = feedback_volume();
+                let keep_output = audition.keep_output(level.is_some(), received_at);
+                output.release_when_idle(keep_output, received_at);
+                if level.is_none() {
                     start_tone.retract();
-                    audition.stop();
-                    continue;
                 }
                 let tone = match request {
+                    Some(Request::Audition(set, what)) => {
+                        audition.play(&sounds, set, what, level, |cue, sound| {
+                            output.prepare(Instant::now());
+                            output.add(sound, (set, cue));
+                        });
+                        None
+                    }
+                    Some(Request::StopAudition) => {
+                        audition.stop();
+                        None
+                    }
+                    _ if level.is_none() => continue,
                     Some(Request::Play(tone, percent)) => {
                         if tone == Tone::DictationStart {
                             start_tone.cancel_pending();
@@ -428,24 +445,6 @@ pub fn preload() -> Result<()> {
                     }
                     Some(Request::Prepare) => {
                         output.prepare(received_at);
-                        None
-                    }
-                    Some(Request::Audition(set, what)) => {
-                        audition.stop();
-                        let stopped = audition.begin();
-                        for (sound, at, cue) in sounds.audition(set, what) {
-                            let (sound, _) =
-                                Retractable::with_flag(sound.delay(at), stopped.clone());
-                            output.play(sound, (set, cue));
-                        }
-                        #[cfg(target_os = "macos")]
-                        if what == Audition::Cue(Cue::Error) && !set.has_own_error() {
-                            audition.system = spawn_system_sound("Basso");
-                        }
-                        None
-                    }
-                    Some(Request::StopAudition) => {
-                        audition.stop();
                         None
                     }
                     None => None,
@@ -742,12 +741,10 @@ pub fn stop_tone_length() -> Duration {
     })
 }
 
-/// Plays `what` of `set` at the current volume, so the sound picker can be
-/// heard. It ends the audition still sounding, if any.
+/// Plays `what` of `set` in the picker, at the usual level or the default
+/// while feedback is off. It ends the audition still sounding, if any.
 pub fn audition(set: SoundSet, what: Audition) {
-    if sounds_enabled() {
-        enqueue(DICTATION_PLAYER.get(), Request::Audition(set, what));
-    }
+    enqueue(DICTATION_PLAYER.get(), Request::Audition(set, what));
 }
 
 /// Ends the audition still sounding, fading it out over [`RETRACT_FADE`].
@@ -759,12 +756,50 @@ pub fn stop_audition() {
 #[derive(Default)]
 struct Auditioning {
     stopped: Option<Arc<AtomicBool>>,
+    /// Only a preview started while Off may keep the muted output open.
+    while_off_until: Option<Instant>,
     /// Basso, for Classic's error.
     #[cfg(target_os = "macos")]
     system: Option<std::process::Child>,
 }
 
+type AuditionSource = rodio::source::Amplify<Retractable<rodio::source::Delay<SamplesBuffer>>>;
+
 impl Auditioning {
+    fn play(
+        &mut self,
+        sounds: &Sounds,
+        set: SoundSet,
+        what: Audition,
+        level: Option<f32>,
+        mut add: impl FnMut(Cue, AuditionSource),
+    ) {
+        self.stop();
+        let stopped = self.begin();
+        let gain = level.unwrap_or(DEFAULT_VOLUME);
+        for (sound, at, cue) in sounds.audition(set, what) {
+            let (sound, _) = Retractable::with_flag(sound.delay(at), stopped.clone());
+            add(cue, sound.amplify(gain));
+        }
+        #[cfg(target_os = "macos")]
+        if what == Audition::Cue(Cue::Error) && !set.has_own_error() {
+            self.system = spawn_system_sound("Basso", gain);
+        }
+        if level.is_none() {
+            self.while_off_until = Some(Instant::now() + what.length());
+        }
+    }
+
+    fn keep_output(&mut self, enabled: bool, now: Instant) -> bool {
+        if enabled {
+            self.while_off_until = None;
+        } else if self.while_off_until.is_none_or(|until| now >= until) {
+            self.stop();
+            return false;
+        }
+        true
+    }
+
     /// The flag that stops the audition beginning now.
     fn begin(&mut self) -> Arc<AtomicBool> {
         self.stopped
@@ -773,6 +808,7 @@ impl Auditioning {
     }
 
     fn stop(&mut self) {
+        self.while_off_until = None;
         if let Some(stopped) = self.stopped.take() {
             stopped.store(true, Ordering::Release);
         }
@@ -1221,15 +1257,19 @@ impl FeedbackOutput<MixerDeviceSink> {
         self.prepare(Instant::now());
         // Opening may have been slow; recheck the latest preference before
         // retaining the output or playing the queued sound.
-        if !sounds_enabled() {
+        let Some(level) = feedback_volume() else {
             self.release_when_idle(false, Instant::now());
             return false;
-        }
+        };
+        self.add(sound.amplify(level), tone)
+    }
+
+    fn add(&mut self, sound: impl Source + Send + 'static, tone: impl std::fmt::Debug) -> bool {
         let Some(opened) = self.sink.as_ref() else {
             return false;
         };
         let duration = sound.total_duration().unwrap_or(Duration::ZERO);
-        opened.sink.mixer().add(sound.amplify(volume()));
+        opened.sink.mixer().add(sound);
         tracing::debug!(?tone, "playing feedback tone");
         self.mark_playing(Instant::now(), duration);
         true
@@ -1242,18 +1282,18 @@ fn play_system_sound(tone: Tone) {
         Tone::Error => "Basso",
         _ => return,
     };
-    if let Some(mut child) = spawn_system_sound(sound) {
+    if let Some(mut child) = spawn_system_sound(sound, volume()) {
         thread::spawn(move || {
             let _ = child.wait();
         });
     }
 }
 
-/// Starts `/System/Library/Sounds/<sound>.aiff` at the current volume. The
+/// Starts `/System/Library/Sounds/<sound>.aiff` at the requested level. The
 /// caller waits for it.
 #[cfg(target_os = "macos")]
-fn spawn_system_sound(sound: &str) -> Option<std::process::Child> {
-    let volume = volume().to_string();
+fn spawn_system_sound(sound: &str, level: f32) -> Option<std::process::Child> {
+    let volume = level.to_string();
     Command::new("/usr/bin/afplay")
         .args([
             "-v",
@@ -2159,6 +2199,38 @@ mod tests {
         }
         assert!(!SoundSet::Classic.has(Cue::Done));
         assert!(SoundSet::Classic.has(Cue::Error));
+    }
+
+    #[test]
+    fn picker_previews_render_at_the_default_only_while_off() {
+        let sounds = Sounds::load().unwrap();
+        let mut audition = Auditioning::default();
+        let set = SoundSet::Signature;
+        for what in std::iter::once(Audition::Dictation).chain(Cue::ALL.map(Audition::Cue)) {
+            let render = |audition: &mut Auditioning, level| {
+                let mut peaks = Vec::new();
+                audition.play(&sounds, set, what, level, |cue, source| {
+                    peaks.push((cue, source.map(f32::abs).fold(0.0, f32::max)));
+                });
+                peaks
+            };
+            let off = render(&mut audition, None);
+            let now = Instant::now();
+            assert!(audition.keep_output(false, now + OBSERVATION_INTERVAL));
+            assert!(!audition.keep_output(false, now + what.length()));
+            assert_eq!(off.len(), what.cues().len());
+            assert!(off.iter().all(|(_, peak)| *peak > 0.0));
+            assert_eq!(render(&mut audition, Some(DEFAULT_VOLUME)), off);
+            for ((cue, quiet), (expected, peak)) in
+                render(&mut audition, Some(DEFAULT_VOLUME / 4.0))
+                    .into_iter()
+                    .zip(off)
+            {
+                assert_eq!((cue, quiet), (expected, peak / 4.0));
+            }
+            // Turning ordinary feedback off releases even a sounding output.
+            assert!(!audition.keep_output(false, now));
+        }
     }
 
     /// Stopping fades every sound of the audition, even one still waiting

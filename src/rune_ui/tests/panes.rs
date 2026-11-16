@@ -2610,7 +2610,6 @@ fn a_lone_lab_card_keeps_half_the_row() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     unfold_labs(&mut rt);
     let mut width = None;
-    let mut lone = false;
     let chips = [
         "chip-all",
         "chip-dictation",
@@ -2632,14 +2631,28 @@ fn a_lone_lab_card_keeps_half_the_row() {
             .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
             .map(|e| e.rect[2])
             .collect();
-        lone |= widths.len() % 2 == 1;
         let width = *width.get_or_insert(widths[0]);
         assert!(
             widths.iter().all(|w| (w - width).abs() < 0.5),
             "{chip}: every card is as wide: {widths:?}"
         );
     }
-    assert!(lone, "some chip leaves a card alone in its row");
+    // A chip's group can come out even as labs are added and removed, so the
+    // lone card is a search that matches exactly one.
+    tap(&mut rt, "chip-all");
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    settle(&mut rt);
+    let lone: Vec<f32> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
+        .map(|e| e.rect[2])
+        .collect();
+    assert_eq!(lone.len(), 1, "the search matches one card: {lone:?}");
+    assert!(
+        (lone[0] - width.expect("a chip shows cards")).abs() < 0.5,
+        "a card alone in its row keeps half the width: {lone:?}"
+    );
 }
 
 #[test]
@@ -2828,16 +2841,29 @@ fn labs_groups_follow_each_os() {
     let cards = |rt: &Runtime<Ui>| -> Vec<String> {
         rt.elements()
             .into_iter()
-            .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
+            .filter_map(|e| {
+                let key = e.key?;
+                key.strip_prefix("lab-card-")
+                    .or_else(|| key.strip_prefix("lab-featured-"))
+                    .map(str::to_string)
+            })
             .collect()
     };
-    let cases: [(&str, &[&str], &str); 3] = [
-        ("windows-labs", &["terminal-paste"], "mouse-shortcuts"),
-        ("linux-labs", &["section-key"], "terminal-paste"),
+    let cases: [(&str, &[&str], &[&str]); 3] = [
+        (
+            "windows-labs",
+            &["terminal-paste"],
+            &["mouse-shortcuts", "microphone-key"],
+        ),
+        (
+            "linux-labs",
+            &["section-key"],
+            &["terminal-paste", "microphone-key"],
+        ),
         (
             "mac-labs",
-            &["section-key", "mouse-shortcuts"],
-            "terminal-paste",
+            &["section-key", "mouse-shortcuts", "microphone-key"],
+            &["terminal-paste"],
         ),
     ];
     for (scene, shows, hides) in cases {
@@ -2847,7 +2873,9 @@ fn labs_groups_follow_each_os() {
         for id in shows {
             assert!(shown.contains(&id.to_string()), "{scene} shows {id}");
         }
-        assert!(!shown.contains(&hides.to_string()), "{scene} hides {hides}");
+        for id in hides {
+            assert!(!shown.contains(&id.to_string()), "{scene} hides {id}");
+        }
         for group in crate::labs::Group::ALL {
             let any = shown.iter().any(|id| {
                 crate::labs::Feature::from_name(id)
@@ -3063,7 +3091,7 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text.starts_with("Show provisional words in the focused text field")),
+            .any(|text| text.starts_with("On Wayland, show your words in the text field")),
         "its description stays under the note"
     );
 

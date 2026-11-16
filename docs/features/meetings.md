@@ -381,14 +381,20 @@ rewritten as `providers` on the next load.
 Call detection knows Brave, Chrome, Safari, Firefox, Edge, Arc
 (`company.thebrowser.Browser`, foreground name `Arc`; its tab is read like
 Brave's), Helium (`net.imput.helium`, helpers included; `helium` and
-`helium-browser` on Linux, `helium.exe` on Windows), and Vivaldi
+`helium-browser` on Linux, `helium.exe` on Windows), Ardia
+(`com.ardia.browser`, its Chromium audio service reports
+`com.ardia.browser.helper`), Zen (`app.zen-browser.zen`; Firefox-based, so its
+helpers are `app.zen-browser.*` rather than `org.mozilla.*`), and Vivaldi
 (`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on Linux, `vivaldi.exe` on
 Windows). Arc was missing until #801, so its Meet calls were never detected;
 Vivaldi was missing until #1105, so its calls
-(Teams in a Vivaldi web app included) were never offered. Checks:
+(Teams in a Vivaldi web app included) were never offered; Ardia and Zen were
+missing until #1875, so their calls were never offered. Checks:
 `a_google_meet_call_in_arc_records_after_about_two_seconds`,
-`vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
-Vivaldi call.
+`vivaldi_on_the_microphone_is_a_browser_call`,
+`ardia_on_the_microphone_is_a_named_browser_call`, and
+`zen_on_the_microphone_is_a_named_browser_call`. Not observed on a real
+Vivaldi, Ardia, or Zen call.
 
 Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
 `teams.live.com`) are known call sites without the lab: a browser on one is a
@@ -439,12 +445,12 @@ Checks: `more_call_apps_are_unknown_until_their_lab_is_on`,
 of these apps or websites on a real call, the Phone app's Continuity audio in
 particular.
 
-Chromium and Electron apps (Brave, Chrome, Helium, Edge, Arc, Slack, Teams)
-capture microphone audio in sandboxed `audio.mojom.AudioService` utility
+Chromium and Electron apps (Brave, Chrome, Helium, Ardia, Edge, Arc, Slack,
+Teams) capture microphone audio in sandboxed `audio.mojom.AudioService` utility
 processes (`*.helper`) that do not register with `NSRunningApplication`; Zoom
-uses `us.zoom.CptHost`, Firefox uses `org.mozilla.plugincontainer`, Safari uses
-`com.apple.WebKit.GPU` (`Safari Graphics and Media`), and FaceTime uses
-`com.apple.avconferenced`.
+uses `us.zoom.CptHost`, Firefox uses `org.mozilla.plugincontainer`, Zen uses
+`app.zen-browser.plugincontainer`, Safari uses `com.apple.WebKit.GPU` (`Safari
+Graphics and Media`), and FaceTime uses `com.apple.avconferenced`.
 [microphone_activity.rs](../../src/microphone_activity.rs) attributes each input
 process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
@@ -1140,6 +1146,31 @@ While recording                                      // meetings.rolling
      ├── First pause after 6 s (pause segmenter; never under 3 s) -> boundary
      ├── No pause by 10 s -> hard cut; next chunk repeats its last 2 s
      │   (so a chunk is at most 12 s of audio)
+     ├── Quiet microphone track (loud level, the 2nd-loudest 20 ms frame of a
+     │   second over the last minute, under -35 dBFS throughout) -> chunks
+     │   raised so that level reaches -20 dBFS, at most 30 dB, each chunk's
+     │   peak under -1 dBFS; the recording, the system track and the echo
+     │   envelope keep their audio, and a chunk the -60 dB silence gate would
+     │   skip is left as captured, so the gate's decision does not change (the
+     │   raise is for the speech detector and the model). Within a minute of
+     │   the track's own normal-level speech nothing is raised; before its
+     │   first word, or after a quiet minute, background and speaker leakage
+     │   can be raised too
+     │   // checks: chunk_level.rs a_normal_track_is_left_alone,
+     │   // background_after_a_normal_word_stays_alone,
+     │   // a_loud_word_leaves_the_window_after_a_minute,
+     │   // a_quiet_track_is_raised_to_the_target,
+     │   // a_near_silent_track_is_left_bit_identical,
+     │   // the_raise_stops_at_thirty_db,
+     │   // a_single_click_does_not_make_a_quiet_track_normal,
+     │   // a_chunk_peak_stays_under_minus_one_dbfs,
+     │   // an_already_loud_chunk_is_not_attenuated, and in transcript.rs
+     │   // a_normal_microphone_track_is_left_bit_identical,
+     │   // a_finished_chunker_starts_its_pause_cuts_over,
+     │   // a_quiet_tracks_silent_chunk_is_left_for_the_silence_gate,
+     │   // a_quiet_microphone_chunk_reaches_the_transcriber_raised_and_a_system_chunk_unchanged;
+     │   // not yet observed on a real call where another app holds the mic
+     │   // with voice processing; the echo replay needs such a recording
      └── Silent chunk (no 20 ms frame ≥ -60 dB) -> skipped, no inference
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
      ├── No speech detected (Silero, once installed) -> empty transcript, no

@@ -155,6 +155,9 @@ pub struct LabsSettings {
     /// The ISO section key, left of 1, may be a shortcut on its own (Linux
     /// and macOS, issue 1050).
     pub section_key_alone: bool,
+    /// The microphone (dictation) key in a laptop keyboard's top row may be
+    /// a shortcut on its own (macOS, issue 181).
+    pub microphone_key: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
     /// A kept recording may be copied from History and the menu bar or tray
@@ -404,6 +407,7 @@ impl Default for LabsSettings {
             k_quant_models: false,
             picker_downloaded: false,
             section_key_alone: false,
+            microphone_key: false,
             keep_recordings: false,
             copy_dictation_audio: false,
             settings_search: false,

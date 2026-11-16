@@ -58,6 +58,7 @@ impl Feature {
             | Self::KQuantModels
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
+            | Self::MicrophoneKeyAlone
             | Self::KeepRecordings
             | Self::SettingsSearch
             | Self::Appearance
@@ -182,7 +183,7 @@ impl Feature {
             | Self::CursorContext
             | Self::CleanUpWithAppleIntelligence => 20261113,
             Self::CalendarMenu => 20261114,
-            Self::CopyDictationAudio => 20261115,
+            Self::CopyDictationAudio | Self::MicrophoneKeyAlone => 20261115,
         }
     }
 
@@ -269,6 +270,7 @@ impl Feature {
             Self::VoiceFilter => MACOS_LINUX,
             Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => WINDOWS,
             Self::SectionKeyAlone => MACOS_LINUX,
+            Self::MicrophoneKeyAlone => MACOS,
             Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::GnomeMeetingCapsules
@@ -394,6 +396,7 @@ impl Feature {
             Self::KQuantModels => "k-quant-models",
             Self::PickerDownloaded => "picker-downloaded",
             Self::SectionKeyAlone => "section-key",
+            Self::MicrophoneKeyAlone => "microphone-key",
             Self::KeepRecordings => "keep-recordings",
             Self::SettingsSearch => "settings-search",
             Self::Appearance => "appearance",
@@ -484,6 +487,7 @@ impl Feature {
             Self::KQuantModels => "labs.k_quant_models",
             Self::PickerDownloaded => "labs.picker_downloaded",
             Self::SectionKeyAlone => "labs.section_key_alone",
+            Self::MicrophoneKeyAlone => "labs.microphone_key",
             Self::KeepRecordings => "labs.keep_recordings",
             Self::SettingsSearch => "labs.settings_search",
             Self::Appearance => "labs.appearance",

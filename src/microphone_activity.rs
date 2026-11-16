@@ -98,6 +98,8 @@ pub(crate) fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "company.thebrowser.Browser"
                 | "com.vivaldi.Vivaldi"
                 | "net.imput.helium"
+                | "com.ardia.browser"
+                | "app.zen-browser.zen"
         )
     )
 }
@@ -409,6 +411,11 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("company.thebrowser.browser", "company.thebrowser.Browser"),
         ("com.vivaldi.vivaldi", "com.vivaldi.Vivaldi"),
         ("net.imput.helium", "net.imput.helium"),
+        // Ardia's Chromium audio service reports `com.ardia.browser.helper`.
+        ("com.ardia.browser", "com.ardia.browser"),
+        // Zen is Firefox-based: its main process and its helpers, which are
+        // `app.zen-browser.*` rather than `org.mozilla.*`.
+        ("app.zen-browser", "app.zen-browser.zen"),
     ]
     .iter()
     .find_map(|(prefix, canonical)| {
@@ -443,6 +450,8 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "company.thebrowser.Browser" => Some("Arc"),
         "com.vivaldi.Vivaldi" => Some("Vivaldi"),
         "net.imput.helium" => Some("Helium"),
+        "com.ardia.browser" => Some("Ardia"),
+        "app.zen-browser.zen" => Some("Zen"),
         _ => None,
     }
 }
@@ -461,6 +470,7 @@ fn is_helper_bundle_id(bundle_id: &str) -> bool {
                 | "us.zoom.zoomcefhelper"
                 | "us.zoom.zccimeetinghost"
                 | "org.mozilla.plugincontainer"
+                | "app.zen-browser.plugincontainer"
         )
 }
 
@@ -1007,6 +1017,24 @@ mod tests {
             "net.imput.helium.helper.Renderer",
             "net.imput.helium"
         ));
+        assert!(is_process_of(
+            "com.ardia.browser.helper",
+            "com.ardia.browser"
+        ));
+        // Zen's audio process is the main app; its helpers are Zen's own.
+        assert!(is_process_of("app.zen-browser.zen", "app.zen-browser.zen"));
+        assert!(is_process_of(
+            "app.zen-browser.plugincontainer",
+            "app.zen-browser.zen"
+        ));
+        assert!(is_process_of(
+            "app.zen-browser.zen-gpu-helper",
+            "app.zen-browser.zen"
+        ));
+        assert!(is_process_of(
+            "app.zen-browser.zen-media-plugin-helper",
+            "app.zen-browser.zen"
+        ));
         assert!(is_process_of("com.google.Chrome", "com.google.Chrome"));
         assert!(!is_process_of(
             "com.google.Chrome.helper",
@@ -1017,6 +1045,9 @@ mod tests {
             "company.thebrowser.Browser"
         ));
         assert!(!is_process_of("com.google.Chromecast", "com.google.Chrome"));
+        // A prefix without the dot boundary is a different app.
+        assert!(!is_process_of("com.ardia.browserx", "com.ardia.browser"));
+        assert!(!is_process_of("app.zen-browserx", "app.zen-browser.zen"));
     }
 
     #[test]
@@ -1024,6 +1055,9 @@ mod tests {
         assert!(browser_bundle("com.brave.Browser.helper", None));
         assert!(browser_bundle("com.google.Chrome.helper", None));
         assert!(browser_bundle("net.imput.helium.helper", None));
+        assert!(browser_bundle("com.ardia.browser.helper", None));
+        assert!(browser_bundle("app.zen-browser.zen", None));
+        assert!(browser_bundle("app.zen-browser.plugincontainer", None));
         assert!(browser_bundle(
             "com.apple.WebKit.GPU",
             Some("Safari Graphics and Media")
@@ -1109,6 +1143,42 @@ mod tests {
                 Some("net.imput.helium"),
                 true,
             ),
+            (
+                "com.ardia.browser",
+                "Ardia",
+                Some("com.ardia.browser"),
+                true,
+            ),
+            (
+                "com.ardia.browser.helper",
+                "Ardia Helper",
+                Some("com.ardia.browser"),
+                true,
+            ),
+            (
+                "app.zen-browser.zen",
+                "Zen",
+                Some("app.zen-browser.zen"),
+                true,
+            ),
+            (
+                "app.zen-browser.plugincontainer",
+                "plugin-container",
+                Some("app.zen-browser.zen"),
+                true,
+            ),
+            (
+                "app.zen-browser.zen-gpu-helper",
+                "Zen GPU Helper",
+                Some("app.zen-browser.zen"),
+                true,
+            ),
+            (
+                "app.zen-browser.zen-media-plugin-helper",
+                "Zen Media Plugin Helper",
+                Some("app.zen-browser.zen"),
+                true,
+            ),
             ("anomaly.hex", "Hex", None, false),
             ("zoom", "Zoom", Some("us.zoom.xos"), false),
             (
@@ -1152,6 +1222,15 @@ mod tests {
             assert_eq!(app.canonical_bundle_id(), expected, "bundle {bundle_id}");
             assert_eq!(app.is_browser(), browser, "browser {bundle_id}");
         }
+        // The names the pause and a browser call show for them.
+        assert_eq!(
+            canonical_application_name("com.ardia.browser"),
+            Some("Ardia")
+        );
+        assert_eq!(
+            canonical_application_name("app.zen-browser.zen"),
+            Some("Zen")
+        );
     }
 
     #[test]

@@ -526,6 +526,18 @@ pub fn frontmost_bundle_path() -> Option<std::path::PathBuf> {
     })
 }
 
+/// The frontmost application's bundle identifier, as a paste reads it before
+/// choosing an insertion path the app can accept.
+#[cfg(target_os = "macos")]
+pub fn frontmost_bundle_id() -> Option<String> {
+    autoreleasepool(|_| {
+        NSWorkspace::sharedWorkspace()
+            .frontmostApplication()?
+            .bundleIdentifier()
+            .map(|id| id.to_string())
+    })
+}
+
 /// The frontmost application's display name, without reading a page or a
 /// window title: a dictation mode's application name (Labs › Switch model
 /// with app). `None` when Hex itself owns the frontmost application, since

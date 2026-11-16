@@ -2846,6 +2846,8 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
 fn the_sound_sets_sheet_plays_and_chooses_sets() {
     use crate::feedback::{Audition, Cue, SoundSet};
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    rt.state.settings.sound_effects = false;
+    rt.state.settings.sound_effect_volume = 0.23;
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
     open_advanced(&mut rt, Pane::General);
     tap(&mut rt, "sound-set-control");
@@ -2883,6 +2885,8 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
     assert!(!rt.state.sound_sets.open);
     assert_eq!(playing(&rt), None);
     assert!(texts(&rt).iter().any(|text| text == "Wood"));
+    assert!(!rt.state.settings.sound_effects);
+    assert_eq!(rt.state.settings.sound_effect_volume, 0.23);
 }
 
 #[test]

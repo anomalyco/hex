@@ -203,6 +203,14 @@ impl WindowsDesktopHost {
         processing: crate::dictation::modes::ProcessingState,
     ) -> Self {
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
+        // The Sounds sheet also plays with the listener stopped and volume Off.
+        // Preloading decodes the sounds without opening a device.
+        crate::feedback::set_enabled(settings.sound_effects);
+        crate::feedback::set_volume(settings.sound_effect_volume);
+        crate::feedback::set_sound_set(settings.sound_theme);
+        if let Err(error) = crate::feedback::preload() {
+            tracing::warn!(%error, "Windows recording feedback is unavailable");
+        }
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
