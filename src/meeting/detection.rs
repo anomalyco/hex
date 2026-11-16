@@ -2267,11 +2267,32 @@ mod tests {
     }
 
     #[test]
+    fn a_hand_stopped_call_still_on_the_microphone_stays_snoozed() {
+        let zoom = zoom();
+        let always = [choice("us.zoom.xos", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&zoom, &always),
+            Some(Detection::Record(zoom.clone()))
+        );
+        // As a running recording's present poll does, then the hand stop: the
+        // app is still on the microphone.
+        let now = watch.base + Duration::from_millis(watch.elapsed_ms);
+        watch.detector.keep_snooze_alive_at(now);
+        watch.detector.recording_stopped_at(now);
+        // The app never leaves, so this is not a new call: no second
+        // recording while it holds the microphone.
+        assert!(watch.run(Some(&zoom), &always, 120_000).is_empty());
+    }
+
+    #[test]
     fn a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds() {
         let slack = slack_huddle();
         let mut watch = Watch::new();
         assert!(watch.stable(&slack, &[]).is_some());
-        watch.detector.recording_stopped();
+        watch
+            .detector
+            .recording_stopped_at(watch.base + Duration::from_millis(watch.elapsed_ms));
         // A moment off the microphone: still the same call.
         assert!(watch.run(None, &[], 2_000).is_empty());
         assert!(watch.run(Some(&slack), &[], 5_000).is_empty());
@@ -2289,7 +2310,9 @@ mod tests {
         // The absence is seen while the stopped recording transcribes.
         let mut watch = Watch::new();
         assert!(watch.stable(&slack, &[]).is_some());
-        watch.detector.recording_stopped();
+        watch
+            .detector
+            .recording_stopped_at(watch.base + Duration::from_millis(watch.elapsed_ms));
         for _ in 0..8 {
             let now = watch.base + Duration::from_millis(watch.elapsed_ms);
             watch.detector.observe_call_app_at(false, now);

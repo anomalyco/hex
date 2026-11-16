@@ -375,7 +375,8 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          `meet_prefixed_addresses_are_snoozed_by_their_own_codes`,
          `extracts_a_meet_code_from_a_meet_prefixed_address`,
          `a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds`,
-         `an_automatic_call_ended_stop_offers_the_call_again_when_it_returns`
+         `an_automatic_call_ended_stop_offers_the_call_again_when_it_returns`,
+         `a_hand_stopped_call_still_on_the_microphone_stays_snoozed`
   -> "Left the call" prompt after the call app is off the microphone for 3 s
   -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
      stalled loop) start a stability run again instead of counting the gap
