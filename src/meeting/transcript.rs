@@ -47,8 +47,6 @@ const CHUNK_TARGET: usize = RATE * 6;
 const CHUNK_MAX: usize = RATE * 10;
 const CHUNK_OVERLAP: usize = RATE * 2;
 const MIN_TAIL: usize = RATE * 3 / 10;
-/// A chunk with no 20 ms frame this loud is silence and is not transcribed.
-const SILENT_DB: f32 = -60.0;
 /// About five minutes of one-second blocks for both sources.
 const ROLLING_QUEUE_CAPACITY: usize = 600;
 /// Chunks slower than this are logged.
@@ -89,11 +87,7 @@ pub(super) struct Chunk {
 
 impl Chunk {
     fn is_silent(&self) -> bool {
-        let threshold = 10_f32.powf(SILENT_DB / 10.0);
-        self.samples.chunks(FRAME).all(|frame| {
-            frame.iter().map(|sample| sample * sample).sum::<f32>() / (frame.len() as f32)
-                < threshold
-        })
+        chunk_level::silent(&self.samples)
     }
 }
 
@@ -105,10 +99,9 @@ pub(super) struct Chunker {
     overlap: usize,
     segmenter: PauseSegmenter,
     pauses: VecDeque<usize>,
-    /// Whether chunks are raised before transcription: the microphone's,
-    /// which another app holding the device with voice processing can leave
-    /// tens of dB quiet, never the system track's.
-    raise: bool,
+    /// The track this chunker splits: only the microphone's chunks are
+    /// raised, and only while its own recent level says it is quiet.
+    source: MeetingSource,
     /// The microphone's recent loudness on its captured audio, which decides
     /// that raise; a system chunker never hears it.
     level: chunk_level::TrackLevel,
@@ -119,7 +112,6 @@ impl Chunker {
     /// while the track's own recent level says it is quiet; the system track
     /// is transcribed as it plays.
     pub(super) fn new(source: MeetingSource) -> Self {
-        let raise = source == MeetingSource::Microphone;
         Self {
             buffer: Vec::new(),
             buffer_start: 0,
@@ -127,9 +119,14 @@ impl Chunker {
             overlap: 0,
             segmenter: PauseSegmenter::default(),
             pauses: VecDeque::new(),
-            raise,
+            source,
             level: chunk_level::TrackLevel::default(),
         }
+    }
+
+    /// Whether this track's chunks can be raised at all.
+    fn raises(&self) -> bool {
+        self.source == MeetingSource::Microphone
     }
 
     pub(super) fn push(&mut self, samples: &[f32]) -> Vec<Chunk> {
@@ -137,7 +134,7 @@ impl Chunker {
             if let Some(cut) = self.segmenter.push(frame) {
                 self.pauses.push_back(cut);
             }
-            if self.raise {
+            if self.raises() {
                 self.level.hear(frame);
             }
         }
@@ -145,16 +142,18 @@ impl Chunker {
         std::iter::from_fn(|| self.next_chunk()).collect()
     }
 
-    /// Queues the rest of the audio as one last chunk and closes the track:
-    /// a later push, after a gap, starts a new chunk at zero while the level
-    /// window keeps what it heard.
+    /// Queues the rest of the audio as one last chunk and closes the track.
+    /// A later push, after a gap, starts a fresh chunker at zero — the pause
+    /// segmenter reports cuts from the first sample it ever heard, so it must
+    /// not carry over — while the level window keeps what it heard.
     pub(super) fn finish(&mut self) -> Option<Chunk> {
         let chunk = self.rest(MIN_TAIL);
-        self.buffer.clear();
-        self.buffer_start = 0;
-        self.chunk_start = 0;
-        self.overlap = 0;
-        self.pauses.clear();
+        let level = std::mem::take(&mut self.level);
+        let source = self.source;
+        *self = Self {
+            level,
+            ..Self::new(source)
+        };
         chunk
     }
 
@@ -171,10 +170,12 @@ impl Chunker {
     }
 
     /// The track's audio from `begin` to `cut`, raised while the track's own
-    /// recent level says its microphone is quiet.
+    /// recent level says its microphone is quiet. A chunk the silence gate
+    /// will skip is left as captured: raising silence would hand the model
+    /// audio to invent words for.
     fn chunk(&self, begin: usize, cut: usize, tail: usize) -> Chunk {
         let mut samples = self.buffer[begin - self.buffer_start..cut - self.buffer_start].to_vec();
-        if self.raise {
+        if self.raises() && !chunk_level::silent(&samples) {
             chunk_level::raise(&mut samples, self.level.gain());
         }
         Chunk {
@@ -2431,6 +2432,41 @@ mod tests {
         assert!(chunker.finish().is_none());
     }
 
+    #[test]
+    fn a_finished_chunker_starts_its_pause_cuts_over() {
+        // Thirteen seconds with pauses, so the first run finds real cuts.
+        let audio = crate::transcription::pause_segmenter::tests::utterance(
+            &[(4_000, 1_000), (4_000, 1_000), (3_000, 0)],
+            -60.0,
+        );
+        let boundaries = |chunks: Vec<Chunk>| {
+            chunks
+                .iter()
+                .map(|chunk| (chunk.start, chunk.samples.len()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut reused = Chunker::new(MeetingSource::System);
+        for block in audio.chunks(1_024) {
+            reused.push(block);
+        }
+        reused.finish();
+        let mut second = Vec::new();
+        for block in audio.chunks(1_024) {
+            second.extend(reused.push(block));
+        }
+        second.extend(reused.finish());
+        assert!(!second.is_empty());
+
+        let mut fresh = Chunker::new(MeetingSource::System);
+        let mut expected = Vec::new();
+        for block in audio.chunks(1_024) {
+            expected.extend(fresh.push(block));
+        }
+        expected.extend(fresh.finish());
+        assert_eq!(boundaries(second), boundaries(expected));
+    }
+
     /// A track that only has to hand its audio to the chunker.
     fn bare_track(source: MeetingSource) -> RollingTrack {
         RollingTrack {
@@ -2560,6 +2596,62 @@ mod tests {
         // and is left alone.
         assert!((microphone + 22.0).abs() < 0.5, "{microphone}");
         assert_eq!(system, captured);
+    }
+
+    /// Counts the chunks a transcriber is handed.
+    #[derive(Default)]
+    struct Counted(usize);
+
+    impl ChunkTranscriber for Counted {
+        fn transcribe_chunk(&mut self, _chunk: &Chunk) -> Result<Chunked> {
+            self.0 += 1;
+            Ok(Chunked::Done(Transcript::default()))
+        }
+    }
+
+    #[test]
+    fn a_quiet_tracks_silent_chunk_is_left_for_the_silence_gate() {
+        let noise = crate::transcription::pause_segmenter::tests::noise;
+        let mut seed = 21;
+        let quiet = noise(9_000, -50.0, &mut seed);
+        let silence = noise(4_000, -70.0, &mut seed);
+        let audible = noise(4_000, -55.0, &mut seed);
+
+        let mut track = bare_track(MeetingSource::Microphone);
+        let mut envelope = EchoEnvelope::default();
+        let mut pending = VecDeque::new();
+        for part in [&quiet, &silence, &audible] {
+            for block in part.chunks(1_024) {
+                track.push(0, block, &mut envelope, &mut pending);
+            }
+            track.end(0, &mut envelope, &mut pending);
+        }
+        assert_eq!(pending.len(), 3);
+        let chunks = pending.iter().map(|(_, chunk)| chunk).collect::<Vec<_>>();
+        // The track is quiet enough to raise, so the silence rule is what
+        // keeps a digitally silent chunk as captured.
+        assert!(chunks[1].is_silent());
+        assert_eq!(chunks[1].samples, silence);
+        // The same track does raise audible audio.
+        assert!(!chunks[2].is_silent());
+        assert_ne!(chunks[2].samples, audible);
+
+        let mut tracks = [Some(track), None];
+        let mut model = Counted::default();
+        let mut failed = false;
+        while !pending.is_empty() {
+            assert!(transcribe_pending(
+                Path::new("."),
+                &mut tracks,
+                &mut pending,
+                &mut model,
+                &mut failed,
+            ));
+        }
+        assert!(!failed);
+        // One call for the quiet audio, one for the raised audio, and none
+        // for the silence the gate skipped.
+        assert_eq!(model.0, 2);
     }
 
     #[test]

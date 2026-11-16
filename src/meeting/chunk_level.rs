@@ -3,10 +3,12 @@
 //! When another call app holds the built-in microphone with voice processing,
 //! Hex's own microphone track can be recorded tens of dB quiet: live, but too
 //! quiet for the speech detector and the models. The decision is the track's,
-//! not the chunk's. A microphone that reached a normal level anywhere in the
-//! last minute is transcribed exactly as captured, so a quiet word between
-//! louder ones, and a chunk between words, are never raised. Only a track
-//! that stayed under that level throughout the window is raised.
+//! not the chunk's. Within a minute of normal-level speech a microphone is
+//! transcribed exactly as captured, so a quiet word between louder ones, and
+//! a chunk between words, are never raised. Before its first word, and after
+//! more than a minute without one, a normal microphone's background and
+//! speaker leakage can be raised by up to [`MAX_GAIN_DB`]: the speech detector
+//! still checks every chunk, and echo classification uses the captured audio.
 //!
 //! Each one-second block of the window keeps the level two of its 20 ms
 //! frames reached, so one click cannot make a quiet microphone look normal
@@ -14,11 +16,15 @@
 //!
 //! The recording, the pause segmenter and the echo envelopes keep the
 //! captured audio. The raise happens when a chunk is made, and it does not
-//! change the -60 dB silence gate's decision: a chunk quiet enough to be
-//! skipped gets no gain. It is there so the speech detector and the model
-//! hear the words.
+//! change the -60 dB silence gate's decision: a chunk the gate would skip is
+//! left as captured. It is there so the speech detector and the model hear
+//! the words.
 
 use std::collections::VecDeque;
+
+/// The frame a level is measured over: 20 ms at 16 kHz, the same frame the
+/// pause segmenter uses.
+const FRAME: usize = 320;
 
 /// One second of 16 kHz samples: the block the window remembers.
 const BLOCK: usize = 16_000;
@@ -45,6 +51,19 @@ const MAX_CHUNK_PEAK: f32 = 0.891;
 
 /// 20 ms of digital silence reported as a level, in dBFS: an energy of 1e-12.
 const SILENT_FRAME: f32 = -120.0;
+
+/// A chunk with no 20 ms frame this loud is silence and is not transcribed.
+const SILENT_DB: f32 = -60.0;
+
+/// Whether every 20 ms frame of `samples` is below [`SILENT_DB`]: the one rule
+/// the silence gate and the raise share, so a chunk the gate will skip is
+/// never raised into audio.
+pub(super) fn silent(samples: &[f32]) -> bool {
+    let threshold = 10_f32.powf(SILENT_DB / 10.0);
+    samples.chunks(FRAME).all(|frame| {
+        frame.iter().map(|sample| sample * sample).sum::<f32>() / (frame.len() as f32) < threshold
+    })
+}
 
 /// Two loudest 20 ms frames of one second, in dBFS.
 #[derive(Clone, Copy)]
@@ -156,8 +175,6 @@ fn frame_dbfs(frame: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// 20 ms at 16 kHz, the frame the silence gate and the pause segmenter use.
-    use crate::transcription::pause_segmenter::FRAME_SAMPLES as FRAME;
 
     /// Deterministic noise whose 20 ms frames all sit at `dbfs` RMS.
     fn noise(dbfs: f32, samples: usize) -> Vec<f32> {
