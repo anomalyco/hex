@@ -683,7 +683,9 @@ pub(super) const SCENES: &[Scene] = &[
         ui.platform.tuning.mode = crate::audio::voice_filter::VoiceFilterMode::Muted;
         ui.platform.demo = Some(fun::preview_demo(
             false,
-            Some(crate::audio::hex_microphone::DemoPlaybackTrack::CallHears),
+            Some(crate::audio::hex_microphone::DemoPlaybackTrack::Effect(
+                crate::audio::voice_filter::VoiceFilterMode::Robot,
+            )),
         ));
         ui.pane = Pane::VoiceFilter;
     }),
@@ -692,10 +694,14 @@ pub(super) const SCENES: &[Scene] = &[
         if let Some(driver) = &mut ui.platform.hex_microphone {
             driver.driver_bundle_installed = false;
             driver.driver_loaded = false;
+            driver.mic_in_use = false;
+            driver.sink_streaming = false;
             driver.installed_version = None;
             driver.active_apps.clear();
         }
-        ui.platform.demo = Some(fun::preview_demo(true, None));
+        if let Some(demo) = &mut ui.platform.demo {
+            demo.has_recording = false;
+        }
         ui.pane = Pane::VoiceFilter;
     }),
     ("voice-filter", |ui| {

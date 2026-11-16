@@ -1927,8 +1927,10 @@ fn platform_goldens() {
 #[test]
 fn voice_filter_saves_the_mode_and_applies_the_tuning_live() {
     use crate::audio::voice_filter::VoiceFilterMode;
-    let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
-    tap(&mut rt, "fun-mode/segment1");
+    let mut rt = runtime("mac-voice-filter", true, (980.0, 1300.0));
+    assert!(rt.find("fun-slider-strength").is_none());
+    open_advanced(&mut rt, Pane::VoiceFilter);
+    tap(&mut rt, "muted/apply");
     assert_eq!(
         rt.state.settings.experimental.hex_microphone_mode,
         VoiceFilterMode::Muted
@@ -1941,7 +1943,7 @@ fn voice_filter_saves_the_mode_and_applies_the_tuning_live() {
         rt.find("fun-comfort-noise").is_some(),
         "Muted offers comfort noise"
     );
-    tap(&mut rt, "fun-mode/segment3");
+    tap(&mut rt, "normal/apply");
     assert!(
         rt.find("fun-slider-strength").is_none(),
         "Normal has no sliders"
@@ -1949,8 +1951,54 @@ fn voice_filter_saves_the_mode_and_applies_the_tuning_live() {
 }
 
 #[test]
-fn voice_filter_sliders_set_the_filter_from_the_pointer() {
+fn preview_each_effect_before_install_without_applying_it() {
+    use crate::audio::{hex_microphone::DemoPlaybackTrack, voice_filter::VoiceFilterMode};
+    let mut rt = runtime("mac-voice-filter-driver-missing", false, PANE_SIZE);
+    let tuning = rt.state.platform.tuning.clone();
+    let saves = saved(&rt);
+    assert!(asked(&rt).is_empty());
+    for mode in VoiceFilterMode::ALL {
+        tap(&mut rt, &format!("{}/play", mode.id()));
+    }
+    let expected: Vec<_> = VoiceFilterMode::ALL
+        .into_iter()
+        .map(|mode| {
+            PlatformRequest::HexMicrophoneDemo(platform::DemoRequest::Play(
+                DemoPlaybackTrack::Effect(mode),
+            ))
+        })
+        .collect();
+    assert_eq!(asked(&rt), expected);
+    assert_eq!(rt.state.platform.tuning, tuning);
+    assert_eq!(saved(&rt), saves);
+}
+
+#[test]
+fn voice_filter_setup_distinguishes_an_available_input_from_a_call() {
     let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
+    rt.state
+        .platform
+        .hex_microphone
+        .as_mut()
+        .unwrap()
+        .mic_in_use = false;
+    refresh(&mut rt);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|s| s.contains("Select Hex Microphone"))
+    );
+    assert!(!texts(&rt).iter().any(|s| s.contains("Slack")));
+    let linux = runtime("voice-filter-unavailable", true, PANE_SIZE);
+    assert!(texts(&linux).iter().any(|s| s.contains("pw-cat")));
+    assert!(linux.find("install").is_none());
+    assert!(linux.find("robot/play").is_some());
+}
+
+#[test]
+fn voice_filter_sliders_set_the_filter_from_the_pointer() {
+    let mut rt = runtime("mac-voice-filter", true, (980.0, 1300.0));
+    open_advanced(&mut rt, Pane::VoiceFilter);
     let before = rt.state.platform.tuning.muffled_wall_hz;
     let (x, y) = rt.find("fun-slider-wall/track").unwrap();
     rt.pointer_down(x + 140.0, y);
@@ -1991,14 +2039,16 @@ fn try_it_records_and_plays_through_the_host() {
     use platform::DemoRequest;
     let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
     tap(&mut rt, "fun-demo-record");
-    tap(&mut rt, "fun-play-call-hears");
+    tap(&mut rt, "robot/play");
     tap(&mut rt, "fun-demo-source/segment1");
     assert_eq!(
         asked(&rt),
         [
             PlatformRequest::HexMicrophoneDemo(DemoRequest::Record),
             PlatformRequest::HexMicrophoneDemo(DemoRequest::Play(
-                crate::audio::hex_microphone::DemoPlaybackTrack::CallHears
+                crate::audio::hex_microphone::DemoPlaybackTrack::Effect(
+                    crate::audio::voice_filter::VoiceFilterMode::Robot
+                )
             )),
             PlatformRequest::HexMicrophoneDemo(DemoRequest::SelectSource(
                 crate::audio::hex_microphone::DemoSourceKind::Recording
@@ -2006,7 +2056,7 @@ fn try_it_records_and_plays_through_the_host() {
         ]
     );
     let mut rt = runtime("mac-voice-filter-muted", true, PANE_SIZE);
-    tap(&mut rt, "fun-play-call-hears");
+    tap(&mut rt, "robot/play");
     assert_eq!(
         asked(&rt),
         [PlatformRequest::HexMicrophoneDemo(
@@ -3092,6 +3142,8 @@ fn experiment_goldens() {
         check_golden("mac-voice-filter", dark, PANE_SIZE);
         check_golden("mac-hud-lab", dark, PANE_SIZE);
     }
+    check_golden("voice-filter-unavailable", true, PANE_SIZE);
+    check_golden("voice-filter", false, PANE_SIZE);
     check_golden("mac-voice-filter-muted", true, PANE_SIZE);
     check_golden("mac-voice-filter-driver-missing", false, PANE_SIZE);
     check_golden("mac-activity", false, PANE_SIZE);
