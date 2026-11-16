@@ -19,6 +19,17 @@ pub(super) fn start(factor: f32) -> Option<Guard> {
     Guard::start(factor, Output::current)
 }
 
+/// What one channel of an output reports for its volume scalar.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VolumeScalar {
+    /// Readable and settable: Lower audio can ramp it and put it back.
+    Settable,
+    /// Readable but not settable, so its balance cannot be restored.
+    ReadOnly,
+    /// No volume scalar at all: a stream channel without its own control.
+    Absent,
+}
+
 /// One property of an output, and the elements of it that ramp together.
 struct Control {
     selector: [u8; 4],
@@ -26,26 +37,43 @@ struct Control {
 }
 
 impl Control {
-    /// The channels that actually have a settable volume scalar, then the main
-    /// volume, then the virtual main volume, which macOS keeps balanced. A
-    /// channel without a volume control is skipped, not fatal.
-    fn select(channels: u32, mut usable: impl FnMut([u8; 4], u32) -> bool) -> Option<Self> {
-        let elements: Vec<u32> = (1..=channels)
-            .filter(|&element| usable(VOLUME, element))
-            .collect();
+    /// The settable channels when every channel that reports a volume can be
+    /// set. A readable channel that cannot be set rules out both a per-channel
+    /// subset and the plain main volume, so only the virtual main volume, which
+    /// macOS keeps balanced, is left. Channels with no volume control at all
+    /// are skipped; with none readable, the main volume and then the virtual
+    /// main volume are the fallbacks.
+    fn select(channels: u32, mut scalar: impl FnMut([u8; 4], u32) -> VolumeScalar) -> Option<Self> {
+        let mut elements = Vec::new();
+        let mut read_only = false;
+        for element in 1..=channels {
+            match scalar(VOLUME, element) {
+                VolumeScalar::Settable => elements.push(element),
+                VolumeScalar::ReadOnly => read_only = true,
+                VolumeScalar::Absent => {}
+            }
+        }
+        if read_only {
+            return Self::master(VIRTUAL_MAIN_VOLUME, &mut scalar);
+        }
         if !elements.is_empty() {
             return Some(Self {
                 selector: VOLUME,
                 elements,
             });
         }
-        [VOLUME, VIRTUAL_MAIN_VOLUME]
-            .into_iter()
-            .find(|&selector| usable(selector, 0))
-            .map(|selector| Self {
-                selector,
-                elements: vec![0],
-            })
+        Self::master(VOLUME, &mut scalar).or_else(|| Self::master(VIRTUAL_MAIN_VOLUME, &mut scalar))
+    }
+
+    /// The element-0 volume of `selector`, when it can be read and set.
+    fn master(
+        selector: [u8; 4],
+        scalar: &mut impl FnMut([u8; 4], u32) -> VolumeScalar,
+    ) -> Option<Self> {
+        (scalar(selector, 0) == VolumeScalar::Settable).then_some(Self {
+            selector,
+            elements: vec![0],
+        })
     }
 }
 
@@ -62,38 +90,51 @@ fn address(selector: [u8; 4], element: u32) -> AudioObjectPropertyAddress {
     }
 }
 
-/// Whether the output can read this volume and set it.
-fn usable(device: u32, address: AudioObjectPropertyAddress) -> bool {
+/// What the output reports for this volume: absent, read-only, or settable.
+fn scalar(device: u32, address: AudioObjectPropertyAddress) -> VolumeScalar {
+    let readable = super::read_property::<f32>(device, address)
+        .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value));
+    if !readable {
+        return VolumeScalar::Absent;
+    }
     let mut property = address;
     let mut settable = 0;
     // SAFETY: Both output pointers refer to initialized, correctly typed values.
-    if unsafe {
+    let settable = unsafe {
         AudioObjectIsPropertySettable(
             device,
             NonNull::from(&mut property),
             NonNull::from(&mut settable),
-        )
-    } != 0
-        || settable == 0
-    {
-        return false;
+        ) == 0
+            && settable != 0
+    };
+    if settable {
+        VolumeScalar::Settable
+    } else {
+        VolumeScalar::ReadOnly
     }
-    super::read_property::<f32>(device, address)
-        .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
 }
 
 impl Output {
     fn current() -> Option<Self> {
-        let output = Self::resolve();
+        let device = super::default_output_device();
+        let output = device.and_then(Self::resolve);
         if output.is_none() {
-            tracing::warn!("found no output volume to lower while recording");
+            match device {
+                Some(device) => tracing::warn!(
+                    device,
+                    "lower audio: no controllable output volume on the default output, leaving it unchanged"
+                ),
+                None => tracing::warn!(
+                    "lower audio: no default output device to lower, leaving it unchanged"
+                ),
+            }
         }
         output
     }
 
     /// The default output and the control to ramp on it, when it has one.
-    fn resolve() -> Option<Self> {
-        let device = super::default_output_device()?;
+    fn resolve(device: u32) -> Option<Self> {
         let mut property = address(*b"slay", 0); // stream configuration
         let mut bytes = 0;
         // SAFETY: The property address and size point to initialized stack values.
@@ -156,7 +197,7 @@ impl Output {
             return None;
         }
         let control = Control::select(channels, |selector, element| {
-            usable(device, address(selector, element))
+            scalar(device, address(selector, element))
         })?;
         Some(Self { device, control })
     }
@@ -198,40 +239,92 @@ impl Volume for Output {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use VolumeScalar::{Absent, ReadOnly, Settable};
 
     fn selected(
         channels: u32,
-        usable: impl FnMut([u8; 4], u32) -> bool,
+        scalar: impl FnMut([u8; 4], u32) -> VolumeScalar,
     ) -> Option<([u8; 4], Vec<u32>)> {
-        Control::select(channels, usable).map(|control| (control.selector, control.elements))
+        Control::select(channels, scalar).map(|control| (control.selector, control.elements))
     }
 
     #[test]
     fn channels_without_a_volume_scalar_are_skipped_not_fatal() {
-        // A USB adapter reporting two buffers of two channels where only the
-        // first pair has a per-channel volume scalar.
+        // The reported USB adapter: two buffers of two channels with scalars on
+        // channels 1 and 2 only, and no element-0 volume of either kind.
         assert_eq!(
-            selected(4, |selector, element| selector == VOLUME
-                && (1..=2).contains(&element)),
+            selected(4, |selector, element| match (selector, element) {
+                (VOLUME, 1 | 2) => Settable,
+                _ => Absent,
+            }),
             Some((VOLUME, vec![1, 2]))
         );
-        // One usable channel is enough to lower the output.
+        // A channel with no control of its own does not stop the others.
         assert_eq!(
-            selected(2, |selector, element| selector == VOLUME && element == 2),
+            selected(2, |selector, element| match (selector, element) {
+                (VOLUME, 2) => Settable,
+                _ => Absent,
+            }),
             Some((VOLUME, vec![2]))
         );
     }
 
     #[test]
-    fn the_main_then_the_virtual_main_volume_are_the_fallbacks() {
+    fn a_read_only_channel_leaves_the_balance_to_the_virtual_main_volume() {
+        // Channel 1 can be set while channel 2 can only be read: lowering
+        // channel 1 alone would be lopsided, and a plain main write could
+        // flatten channel 2, so the balanced virtual main volume is the only
+        // choice.
         assert_eq!(
-            selected(2, |selector, element| selector == VOLUME && element == 0),
+            selected(2, |selector, element| match (selector, element) {
+                (VOLUME, 1) => Settable,
+                (VOLUME, 2) => ReadOnly,
+                (VIRTUAL_MAIN_VOLUME, 0) => Settable,
+                _ => Absent,
+            }),
+            Some((VIRTUAL_MAIN_VOLUME, vec![0]))
+        );
+        // The same with nothing else to set: one read-only channel is enough
+        // to send the whole output to the virtual main volume.
+        assert_eq!(
+            selected(1, |selector, element| match (selector, element) {
+                (VOLUME, 1) => ReadOnly,
+                (VIRTUAL_MAIN_VOLUME, 0) => Settable,
+                _ => Absent,
+            }),
+            Some((VIRTUAL_MAIN_VOLUME, vec![0]))
+        );
+        // Without it the output is left alone, even with a settable main
+        // volume.
+        assert_eq!(
+            selected(2, |selector, element| match (selector, element) {
+                (VOLUME, 1) => Settable,
+                (VOLUME, 2) => ReadOnly,
+                (VOLUME, 0) => Settable,
+                _ => Absent,
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn the_main_then_the_virtual_main_volume_are_the_fallbacks() {
+        // No channel reports a volume at all: element 0's volume, then the
+        // virtual main volume.
+        assert_eq!(
+            selected(2, |selector, element| match (selector, element) {
+                (VOLUME, 0) => Settable,
+                _ => Absent,
+            }),
             Some((VOLUME, vec![0]))
         );
         assert_eq!(
-            selected(2, |selector, _| selector == VIRTUAL_MAIN_VOLUME),
+            selected(2, |selector, element| match (selector, element) {
+                (VIRTUAL_MAIN_VOLUME, 0) => Settable,
+                _ => Absent,
+            }),
             Some((VIRTUAL_MAIN_VOLUME, vec![0]))
         );
-        assert_eq!(selected(2, |_, _| false), None);
+        assert_eq!(selected(2, |_, _| Absent), None);
     }
 }
