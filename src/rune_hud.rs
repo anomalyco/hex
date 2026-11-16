@@ -497,14 +497,17 @@ impl Hud {
         }
         // Rune can take the HUD away without telling Hex: it drops an overlay
         // whose layer surface the compositor closed (a monitor unplugged, or a
-        // KVM switching away and back, #1663), and `show_fading` gives up when
-        // the window or surface it has to make fails (#1793). Ask Rune for the
-        // HUD at each capture's start instead of trusting `shown`: it is Hex's
+        // KVM switching away and back, #1663), hides one whose GPU surface
+        // refused a new configuration, and `show_fading` gives up when the
+        // window or surface it has to make fails (#1793). Ask Rune for the HUD
+        // at each capture's start instead of trusting `shown`: it is Hex's
         // record of a request, not of Rune's state. A cloaked `ShowWindow` is
         // why: Rune still counts the overlay shown then, so it ignores a show
-        // and only the first-frame recovery hide gets it back. Rune's show is a
-        // no-op while the overlay is visible, and it cancels an exit fade.
-        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        // and only the first-frame recovery hide gets it back. On macOS a Space
+        // or app switch can leave the panel hidden or stranded the same way,
+        // and `rehome` repairs only a panel it can see, so the start's own ask
+        // is the one chance to get it back. Rune's show is a no-op while the
+        // overlay is visible, and it cancels an exit fade.
         if starts {
             self.shown.store(false, Ordering::Release);
         }
