@@ -16,7 +16,7 @@ use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, CallSwitch, Detection, MeetingCandidate,
-    MeetingDetector, candidate_from_microphone,
+    MeetingDetector, OfferId, candidate_from_microphone,
 };
 use crate::meeting::recovery::PendingFinals;
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
@@ -29,11 +29,11 @@ use call_switch::{
 mod call_switch;
 
 pub(crate) enum ControllerCommand {
-    Record(MeetingCandidate),
+    Record(MeetingCandidate, Option<OfferId>),
     Dismiss,
     /// The offer's capsule closed on its timeout, unanswered: the call is
     /// offered again once its app releases and retakes the microphone.
-    OfferTimedOut,
+    OfferTimedOut(OfferId),
     Stop,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
@@ -60,7 +60,8 @@ pub(crate) enum ControllerCommand {
 }
 
 pub(crate) enum ControllerEvent {
-    Offer(MeetingCandidate),
+    Offer(OfferId, MeetingCandidate),
+    OfferWithdrawn(OfferId),
     /// A calendar meeting is about to start. `automatic` when its call
     /// service is set to Always record.
     Reminder {
@@ -196,13 +197,14 @@ pub(crate) fn controller_loop(
 
     while !shutdown.load(Ordering::Relaxed) {
         let enabled = crate::app_settings::meetings_enabled();
+        let previous_offer = detector.open_offer();
         poll_import(&mut importing, &events);
         let requested_commands = meeting_requests
             .try_iter()
             .take(8)
             .map(|request| match request {
                 MeetingRequest::Start { title } => {
-                    ControllerCommand::Record(MeetingCandidate::manual_titled(title))
+                    ControllerCommand::Record(MeetingCandidate::manual_titled(title), None)
                 }
                 MeetingRequest::Stop => ControllerCommand::Stop,
                 MeetingRequest::Summarize(id) => ControllerCommand::Summarize(id),
@@ -247,7 +249,9 @@ pub(crate) fn controller_loop(
                     // Offers record by hand, which never watches a page: the
                     // call whose page named this one is not kept for it.
                     detector.take_switched_from();
-                    let _ = events.send(ControllerEvent::Offer(candidate));
+                    if let Some(id) = detector.open_offer() {
+                        let _ = events.send(ControllerEvent::Offer(id, candidate));
+                    }
                 }
                 Ok(Some(Detection::Record(candidate))) => {
                     let mut start = reminders.start_for(&candidate);
@@ -267,6 +271,14 @@ pub(crate) fn controller_loop(
             // back as fresh when detection resumes. A recording that watches
             // its browser's page for another call keeps reading it.
             browser.reset();
+        }
+        if !enabled || recording.is_some() {
+            detector.withdraw_offer();
+        }
+        if let Some(id) = previous_offer
+            && detector.open_offer() != Some(id)
+        {
+            let _ = events.send(ControllerEvent::OfferWithdrawn(id));
         }
         thread::sleep(Duration::from_millis(500));
     }
@@ -348,7 +360,7 @@ fn handle_command(
     events: &SyncSender<ControllerEvent>,
 ) {
     match command {
-        ControllerCommand::Record(_) | ControllerCommand::RecordMeeting { .. } if !enabled => {
+        ControllerCommand::Record(..) | ControllerCommand::RecordMeeting { .. } if !enabled => {
             tracing::warn!("ignored a meeting recording request while meetings are off");
         }
         ControllerCommand::Import(_) if !enabled => {
@@ -361,7 +373,9 @@ fn handle_command(
             });
         }
         ControllerCommand::Import(path) => start_import(recording, importing, path, events),
-        ControllerCommand::Record(candidate) if recording.is_none() => {
+        ControllerCommand::Record(candidate, offer)
+            if recording.is_none() && (offer.is_none() || offer == detector.open_offer()) =>
+        {
             tracing::info!(
                 source = candidate.source.label(),
                 application = candidate.application.as_deref(),
@@ -431,8 +445,8 @@ fn handle_command(
             }
         }
         ControllerCommand::Summarize(id) => start_notes(id, events),
-        ControllerCommand::OfferTimedOut => detector.offer_timed_out(),
-        ControllerCommand::Dismiss | ControllerCommand::Record(_) => {}
+        ControllerCommand::OfferTimedOut(id) => detector.offer_timed_out(id),
+        ControllerCommand::Dismiss | ControllerCommand::Record(..) => {}
     }
 }
 
