@@ -22,7 +22,6 @@ use super::controls::{self, Paint};
 use super::icons::{
     BOOK, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
 };
-use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
@@ -462,6 +461,30 @@ pub(super) fn offered(ui: &Ui, feature: Feature) -> bool {
             .any(|row| row.lab.id() == feature.name() && !row.locked)
 }
 
+/// Search only the cards the current store can reveal. This also covers
+/// Annotate's build-specific card without inventing a second feature gate.
+fn find_cards(ui: &Ui) -> impl Iterator<Item = Row> {
+    shown(ui).into_iter().filter(|row| !row.locked)
+}
+
+pub(super) fn search_entries(
+    ui: &Ui,
+) -> impl Iterator<Item = (Lab, &'static str, &'static str, &'static str)> {
+    find_cards(ui).map(|row| (row.lab, row.title, row.about, group::name(row.group)))
+}
+
+pub(super) fn reveal_card(ui: &mut Ui, lab: Lab, tx: &mut Tx) {
+    reveal(
+        ui,
+        &LabsLink {
+            lab: Some(lab.id().into()),
+            ..Default::default()
+        },
+        tx,
+    );
+    tx.focus(row_key(lab), true);
+}
+
 fn rows(ui: &Ui) -> Vec<Row> {
     let caps = ui.platform.caps;
     let settings = &ui.settings;
@@ -536,7 +559,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             });
         }
     }
-    rows.push(row(Feature::SettingsSearch, Some(SEARCH_ICON)));
     rows.push(row(Feature::Appearance, Some(&PANEL)));
     rows.push(row(Feature::ReleaseNotesLink, None));
     if caps.meetings {
@@ -864,7 +886,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::CopyDictationAudio => "lab-copy-dictation-audio",
         Feature::HistoryMultiSelect => "lab-history-multi-select",
-        Feature::SettingsSearch => "lab-settings-search",
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",

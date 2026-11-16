@@ -60,7 +60,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        needs a speech model that streams on a GPU, as Live text does
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
-├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
@@ -654,27 +653,11 @@ default (see [dictation.md](dictation.md)). `labs.restore_shortcut_default`
 is read and ignored, and `hex labs on restore-shortcut-default` says it
 graduated.
 
-Settings search (`settings-search`, every OS): while on, General starts with
-a single-line search field. Typing keeps only the rows and cards whose title
-or description matches case-insensitively; the Advanced fold's rows match
-without opening it, and the fold control hides while a query is set.
-Permissions and errors always stay; the listener card matches its status,
-hint, and Enable/Disable text, and the desktop-shortcut card matches its
-title, and either counts as a match when shown. Nothing matching shows
-"No settings match" with the kit's empty state, and clearing the field
-restores the pane. The gate is the pane
-([general/search.rs](../../src/rune_ui/general/search.rs) reads
-`labs::Feature::SettingsSearch`), so off, General is exactly as before.
-Checks: `settings_search_shows_with_its_lab_and_filters_general`,
-`settings_search_matches_descriptions`,
-`settings_search_keeps_permissions_and_status_cards`,
-`the_settings_search_clear_button_empties_the_field_and_restores_the_pane`,
-and `command_f_focuses_general_search_only_with_its_lab_and_pane` in
-[tests.rs](../../src/rune_ui/tests.rs) and the matching test in
-[general/search.rs](../../src/rune_ui/general/search.rs). Not yet observed
-in a real window; the Labs page goldens were regenerated for macOS
-(`mac-labs`, `mac-labs-link`, light and dark), Windows (`windows-labs`,
-light), and Linux (`linux-labs`, light).
+Settings search graduated to the [window’s Find popover](README.md#find-a-setting-or-lab).
+The former `settings-search` card and General filter field are gone. Older
+settings files with `labs.settings_search` load without migration or an
+immediate write; the unused key drops on a subsequent save. General’s ⌘F
+opens Find. Labs’ own ⌘F, tabs, chips and local filter still work normally.
 
 The sidebar footer's **What's new** opens a short feed of shipped features,
 newest first. Each entry has a decorative feature icon. Entries shipped on the

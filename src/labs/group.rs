@@ -76,7 +76,6 @@ impl Feature {
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
-            | Self::SettingsSearch
             | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::SpeakersOnly

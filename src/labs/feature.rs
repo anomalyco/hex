@@ -51,7 +51,6 @@ pub enum Feature {
     SectionKeyAlone,
     MicrophoneKeyAlone,
     KeepRecordings,
-    SettingsSearch,
     Appearance,
     ReleaseNotesLink,
     HideMenuBarIcon,
@@ -85,7 +84,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 77] = [
+    pub const ALL: [Self; 76] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -132,7 +131,6 @@ impl Feature {
         Self::SectionKeyAlone,
         Self::MicrophoneKeyAlone,
         Self::KeepRecordings,
-        Self::SettingsSearch,
         Self::Appearance,
         Self::ReleaseNotesLink,
         Self::HideMenuBarIcon,

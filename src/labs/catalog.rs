@@ -58,7 +58,6 @@ impl Feature {
             | Self::SectionKeyAlone
             | Self::MicrophoneKeyAlone
             | Self::KeepRecordings
-            | Self::SettingsSearch
             | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::HideMenuBarIcon
@@ -132,7 +131,7 @@ impl Feature {
             | Self::HideMenuBarIcon => 20261102,
             Self::GnomeClipboardRestore | Self::NotchIndicator => 20261103,
             Self::GnomeMeetingCapsules | Self::Screenshots | Self::AnnotateReplay => 20261104,
-            Self::SettingsSearch | Self::MeetingImport => 20261106,
+            Self::MeetingImport => 20261106,
             Self::LiveTyping
             | Self::QuitClosesWindow
             | Self::CapsLockDictation
@@ -303,7 +302,6 @@ impl Feature {
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::KeepRecordings
-            | Self::SettingsSearch
             | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::FillerWords
@@ -369,7 +367,6 @@ impl Feature {
             Self::SectionKeyAlone => "section-key",
             Self::MicrophoneKeyAlone => "microphone-key",
             Self::KeepRecordings => "keep-recordings",
-            Self::SettingsSearch => "settings-search",
             Self::Appearance => "appearance",
             Self::ReleaseNotesLink => "release-notes-link",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
@@ -452,7 +449,6 @@ impl Feature {
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::MicrophoneKeyAlone => "labs.microphone_key",
             Self::KeepRecordings => "labs.keep_recordings",
-            Self::SettingsSearch => "labs.settings_search",
             Self::Appearance => "labs.appearance",
             Self::ReleaseNotesLink => "labs.release_notes_link",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
