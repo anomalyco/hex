@@ -1843,15 +1843,19 @@ relaunch. Speech-model downloads are unaffected. Releases through 2.3.1 read
 Every quit Hex starts ends through its own drain: Rune is told the app has work
 after its loop (`rune::orderly_exit`, called by `macos_rune::run`,
 `windows::rune::open`, and `rune_ui::run_app`), so Quit Hex, `hex quit`, and
-Restart to update stop and join the meeting controller before the staged
-update is installed. On macOS the AppKit terminate notification drains the
-same way, with 5 s before `_exit` (`DEADLINE`), or 30 s while a meeting is
-recording (`MEETING_DEADLINE`), so a finalising recorder is never cut off.
-Linux's service stop has its own 20 s bound (`STOP_DEADLINE`) under the unit's
-30 s `TimeoutStopSec`, and Windows arms the same 20 s bound around its
-post-loop teardown (`arm_windows_deadline`). Restart to update refuses while a
-meeting records (`updater::restart_hold`), re-checks after its final manifest
-check, and keeps the release staged.
+Restart to update stop and join the meeting controller. The staged bundle is
+installed before that join (the swap is atomic and touches no meeting files),
+and a quit that begins during Restart to update's final check never swaps a
+second time. On macOS the AppKit terminate notification drains the same way,
+with 5 s before `_exit` (`DEADLINE`), extended up to 30 s from the quit's
+start while a recording or recovery is in flight (`MEETING_DEADLINE`), so a
+finalising meeting is never cut off. Linux's service stop has its own 20 s
+bound (`STOP_DEADLINE`) under the unit's 30 s `TimeoutStopSec`; Windows marks
+quitting and arms 20 s around its post-loop teardown, or 30 s while meeting
+audio is in flight (`arm_windows_deadline`), exiting 1 when the window failed.
+Restart to update refuses while meeting audio is in flight
+(`updater::restart_hold`), re-checks after its final manifest check, and keeps
+the release staged.
 
 [updater.rs](../../src/updater.rs) owns the worker and the shared status the
 window, menu bar, and tray show; `updater/protocol.rs` passes the release

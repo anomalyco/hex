@@ -545,9 +545,10 @@ fn run(shared: &Shared, method: &Method) {
         let restarting = matches!(*lock(&shared.restart), Restart::Requested);
         let staged = lock(&shared.staged).clone();
         {
-            // A staged update stays offered while the check runs.
+            // A staged update stays offered while the check runs, and a quit
+            // that already installed the update is never un-applied.
             let mut state = lock(&shared.state);
-            if !matches!(*state, State::Ready) {
+            if !matches!(*state, State::Ready | State::Applied) {
                 *state = State::Checking;
             }
         }
@@ -572,7 +573,12 @@ fn run(shared: &Shared, method: &Method) {
             }
         };
         if restarting {
-            if finish_restart(shared, next, restart_hold()) {
+            if finish_restart(
+                shared,
+                next,
+                restart_hold(),
+                crate::desktop::process_exit::quitting(),
+            ) {
                 return;
             }
         } else {
@@ -580,7 +586,7 @@ fn run(shared: &Shared, method: &Method) {
             // Restart to update was pressed during this check: the next
             // check, which starts at once, finishes it.
             if !matches!(*lock(&shared.restart), Restart::Requested) {
-                *state = next;
+                keep_applied(&mut state, next);
             }
         }
         if wait(shared, delay) {
@@ -605,17 +611,39 @@ fn restart_hold() -> Option<&'static str> {
         .then_some("Hex is recording a meeting; restart to update when it finishes")
 }
 
+/// Writes `next` unless a quit already installed the staged update. That
+/// state must survive every later check: the bundle beneath this process has
+/// already been swapped, so a second swap would exchange it back.
+fn keep_applied(state: &mut State, next: State) {
+    if !matches!(*state, State::Applied) {
+        *state = next;
+    }
+}
+
 /// Switches to the newest staged update once Restart to update's final
 /// check has run, whatever its result. True when Hex now quits. A meeting
 /// that started recording since the click keeps the update staged and the
-/// restart waiting.
-fn finish_restart(shared: &Shared, next: State, hold: Option<&'static str>) -> bool {
+/// restart waiting, and a quit that began during the check never swaps: the
+/// drain installs the update itself.
+fn finish_restart(
+    shared: &Shared,
+    next: State,
+    hold: Option<&'static str>,
+    quitting: bool,
+) -> bool {
     let mut state = lock(&shared.state);
     // Quitting installs the staged update itself (`install_on_quit`), and it
     // holds this lock while it does; a swap here would exchange the same two
     // bundles back and lose the update.
     if matches!(*state, State::Applied) {
         *lock(&shared.restart) = Restart::Done(Ok(()));
+        return true;
+    }
+    if quitting {
+        // The drain installs what is staged; this check must not swap, nor
+        // hold the quit for an update that is already being installed.
+        *lock(&shared.restart) = Restart::Done(Ok(()));
+        tracing::info!("a quit started during Restart to update; the drain installs it");
         return true;
     }
     if let Some(hold) = hold {
@@ -749,7 +777,7 @@ fn check(
             // A staged update stays offered while a newer one downloads in
             // the background.
             if staged.is_none() || restarting {
-                *lock(&shared.state) = State::Downloading;
+                keep_applied(&mut lock(&shared.state), State::Downloading);
             }
             transport::prune(&updates, Some(&target.sha256));
             #[cfg(target_os = "linux")]
@@ -1204,7 +1232,7 @@ mod tests {
         *lock(&updater.shared.restart) = Restart::Requested;
 
         assert!(
-            finish_restart(&updater.shared, State::Ready, None),
+            finish_restart(&updater.shared, State::Ready, None, false),
             "the quit already installed the update; Hex still quits"
         );
         assert!(matches!(
@@ -1212,6 +1240,32 @@ mod tests {
             Restart::Done(Ok(()))
         ));
         assert!(matches!(*lock(&updater.shared.state), State::Applied));
+    }
+
+    #[test]
+    fn a_restart_check_that_races_a_quit_never_swaps() {
+        let updater = Updater::idle_checking();
+        *lock(&updater.shared.state) = State::Ready;
+        *lock(&updater.shared.restart) = Restart::Requested;
+
+        // A quit began during the final check: the drain installs whatever is
+        // staged, so this check must not swap (nor report "no update").
+        assert!(finish_restart(&updater.shared, State::Ready, None, true));
+        assert!(matches!(
+            *lock(&updater.shared.restart),
+            Restart::Done(Ok(()))
+        ));
+        assert!(matches!(*lock(&updater.shared.state), State::Ready));
+    }
+
+    #[test]
+    fn a_quit_that_installed_the_update_is_never_overwritten() {
+        let mut state = State::Applied;
+        keep_applied(&mut state, State::Current);
+        assert!(matches!(state, State::Applied));
+        let mut state = State::Ready;
+        keep_applied(&mut state, State::Current);
+        assert!(matches!(state, State::Current));
     }
 
     #[test]
@@ -1230,7 +1284,12 @@ mod tests {
         // A meeting that started after the click keeps the restart waiting.
         // Nothing is staged in this test, so the state follows the check's
         // result rather than claiming an update is ready.
-        assert!(!finish_restart(&updater.shared, State::Current, hold));
+        assert!(!finish_restart(
+            &updater.shared,
+            State::Current,
+            hold,
+            false
+        ));
         assert!(matches!(*lock(&updater.shared.state), State::Current));
         assert!(matches!(
             *lock(&updater.shared.restart),

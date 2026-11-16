@@ -869,8 +869,12 @@ impl LinuxDesktopHost {
     fn refresh(&mut self) {
         self.switch_with_keyboard();
         // Restart to update asks systemd to restart Hex after the updater's
-        // final check; only a failure needs showing.
+        // final check; only a failure needs showing, and a restart that never
+        // happened must not reopen the window on the next launch.
         if let Some(Err(error)) = self.updater.take_restart() {
+            if let Some(marker) = reopen_marker() {
+                let _ = std::fs::remove_file(marker);
+            }
             self.error = Some(format!("Could not restart Hex: {error:#}"));
         }
         // Settings may set up the transformations workspace at any time.

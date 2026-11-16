@@ -182,6 +182,9 @@ pub(crate) fn run_app(
     // the error and let `run_window` report it and keep Hex running (#979).
     let result = app.try_run();
     if result.is_ok() {
+        // Quitting is marked before the stop, so a recording cannot start
+        // behind the join and one in flight keeps its longer bound.
+        crate::desktop::process_exit::begin_quitting();
         // A recording stops, keeping its audio for the next launch.
         shutdown.store(true, std::sync::atomic::Ordering::Release);
         if let Some(meetings) = meetings {

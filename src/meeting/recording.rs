@@ -1,8 +1,9 @@
-//! Whether this process is recording a meeting, for the quits and updates that
-//! must wait for its audio to be finalised.
+//! Whether this process is busy with meeting audio, for the quits and updates
+//! that must wait for it to be finalised.
 //!
-//! The recorder holds one [`Recording`] for its whole run, so a quit or a
-//! restart to update can see it from any thread without asking the controller.
+//! A recording and a launch recovery each hold a [`Recording`] for their run,
+//! so a quit or a restart to update can see them from any thread without
+//! asking the controller.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,8 +14,9 @@ pub fn recording() -> bool {
     RECORDING.load(Ordering::Acquire) > 0
 }
 
-/// Marks this process as recording until dropped. Overlapping recorders (a
-/// CLI recording beside the app's) each hold their own.
+/// Marks this process as busy with meeting audio until dropped. Overlapping
+/// holders in this process (a recording and a recovery pass) each hold their
+/// own; another Hex process has its own counter.
 pub(super) struct Recording(());
 
 impl Recording {

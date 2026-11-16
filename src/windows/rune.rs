@@ -310,8 +310,10 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let result = app.try_run();
     // The teardown below runs after the loop, with no deadline of its own;
     // bound it like Linux's stop so a worker that never stops cannot hold the
-    // process open.
-    crate::desktop::process_exit::arm_windows_deadline();
+    // process open. Quitting is marked first, so a recording cannot start
+    // behind the teardown and one in flight keeps its longer bound.
+    crate::desktop::process_exit::begin_quitting();
+    crate::desktop::process_exit::arm_windows_deadline(if result.is_ok() { 0 } else { 1 });
     if result.is_ok() {
         // A frame reached the screen, or Hex quit cleanly: this launch's GPU
         // works. A failed start is neither, and keeps the marker so the next

@@ -450,6 +450,9 @@ pub fn record(
     shutdown: &AtomicBool,
     updates: Option<SyncSender<RecordingUpdate>>,
 ) -> Result<MeetingManifest> {
+    if crate::desktop::process_exit::quitting() {
+        return Err(eyre!("Hex is quitting"));
+    }
     let (_, transcription_selection) = crate::app_settings::transcription_selection();
     let transcription_model = crate::transcription::models::validate(&transcription_selection)?;
     if !crate::transcription::models::is_installed(
@@ -465,6 +468,11 @@ pub fn record(
     fs::create_dir_all(&meeting_dir).wrap_err("could not create meeting directory")?;
     set_owner_only(&meeting_dir, true)?;
     let _active = ActiveMeeting::acquire(&meeting_dir)?;
+    // A quit may have begun while this recording was being set up: refuse
+    // rather than start audio the drain will cut off.
+    if crate::desktop::process_exit::quitting() {
+        return Err(eyre!("Hex is quitting"));
+    }
     // Held until this recording returns: a quit or a restart to update can
     // see it and wait for the audio to be finalised.
     let _recording = recording::Recording::start();
