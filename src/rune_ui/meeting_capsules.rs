@@ -56,11 +56,12 @@ use crate::meeting::detection::MeetingCandidate;
 use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
+mod handoff;
 mod panel;
 mod throw;
 mod waveform;
 
-use panel::{agent_prompt, hex_command, ready, ready_summary, recording, recording_notice};
+use panel::{agent_prompt, hex_command, ready, recording, recording_notice};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -90,6 +91,8 @@ const PANEL_RADIUS: f32 = 13.0;
 /// Around the open panel's rows.
 const PANEL_PAD: f32 = 5.0;
 const HEADER_HEIGHT: f32 = 36.0;
+const STOP_TARGET: f32 = 44.0;
+const OPEN_HEADER: f32 = STOP_TARGET + 2.0 * PANEL_PAD;
 const ROW_HEIGHT: f32 = 36.0;
 /// Concentric with the panel across [`PANEL_PAD`].
 const ROW_RADIUS: f32 = PANEL_RADIUS - PANEL_PAD;
@@ -110,7 +113,9 @@ const REST_WINDOW_WIDTH: f32 = REST_WIDTH + 2.0 * CAPSULE_INSET;
 const RECORDING_WINDOW: (f32, f32) = (
     PANEL_WIDTH + 2.0 * CAPSULE_INSET,
     HEADER_HEIGHT
-        + NOTICE_HEIGHT
+        + SUMMARY_LINE * SUMMARY_LINES as f32
+        + ROW_PX
+        + FIRST_ROW_GAP
         + 3.0 * ROW_HEIGHT
         + FIRST_ROW_GAP
         + PANEL_PAD
@@ -150,6 +155,9 @@ enum Kind {
         auto_stop: bool,
     },
     Ready(Box<MeetingManifest>),
+    Finalizing {
+        duration_ms: u64,
+    },
     /// An automatic recording while the recording indicator is off.
     AutoStarted {
         title: String,
@@ -225,6 +233,7 @@ impl PillModel {
                 self.call_ended = false;
             }
             ControllerEvent::ReminderWithdrawn { .. }
+            | ControllerEvent::Stopping
             | ControllerEvent::Chapters(_)
             | ControllerEvent::ImportFailed { .. }
             | ControllerEvent::NotesStarted
@@ -287,6 +296,8 @@ struct Capsule {
     /// The pointer is over the recording pill (or holding it), or over the
     /// ready panel.
     hovered: bool,
+    /// The command was accepted, but the worker has not reported capture stopped.
+    stopping: bool,
     /// The ready panel's time ran out while the pointer was over it; it
     /// closes when the pointer leaves.
     expired: bool,
@@ -349,7 +360,7 @@ impl Capsule {
     fn fit_recording_window(&self) {
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
             resize(recording_window_size(
-                self.hovered,
+                self.hovered || self.stopping,
                 recording_notice(shown).is_some(),
             ));
         }
@@ -390,6 +401,7 @@ impl Capsule {
             && ready.id == manifest.id
         {
             *ready = manifest;
+            #[cfg(target_os = "windows")]
             if let Some(resize) = &self.resize {
                 resize(ready_window_size(ready));
             }
@@ -514,6 +526,7 @@ impl Capsule {
                 recording_window_size(self.hovered, recording_notice(shown).is_some())
             }
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
+            Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
             Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
@@ -597,8 +610,14 @@ fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
 
 /// The ready panel's window: its header, a summary while there is one or one
 /// is being written, and the three copies.
+#[cfg(not(target_os = "windows"))]
+fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
+    RECORDING_WINDOW
+}
+
+#[cfg(target_os = "windows")]
 fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
-    let summary = if ready_summary(manifest).is_some() {
+    let summary = if panel::ready_summary(manifest).is_some() {
         SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + FIRST_ROW_GAP
     } else {
         0.0
@@ -678,6 +697,8 @@ pub(crate) struct MeetingCapsules {
     /// Bumped whenever the panel shows something new, so a stale timeout
     /// doesn't close it.
     generation: Arc<AtomicU64>,
+    /// Which finished/finalizing meeting still occupies the recording window.
+    handoff: Option<String>,
 }
 
 /// The recording capsule, rebuilt from its [`PillModel`] and the live Show
@@ -690,14 +711,6 @@ struct Pill {
 }
 
 impl Pill {
-    fn apply(&self, event: &ControllerEvent) {
-        self.lock().apply(event, Instant::now());
-        self.reconcile();
-        if let ControllerEvent::RecordingStarted { id, .. } = event {
-            self.tick(id.clone());
-        }
-    }
-
     fn keep_recording(&self) {
         self.lock().keep_recording();
         self.reconcile();
@@ -747,6 +760,8 @@ impl Pill {
             tx.wake_after(Duration::ZERO);
             capsule.live = Live::default();
             capsule.hovered = false;
+            capsule.stopping = false;
+            capsule.expired = false;
             capsule.corner = corner;
             capsule.throw.stop();
             tx.instant();
@@ -838,6 +853,7 @@ impl MeetingCapsules {
                     resize: None,
                     choose: choose.clone(),
                     hovered: false,
+                    stopping: false,
                     expired: false,
                     corner: MeetingIndicatorCorner::default(),
                     shift: None,
@@ -912,12 +928,13 @@ impl MeetingCapsules {
             panel,
             pill,
             generation: Arc::default(),
+            handoff: None,
         }
     }
 
     /// Shows, updates, or closes a capsule for each controller event.
     pub(crate) fn event(&mut self, event: &ControllerEvent) {
-        self.pill.apply(event);
+        self.advance_handoff(event);
         match event {
             ControllerEvent::Reminder { meeting, automatic } => {
                 // Unanswered, it closes without recording or snoozing
@@ -955,6 +972,7 @@ impl MeetingCapsules {
                 self.show_panel(Kind::Offer(candidate.clone()), Some(OFFER_TIMEOUT));
             }
             ControllerEvent::Starting | ControllerEvent::Transcribing => self.close_panel(),
+            ControllerEvent::Stopping => self.pill.handle.update(|c, _| c.mark_stopping()),
             ControllerEvent::RecordingStarted {
                 title, automatic, ..
             } => {
@@ -987,10 +1005,10 @@ impl MeetingCapsules {
                 });
             }
             ControllerEvent::Finished(manifest) => {
-                self.show_panel(Kind::Ready(manifest.clone()), Some(READY_TIMEOUT));
+                let panel = self.finish_meeting(manifest);
                 // Copy new's hint reads the final transcript, off the main
                 // thread.
-                let (panel, id) = (self.panel.clone(), manifest.id.clone());
+                let id = manifest.id.clone();
                 std::thread::spawn(move || {
                     let entries = match meeting::TranscriptReader::default().read(&id) {
                         Ok(entries) => entries,
@@ -1010,8 +1028,12 @@ impl MeetingCapsules {
             }
             ControllerEvent::NotesFinished(manifest) => {
                 let manifest = manifest.clone();
-                self.panel
-                    .update(move |capsule, _| capsule.refresh_ready(manifest));
+                let panel = if self.handoff.as_ref() == Some(&manifest.id) {
+                    &self.pill.handle
+                } else {
+                    &self.panel
+                };
+                panel.update(move |capsule, _| capsule.refresh_ready(manifest));
             }
             ControllerEvent::Retitled { .. }
             | ControllerEvent::SourceWarning { .. }
@@ -1061,37 +1083,7 @@ impl MeetingCapsules {
             });
         }
         if let Some(timeout) = timeout {
-            let (panel, current) = (self.panel.clone(), self.generation.clone());
-            std::thread::spawn(move || {
-                std::thread::sleep(timeout);
-                if current.load(Ordering::SeqCst) == generation {
-                    panel.update(move |capsule, _| {
-                        // Checked again when applied: a newer capsule may
-                        // have been shown since.
-                        if current.load(Ordering::SeqCst) != generation {
-                            return;
-                        }
-                        if let Some(Kind::Offer(candidate)) = &capsule.kind {
-                            tracing::info!(
-                                source = candidate.source.label(),
-                                title = %candidate.title,
-                                "meeting recording offer timed out"
-                            );
-                            // Unanswered: offered again when the call app
-                            // retakes the microphone (#1267).
-                            if candidate.key != "preview" {
-                                capsule.send(ControllerCommand::OfferTimedOut);
-                            }
-                        }
-                        // A ready panel waits for the pointer to leave it.
-                        if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
-                            capsule.expired = true;
-                            return;
-                        }
-                        capsule.close();
-                    });
-                }
-            });
+            self.timeout(self.panel.clone(), generation, timeout);
         }
     }
 
@@ -1184,14 +1176,17 @@ fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
 
 fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     // Recording and its summary stay dark; offers and reminders follow the host.
-    let dark =
-        matches!(capsule.kind, Some(Kind::Recording(_) | Kind::Ready(_))) || cx.system_dark();
+    let dark = matches!(
+        capsule.kind,
+        Some(Kind::Recording(_) | Kind::Finalizing { .. } | Kind::Ready(_))
+    ) || cx.system_dark();
     let p = Paint::new(dark, cx.env().scale);
     let Some(kind) = &capsule.kind else {
         return row().key("empty");
     };
     let (dot, title, subtitle, actions) = match kind {
         Kind::Recording(shown) => return recording(p, capsule, shown),
+        Kind::Finalizing { duration_ms } => return panel::finalizing(p, capsule, *duration_ms),
         Kind::AutoStarted { title } => (
             p.danger(),
             tr("Recording automatically").to_owned(),
@@ -1587,6 +1582,7 @@ mod tests {
             resize: None,
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             hovered: false,
+            stopping: false,
             expired: false,
             corner: MeetingIndicatorCorner::TopRight,
             shift: None,

@@ -87,6 +87,9 @@ pub(crate) enum ControllerEvent {
     SourceWarning {
         warning: Option<TrackWarning>,
     },
+    /// Stop requested; the capture worker may still be closing its sources.
+    Stopping,
+    /// Both sources have stopped. The worker is preparing the final transcript.
     Transcribing,
     /// `auto_stop` when the recording stops on its own after
     /// [`crate::meeting::detection::AUTO_STOP_GRACE`] (Stop when the
@@ -135,12 +138,11 @@ struct ActiveRecording {
 }
 
 impl ActiveRecording {
-    /// Ends this recording and its call's snooze as a hand stop does: a call
-    /// app back after leaving it is a new call (Always record starts again).
+    /// Request a stop and end the snooze; the worker confirms when capture ends.
     fn end(&self, detector: &mut MeetingDetector, events: &SyncSender<ControllerEvent>) {
         if !self.stop.swap(true, Ordering::Relaxed) {
             detector.recording_stopped();
-            let _ = events.send(ControllerEvent::Transcribing);
+            let _ = events.send(ControllerEvent::Stopping);
         }
     }
 }
@@ -977,6 +979,7 @@ fn poll_recording(
                 }
                 meeting::RecordingUpdate::Transcribing => {
                     active.end(detector, events);
+                    let _ = events.send(ControllerEvent::Transcribing);
                 }
             }
         }

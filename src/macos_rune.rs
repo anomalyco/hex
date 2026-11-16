@@ -1075,6 +1075,7 @@ impl Pump {
                     tracing::info!(%app, "the call ended; the recording continues until Stop");
                 }
             }
+            ControllerEvent::Stopping => {}
             ControllerEvent::Transcribing => self.meeting_state = MeetingMenuState::Transcribing,
             ControllerEvent::Finished(manifest) => {
                 tracing::info!(id = %manifest.id, "meeting transcript ready");

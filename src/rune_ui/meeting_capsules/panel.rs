@@ -2,7 +2,7 @@
 //! rest, then Stop and the three copies, and the finished meeting's title
 //! and summary over the same copies.
 
-use rune::{Cursor, El, Icon, TextStyle, Tx, col, el, icon, row, text};
+use rune::{Cursor, El, Icon, SpringPair, TextStyle, Transition, Tx, col, el, icon, row, text};
 use rune_theme_opencode::icons;
 
 use super::*;
@@ -229,6 +229,18 @@ fn panel_body(p: Paint, title: &str) -> El {
         .hit()
 }
 
+fn replace(c: &Capsule) -> Transition {
+    let (enter, exit) = if c.reduced.get() {
+        (0.18, 0.15)
+    } else {
+        (0.3, 0.24)
+    };
+    Transition::opacity().springs(SpringPair::new(
+        Spring::new(enter, 0.),
+        Spring::new(exit, 0.),
+    ))
+}
+
 /// The finished meeting stays where its pill was; other panels take the saved corner.
 pub(super) fn show_corner(
     kind: &Kind,
@@ -272,7 +284,32 @@ fn in_corner(capsule: &Capsule, body: El) -> El {
 /// The finished meeting: its title and length, the summary when there is
 /// one, and the same copies as the recording.
 pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> El {
-    let title = meeting::display_title(manifest);
+    result(
+        p,
+        capsule,
+        meeting::display_title(manifest),
+        manifest.duration_ms,
+        Some(manifest),
+    )
+}
+
+pub(super) fn finalizing(p: Paint, capsule: &Capsule, duration_ms: u64) -> El {
+    result(
+        p,
+        capsule,
+        tr("Transcribing…").to_owned(),
+        Some(duration_ms),
+        None,
+    )
+}
+
+fn result(
+    p: Paint,
+    capsule: &Capsule,
+    title: String,
+    duration: Option<u64>,
+    manifest: Option<&MeetingManifest>,
+) -> El {
     let header = row()
         .key("header")
         .h(HEADER_HEIGHT)
@@ -282,7 +319,12 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
         .center_y()
         .child(
             text(title.clone())
-                .key("title")
+                .key(if manifest.is_some() {
+                    "title"
+                } else {
+                    "finalizing"
+                })
+                .transition(replace(capsule))
                 .font(TextStyle::new(13.0, 600.0).lh(20.0))
                 .color(p.text())
                 .truncate()
@@ -290,16 +332,17 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
                 .min_w(0.0)
                 .a11y_hidden(),
         )
-        .children(manifest.duration_ms.map(|duration| {
+        .children(duration.map(|duration| {
             text(meeting::format_duration(duration))
                 .key("duration")
                 .font(timer_style())
                 .color(p.muted())
         }))
-        .child(dismiss_button(p));
-    let summary = ready_summary(manifest).map(|(summary, written)| {
+        .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
+    let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
         text(summary)
             .key("summary")
+            .transition(replace(capsule))
             .font(p.k.ty.text_small)
             .color(if written { p.muted() } else { p.faint() })
             .max_lines(SUMMARY_LINES)
@@ -312,10 +355,20 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
         .px(PANEL_PAD)
         .pb(PANEL_PAD)
         .children(copy_rows(p, capsule, false));
+    let rows = if manifest.is_none() {
+        rows.disabled(true).opacity(0.48)
+    } else {
+        rows
+    };
+    let contents = col().key("panel-contents").w(PANEL_WIDTH);
+    let contents = if capsule.corner.is_top() {
+        contents.child(header).children(summary).child(rows)
+    } else {
+        contents.child(rows).children(summary).child(header)
+    };
     let body = panel_body(p, &title)
-        .child(header)
-        .children(summary)
-        .child(rows)
+        .motion(RECORDING_OPEN)
+        .child(contents)
         .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside))
         .cursor(Cursor::Grab)
         .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx));
@@ -326,7 +379,7 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
-    let open = capsule.hovered;
+    let open = capsule.hovered || capsule.stopping;
     let notice = recording_notice(shown);
     let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
     let notice_text = |notice: Notice| {
@@ -341,6 +394,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let top = capsule.corner.is_top();
     let meter = row()
         .key("meter")
+        .h(REST_HEIGHT)
         .gap(6.0)
         .center_y()
         .child(status_dot(p.danger()).size(6.0, 6.0))
@@ -351,21 +405,35 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 .font(TextStyle::new(13.0, 500.0).mono().lh(18.0))
                 .color(p.muted()),
         );
-    let accessory = if open {
+    let meter = if top {
+        meter.self_start()
+    } else {
+        meter.self_end()
+    };
+    let accessory = if capsule.stopping {
+        Some(
+            text(tr("Stopping…").to_owned())
+                .key("stopping")
+                .font(p.k.ty.text_xsmall)
+                .color(p.muted())
+                .mx(ROW_PX)
+                .transition(replace(capsule)),
+        )
+    } else if open {
         Some(
             row()
                 .key("stop")
-                .h(HEADER_HEIGHT - 2.0 * PANEL_PAD)
-                .px(ROW_PX)
+                .h(STOP_TARGET)
+                .min_w(STOP_TARGET)
+                .px(ROW_PX + 4.)
                 .gap(6.0)
                 .center_y()
                 .radius(ROW_RADIUS)
                 .hover(p.k.c.hover)
                 .label(tr("Stop"))
+                .role("button")
                 .focusable(true)
-                .on_press(|c: &mut Capsule| {
-                    c.send(ControllerCommand::Stop);
-                })
+                .on_press(Capsule::request_stop)
                 .child(icon(&icons::STOP, 12.0).color(p.muted()))
                 .child(
                     text(tr("Stop").to_owned())
@@ -377,7 +445,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     } else {
         notice.map(notice_text)
     };
-    let panel_height = HEADER_HEIGHT
+    let panel_height = OPEN_HEADER
         + 3.0 * ROW_HEIGHT
         + FIRST_ROW_GAP
         + PANEL_PAD
@@ -392,16 +460,9 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     // the moving clip's origin so neither the rows nor the meter ride its edge.
     let header = row()
         .key("header")
-        .absolute(
-            0.0,
-            if top {
-                0.0
-            } else {
-                panel_height - HEADER_HEIGHT
-            },
-        )
+        .absolute(0.0, if top { 0.0 } else { panel_height - OPEN_HEADER })
         .w(PANEL_WIDTH)
-        .h(HEADER_HEIGHT)
+        .h(OPEN_HEADER)
         .center_y()
         .gap(8.0);
     let spacer = el().key("space").grow(1.0);
@@ -436,9 +497,9 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                     .absolute(
                         0.0,
                         if top {
-                            HEADER_HEIGHT
+                            OPEN_HEADER
                         } else {
-                            panel_height - HEADER_HEIGHT - NOTICE_HEIGHT
+                            panel_height - OPEN_HEADER - NOTICE_HEIGHT
                         },
                     )
                     .w(PANEL_WIDTH)

@@ -397,6 +397,9 @@ impl Pump {
                         "Recording “{title}”; `hex meetings stop` stops and transcribes it"
                     ))
                 }
+                (Some(ControllerEvent::Stopping), true) => {
+                    ControlReply::done("Stopping the meeting recording")
+                }
                 (Some(ControllerEvent::Transcribing | ControllerEvent::Finished(_)), true) => {
                     ControlReply::done("Stopped recording; transcribing the meeting")
                 }

@@ -1,0 +1,139 @@
+//! Ownership of the surface between the stop command and final publication.
+use super::*;
+
+impl Capsule {
+    pub(super) fn request_stop(&mut self) {
+        if !self.stopping
+            && matches!(self.kind, Some(Kind::Recording(_)))
+            && self.send(ControllerCommand::Stop)
+        {
+            self.mark_stopping();
+        }
+    }
+
+    pub(super) fn mark_stopping(&mut self) {
+        if matches!(self.kind, Some(Kind::Recording(_))) {
+            self.stopping = true;
+            #[cfg(target_os = "windows")]
+            self.fit_recording_window();
+        }
+    }
+
+    pub(super) fn capture_stopped(&mut self) {
+        if let Some(Kind::Recording(r)) = &self.kind {
+            self.kind = Some(Kind::Finalizing {
+                duration_ms: r.started.elapsed().as_millis() as u64,
+            });
+            self.waveform = None;
+        }
+    }
+
+    pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
+        self.live = Live::default();
+        self.kind = Some(Kind::Ready(manifest));
+        self.waveform = None;
+    }
+}
+
+impl MeetingCapsules {
+    pub(super) fn advance_handoff(&mut self, event: &ControllerEvent) {
+        // A new panel supersedes an old summary, and failure yields to the
+        // host's failure UI. Notes never take ownership or show a window.
+        if matches!(
+            event,
+            ControllerEvent::Starting
+                | ControllerEvent::RecordingStarted { .. }
+                | ControllerEvent::Reminder { .. }
+                | ControllerEvent::Offer(_)
+                | ControllerEvent::Failed { .. }
+        ) && self.handoff.take().is_some()
+        {
+            self.pill.handle.update(|c, _| c.kind = None);
+            self.pill.handle.hide();
+        }
+        if let Some(id) = self.pill.apply(event) {
+            self.handoff = Some(id);
+            if matches!(event, ControllerEvent::Transcribing) {
+                self.pill.handle.update(|c, _| c.capture_stopped());
+            }
+        }
+    }
+
+    pub(super) fn finish_meeting(&self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {
+        if self.handoff.as_ref() != Some(&manifest.id) {
+            self.show_panel(Kind::Ready(Box::new(manifest.clone())), Some(READY_TIMEOUT));
+            return self.panel.clone();
+        }
+        let handle = self.pill.handle.clone();
+        let finished = Box::new(manifest.clone());
+        #[cfg(target_os = "windows")]
+        handle.resize(ready_window_size(&finished));
+        handle.update(move |c, _| c.published(finished));
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.timeout(handle.clone(), generation, READY_TIMEOUT);
+        handle
+    }
+}
+
+impl Pill {
+    fn apply(&self, event: &ControllerEvent) -> Option<String> {
+        // Relinquish the visible pill under the same lock as the ticker, so
+        // its last reconciliation cannot hide or restore a finalizing surface.
+        let mut model = self.lock();
+        let retain = match event {
+            ControllerEvent::Transcribing => model.shown.take(),
+            ControllerEvent::Finished(m) if model.shown.as_ref() == Some(&m.id) => {
+                model.shown.take()
+            }
+            _ => None,
+        };
+        model.apply(event, Instant::now());
+        drop(model);
+        self.reconcile();
+        if let ControllerEvent::RecordingStarted { id, .. } = event {
+            self.tick(id.clone());
+        }
+        retain
+    }
+}
+
+impl MeetingCapsules {
+    pub(super) fn timeout(
+        &self,
+        panel: OverlayHandle<Capsule>,
+        generation: u64,
+        timeout: Duration,
+    ) {
+        let current = self.generation.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            if current.load(Ordering::SeqCst) == generation {
+                panel.update(move |capsule, _| {
+                    // Checked again when applied: a newer capsule may
+                    // have been shown since.
+                    if current.load(Ordering::SeqCst) != generation {
+                        return;
+                    }
+                    if let Some(Kind::Offer(candidate)) = &capsule.kind {
+                        tracing::info!(
+                            source = candidate.source.label(),
+                            title = %candidate.title,
+                            "meeting recording offer timed out"
+                        );
+                        // Unanswered: offered again when the call app
+                        // retakes the microphone (#1267).
+                        if candidate.key != "preview" {
+                            capsule.send(ControllerCommand::OfferTimedOut);
+                        }
+                    }
+                    // A ready panel waits for the pointer to leave it.
+                    if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
+                        capsule.expired = true;
+                        return;
+                    }
+                    capsule.close();
+                });
+            }
+        });
+    }
+}

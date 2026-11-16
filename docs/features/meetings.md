@@ -849,6 +849,14 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   in its header, then Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
+     ├── Stop -> the icon, label and padding are one button at least 44 pt tall.
+     │   A click queues one stop immediately. The pill stays open and says
+     │   “Stopping…” with its recording dot and elapsed time until capture ends.
+     │   The worker closing its sources, not the click, switches the header to
+     │   “Transcribing…”. Publication brings back the copies and Close on the
+     │   same surface; it does not wait for notes or a minimum animation time.
+     │   A recorder failure yields to the Meetings error instead of showing a
+     │   finished transcript. Check: `stop_handoff_frames` (offscreen Rune).
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
      │   its centre and saves recording_indicator_corner (window settings too)
      ├── Copy new -> copies the turns not yet copied or pasted, through
