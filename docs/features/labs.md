@@ -2700,7 +2700,7 @@ Captures
 ├── click       -> the editor (a shot with its words; a recording, or an
 │                  annotation's movie with its timed words, to trim; one whose
 │                  model gave no word times (GigaAM v3) has its text spread
-│                  over the movie as estimated; an annotation whose movie
+│                  over the recording as estimated; an annotation whose movie
 │                  expired: its first keyframe)
 ├── drag        -> the file (an annotation's movie, else its keyframe)
 ├── hover       -> Copy, Show in Finder, Move to Trash in the age's place

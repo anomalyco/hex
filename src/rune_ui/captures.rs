@@ -328,7 +328,7 @@ fn open(ui: &mut Ui, id: u64) {
     {
         use super::screenshot_thumbnail::editor;
         let words = |text: &str, timed: &[CaptureWord], duration_ms: u64| {
-            words_on_clock(text, timed, duration_ms)
+            words_for_editor(text, timed, duration_ms)
                 .into_iter()
                 .map(|word| editor::clip::Word {
                     t0: word.t0,
@@ -361,13 +361,13 @@ fn open(ui: &mut Ui, id: u64) {
     let _ = entry;
 }
 
-/// An entry's words on its movie's clock: its own when the model timed them,
-/// else its text spread over the movie as estimated times, the way the words
-/// path fills them for a model that gives none (GigaAM v3). A capture already
+/// An entry's words for the editor: its own when the model timed them, else
+/// its text spread over its length as estimated times, the way the words path
+/// fills them for a model that gives none (GigaAM v3). A capture already
 /// written without times still opens with its words instead of reading
 /// "Nothing was said".
 #[cfg(any(target_os = "macos", test))]
-fn words_on_clock(text: &str, timed: &[CaptureWord], duration_ms: u64) -> Vec<CaptureWord> {
+fn words_for_editor(text: &str, timed: &[CaptureWord], duration_ms: u64) -> Vec<CaptureWord> {
     if !timed.is_empty() {
         return timed.to_vec();
     }
@@ -632,10 +632,10 @@ mod tests {
     use super::*;
 
     /// A capture whose model gave no word times still opens in the editor
-    /// with its words, on the movie's clock, rather than "Nothing was said".
+    /// with its words spread over its length, rather than "Nothing was said".
     #[test]
-    fn an_untimed_capture_gets_its_words_spread_over_the_movie() {
-        let spread = words_on_clock("make it blue", &[], 4_000);
+    fn an_untimed_capture_gets_its_words_spread_over_its_length() {
+        let spread = words_for_editor("make it blue", &[], 4_000);
         assert_eq!(
             spread
                 .iter()
@@ -645,7 +645,7 @@ mod tests {
         );
         assert_eq!((spread[0].t0, spread[2].t1), (0, 4_000));
 
-        assert!(words_on_clock("   ", &[], 4_000).is_empty(), "silence");
+        assert!(words_for_editor("   ", &[], 4_000).is_empty(), "silence");
 
         let timed = vec![CaptureWord {
             t0: 100,
@@ -653,7 +653,7 @@ mod tests {
             text: "make".into(),
         }];
         assert_eq!(
-            words_on_clock("make it blue", &timed, 4_000),
+            words_for_editor("make it blue", &timed, 4_000),
             timed,
             "a model's own times stay"
         );
