@@ -940,7 +940,7 @@ impl SealedReplay {
             Some(&engine_cfg),
         )?;
 
-        let words = bundle.transcript.words.len();
+        let words = scrawl_capture::transcribe::word_count(&bundle.transcript);
         let missing_transcript = bundle
             .transcript
             .missing

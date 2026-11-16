@@ -9,7 +9,8 @@ PipeWire (`capture.linux`), on Windows Windows.Graphics.Capture
 (`capture.windows`), (or a cabled iPhone through `scrawl-helper`'s
 mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
 macOS and Windows, or the Annotate key held or the pen), transcribes the narration with word timestamps on
-Hex's loaded model, writes a Scrawl bundle into Scrawl's captures folder,
+Hex's loaded model (a model that gives none, GigaAM v3 say, still counts the
+words in its text), writes a Scrawl bundle into Scrawl's captures folder,
 copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
 router (`crates/router`), run in Hex's process. Settings › Annotate (under
 Labs in the sidebar) holds its settings. Scrawl's capsule (switch
@@ -362,7 +363,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 ├── Follows `capture_host::watch()`: Recording from the instant `recording` is
 │   Some (the bundle's t0; timer, meter, ✓ finish, ✕ cancel) -> Processing ->
 │   done (the lead alone, no word), Failed, or Cancelled, then leaves on its
-│   own; a written capture whose transcript has no words reads "no speech"
+│   own; a written capture whose transcript has no words at all (none timed,
+│   none in its text) reads "no speech"
 ├── Tones (`capture_capsule::tone`, at the dictation volume; zero is
 │   silent), from the chosen sound set: start and stop are the set's start
 │   and stop, a send going its done (Annotate's own sent sound when the set
@@ -990,7 +992,8 @@ Where it goes                            // capture.route; capture.routing's aut
 
 hex capture list|show|send|route         // capture.cli; docs/cli.md
 ├── list [--limit N] -> the newest bundles in the captures folder: mode, words,
-│   where it went
+│   where it went; words count a model's own word times, else the words in the
+│   transcript's text
 ├── show <capture> -> one capture's words, files, and send; a capture whose
 │   audio stopped early (the 8 h disk guard, or a failed write) says where
 ├── send <capture> [--to <session>] [--always] -> needs a listening Hex
@@ -1079,7 +1082,9 @@ Checks:
 - Words, in parakeet.rs: `chunked_word_transcription_keeps_word_times_across_chunks`
   and `word_transcription_is_a_foreground_request_on_the_shared_engine`;
   `foreground_work_waits_for_an_open_stream_instead_of_interrupting_it` in
-  [transcription/engine.rs](../../src/transcription/engine.rs).
+  [transcription/engine.rs](../../src/transcription/engine.rs);
+  `a_transcript_without_word_times_counts_the_words_it_says` in
+  [transcribe.rs](../../crates/capture/src/transcribe.rs).
 - Host, in capture_host.rs (a fake engine that writes through Scrawl's real
   `finalize_capture_bundle_with_flags`, without a screen):
   `controls_are_idempotent_and_stop_writes_a_scrawl_bundle`,
@@ -1164,7 +1169,8 @@ Checks:
   `an_app_rules_folder_is_read_with_the_sessions`, and
   `a_look_past_its_deadline_skips_what_it_hadnt_begun`
   in [look.rs](../../crates/router/src/routing/look.rs); the CLI's
-  `a_capture_on_disk_summarizes_its_mode_words_and_send` in
+  `a_capture_on_disk_summarizes_its_mode_words_and_send` and
+  `a_capture_without_word_times_counts_the_words_it_says` in
   [library.rs](../../src/capture_host/library.rs), the protocol round trips in
   control.rs, and `control_commands_parse` in main.rs.
 - Switching, in capture_host.rs:
