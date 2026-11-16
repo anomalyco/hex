@@ -837,12 +837,17 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
      ├── Always dark in either host appearance, including the open Stop and copy rows
-     ├── At rest: a steady recording dot, Dot scope and elapsed time
+     ├── At rest: Dot scope and elapsed time, with no separate recording dot;
+     │   the accessible status names the recording and its title
      │   ├── The dictation HUD's listening field follows the louder fresh RMS
      │   │   from microphone or system audio (not individual speakers). Missing
-     │   │   buffers and those over 300 ms old read as zero. In silence the
-     │   │   beam settles to a still dotted line; the recording dot stays visible.
-     │   │   Reduce Motion holds the HUD's braid still
+     │   │   buffers and those over 300 ms old read as zero. When speech pauses
+     │   │   the beam narrows and dims into a still dotted line; a returning
+     │   │   voice opens it from its current height. The timer keeps ticking.
+     │   │   Reduce Motion holds the braid still
+     │   │   and fades its light without squeezing the rows. Checks:
+     │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
+     │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
      ├── Hover -> the pill reveals a panel: Stop opposite the meter and time

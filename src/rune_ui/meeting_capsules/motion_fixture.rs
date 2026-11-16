@@ -252,3 +252,53 @@ fn paint_recording(
     gpu.queue.submit([encoder.finish()]);
     target.read(&gpu.device)
 }
+
+#[test]
+fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
+        for (sec, warning, width) in [
+            (258, false, REST_WIDTH),
+            (123 * 60 + 45, false, REST_WIDTH + 8.),
+            (123 * 60 + 45, true, PANEL_WIDTH),
+        ] {
+            let (mut rt, received, _) = runtime(live_recording("fixture"), false, true, RECORDING);
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                if let Some(Kind::Recording(shown)) = &mut c.kind {
+                    shown.started = Instant::now() - Duration::from_secs(sec);
+                    shown.warning = warning.then_some(meeting::TrackWarning::DigitalSilence);
+                }
+                tx.instant();
+            });
+            rt.settle_all();
+            rt.frame(0.);
+            let rect = |rt: &Runtime<Capsule>, key| {
+                rt.elements()
+                    .into_iter()
+                    .find(|e| e.key.as_deref() == Some(key))
+                    .unwrap()
+                    .rect
+            };
+            let [px, _, pw, ph] = rect(&rt, "pill");
+            let [sx, _, sw, _] = rect(&rt, "meeting-listening-field");
+            let [tx, _, tw, _] = rect(&rt, "elapsed");
+            assert_eq!((pw, ph), (width, REST_HEIGHT));
+            assert!(sx - px >= 9. && px + pw - tx - tw >= 9. && tx - (sx + sw) >= 5.);
+            if warning {
+                let [x, _, w, _] = rect(&rt, "notice");
+                assert!(w > 0. && (x + w <= sx || x >= tx + tw));
+            }
+            let timer = rt.find("elapsed").unwrap();
+            rt.pointer_move(timer.0, timer.1);
+            for _ in 0..48 {
+                rt.frame(1. / 60.);
+            }
+            assert_eq!(rt.find("elapsed"), Some(timer));
+            let [x, _, w, h] = rect(&rt, "stop");
+            assert!(w >= 44. && h >= 26. && (x + w <= sx || x >= tx + tw));
+            tap(&mut rt, "stop");
+            assert!(matches!(received.try_recv(), Ok(ControllerCommand::Stop)));
+        }
+    }
+}

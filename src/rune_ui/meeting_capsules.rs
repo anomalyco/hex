@@ -60,7 +60,7 @@ mod panel;
 mod throw;
 mod waveform;
 
-use panel::{agent_prompt, hex_command, ready, ready_summary, recording, recording_notice};
+use panel::{agent_prompt, hex_command, ready, ready_summary, recording};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -78,9 +78,9 @@ const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// Between a capsule's window edges and what it draws.
 const CAPSULE_INSET: f32 = 4.0;
-/// Same header at rest and open so the recording dot and timer stay put.
+/// Same header at rest and open so the waveform and timer stay put.
 const REST_HEIGHT: f32 = HEADER_HEIGHT;
-const REST_WIDTH: f32 = 160.0;
+const REST_WIDTH: f32 = 148.0;
 /// The resting pill's sides, and the open panel header's right side, so the
 /// timer stays put as the pill opens.
 const REST_PX: f32 = 11.0;
@@ -102,9 +102,6 @@ const NOTICE_HEIGHT: f32 = 20.0;
 /// The ready panel's summary: Apple Intelligence's two sentences.
 const SUMMARY_LINES: usize = 3;
 const SUMMARY_LINE: f32 = 19.5;
-/// The resting pill fits a timer up to `100:00`.
-#[cfg(target_os = "windows")]
-const REST_WINDOW_WIDTH: f32 = REST_WIDTH + 2.0 * CAPSULE_INSET;
 /// The recording capsule's window at its largest: the open panel with a
 /// notice.
 const RECORDING_WINDOW: (f32, f32) = (
@@ -350,7 +347,7 @@ impl Capsule {
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
             resize(recording_window_size(
                 self.hovered,
-                recording_notice(shown).is_some(),
+                panel::rest_width(shown),
             ));
         }
     }
@@ -511,7 +508,7 @@ impl Capsule {
     fn window_size(&self) -> (f32, f32) {
         match &self.kind {
             Some(Kind::Recording(shown)) => {
-                recording_window_size(self.hovered, recording_notice(shown).is_some())
+                recording_window_size(self.hovered, panel::rest_width(shown))
             }
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
             Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
@@ -578,18 +575,14 @@ impl Capsule {
 }
 
 /// The recording capsule's window. On Windows it is the size of what it
-/// draws: the resting pill (as wide as the open panel while it says
-/// `noticed`), then the open panel. Elsewhere it stays at its largest, and
+/// draws: the resting pill (including its timer and any notice), then the
+/// open panel. Elsewhere it stays at its largest, and
 /// only the `.hit()` pill takes the pointer.
 #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
-fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
+fn recording_window_size(open: bool, rest_width: f32) -> (f32, f32) {
     #[cfg(target_os = "windows")]
     if !open {
-        let width = if noticed {
-            RECORDING_WINDOW.0
-        } else {
-            REST_WINDOW_WIDTH
-        };
+        let width = rest_width + 2.0 * CAPSULE_INSET;
         return (width, REST_HEIGHT + 2.0 * CAPSULE_INSET);
     }
     RECORDING_WINDOW
@@ -737,10 +730,8 @@ impl Pill {
         place_capsule(&self.handle, corner, 0.0, 0.0);
         // Windows: a shown pill starts at rest.
         #[cfg(target_os = "windows")]
-        self.handle.resize(recording_window_size(
-            false,
-            recording_notice(&recording).is_some(),
-        ));
+        self.handle
+            .resize(recording_window_size(false, panel::rest_width(&recording)));
         self.handle.update(move |capsule, tx| {
             capsule.kind = Some(Kind::Recording(recording));
             capsule.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
@@ -886,7 +877,7 @@ impl MeetingCapsules {
             handle: overlay(
                 app,
                 "Hex meeting recording",
-                recording_window_size(false, false),
+                recording_window_size(false, REST_WIDTH),
                 true,
             ),
             model: Arc::default(),
