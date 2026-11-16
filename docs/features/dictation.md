@@ -338,6 +338,35 @@ Checks: the `both_options_*` tests and
 `a_modifier_alone_says_linux_needs_a_key_and_suggests_one` in
 `rune_ui/tests.rs`. Constructed events only; no physical keyboard run on any OS.
 
+**Fixed November 16, 2026 (issue 1901):** an app that registers raw keyboard
+input and installs its own `WH_KEYBOARD_LL` hook when it starts (Tauri 2 apps
+do both) silenced Hex's hook once such a window came to the front: while it
+is in front, Windows stops calling low-level keyboard hooks at all, so the
+dictation shortcut did nothing over that app until a hook was installed again,
+whatever its position in the chain. The listener now watches the foreground
+window (`SetWinEventHook`, skipping Hex's own process) on its hook thread and,
+in that callback, installs a fresh keyboard hook first and drops the old one
+straight after, with no message pumped in between:
+
+```ts
+Windows keyboard hook re-arm                             // dictate.windows-rearm
+  ├── Another app comes to the front -> New WH_KEYBOARD_LL hook, then the old one dropped
+  │   -> A hook installed again re-arms every low-level hook, whatever its position
+  │   -> A chord held across the swap is neither duplicated nor lost
+  ├── ~1.5 s later -> One more swap, arming no timer, skipped while Hex is in front
+  │   -> Covers an app that shows its window first and installs its hook only then
+  ├── The new hook fails -> The old one stays; one warning, later failures quiet
+  ├── The foreground watcher fails -> The listener runs as before
+  └── Known gap: such an app installs its hook while already in front, more than
+      ~1.5 s after it came to the front
+      -> The shortcut works again at the next foreground change
+```
+
+Proof limit: a C# harness reimplementing the swap, with its own window and a
+message loop that dispatches, ran on a GitHub Windows runner with injected
+input. Hex's Rust listener, a real Tauri app and a physical keyboard were not
+exercised, and no automated check covers the re-arm.
+
 ### Shortcuts Under Secure Input (macOS)
 
 **Added November 9, 2026:** while another app holds Secure Event Input (a
