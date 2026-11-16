@@ -10,15 +10,7 @@ use crate::labs::Group;
 
 /// A group's header and chip.
 pub(super) fn name(group: Group) -> &'static str {
-    match group {
-        Group::Dictation => tr("Dictation"),
-        Group::Output => tr("Output"),
-        Group::History => tr("History"),
-        Group::Meetings => tr("Meetings"),
-        Group::Annotate => tr("Annotate"),
-        Group::Shortcuts => tr("Shortcuts"),
-        Group::Models => tr("Models"),
-    }
+    tr(group.title())
 }
 
 /// Whether `group`'s cards show: as last opened or closed by hand, else

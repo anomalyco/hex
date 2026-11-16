@@ -96,6 +96,13 @@ from the built app (`iconutil -c iconset Hex.app/Contents/Resources/AppIcon.icns
 Regenerate with `bun run generate:og`, bump the `?v=` on both image tags in
 `index.html`, rebuild, deploy, and fetch the published PNG.
 
+The Labs pages (`/hex/labs`, `/hex/labs/<id>`) each have their own card,
+drawn at build by `scripts/labs.ts` with satori and resvg (no browser): the
+icon, "Hex Labs", the lab's title and line, and its OSes. Their `?v=` is a
+hash of what the card shows. `src/labs.json` comes from the app's Labs
+registry; never edit it by hand (`HEX_UPDATE_LABS_JSON=1 scripts/check
+labs::web` from the repository root rewrites it).
+
 Messages also plays `public/og.mp4` (`og:video`) inline on a loop in place of the
 image; other apps keep the PNG. It's a 4.5 s, 1200 × 630, 60 fps silent H.264
 loop: the icon speaks and the words pile up under it

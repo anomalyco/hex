@@ -152,6 +152,14 @@ impl Hotkeys {
             .find_map(DictationHotkey::recording_cancel)
     }
 
+    /// Whether a held capture takes Escape at `now`, for the tap to keep it
+    /// from the app in front.
+    pub(super) fn takes_escape(&self, now: CaptureInstant) -> bool {
+        Shortcut::all()
+            .filter_map(|shortcut| self.machine(shortcut))
+            .any(|machine| machine.takes_escape(now))
+    }
+
     pub(super) fn suppresses_recognition(&self) -> bool {
         Shortcut::all()
             .filter_map(|shortcut| self.machine(shortcut))

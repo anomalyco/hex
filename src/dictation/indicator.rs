@@ -270,6 +270,13 @@ impl IndicatorModel {
         self.phase == Phase::Recording
     }
 
+    /// The meter's loudness, dBFS: tests check that a meter still updates it
+    /// when the update draws no frame of its own.
+    #[cfg(test)]
+    pub fn loudness(&self) -> f32 {
+        self.loudness
+    }
+
     /// What the HUD says to assistive technology: Recording, Transcribing,
     /// or Failed, in English (callers translate it); `None` while nothing
     /// shows or the HUD fades out.

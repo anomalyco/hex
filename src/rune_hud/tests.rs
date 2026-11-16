@@ -595,3 +595,127 @@ fn a_recording_asks_again_only_when_its_frames_stop() {
     assert!(!reshow_due(Some(Duration::ZERO), false));
     assert!(reshow_due(Some(stale), false));
 }
+
+/// A HUD as `install` builds it, without its overlay: the state `handle`
+/// touches, and no GPU or Rune. `shown` is what `Hud::show` records once Rune
+/// took the show; a HUD with no overlay can't ask it.
+fn hud(shown: bool) -> Hud {
+    Hud {
+        model: IndicatorModel::new(dot_scope::lab(), Instant::now()),
+        drawn: None,
+        layout: Layout::default(),
+        position: IndicatorPosition::Top,
+        this: None,
+        shown: Arc::new(AtomicBool::new(shown)),
+        reduce: false,
+        animating: Arc::new(AtomicBool::new(false)),
+        #[cfg(target_os = "macos")]
+        placed: None,
+        #[cfg(not(target_os = "macos"))]
+        edge_placed: None,
+        #[cfg(not(target_os = "macos"))]
+        followed: None,
+        #[cfg(not(target_os = "macos"))]
+        gpu: Arc::default(),
+        #[cfg(target_os = "windows")]
+        watch: Arc::default(),
+        #[cfg(any(target_os = "windows", test))]
+        last_drawn: None,
+        #[cfg(any(target_os = "windows", test))]
+        armed: false,
+        #[cfg(any(target_os = "windows", test))]
+        polled_at: None,
+        #[cfg(target_os = "windows")]
+        stepped_at: None,
+        #[cfg(target_os = "windows")]
+        reshown: false,
+    }
+}
+
+/// An armed timer draws the next level itself, so a meter only updates the
+/// model; a timer that isn't armed draws nothing, so the meter's update draws
+/// one frame. Loudness moves either way.
+#[test]
+fn an_armed_timer_draws_for_meters_and_a_stopped_one_lets_a_meter_draw() {
+    let mut hud = hud(true);
+    hud.armed = true;
+    let draws = windows_pacing::meter_update(
+        &mut hud,
+        HudEvent::Meter {
+            average: 0.5,
+            peak: 0.8,
+        },
+    );
+    assert!(!draws, "the armed timer's frame shows the level");
+    assert!((hud.model.loudness() - dot_scope::loudness(0.5)).abs() < f32::EPSILON);
+
+    hud.armed = false;
+    let draws = windows_pacing::meter_update(
+        &mut hud,
+        HudEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        },
+    );
+    assert!(draws, "nothing else draws the level, so this meter does");
+    assert!((hud.model.loudness() - dot_scope::loudness(0.1)).abs() < f32::EPSILON);
+}
+
+/// The timer arms from a start's own time, before any frame it draws, so the
+/// first frame after the show asks for the next one. It stops arming once no
+/// frame has drawn for `RESHOW_AFTER`: a show that fails draws nothing, and an
+/// always-asking timer would turn Rune's loop at 60 Hz with Hex idle. A hidden
+/// HUD arms nothing either.
+#[test]
+fn the_timer_arms_from_a_start_and_stops_when_frames_stop() {
+    let mut hud = hud(true);
+    hud.animating.store(true, Ordering::Release);
+    // `handle(Started)` is where a start's arming reference comes from.
+    hud.handle(HudEvent::Started);
+    assert!(
+        hud.last_drawn.is_some_and(|at| at.elapsed() < RESHOW_AFTER),
+        "the start is the first reference"
+    );
+    // `Hud::show` records the show once Rune takes it; this HUD has no overlay.
+    hud.shown.store(true, Ordering::Release);
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(hud.armed, "the start's frame asks for the next");
+
+    // Frames stop: the reference ages past `RESHOW_AFTER`.
+    hud.last_drawn = Some(Instant::now() - RESHOW_AFTER - Duration::from_millis(1));
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(!hud.armed, "a stale reference asks for nothing");
+
+    // Hidden, even a fresh reference arms nothing.
+    hud.last_drawn = Some(Instant::now());
+    hud.shown.store(false, Ordering::Release);
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(!hud.armed);
+}
+
+/// Rune runs a poll before the frame's render, so a stall longer than
+/// `RESHOW_AFTER` leaves the next poll looking at a stale `last_drawn` even
+/// though the frame it is part of draws: that frame is the one the previous
+/// poll drew. It must arm the next, or a HUD with no meters to restart it
+/// (Transcribing, Completed, Failed) freezes on screen and never fades out.
+#[test]
+fn a_frame_drawn_since_the_last_poll_keeps_the_timer_armed() {
+    let mut hud = hud(true);
+    hud.animating.store(true, Ordering::Release);
+    let polled = Instant::now() - RESHOW_AFTER - RESHOW_AFTER;
+    hud.polled_at = Some(polled);
+    // Older than RESHOW_AFTER, but the frame drew after that poll.
+    hud.last_drawn = Some(polled + Duration::from_millis(1));
+    assert!(
+        hud.last_drawn
+            .is_some_and(|at| at.elapsed() >= RESHOW_AFTER),
+        "the reference is stale on its own"
+    );
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(hud.armed, "a frame since the last poll keeps the timer");
+
+    // Nothing drew since the last poll and the reference is stale: stop.
+    hud.last_drawn = Some(Instant::now() - RESHOW_AFTER - Duration::from_millis(1));
+    windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
+    assert!(!hud.armed, "no frame since the last poll, and a stale one");
+}

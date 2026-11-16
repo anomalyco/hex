@@ -27,6 +27,7 @@ pub enum Feature {
     ReturnToApp,
     SpokenFormatting,
     FillerWords,
+    CleanUpWithAppleIntelligence,
     SecondDictationShortcut,
     TerminalPasteShortcut,
     SmartSpacing,
@@ -48,6 +49,7 @@ pub enum Feature {
     KQuantModels,
     PickerDownloaded,
     SectionKeyAlone,
+    MicrophoneKeyAlone,
     KeepRecordings,
     SettingsSearch,
     Appearance,
@@ -68,6 +70,7 @@ pub enum Feature {
     ApiTimestamps,
     ApiBrowserAccess,
     SpeakersOnly,
+    CalendarMenu,
     MoreDictationShortcuts,
     PauseMenu,
     PrintStart,
@@ -76,10 +79,11 @@ pub enum Feature {
     ShellCompletions,
     YoloMode,
     CursorContext,
+    CopyDictationAudio,
 }
 
 impl Feature {
-    pub const ALL: [Self; 71] = [
+    pub const ALL: [Self; 75] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -102,6 +106,7 @@ impl Feature {
         Self::ReturnToApp,
         Self::SpokenFormatting,
         Self::FillerWords,
+        Self::CleanUpWithAppleIntelligence,
         Self::SecondDictationShortcut,
         Self::TerminalPasteShortcut,
         Self::SmartSpacing,
@@ -123,6 +128,7 @@ impl Feature {
         Self::KQuantModels,
         Self::PickerDownloaded,
         Self::SectionKeyAlone,
+        Self::MicrophoneKeyAlone,
         Self::KeepRecordings,
         Self::SettingsSearch,
         Self::Appearance,
@@ -143,6 +149,7 @@ impl Feature {
         Self::ApiTimestamps,
         Self::ApiBrowserAccess,
         Self::SpeakersOnly,
+        Self::CalendarMenu,
         Self::MoreDictationShortcuts,
         Self::PauseMenu,
         Self::PrintStart,
@@ -151,5 +158,6 @@ impl Feature {
         Self::ShellCompletions,
         Self::YoloMode,
         Self::CursorContext,
+        Self::CopyDictationAudio,
     ];
 }

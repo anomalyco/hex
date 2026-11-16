@@ -22,6 +22,8 @@ pub(crate) mod notes;
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
 mod platform;
 pub mod protocol;
+#[cfg(any(target_os = "macos", test))]
+mod staging;
 mod transport;
 
 use std::path::{Path, PathBuf};
@@ -583,10 +585,26 @@ fn run(shared: &Shared, method: &Method) {
     }
 }
 
+/// Whether a release that just finished staging becomes the staged update.
+/// A quit installs the staged update itself (`install_on_quit`), so a
+/// download that lands afterwards must not replace it: the caller drops the
+/// folder it unpacked, because the bundle that update replaced now lives in
+/// the folder of the one the quit installed.
+fn adopts_staged_update(state: &State, quitting: bool) -> bool {
+    !quitting && !matches!(state, State::Applied)
+}
+
 /// Switches to the newest staged update once Restart to update's final
 /// check has run, whatever its result. True when Hex now quits.
 fn finish_restart(shared: &Shared, next: State) -> bool {
     let mut state = lock(&shared.state);
+    // Quitting installs the staged update itself (`install_on_quit`), and it
+    // holds this lock while it does; a swap here would exchange the same two
+    // bundles back and lose the update.
+    if matches!(*state, State::Applied) {
+        *lock(&shared.restart) = Restart::Done(Ok(()));
+        return true;
+    }
     let staged = lock(&shared.staged).clone();
     let result = match &staged {
         Some(update) => {
@@ -723,11 +741,32 @@ fn check(
             #[cfg(not(target_os = "windows"))]
             let staged = platform::stage(&file, &version);
             let staged = staged.wrap_err_with(|| format!("could not stage Hex {version}"))?;
-            *lock(&shared.staged) = Some(StagedUpdate {
-                staged,
-                sha256: target.sha256,
-                version: version.clone(),
-            });
+            // A quit installs the staged update itself (`install_on_quit`) and
+            // holds both locks, so take them in the same order and look again
+            // under them: a release that lands after that must not replace the
+            // installed one or remove the folder its replaced bundle lives in.
+            #[cfg(target_os = "macos")]
+            let kept = staged.clone();
+            {
+                let state = lock(&shared.state);
+                let mut staged_updates = lock(&shared.staged);
+                if !adopts_staged_update(&state, crate::desktop::process_exit::quitting()) {
+                    drop(staged_updates);
+                    drop(state);
+                    #[cfg(target_os = "macos")]
+                    platform::discard(&kept);
+                    return Ok(State::Applied);
+                }
+                *staged_updates = Some(StagedUpdate {
+                    staged,
+                    sha256: target.sha256,
+                    version: version.clone(),
+                });
+            }
+            // Now that this release is the staged update, the unpacked folder
+            // of the release it replaced is no longer needed.
+            #[cfg(target_os = "macos")]
+            platform::remove_superseded(&kept);
             *lock(&shared.notes) = None;
             // Restart to update's final check quits right after; notes
             // would only hold it up.
@@ -1134,6 +1173,41 @@ mod tests {
         ));
         // Another channel's release waits for the user to confirm it.
         assert!(!replaces_staged(&decide("stable", "2.3.1", 'c'), &staged));
+    }
+
+    #[test]
+    fn a_restart_after_a_quit_installed_the_update_does_not_swap_again() {
+        let updater = Updater::idle_checking();
+        // Quitting installed the staged update and set Applied; the final
+        // restart check finishes afterwards.
+        *lock(&updater.shared.state) = State::Applied;
+        *lock(&updater.shared.restart) = Restart::Requested;
+
+        assert!(
+            finish_restart(&updater.shared, State::Ready),
+            "the quit already installed the update; Hex still quits"
+        );
+        assert!(matches!(
+            *lock(&updater.shared.restart),
+            Restart::Done(Ok(()))
+        ));
+        assert!(matches!(*lock(&updater.shared.state), State::Applied));
+    }
+
+    #[test]
+    fn a_release_that_finishes_staging_after_a_quit_installed_one_is_discarded() {
+        // Hex is still running: the release becomes the staged update.
+        assert!(adopts_staged_update(&State::Ready, false));
+        assert!(adopts_staged_update(&State::Checking, false));
+        assert!(adopts_staged_update(&State::Downloading, false));
+        assert!(adopts_staged_update(&State::Current, false));
+        // Quitting installs what was staged (`install_on_quit`), so a release
+        // that lands later must not replace it: the folder it unpacked into
+        // holds the bundle the installed update replaced.
+        assert!(!adopts_staged_update(&State::Ready, true));
+        assert!(!adopts_staged_update(&State::Downloading, true));
+        assert!(!adopts_staged_update(&State::Applied, false));
+        assert!(!adopts_staged_update(&State::Applied, true));
     }
 
     #[test]

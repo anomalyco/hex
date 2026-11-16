@@ -26,6 +26,7 @@ const IMPORT_PENDING_FILE: &str = "import.pending";
 
 mod capture;
 mod chapters;
+mod chunk_level;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod detection;
 #[cfg(target_os = "linux")]

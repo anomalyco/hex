@@ -171,7 +171,12 @@ pub(super) fn deliver(out: &Out, png: &[u8], words: &str) -> anyhow::Result<()> 
         Out::Copy => save::copy(png, None),
         Out::Save => {
             let folder = crate::app_settings::screenshot_settings().folder();
-            save::write(&folder, png).map(|_| ())
+            let written = save::write(&folder, png);
+            match &written {
+                Ok(_) => crate::screenshots::clear_save_error(),
+                Err(error) => crate::screenshots::record_save_error(&folder, error),
+            }
+            written.map(|_| ())
         }
         Out::Send(dest) => {
             let folder = std::env::temp_dir().join("hex-screenshots");
@@ -209,7 +214,13 @@ impl ClipExport {
             Out::Copy => anyhow::bail!("a recording isn't copied"),
             Out::Save => {
                 let folder = crate::app_settings::screenshot_settings().folder();
-                super::clip::write_span(&self.movie, self.trim, &save::recording_path(&folder))
+                let written =
+                    super::clip::write_span(&self.movie, self.trim, &save::recording_path(&folder));
+                match &written {
+                    Ok(()) => crate::screenshots::clear_save_error(),
+                    Err(error) => crate::screenshots::record_save_error(&folder, error),
+                }
+                written
             }
             Out::Send(dest) => {
                 // The whole recording is already saved; only a cut is new.

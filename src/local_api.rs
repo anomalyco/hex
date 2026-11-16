@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use serde::Serialize;
 
+use crate::app_settings::AppSettings;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 use cors::{Cors, CorsOrigin};
 
@@ -381,6 +382,10 @@ pub fn run_service(
     };
     let events = EventLog::create(&service_event_path)?;
     let local_api = if embedded {
+        // This service runs no launch that publishes settings, so read them
+        // here: transcription biases on the saved vocabulary rather than an
+        // empty one.
+        AppSettings::apply_for_embedded_service();
         let api = LocalApi::start_embedded(events)?;
         thread::Builder::new()
             .name("embedded-host-lease".into())

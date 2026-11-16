@@ -13,4 +13,5 @@
 - [Linux guide](https://github.com/anomalyco/hex/blob/dev/docs/linux.md)
 - [Transforms](https://anoma.ly/hex/docs/transforms): the JavaScript API for changing dictated text before Hex pastes it, including `fetch` and `node:child_process`
 - [Managing Hex](https://anoma.ly/hex/docs/admin): macOS configuration-profile keys that turn off Meetings, Annotate, OpenCode processing, transforms, Labs, and updates, or hold transforms to this computer
+- [Hex Labs](__ORIGIN__/labs): features Hex is trying out, each off until it's turned on in Settings › Labs or with `hex labs on <id>`, one page per lab at __ORIGIN__/labs/<id>
 - [TypeScript SDK](https://github.com/anomalyco/hex/blob/dev/sdk/typescript/README.md): local transcription for other apps

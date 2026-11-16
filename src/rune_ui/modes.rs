@@ -12,8 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use rune::{
-    Align, Drag, El, Phase, ScrollSpec, Side, TextEdit, Tx, Waker, col, edit_access, el, row,
-    spacer, text,
+    Align, Drag, El, Phase, ScrollSpec, Side, TextEdit, Tx, Waker, col, edit_access, el, row, text,
 };
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Switch, TextArea, TextInput};
 
@@ -538,9 +537,7 @@ fn add_application(ui: &mut Ui, name: String) {
                 apps.sort_by_key(|name| name.to_lowercase());
             });
         }
-        ui.modes.application_search = TextEdit::default();
-        ui.modes.application_highlight = Highlight::default();
-        ui.modes.application_search.focused = true;
+        close_picker(ui);
         return;
     }
     let selection = ui.modes.selected;
@@ -567,11 +564,17 @@ fn add_application(ui: &mut Ui, name: String) {
             mode.applications.sort_by_key(|name| name.to_lowercase());
         })
     {
-        ui.modes.application_search = TextEdit::default();
-        ui.modes.application_highlight = Highlight::default();
-        ui.modes.application_search.focused = true;
         ui.modes.application_error = None;
+        close_picker(ui);
     }
+}
+
+/// Closes the application picker, clearing its search.
+pub(super) fn close_picker(ui: &mut Ui) {
+    let modes = &mut ui.modes;
+    modes.application_picker_open = false;
+    modes.application_search = TextEdit::default();
+    modes.application_highlight = Highlight::default();
 }
 
 /// Up and Down move the application search's highlight.
@@ -926,11 +929,18 @@ fn basics(
     if let Some(speech) = speech_row(ui, p, selection, current, layer) {
         rows.push(speech);
     }
-    if let Some(error) = &ui.modes.application_error {
+    let picking = ui.modes.application_picker_open && ui.modes.picker_target == PickerTarget::Mode;
+    if let Some(error) = ui.modes.application_error.as_ref().filter(|_| !picking) {
         rows.push(note("application-error", error, p.danger()));
     }
-    if ui.modes.application_picker_open && ui.modes.picker_target == PickerTarget::Mode {
-        rows.push(application_picker(ui, p, &current.applications));
+    if picking {
+        application_picker(
+            ui,
+            p,
+            &current.applications,
+            "open-application-picker",
+            layer,
+        );
     }
     card(p, "basics-card", rows)
 }
@@ -1005,9 +1015,17 @@ pub(super) fn application_chip(
         .child(remove_button(p, ControlSize::Small, remove))
 }
 
-/// The catalog search, results, Choose a file…, and Done, adding to the
-/// picker's target; `selected` is what the target already has.
-pub(super) fn application_picker(ui: &Ui, p: Paint, selected: &[String]) -> El {
+/// The catalog search, results, and Choose a file…, floating under the
+/// element keyed `anchor` (the + that opened it), adding to the picker's
+/// target; `selected` is what the target already has. Picking an app, a
+/// click outside, or Escape closes it.
+pub(super) fn application_picker(
+    ui: &Ui,
+    p: Paint,
+    selected: &[String],
+    anchor: &'static str,
+    layer: &mut Vec<El>,
+) {
     let c = &p.k.c;
     let search = TextInput::new(&ui.modes.application_search)
         .placeholder(tr("Search applications"))
@@ -1100,16 +1118,28 @@ pub(super) fn application_picker(ui: &Ui, p: Paint, selected: &[String]) -> El {
                 ),
         );
     }
-    col()
+    let mut picker = col()
         .key("application-picker")
-        .ml(METRICS.row_px)
-        .mr(METRICS.row_px)
-        .mb(8.0)
+        .role("dialog")
+        .label(tr("Add application"))
+        .focus_return(anchor)
+        .modal(true, close_picker)
+        .w(PICKER_WIDTH)
+        .shrink()
+        .min_h(0.0)
         .padding(8.0)
         .gap(6.0)
         .radius(p.k.radius.md)
         .fill(c.layer_01)
         .child(search)
+        .children(ui.modes.application_error.as_ref().map(|error| {
+            text(error.clone())
+                .key("application-error")
+                .font(DESCRIPTION)
+                .color(p.danger())
+                .px(8.0)
+                .wrap()
+        }))
         .children(status.map(|status| {
             text(status)
                 .key("status")
@@ -1118,25 +1148,35 @@ pub(super) fn application_picker(ui: &Ui, p: Paint, selected: &[String]) -> El {
                 .px(8.0)
                 .py(6.0)
         }))
-        .child(results)
         .child(
-            row()
-                .key("picker-actions")
-                .justify_between()
-                .child(choose_file_button(p))
-                .child(spacer())
-                .child(button(
-                    p,
-                    "close-application-picker",
-                    tr("Done"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| {
-                        ui.modes.application_picker_open = false;
-                        ui.modes.application_search = TextEdit::default();
-                    },
-                )),
+            col()
+                .key("viewport")
+                .shrink()
+                .min_h(0.0)
+                .max_h(PICKER_RESULTS_HEIGHT)
+                .scroll(ScrollSpec {
+                    stick_bottom: false,
+                })
+                .child(results),
         )
+        .child(row().key("picker-actions").child(choose_file_button(p)))
+        .anchored_fit(anchor, Side::Bottom, Align::Start, 4.0);
+    for shadow in &p.k.elevation.floating {
+        picker = picker.box_shadow(*shadow);
+    }
+    layer.push(
+        el().key("application-picker-scrim")
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+            .on_press(close_picker),
+    );
+    layer.push(picker);
 }
+
+const PICKER_WIDTH: f32 = 340.0;
+const PICKER_RESULTS_HEIGHT: f32 = 320.0;
 
 /// "Choose a file…" opens the native file dialog.
 fn choose_file_button(p: Paint) -> El {
@@ -1366,6 +1406,12 @@ pub(super) fn fixture(ui: &mut Ui) {
             description: None,
         },
     ];
+    fixture_catalog(ui);
+    ui.modes.select_in(&ui.settings, Selection::Custom(0));
+}
+
+/// The fixture's installed applications and their stand-in icons.
+pub(super) fn fixture_catalog(ui: &mut Ui) {
     let app = |name: &str, path: &str| InstalledApplication {
         name: name.into(),
         bundle_id: None,
@@ -1402,7 +1448,6 @@ pub(super) fn fixture(ui: &mut Ui) {
         )
     });
     ui.modes.icons.get_mut().extend(icons);
-    ui.modes.select_in(&ui.settings, Selection::Custom(0));
 }
 
 const FIXTURE_ICON: u32 = 48;

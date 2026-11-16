@@ -8,7 +8,7 @@
 use rune::{El, Icon, row, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folding, icon_row,
+    ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folder_label, folding, icon_row,
     icon_toggle_row, note, section, select, setting_row, toggle_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
@@ -257,6 +257,21 @@ fn on_this_mac_detail(availability: NotesAvailability) -> &'static str {
     }
 }
 
+/// Why Labs › Clean up with Apple Intelligence can't run on this Mac now: the
+/// same words Summaries uses, so every Apple Intelligence row gives one
+/// reason. `None` while it can run.
+pub(super) fn clean_up_note(availability: NotesAvailability) -> Option<String> {
+    let reason = match availability {
+        NotesAvailability::Available => return None,
+        NotesAvailability::DeviceNotEligible => tr("This Mac does not support Apple Intelligence"),
+        NotesAvailability::NotEnabled => tr("Turn on Apple Intelligence in System Settings"),
+        NotesAvailability::ModelNotReady => tr("The Apple Intelligence model is still downloading"),
+        NotesAvailability::UnsupportedSystem => tr("Requires macOS 26 or later"),
+        NotesAvailability::Unknown => tr("Apple Intelligence is unavailable"),
+    };
+    Some(reason.to_owned())
+}
+
 /// Meetings › Settings › After a meeting › Summaries: who writes a meeting's
 /// title and summary, with the OpenCode model nested under it while OpenCode
 /// writes them. A Mac picks Off, On this Mac, or OpenCode; elsewhere a
@@ -400,18 +415,6 @@ struct SummariesOption {
     disabled: bool,
 }
 
-fn folder_label(ui: &Ui) -> String {
-    let folder = ui.settings.meetings.resolved_output_folder();
-    crate::app_paths::home_dir()
-        .and_then(|home| {
-            folder
-                .strip_prefix(home)
-                .ok()
-                .map(|relative| format!("~/{}", relative.display()))
-        })
-        .unwrap_or_else(|| folder.display().to_string())
-}
-
 /// Whether an organization turned OpenCode processing off.
 pub(super) fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
@@ -535,7 +538,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                     .child(button(
                         p,
                         "choose-meeting-folder",
-                        &folder_label(ui),
+                        &folder_label(&ui.settings.meetings.resolved_output_folder()),
                         ButtonKind::Secondary,
                         |ui: &mut Ui, _| {
                             ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder))
@@ -706,7 +709,7 @@ pub(super) fn summary_model_shown(ui: &Ui) -> bool {
 /// use, such as one typed with `hex settings`; `None` when it can.
 pub(super) fn summary_model_problem(saved: &str) -> Option<&'static str> {
     (!saved.trim().is_empty() && crate::meeting::generator::parse_model(saved).is_none()).then(|| {
-        tr("Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex tries its list of fast models")
+        tr("Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex uses OpenCode's default model")
     })
 }
 

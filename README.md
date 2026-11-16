@@ -10,6 +10,55 @@ it pastes.
 - the first run downloads a speech model; after that nothing leaves your machine
 - experimental features live in Labs, at the bottom of the sidebar
 
+## What it does
+
+- hold the shortcut to dictate, or set Shortcut mode to Tap to start and stop
+  with a press
+- the text lands at the cursor in whatever app you're in
+- Option-Shift-V pastes the last dictation again (Ctrl-Alt-V on Windows and Linux)
+- History keeps your dictations, searchable, for 7 days by default
+- Output runs every dictation through steps you choose (word replacements,
+  built-in cleanups, your own scripts, an optional OpenCode rewrite), with
+  different steps per app or website
+- Vocabulary is one list of names Hex should know; Whisper and Qwen3-ASR read
+  it while transcribing, Parakeet models read it with Labs › Vocabulary biasing
+  on, and the OpenCode rewrite uses it
+- Annotate records the screen while you draw and talk, on macOS, Linux and
+  Windows (GNOME Wayland needs Labs › Annotate on GNOME)
+- an authenticated local API and the [TypeScript SDK](sdk/typescript/README.md)
+  transcribe with the same model, for your own tools
+- Meetings is a macOS lab that records a call and writes the transcript
+
+Output and History:
+
+<img src="docs/images/output.png" width="600" alt="Hex output: the steps every dictation runs, a Try box, and different steps per app">
+
+<img src="docs/images/history.png" width="600" alt="Hex history: past dictations, a search field, and one entry's raw transcript, app, processing and model">
+
+## Speech models
+
+Hex downloads one model the first time it runs and transcribes with it on your
+machine from then on. On an English system that's Parakeet Unified English: it
+writes while you talk, so the text is ready when you let go. Other languages
+start with the model recommended for them. That model also serves meetings and
+`hex transcribe`.
+
+Settings' picker offers more, among others:
+
+- Parakeet v3: 25 European languages, and it hears which one you speak
+- Cohere Transcribe: the fewest wrong words, in 14 languages; a big download
+- Whisper large-v3-turbo: almost any language, and it reads your vocabulary
+- Qwen3-ASR 0.6B: Chinese and 29 more, and it reads your vocabulary
+- SenseVoice Small: Chinese, Japanese, Korean and English; a small download
+- Nemotron 3.5 ASR: writes while you talk, in 27 languages
+- Granite Speech 5.0: IBM's model, seven languages, with punctuation
+- one-language models: ivrit.ai Whisper for Hebrew, GigaAM v3 for Russian,
+  NB-Whisper for Norwegian, QwenCleo-ASR for Egyptian Arabic
+- more English models: Parakeet v2 and Underdog Bark 3.0
+
+Add a GGUF model of your own with "Add model file…" in the picker; see
+[your own speech models](docs/features/own-models.md).
+
 ## Downloads
 
 Stable is the current release. Dev is the newest build of `dev` and updates

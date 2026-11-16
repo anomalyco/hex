@@ -25,7 +25,7 @@ use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, keys, ready, title_font};
 use super::live::{Live, ModelStep};
-use super::login::{self, Login, login_ask};
+use super::login::{self, Login, LoginCopy, login_ask};
 use super::mic_line::mic_capsule;
 use super::pill::{CAPSULE, FLY, PILL, after_flight, language_capsule, pill, slot};
 use super::sparks::impacts;
@@ -312,7 +312,10 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
                     s.now,
                     s.reduced.get(),
                     false,
-                    s.toggle,
+                    LoginCopy {
+                        home: s.home,
+                        toggle: s.toggle,
+                    },
                     login::toggle,
                 )
                 .map(|ask| ask.transition(arrives())),
@@ -346,7 +349,10 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
         s.now,
         s.reduced.get(),
         true,
-        s.toggle,
+        LoginCopy {
+            home: s.home,
+            toggle: s.toggle,
+        },
         |s: &mut Onboard| {
             let next = if s.login.login == Login::On {
                 Login::Off

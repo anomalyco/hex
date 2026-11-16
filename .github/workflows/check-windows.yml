@@ -35,6 +35,8 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          env-vars: INCLUDE LIB ImageVersion
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: cargo-nextest
@@ -101,7 +103,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+      # windows-11-arm mixes image builds that install different MSVC toolsets
+      # (14.51, 14.52), and ImageVersion names the build. Keying the cache on it
+      # keeps a restored target/ from linking transcribe-cpp's static objects,
+      # built against a newer STL, against the older image's libcpmt: the static
+      # runtime needs link toolset >= object toolset. INCLUDE/LIB name the
+      # toolset too, where a runner sets them.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          env-vars: INCLUDE LIB ImageVersion
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: cargo-nextest

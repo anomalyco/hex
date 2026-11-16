@@ -25,6 +25,8 @@ mod history;
 #[cfg_attr(target_os = "windows", path = "rune_ui/windows_host.rs")]
 #[cfg_attr(target_os = "macos", path = "rune_ui/macos_host.rs")]
 mod host;
+#[cfg(target_os = "macos")]
+mod hotkey_keys;
 mod hud_lab;
 #[cfg(target_os = "macos")]
 mod hud_stories;
@@ -109,7 +111,7 @@ pub(crate) fn run_app(
     requests: std::sync::mpsc::Receiver<crate::linux::service::Control>,
     first: Option<crate::linux::service::Activation>,
     shutdown: &'static std::sync::atomic::AtomicBool,
-) {
+) -> Result<(), String> {
     use crate::linux::service::{Activation, Control};
     rune::set_app_id(crate::linux::portal::APP_ID);
     let mut app = self::app(Some(host.clone()))
@@ -170,12 +172,18 @@ pub(crate) fn run_app(
             }
         })
         .expect("could not start the window request thread");
-    app.run();
-    // A recording stops, keeping its audio for the next launch.
-    shutdown.store(true, std::sync::atomic::Ordering::Release);
-    if let Some(meetings) = meetings {
-        meetings.join();
+    // Rune r399 prints a startup error and exits the process from `run` on
+    // native targets. Hex's window is optional (no display, no GPU), so take
+    // the error and let `run_window` report it and keep Hex running (#979).
+    let result = app.try_run();
+    if result.is_ok() {
+        // A recording stops, keeping its audio for the next launch.
+        shutdown.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(meetings) = meetings {
+            meetings.join();
+        }
     }
+    result
 }
 
 /// The window as a Rune app whose lifetime the caller chooses, connected to
@@ -473,7 +481,7 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
 /// The key `name` names on the active keyboard layout ("v", "space", "f5").
 #[cfg(target_os = "macos")]
 pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
-    host::hotkey_key_named(name)
+    hotkey_keys::hotkey_key_named(name)
 }
 
 /// The key `name` names: Linux and Windows bind keys by name, and the
@@ -661,6 +669,9 @@ pub(crate) struct Ui {
     labs_open: bool,
     /// The Labs store's search, tab, and chip.
     lab_store: labs::Store,
+    /// Labs › Screenshots' saves-folder chooser, on the card.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    screenshot_folder: labs::screenshots::FolderChoice,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
@@ -791,6 +802,8 @@ impl Ui {
             advanced: Vec::new(),
             labs_open: false,
             lab_store: labs::Store::default(),
+            #[cfg(all(target_os = "macos", hex_capture))]
+            screenshot_folder: labs::screenshots::FolderChoice::default(),
             build_preview: None,
             capture: Capture::Idle,
             vocabulary,
@@ -1353,6 +1366,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
     changed |= meetings::poll_import(ui);
+    // Labs › Screenshots' folder chooser, on macOS.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    {
+        changed |= labs::screenshots::poll(ui);
+    }
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);

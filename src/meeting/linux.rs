@@ -5,7 +5,9 @@
 //! (`stream.capture.sink`), and the source mixes them, so a call that plays on
 //! a headset or dock instead of the default output is still heard (#1801).
 //! Each runs as a child process so Hex links no PipeWire library and a desktop
-//! without PipeWire fails only this source.
+//! without PipeWire fails only this source. A capture that ends while its sink
+//! is still listed starts again, so a Bluetooth card switching from A2DP to
+//! HFP does not silence that output for the rest of the meeting.
 
 use std::collections::BTreeSet;
 use std::io::Read;
@@ -19,7 +21,10 @@ use std::time::{Duration, Instant, SystemTime};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use super::SAMPLE_RATE;
-use super::capture::{LiveSource, MIX_HOLD, POLL_INTERVAL, PacketSink, STALL_TIMEOUT, mix};
+use super::capture::{
+    LiveSource, MIX_HOLD, POLL_INTERVAL, PacketSink, RETRY_INITIAL, RETRY_MAX, STALL_TIMEOUT, mix,
+    retry_delay,
+};
 
 const PW_RECORD: &str = "pw-record";
 /// 100 ms of 16 kHz mono `f32`.
@@ -28,7 +33,9 @@ const READ_BYTES: usize = SAMPLE_RATE as usize / 10 * 4;
 /// total however many outputs it hears.
 const QUEUE_PER_CAPTURE: usize = 128;
 const QUEUE_CAPACITY: usize = 1_024;
-/// How often the source checks that the outputs to capture have not changed.
+/// How often the source re-reads the outputs it captures: a changed list
+/// reopens it, and a capture that ended starts again while its sink is still
+/// listed.
 const ROUTE_CHECK: Duration = Duration::from_secs(2);
 /// The PipeWire node every system audio monitor presents.
 const NODE_NAME: &str = "hex-meeting-system-audio";
@@ -81,6 +88,10 @@ struct MonitorSource {
     /// The sinks asked for, empty when one untargeted `pw-record` follows the
     /// default output. A changed list reopens the source.
     sinks: Vec<String>,
+    /// The program every capture starts, kept to start one again.
+    executable: PathBuf,
+    /// The capture events' sender, kept so a restarted capture can send.
+    sender: SyncSender<MonitorEvent>,
     buffers: Receiver<MonitorEvent>,
     last_audio: Instant,
     route_checked: Instant,
@@ -95,7 +106,55 @@ struct Output {
     sink: Option<String>,
     /// `None` once this capture ended; the others keep the track going.
     child: Option<Child>,
+    /// When a capture that ended starts again.
+    restart: Restart,
     pending: Vec<f32>,
+}
+
+/// When an output starts a capture that ended again: due after a wait that
+/// starts at [`RETRY_INITIAL`] and doubles to [`RETRY_MAX`] while captures
+/// keep ending right away.
+struct Restart {
+    /// When the next capture is due, `None` while one runs.
+    due: Option<Instant>,
+    /// The wait before that try.
+    wait: Duration,
+    /// When the capture that ended began, so one that ran a while starts over.
+    started: Option<Instant>,
+}
+
+impl Restart {
+    /// The state of a capture that started at `now`.
+    fn running(now: Instant) -> Self {
+        Self {
+            due: None,
+            wait: RETRY_INITIAL,
+            started: Some(now),
+        }
+    }
+
+    /// A capture started at `now`, replacing the one that ended.
+    fn started(&mut self, now: Instant) {
+        self.due = None;
+        self.started = Some(now);
+    }
+
+    /// The capture ended at `now`: due again after the wait it reached, which
+    /// starts over for one that ran at least a second and doubles for one that
+    /// keeps ending right away.
+    fn exited(&mut self, now: Instant) {
+        let ran = self.started.take().map_or(Duration::ZERO, |started| {
+            now.saturating_duration_since(started)
+        });
+        self.wait = retry_delay(self.wait, ran);
+        self.due = Some(now + self.wait);
+        self.wait = self.wait.saturating_mul(2).min(RETRY_MAX);
+    }
+
+    /// Whether the next capture is due at `now`.
+    fn is_due(&self, now: Instant) -> bool {
+        self.due.is_some_and(|due| now >= due)
+    }
 }
 
 /// What one capture sends: its 16 kHz audio as `index` into `outputs`, or that
@@ -151,6 +210,25 @@ fn route_needs_reopen(open: &[String], listed: Option<&[String]>) -> bool {
     }
 }
 
+/// The outputs to start again: a capture that ended and is due, whose sink is
+/// still listed. A listing Hex could not read (`None`) keeps every such
+/// output; the fallback output never restarts here, since the source reopens
+/// for it instead.
+fn restart_due(outputs: &[Output], listed: Option<&[String]>, now: Instant) -> Vec<usize> {
+    outputs
+        .iter()
+        .enumerate()
+        .filter(|(_, output)| {
+            output.child.is_none()
+                && output.restart.is_due(now)
+                && output.sink.as_deref().is_some_and(|sink| {
+                    listed.is_none_or(|listed| listed.iter().any(|name| name == sink))
+                })
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
 impl MonitorSource {
     fn start() -> Result<Self> {
         let executable =
@@ -177,6 +255,7 @@ impl MonitorSource {
                 Ok(child) => outputs.push(Output {
                     sink: target.map(str::to_owned),
                     child: Some(child),
+                    restart: Restart::running(Instant::now()),
                     pending: Vec::new(),
                 }),
                 Err(error) => {
@@ -189,9 +268,6 @@ impl MonitorSource {
                 }
             }
         }
-        // Every reader thread holds its own sender, so a source with no
-        // capture left reports it as disconnected.
-        drop(sender);
         if outputs.is_empty() {
             return Err(
                 first_error.unwrap_or_else(|| eyre!("no audio output is available to capture"))
@@ -205,6 +281,8 @@ impl MonitorSource {
         Ok(Self {
             outputs,
             sinks,
+            executable,
+            sender,
             buffers,
             last_audio: Instant::now(),
             route_checked: Instant::now(),
@@ -225,9 +303,10 @@ impl MonitorSource {
         }
     }
 
-    /// Drops one capture that ended, so the others keep recording and its
-    /// unpicked audio never replays later.
+    /// Drops one capture that ended so the others keep recording and its
+    /// unpicked audio never replays later, and schedules it to start again.
     fn close(&mut self, index: usize) {
+        let now = Instant::now();
         let reason = {
             let Some(output) = self.outputs.get_mut(index) else {
                 return;
@@ -239,6 +318,7 @@ impl MonitorSource {
             let _ = child.kill();
             let _ = child.wait();
             output.pending.clear();
+            output.restart.exited(now);
             let sink = output.sink.as_deref().unwrap_or("the default output");
             match status {
                 Some(status) => format!("{sink}: pw-record exited ({status})"),
@@ -249,10 +329,39 @@ impl MonitorSource {
         self.last_exit = Some(reason);
     }
 
-    /// Whether the outputs to capture changed since they were opened. A sound
-    /// server that cannot be read, or lists nothing, keeps what is open.
-    fn route_changed(&self) -> bool {
-        route_needs_reopen(&self.sinks, capturable_sinks().as_deref())
+    /// Starts again every capture whose sink is still listed, at its own index
+    /// so its audio keeps its place in the mix. A failed start waits for the
+    /// next due time, still bounded by [`RETRY_MAX`].
+    fn restart_exited(&mut self, listed: Option<&[String]>) {
+        let now = Instant::now();
+        for index in restart_due(&self.outputs, listed, now) {
+            let target = self.outputs[index].sink.clone();
+            let spawned = spawn_monitor(
+                &self.executable,
+                target.as_deref(),
+                index,
+                self.sender.clone(),
+            );
+            let output = &mut self.outputs[index];
+            match spawned {
+                Ok(child) => {
+                    output.child = Some(child);
+                    output.restart.started(now);
+                    tracing::info!(
+                        sink = target.as_deref().unwrap_or("the default output"),
+                        "system audio monitor restarted"
+                    );
+                }
+                Err(error) => {
+                    output.restart.exited(now);
+                    tracing::warn!(
+                        sink = target.as_deref().unwrap_or("the default output"),
+                        error = %format!("{error:#}"),
+                        "could not restart a system audio monitor; trying again"
+                    );
+                }
+            }
+        }
     }
 
     /// Why no capture is left, for the source's error.
@@ -366,9 +475,11 @@ impl LiveSource for MonitorSource {
     fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
         if self.route_checked.elapsed() >= ROUTE_CHECK {
             self.route_checked = Instant::now();
-            if self.route_changed() {
+            let listed = capturable_sinks();
+            if route_needs_reopen(&self.sinks, listed.as_deref()) {
                 return Err("the audio outputs changed".into());
             }
+            self.restart_exited(listed.as_deref());
         }
         match self.buffers.recv_timeout(POLL_INTERVAL) {
             Ok(first) => {
@@ -584,6 +695,79 @@ mod tests {
         assert!(!route_needs_reopen(&open, None));
         assert!(!route_needs_reopen(&open, Some(&["speakers".to_owned()])));
         assert!(route_needs_reopen(&open, Some(&[])));
+    }
+
+    #[test]
+    fn an_exited_monitor_is_restarted_while_its_sink_keeps_its_name() {
+        let now = Instant::now();
+        let due = now + RETRY_INITIAL;
+        let sinks = ["speakers".to_owned(), "headset".to_owned()];
+        // A Bluetooth card changing profile ends that sink's pw-record while
+        // the sink comes back under the same name, so the set is unchanged and
+        // the source stays open; only that capture starts again.
+        assert!(!route_needs_reopen(&sinks, Some(&sinks)));
+        let exited = |at| {
+            let mut restart = Restart::running(now);
+            restart.exited(at);
+            restart
+        };
+        let output = |sink: Option<&str>, restart| Output {
+            sink: sink.map(str::to_owned),
+            child: None,
+            restart,
+            pending: Vec::new(),
+        };
+        let outputs = [
+            // Ended, due, and still listed: the one that starts again.
+            output(Some("speakers"), exited(now)),
+            // Ended and due, but gone from the listed sinks.
+            output(Some("headset"), exited(now)),
+            // Ended, but not due yet.
+            output(Some("dock"), exited(due)),
+            // The fallback output never restarts here.
+            output(None, exited(now)),
+            // Still running.
+            output(Some("speakers"), Restart::running(now)),
+        ];
+        let listed = ["speakers".to_owned(), "dock".to_owned()];
+        assert_eq!(restart_due(&outputs, Some(&listed), due), [0]);
+        // A listing Hex could not read keeps every output that is due by now;
+        // the fallback still never restarts.
+        let later = due + RETRY_INITIAL;
+        assert_eq!(restart_due(&outputs, None, later), [0, 1, 2]);
+    }
+
+    #[test]
+    fn a_monitor_that_ends_right_after_each_restart_keeps_backing_off() {
+        let mut now = Instant::now();
+        let mut restart = Restart::running(now);
+        let mut waits = Vec::new();
+        for _ in 0..6 {
+            restart.exited(now);
+            let due = restart.due.expect("an ended capture is due again");
+            assert!(!restart.is_due(now), "not due the moment it ended");
+            assert!(restart.is_due(due));
+            waits.push(due.saturating_duration_since(now));
+            now = due;
+            restart.started(now);
+        }
+        assert_eq!(
+            waits,
+            [
+                RETRY_INITIAL,
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                RETRY_MAX,
+                RETRY_MAX,
+            ]
+        );
+        // A capture that ran for at least a second starts the wait over.
+        restart.exited(now + Duration::from_secs(1));
+        assert_eq!(
+            restart.due.expect("due again"),
+            now + Duration::from_secs(1) + RETRY_INITIAL
+        );
     }
 
     #[test]

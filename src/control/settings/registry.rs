@@ -383,6 +383,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: remove filler words such as um and uh from dictations, without an AI model",
     ),
     key(
+        "labs.clean_up_with_apple_intelligence",
+        Kind::Bool,
+        "Labs: fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence",
+    ),
+    key(
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut",
@@ -453,9 +458,20 @@ pub(super) const KEYS: &[Key] = &[
          with no modifier (Linux, macOS); off puts such a shortcut back to its default",
     ),
     key(
+        "labs.microphone_key",
+        Kind::Bool,
+        "Labs: a shortcut may be the microphone (dictation) key in a laptop keyboard's top row \
+         with no modifier (macOS); off puts such a shortcut back to its default",
+    ),
+    key(
         "labs.keep_recordings",
         Kind::Bool,
         "Labs: dictations saved to History keep their audio, so History can transcribe them again with another model; off stops saving, clearing History deletes it",
+    ),
+    key(
+        "labs.copy_dictation_audio",
+        Kind::Bool,
+        "Labs: History entries with a kept recording offer Copy audio, and the menu bar or tray offers Copy last dictation audio; copies the kept WAV as a file and stores no audio itself, so it needs Labs: keep recordings",
     ),
     key(
         "labs.history_stats",
@@ -630,6 +646,13 @@ pub(super) const KEYS: &[Key] = &[
          left alone, and outputs Hex can't classify count as speakers",
     ),
     key(
+        "labs.calendar_menu",
+        Kind::Bool,
+        "Labs: the menu bar lists the next calendar meetings, each a local start and end time and \
+         title; choosing one that has a call link opens it, and that click doesn't start a \
+         recording (macOS, with Meetings on and a calendar connected)",
+    ),
+    key(
         "labs.pause_menu",
         Kind::Bool,
         "Labs: the menu bar offers Pause Hex, which makes every capture shortcut inert until \
@@ -671,7 +694,7 @@ pub(super) const KEYS: &[Key] = &[
     optional(
         "meetings.opencode_model",
         Kind::Text,
-        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none lets Hex pick a fast model",
+        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none uses OpenCode's default model",
     ),
     key(
         "meetings.show_recording_indicator",

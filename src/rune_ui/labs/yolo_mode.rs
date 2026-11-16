@@ -1,6 +1,6 @@
 //! Labs › YOLO mode's card while on: how long a
 //! dictation must be for Return to follow its paste, and the apps it sends
-//! in, chosen with the Modes pane's application picker.
+//! in, chosen with the Modes pane's floating application picker.
 
 use rune::{El, col, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
@@ -12,8 +12,15 @@ use crate::app_settings::YOLO_MODE_SECONDS;
 use crate::desktop::i18n::{tr, tr_fill};
 
 pub(super) fn body(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let picking =
-        ui.modes.application_picker_open && ui.modes.picker_target == PickerTarget::YoloMode;
+    if ui.modes.application_picker_open && ui.modes.picker_target == PickerTarget::YoloMode {
+        modes::application_picker(
+            ui,
+            p,
+            &ui.settings.labs.yolo_mode_apps,
+            PICKER_ANCHOR,
+            layer,
+        );
+    }
     col()
         .key("yolo-mode")
         .gap(6.0)
@@ -27,10 +34,9 @@ pub(super) fn body(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 .child(longer_than(ui, p, layer)),
         )
         .child(only_in(ui, p))
-        .children(
-            picking.then(|| modes::application_picker(ui, p, &ui.settings.labs.yolo_mode_apps)),
-        )
 }
+
+const PICKER_ANCHOR: &str = "open-yolo-mode-picker";
 
 fn label(p: Paint, words: &str) -> El {
     text(words.to_owned())
@@ -102,6 +108,6 @@ fn only_in(ui: &Ui, p: Paint) -> El {
             .label(tr("Add application"))
             .on_press(|ui: &mut Ui| modes::toggle_picker(ui, PickerTarget::YoloMode))
             .build(p.k)
-            .key("open-yolo-mode-picker"),
+            .key(PICKER_ANCHOR),
     )
 }

@@ -160,6 +160,47 @@ impl Home {
             Self::Launcher => tr("Open it again from your app launcher"),
         }
     }
+
+    /// The launch-at-login ask's question: the Mac's own words on a Mac, and
+    /// the computer's elsewhere.
+    pub(super) fn ask_question(self) -> &'static str {
+        match self {
+            Self::MenuBar => tr("Open Hex when your Mac starts?"),
+            Self::Tray | Self::Launcher => tr("Open Hex when your computer starts?"),
+        }
+    }
+
+    /// The ask once the login item is on.
+    pub(super) fn ask_started(self) -> &'static str {
+        match self {
+            Self::MenuBar => tr("Hex opens when your Mac starts."),
+            Self::Tray | Self::Launcher => tr("Hex opens when your computer starts."),
+        }
+    }
+
+    /// The ask's line under the button: tiny, and asleep where Hex lives.
+    pub(super) fn ask_nap(self, toggle: bool) -> &'static str {
+        match (self, toggle) {
+            (Self::MenuBar, true) => {
+                tr("It's tiny. It naps in your menu bar until you tap the key.")
+            }
+            (Self::MenuBar, false) => {
+                tr("It's tiny. It naps in your menu bar until you hold the key.")
+            }
+            (Self::Tray, true) => {
+                tr("It's tiny. It naps in your system tray until you tap the key.")
+            }
+            (Self::Tray, false) => {
+                tr("It's tiny. It naps in your system tray until you hold the key.")
+            }
+            (Self::Launcher, true) => {
+                tr("It's tiny. It naps in the background until you tap the key.")
+            }
+            (Self::Launcher, false) => {
+                tr("It's tiny. It naps in the background until you hold the key.")
+            }
+        }
+    }
 }
 
 /// Final `"Hex is ready"` landing: the Hex logo builds outside in (its

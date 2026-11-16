@@ -799,6 +799,11 @@ pub fn listen(
             if hotkey_capture_suspended {
                 continue;
             }
+            // Labs › YOLO mode: Escape after a release skips that
+            // dictation's Return.
+            if input_event.is_escape_down() {
+                crate::dictation::yolo_mode::note_escape();
+            }
             #[cfg(hex_capture)]
             if let Some(host) = capture_host.as_mut() {
                 // Escape while drawing stops drawing, never the recording.
@@ -945,7 +950,12 @@ pub fn listen(
         let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
         #[cfg(not(hex_capture))]
         let capture_escape = false;
-        input_monitor.set_takes_escape(claims_escape(programmatic.is_some(), capture_escape));
+        // A held Hold capture takes Escape once it is past the hold threshold.
+        input_monitor.set_takes_escape(claims_escape(
+            programmatic.is_some(),
+            capture_escape,
+            hotkeys.takes_escape(CaptureInstant::now()),
+        ));
         // Toggle's cancel key is Hex's only while one of its shortcuts'
         // recordings runs; the listener ignores keys during a programmatic one.
         // A Caps Lock capture keeps Escape in Hold mode too, and an extra
@@ -2003,9 +2013,9 @@ mod tests {
         assert!(!hotkeys.any_recording());
     }
 
-    /// Escape cancels a recording extra in its own mode, and the dictation
-    /// shortcut keeps its Hold-mode behavior (no cancel at all). A locked
-    /// extra is cancelled too while that shortcut ignores Escape as it holds.
+    /// Escape cancels a recording extra in its own mode, locked included,
+    /// and the Hold-mode dictation shortcut only while it is held past the
+    /// hold threshold.
     #[test]
     fn escape_cancels_a_locked_extra_that_records() {
         let base = CaptureInstant::from_nanos(140_000_000_000);
@@ -2052,13 +2062,24 @@ mod tests {
         assert!(escape(&mut hotkeys, false, 0, 500).is_empty());
         assert!(!hotkeys.extra[0].as_ref().unwrap().is_recording());
 
-        // Hold dictation still ignores Escape while its key is held.
+        // Hold dictation ignores Escape until the hold threshold makes the
+        // press Hex's (it may be Option-Escape); then Escape cancels it, and
+        // the tap keeps it from the app.
         assert_eq!(
             press(&mut hotkeys, OPTION_KEY_MASK, 600),
             [(Shortcut::Dictation, START)]
         );
+        assert!(!hotkeys.takes_escape(at(680)));
         assert!(escape(&mut hotkeys, true, OPTION_KEY_MASK, 680).is_empty());
+        assert!(escape(&mut hotkeys, false, OPTION_KEY_MASK, 700).is_empty());
         assert!(hotkeys.dictation.is_recording());
+        assert!(hotkeys.takes_escape(at(900)));
+        assert_eq!(
+            escape(&mut hotkeys, true, OPTION_KEY_MASK, 1_000),
+            [(Shortcut::Dictation, HotkeyAction::CancelShortcut)]
+        );
+        assert!(!hotkeys.dictation.is_recording());
+        assert!(!hotkeys.takes_escape(at(1_000)));
     }
 
     fn caps_lock_hotkeys(
@@ -2207,13 +2228,15 @@ mod tests {
     }
 
     #[test]
-    fn only_a_capture_claims_escape() {
+    fn a_capture_or_a_held_dictation_claims_escape() {
         // The capture picker would otherwise claim Escape that the listener
         // then ignores during a programmatic dictation.
-        assert!(!claims_escape(true, true));
-        assert!(claims_escape(false, true));
-        // Dictation never takes Escape from the app (#786).
-        assert!(!claims_escape(false, false));
+        assert!(!claims_escape(true, true, false));
+        assert!(!claims_escape(true, false, true));
+        assert!(claims_escape(false, true, false));
+        assert!(claims_escape(false, false, true));
+        // A hands-free dictation never takes Escape from the app (#786).
+        assert!(!claims_escape(false, false, false));
     }
 
     #[test]

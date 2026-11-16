@@ -455,3 +455,89 @@ fn a_shortcut_that_did_not_start_shows_only_reopen() {
         "{shown:?}"
     );
 }
+
+/// A ready page on `caps` with its login item as `login`, so the ask shows,
+/// and a shortcut that `tap`s to start or holds.
+fn ready_with_login(
+    caps: platform::Capabilities,
+    login: crate::desktop::login_item::LoginItemStatus,
+    tap: bool,
+) -> Ui {
+    let mut ui = portal_fixture();
+    ui.platform.caps = caps;
+    ui.platform.login_item = Some(login);
+    ui.settings.shortcut_mode = if tap {
+        crate::dictation::ShortcutMode::Toggle
+    } else {
+        crate::dictation::ShortcutMode::Hold
+    };
+    super::super::onboarding::fixture(&mut ui, Step::Setup, true);
+    ui.picker.installed = Some(vec![ui.settings.transcription.model]);
+    if let Some(view) = &mut ui.view {
+        view.transcription.preparing = None;
+    }
+    super::super::onboarding::poll(&mut ui);
+    super::super::onboarding_kit::live::fixture(&mut ui, Page::Ready);
+    ui
+}
+
+/// The launch-at-login ask in the platform's own words: a Mac and its menu
+/// bar, a Windows computer and its system tray, a Linux computer in the
+/// background.
+#[test]
+fn the_login_ask_speaks_each_platforms_wording() {
+    use crate::desktop::login_item::LoginItemStatus;
+
+    let mac = texts(&runtime("mac-onboarding-ready", true, PANE_SIZE));
+    assert!(
+        mac.contains(&"Open Hex when your Mac starts?".to_owned()),
+        "{mac:?}"
+    );
+    assert!(
+        mac.contains(&"It's tiny. It naps in your menu bar until you hold the key.".to_owned()),
+        "{mac:?}"
+    );
+
+    for (caps, place) in [
+        (platform::Capabilities::WINDOWS, "your system tray"),
+        (platform::Capabilities::LINUX, "the background"),
+    ] {
+        for (tap, start) in [(false, "hold"), (true, "tap")] {
+            let off = texts(&runtime_for(
+                ready_with_login(caps, LoginItemStatus::Disabled, tap),
+                true,
+                PANE_SIZE,
+            ));
+            assert!(
+                off.contains(&"Open Hex when your computer starts?".to_owned()),
+                "{caps:?}: {off:?}"
+            );
+            assert!(
+                off.contains(&format!(
+                    "It's tiny. It naps in {place} until you {start} the key."
+                )),
+                "{caps:?}: {off:?}"
+            );
+            assert!(
+                !off.iter()
+                    .any(|text| text.contains("Mac") || text.contains("menu bar")),
+                "{caps:?}: {off:?}"
+            );
+        }
+
+        let on = texts(&runtime_for(
+            ready_with_login(caps, LoginItemStatus::Enabled, false),
+            true,
+            PANE_SIZE,
+        ));
+        assert!(
+            on.contains(&"Hex opens when your computer starts.".to_owned()),
+            "{caps:?}: {on:?}"
+        );
+        assert!(
+            !on.iter()
+                .any(|text| text.contains("Mac") || text.contains("menu bar")),
+            "{caps:?}: {on:?}"
+        );
+    }
+}

@@ -286,6 +286,11 @@ device refuses a stream in its own default format     // #988, Intel Smart Sound
   -> log the refused format (channels, Hz, sample format) // audio/input_format
   -> try the other formats it lists (F32, I16, U16, I32), at most 12
   -> none opens -> the default format's error, with its format, goes to recovery
+device reports no default format at all               // #1845, Windows default input
+  -> log the driver's reason and kind, not just the wrap // audio/input_format
+  -> try the direct WASAPI paths, then the formats it lists
+     (48 kHz, else 44.1 kHz, else the range's top) // unverified on real Windows
+  -> none opens -> the read error, with its cause, goes to recovery
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"
@@ -1107,9 +1112,14 @@ occur.
 ### Slow Paste Consumer
 
 ```ts
-Chromium 155/156 frontmost? type instead (#212); else publish clipboard -> post Paste
-  ├── settle for 100 ms -> allow next output
-  └── schedule restore after 500 ms -> restore only if still owned
+Which insertion?                                       // paste.rs
+├── Chromium 155/156 frontmost -> type instead (#212)
+├── Windows App frontmost -> type one paced key at a time (#1048)
+│       // both skip the paste; Keep dictation on clipboard still writes the
+│       // typed text to the clipboard afterwards
+└── else -> publish clipboard -> post Paste
+    ├── settle for 100 ms -> allow next output
+    └── schedule restore after 500 ms -> restore only if still owned
 target consumes later?                                // no consumption acknowledgment
 
 controlled delayed consumer -> output A -> output B -> restoration

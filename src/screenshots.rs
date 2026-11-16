@@ -18,7 +18,8 @@ mod recording;
 pub(crate) mod save;
 pub(crate) mod system_shortcut;
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::app_settings::RuntimeHotkey;
@@ -38,6 +39,45 @@ static OVERLAYS: OnceLock<Overlays> = OnceLock::new();
 static PICKER: Mutex<picker::Picker> = Mutex::new(picker::Picker::new());
 /// The picker's window, left out of the shot; 0 before it's made.
 static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
+/// The folder the last shot, recording, or editor save couldn't be written
+/// to and why, which Labs › Screenshots' card names until a save works or
+/// another folder is chosen. It keeps its own folder: the setting may have
+/// changed since through `hex settings` or `settings.json`.
+static SAVE_ERROR: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
+/// How many times [`SAVE_ERROR`] was recorded or cleared. A window's poll
+/// that reports nothing redraws nothing, so the card compares this count
+/// with the one it last drew and reports the difference.
+static SAVE_ERROR_CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// The last failed save's folder and reason, for the card.
+pub(crate) fn save_error() -> Option<(PathBuf, String)> {
+    SAVE_ERROR
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// How many times the last failed save changed: a save recorded an error or
+/// cleared one.
+pub(crate) fn save_error_generation() -> u64 {
+    SAVE_ERROR_CHANGES.load(Ordering::Relaxed)
+}
+
+/// Forgets the last failed save: a later one saved fine, or the folder
+/// changed.
+pub(crate) fn clear_save_error() {
+    *SAVE_ERROR.lock().unwrap_or_else(|error| error.into_inner()) = None;
+    SAVE_ERROR_CHANGES.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Remembers a failed save of `folder` for the card, bounded so a long path
+/// can't grow the note without limit.
+pub(crate) fn record_save_error(folder: &Path, error: &anyhow::Error) {
+    let bounded: String = error.to_string().chars().take(300).collect();
+    *SAVE_ERROR.lock().unwrap_or_else(|error| error.into_inner()) =
+        Some((folder.to_path_buf(), bounded));
+    SAVE_ERROR_CHANGES.fetch_add(1, Ordering::Relaxed);
+}
 
 /// Adds the screenshot picker, thumbnail, and editor, hidden. They're made at
 /// launch only while the Lab is on then.
@@ -257,8 +297,16 @@ fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
     let png = save::encode(image.width, image.height, &image.rgba, scale)?;
     let folder = crate::app_settings::screenshot_settings().folder();
     let path = save::write(&folder, &png);
-    if let Err(error) = &path {
-        tracing::warn!(%error, folder = %folder.display(), "could not save the screenshot");
+    match &path {
+        Ok(_) => {
+            // The shot reached the folder this time, even if the clipboard
+            // copy below fails.
+            clear_save_error();
+        }
+        Err(error) => {
+            tracing::warn!(%error, folder = %folder.display(), "could not save the screenshot");
+            record_save_error(&folder, error);
+        }
     }
     save::copy(&png, path.as_deref().ok())?;
     let path = path?;

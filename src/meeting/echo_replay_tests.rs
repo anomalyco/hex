@@ -204,7 +204,8 @@ fn parakeet_cache(cache: &Path, tracks: &[(MeetingSource, Vec<f32>); 2]) -> [Vec
     ));
     let started = Instant::now();
     let cpu = process_cpu_seconds();
-    let chunks = [0, 1].map(|index| replay_transcribe(&mut model, &tracks[index].1));
+    let chunks =
+        [0, 1].map(|index| replay_transcribe(&mut model, tracks[index].0, &tracks[index].1));
     println!(
         "parakeet: {:.1} s, {:.1} CPU s",
         started.elapsed().as_secs_f32(),

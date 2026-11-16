@@ -1,8 +1,8 @@
 //! Launch at login. macOS registers the app with `SMAppService` through a
 //! worker thread, since ServiceManagement can block; Windows writes the
-//! current user's `Run` registry value (`windows_login_item`). Linux starts
-//! the `hex.service` unit from its install script or Nix module, so Hex does
-//! not offer the setting there.
+//! current user's `Run` registry value (`windows_login_item`) and Linux the
+//! managed `anomaly.hex.desktop` XDG autostart entry (`linux/login_item`).
+//! Each platform's own record is the source of truth.
 
 #[cfg(target_os = "macos")]
 use color_eyre::eyre::{Result, eyre};

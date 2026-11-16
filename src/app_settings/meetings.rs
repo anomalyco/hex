@@ -79,8 +79,8 @@ pub struct MeetingSettings {
     /// How finished meetings are written to `output_folder`.
     pub export: MeetingExportSettings,
     /// The OpenCode `provider/model` that writes meeting notes when
-    /// `summaries` is OpenCode; left out of the file while unset, when Hex
-    /// picks a fast model.
+    /// `summaries` is OpenCode; left out of the file while unset, when
+    /// OpenCode's own default model writes them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencode_model: Option<String>,
 }

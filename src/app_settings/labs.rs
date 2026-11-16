@@ -101,6 +101,7 @@ pub struct LabsSettings {
     pub spoken_formatting: bool,
     /// Filler words such as "um" and "uh" are removed from dictations (issue 631).
     pub filler_words: bool,
+    pub clean_up_with_apple_intelligence: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
     pub second_dictation_shortcut: bool,
     /// Up to four more dictation shortcuts, each with its own activation
@@ -148,8 +149,14 @@ pub struct LabsSettings {
     /// The ISO section key, left of 1, may be a shortcut on its own (Linux
     /// and macOS, issue 1050).
     pub section_key_alone: bool,
+    /// The microphone (dictation) key in a laptop keyboard's top row may be
+    /// a shortcut on its own (macOS, issue 181).
+    pub microphone_key: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
+    /// A kept recording may be copied from History and the menu bar or tray
+    /// as a file on the clipboard; it stores no audio itself.
+    pub copy_dictation_audio: bool,
     /// General's pane starts with a search field that filters its rows.
     pub settings_search: bool,
     /// The sidebar footer links this build's release notes.
@@ -224,6 +231,10 @@ pub struct LabsSettings {
     /// A dictation mode's speech model and language follow the foreground
     /// application (macOS and Windows).
     pub app_model_switching: bool,
+    /// The menu bar lists the next calendar meetings, each a local start and
+    /// end time and title; choosing one with a call link opens it (macOS,
+    /// with Meetings on and a calendar connected).
+    pub calendar_menu: bool,
     /// The menu bar offers Pause Hex, which makes every capture shortcut
     /// inert until Resume (macOS).
     pub pause_menu: bool,
@@ -360,6 +371,7 @@ impl Default for LabsSettings {
             return_to_app: false,
             spoken_formatting: false,
             filler_words: false,
+            clean_up_with_apple_intelligence: false,
             second_dictation_shortcut: false,
             more_dictation_shortcuts: false,
             terminal_paste_shortcut: false,
@@ -382,7 +394,9 @@ impl Default for LabsSettings {
             k_quant_models: false,
             picker_downloaded: false,
             section_key_alone: false,
+            microphone_key: false,
             keep_recordings: false,
+            copy_dictation_audio: false,
             settings_search: false,
             release_notes_link: false,
             hide_menu_bar_icon: false,
@@ -406,6 +420,7 @@ impl Default for LabsSettings {
             api_browser_origins: Vec::new(),
             speakers_only: false,
             app_model_switching: false,
+            calendar_menu: false,
             pause_menu: false,
             print_start: false,
             voice_prompt: false,

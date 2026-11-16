@@ -42,6 +42,19 @@ impl Group {
         }
     }
 
+    /// Its English header in Settings › Labs.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Dictation => "Dictation",
+            Self::Output => "Output",
+            Self::History => "History",
+            Self::Meetings => "Meetings",
+            Self::Annotate => "Annotate",
+            Self::Shortcuts => "Shortcuts",
+            Self::Models => "Models",
+        }
+    }
+
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|group| group.id() == id)
     }
@@ -72,6 +85,7 @@ impl Feature {
             | Self::SpokenFormatting
             | Self::SpokenSymbols
             | Self::FillerWords
+            | Self::CleanUpWithAppleIntelligence
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::ReturnToApp
@@ -91,11 +105,13 @@ impl Feature {
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::HistoryMultiSelect
-            | Self::RecentDictations => Group::History,
+            | Self::RecentDictations
+            | Self::CopyDictationAudio => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::GnomeMeetingCapsules
-            | Self::MeetingImport => Group::Meetings,
+            | Self::MeetingImport
+            | Self::CalendarMenu => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate
@@ -109,6 +125,7 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
+            | Self::MicrophoneKeyAlone
             | Self::ShareShortcut
             | Self::CapsLockDictation
             | Self::PauseMenu => Group::Shortcuts,
