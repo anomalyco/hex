@@ -339,11 +339,14 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          ├── Record -> Start recording
          ├── Not now -> Close
          ├── … -> "<provider>" · "Change anytime in Settings" (capsule widens)
+         │   │   No rule is saved and no recording starts. The choices stay
+         │   │   open past the timeout, until answered or the offer is withdrawn.
          │   ├── Never offer -> saved, close
          │   ├── Always record -> saved, records this call too
          │   │   └── not offered for a browser on an unknown page
-         │   └── Cancel
-         └── 20 s timeout -> Close                     // never records on timeout
+         │   └── Cancel -> Back to Record / Not now; if the original timer
+         │       already fired, the compact offer gets another 20 s
+         └── 20 s timeout while compact -> Close       // never records on timeout
              └── unanswered -> the snooze ends the moment the call app leaves
                  the microphone, so a call joined after its pre-join screen is
                  offered again when it retakes it (#1267; check
@@ -599,6 +602,17 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `meetings_settings_save_and_ask_for_system_audio` (Linux pane tests). The
 controller loop that turns `Detection::Record` into a recording has no
 automated test; it shares the manual Record path.
+
+`the_offer_menu_stays_usable_past_the_unanswered_deadline` presses … on a
+fixture Slack huddle, resizes that same Rune surface and delivers the scheduled
+20 s timeout. The choices remain clickable; no controller command or policy
+write comes from opening them. `cancel_returns_to_a_timed_clickable_offer` and
+`an_untouched_offer_times_out_without_a_choice` check the compact path.
+The detector withdraws a held offer when its call's snooze ends, another
+detection replaces it, Meetings turns off, or recording begins. The timeout
+and the Record request refer to that offer, not just its app: a late one
+cannot answer a later huddle. These checks exercise fixture input, timers and
+requests, not a native overlay, a live Slack call or a recorder.
 
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),

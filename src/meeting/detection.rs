@@ -579,6 +579,9 @@ impl MeetingSource {
 #[derive(Default)]
 pub struct MeetingDetector {
     pending: Option<Pending>,
+    /// Which Ask presentation can still answer. A later call in the same
+    /// app has the same key but must not inherit a delayed timeout.
+    open_offer: Option<OfferId>,
     offered: Option<String>,
     offered_application: Option<String>,
     /// The offered call's meeting code, when its page named one: another
@@ -607,6 +610,15 @@ pub struct MeetingDetector {
     /// recording); absence is counted from here, gaps included.
     last_present: Option<Instant>,
     calendar: Option<CalendarSnooze>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OfferId(Instant);
+
+impl OfferId {
+    pub fn at(now: Instant) -> Self {
+        Self(now)
+    }
 }
 
 /// A candidate that has been on the microphone but is not yet stable.
@@ -753,10 +765,21 @@ impl MeetingDetector {
     }
 
     /// The offer's capsule closed on its timeout, unanswered.
-    pub fn offer_timed_out(&mut self) {
-        if self.offered.is_some() {
+    pub fn offer_timed_out(&mut self, id: OfferId) {
+        if self.open_offer == Some(id) {
             self.timed_out = true;
+            self.withdraw_offer();
         }
+    }
+
+    pub fn open_offer(&self) -> Option<OfferId> {
+        self.open_offer
+    }
+
+    /// A recording or Meetings being turned off also retires the panel,
+    /// without changing the call's snooze.
+    pub fn withdraw_offer(&mut self) {
+        self.open_offer = None;
     }
 
     /// Whether the call app is on the microphone, seen while a recording is
@@ -859,6 +882,7 @@ impl MeetingDetector {
 
     /// Forgets the snoozed call: the next one is offered as new.
     fn end_snooze(&mut self) {
+        self.withdraw_offer();
         self.offered = None;
         self.offered_application = None;
         self.offered_call = None;
@@ -905,7 +929,10 @@ impl MeetingDetector {
         let candidate = self.observe_at(candidate, now, now_ms)?;
         Some(match candidate.policy(choices) {
             MeetingPolicy::AlwaysRecord => Detection::Record(candidate),
-            _ => Detection::Offer(candidate),
+            _ => {
+                self.open_offer = Some(OfferId::at(now));
+                Detection::Offer(candidate)
+            }
         })
     }
 
@@ -959,6 +986,7 @@ impl MeetingDetector {
         }
         self.pending = None;
         self.offered = Some(candidate.key.clone());
+        self.withdraw_offer();
         self.offered_application = candidate.application.clone();
         self.offered_call = candidate.call.clone();
         self.stopped = false;
@@ -1962,6 +1990,22 @@ mod tests {
     }
 
     #[test]
+    fn an_open_offer_ends_with_its_call_or_a_replacement_detection() {
+        let slack = slack_huddle();
+        let zoom = zoom();
+        let mut watch = Watch::new();
+        assert!(watch.stable(&slack, &[]).is_some());
+        let first = watch.detector.open_offer().unwrap();
+        assert!(watch.run(Some(&slack), &[], 30_000).is_empty());
+        assert_eq!(watch.detector.open_offer(), Some(first));
+        assert!(watch.stable(&zoom, &[]).is_some());
+        let next = watch.detector.open_offer().unwrap();
+        assert_ne!(next, first);
+        watch.run(None, &[], 61_000);
+        assert_eq!(watch.detector.open_offer(), None);
+    }
+
+    #[test]
     fn a_timed_out_offer_is_offered_again_when_the_call_retakes_the_microphone() {
         // Google Meet's pre-join screen holds the microphone; nobody answers
         // the offer before it times out (#1267).
@@ -1974,7 +2018,8 @@ mod tests {
         let mut watch = Watch::new();
         assert!(watch.stable(&meet, &[]).is_some());
         assert!(watch.run(Some(&meet), &[], 30_000).is_empty());
-        watch.detector.offer_timed_out();
+        let first = watch.detector.open_offer().unwrap();
+        watch.detector.offer_timed_out(first);
         assert!(watch.run(Some(&meet), &[], 10_000).is_empty());
         // Joining releases and retakes the microphone: offered again.
         assert!(watch.run(None, &[], 500).is_empty());
@@ -1983,7 +2028,10 @@ mod tests {
             Some(Detection::Offer(meet.clone()))
         );
 
-        // An offer that hasn't timed out stays snoozed through the same release.
+        // Even a late timeout for the first offer (identical call key)
+        // cannot shorten this offer's snooze.
+        assert_ne!(watch.detector.open_offer(), Some(first));
+        watch.detector.offer_timed_out(first);
         assert!(watch.run(None, &[], 500).is_empty());
         assert!(watch.run(Some(&meet), &[], 10_000).is_empty());
     }

@@ -75,7 +75,7 @@ impl Meetings {
                 for event in events {
                     capsules.event(&event);
                     #[cfg(target_os = "linux")]
-                    if matches!(event, ControllerEvent::Offer(_)) {
+                    if matches!(event, ControllerEvent::Offer(..)) {
                         let window = window.clone();
                         capsules.when_offer_unshown(move |reason| offer_unshown(&window, reason));
                     }
@@ -214,7 +214,8 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
         ControllerEvent::CallEnded { app, .. } => {
             tracing::info!(%app, "the call ended; the recording continues until Stop");
         }
-        ControllerEvent::Offer(_)
+        ControllerEvent::Offer(..)
+        | ControllerEvent::OfferWithdrawn(_)
         | ControllerEvent::Reminder { .. }
         | ControllerEvent::ReminderWithdrawn { .. }
         | ControllerEvent::CallEndedWithdrawn

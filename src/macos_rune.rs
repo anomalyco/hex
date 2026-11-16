@@ -1046,7 +1046,8 @@ impl Pump {
     fn controller_event(&mut self, event: ControllerEvent) {
         self.capsules.event(&event);
         match event {
-            ControllerEvent::Offer(_)
+            ControllerEvent::Offer(..)
+            | ControllerEvent::OfferWithdrawn(_)
             | ControllerEvent::Reminder { .. }
             | ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::CallEndedWithdrawn => {}
