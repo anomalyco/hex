@@ -1804,6 +1804,8 @@ Hex checks the release service            // maintain.updates
 │   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
 │   └── Sidebar Update, menu bar / tray: Restart to update; a dev build lists its
 │       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
+│       ├── A meeting is recording -> refused with that reason; the update stays
+│       │   staged and Ready, so the next click after it ends restarts
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
 │       ├── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
@@ -1836,6 +1838,16 @@ reads it once at launch, so a forced value wins and a change applies after
 relaunch. Speech-model downloads are unaffected. Releases through 2.3.1 read
 `com.kitlangton.hex2`; there is no fallback to it, so profiles must name
 `anomaly.hex`.
+
+Every quit Hex starts ends through its own drain: Rune is told the app has work
+after its loop (`rune::orderly_exit`, called by `macos_rune::run`,
+`windows::rune::open`, and `rune_ui::run_app`), so Quit Hex, `hex quit`, and
+Restart to update stop and join the meeting controller before the staged
+update is installed and the process `_exit`s. On macOS the AppKit terminate
+notification drains the same way. Restart to update refuses while a meeting
+records (`updater::restart_hold`) and re-checks after its final manifest check,
+keeping the release staged. The drain gets 5 s, or 30 s while a meeting is
+recording, so a finalising recorder is never cut off.
 
 [updater.rs](../../src/updater.rs) owns the worker and the shared status the
 window, menu bar, and tray show; `updater/protocol.rs` passes the release

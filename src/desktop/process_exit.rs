@@ -12,7 +12,8 @@
 //! and finishes its transcript at the next launch.
 //!
 //! The drain runs on the main thread, so a worker that never stops would hang
-//! quit, logout, and updates. After [`DEADLINE`] the process ends anyway.
+//! quit, logout, and updates. After [`DEADLINE`] the process ends anyway; a
+//! meeting still recording gets [`MEETING_DEADLINE`] to finalise its audio.
 //! Dropping the transcription engine cancels its job and normally returns at
 //! once; only a wedged native run reaches either bound, and `_exit` is what
 //! makes leaving it running safe.
@@ -30,6 +31,11 @@ use std::time::Duration;
 
 /// How long quitting waits for the drain before ending the process anyway.
 const DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long it waits while a meeting recording must finalise its audio and
+/// write `final.pending`: its capture threads can take longer to stop than
+/// the rest of the drain, and ending early loses the recording.
+const MEETING_DEADLINE: Duration = Duration::from_secs(30);
 
 /// How long a Linux stop may drain before the process ends anyway. Shorter
 /// than the unit's `TimeoutStopSec=30`, with room for a CPU transcription to
@@ -87,12 +93,22 @@ impl Drain {
 
 /// Drains, then ends the process without running static destructors.
 pub(crate) fn finish(drain: &Drain) -> ! {
-    finish_within(drain, DEADLINE, 0)
+    finish_within(drain, drain_deadline(), 0)
 }
 
 /// `finish`, ending with `code`: a launch whose window never started exits 1.
 pub(crate) fn finish_with(drain: &Drain, code: i32) -> ! {
-    finish_within(drain, DEADLINE, code)
+    finish_within(drain, drain_deadline(), code)
+}
+
+/// The time the drain gets: a recording still running needs longer to
+/// finalise its WAVs and manifest than everything else.
+fn drain_deadline() -> Duration {
+    if crate::meeting::recording() {
+        MEETING_DEADLINE
+    } else {
+        DEADLINE
+    }
 }
 
 fn finish_within(drain: &Drain, deadline: Duration, code: i32) -> ! {

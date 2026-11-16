@@ -168,6 +168,10 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bool) -> Result<()> {
+    // Rune ends a quitting app with `_exit` unless it is told an app has work
+    // after the loop. Hex does: the teardown below stops a meeting recording
+    // and joins its workers.
+    rune::orderly_exit();
     if let Err(error) = crate::windows::login_item::follow_current_version() {
         tracing::warn!(%error, "could not point Launch at login at this version of Hex");
     }
@@ -311,12 +315,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         crate::windows::gpu_fallback::disarm();
     }
     shutdown.store(true, Ordering::Relaxed);
-    drop(requests);
-    let _ = runtime.join();
-    // A recording stops, keeping its audio for the next launch.
+    // A recording finalises its audio first; the runtime can take longer.
     if let Some(meetings) = meetings {
         meetings.join();
     }
+    drop(requests);
+    let _ = runtime.join();
     drop(local_api);
     drop(tray);
     if let Err(error) = &result {

@@ -293,6 +293,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let Some(mtm) = MainThreadMarker::new() else {
         return Err(eyre!("desktop startup requires the main thread"));
     };
+    // Rune ends a quitting app with `_exit` unless it is told an app has work
+    // after the loop. Hex does: the drain below joins the listener, stops a
+    // meeting recording, and installs a staged update.
+    rune::orderly_exit();
     shutdown.store(false, Ordering::Relaxed);
     watch_process();
     // Observing first means a source change during startup still rebuilds
@@ -564,6 +568,12 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // will-terminate notification finishes there instead.
     DRAIN.set(move || {
         shutdown.store(true, Ordering::Relaxed);
+        // A recording finalises its WAVs and writes `final.pending` itself;
+        // nothing may cut that short, and installing the staged update is
+        // free to happen afterwards.
+        if controller.join().is_err() {
+            tracing::error!("meeting controller worker panicked during shutdown");
+        }
         if let Some(updater) = UPDATER.get() {
             updater.stop();
             updater.install_on_quit();
@@ -572,11 +582,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         local_api.shutdown();
         // The listener owns the transcription engine; joining it frees the
         // model after its last use.
-        for (name, worker) in [
-            ("recognition", recognition),
-            ("meeting controller", controller),
-            ("runtime", runtime),
-        ] {
+        for (name, worker) in [("recognition", recognition), ("runtime", runtime)] {
             if worker.join().is_err() {
                 tracing::error!("{name} worker panicked during shutdown");
             }

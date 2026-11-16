@@ -395,7 +395,7 @@ impl Updater {
             DesktopAction::WindowFocused => self.window_focused(),
             DesktopAction::OpenUpdate => self.open_download(),
             DesktopAction::ConfirmUpdateSwitch => self.confirm_switch(),
-            DesktopAction::RestartIntoUpdate => self.request_restart()?,
+            DesktopAction::RestartIntoUpdate => self.request_restart(restart_hold())?,
             _ => {}
         }
         Ok(())
@@ -403,8 +403,12 @@ impl Updater {
 
     /// Restart to update: the worker checks the channel once more, so a
     /// release published since the update was staged replaces it first,
-    /// then switches to the newest staged update.
-    fn request_restart(&self) -> Result<()> {
+    /// then switches to the newest staged update. A meeting recording holds
+    /// it: the relaunch would cut the recording short.
+    fn request_restart(&self, hold: Option<&'static str>) -> Result<()> {
+        if let Some(hold) = hold {
+            return Err(eyre!(hold));
+        }
         let mut state = lock(&self.shared.state);
         let mut restart = lock(&self.shared.restart);
         // A second click while the restart is under way changes nothing.
@@ -568,7 +572,7 @@ fn run(shared: &Shared, method: &Method) {
             }
         };
         if restarting {
-            if finish_restart(shared, next) {
+            if finish_restart(shared, next, restart_hold()) {
                 return;
             }
         } else {
@@ -594,9 +598,18 @@ fn adopts_staged_update(state: &State, quitting: bool) -> bool {
     !quitting && !matches!(state, State::Applied)
 }
 
+/// Why Restart to update has to wait: a meeting that is still recording
+/// would lose its audio to the relaunch.
+fn restart_hold() -> Option<&'static str> {
+    crate::meeting::recording()
+        .then_some("Hex is recording a meeting; restart to update when it finishes")
+}
+
 /// Switches to the newest staged update once Restart to update's final
-/// check has run, whatever its result. True when Hex now quits.
-fn finish_restart(shared: &Shared, next: State) -> bool {
+/// check has run, whatever its result. True when Hex now quits. A meeting
+/// that started recording since the click keeps the update staged and the
+/// restart waiting.
+fn finish_restart(shared: &Shared, next: State, hold: Option<&'static str>) -> bool {
     let mut state = lock(&shared.state);
     // Quitting installs the staged update itself (`install_on_quit`), and it
     // holds this lock while it does; a swap here would exchange the same two
@@ -604,6 +617,12 @@ fn finish_restart(shared: &Shared, next: State) -> bool {
     if matches!(*state, State::Applied) {
         *lock(&shared.restart) = Restart::Done(Ok(()));
         return true;
+    }
+    if let Some(hold) = hold {
+        *state = State::Ready;
+        *lock(&shared.restart) = Restart::Done(Err(hold.into()));
+        tracing::info!(reason = hold, "Restart to update waits for a meeting");
+        return false;
     }
     let staged = lock(&shared.staged).clone();
     let result = match &staged {
@@ -1184,7 +1203,7 @@ mod tests {
         *lock(&updater.shared.restart) = Restart::Requested;
 
         assert!(
-            finish_restart(&updater.shared, State::Ready),
+            finish_restart(&updater.shared, State::Ready, None),
             "the quit already installed the update; Hex still quits"
         );
         assert!(matches!(
@@ -1192,6 +1211,29 @@ mod tests {
             Restart::Done(Ok(()))
         ));
         assert!(matches!(*lock(&updater.shared.state), State::Applied));
+    }
+
+    #[test]
+    fn restart_to_update_waits_while_a_meeting_records() {
+        let updater = Updater::idle_checking();
+        *lock(&updater.shared.state) = State::Ready;
+        let hold = Some("Hex is recording a meeting; restart to update when it finishes");
+        let error = updater.request_restart(hold).unwrap_err();
+        assert!(error.to_string().contains("recording"));
+        assert!(matches!(*lock(&updater.shared.state), State::Ready));
+        assert!(
+            matches!(*lock(&updater.shared.restart), Restart::Idle),
+            "a refused restart is not left pending"
+        );
+
+        // A meeting that started after the click keeps the update staged, so
+        // Restart to update is offered again once it finishes.
+        assert!(!finish_restart(&updater.shared, State::Ready, hold));
+        assert!(matches!(*lock(&updater.shared.state), State::Ready));
+        assert!(matches!(
+            *lock(&updater.shared.restart),
+            Restart::Done(Err(_))
+        ));
     }
 
     #[test]

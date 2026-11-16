@@ -114,6 +114,10 @@ pub(crate) fn run_app(
     shutdown: &'static std::sync::atomic::AtomicBool,
 ) -> Result<(), String> {
     use crate::linux::service::{Activation, Control};
+    // Rune ends a quitting app with `_exit` unless it is told an app has work
+    // after the loop. Hex does: the teardown below stops a meeting recording
+    // and joins it.
+    rune::orderly_exit();
     rune::set_app_id(crate::linux::portal::APP_ID);
     let mut app = self::app(Some(host.clone()))
         .args(window_args())

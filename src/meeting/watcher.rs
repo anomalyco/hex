@@ -18,6 +18,7 @@ use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, CallSwitch, Detection, MeetingCandidate,
     MeetingDetector, candidate_from_microphone,
 };
+use crate::meeting::recovery::PendingFinals;
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
@@ -333,95 +334,6 @@ impl MeetingExpiry {
         }
         if let Err(error) = meeting::expire_audio(audio) {
             tracing::warn!(%error, "could not expire old meeting audio");
-        }
-    }
-}
-
-/// How long finishing pending transcripts waits for the dictation engine
-/// before loading its own model, as a recording without one does.
-const ENGINE_GRACE: Duration = Duration::from_secs(30);
-
-/// Finishes, once per launch, the transcripts of meetings Hex quit while
-/// recording. It waits for the dictation engine so the work borrows its
-/// model rather than loading a second copy.
-struct PendingFinals {
-    since: Instant,
-    /// The launch sweep for abandoned import folders ran.
-    swept: bool,
-    checked: bool,
-    worker: Option<JoinHandle<()>>,
-}
-
-impl PendingFinals {
-    fn new() -> Self {
-        Self {
-            since: Instant::now(),
-            swept: false,
-            checked: false,
-            worker: None,
-        }
-    }
-
-    fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
-        // Before the pending pass, and whatever the Meetings opt-in, remove
-        // folders a crashed or quitting import left without a manifest.
-        if !self.swept {
-            self.swept = true;
-            meeting::sweep::remove_orphaned_imports();
-        }
-        if self.checked
-            || !enabled
-            || recording
-            || (crate::transcription::engine::TranscriptionEngine::shared().is_none()
-                && self.since.elapsed() < ENGINE_GRACE)
-        {
-            return;
-        }
-        self.checked = true;
-        let ids = meeting::pending_final_transcripts();
-        if ids.is_empty() {
-            return;
-        }
-        let events = events.clone();
-        self.worker = thread::Builder::new()
-            .name("meeting-pending-finals".into())
-            .spawn(move || {
-                for id in ids {
-                    if crate::desktop::process_exit::quitting() {
-                        return;
-                    }
-                    match meeting::finish_pending(&id) {
-                        Ok(Some(manifest))
-                            if manifest.status == meeting::MeetingStatus::Complete =>
-                        {
-                            tracing::info!(meeting = id, "finished a pending meeting transcript");
-                            if meeting::notes_wanted() {
-                                start_notes(manifest.id, &events);
-                            }
-                        }
-                        Ok(Some(manifest)) => {
-                            tracing::info!(
-                                meeting = id,
-                                status = ?manifest.status,
-                                "left a pending meeting for the next launch"
-                            );
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            tracing::warn!(%error, meeting = id, "could not finish a pending meeting transcript");
-                        }
-                    }
-                }
-            })
-            .map_err(|error| tracing::error!(%error, "could not start pending meeting transcripts"))
-            .ok();
-    }
-
-    fn join(self) {
-        if let Some(worker) = self.worker
-            && worker.join().is_err()
-        {
-            tracing::error!("pending meeting transcripts panicked");
         }
     }
 }
@@ -1466,7 +1378,7 @@ fn detect_meeting(
 
 /// Writes notes on a background thread; the UI refreshes from the manifest
 /// whether generation succeeds or fails.
-fn start_notes(id: String, events: &SyncSender<ControllerEvent>) {
+pub(super) fn start_notes(id: String, events: &SyncSender<ControllerEvent>) {
     let finished = events.clone();
     if meeting::spawn_summary(id, move |result| {
         if let Ok(manifest) = result {

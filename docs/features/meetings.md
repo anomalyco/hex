@@ -1278,22 +1278,36 @@ Stop & Transcribe
   -> Join on one timeline -> Echo suppression -> Final publication
 
 Hex quits while recording                           // meetings.quit
-  -> Capture stops; WAVs and manifest finalized; no chunk starts, no model loads
-  -> Interrupted with its rolling draft + final.pending beside the manifest
+  -> The drain joins the meeting controller first; capture stops, no chunk starts
+  -> WAVs and manifest finalized; Interrupted with its rolling draft and
+     final.pending beside the manifest
 Hex quits during Stop & Transcribe's final pass (#1284)
   -> Same: Interrupted + final.pending, never Failed with "Hex is quitting"
-  -> Next launch, Meetings on, no recording, once the dictation engine is up
-     (or 30 s without one) -> full-WAV final pass -> Complete + Markdown + notes
-     ├── Quit again or model not installed -> stays pending
-     └── Other failure -> stays Interrupted with the error and its draft
+Hex or Hex's process dies mid-recording (no final.pending)   // meetings.recovery
+  -> Next launch selects every unlocked folder whose manifest is Starting,
+     Recording, or Transcribing, or Interrupted with no error and no published
+     final transcript; Failed and completed meetings are never touched
+  -> Each track whose RIFF/data size is 0 or wrong is repaired from its file
+     length (chunk walk, block-aligned, synced), then the manifest's sample
+     counts, duration, and ended_at come from the repaired audio
+  -> final.pending -> the same next-launch final pass as a quit
+Any of the above, next launch, Meetings on, no recording, engine up (or 30 s)
+  -> Full-WAV final pass -> Complete + Markdown export + notes
+  ├── Quit again or model not installed -> stays pending
+  └── Other failure -> stays Interrupted with the error and its draft
 ```
 
-Quitting gives its workers 5 s before `_exit`, and the final pass of a long
-meeting can take longer, or load a model once the dictation engine is gone.
-Sources: `record`, `finish_pending` in [meeting.rs](../../src/meeting.rs),
-`PendingFinals` in [meeting/watcher.rs](../../src/meeting/watcher.rs). Check:
-`quitting_mid_meeting_loads_no_model_and_finishes_in_time`. No repeatable
-driver quits a real recording and relaunches.
+Quitting gives its workers 5 s, or 30 s while a meeting records
+(`meeting::recording`), before `_exit`, and the final pass of a long meeting
+can take longer, or load a model once the dictation engine is gone.
+Sources: `record` in [meeting.rs](../../src/meeting.rs), `recording` in
+[meeting/recording.rs](../../src/meeting/recording.rs), and `PendingFinals`,
+`recover`, `repair_wav` in [meeting/recovery.rs](../../src/meeting/recovery.rs).
+Checks: `quitting_mid_meeting_loads_no_model_and_finishes_in_time`,
+`a_zeroed_wav_header_is_repaired_from_its_file_length`,
+`a_stranded_recording_is_selected_for_recovery`, and
+`restart_to_update_waits_while_a_meeting_records`. No repeatable driver quits a
+real recording and relaunches.
 
 Design choice: chunks are background jobs on the dictation transcription engine
 (`TranscriptionEngine::background`), using whatever model dictation has loaded,
