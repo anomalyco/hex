@@ -37,6 +37,7 @@ const DEFAULT_LANGUAGE: &str = "en";
 #[command(
     name = "hex",
     version = crate::VERSION,
+    long_version = option_env!("HEX_LOCAL_LONG_VERSION"),
     about = "Local Hex dictation for Windows",
     long_about = "Local Hex dictation for Windows.\n\n\
         Control commands (status, dictation, settings, model, window, …) drive the one running \
