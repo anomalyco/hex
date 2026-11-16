@@ -20,10 +20,6 @@
 
 use std::collections::VecDeque;
 
-/// The frame a level is measured over: 20 ms at 16 kHz, the same frame the
-/// silence gate and the pause segmenter use.
-const FRAME: usize = 320;
-
 /// One second of 16 kHz samples: the block the window remembers.
 const BLOCK: usize = 16_000;
 
@@ -160,6 +156,8 @@ fn frame_dbfs(frame: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// 20 ms at 16 kHz, the frame the silence gate and the pause segmenter use.
+    use crate::transcription::pause_segmenter::FRAME_SAMPLES as FRAME;
 
     /// Deterministic noise whose 20 ms frames all sit at `dbfs` RMS.
     fn noise(dbfs: f32, samples: usize) -> Vec<f32> {
