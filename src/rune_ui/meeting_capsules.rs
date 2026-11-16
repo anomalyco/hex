@@ -43,8 +43,8 @@ use std::time::{Duration, Instant};
 #[cfg(not(target_os = "windows"))]
 use rune::OverlayInput;
 use rune::{
-    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlayOptions, OverlaySpec, Phase,
-    ScreenEdge, Spring, Tx, col, row, text,
+    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx,
+    col, row, text,
 };
 use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
@@ -821,13 +821,12 @@ impl MeetingCapsules {
             }
             .options(Default::default());
             let spec = if recording {
-                spec.poll(waveform::poll)
-                    .compositor(waveform::Ink::default())
+                spec.compositor(waveform::Ink::default())
             } else {
                 spec
             };
             let handle = app.overlay(
-                spec,
+                spec.poll(poll),
                 Capsule {
                     kind: None,
                     more_open: false,
@@ -1161,10 +1160,11 @@ fn dismiss_button(p: Paint) -> El {
 }
 
 /// The overlay's frame hook: steps a glide into its corner, a frame at a
-/// time, until it rests.
+/// time, until it rests, and keeps a recording's waveform fed.
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
+    let changed = waveform::poll(capsule, now, tx);
     if !capsule.throw.gliding() {
-        return false;
+        return changed;
     }
     let offset = capsule.throw.step(now);
     if let Some(shift) = &capsule.shift {
@@ -1174,7 +1174,7 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     if offset.is_some() {
         tx.wake_after(Duration::ZERO);
     }
-    false
+    changed
 }
 
 fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
