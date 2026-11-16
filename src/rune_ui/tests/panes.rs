@@ -1328,7 +1328,16 @@ fn release_notes_link_shows_only_with_its_lab() {
     assert!(rt.find("release-notes").is_some());
     assert!(rt.find("nav-whats-new").is_some());
 
-    for (kind, name) in [(BuildKind::Local, "local"), (BuildKind::Test, "test")] {
+    for (kind, name) in [
+        (
+            BuildKind::Local {
+                version: "3.4.0",
+                commit: None,
+            },
+            "local",
+        ),
+        (BuildKind::Test, "test"),
+    ] {
         rt.state.build_preview = Some(kind);
         refresh(&mut rt);
         assert!(

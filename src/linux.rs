@@ -41,6 +41,7 @@ use crate::linux::service::{Activation, Launch};
 #[command(
     name = "hex",
     version = crate::VERSION,
+    long_version = option_env!("HEX_LOCAL_LONG_VERSION"),
     about = "Local, observable voice recognition (Linux beta)",
     long_about = "Local, observable voice recognition (Linux beta).\n\n\
         Control commands (status, dictation, settings, model, window, …) drive the one running \
