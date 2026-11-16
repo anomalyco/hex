@@ -2478,7 +2478,8 @@ fn escape_cancels_a_transformation_reorder_without_saving() {
 
 #[test]
 fn escape_restores_a_slider_dragged_from_its_press() {
-    let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
+    let mut rt = runtime("mac-voice-filter", true, (980.0, 1300.0));
+    open_advanced(&mut rt, Pane::VoiceFilter);
     let strength = |rt: &Runtime<Ui>| rt.state.platform.tuning.strength;
     let before = strength(&rt);
     let saves = saved(&rt);
