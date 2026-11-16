@@ -1497,6 +1497,16 @@ mod tests {
         dark: bool,
         size: (f32, f32),
     ) -> (Runtime<Capsule>, Receiver<ControllerCommand>, Chosen) {
+        runtime_with(kind, more_open, dark, size, view)
+    }
+
+    fn runtime_with(
+        kind: Kind,
+        more_open: bool,
+        dark: bool,
+        size: (f32, f32),
+        view: fn(&Capsule, &mut Cx<Capsule>) -> El,
+    ) -> (Runtime<Capsule>, Receiver<ControllerCommand>, Chosen) {
         let (commands, received) = mpsc::sync_channel(4);
         let chosen = Chosen::default();
         let saved = chosen.clone();
@@ -2617,6 +2627,7 @@ mod tests {
     }
 
     include!("meeting_capsules/motion_fixture.rs");
+    include!("meeting_capsules/offer_preview.rs");
 
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
