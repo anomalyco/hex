@@ -3501,6 +3501,7 @@ fn goldens() {
             "captures",
             "mac-labs",
             "mac-labs-link",
+            "mac-labs-yolo-mode",
             "output",
             "modes",
             "modes-picker",
