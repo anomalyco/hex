@@ -471,7 +471,8 @@ fn capture_end_and_publication_retarget_one_anchored_surface() {
                     (x - ax).abs() < 0.02 && (y - ay).abs() < 0.02,
                     "{corner:?} {frame}: {ax},{ay} vs {x},{y}"
                 );
-                assert_eq!(rt.find("elapsed").is_some(), frame < 12);
+                assert_eq!(rt.find("meeting-listening-field").is_some(), frame < 12);
+                assert!(rt.find("elapsed").is_some());
                 assert_eq!(rt.find("dismiss").is_some(), frame >= 12 + delay);
             }
         }

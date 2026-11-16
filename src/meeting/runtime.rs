@@ -219,7 +219,7 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
         | ControllerEvent::Reminder { .. }
         | ControllerEvent::ReminderWithdrawn { .. }
         | ControllerEvent::CallEndedWithdrawn
-        | ControllerEvent::NotesStarted
+        | ControllerEvent::NotesProgress(_)
         | ControllerEvent::NotesFinished(_) => {}
     }
 }

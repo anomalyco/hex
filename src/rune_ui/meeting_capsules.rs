@@ -61,7 +61,10 @@ mod panel;
 mod throw;
 mod waveform;
 
-use panel::{agent_prompt, hex_command, ready, recording, recording_notice};
+use panel::{
+    agent_prompt, hex_command, ready, ready_window_size, recording, recording_notice,
+    recording_window_size,
+};
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -108,8 +111,7 @@ const SUMMARY_LINE: f32 = 19.5;
 /// The resting pill fits a timer up to `100:00`.
 #[cfg(target_os = "windows")]
 const REST_WINDOW_WIDTH: f32 = REST_WIDTH + 2.0 * CAPSULE_INSET;
-/// The recording capsule's window at its largest: the open panel with a
-/// notice.
+/// One transparent window with room for the finished panel's longest summary.
 const RECORDING_WINDOW: (f32, f32) = (
     PANEL_WIDTH + 2.0 * CAPSULE_INSET,
     HEADER_HEIGHT
@@ -236,7 +238,7 @@ impl PillModel {
             | ControllerEvent::Stopping
             | ControllerEvent::Chapters(_)
             | ControllerEvent::ImportFailed { .. }
-            | ControllerEvent::NotesStarted
+            | ControllerEvent::NotesProgress(_)
             | ControllerEvent::NotesFinished(_) => {}
         }
     }
@@ -588,49 +590,6 @@ impl Capsule {
             }
         }
     }
-}
-
-/// The recording capsule's window. On Windows it is the size of what it
-/// draws: the resting pill (as wide as the open panel while it says
-/// `noticed`), then the open panel. Elsewhere it stays at its largest, and
-/// only the `.hit()` pill takes the pointer.
-#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
-fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
-    #[cfg(target_os = "windows")]
-    if !open {
-        let width = if noticed {
-            RECORDING_WINDOW.0
-        } else {
-            REST_WINDOW_WIDTH
-        };
-        return (width, REST_HEIGHT + 2.0 * CAPSULE_INSET);
-    }
-    RECORDING_WINDOW
-}
-
-/// The ready panel's window: its header, a summary while there is one or one
-/// is being written, and the three copies.
-#[cfg(not(target_os = "windows"))]
-fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
-    RECORDING_WINDOW
-}
-
-#[cfg(target_os = "windows")]
-fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
-    let summary = if panel::ready_summary(manifest).is_some() {
-        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + FIRST_ROW_GAP
-    } else {
-        0.0
-    };
-    (
-        PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        HEADER_HEIGHT
-            + summary
-            + 3.0 * ROW_HEIGHT
-            + FIRST_ROW_GAP
-            + PANEL_PAD
-            + 2.0 * CAPSULE_INSET,
-    )
 }
 
 /// Where a corner's capsule window sits: its edge and margin, and its
@@ -1035,12 +994,12 @@ impl MeetingCapsules {
                 };
                 panel.update(move |capsule, _| capsule.refresh_ready(manifest));
             }
+            ControllerEvent::NotesProgress(id) => self.notes_progress(id),
             ControllerEvent::Retitled { .. }
             | ControllerEvent::SourceWarning { .. }
             | ControllerEvent::Failed { .. }
             | ControllerEvent::ImportFailed { .. }
-            | ControllerEvent::Chapters(_)
-            | ControllerEvent::NotesStarted => {}
+            | ControllerEvent::Chapters(_) => {}
         }
     }
 

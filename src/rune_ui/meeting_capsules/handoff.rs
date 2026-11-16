@@ -25,6 +25,17 @@ impl Capsule {
                 duration_ms: r.started.elapsed().as_millis() as u64,
             });
             self.waveform = None;
+            #[cfg(target_os = "windows")]
+            if let Some(resize) = &self.resize {
+                resize((
+                    RECORDING_WINDOW.0,
+                    HEADER_HEIGHT
+                        + 3. * ROW_HEIGHT
+                        + FIRST_ROW_GAP
+                        + PANEL_PAD
+                        + 2. * CAPSULE_INSET,
+                ));
+            }
         }
     }
 
@@ -48,6 +59,7 @@ impl MeetingCapsules {
                 | ControllerEvent::Failed { .. }
         ) && self.handoff.take().is_some()
         {
+            self.generation.fetch_add(1, Ordering::SeqCst);
             self.pill.handle.update(|c, _| c.kind = None);
             self.pill.handle.hide();
         }
@@ -57,6 +69,28 @@ impl MeetingCapsules {
                 self.pill.handle.update(|c, _| c.capture_stopped());
             }
         }
+    }
+
+    pub(super) fn notes_progress(&self, id: &str) {
+        let handle = if self.handoff.as_deref() == Some(id) {
+            &self.pill.handle
+        } else {
+            &self.panel
+        };
+        let id = id.to_owned();
+        handle.update_if(move |c, _| {
+            let Some(Kind::Ready(m)) = &c.kind else {
+                return false;
+            };
+            if m.id != id {
+                return false;
+            }
+            #[cfg(target_os = "windows")]
+            if let Some(resize) = &c.resize {
+                resize(ready_window_size(m));
+            }
+            true
+        });
     }
 
     pub(super) fn finish_meeting(&self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {

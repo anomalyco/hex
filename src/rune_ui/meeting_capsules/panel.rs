@@ -333,10 +333,12 @@ fn result(
                 .a11y_hidden(),
         )
         .children(duration.map(|duration| {
-            text(meeting::format_duration(duration))
-                .key("duration")
-                .font(timer_style())
-                .color(p.muted())
+            row().key("meter").center_y().child(
+                text(meeting::format_duration(duration))
+                    .key("elapsed")
+                    .font(timer_style())
+                    .color(p.muted()),
+            )
         }))
         .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
     let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
@@ -350,6 +352,9 @@ fn result(
             .mt(2.0)
             .mb(ROW_PX)
     });
+    // The measured lane and the following rows move on the same spring.
+    // Reveal the words inside the growing gap, never over the copy buttons.
+    let summary = col().key("summary-lane").clip_rounded(0.).children(summary);
     let rows = col()
         .key("rows")
         .px(PANEL_PAD)
@@ -362,9 +367,9 @@ fn result(
     };
     let contents = col().key("panel-contents").w(PANEL_WIDTH);
     let contents = if capsule.corner.is_top() {
-        contents.child(header).children(summary).child(rows)
+        contents.child(header).child(summary).child(rows)
     } else {
-        contents.child(rows).children(summary).child(header)
+        contents.child(rows).child(summary).child(header)
     };
     let body = panel_body(p, &title)
         .motion(RECORDING_OPEN)
@@ -596,4 +601,59 @@ pub(super) fn agent_prompt(hex: &str, id: &str, title: &str, recording: Option<u
              Read its notes and transcript:\n  {hex} meetings show {id} --md\n\n{search}"
         ),
     }
+}
+
+/// The recording capsule's window. On Windows it is the size of what it
+/// draws: the resting pill (as wide as the open panel while it says
+/// `noticed`), then the open panel. Elsewhere it stays at its largest, and
+/// only the `.hit()` pill takes the pointer.
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+pub(super) fn recording_window_size(open: bool, noticed: bool) -> (f32, f32) {
+    #[cfg(target_os = "windows")]
+    {
+        if !open {
+            let width = if noticed {
+                RECORDING_WINDOW.0
+            } else {
+                REST_WINDOW_WIDTH
+            };
+            return (width, REST_HEIGHT + 2.0 * CAPSULE_INSET);
+        }
+        (
+            RECORDING_WINDOW.0,
+            OPEN_HEADER
+                + 3. * ROW_HEIGHT
+                + FIRST_ROW_GAP
+                + PANEL_PAD
+                + 2. * CAPSULE_INSET
+                + if noticed { NOTICE_HEIGHT } else { 0. },
+        )
+    }
+    #[cfg(not(target_os = "windows"))]
+    RECORDING_WINDOW
+}
+
+/// The ready panel's window: its header, a summary while there is one or one
+/// is being written, and the three copies.
+#[cfg(not(target_os = "windows"))]
+pub(super) fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
+    RECORDING_WINDOW
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
+    let summary = if ready_summary(manifest).is_some() {
+        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + FIRST_ROW_GAP
+    } else {
+        0.0
+    };
+    (
+        PANEL_WIDTH + 2.0 * CAPSULE_INSET,
+        HEADER_HEIGHT
+            + summary
+            + 3.0 * ROW_HEIGHT
+            + FIRST_ROW_GAP
+            + PANEL_PAD
+            + 2.0 * CAPSULE_INSET,
+    )
 }
