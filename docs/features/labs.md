@@ -122,7 +122,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
 ├── Double-tap on a lone modifier no labs.double_tap_modifiers (macOS) Double-tap shortcut mode takes a shortcut without a key (one or more modifiers), such as Option, Globe, or ⌃⌥; two complete taps start hands-free, one tap or a hold does nothing
-├── Hold through other keys no labs.hold_through_keys (macOS, Windows) a key or click joining a held shortcut with no key a second or more after it went down reaches the app in front and the dictation keeps recording; the release still finishes it. Inside the first second a chord still discards it
+├── Hold through other keys no labs.hold_through_keys (macOS, Windows) macOS: a key a second or more into a held shortcut with no key no longer ends the dictation (clicks were already ignored after 300 ms); Windows: keys and clicks. They reach the app in front and the release still finishes; inside the first second a chord still discards it
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
@@ -1709,8 +1709,10 @@ at 500 ms, 1 s, and 5 s, the release while the key is down, and off);
 [windows/input/hold_through.rs](../../src/windows/input/hold_through.rs)
 (they need Windows to compile and run, through Check Windows);
 `hold_through_keys_is_its_own_bit_and_macos_and_windows_only` in
-[labs.rs](../../src/labs.rs). Not yet observed: a real keyboard on either OS;
-the Labs page goldens were regenerated for the new row.
+[labs.rs](../../src/labs.rs). The regenerated goldens that changed against
+`origin/dev` are `mac-labs` and `mac-labs-link` (light and dark),
+`windows-labs` (light), and `whats-new-yolo` (light and dark). Not yet
+observed: a real keyboard on either OS.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
 on, the speech model picker's Every model view shows one row between its
