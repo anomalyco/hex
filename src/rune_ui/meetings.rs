@@ -26,7 +26,7 @@ use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 mod fixture;
 
-static MORE_ICON: rune::Icon = rune::Icon {
+pub(super) static MORE_ICON: rune::Icon = rune::Icon {
     name: "hex-more",
     view: 16.0,
     body: r#"<circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/>"#,

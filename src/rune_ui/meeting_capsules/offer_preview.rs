@@ -18,11 +18,18 @@ fn offer_navigation_preview() {
         MeetingIndicatorCorner::BottomLeft,
     ] {
         let variant = std::env::var("HEX_OFFER_VARIANT").unwrap_or_default();
+        let dark = variant != "quiet-light";
+        QUIET.set(variant.starts_with("quiet"));
         let prototype = variant != "before";
+        let candidate = if variant == "quiet-unknown" {
+            bare_browser()
+        } else {
+            slack_huddle()
+        };
         if prototype {
             let widths = [false, true].map(|open| {
                 let (probe, _, _) =
-                    runtime_with(offer(slack_huddle()), open, true, MENU, measure_page);
+                    runtime_with(offer(candidate.clone()), open, dark, MENU, measure_page);
                 probe
                     .elements()
                     .iter()
@@ -32,8 +39,8 @@ fn offer_navigation_preview() {
             });
             POSE.set((widths, 0.0));
         }
-        let reduced = variant == "reduced";
-        let kit = Paint::new(true, 2.0).k;
+        let reduced = variant.ends_with("reduced");
+        let kit = Paint::new(dark, 2.0).k;
         let spring = if reduced {
             kit.motion.overlay
         } else {
@@ -42,9 +49,9 @@ fn offer_navigation_preview() {
         let mut velocity = 0.0;
         let mut size = if prototype { MENU } else { PANEL };
         let (mut rt, commands, chosen) = runtime_with(
-            offer(slack_huddle()),
+            offer(candidate),
             false,
-            true,
+            dark,
             size,
             if prototype { fitted_offer } else { view },
         );
@@ -60,7 +67,29 @@ fn offer_navigation_preview() {
         let mut renderer = offscreen::renderer(&gpu.device);
         rt.settle_all();
         rt.frame(0.0);
-        for frame in 0..138 {
+        for frame in 0..=138 {
+            if frame == 138 {
+                rt.pointer_move(0.0, 0.0);
+                let focused = |rt: &Runtime<Capsule>| {
+                    rt.elements().iter().any(|e| {
+                        e.key.as_deref() == Some("offer-more")
+                            && e.focus_visible
+                            && e.role == "button"
+                            && e.label.as_deref() == Some(tr("More"))
+                    })
+                };
+                for _ in 0..5 {
+                    rt.key(rune::KeyEvent {
+                        key: rune::Key::Tab,
+                        mods: Default::default(),
+                    });
+                    rt.frame(0.0);
+                    if focused(&rt) {
+                        break;
+                    }
+                }
+                assert!(focused(&rt), "Tab must reach the named More button");
+            }
             let click = match frame {
                 24 => Some("offer-more"),
                 84 => Some("offer-cancel"),
@@ -144,6 +173,75 @@ fn offer_navigation_preview() {
 }
 
 thread_local! { static POSE: Cell<([f32;2], f32)> = const {Cell::new(([0.;2],0.))}; }
+thread_local! { static QUIET: Cell<bool> = const {Cell::new(false)}; }
+
+// Same scoped commands as the original; only the faces change in this study.
+fn quiet_face(p: Paint, key: &str, label: &str, primary: bool) -> El {
+    if key == "offer-more" {
+        return IconButton::new(&crate::rune_ui::meetings::MORE_ICON)
+            .variant(IconButtonVariant::Ghost)
+            .control_size(ControlSize::Large)
+            .label(tr("More"))
+            .build(p.k)
+            .w(34.0)
+            .key(key);
+    }
+    button_face(p, key, label, primary)
+}
+
+fn offer_service(candidate: &MeetingCandidate) -> Option<crate::calendar::CallProvider> {
+    // An unknown browser's app name, bundle id and tab title are not a call provider.
+    let identity = match candidate.source {
+        MeetingSource::BrowserCall => candidate.site.as_deref()?,
+        source => source.label(),
+    };
+    crate::calendar::CallProvider::from_meeting_app(identity)
+}
+
+fn provider_mark(p: Paint, candidate: &MeetingCandidate) -> El {
+    use crate::calendar::CallProvider;
+    let service = offer_service(candidate);
+    let mark = if service == Some(CallProvider::Slack) {
+        // A small fixed rendition from Slack.app's local app icon, not an
+        // app lookup, URL or installed-app dependency in the replay.
+        static ICON: std::sync::OnceLock<rune::Pixels> = std::sync::OnceLock::new();
+        let pixels = ICON.get_or_init(|| {
+            let bytes = include_bytes!("../../../tests/fixtures/offer-slack-icon.png");
+            let mut png = png::Decoder::new(std::io::Cursor::new(bytes))
+                .read_info()
+                .unwrap();
+            let mut buf = vec![0; png.output_buffer_size().unwrap()];
+            let info = png.next_frame(&mut buf).unwrap();
+            assert_eq!(info.color_type, png::ColorType::Rgba);
+            let pixels = rune::Pixels::new();
+            pixels.set(info.width, info.height, buf);
+            pixels
+        });
+        rune::el().size(24.0, 24.0).pixels(pixels)
+    } else {
+        let icon = service
+            .map(crate::rune_ui::platform_settings::provider_icon)
+            .unwrap_or(&crate::rune_ui::icons::CALL);
+        row()
+            .size(24.0, 24.0)
+            .center()
+            .child(rune::icon(icon, 18.0).color(p.muted()))
+    };
+    mark.key("provider-mark").a11y_hidden()
+}
+
+#[test]
+fn an_offer_mark_uses_the_detected_service_not_the_browser_or_title() {
+    use crate::calendar::CallProvider;
+    assert_eq!(offer_service(&slack_huddle()), Some(CallProvider::Slack));
+    let mut c = bare_browser();
+    c.title = "Slack huddle".into();
+    assert_eq!(offer_service(&c), None);
+    c.site = Some("meet.google.com".into());
+    assert_eq!(offer_service(&c), Some(CallProvider::GoogleMeet));
+    c.site = Some("app.slack.com.example.org".into());
+    assert_eq!(offer_service(&c), None);
+}
 
 fn measure_page(c: &Capsule, cx: &mut Cx<Capsule>) -> El {
     col().w_full().items_start().child(offer_page(
@@ -157,7 +255,14 @@ fn offer_page(c: &Capsule, p: Paint, rules: bool) -> El {
     let Some(Kind::Offer(id, candidate)) = &c.kind else {
         return row();
     };
-    let (dot, title, subtitle, actions) = offer::actions(p, *id, candidate, rules);
+    let quiet = QUIET.get();
+    let (dot, title, subtitle, actions) = offer::actions_with(
+        p,
+        *id,
+        candidate,
+        rules,
+        if quiet { quiet_face } else { button_face },
+    );
     let label = col()
         .items_start()
         .child(
@@ -179,15 +284,19 @@ fn offer_page(c: &Capsule, p: Paint, rules: bool) -> El {
         .pr(ACTIONS_INSET)
         .center_y()
         .gap(12.0)
-        .child(status_dot(dot))
+        .child(if quiet {
+            provider_mark(p, candidate)
+        } else {
+            status_dot(dot)
+        })
         .child(label)
-        .child(row().key("actions").gap(8.0).children(actions))
+        .child(row().key("actions").center_y().gap(8.0).children(actions))
 }
 
 // The shape and page have independent origins. A page is mounted at its
 // measured final size and corner, never laid out to the moving shell width.
 fn fitted_offer(c: &Capsule, cx: &mut Cx<Capsule>) -> El {
-    let reduced = std::env::var("HEX_OFFER_VARIANT").as_deref() == Ok("reduced");
+    let reduced = std::env::var("HEX_OFFER_VARIANT").is_ok_and(|s| s.ends_with("reduced"));
     cx.reduced_motion(reduced);
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let ([compact, wide], t) = POSE.get();
@@ -201,6 +310,10 @@ fn fitted_offer(c: &Capsule, cx: &mut Cx<Capsule>) -> El {
     let alpha = (alpha * 1.45).min(1.0);
     let fraction = if reduced {
         if rules { 1.0 } else { 0.0 }
+    } else if wide < compact {
+        // With no Always record action, the rules can be the smaller page.
+        // Let the wider page fade before shrinking its shell.
+        ((t - split) / (1.0 - split)).max(0.0)
     } else {
         (t / split).min(1.0)
     };

@@ -1130,13 +1130,16 @@ fn button(
     primary: bool,
     press: impl Fn(&mut Capsule) + 'static,
 ) -> El {
+    button_face(p, key, label, primary).on_press(press)
+}
+
+fn button_face(p: Paint, key: &str, label: &str, primary: bool) -> El {
     Button::new(label)
         .variant(if primary {
             ButtonVariant::Contrast
         } else {
             ButtonVariant::Neutral
         })
-        .on_press(press)
         .build_push(p.k)
         .key(key)
 }

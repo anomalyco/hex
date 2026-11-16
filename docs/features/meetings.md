@@ -614,6 +614,13 @@ and the Record request refer to that offer, not just its app: a late one
 cannot answer a later huddle. These checks exercise fixture input, timers and
 requests, not a native overlay, a live Slack call or a recorder.
 
+On the prototype branch only, `offer_navigation_preview` replays More and
+Cancel on one offscreen surface, then tabs to the named More button for the
+focus still. It can draw a dummy Slack huddle with a fixed local app-icon
+snapshot or an unknown browser with a neutral call mark. The fixture's icon
+is not a runtime asset. Neither this replay nor its corner traces test native
+overlay placement, OS focus delivery or actual meeting capture.
+
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
 [dictation/context.rs](../../src/dictation/context.rs), the controller in

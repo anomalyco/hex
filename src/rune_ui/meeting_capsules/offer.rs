@@ -38,8 +38,18 @@ pub(super) fn actions(
     candidate: &MeetingCandidate,
     choosing: bool,
 ) -> (rune::Color, String, String, Vec<El>) {
+    actions_with(p, id, candidate, choosing, button_face)
+}
+
+pub(super) fn actions_with(
+    p: Paint,
+    id: OfferId,
+    candidate: &MeetingCandidate,
+    choosing: bool,
+    face: impl Fn(Paint, &str, &str, bool) -> El,
+) -> (rune::Color, String, String, Vec<El>) {
     let action = |key: &str, label: &str, primary, press: fn(&mut Capsule)| {
-        button(p, key, label, primary, move |c| {
+        face(p, key, label, primary).on_press(move |c: &mut Capsule| {
             if c.more_open == choosing
                 && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
             {
