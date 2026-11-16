@@ -2698,8 +2698,10 @@ Captures
 │                  "Screenshot · 2880 × 1800", "Screen recording · 0:42",
 │                  "Annotation · 0:18", or "Annotation · Video expired" · its age
 ├── click       -> the editor (a shot with its words; a recording, or an
-│                  annotation's movie with its timed words, to trim; an
-│                  annotation whose movie expired: its first keyframe)
+│                  annotation's movie with its timed words, to trim; one whose
+│                  model gave no word times (GigaAM v3) has its text spread
+│                  over the recording as estimated; an annotation whose movie
+│                  expired: its first keyframe)
 ├── drag        -> the file (an annotation's movie, else its keyframe)
 ├── hover       -> Copy, Show in Finder, Move to Trash in the age's place
 │                  (Copy: a check only once the clipboard has it, else the
@@ -2832,7 +2834,9 @@ record shortcut  -> the same picker, "Full screen · Click to record"; area, win
 │                       click -> the editor; drag -> the saved movie; a dictation never lands on it
 └── editor       -> the saved movie's frame above a filmstrip of 12 frames; a drag on the strip
                     moves the nearer end of the span kept (never under 0.5 s) and shows the frame
-                    there; the words said inside the span under it, read-only; no marks, no Copy
+                    there; the words said inside the span under it, read-only (one whose model
+                    gave no word times has its text spread over the movie as estimated, never
+                    "Nothing was said"); no marks, no Copy
                     ├── Save     -> another "Hex Recording … .mp4" in screenshots.folder,
                     │               copied whole or cut without re-encoding (`scrawl-helper trim`)
                     └── Send to… -> a contact sheet of up to 4 frames in the span as the image,

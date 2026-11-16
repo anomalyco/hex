@@ -8,13 +8,15 @@ display with ScreenCaptureKit, on Linux the screen-cast portal and
 PipeWire (`capture.linux`), on Windows Windows.Graphics.Capture
 (`capture.windows`), (or a cabled iPhone through `scrawl-helper`'s
 mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
-macOS and Windows, or the Annotate key held or the pen), transcribes the narration with word timestamps on
-Hex's loaded model, writes a Scrawl bundle into Scrawl's captures folder,
-copies it to the clipboard, and sends it to an OpenCode session with Scrawl's
-router (`crates/router`), run in Hex's process. Settings › Annotate (under
-Labs in the sidebar) holds its settings. Scrawl's capsule (switch
-chips, the on-screen picker, route chips) and its ink and laser overlay are
-Rune overlays.
+macOS and Windows, or the Annotate key held or the pen), transcribes the
+narration with word timestamps on Hex's loaded model (a model that gives
+none, GigaAM v3 say, has its text spread over the recording as estimated
+times), writes a Scrawl bundle into Scrawl's captures folder, copies it to
+the clipboard, and sends it to an OpenCode session with Scrawl's router
+(`crates/router`), run in Hex's process. Settings › Annotate (under Labs in
+the sidebar) holds its settings. Scrawl's capsule (switch chips, the
+on-screen picker, route chips) and its ink and laser overlay are Rune
+overlays.
 
 ```ts
 Turn it on                               // capture.gate
@@ -362,7 +364,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 ├── Follows `capture_host::watch()`: Recording from the instant `recording` is
 │   Some (the bundle's t0; timer, meter, ✓ finish, ✕ cancel) -> Processing ->
 │   done (the lead alone, no word), Failed, or Cancelled, then leaves on its
-│   own; a written capture whose transcript has no words reads "no speech"
+│   own; a written capture whose transcript has no words at all (none timed,
+│   none in its text) reads "no speech"
 ├── Tones (`capture_capsule::tone`, at the dictation volume; zero is
 │   silent), from the chosen sound set: start and stop are the set's start
 │   and stop, a send going its done (Annotate's own sent sound when the set
@@ -805,6 +808,13 @@ hex capture stop                         // capture.stop
     ├── Word times moved earlier by the model's measured lag (Parakeet Unified
     │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
     │   other models and Apple keep their own times
+    ├── A model that gives no word times (GigaAM v3) has each 30 s piece's
+    │   text spread over that piece's own audio (a clip held in memory, over
+    │   the whole of it) as estimated times, so keyframes and the editor have
+    │   somewhere to put it; a bundle already on disk without them counts and
+    │   spreads its own text
+    │   (`scrawl_capture::transcribe::word_count`, the Captures pane's
+    │   `words_for_editor`)
     ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
     │   guard, never a memory bound (iPhone and replay narration are decoded in
     │   memory and so are not covered by it), and scrawl.json's
@@ -990,7 +1000,8 @@ Where it goes                            // capture.route; capture.routing's aut
 
 hex capture list|show|send|route         // capture.cli; docs/cli.md
 ├── list [--limit N] -> the newest bundles in the captures folder: mode, words,
-│   where it went
+│   where it went; words count a model's own word times, else the words in the
+│   transcript's text
 ├── show <capture> -> one capture's words, files, and send; a capture whose
 │   audio stopped early (the 8 h disk guard, or a failed write) says where
 ├── send <capture> [--to <session>] [--always] -> needs a listening Hex
@@ -1079,7 +1090,9 @@ Checks:
 - Words, in parakeet.rs: `chunked_word_transcription_keeps_word_times_across_chunks`
   and `word_transcription_is_a_foreground_request_on_the_shared_engine`;
   `foreground_work_waits_for_an_open_stream_instead_of_interrupting_it` in
-  [transcription/engine.rs](../../src/transcription/engine.rs).
+  [transcription/engine.rs](../../src/transcription/engine.rs);
+  `a_transcript_without_word_times_counts_the_words_it_says` in
+  [transcribe.rs](../../crates/capture/src/transcribe.rs).
 - Host, in capture_host.rs (a fake engine that writes through Scrawl's real
   `finalize_capture_bundle_with_flags`, without a screen):
   `controls_are_idempotent_and_stop_writes_a_scrawl_bundle`,
@@ -1102,7 +1115,11 @@ Checks:
   In capture_host/wav_file.rs: `a_finished_file_reads_back_and_can_be_trimmed`,
   `a_keep_past_the_written_samples_keeps_them_all`, and
   `the_file_is_owner_only`.
-  In capture_host/words.rs: `pieces_past_the_first_window_keep_their_place_on_the_clock`.
+  In capture_host/words.rs: `pieces_past_the_first_window_keep_their_place_on_the_clock`,
+  `an_untimed_piece_spreads_over_its_own_audio_only`, and
+  `a_model_without_word_times_spreads_its_text_over_the_clip`;
+  `an_untimed_capture_gets_its_words_spread_over_its_length` in
+  [rune_ui/captures.rs](../../src/rune_ui/captures.rs).
 - The audio-stopped notice: `summary_says_where_a_captures_audio_stopped` in
   [sketch.rs](../../crates/capture/src/sketch.rs);
   `lengths_read_as_clocks_at_an_hour` and
@@ -1164,7 +1181,8 @@ Checks:
   `an_app_rules_folder_is_read_with_the_sessions`, and
   `a_look_past_its_deadline_skips_what_it_hadnt_begun`
   in [look.rs](../../crates/router/src/routing/look.rs); the CLI's
-  `a_capture_on_disk_summarizes_its_mode_words_and_send` in
+  `a_capture_on_disk_summarizes_its_mode_words_and_send` and
+  `a_capture_without_word_times_counts_the_words_it_says` in
   [library.rs](../../src/capture_host/library.rs), the protocol round trips in
   control.rs, and `control_commands_parse` in main.rs.
 - Switching, in capture_host.rs:

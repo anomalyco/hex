@@ -173,6 +173,17 @@ pub fn normalize_transcript(transcript: TranscriptData, start_offset_ms: u64) ->
     transcript
 }
 
+/// How many words a transcript holds: its word times, or the words in its
+/// text when the model gave none (GigaAM v3 asks for no timestamps), so a
+/// capture that was heard but left untimed never counts as silence.
+pub fn word_count(transcript: &TranscriptData) -> usize {
+    if transcript.words.is_empty() {
+        transcript.text.split_whitespace().count()
+    } else {
+        transcript.words.len()
+    }
+}
+
 fn with_temp_wav<T>(audio: &RecordedAudio, f: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
     let wav = audio.wav_bytes_16k()?;
     let path = std::env::temp_dir().join(format!(
@@ -480,7 +491,7 @@ fn finish_live(
         Ok(done) => {
             crate::log::scrawl_log(format!(
                 "Live transcription: {} words, {} of {} ms streamed, tail {} ms",
-                done.transcript.words.len(),
+                word_count(&done.transcript),
                 done.streamed_samples as u64 * 1_000 / 16_000,
                 audio.duration_ms(),
                 done.tail_ms
@@ -746,6 +757,42 @@ mod tests {
         assert_eq!(tr.segments[0].t0, 260);
         assert_eq!(tr.segments[0].t1, 350);
         assert_eq!(tr.segments[0].text, "hello world.");
+    }
+
+    /// A model that gives no word times (GigaAM v3) still said words, so the
+    /// count comes from the text and only silence counts none.
+    #[test]
+    fn a_transcript_without_word_times_counts_the_words_it_says() {
+        let untimed = TranscriptData {
+            source: "hex".into(),
+            text: " make it blue ".into(),
+            ..Default::default()
+        };
+        assert_eq!(word_count(&untimed), 3);
+        assert_eq!(word_count(&named("speech-analyzer")), 0);
+        let blank = TranscriptData {
+            text: " \n ".into(),
+            ..Default::default()
+        };
+        assert_eq!(word_count(&blank), 0, "whitespace alone is silence");
+
+        let timed = TranscriptData {
+            text: "make it blue".into(),
+            words: vec![
+                WordTiming {
+                    t0: 0,
+                    t1: 200,
+                    text: "make".into(),
+                },
+                WordTiming {
+                    t0: 200,
+                    t1: 400,
+                    text: "it".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(word_count(&timed), 2, "the model's own words count");
     }
 
     #[test]

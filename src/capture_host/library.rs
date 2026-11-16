@@ -130,7 +130,7 @@ fn summary(dir: &Path, bundle: &ScrawlBundle) -> ScrawlCaptureSummary {
         duration_ms: bundle.duration_ms,
         mode: mode.into(),
         app: bundle.target.app.clone(),
-        words: bundle.transcript.words.len(),
+        words: scrawl_capture::transcribe::word_count(&bundle.transcript),
         sent_to: bundle
             .destination
             .as_ref()
@@ -191,6 +191,40 @@ mod tests {
                 .unwrap_err()
                 .code,
             "not-found"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A model that gives no word times (GigaAM v3) said every word in the
+    /// text, so the list counts them and the capture never reads as silence.
+    #[test]
+    fn a_capture_without_word_times_counts_the_words_it_says() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-capture-untimed-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let frame = r#"{"x":0,"y":0,"width":1,"height":1,"scale":2}"#;
+        let write = |name: &str, text: &str| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            let manifest = format!(
+                r#"{{"version":1,"id":"a","createdAtMs":1792933491953,"durationMs":4000,
+                "target":{{"mode":"display","displayId":1,"frame":{frame}}},
+                "transcript":{{"source":"hex","text":"{text}","segments":[],"words":[]}},
+                "strokes":[],"marks":[],"events":[],"keyframes":[],"contactSheet":"sheet.jpg"}}"#
+            );
+            std::fs::write(dir.join("scrawl.json"), manifest).unwrap();
+            let bundle = load(&dir).expect("the manifest reads");
+            summary(&dir, &bundle).words
+        };
+        assert_eq!(write("1792933491953.scrawl", " make it blue "), 3);
+        assert_eq!(
+            write("1792933491954.scrawl", "  "),
+            0,
+            "silence counts none"
         );
         let _ = std::fs::remove_dir_all(root);
     }
