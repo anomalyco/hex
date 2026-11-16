@@ -38,10 +38,11 @@ pub(crate) type Background = Box<dyn FnOnce(Option<&mut Model>) + Send>;
 /// A healthy finish decodes at most a couple of seconds of buffered audio.
 /// Past this the stream is aborted and the clip is transcribed offline.
 const STREAM_FINISH_DEADLINE: Duration = Duration::from_millis(1_500);
-/// Audio fed past the clip's trimmed end that the stream may still keep.
-/// The audio owner caps live feeding at the release plus the base tail
-/// (`DictationCapture::limit_stream_to`), so only a caller that feeds more
-/// than its clip keeps trips this. Beyond it, the offline clip is authoritative.
+/// Audio fed past the clip's trimmed end (a release handled late) that the
+/// stream may still keep. The audio owner caps live feeding at the release
+/// plus the base tail (`DictationCapture::limit_stream_to`), but audio that
+/// arrived before the finish began can still sit past the clip's end. Beyond
+/// this, the offline clip is authoritative.
 const MAX_OVERFED_SAMPLES: usize = 16_000 / 4;
 /// How long a job may run once the engine starts it, before the clip's own
 /// share. It covers activating and prewarming the largest model inside the
@@ -91,6 +92,10 @@ pub(crate) enum Command {
         /// Where the stream publishes its text after each feed, when live
         /// text is on (Labs).
         partials: Option<Partials>,
+        /// Clip samples of Hex's own sounds at the capture's head (the
+        /// pre-roll and the start tone): speech it heard there is never a
+        /// lost opening.
+        head_ignored: usize,
     },
     Feed {
         stream: u64,
@@ -646,7 +651,15 @@ impl TranscriptionEngine {
     }
 
     /// Opens a live stream when the loaded model can stream on this device.
+    #[cfg(test)]
     pub fn begin(&self) -> Option<LiveStream> {
+        self.begin_ignoring_head(0)
+    }
+
+    /// Opens a live stream whose opening-coverage check ignores `head_ignored`
+    /// clip samples: Hex's own sounds at the capture's head, never a lost
+    /// opening.
+    pub fn begin_ignoring_head(&self, head_ignored: usize) -> Option<LiveStream> {
         if !self.streams.load(Ordering::Acquire) {
             return None;
         }
@@ -659,6 +672,7 @@ impl TranscriptionEngine {
                 stream: id,
                 cancel: cancel.clone(),
                 partials: partials.clone(),
+                head_ignored,
             })
             .ok()?;
         Some(LiveStream {
@@ -1068,10 +1082,18 @@ impl Worker {
                     stream,
                     cancel,
                     partials,
+                    head_ignored,
                 } => {
                     self.dictating.store(true, Ordering::Release);
                     crate::dictation::vocabulary::for_dictation(|| {
-                        self.stream(stream, &cancel, partials.as_ref(), &commands, &mut next);
+                        self.stream(
+                            stream,
+                            &cancel,
+                            partials.as_ref(),
+                            head_ignored,
+                            &commands,
+                            &mut next,
+                        );
                     });
                     self.dictating.store(false, Ordering::Release);
                 }
@@ -1260,6 +1282,7 @@ impl Worker {
         id: u64,
         cancel: &CancelToken,
         partials: Option<&Partials>,
+        head_ignored: usize,
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
@@ -1305,7 +1328,7 @@ impl Worker {
         };
         let trailing_silence = stream_trailing_silence(model);
         let ended = model.with_stream(&options, cancel, |stream| {
-            let mut capped = PauseCap::new(stream, trailing_silence);
+            let mut capped = PauseCap::new(stream, trailing_silence).ignoring_head(head_ignored);
             let ended = drive_stream(
                 id,
                 &mut capped,
@@ -1659,12 +1682,23 @@ mod tests {
         text_start_ms: Option<u64>,
         text_end_ms: u64,
     ) -> Result<String, String> {
+        finish_with_text_bounds_ignoring_head(clip, 0, text_start_ms, text_end_ms)
+    }
+
+    /// As above, with `head_ignored` clip samples of Hex's own sounds at the
+    /// capture's head, as the audio owner passes for a real capture.
+    fn finish_with_text_bounds_ignoring_head(
+        clip: &[f32],
+        head_ignored: usize,
+        text_start_ms: Option<u64>,
+        text_end_ms: u64,
+    ) -> Result<String, String> {
         let mut fake = FakeStream {
             text_start_ms,
             text_end_ms: Some(text_end_ms),
             ..FakeStream::default()
         };
-        let mut capped = PauseCap::new(&mut fake, 0);
+        let mut capped = PauseCap::new(&mut fake, 0).ignoring_head(head_ignored);
         for chunk in clip.chunks(1_600) {
             capped.feed(chunk).unwrap();
         }
@@ -1756,54 +1790,46 @@ mod tests {
     }
 
     #[test]
-    fn an_isolated_burst_before_a_late_first_token_does_not_discard_the_stream() {
-        // Hex's own start tone is 98-272 ms and its click is shorter, but a
-        // tone plus the mic's decay reaches the 300 ms the check counts. It
-        // sits at the clip's head; the first word comes 2 s later. That is a
-        // sound on its own, not an opening the stream lost.
-        let mut clip = vec![0.0; 8_000]; // 500 ms of room
-        clip.extend(tone(6_400)); // 400 ms of tone at 0.5-0.9 s
-        clip.extend(vec![0.0; 32_000]); // 2 s before the first word
-        clip.extend(tone(16_000)); // the dictation itself, 2.9-3.9 s
+    fn hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening() {
+        // The pre-roll, the 272 ms Classic start tone, and the tap's click
+        // (0.45-0.82 s) are Hex's own sounds; the first word comes 0.8 s
+        // later. The stream lost nothing, so the clip is kept.
+        let mut clip = vec![0.0; 7_200]; // 450 ms of pre-roll
+        clip.extend(tone(4_352)); // the 272 ms start tone
+        clip.extend(tone(1_600)); // the tap's click, 100 ms
+        clip.extend(vec![0.0; 12_448]); // room up to 1.6 s
+        clip.extend(tone(16_000)); // the dictation itself, 1.6-2.6 s
         clip.extend(vec![0.0; 3_200]);
+        let head = 14_400; // 900 ms: the pre-roll, the tone, and its margin
         assert_eq!(
-            finish_with_text_bounds(&clip, Some(2_900), 3_900),
+            finish_with_text_bounds_ignoring_head(&clip, head, Some(1_600), 2_600),
             Ok(format!("streamed {}", clip.len()))
         );
-    }
-
-    #[test]
-    fn a_split_burst_that_reaches_the_threshold_is_not_a_lost_opening() {
-        // Two 200 ms bursts (two taps, or a tone and a click) add up to more
-        // than 300 ms and the second ends 190 ms before the text's slack, but
-        // they are not one run of speech: only a run that runs into the text
-        // can be a lost opening.
-        let mut clip = vec![0.0; 23_200]; // 1.45 s of room
-        clip.extend(tone(3_200)); // 200 ms
-        clip.extend(vec![0.0; 4_960]); // 310 ms between the bursts
-        clip.extend(tone(3_200)); // 200 ms, ending 190 ms before the slack
-        clip.extend(vec![0.0; 9_600]); // 600 ms
-        clip.extend(tone(16_000)); // the dictation itself, 2.75-3.75 s
-        clip.extend(vec![0.0; 3_200]);
-        assert_eq!(
-            finish_with_text_bounds(&clip, Some(2_750), 3_750),
-            Ok(format!("streamed {}", clip.len()))
-        );
-    }
-
-    #[test]
-    fn speech_running_into_the_texts_start_is_still_a_lost_opening() {
-        // 1.5 s of speech, 1.1 s of it before the text's slack: it runs
-        // straight into the first token, so the whole clip decides.
-        let mut clip = vec![0.0; 24_000];
-        clip.extend(tone(24_000)); // 1.5-3.0 s
-        clip.extend(vec![0.0; 3_200]);
-        let result = finish_with_text_bounds(&clip, Some(3_000), 3_000);
+        // Without the exclusion the same sounds are 400 ms of "speech" before
+        // the text, which is what a real model sees when they are all the head
+        // holds.
         assert!(
-            result
-                .as_ref()
-                .is_err_and(|reason| reason.contains("precedes")
-                    && reason.contains("running from 1500 to 2580 ms")),
+            finish_with_text_bounds(&clip, Some(1_600), 2_600)
+                .is_err_and(|reason| reason.contains("precedes")),
+            "the head exclusion is what keeps this stream"
+        );
+    }
+
+    #[test]
+    fn a_lost_opening_after_a_long_pause_still_falls_back_to_the_whole_clip() {
+        // The review's case: 1.6 s of speech the stream lost, then a 1 s
+        // pause, then the text at 3.5 s. The pause is longer than the check's
+        // 400 ms slack, so nothing but counting the speech itself can catch it.
+        let mut clip = vec![0.0; 14_400]; // 900 ms: pre-roll and start tone
+        clip.extend(tone(25_600)); // 1.6 s of lost speech, 0.9-2.5 s
+        clip.extend(vec![0.0; 16_000]); // a 1 s pause
+        clip.extend(tone(16_000)); // the text's own speech, 3.5-4.5 s
+        clip.extend(vec![0.0; 3_200]);
+        let result = finish_with_text_bounds_ignoring_head(&clip, 14_400, Some(3_500), 4_500);
+        assert!(
+            result.as_ref().is_err_and(
+                |reason| reason.contains("precedes") && reason.contains("from 900 to 2500 ms")
+            ),
             "{result:?}"
         );
     }

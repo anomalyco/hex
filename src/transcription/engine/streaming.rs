@@ -142,43 +142,6 @@ pub(super) fn spoken_text_end_ms(tokens: &[transcribe_cpp::Token]) -> Option<u64
         .map(|end| end as u64)
 }
 
-/// The speech the stream heard that runs into `covered`: the contiguous run
-/// ending at the last speech frame before it, bridging at most
-/// [`BRIDGE_GAP_FRAMES`] quiet frames, when that run ends within
-/// [`UNTRANSCRIBED_SLACK_SAMPLES`] of `covered`.
-///
-/// Only such a run is a lost opening. Hex's own start and stop tones, a cough,
-/// and a click sit at the clip's head as their own short run, seconds before
-/// the first word, and must not make the whole clip decide.
-///
-/// Returns the run's first and last frame ends and its length, in samples.
-fn leading_speech_run(speech_ends: &[usize], covered: usize) -> Option<(usize, usize, usize)> {
-    let frame = crate::transcription::pause_segmenter::FRAME_SAMPLES;
-    let mut ends = speech_ends
-        .iter()
-        .rev()
-        .copied()
-        .filter(|&end| end < covered);
-    let last = ends.next()?;
-    // A first token may be emitted up to the trailing check's slack after the
-    // audio it covers, so speech that ends that far before `covered` still
-    // runs into the text.
-    if covered - last > UNTRANSCRIBED_SLACK_SAMPLES {
-        return None;
-    }
-    let bridge = (BRIDGE_GAP_FRAMES + 1) * frame;
-    let mut first = last;
-    let mut count = 1;
-    for end in ends {
-        if first - end > bridge {
-            break;
-        }
-        first = end;
-        count += 1;
-    }
-    Some((((first - frame) / 16), last / 16, count * frame))
-}
-
 /// Silence a dictation stream of `model` hears after the clip, before it
 /// finalizes: the same trailing silence its whole-clip runs get, so a
 /// streamed sentence keeps its closing punctuation (issue 657). Applies on
@@ -202,10 +165,6 @@ pub(super) const UNTRANSCRIBED_SLACK_SAMPLES: usize = 6_400;
 /// unusable: a phrase the stream dropped (#1101). Longer than the stop
 /// tone or key click the clip's 200 ms tail can carry.
 pub(super) const UNTRANSCRIBED_SPEECH_SAMPLES: usize = 4_800;
-/// Quiet frames a run of speech may skip over, as between syllables: the
-/// allowance the release tail makes for speech carrying past the release
-/// (`TAIL_SPEECH_GAP_FRAMES` in `crate::dictation`).
-pub(super) const BRIDGE_GAP_FRAMES: usize = 2;
 
 /// A dictation stream that hears at most the head and tail of each pause.
 /// Parakeet's buffered stream can drop the first word after a pause longer
@@ -213,12 +172,12 @@ pub(super) const BRIDGE_GAP_FRAMES: usize = 2;
 /// offline fallback, keeps every sample.
 ///
 /// It also checks the finalized text covers the speech the stream heard at
-/// both ends: a run of speech that runs into its start means the stream lost
-/// its opening, speech well past its end means it dropped a phrase (#1101),
-/// and the whole clip decides. A shorter sound before the speech (Hex's own
-/// tones, a cough, a click) is its own run and never decides. A raw decode
-/// carrying two different language tags means it changed language mid-clip,
-/// so the whole clip decides too.
+/// both ends: speech before its start that Hex did not itself play means the
+/// stream lost its opening, speech well past its end means it dropped a
+/// phrase (#1101), and the whole clip decides. The capture's own sounds (the
+/// pre-roll, the start tone) are ignored at the head. A raw decode carrying
+/// two different language tags means it changed language mid-clip, so the
+/// whole clip decides too.
 pub(super) struct PauseCap<'a, S> {
     stream: &'a mut S,
     speech: crate::transcription::pause_segmenter::SpeechFrames,
@@ -237,6 +196,9 @@ pub(super) struct PauseCap<'a, S> {
     heard: bool,
     /// Silence fed after the clip, just before finalizing.
     trailing_silence: usize,
+    /// Clip samples of Hex's own sounds at the capture's head: the pre-roll
+    /// and the start tone. Speech there is never a lost opening.
+    head_ignored: usize,
 }
 
 impl<'a, S: StreamFeed> PauseCap<'a, S> {
@@ -252,7 +214,15 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             dropped: 0,
             heard: false,
             trailing_silence,
+            head_ignored: 0,
         }
+    }
+
+    /// Ignores `head` clip samples when it judges a lost opening, as Hex's own
+    /// sounds at the capture's head are not speech the stream lost.
+    pub(super) fn ignoring_head(mut self, head: usize) -> Self {
+        self.head_ignored = head;
+        self
     }
 
     fn frame(&mut self, out: &mut Vec<f32>) {
@@ -330,18 +300,32 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
             && let Some(start_ms) = self.stream.text_start_ms()
         {
             // The trailing check's slack and threshold, on the speech that
-            // runs into the text's start. Unlike the trailing check, a
-            // late-emitted first token moves t0 later, the unsafe direction
-            // here, so the cost is at most a whole-clip run.
+            // ends before the text begins, without Hex's own sounds at the
+            // capture's head. Unlike the trailing check, a late-emitted first
+            // token moves t0 later, the unsafe direction here, so the cost is
+            // at most a whole-clip run.
             let covered = (start_ms as usize * 16).saturating_sub(UNTRANSCRIBED_SLACK_SAMPLES);
-            if let Some((run_start_ms, run_end_ms, untranscribed)) =
-                leading_speech_run(&self.speech_ends, covered)
-                && untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES
+            let frame = crate::transcription::pause_segmenter::FRAME_SAMPLES;
+            let (mut first, mut last, mut untranscribed) = (None, 0, 0);
+            for end in self
+                .speech_ends
+                .iter()
+                .copied()
+                .filter(|&end| end > self.head_ignored && end < covered)
+            {
+                first.get_or_insert(end);
+                last = end;
+                untranscribed += frame;
+            }
+            if untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES
+                && let Some(first) = first
             {
                 return Err(format!(
                     "the stream's text starts at {start_ms} ms but {} ms of speech precedes it, \
-                     running from {run_start_ms} to {run_end_ms} ms",
-                    untranscribed / 16
+                     from {} to {} ms",
+                    untranscribed / 16,
+                    (first - frame) / 16,
+                    last / 16
                 ));
             }
         }

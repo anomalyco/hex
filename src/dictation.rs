@@ -19,6 +19,7 @@ pub(crate) mod live_text;
 pub(crate) mod modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
+mod release_tail;
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) mod screen_vocabulary;
 pub(crate) mod service;
@@ -39,6 +40,8 @@ use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 
 use crate::audio::CaptureInstant;
 use crate::transcription::engine::{LiveStream, Partial, TranscriptionEngine};
+
+pub use release_tail::{ReleaseTail, ReleaseWait};
 
 #[cfg(target_os = "macos")]
 use crate::audio::recording_environment::{
@@ -170,88 +173,6 @@ const STREAM_FEED_SAMPLES: usize = 2_560;
 pub enum Finish {
     Discard,
     Transcribe(DictationClip),
-}
-
-/// Where a shortcut finish's tail stands, from the audio recorded so far.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReleaseTail {
-    /// More audio is needed. `growing` once speech has carried past
-    /// [`POST_RELEASE_TAIL`], so the wait is bounded by
-    /// [`MAX_RELEASE_TAIL`] rather than the base tail.
-    Waiting { growing: bool },
-    /// Finish keeping this much audio after the release.
-    Through(Duration),
-}
-
-impl ReleaseTail {
-    /// The longest tail a wait in this state may still end with.
-    pub fn bound(self) -> Duration {
-        match self {
-            Self::Waiting { growing: true } => MAX_RELEASE_TAIL,
-            Self::Waiting { growing: false } => POST_RELEASE_TAIL,
-            Self::Through(tail) => tail,
-        }
-    }
-}
-
-/// A shortcut release waiting for its tail, for capture loops that poll
-/// between microphone chunks (Linux and Windows; the macOS audio owner
-/// drains its tail directly).
-#[cfg(not(target_os = "macos"))]
-pub struct ReleaseWait {
-    ended_at: CaptureInstant,
-    started: std::time::Instant,
-    tone: Duration,
-    waits: bool,
-}
-
-#[cfg(not(target_os = "macos"))]
-impl ReleaseWait {
-    /// How long past a tail itself the loop waits for its audio.
-    const GRACE: Duration = Duration::from_millis(100);
-
-    /// A release at `ended_at`. Only one that will transcribe waits; its
-    /// stop tone (sounding from now) is never taken for speech.
-    pub fn new(capture: &DictationCapture, ended_at: CaptureInstant) -> Self {
-        let waits = capture.would_transcribe(ended_at);
-        Self {
-            ended_at,
-            started: std::time::Instant::now(),
-            tone: if waits {
-                crate::feedback::stop_tone_length()
-            } else {
-                Duration::ZERO
-            },
-            waits,
-        }
-    }
-
-    pub fn ended_at(&self) -> CaptureInstant {
-        self.ended_at
-    }
-
-    pub fn waits(&self) -> bool {
-        self.waits
-    }
-
-    /// Finishes with the audio already captured, as after a lost microphone.
-    pub fn stop_waiting(&mut self) {
-        self.waits = false;
-    }
-
-    /// The tail to finish with once it is decided, or once the wait for it
-    /// is over (the base tail plus the grace, or the longest tail plus the
-    /// grace while speech grows it); `None` while it is still coming.
-    pub fn tail(&self, capture: &DictationCapture, now: std::time::Instant) -> Option<Duration> {
-        if !self.waits {
-            return Some(POST_RELEASE_TAIL);
-        }
-        match capture.release_tail(self.ended_at, self.tone) {
-            ReleaseTail::Through(tail) => Some(tail),
-            waiting if now >= self.started + waiting.bound() + Self::GRACE => Some(waiting.bound()),
-            ReleaseTail::Waiting { .. } => None,
-        }
-    }
 }
 
 /// Speech flags of a recording's 16 kHz audio, one per 20 ms frame, against
@@ -860,8 +781,9 @@ struct Recording {
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
-    /// Clip samples a live stream may hear once a finish begins: the clip is
-    /// authoritative, so the stream never hears audio the clip trims.
+    /// Clip samples a live stream may hear once a finish begins. The clip is
+    /// authoritative; audio fed before the finish can still sit past its end,
+    /// which the engine's overfeed tolerance covers.
     feed_limit: Option<usize>,
     /// This capture already logged why it has no live stream, so the retry
     /// on every audio chunk never repeats it.
@@ -999,6 +921,22 @@ impl Recording {
         let recorded = &self.samples[delay.min(self.samples.len())..];
         let fresh = &recorded[self.voice.consumed.min(recorded.len())..];
         self.voice.extend(fresh);
+    }
+
+    /// Clip samples of Hex's own sounds at the capture's head: the pre-roll
+    /// (a retracted double-tap first tone, an earlier dictation's stop tone)
+    /// through the press, then the start tone and the output and input latency
+    /// it takes to reach the microphone. A stream that hears them has not lost
+    /// any speech.
+    fn head_ignored(&self) -> usize {
+        let tone = crate::feedback::start_tone_length();
+        let after_press = if tone.is_zero() {
+            Duration::ZERO
+        } else {
+            tone + STOP_TONE_MARGIN
+        };
+        samples_for(self.pre_press, PARAKEET_SAMPLE_RATE)
+            + samples_for(after_press, PARAKEET_SAMPLE_RATE)
     }
 
     /// The 20 ms clip frame `at` falls in.
@@ -1409,7 +1347,7 @@ impl DictationCapture {
         if recording.stream.is_some() {
             return;
         }
-        recording.stream = engine.begin();
+        recording.stream = engine.begin_ignoring_head(recording.head_ignored());
         // The capture retries the stream on each audio chunk; say once, and
         // only when it would have shown live words, why there is none.
         if recording.stream.is_none()
@@ -1444,9 +1382,11 @@ impl DictationCapture {
     }
 
     /// Caps the live stream at the audio this finish keeps: everything through
-    /// `ended_at + tail`, in final-clip coordinates. A grown tail and the wait
-    /// for the stop tone are fed from the finished clip instead, so the stream
-    /// never hears samples the clip trims away.
+    /// `ended_at + tail`, in final-clip coordinates. A grown tail, and audio
+    /// captured while the tail decides, arrive from the finished clip instead,
+    /// so the stream is never fed past the clip from here on. What it heard
+    /// before the finish can still sit past the clip's end, which the engine's
+    /// overfeed tolerance covers.
     pub fn limit_stream_to(&mut self, ended_at: CaptureInstant, tail: Duration) {
         let Some(recording) = &mut self.recording else {
             return;

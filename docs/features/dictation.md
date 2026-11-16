@@ -1434,9 +1434,11 @@ and Windows loops (`ReleaseWait`) wait at most the base tail plus 100 ms, or
 **The tail's wait can outlast the base tail** (a 428 ms Classic stop sound
 plus 160 ms of speech after it), so every finish caps the live stream at the
 release plus `POST_RELEASE_TAIL` when it begins (`limit_stream_to`): audio
-captured during the wait is audio the clip trims, and `finish_stream` feeds
-the remainder of the clip, so the stream never hears past what the clip
-keeps. Check: `a_long_release_tail_never_feeds_the_stream_past_the_clip`.
+captured during the wait is trimmed from the clip unless the tail grows to
+keep it, and either way `finish_stream` feeds the remainder of the finished
+clip. Audio that arrived before the finish began can still sit past the
+clip's trimmed end; `MAX_OVERFED_SAMPLES` (250 ms) tolerates that late
+release. Check: `a_long_release_tail_never_feeds_the_stream_past_the_clip`.
 Escape, short taps, voice controls, programmatic stops, and meetings still
 get no tail. Other checks in dictation.rs:
 `a_word_said_through_the_release_keeps_the_tail_open_until_it_ends`,
@@ -1461,13 +1463,14 @@ Model advertises streaming, GPU device             // dictate.streaming
     -> Finish with the complete clip
     -> Feed any unfed remainder
     -> The finish caps the stream at release + 200 ms when it begins
-       // audio captured while the tail decides is trimmed from the clip
+       // audio captured while the tail decides is trimmed unless the tail grows
     -> Unified English: feed 400 ms of silence, as the whole clip gets (every OS)
     -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
-       ├── ≥ 300 ms of one run of speech that runs into the text's start
-       │   -> Transcribe the whole clip offline (source=fallback)   // lost opening
+       ├── ≥ 300 ms of speech it heard before the text, outside the pre-roll and
+       │   start tone   -> Transcribe the whole clip offline (source=fallback)
+       │                                                  // likely lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
        ├── The raw decode carries two different <ll-RR> language tags
@@ -1729,20 +1732,27 @@ macOS or a microphone.
 
 **Guard, November 7, 2026 (opening and language):** the coverage check now
 also runs at the start. `PauseCap` takes the first token with letters or
-digits (`spoken_text_start_ms`, the minimum `t0_ms`) and looks at the speech
+digits (`spoken_text_start_ms`, the minimum `t0_ms`) and sums the speech
 frames the stream heard that end more than 400 ms before it; at least 300 ms
-in one run of such speech means the stream lost its opening, so the whole clip
-is transcribed offline (`source=fallback`, reason "the stream's text starts at …
-ms but … ms of speech precedes it, running from … to … ms"). Only one run of
-speech counts: the contiguous run that ends nearest that boundary, bridging
-syllable gaps of up to 40 ms (`BRIDGE_GAP_FRAMES`), and only while it ends
-within that same 400 ms of the boundary — the slack a first token may be
-emitted late by. Sounds that sit at the clip's head as their own run, seconds
-before the first word, never decide: Hex's own start tone (98–272 ms) and the
-double tap's click, a cough, or two taps adding up to 300 ms all stay short
-runs of their own, which is the false positive the first version had
-(`an_isolated_burst_before_a_late_first_token_does_not_discard_the_stream`,
-`a_split_burst_that_reaches_the_threshold_is_not_a_lost_opening`). This check
+of such speech means the stream lost its opening, so the whole clip is
+transcribed offline (`source=fallback`, reason "the stream's text starts at …
+ms but … ms of speech precedes it, from … to … ms"). Speech inside the press
+window is not counted: the pre-roll through the press, plus the current set's
+start sound (`feedback::start_tone_length`) and the output and input latency
+it takes to reach the microphone (`STOP_TONE_MARGIN`), all of it Hex's own
+audio — a retracted double-tap tone and an earlier dictation's stop tone live
+in the pre-roll, and the start tone follows the press. The clip knows that
+offset (`Recording::head_ignored`, from `pre_press`) and the stream is opened
+with it. Hex's tones are a likely source of false positives on a real
+microphone (the first version of this check, which summed them, rejected
+streams that had lost nothing — see
+`hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening`), but that is
+not measured on a device, and the false-positive rate of this check on real
+speech (fillers, coughs, clicks outside the press window) is still unmeasured.
+Because it counts every counted frame, a lost opening is caught however it is
+broken up, including one followed by a pause longer than the 400 ms slack
+(`a_lost_opening_after_a_long_pause_still_falls_back_to_the_whole_clip`).
+This check
 cannot see an opening that was garbled rather than dropped: a garbled opening
 still yields word tokens at the speech onset. The stream's unfiltered raw
 decode also keeps Nemotron 3.5's `<ll-RR>` language tags, which the public
@@ -1752,7 +1762,7 @@ garbled opening only when the garbled part carries a different tag, and
 neither check catches a stream that stays in one wrong language for the whole
 clip. Checks:
 `a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip`,
-`speech_running_into_the_texts_start_is_still_a_lost_opening`,
+`a_lost_opening_after_a_long_pause_still_falls_back_to_the_whole_clip`,
 `a_short_click_before_the_text_does_not_discard_the_stream`,
 `a_punctuation_token_does_not_start_the_streams_text`, and
 `a_stream_that_switched_language_falls_back_to_the_whole_clip` (synthetic
