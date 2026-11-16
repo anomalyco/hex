@@ -696,18 +696,17 @@ Details and checks in [labs.md](labs.md).
 ### YOLO Mode (Labs, every OS)
 
 With Labs › YOLO mode on (`labs.yolo_mode`, off by
-default), a long shortcut dictation sends itself:
+default), even a one-word shortcut dictation sends itself:
 
 ```ts
-Dictation shortcut released (hold, lock, or Toggle)
-  -> Held = press to release, without pre-roll or release tail
-Paste job, as the output commits                     // dictate.yolo-mode
-├── Held >= the chosen time (1-10 s, default 2 s), and the frontmost app is one
-│   of Only in's apps (none chosen = every app) -> Paste as usual
+Shortcut dictation (hold, lock, or Toggle)            // dictate.yolo-mode
+├── Discarded tap, silence, cancellation, or no final text -> No paste or Return
+├── Only in matches the captured app (none chosen = every app) -> Paste final text
+│   ├── Insertion failed -> No Return
 │   -> Wait until 500 ms after submission and 100 ms after the paste (macOS)
 │   ├── No Escape since submission -> Press Return; History records Send
 │   └── Escape after the release (macOS) -> No Return; History records Dictation
-└── Shorter, or another app -> Paste as usual
+└── Another app -> Paste as usual, without Return
 Never: Dictate without processing, `hex dictation`, the local API,
 printing stops, Copy dictation only, Live typing, meetings, captures,
 Paste last dictation

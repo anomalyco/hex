@@ -767,7 +767,7 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.yolo_mode = true;
         ui.settings.labs.yolo_mode_apps = vec!["Messages".into(), "Slack".into()];
         crate::labs::apply(&ui.settings.labs);
-        ui.lab_store.group = Some(crate::labs::Feature::YoloMode.group());
+        ui.lab_store.search = rune::TextEdit::new("YOLO".to_owned());
     }),
     // The same card with its Only in picker open over the cards below.
     ("mac-labs-yolo-mode-picker", |ui| {

@@ -929,9 +929,8 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::AppModelSwitching => ui.open = None,
         // The card's duration menu closes when its lab does.
         Feature::KeepMicrophoneOpen => ui.open = None,
-        // Its menu and application picker close with it.
+        // Its application picker closes with it.
         Feature::YoloMode => {
-            ui.open = None;
             if ui.modes.picker_target == super::modes::PickerTarget::YoloMode {
                 ui.modes.application_picker_open = false;
             }
