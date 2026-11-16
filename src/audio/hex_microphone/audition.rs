@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn audition_changes_only_the_requested_span_and_only_on_its_copy() {
         let live = TunedFilterConfig::default();
-        let input = vec![0.25; 48000];
+        let input = vec![0.25; 5 * 48000];
         let render = |track| {
             Clip {
                 track,
@@ -165,9 +165,10 @@ mod tests {
         };
         let muted = render(DemoPlaybackTrack::Effect(Muted));
         assert_eq!(muted.len(), input.len());
-        assert_eq!(&muted[..10000], &input[..10000]);
-        assert_eq!(&muted[45000..], &input[45000..]);
-        assert!(muted[24000].abs() < 0.01);
+        assert!(muted[..48000] == input[..48000]);
+        // The preset fades back to the original after the dictation span.
+        assert!(muted[4 * 48000 + 24000..] == input[4 * 48000 + 24000..]);
+        assert!(muted[2 * 48000].abs() < 0.01);
         assert_ne!(muted, render(DemoPlaybackTrack::Effect(Robot)));
         assert_eq!(render(DemoPlaybackTrack::You), input);
         assert_eq!(live.mode, Muffled);
