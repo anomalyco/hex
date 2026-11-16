@@ -85,3 +85,45 @@ fn an_old_opt_in_is_ignored_without_changing_other_labs() {
     assert_eq!(labs["appearance"], true);
     assert!(labs.get("settings_search").is_none());
 }
+
+#[test]
+fn recorder_and_modal_keep_their_keys() {
+    let mut recording = runtime("mac-settings-recording");
+    send(&mut recording, Key::Command('k'));
+    assert!(!recording.state.find.open);
+    let mut dialog = runtime("mac-settings");
+    let (x, y) = dialog.find("shortcut-mode-control").unwrap();
+    dialog.pointer_down(x, y);
+    dialog.pointer_up(x, y);
+    dialog.frame(0.0);
+    assert!(dialog.state.explainer.open);
+    send(&mut dialog, Key::Command('k'));
+    assert!(dialog.state.explainer.open && !dialog.state.find.open);
+}
+
+#[test]
+fn an_unavailable_shortcut_is_not_a_setting_hit() {
+    let rt = runtime("mac-settings");
+    let second = Link::Setting(Pane::General, "second-dictation-shortcut", false);
+    assert!(!entries(&rt.state).iter().any(|e| e.link == second));
+    // People can still find the lab that offers it, without enabling it.
+    assert!(entries(&rt.state).iter().any(|e| e.link
+        == Link::Lab(labs::Lab::Feature(
+            crate::labs::Feature::SecondDictationShortcut
+        ))));
+}
+
+#[cfg(hex_capture)]
+#[test]
+fn annotate_only_lists_when_the_store_has_its_card() {
+    let mut rt = runtime("mac-scrawl");
+    let lab = Link::Lab(labs::Lab::Annotate);
+    assert!(entries(&rt.state).iter().any(|e| e.link == lab));
+    let before = rt.state.settings.clone();
+    rt.update(move |ui, tx| reveal(ui, tx, lab));
+    rt.frame(0.0);
+    assert!(focus(&rt).unwrap_or_default().ends_with("/lab-annotate"));
+    assert!(rt.state.settings == before);
+    rt.state.platform.scrawl = None;
+    assert!(!entries(&rt.state).iter().any(|e| e.link == lab));
+}
