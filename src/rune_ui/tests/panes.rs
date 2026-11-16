@@ -2537,7 +2537,7 @@ fn the_labs_store_filters_by_tab_chip_and_search() {
     let mut rt = runtime("mac-labs-on", true, (980.0, 2000.0));
     assert!(rt.find("lab-card-live-text").is_some());
     assert!(
-        rt.find("lab-card-vocabulary-biasing").is_none(),
+        rt.find("lab-card-screen-vocabulary").is_none(),
         "Turned on lists only what's on"
     );
     rt.update(|ui, _| ui.lab_store.tab = super::super::labs::Tab::Discover);

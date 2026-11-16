@@ -111,6 +111,52 @@ fn a_delayed_read_cannot_republish_runtime_values_from_before_a_save() {
     assert!(crate::app_settings::microphone_policy().release_while_idle);
 }
 
+/// Removing the per-app editor must not erase or enable a saved choice. An
+/// unrelated edit must also keep the separate second and four extra bindings.
+#[test]
+fn saved_mode_choices_and_five_shortcuts_survive_an_unrelated_edit() {
+    for enabled in [false, true] {
+        let binding = |key| HotkeyBinding {
+            modifiers: HotkeyModifiers::control_option(),
+            key: Some(HotkeyKey::named(key)),
+        };
+        let rows: Vec<_> = [
+            ("f1", "tap"),
+            ("f2", "hold"),
+            ("f3", "double_tap"),
+            ("f4", "hold_or_double_tap"),
+        ]
+        .into_iter()
+        .map(|(key, mode)| json!({"binding": binding(key), "mode": mode}))
+        .collect();
+        let speech = json!({"model":"parakeet_v3", "language":"es"});
+        let file = SettingsFile::new(&serde_json::to_vec(&json!({
+            "labs": {"app_model_switching": enabled, "second_dictation_shortcut":true, "more_dictation_shortcuts":true},
+            "dictation_processing": {"default_mode":{"speech":speech}, "modes":[{"name":"Work", "speech":speech}]},
+            "second_dictation_hotkey":binding("f5"), "extra_dictation_hotkeys":rows,
+        })).unwrap());
+        let before = AppSettings::load_from(&file.path).unwrap();
+        let mut edit = before.clone();
+        edit.sound_effects = !before.sound_effects;
+        before
+            .update_at(&edit, &file.path, Policy::default())
+            .unwrap();
+        let after = AppSettings::load_from(&file.path).unwrap();
+        assert_eq!(after.labs.app_model_switching, enabled);
+        for mode in [
+            &after.dictation_processing.default_mode,
+            &after.dictation_processing.modes[0],
+        ] {
+            assert_eq!(serde_json::to_value(&mode.speech).unwrap(), speech);
+        }
+        assert_eq!(after.second_dictation_hotkey, Some(binding("f5")));
+        assert_eq!(
+            serde_json::to_value(after.extra_dictation_hotkeys).unwrap(),
+            json!(rows)
+        );
+    }
+}
+
 /// The embedded service `hex transcribe` and the TypeScript SDK start reads
 /// the saved vocabulary, its boost, and the Labs switches with the decode a
 /// launch uses, writing nothing back. They produce the expected bias.
