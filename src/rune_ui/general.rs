@@ -206,7 +206,7 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     );
     rows.extend(microphone_rows(ui, p, layer));
     let (_, row) = microphone_release_row(ui, p);
-    rows.push(row.into());
+    rows.push(row);
     rows.extend(launch_at_login_rows(ui, p));
     (!rows.is_empty()).then(|| card(p, "basics", rows))
 }
@@ -733,36 +733,30 @@ pub(super) fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> 
     if ui.records_shortcuts()
         && let Some(side) = picked_side(ui, ShortcutTarget::Dictation)
     {
-        rows.push(
-            side_row(
-                ui,
-                p,
-                "dictation-side",
-                side,
-                |ui, index| {
-                    let target = ShortcutTarget::Dictation;
-                    if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
-                        ui.update(|settings| s::set_binding(settings, target, candidate));
-                    }
-                },
-                layer,
-            )
-            .into(),
-        );
+        rows.push(side_row(
+            ui,
+            p,
+            "dictation-side",
+            side,
+            |ui, index| {
+                let target = ShortcutTarget::Dictation;
+                if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
+                    ui.update(|settings| s::set_binding(settings, target, candidate));
+                }
+            },
+            layer,
+        ));
     }
     // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
-        rows.push(
-            folding(
-                "input-source-mappings",
-                if settings.keyboard_model_switching.enabled {
-                    s::input_source_rows(ui, p, layer)
-                } else {
-                    Vec::new()
-                },
-            )
-            .into(),
-        );
+        rows.push(folding(
+            "input-source-mappings",
+            if settings.keyboard_model_switching.enabled {
+                s::input_source_rows(ui, p, layer)
+            } else {
+                Vec::new()
+            },
+        ));
     }
     rows.push(
         icon_toggle_row(
@@ -786,7 +780,7 @@ pub(super) fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> 
     // macOS runs its models on Metal or Apple's speech engine.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if ui.platform.caps.os != super::platform::Os::Macos {
-        rows.push(speech_engine_row(ui, p, layer).into());
+        rows.push(speech_engine_row(ui, p, layer));
     }
     rows
 }
@@ -808,31 +802,28 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         ));
     }
     let behaviors = RecordingAudioBehavior::ALL;
-    rows.push(
-        pick_row(
-            ui,
-            p,
-            "while-dictating",
-            &MUTE,
-            tr("While dictating"),
-            behaviors
-                .iter()
-                .map(|behavior| tr(behavior.label()))
-                .collect(),
-            behaviors
-                .iter()
-                .position(|behavior| *behavior == settings.recording_audio_behavior)
-                .unwrap_or(0),
-            |ui, index| {
-                let behavior = RecordingAudioBehavior::ALL[index];
-                if ui.settings.recording_audio_behavior != behavior {
-                    ui.update(|settings| settings.recording_audio_behavior = behavior);
-                }
-            },
-            layer,
-        )
-        .into(),
-    );
+    rows.push(pick_row(
+        ui,
+        p,
+        "while-dictating",
+        &MUTE,
+        tr("While dictating"),
+        behaviors
+            .iter()
+            .map(|behavior| tr(behavior.label()))
+            .collect(),
+        behaviors
+            .iter()
+            .position(|behavior| *behavior == settings.recording_audio_behavior)
+            .unwrap_or(0),
+        |ui, index| {
+            let behavior = RecordingAudioBehavior::ALL[index];
+            if ui.settings.recording_audio_behavior != behavior {
+                ui.update(|settings| settings.recording_audio_behavior = behavior);
+            }
+        },
+        layer,
+    ));
     if settings.recording_audio_behavior == RecordingAudioBehavior::Duck {
         let volume = ui
             .duck_volume_drag
@@ -868,33 +859,30 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     {
         rows.extend(pause_browser_rows(ui, p).into_iter().map(CardRow::from));
     }
-    rows.push(
-        pick_row(
-            ui,
-            p,
-            "indicator",
-            &PANEL,
-            tr("Dictation HUD"),
-            vec![tr("Top"), tr("Bottom"), tr("Off")],
-            match settings.indicator_position {
-                IndicatorPosition::Top => 0,
-                IndicatorPosition::Bottom => 1,
-                IndicatorPosition::Hidden => 2,
-            },
-            |ui, index| {
-                let position = [
-                    IndicatorPosition::Top,
-                    IndicatorPosition::Bottom,
-                    IndicatorPosition::Hidden,
-                ][index];
-                if ui.settings.indicator_position != position {
-                    ui.update(|settings| settings.indicator_position = position);
-                }
-            },
-            layer,
-        )
-        .into(),
-    );
+    rows.push(pick_row(
+        ui,
+        p,
+        "indicator",
+        &PANEL,
+        tr("Dictation HUD"),
+        vec![tr("Top"), tr("Bottom"), tr("Off")],
+        match settings.indicator_position {
+            IndicatorPosition::Top => 0,
+            IndicatorPosition::Bottom => 1,
+            IndicatorPosition::Hidden => 2,
+        },
+        |ui, index| {
+            let position = [
+                IndicatorPosition::Top,
+                IndicatorPosition::Bottom,
+                IndicatorPosition::Hidden,
+            ][index];
+            if ui.settings.indicator_position != position {
+                ui.update(|settings| settings.indicator_position = position);
+            }
+        },
+        layer,
+    ));
     if ui.platform.caps.terminal_paste {
         rows.push(
             icon_toggle_row(
@@ -1029,69 +1017,63 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow
         .into(),
     );
     let languages = crate::desktop::i18n::LANGUAGE_CHOICES;
-    rows.push(
-        pick_row(
-            ui,
-            p,
-            "interface-language",
-            &GLOBE,
-            tr("Interface language"),
-            languages.iter().map(|(_, name)| tr(name)).collect(),
-            languages
-                .iter()
-                .position(|(code, _)| *code == settings.ui_language.as_deref())
-                .unwrap_or(0),
-            |ui, index| {
-                let code = crate::desktop::i18n::LANGUAGE_CHOICES[index]
-                    .0
-                    .map(str::to_string);
-                if ui.update(|settings| settings.ui_language = code.clone()) {
-                    crate::desktop::i18n::apply(code.as_deref());
-                }
-            },
-            layer,
-        )
-        .into(),
-    );
+    rows.push(pick_row(
+        ui,
+        p,
+        "interface-language",
+        &GLOBE,
+        tr("Interface language"),
+        languages.iter().map(|(_, name)| tr(name)).collect(),
+        languages
+            .iter()
+            .position(|(code, _)| *code == settings.ui_language.as_deref())
+            .unwrap_or(0),
+        |ui, index| {
+            let code = crate::desktop::i18n::LANGUAGE_CHOICES[index]
+                .0
+                .map(str::to_string);
+            if ui.update(|settings| settings.ui_language = code.clone()) {
+                crate::desktop::i18n::apply(code.as_deref());
+            }
+        },
+        layer,
+    ));
     if s::updates_itself(ui) {
         let shown = settings
             .updates
             .channel
             .unwrap_or_else(crate::updater::build_channel);
-        rows.push(
-            pick_row(
-                ui,
-                p,
-                "update-channel",
-                &REFRESH,
-                tr("Update channel"),
-                UpdateChannel::ALL
-                    .iter()
-                    .map(|channel| tr(channel.label()))
-                    .collect(),
-                UpdateChannel::ALL
-                    .iter()
-                    .position(|item| *item == shown)
-                    .unwrap_or(0),
-                |ui, index| {
-                    // Choosing the channel already in effect saves nothing, so an
-                    // unset channel keeps following the build.
-                    let channel = UpdateChannel::ALL[index];
-                    let shown = ui
-                        .settings
-                        .updates
-                        .channel
-                        .unwrap_or_else(crate::updater::build_channel);
-                    if channel != shown
-                        && ui.update(|settings| settings.updates.channel = Some(channel))
-                    {
-                        ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
-                    }
-                },
-                layer,
-            )
-            .into(),
-        );
+        rows.push(pick_row(
+            ui,
+            p,
+            "update-channel",
+            &REFRESH,
+            tr("Update channel"),
+            UpdateChannel::ALL
+                .iter()
+                .map(|channel| tr(channel.label()))
+                .collect(),
+            UpdateChannel::ALL
+                .iter()
+                .position(|item| *item == shown)
+                .unwrap_or(0),
+            |ui, index| {
+                // Choosing the channel already in effect saves nothing, so an
+                // unset channel keeps following the build.
+                let channel = UpdateChannel::ALL[index];
+                let shown = ui
+                    .settings
+                    .updates
+                    .channel
+                    .unwrap_or_else(crate::updater::build_channel);
+                if channel != shown
+                    && ui.update(|settings| settings.updates.channel = Some(channel))
+                {
+                    ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
+                }
+            },
+            layer,
+        ));
     }
     rows
 }
