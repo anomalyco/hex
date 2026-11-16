@@ -2954,7 +2954,13 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
         focused(&rt)
     );
     key(&mut rt, Key::Down, Mods::default());
-    assert!(rt.state.labs_open, "a second Down keeps Labs open");
+    assert_eq!(rt.state.pane, Pane::WhatsNew);
+    assert!(!rt.state.labs_open);
+    assert!(focused(&rt).ends_with("nav-whats-new"));
+    key(&mut rt, Key::Down, Mods::default());
+    assert_eq!(rt.state.pane, Pane::WhatsNew, "Down stops before Quit");
+    key(&mut rt, Key::Up, Mods::default());
+    assert!(rt.state.labs_open, "Up from What's new returns to Labs");
     key(&mut rt, Key::Up, Mods::default());
     assert_eq!(rt.state.pane, last, "Up returns to the last pane");
     assert!(!rt.state.labs_open);

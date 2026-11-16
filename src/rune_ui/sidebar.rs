@@ -233,6 +233,14 @@ pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
     }
     nav = nav.children(labs::playground_nav(ui, p));
     nav = nav.child(labs::nav(ui, p));
+    // Pinned to the foot of the list, but still reached by Down from Labs.
+    nav = nav.child(el().key("spacer").grow(1.0)).child(nav_slot(
+        p,
+        Pane::WhatsNew,
+        ui.pane == Pane::WhatsNew && !ui.labs_open,
+        NAV_ROW_GAP / 2.0,
+        NAV_ROW_GAP / 2.0,
+    ));
     title_bar(col())
         .key("sidebar")
         .role("navigation")
@@ -242,12 +250,7 @@ pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
         .pb(12.0)
         .pl(10.0)
         .pr(6.0)
-        .child(nav)
-        .child(el().key("spacer").grow(1.0))
-        .children(sidebar_update::control(ui, p))
-        .children(sidebar_update::notes(ui, p))
-        .children(sidebar_update::blocked(ui, p))
-        .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
+        .child(nav.grow(1.0))
         .child(footer(ui, p))
 }
 
@@ -255,7 +258,7 @@ pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
 /// Both lines keep their place in every state, so a check never moves the
 /// version, and the status line is one element whose words change in place
 /// rather than two that cross-fade over each other. An available update is
-/// the Update button above.
+/// the Update button in place of the status line.
 fn footer(ui: &Ui, p: Paint) -> El {
     let c = &p.k.c;
     let line = |key: &str, words: &str, color| {
@@ -350,25 +353,37 @@ fn footer(ui: &Ui, p: Paint) -> El {
                 .py(2.0),
         ),
     };
+    let version = version_line(ui, p, line("version", &version_label(), p.faint()));
+    let version = if host::QUIT_IN_WINDOW {
+        // Long build labels and translations get a second line rather than
+        // crowding the badge or overlaying Quit's hit target.
+        row()
+            .key("version-and-quit")
+            .flex_wrap()
+            .justify_between()
+            .center_y()
+            .child(version)
+            .child(
+                line("quit", tr("Quit Hex"), c.text_muted)
+                    .role("button")
+                    .label(tr("Quit Hex"))
+                    .hover(c.hover)
+                    .press(c.pressed)
+                    .focusable(true)
+                    .focus_ring(2.0, -2.0, c.border_focus)
+                    .on_press(|ui: &mut Ui| ui.quit()),
+            )
+    } else {
+        version
+    };
     col()
         .key("footer")
         .mt(8.0)
-        .child(version_line(
-            ui,
-            p,
-            line("version", &version_label(), p.faint()),
-        ))
+        .child(version)
         .children(status)
-        .child(
-            line(Pane::WhatsNew.key(), Pane::WhatsNew.title(), c.text_muted)
-                .role("button")
-                .label(Pane::WhatsNew.title())
-                .focusable(true)
-                .focus_ring(2.0, -2.0, c.border_focus)
-                .hover(c.hover)
-                .press(c.pressed)
-                .on_press_tx(|ui: &mut Ui, tx: &mut Tx| ui.select_pane(Pane::WhatsNew, tx)),
-        )
+        .children(sidebar_update::control(ui, p))
+        .children(sidebar_update::notes(ui, p))
+        .children(sidebar_update::blocked(ui, p))
 }
 
 /// The version itself links to this build's notes while its lab is on.
@@ -554,32 +569,4 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
         item = item.fill(c.layer_02);
     }
     lists::source_item(item, on)
-}
-
-/// Linux has no tray: the window's way to stop Hex. Closing the window
-/// keeps Hex dictating.
-fn quit_item(p: Paint) -> El {
-    let c = &p.k.c;
-    row()
-        .key("quit")
-        .role("button")
-        .label(tr("Quit Hex"))
-        .h(NAV_ROW_HEIGHT)
-        .px(6.0)
-        .mt(NAV_ROW_GAP)
-        .center_y()
-        .radius(p.k.radius.sm)
-        .hover(c.hover)
-        .press(c.pressed)
-        .on_press(|ui: &mut Ui| ui.quit())
-        .focusable(true)
-        .focus_ring(2.0, -2.0, c.border_focus)
-        .child(
-            text(tr("Quit Hex"))
-                .key("label")
-                .font(p.k.ty.ui)
-                .color(c.text_muted)
-                .truncate()
-                .a11y_hidden(),
-        )
 }

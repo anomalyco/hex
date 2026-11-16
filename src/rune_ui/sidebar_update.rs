@@ -67,8 +67,7 @@ pub(super) fn notes(ui: &Ui, p: Paint) -> Option<El> {
         .and_then(|notes| list(p, notes))
 }
 
-/// The first few changes and What's new, which opens the build's entry in
-/// the dev changelog.
+/// The first few changes and the release notes for this staged build.
 fn list(p: Paint, notes: &crate::desktop::host::UpdateNotes) -> Option<El> {
     if notes.items.is_empty() {
         return None;
