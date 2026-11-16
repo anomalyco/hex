@@ -503,11 +503,12 @@ impl Hud {
         // at each capture's start instead of trusting `shown`: it is Hex's
         // record of a request, not of Rune's state. A cloaked `ShowWindow` is
         // why: Rune still counts the overlay shown then, so it ignores a show
-        // and only the first-frame recovery hide gets it back. On macOS a Space
-        // or app switch can leave the panel hidden or stranded the same way,
-        // and `rehome` repairs only a panel it can see, so the start's own ask
-        // is the one chance to get it back. Rune's show is a no-op while the
-        // overlay is visible, and it cancels an exit fade.
+        // and only the first-frame recovery hide gets it back. On macOS Rune
+        // can also hide the overlay itself when its GPU surface refuses a new
+        // configuration (a display or Space change mid-capture), and the
+        // start's ask is what brings that back, re-applying the panel's Space
+        // behavior as it shows. Rune's show is a no-op while the overlay is
+        // visible, and it cancels an exit fade.
         if starts {
             self.shown.store(false, Ordering::Release);
         }
