@@ -23,6 +23,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Voice prompt", "Instruction vocale"),
     ("Stop phrase", "Phrase d'arrêt"),
     ("Say a phrase to finish a hands-free dictation", "Dites une phrase pour terminer une dictée sans les mains"),
+    ("Keep long holds through other keys", "Garder les appuis longs malgré d'autres touches"),
+    ("While you hold a modifier-only shortcut, like Option or Alt, for more than a second, other keys and clicks no longer throw the dictation away. They still reach the app in front, and Hex keeps recording until you let go.", "Si vous maintenez un raccourci composé uniquement de modificateurs, comme Option ou Alt, plus d'une seconde, les autres touches et clics ne jettent plus la dictée. Ils parviennent quand même à l'application au premier plan, et Hex continue d'enregistrer jusqu'au relâchement"),
     ("Copy captures as a zip", "Copier les captures en zip"),
     ("A finished capture copies as one zip file, without video or audio.", "Une capture terminée est copiée en un seul fichier zip, sans vidéo ni son audio"),
     ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Dites « rewrite this » pendant une dictée, puis une instruction ; Hex l'applique avec le modèle OpenCode du mode"),

@@ -23,6 +23,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Voice prompt", "Голосовая инструкция"),
     ("Stop phrase", "Фраза остановки"),
     ("Say a phrase to finish a hands-free dictation", "Скажите фразу, чтобы завершить диктовку без рук"),
+    ("Keep long holds through other keys", "Долгое удержание несмотря на другие клавиши"),
+    ("While you hold a modifier-only shortcut, like Option or Alt, for more than a second, other keys and clicks no longer throw the dictation away. They still reach the app in front, and Hex keeps recording until you let go.", "Если удерживать сочетание только из модификаторов, например Option или Alt, дольше секунды, другие клавиши и щелчки больше не отбрасывают диктовку. Они всё равно доходят до приложения на переднем плане, а Hex продолжает запись, пока вы не отпустите"),
     ("Copy captures as a zip", "Копировать записи как zip"),
     ("A finished capture copies as one zip file, without video or audio.", "Готовая запись копируется одним zip-файлом, без видео и звука"),
     ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Скажите «rewrite this» во время диктовки, а затем инструкцию; Hex применит её моделью OpenCode режима"),

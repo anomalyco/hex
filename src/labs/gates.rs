@@ -182,6 +182,15 @@ pub fn double_tap_modifiers() -> bool {
     on(DOUBLE_TAP_MODIFIERS) && Feature::DoubleTapModifiers.on_this_os()
 }
 
+/// A key or click joining a held modifier-only shortcut a second or more
+/// after it went down is left to the app in front, so the release still
+/// finishes the dictation (macOS and Windows; read by each OS's shortcut
+/// machine as the key or click arrives).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+pub fn hold_through_keys() -> bool {
+    on(HOLD_THROUGH_KEYS) && Feature::HoldThroughKeys.on_this_os()
+}
+
 /// Parakeet Ultra joins the catalog (read wherever a model is listed,
 /// chosen, or run).
 pub fn parakeet_ultra() -> bool {

@@ -84,6 +84,7 @@ impl Feature {
             Self::YoloMode => "YOLO mode",
             Self::CopyDictationAudio => "Copy dictation audio",
             Self::StopPhrase => "Stop phrase",
+            Self::HoldThroughKeys => "Keep long holds through other keys",
         }
     }
 
@@ -293,6 +294,9 @@ impl Feature {
                 "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
             }
             Self::StopPhrase => "Say a phrase to finish a hands-free dictation",
+            Self::HoldThroughKeys => {
+                "While you hold a modifier-only shortcut, like Option or Alt, for more than a second, other keys and clicks no longer throw the dictation away. They still reach the app in front, and Hex keeps recording until you let go."
+            }
         }
     }
 }

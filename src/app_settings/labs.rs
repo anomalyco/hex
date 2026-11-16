@@ -257,6 +257,10 @@ pub struct LabsSettings {
     /// field returns to its default.
     #[serde(deserialize_with = "deserialize_phrase")]
     pub stop_phrase_text: String,
+    /// A key or click joining a held modifier-only shortcut a second or more
+    /// after it went down reaches the app in front and leaves the dictation
+    /// recording, which the release still finishes (macOS and Windows).
+    pub hold_through_keys: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -435,6 +439,7 @@ impl Default for LabsSettings {
             voice_prompt_phrase: crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned(),
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
+            hold_through_keys: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,

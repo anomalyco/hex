@@ -853,6 +853,18 @@
       ],
       "summary": "Say a phrase to finish a hands-free dictation",
       "title": "Stop phrase"
+    },
+    {
+      "added": "2026-11-16",
+      "group": "shortcuts",
+      "groupTitle": "Shortcuts",
+      "id": "hold-through-keys",
+      "oses": [
+        "macos",
+        "windows"
+      ],
+      "summary": "While you hold a modifier-only shortcut, like Option or Alt, for more than a second, other keys and clicks no longer throw the dictation away. They still reach the app in front, and Hex keeps recording until you let go.",
+      "title": "Keep long holds through other keys"
     }
   ]
 }
