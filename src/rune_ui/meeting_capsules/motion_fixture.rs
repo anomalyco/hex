@@ -147,19 +147,14 @@ fn a_light_host_draws_the_dark_recording_from_the_first_frame() {
         let mut renderer = offscreen::renderer(&gpu.device);
         let target = offscreen::target(&gpu.device, w, h);
         let mut ink = waveform::Ink::default();
+        hold_clock(&mut rt);
         let first = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
         // Opaque interior, above the waveform, outside the antialiased rim.
         let i = 4 * (15 * w as usize + 365);
         assert!(first[i..i + 3].iter().all(|c| *c < 40) && first[i + 3] == 255);
         rt.set_system_dark(true);
         for _ in 0..16 {
-            rt.frame(1.0 / 60.0);
-            // The elapsed label reads the wall clock, and 17 software renders
-            // can straddle a second on a slow runner: hold the clock so only
-            // the host change can alter the pixels.
-            if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
-                shown.started = Instant::now() - Duration::from_secs(258);
-            }
+            hold_clock(&mut rt);
             let frame = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
             assert!(
                 frame == first,
@@ -167,6 +162,22 @@ fn a_light_host_draws_the_dark_recording_from_the_first_frame() {
             );
         }
     }
+}
+
+/// Puts the elapsed label back on the fixture's 04:18 and rebuilds, so no
+/// paint measures the wall clock. The first paint of a software renderer
+/// compiles its pipelines and takes over a second on Windows' WARP: holding
+/// the clock after a frame instead would let the next one tick to 04:19, and
+/// the comparison above would fail on the timer's glyphs rather than a
+/// recolour.
+fn hold_clock(rt: &mut Runtime<Capsule>) {
+    rt.update(|capsule, tx| {
+        if let Some(Kind::Recording(shown)) = &mut capsule.kind {
+            shown.started = Instant::now() - Duration::from_secs(258);
+        }
+        tx.instant();
+    });
+    rt.frame(1.0 / 60.0);
 }
 
 #[test]
