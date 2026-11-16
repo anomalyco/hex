@@ -1554,7 +1554,13 @@ suppression, and the Markdown copy in the user's transcript folder.
 Labs › Voice Filter (experimental.hex_microphone = true), HEX_EXPERIMENTAL_MIC=1,
 or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, Linux
 ├── Sidebar > Voice Filter  // the only home of these controls
-├── Hex Microphone card
+├── What callers hear: the effect applies only while dictating; normal speech otherwise
+│   ├── Select a name → apply it live: Muffled (default), Muted, Quiet, Normal, Chipmunk, Robot, Walkie, Underwater, Far
+│   ├── Play on a tile → preview that effect, never save it or change the virtual input
+│   │   ├── Example clip or an explicit 5 s recording (in memory only); Play original to compare
+│   │   └── Two waveforms highlight the dictation span. Switching previews stops the previous one
+│   └── Adjust effect → per-mode sliders, effect strength, Reset, and comfort noise for Muted
+├── Hex Microphone setup
 │   ├── Linux -> no driver: a PipeWire virtual source (Audio/Source "Hex Microphone",
 │   │   node hex_microphone) that Hex plays into through `pw-cat` while the Voice Filter is on
 │   │   ├── Status -> Starting… / Available ("Choose Hex Microphone as your input…") / Unavailable + reason
@@ -1563,16 +1569,11 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   │   │   1.2 and older reject it and already play raw on -
 │   │   ├── Off or Hex quits -> the source disappears (pw-cat ends with its input); no root, nothing installed
 │   │   └── Session priority 1 -> WirePlumber never picks it as the default input Hex records
-│   ├── macOS driver status -> Installed v<ver> / In use by <app> + Uninstall
-│   │   ├── Version mismatch -> v<old> installed + Update + Uninstall
+│   ├── macOS -> select Hex Microphone as the input in the call app / In use (by name only when observed on that input) + Uninstall
+│   │   ├── Version mismatch -> Update + Uninstall
 │   │   ├── Pre-Anomaly com.kitlangton driver at the same path -> Update replaces it in place
 │   │   ├── Not installed -> Install -> macOS admin prompt -> copies bundled HexMicrophone.driver + restarts coreaudiod
 │   │   └── Inline state -> Installing… / Uninstalling… / Cancelled / Failed with reason
-│   ├── Mode while dictating -> Muffled (default), Muted, Quiet, Normal, Chipmunk, Robot, Walkie, Underwater, Far
-│   ├── Key sliders -> Live mode tuning + Effect strength + Reset
-│   └── Try it -> Example clip OR Record 5s (in-memory only)
-│       ├── Dual waveform -> You vs Call hears with highlighted dictation span
-│       └── Explicit playback -> Play what call hears | Play your voice
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
 │   ├── Lock-free ring -> 48 kHz virtual sink (macOS IOProc; Linux 11 ms blocks into a one-page pipe) -> Raised-cosine fade on intentional hold
