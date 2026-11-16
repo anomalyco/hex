@@ -45,7 +45,7 @@
       "oses": [
         "linux"
       ],
-      "summary": "On Wayland, show your words in the text field as you speak, then type the final text there instead of pasting",
+      "summary": "On Wayland, show your words in the text field as you speak and type the final text there",
       "title": "Live typing"
     },
     {
@@ -69,7 +69,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Make the Parakeet speech model more likely to hear the words in your Vocabulary. Rewriting and search use them either way",
+      "summary": "Help the Parakeet model hear your Vocabulary words. Rewriting and search use them anyway",
       "title": "Vocabulary biasing"
     },
     {
@@ -80,7 +80,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Names and terms in the window you're dictating into can help Hex spell them right. Read on this Mac, never saved",
+      "summary": "Names in the window you're dictating into help Hex spell them. Never saved",
       "title": "Screen vocabulary"
     },
     {
@@ -104,7 +104,7 @@
         "windows",
         "linux"
       ],
-      "summary": "When you switch keyboard language, Hex switches to the speech model you picked for it. You can still pick by hand",
+      "summary": "When you switch keyboard language, Hex switches to the speech model you picked for it",
       "title": "Switch model with keyboard language"
     },
     {
@@ -332,7 +332,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Tell left and right modifier keys apart in a shortcut, so Right ⌘ + Right ⌥ dictates while the left ones work as usual",
+      "summary": "Tell left and right modifiers apart, so Right ⌘ + Right ⌥ doesn't fire on the left keys",
       "title": "Sided modifier chords"
     },
     {
@@ -355,7 +355,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Let Double-tap mode use a shortcut with only modifier keys, such as Option or Globe: tap it twice to dictate hands-free",
+      "summary": "Let Double-tap mode use only modifiers, such as Option or Globe: tap twice to dictate",
       "title": "Double-tap on a lone modifier"
     },
     {
@@ -539,7 +539,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "Use the microphone key on Mac laptops (in F5's spot in the top row) alone as a shortcut; other apps don't get the key",
+      "summary": "Use the mic key in F5's spot on Mac laptops as a shortcut; once set, only Hex gets it",
       "title": "Microphone key alone"
     },
     {
