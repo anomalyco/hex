@@ -1,5 +1,6 @@
 //! The CoreAudio adapter for "Lower audio": the default output's channel
-//! volumes, or its master volume when channels cannot be set separately.
+//! volumes, or its main volume, or its virtual main volume when channels
+//! cannot be set separately.
 use std::mem::{offset_of, size_of};
 use std::ptr::NonNull;
 
@@ -9,15 +10,48 @@ use objc2_core_audio::{
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
 
+use super::VIRTUAL_MAIN_VOLUME;
 use crate::audio::output_ducking::{Guard, Volume};
+
+const VOLUME: [u8; 4] = *b"volm";
 
 pub(super) fn start(factor: f32) -> Option<Guard> {
     Guard::start(factor, Output::current)
 }
 
+/// One property of an output, and the elements of it that ramp together.
+struct Control {
+    selector: [u8; 4],
+    elements: Vec<u32>,
+}
+
+impl Control {
+    /// The channels that actually have a settable volume scalar, then the main
+    /// volume, then the virtual main volume, which macOS keeps balanced. A
+    /// channel without a volume control is skipped, not fatal.
+    fn select(channels: u32, mut usable: impl FnMut([u8; 4], u32) -> bool) -> Option<Self> {
+        let elements: Vec<u32> = (1..=channels)
+            .filter(|&element| usable(VOLUME, element))
+            .collect();
+        if !elements.is_empty() {
+            return Some(Self {
+                selector: VOLUME,
+                elements,
+            });
+        }
+        [VOLUME, VIRTUAL_MAIN_VOLUME]
+            .into_iter()
+            .find(|&selector| usable(selector, 0))
+            .map(|selector| Self {
+                selector,
+                elements: vec![0],
+            })
+    }
+}
+
 struct Output {
     device: u32,
-    elements: Vec<u32>,
+    control: Control,
 }
 
 fn address(selector: [u8; 4], element: u32) -> AudioObjectPropertyAddress {
@@ -28,8 +62,37 @@ fn address(selector: [u8; 4], element: u32) -> AudioObjectPropertyAddress {
     }
 }
 
+/// Whether the output can read this volume and set it.
+fn usable(device: u32, address: AudioObjectPropertyAddress) -> bool {
+    let mut property = address;
+    let mut settable = 0;
+    // SAFETY: Both output pointers refer to initialized, correctly typed values.
+    if unsafe {
+        AudioObjectIsPropertySettable(
+            device,
+            NonNull::from(&mut property),
+            NonNull::from(&mut settable),
+        )
+    } != 0
+        || settable == 0
+    {
+        return false;
+    }
+    super::read_property::<f32>(device, address)
+        .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+}
+
 impl Output {
     fn current() -> Option<Self> {
+        let output = Self::resolve();
+        if output.is_none() {
+            tracing::warn!("found no output volume to lower while recording");
+        }
+        output
+    }
+
+    /// The default output and the control to ramp on it, when it has one.
+    fn resolve() -> Option<Self> {
         let device = super::default_output_device()?;
         let mut property = address(*b"slay", 0); // stream configuration
         let mut bytes = 0;
@@ -92,49 +155,20 @@ impl Output {
         if channels > 256 {
             return None;
         }
-        let separate = Self {
-            device,
-            elements: (1..=channels).collect(),
-        };
-        if channels > 0 && separate.writable() && separate.read().is_some() {
-            return Some(separate);
-        }
-        // A master write must not destroy a readable balance we cannot restore individually.
-        if separate.elements.iter().any(|&element| {
-            super::read_property::<f32>(device, address(*b"volm", element)).is_some()
-        }) {
-            return None;
-        }
-        let master = Self {
-            device,
-            elements: vec![0],
-        };
-        (master.writable() && master.read().is_some()).then_some(master)
-    }
-
-    fn writable(&self) -> bool {
-        self.elements.iter().all(|&element| {
-            let mut property = address(*b"volm", element);
-            let mut settable = 0;
-            // SAFETY: Both output pointers refer to initialized, correctly typed values.
-            unsafe {
-                AudioObjectIsPropertySettable(
-                    self.device,
-                    NonNull::from(&mut property),
-                    NonNull::from(&mut settable),
-                ) == 0
-                    && settable != 0
-            }
-        })
+        let control = Control::select(channels, |selector, element| {
+            usable(device, address(selector, element))
+        })?;
+        Some(Self { device, control })
     }
 }
 
 impl Volume for Output {
     fn read(&self) -> Option<Vec<f32>> {
-        self.elements
+        self.control
+            .elements
             .iter()
             .map(|&element| {
-                super::read_property::<f32>(self.device, address(*b"volm", element))
+                super::read_property::<f32>(self.device, address(self.control.selector, element))
                     .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
             })
             .collect()
@@ -142,8 +176,8 @@ impl Volume for Output {
 
     fn write(&mut self, values: &[f32]) -> bool {
         let mut success = true;
-        for (&element, &value) in self.elements.iter().zip(values) {
-            let mut property = address(*b"volm", element);
+        for (&element, &value) in self.control.elements.iter().zip(values) {
+            let mut property = address(self.control.selector, element);
             let mut value = value;
             // SAFETY: The scalar and property are initialized and correctly sized.
             success &= unsafe {
@@ -158,5 +192,46 @@ impl Volume for Output {
             };
         }
         success
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selected(
+        channels: u32,
+        usable: impl FnMut([u8; 4], u32) -> bool,
+    ) -> Option<([u8; 4], Vec<u32>)> {
+        Control::select(channels, usable).map(|control| (control.selector, control.elements))
+    }
+
+    #[test]
+    fn channels_without_a_volume_scalar_are_skipped_not_fatal() {
+        // A USB adapter reporting two buffers of two channels where only the
+        // first pair has a per-channel volume scalar.
+        assert_eq!(
+            selected(4, |selector, element| selector == VOLUME
+                && (1..=2).contains(&element)),
+            Some((VOLUME, vec![1, 2]))
+        );
+        // One usable channel is enough to lower the output.
+        assert_eq!(
+            selected(2, |selector, element| selector == VOLUME && element == 2),
+            Some((VOLUME, vec![2]))
+        );
+    }
+
+    #[test]
+    fn the_main_then_the_virtual_main_volume_are_the_fallbacks() {
+        assert_eq!(
+            selected(2, |selector, element| selector == VOLUME && element == 0),
+            Some((VOLUME, vec![0]))
+        );
+        assert_eq!(
+            selected(2, |selector, _| selector == VIRTUAL_MAIN_VOLUME),
+            Some((VIRTUAL_MAIN_VOLUME, vec![0]))
+        );
+        assert_eq!(selected(2, |_, _| false), None);
     }
 }
