@@ -19,9 +19,7 @@ use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 use self::hud::Hud;
 pub(crate) use self::hud::Preview;
 use super::Ui;
-use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition,
-};
+use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::lists::{list_row, source_list};
 use super::platform::Os;
 use crate::app_settings::IndicatorPosition;
@@ -224,21 +222,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 move |ui: &mut Ui| choose(ui, set),
             )
         }));
-    let mut footer = row().key("footer").gap(12.0).center_y();
-    footer = footer.child(
-        // Nothing plays with Sound volume off; the HUD still shows.
-        text(if ui.settings.sound_effects {
-            ""
-        } else {
-            tr("Sound volume is off")
-        })
-        .key("muted")
-        .font(DESCRIPTION)
-        .color(p.muted())
-        .grow(1.0)
-        .shrink(),
-    );
-    footer = footer.child(
+    let footer = row().key("footer").justify_end().child(
         button(
             p,
             "close-sound-sets",

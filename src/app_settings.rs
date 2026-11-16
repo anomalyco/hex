@@ -431,7 +431,7 @@ impl Default for AppSettings {
             retired_commands_enabled: None,
             release_microphone_while_idle: false,
             sound_effects: true,
-            sound_effect_volume: 0.5,
+            sound_effect_volume: crate::feedback::DEFAULT_VOLUME,
             sound_theme: crate::feedback::SoundSet::default(),
             microphone: None,
             avoid_bluetooth_microphone: true,

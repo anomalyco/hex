@@ -1068,7 +1068,7 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Sound volume -> slider 0-100%; release saves and previews the start sound; zero suppresses tones
+├── Sound volume -> slider 0-100%; release saves and previews start unless Off; only Sounds sheet auditions play while Off
 │   └── A saved zero displays Off; enabling sounds through the CLI restores the default level
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
 ├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
