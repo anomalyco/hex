@@ -816,8 +816,8 @@ Checks: `hold_through_keys_keeps_a_long_hold_through_a_joining_key` in
 `a_long_hold_keeps_recording_through_a_joining_key_or_button` and
 `toggle_and_a_wrapping_tick_count_keep_the_second` in
 [windows/input/hold_through.rs](../../src/windows/input/hold_through.rs).
-Neither was observed on a real keyboard yet, and the Windows tests have not
-run on Linux.
+Neither was observed on a real keyboard yet; the Windows tests need Windows
+and run in Check Windows.
 
 **Fixed October 22, 2026:** a global shortcut registered with Carbon (Spaceman's
 Option-1 to Option-0 workspace keys, for example) consumes its key before the

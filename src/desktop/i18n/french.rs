@@ -23,7 +23,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Voice prompt", "Instruction vocale"),
     ("Stop phrase", "Phrase d'arrêt"),
     ("Say a phrase to finish a hands-free dictation", "Dites une phrase pour terminer une dictée sans les mains"),
-    ("Hold through other keys", "Tenir malgré d'autres touches"),
+    ("Hold through other keys", "Maintenir malgré les touches"),
     ("Keys a second or more into a held modifier-only shortcut no longer end the dictation", "Une seconde de maintien du raccourci : les touches n'annulent plus la dictée"),
     ("Copy captures as a zip", "Copier les captures en zip"),
     ("A finished capture copies as one zip file, without video or audio.", "Une capture terminée est copiée en un seul fichier zip, sans vidéo ni son audio"),
