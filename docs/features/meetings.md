@@ -840,9 +840,13 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── At rest: a steady recording dot, Dot scope and elapsed time
      │   ├── The dictation HUD's listening field follows the louder fresh RMS
      │   │   from microphone or system audio (not individual speakers). Missing
-     │   │   buffers and those over 300 ms old read as zero. In silence the
-     │   │   beam settles to a still dotted line; the recording dot stays visible.
-     │   │   Reduce Motion holds the HUD's braid still
+     │   │   buffers and those over 300 ms old read as zero. When speech pauses
+     │   │   the beam narrows and dims into a still dotted line; a returning
+     │   │   voice opens it from its current height. The recording dot stays on
+     │   │   and the timer keeps ticking. Reduce Motion holds the braid still
+     │   │   and fades its light without squeezing the rows. Checks:
+     │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
+     │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
      ├── Hover -> the pill reveals a panel: Stop opposite the meter and time
