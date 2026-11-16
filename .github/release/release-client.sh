@@ -2,8 +2,9 @@
 # Vendored from https://anoma.ly/release/client.sh (sha256
 # f19e3852cca5b675a0871487a035fc5ed42a871df429da10fd688568d1ad526e, 2026-10-29)
 # so the publish job runs only locked code. Update it by copying a reviewed
-# version here. Local change: idempotent reads also retry connection resets
-# (--retry-all-errors).
+# version here. Local change: the manifest fallback and the verification
+# download also retry connection resets (--retry-all-errors), write to a file so
+# a retry cannot append to partial bytes, and fail a stalled transfer.
 # The Anomaly release service client, served at https://anoma.ly/release/client.sh.
 # Runs in a GitHub Actions job with `permissions: id-token: write`; needs bash,
 # curl, jq, split and sha256sum (or shasum). See docs/publishing.md.
@@ -93,7 +94,7 @@ upload() {
   local app=$1 path=$2 name=$3 sha256 size started id part chunk
   sha256=$(sha256_of "$path")
   size=$(size_of "$path")
-  if curl -fsSI --retry 3 --retry-all-errors "$RELEASE/$app/files/$sha256/$name" > /dev/null 2>&1; then
+  if curl -fsSI --retry 3 "$RELEASE/$app/files/$sha256/$name" > /dev/null 2>&1; then
     log "already stored: $name ($sha256)"
     return
   fi
@@ -158,7 +159,9 @@ publish() {
     2??) manifest=$(cat "$work/published.json") ;;
     *)
       # A retried or repeated publish: fine if the channel already has exactly this release.
-      manifest=$(curl -fsS --retry 3 --retry-all-errors "$RELEASE/$app/$artifact/$channel.json") || die "HTTP $STATUS publishing $version: $(head -c 1000 "$work/published.json")"
+      # To a file, not stdout: a retried transfer must not append to partial bytes.
+      curl -fsS --retry 3 --retry-all-errors --speed-limit 1024 --speed-time 60 -o "$work/channel.json" "$RELEASE/$app/$artifact/$channel.json" || die "HTTP $STATUS publishing $version: $(head -c 1000 "$work/published.json")"
+      manifest=$(cat "$work/channel.json")
       [ "$(printf '%s' "$manifest" | jq -r .release.version)" = "$version" ] || die "HTTP $STATUS publishing $version: $(head -c 1000 "$work/published.json")"
       log "$channel already has $version; checking it is these files"
       ;;
@@ -173,7 +176,7 @@ publish() {
     [ "$(printf '%s' "$entry" | jq -r .size)" = "$(printf '%s' "$expected" | jq -r .size)" ] || die "$target: published size differs from the local file"
     if [ "$verify" = 1 ]; then
       url="${RELEASE%/release}$(printf '%s' "$entry" | jq -r .url)"
-      curl -fsS --retry 3 --retry-all-errors -o "$work/served" "$url"
+      curl -fsS --retry 3 --retry-all-errors --speed-limit 1024 --speed-time 60 -o "$work/served" "$url"
       [ "$(sha256_of "$work/served")" = "$(printf '%s' "$expected" | jq -r .sha256)" ] || die "$target: the service serves different bytes at $url"
     fi
   done
