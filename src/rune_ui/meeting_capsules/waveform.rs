@@ -1,5 +1,5 @@
 //! The dictation HUD's listening field, drawn into the recording header. The
-//! capsule supplies the surface, timer and recording dot; there is no HUD window.
+//! capsule supplies the surface and timer; there is no HUD window.
 use super::{Capsule, Kind, meeting};
 use crate::dictation::indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
 use crate::rune_hud::spring::{REDUCED_FADE, Spec, Spring};

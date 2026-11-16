@@ -322,7 +322,18 @@ pub(super) fn ready(p: Paint, capsule: &Capsule, manifest: &MeetingManifest) -> 
     in_corner(capsule, body)
 }
 
-/// The recording: at rest only its status, levels and time; under the
+/// Only grow the compact header for a notice or another minute digit.
+/// Its 13 pt monospaced digits each occupy 8 pt at layout resolution.
+pub(super) fn rest_width(shown: &Recording) -> f32 {
+    if recording_notice(shown).is_some() {
+        return PANEL_WIDTH;
+    }
+    let minutes = shown.started.elapsed().as_secs() / 60;
+    let extra = minutes.max(1).ilog10().saturating_sub(1);
+    (REST_WIDTH + extra as f32 * 8.).min(PANEL_WIDTH)
+}
+
+/// The recording: at rest only its levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
@@ -343,7 +354,6 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .key("meter")
         .gap(6.0)
         .center_y()
-        .child(status_dot(p.danger()).size(6.0, 6.0))
         .child(waveform::slot())
         .child(
             text(elapsed)
@@ -382,11 +392,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         + FIRST_ROW_GAP
         + PANEL_PAD
         + if notice.is_some() { NOTICE_HEIGHT } else { 0.0 };
-    let width = if open || notice.is_some() {
-        PANEL_WIDTH
-    } else {
-        REST_WIDTH
-    };
+    let width = if open { PANEL_WIDTH } else { rest_width(shown) };
     let height = if open { panel_height } else { REST_HEIGHT };
     // The full-size layout exists before the first hover. Its origin cancels
     // the moving clip's origin so neither the rows nor the meter ride its edge.
@@ -471,7 +477,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let body = col()
         .key("pill")
         .role("status")
-        .label(&shown.title)
+        .label(format!("{} · {}", tr("Recording"), shown.title))
         .radius(radius)
         .fill(p.k.c.bg_base)
         .border(p.hair, p.k.c.border_base)
