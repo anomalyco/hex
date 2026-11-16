@@ -78,14 +78,13 @@ impl MeetingCapsules {
             let Some(Kind::Ready(m)) = &c.kind else {
                 return false;
             };
-            if m.id != id {
-                return false;
-            }
             #[cfg(target_os = "windows")]
-            if let Some(resize) = &c.resize {
+            if m.id == id
+                && let Some(resize) = &c.resize
+            {
                 resize(ready_window_size(m));
             }
-            true
+            m.id == id
         });
     }
 

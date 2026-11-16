@@ -577,7 +577,7 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                     assert!(t[0] <= last_clock_x + 0.02, "timer reversed at {frame}");
                 }
                 last_clock_x = t[0];
-                if frame >= delay + 1 {
+                if frame > delay {
                     let w = rect(&rt, "title")[2];
                     assert!(
                         (w - *title_width.get_or_insert(w)).abs() < 0.02,
