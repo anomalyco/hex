@@ -863,8 +863,8 @@
         "macos",
         "windows"
       ],
-      "summary": "While you hold a modifier-only shortcut, like Option or Alt, for more than a second, other keys and clicks no longer throw the dictation away. They still reach the app in front, and Hex keeps recording until you let go.",
-      "title": "Keep long holds through other keys"
+      "summary": "Keys a second or more into a held modifier-only shortcut no longer end the dictation",
+      "title": "Hold through other keys"
     }
   ]
 }

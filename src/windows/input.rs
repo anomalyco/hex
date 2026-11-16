@@ -300,7 +300,7 @@ struct CaptureState {
     recording: bool,
     last_release_ms: Option<u32>,
     /// When the held press that records began, from the hook's tick count:
-    /// a key joining it a second later is the app's (Labs › Keep long holds
+    /// a key joining it a second or more later is the app's (Labs › Hold
     /// through other keys).
     pressed_at_ms: Option<u32>,
     /// Every press acts as the second tap of a double-tap: releasing it
@@ -1104,8 +1104,8 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
             } else if !modifier_event {
                 // A key or button joining a held modifier-only shortcut makes
                 // a chord meant for another application, such as Alt+Tab,
-                // unless Labs › Keep long holds through other keys keeps the
-                // long hold and leaves the key to the app in front.
+                // unless Labs › Hold through other keys keeps the long hold
+                // and leaves the key to the app in front.
                 if is_down
                     && state.trigger_vk.is_none()
                     && state.capture.active

@@ -1,6 +1,6 @@
 //! Keys and buttons that join a held modifier-only shortcut: another app's
-//! chord ends the capture, unless the hold is long enough for Labs › Keep
-//! long holds through other keys.
+//! chord ends the capture, unless the hold is long enough for Labs › Hold
+//! through other keys.
 
 use super::{CaptureState, HotkeyAction};
 
@@ -26,7 +26,7 @@ impl CaptureState {
     }
 
     /// Whether a key or button going down now joins a hold that keeps
-    /// recording: Labs › Keep long holds through other keys, in Hold mode,
+    /// recording: Labs › Hold through other keys, in Hold mode,
     /// on a modifier-only shortcut a second or more into its press, which
     /// the release then finishes as usual. `hold_through_keys` is the lab's
     /// gate, read as the event arrives. Before the first second, and with

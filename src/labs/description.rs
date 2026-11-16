@@ -210,7 +210,7 @@ impl Feature {
                 "Say a phrase at the end of a hands-free dictation to finish it; the phrase never reaches the pasted text"
             }
             Self::HoldThroughKeys => {
-                "A key or click joining a held modifier-only shortcut a second or more after it went down is left to the app in front, and the release still finishes the dictation. Before that first second a chord still throws it away, and a shortcut with a key is unchanged"
+                "Keys and clicks a second or more into a held modifier-only shortcut reach the app in front and no longer end the dictation, which the release then finishes as usual. Before that first second a chord still ends it, and a shortcut with a key is unchanged"
             }
         }
     }

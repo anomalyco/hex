@@ -4391,10 +4391,10 @@ fn held_modifier_only_shortcut_plus_any_key_discards_after_the_hold_threshold() 
     assert!(hotkey.is_recording());
 }
 
-/// Labs › Keep long holds through other keys: with the lab on, a key joining
-/// a held modifier-only press a second or more in reaches the app and the
-/// capture keeps recording, and the release still finishes it. Inside the
-/// first second the chord still discards, and off, every chord does.
+/// Labs › Hold through other keys: with the lab on, a key joining a held
+/// modifier-only press a second or more in reaches the app and the capture
+/// keeps recording, and the release still finishes it. Inside the first
+/// second the chord still discards, and off, every chord does.
 #[test]
 fn hold_through_keys_keeps_a_long_hold_through_a_joining_key() {
     let now = capture_time();
@@ -4448,7 +4448,8 @@ fn hold_through_keys_keeps_a_long_hold_through_a_joining_key() {
         assert!(!hotkey.is_recording());
     }
     // Once both are up, the next press pairs with that release as any press
-    // after a release does: a double tap still starts hands-free.
+    // after a release does: it starts, and its release inside the double-tap
+    // window locks the capture for hands-free dictation.
     let mut hotkey = test_hotkey(false, now);
     hotkey.hold_through_keys = || true;
     hotkey.process(press, now);
@@ -4466,6 +4467,11 @@ fn hold_through_keys_keeps_a_long_hold_through_a_joining_key() {
         hotkey.process(press, released + Duration::from_millis(100)),
         Some(HotkeyAction::Start)
     );
+    assert_eq!(
+        hotkey.process(release, released + Duration::from_millis(200)),
+        None
+    );
+    assert!(hotkey.is_locked());
     // Off, a long hold still discards the key.
     let mut hotkey = test_hotkey(false, now);
     hotkey.process(press, now);

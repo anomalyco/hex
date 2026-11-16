@@ -768,7 +768,7 @@ Ordinary hold                            // lock activation is mapped below
   │       (Spaceman's Option-1) -> Seen at HID -> Discard, no double-tap lock
   ├── Modifier-only hold + any key, at any time -> Discard  // dictate.held-chord
   │   (key reaches the app; locked and toggle captures keep recording)
-  │   ├── Keep long holds through other keys, a key at or after 1 s ->
+  │   ├── Hold through other keys, a key at or after 1 s ->
   │   │   Nothing: the capture goes on, the key reaches the app,
   │   │   and the release still finishes it                // dictate.held-chord-lab
   │   └── Return or keypad Enter past 300 ms -> Nothing: the capture goes on,
@@ -796,9 +796,10 @@ raw timestamp, how it was read, and its arrival delay. The `discarded` event in
 `live.ndjson` carries the same cause as `reason`: `key`, `hid-key`, `mouse`, or
 `extra-modifier`. Short taps have no `reason`.
 
-With Labs › Keep long holds through other keys on (macOS and Windows), a
-modifier-only Hold press stops taking keys as a chord a second after it
-started: at or after `HOLD_THROUGH_KEYS_AFTER` (1 s, counted from the press)
+With Labs › Hold through other keys on (macOS and Windows), a
+modifier-only Hold press stops taking keys as a chord a second or more after
+it started: at or after `HOLD_THROUGH_KEYS_AFTER` (1 s, counted from the
+press)
 a key goes to the app in front and the capture keeps recording, and its
 release still finishes with the usual tail, even while that key is still
 down (`dictate.held-chord-lab`). Inside the first second nothing changes, and

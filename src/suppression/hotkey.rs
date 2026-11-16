@@ -130,8 +130,8 @@ const DOUBLE_TAP_MODIFIERS: fn() -> bool = if cfg!(test) {
     crate::labs::double_tap_modifiers
 };
 
-/// Labs › Keep long holds through other keys. Unit tests turn it on per
-/// machine, as they do Tap or hold.
+/// Labs › Hold through other keys. Unit tests turn it on per machine, as they
+/// do Tap or hold.
 const HOLD_THROUGH_KEYS: fn() -> bool = if cfg!(test) {
     || false
 } else {
@@ -139,9 +139,8 @@ const HOLD_THROUGH_KEYS: fn() -> bool = if cfg!(test) {
 };
 
 /// How long a modifier-only shortcut is held before a key joining it is meant
-/// for the app in front rather than a chord (Labs › Keep long holds through
-/// other keys). The Windows hook holds the same second in its `hold_through`
-/// module.
+/// for the app in front rather than a chord (Labs › Hold through other keys).
+/// The Windows hook holds the same second in its `hold_through` module.
 const HOLD_THROUGH_KEYS_AFTER: Duration = Duration::from_secs(1);
 
 pub struct DictationHotkey {
@@ -160,8 +159,9 @@ pub struct DictationHotkey {
     /// Labs › Double-tap on a lone modifier, read as the mode is applied: a
     /// modifier-only binding may start a double-tap-only capture.
     double_tap_modifiers: fn() -> bool,
-    /// Labs › Keep long holds through other keys, read as a key joins a held
-    /// modifier-only capture: a second in, the key is the app's, not a chord.
+    /// Labs › Hold through other keys, read as a key joins a held
+    /// modifier-only capture: a second or more in, the key is the app's, not a
+    /// chord.
     hold_through_keys: fn() -> bool,
     binding: RuntimeHotkey,
     /// Toggle's cancel shortcut; `None` in Hold mode.
@@ -992,7 +992,7 @@ impl DictationHotkey {
                         // key from the session), except Return once the
                         // hold made the press Hex's: pressing it while
                         // dictating never throws the dictation away. With
-                        // Labs › Keep long holds through other keys, a key a
+                        // Labs › Hold through other keys, a key a
                         // second or more into the hold is the app's too, and
                         // the release still finishes.
                         || (chord_key_down
