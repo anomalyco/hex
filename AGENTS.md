@@ -537,10 +537,11 @@ substitute for source inspection or a second roadmap.
 - `meeting/transcript`: streaming 16 kHz resampling, short pause-aware
   overlapping chunks transcribed as background work on the dictation engine's
   loaded model (a process without the engine, such as the CLI, loads its own),
-  microphone chunks raised to the models' level when another app's voice
-  processing leaves them quiet (the recording and echo envelopes keep the
-  captured audio), seam deduplication, echo suppression, the rolling in-call
-  transcript and its `TranscriptReader`, and Markdown rendering.
+  microphone chunks raised to the models' level only while the track stayed
+  under -35 dBFS across its last minute, so a normal microphone is untouched
+  (the recording and echo envelopes keep the captured audio), seam
+  deduplication, echo suppression, the rolling in-call transcript and its
+  `TranscriptReader`, and Markdown rendering.
 - `meeting/echo`: 20 ms energy envelopes of both tracks and the signal-level
   bleed/local classification of microphone segments.
 - `meeting/notes`: a bounded provisional title while recording, then one

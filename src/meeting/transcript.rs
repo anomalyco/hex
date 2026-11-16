@@ -109,12 +109,17 @@ pub(super) struct Chunker {
     /// which another app holding the device with voice processing can leave
     /// tens of dB quiet, never the system track's.
     raise: bool,
+    /// The microphone's recent loudness on its captured audio, which decides
+    /// that raise; a system chunker never hears it.
+    level: chunk_level::TrackLevel,
 }
 
 impl Chunker {
-    /// Splits `source`'s track. Only microphone chunks are raised to the level
-    /// the models hear; the system track is transcribed as it plays.
+    /// Splits `source`'s track. Only microphone chunks are raised, and only
+    /// while the track's own recent level says it is quiet; the system track
+    /// is transcribed as it plays.
     pub(super) fn new(source: MeetingSource) -> Self {
+        let raise = source == MeetingSource::Microphone;
         Self {
             buffer: Vec::new(),
             buffer_start: 0,
@@ -122,7 +127,8 @@ impl Chunker {
             overlap: 0,
             segmenter: PauseSegmenter::default(),
             pauses: VecDeque::new(),
-            raise: source == MeetingSource::Microphone,
+            raise,
+            level: chunk_level::TrackLevel::default(),
         }
     }
 
@@ -131,13 +137,25 @@ impl Chunker {
             if let Some(cut) = self.segmenter.push(frame) {
                 self.pauses.push_back(cut);
             }
+            if self.raise {
+                self.level.hear(frame);
+            }
         }
         self.buffer.extend_from_slice(samples);
         std::iter::from_fn(|| self.next_chunk()).collect()
     }
 
-    pub(super) fn finish(self) -> Option<Chunk> {
-        self.rest(MIN_TAIL)
+    /// Queues the rest of the audio as one last chunk and closes the track:
+    /// a later push, after a gap, starts a new chunk at zero while the level
+    /// window keeps what it heard.
+    pub(super) fn finish(&mut self) -> Option<Chunk> {
+        let chunk = self.rest(MIN_TAIL);
+        self.buffer.clear();
+        self.buffer_start = 0;
+        self.chunk_start = 0;
+        self.overlap = 0;
+        self.pauses.clear();
+        chunk
     }
 
     /// The audio not yet in a chunk, as one last chunk, when at least
@@ -152,12 +170,12 @@ impl Chunker {
         self.buffer_start + self.buffer.len()
     }
 
-    /// The track's audio from `begin` to `cut`, raised when the track's quiet
-    /// microphone needs it.
+    /// The track's audio from `begin` to `cut`, raised while the track's own
+    /// recent level says its microphone is quiet.
     fn chunk(&self, begin: usize, cut: usize, tail: usize) -> Chunk {
         let mut samples = self.buffer[begin - self.buffer_start..cut - self.buffer_start].to_vec();
         if self.raise {
-            chunk_level::raise_quiet_microphone(&mut samples);
+            chunk_level::raise(&mut samples, self.level.gain());
         }
         Chunk {
             start: begin,
@@ -948,9 +966,7 @@ impl RollingTrack {
             .map(StreamingResampler::finish)
             .unwrap_or_default();
         self.push(index, &tail, envelope, pending);
-        if let Some(mut chunk) =
-            std::mem::replace(&mut self.chunker, Chunker::new(self.transcript.source)).finish()
-        {
+        if let Some(mut chunk) = self.chunker.finish() {
             chunk.start += self.base;
             self.pending += chunk.samples.len();
             pending.push_back((index, chunk));
@@ -2430,7 +2446,8 @@ mod tests {
         }
     }
 
-    /// Records how loud each chunk handed to the transcriber is.
+    /// Records how loud each chunk handed to the transcriber is, measured as
+    /// the track measures its own audio.
     #[derive(Default)]
     struct HeardLevels(Vec<f32>);
 
@@ -2440,9 +2457,64 @@ mod tests {
                 !chunk.is_silent(),
                 "a silent chunk is skipped before the transcriber"
             );
-            self.0
-                .push(chunk_level::frame_percentile_dbfs(&chunk.samples, 0.95).unwrap());
+            self.0.push(level_of(&chunk.samples));
             Ok(Chunked::Done(Transcript::default()))
+        }
+    }
+
+    fn level_of(samples: &[f32]) -> f32 {
+        let mut level = chunk_level::TrackLevel::default();
+        for frame in samples.chunks(FRAME) {
+            level.hear(frame);
+        }
+        level.loud_dbfs().unwrap()
+    }
+
+    /// 10 s of a room's background at -50 dBFS with a 300 ms word at -20 dBFS
+    /// in it, as a microphone no other app holds records.
+    fn room_with_a_word() -> Vec<f32> {
+        let noise = crate::transcription::pause_segmenter::tests::noise;
+        let mut seed = 11;
+        let mut audio = noise(4_000, -50.0, &mut seed);
+        audio.extend(noise(300, -20.0, &mut seed));
+        audio.extend(noise(5_700, -50.0, &mut seed));
+        audio
+    }
+
+    #[test]
+    fn a_normal_microphone_track_is_left_bit_identical() {
+        let audio = room_with_a_word();
+        let mut chunker = Chunker::new(MeetingSource::Microphone);
+        let mut chunks = Vec::new();
+        for block in audio.chunks(1_024) {
+            chunks.extend(chunker.push(block));
+        }
+        chunks.extend(chunker.finish());
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert_eq!(
+                chunk.samples,
+                audio[chunk.start..chunk.start + chunk.samples.len()],
+                "a normal microphone chunk is transcribed exactly as captured"
+            );
+        }
+
+        // A background-only chunk later on the same track, inside the minute.
+        let noise = crate::transcription::pause_segmenter::tests::noise;
+        let mut seed = 12;
+        let later_audio = noise(5_000, -50.0, &mut seed);
+        let mut later = Vec::new();
+        for block in later_audio.chunks(1_024) {
+            later.extend(chunker.push(block));
+        }
+        later.extend(chunker.finish());
+        assert!(!later.is_empty());
+        for chunk in &later {
+            assert_eq!(
+                chunk.samples,
+                later_audio[chunk.start..chunk.start + chunk.samples.len()],
+                "a chunk between words is not raised on a normal microphone"
+            );
         }
     }
 
@@ -2455,7 +2527,7 @@ mod tests {
             .iter()
             .map(|sample| sample * 0.025)
             .collect::<Vec<_>>();
-        let captured = chunk_level::frame_percentile_dbfs(&quiet, 0.95).unwrap();
+        let captured = level_of(&quiet);
         assert!(captured < -35.0 && captured > -60.0, "{captured}");
 
         let sources = [MeetingSource::Microphone, MeetingSource::System];
@@ -2483,9 +2555,10 @@ mod tests {
         assert!(!failed);
         assert_eq!(model.0.len(), 2);
         let (microphone, system) = (model.0[0], model.0[1]);
-        // The microphone is raised to the models' level; the system track
-        // plays at the level it is transcribed at and is left alone.
-        assert!((microphone + 25.0).abs() < 0.5, "{microphone}");
+        // The microphone is raised by the 30 dB cap, from about -52 to about
+        // -22 dBFS; the system track plays at the level it is transcribed at
+        // and is left alone.
+        assert!((microphone + 22.0).abs() < 0.5, "{microphone}");
         assert_eq!(system, captured);
     }
 
