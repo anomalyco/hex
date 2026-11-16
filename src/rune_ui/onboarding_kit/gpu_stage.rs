@@ -118,10 +118,9 @@ impl OnboardingGpu {
             &f.rt.instances,
             f.size,
         );
-        let dark = f.rt.env.system_dark;
         let (device, queue) = (f.device, f.queue);
         f.ui.draw_with(f.encoder, f.target, clear, &mut |pass, site| {
-            self.paint(pass, site, device, queue, dark);
+            self.paint(pass, site, device, queue);
         });
         self.end();
     }
@@ -159,7 +158,6 @@ impl OnboardingGpu {
         site: &EffectSite<'_>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        dark: bool,
     ) {
         if is_fireworks_mark(site.mark) {
             if let Some(fireworks) = self.fireworks.as_mut() {
@@ -191,7 +189,6 @@ impl OnboardingGpu {
                 (bottom - top) as u32,
             ],
             scale: w / WINDOW.0,
-            dark,
         };
         let painter = hud
             .painters

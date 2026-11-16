@@ -922,9 +922,8 @@ const DOT_UNIFORM_BINDING: &str = "@group(0) @binding(0) var<uniform> u: DotUnif
 impl DotUniforms {
     fn new(frame: &DotFrame, layout: Layout, target: Target) -> Self {
         let pose = &frame.pose;
-        // An island is black in either appearance and draws no plate.
-        let dark = target.dark || layout.island.is_some();
-        let mut colors = dot_scope::palette(dark, pose, frame.tuning.saturation);
+        // The HUD is always a dark surface, including inside a light preview.
+        let mut colors = dot_scope::palette(true, pose, frame.tuning.saturation);
         if layout.island.is_some() {
             for color in [&mut colors.plate, &mut colors.rim, &mut colors.shadow] {
                 color[3] = 0.0;
@@ -950,7 +949,7 @@ impl DotUniforms {
             grid: pose.grid,
             live: pose.live,
             cool: pose.cool,
-            dark: if dark { 1.0 } else { 0.0 },
+            dark: 1.0,
             base: rgba(colors.base),
             core: rgba(colors.core),
             plate: colors.plate,
@@ -1048,17 +1047,15 @@ pub(crate) struct Target {
     pub(crate) clip: [u32; 4],
     /// Device pixels per point.
     pub(crate) scale: f32,
-    pub(crate) dark: bool,
 }
 
 impl Target {
     /// All of a target `size` device pixels big.
-    fn whole(size: (u32, u32), scale: f32, dark: bool) -> Self {
+    fn whole(size: (u32, u32), scale: f32) -> Self {
         Self {
             viewport: [0.0, 0.0, size.0 as f32, size.1 as f32],
             clip: [0, 0, size.0, size.1],
             scale,
-            dark,
         }
     }
 }
@@ -1191,7 +1188,7 @@ impl Compositor<Hud> for HudCompositor {
     /// clears the target.
     fn render(&mut self, f: &mut Frame<'_, Hud>) {
         let reduce = f.rt.reduced_motion;
-        let target = Target::whole(f.size, f.rt.env.scale, f.rt.env.system_dark);
+        let target = Target::whole(f.size, f.rt.env.scale);
         let hud = &mut f.rt.state;
         hud.reduce = reduce;
         let now = Instant::now();
@@ -1265,6 +1262,21 @@ impl Painter {
         format: wgpu::TextureFormat,
         linear: bool,
     ) -> Painter {
+        Self::pipeline(device, format, linear, false)
+    }
+
+    /// A field drawn directly in an existing surface. The dot geometry and
+    /// colour response are the HUD's; nothing paints between the dots.
+    pub(crate) fn dots_only(device: &wgpu::Device, format: wgpu::TextureFormat) -> Painter {
+        Self::pipeline(device, format, format.is_srgb(), true)
+    }
+
+    fn pipeline(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        linear: bool,
+        dots_only: bool,
+    ) -> Painter {
         let immediates = device.features().contains(wgpu::Features::IMMEDIATES)
             && device.limits().max_immediate_size >= DOT_UNIFORM_BYTES;
         let source = include_str!("rune_hud.wgsl");
@@ -1326,7 +1338,10 @@ impl Painter {
             immediate_size: if immediates { DOT_UNIFORM_BYTES } else { 0 },
         });
         // Display values; a linear target decodes them.
-        let constants = [("linear_target", f64::from(u8::from(linear)))];
+        let constants = [
+            ("linear_target", f64::from(linear)),
+            ("dots_only", f64::from(dots_only)),
+        ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dot_scope_fragment"),
             layout: Some(&pipeline_layout),
@@ -1382,7 +1397,7 @@ impl Painter {
     }
 
     /// Clears `view` and draws Dot scope into it.
-    fn draw(
+    pub(crate) fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,

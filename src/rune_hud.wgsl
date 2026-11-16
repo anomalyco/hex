@@ -10,6 +10,7 @@
 // pixel within it. A linear (sRGB-format) target gets the colours decoded.
 
 override linear_target: bool = false;
+override dots_only: bool = false;
 
 struct Varyings {
     @builtin(position) position: vec4f,
@@ -273,15 +274,15 @@ fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
         }
     }
 
-    // A soft drop shadow 3 pt below, as the prototype's 16 pt canvas blur.
-    let shadow_distance = rounded_box(point - vec2f(0.0, 3.0), half_size, radius);
-    composite(&result, u.shadow.rgb, u.shadow.a * (0.5 - 0.5 * tanh(shadow_distance / 6.5)));
-
     let shape = coverage(distance, aa) * island_shape;
-    composite(&result, u.plate.rgb, u.plate.a * shape);
-    composite(&result, u.rim.rgb, u.rim.a * coverage(abs(distance) - 0.3, aa));
+    if (!dots_only) {
+        let shadow_distance = rounded_box(point - vec2f(0.0, 3.0), half_size, radius);
+        composite(&result, u.shadow.rgb, u.shadow.a * (0.5 - 0.5 * tanh(shadow_distance / 6.5)));
+        composite(&result, u.plate.rgb, u.plate.a * shape);
+        composite(&result, u.rim.rgb, u.rim.a * coverage(abs(distance) - 0.3, aa));
+    }
 
-    if (u.glow > 0.01) {
+    if (!dots_only && u.glow > 0.01) {
         let reach = 34.0 + 20.0 * u.glow;
         let t = clamp(length(point) / reach, 0.0, 1.0);
         let strength = select(0.19, 0.3, dark) * 0.55 * min(1.0, u.glow);
@@ -316,14 +317,16 @@ fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
             let power = max(value.x, 1e-5);
             let fresh = value.y;
             let row = abs(center.y) / half_size.y;
-            let floor_alpha = unlit * (1.0 - 0.7 * sstep(0.35, 0.95, row)) * presence * u.grid;
+            var floor_alpha = unlit * (1.0 - 0.7 * sstep(0.35, 0.95, row)) * presence * u.grid;
+            // A quiet centreline, not a plate-shaped bed of inactive dots.
+            if (dots_only) { floor_alpha = select(0.0, 0.26, j == rows / 2); }
             let alpha = floor_alpha + (full - floor_alpha) * pow(power, curve * mix(1.4, 1.0, fresh));
             let dot_radius = (0.25 + 0.17 * pow(power, 0.6))
                 * mix(1.0, mix(0.82, 1.0, fresh), sstep(0.03, 0.2, power)) * pitch;
             let core = clamp(power * power * 1.1, 0.0, 0.9) * mix(0.3, 1.0, fresh);
             let color = mix(u.base.rgb, u.core.rgb, core);
             let from_center = length(point - center);
-            if (power > 0.05) {
+            if (!dots_only && power > 0.05) {
                 composite(
                     &result,
                     color,

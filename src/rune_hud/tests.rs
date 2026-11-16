@@ -302,7 +302,7 @@ fn rune_hud_frames() {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    let target = Target::whole(size, scale, dark);
+    let target = Target::whole(size, scale);
     let mut dump = Vec::new();
     dump.extend(size.0.to_le_bytes());
     dump.extend(size.1.to_le_bytes());

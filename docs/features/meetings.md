@@ -804,12 +804,16 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   on shows it, keeping the recording's start time, within a second
      │   (the_recording_capsule_follows_the_indicator_setting_mid_recording;
      │   not observed on a real Mac)
-     ├── At rest: voice bars · mm:ss in a small pill, nothing else
-     │   ├── The bars follow the louder track's level (meeting::voice_level),
-     │   │   sampled every 50 ms on the ticker thread
+     ├── Always dark in either host appearance, including the open Stop and copy rows
+     ├── At rest: a steady recording dot, Dot scope and elapsed time
+     │   ├── The dictation HUD's listening field follows the louder fresh RMS
+     │   │   from microphone or system audio (not individual speakers). Missing
+     │   │   buffers and those over 300 ms old read as zero. In silence the
+     │   │   beam settles to a still dotted line; the recording dot stays visible.
+     │   │   Reduce Motion holds the HUD's braid still
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
-     │       automatically" shows left of the bars
-     ├── Hover -> springs open into a panel: Stop (left) and the bars and time
+     │       automatically" shows beside the meter
+     ├── Hover -> the pill reveals a panel: Stop opposite the meter and time
      │   in its header, then Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
@@ -852,7 +856,8 @@ Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.pan
      │   capsule moves there too
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
-  -> Off: top right below the menu bar, no drag, exactly as before
+  -> Off: no drag; the finished meeting still uses its recording's corner.
+     Other panel capsules stay top right below the menu bar
   Checks: a_released_panel_snaps_by_its_own_size,
   each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
   (rune_ui/meeting_capsules.rs); not observed on a real Mac. Every panel
@@ -1451,6 +1456,10 @@ Finished meeting panel (15 s, kept open while the pointer is over it; it
     closes when the pointer leaves after that) -> title · length, the
     summary while notes are on (or "Writing a title and summary with Apple
     Intelligence…", or "Markdown not saved: …"), then the recording's copies
+    ├── Dark in either appearance, at the recording pill’s last outer corner
+    │   (the saved corner if there was no pill for this meeting)
+    ├── × (Close) -> hide immediately, even under the pointer. Late notes do not
+    │   reopen it; the saved meeting and transcript remain in Meetings
     ├── Copy new -> the turns not yet copied or pasted, from the final
     │   transcript read off the main thread after the panel shows
     ├── Copy all -> Markdown, or speaker turns as a fallback
