@@ -289,7 +289,7 @@ impl Feature {
             Self::ShellCompletions => {
                 "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
             }
-            Self::YoloMode => "Send dictations automatically",
+            Self::YoloMode => "Press Return after pasting a dictation",
             Self::CopyDictationAudio => {
                 "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
             }

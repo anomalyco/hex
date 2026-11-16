@@ -609,12 +609,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.yolo_mode",
         Kind::Bool,
-        "Labs: a shortcut dictation held for at least labs.yolo_mode_seconds presses Return after pasting",
-    ),
-    key(
-        "labs.yolo_mode_seconds",
-        Kind::NumberChoice(&["1", "2", "3", "5", "10"]),
-        "Seconds a dictation shortcut must be held for Labs › YOLO mode to press Return: 1, 2, 3, 5, or 10",
+        "Labs: press Return after pasting a shortcut dictation",
     ),
     key(
         "labs.yolo_mode_apps",

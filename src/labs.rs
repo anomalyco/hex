@@ -27,7 +27,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
@@ -531,14 +531,8 @@ static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 /// written by [`state`] and [`apply`].
 static CALENDAR_MENU: AtomicBool = AtomicBool::new(false);
 
-/// Labs › YOLO mode's minimum hold in seconds, 0 while the lab is
-/// off, set beside [`STATE`] like [`PRINT_START`], written by [`state`] and
-/// [`apply`].
-static YOLO_MODE_SECONDS: AtomicU32 = AtomicU32::new(0);
-
-/// The apps Labs › YOLO mode sends in (empty: every
-/// app), set beside [`YOLO_MODE_SECONDS`] by [`state`] and [`apply`].
-static YOLO_MODE_APPS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+/// None while YOLO mode is off; an empty app list sends everywhere.
+static YOLO_MODE_APPS: RwLock<Option<Vec<String>>> = RwLock::new(None);
 
 /// Labs › Clean up with Apple Intelligence's switch, set beside [`STATE`] like
 /// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
@@ -685,24 +679,12 @@ fn yolo_mode_enabled(settings: &LabsSettings) -> bool {
     settings.yolo_mode && Feature::YoloMode.shipped() && Feature::YoloMode.managed().is_none()
 }
 
-/// Records Labs › YOLO mode's apps, then its hold, so a
-/// gate that sees the hold also sees the apps that go with it.
+/// Publish the switch and its app scope together.
 fn store_yolo_mode(settings: &LabsSettings) {
     *YOLO_MODE_APPS
         .write()
-        .unwrap_or_else(|error| error.into_inner()) = settings.yolo_mode_apps.clone();
-    YOLO_MODE_SECONDS.store(yolo_mode_seconds(settings), Ordering::Release);
-}
-
-/// Labs › YOLO mode's minimum hold in seconds, or 0 while it's off
-/// (or its hold isn't one it offers).
-fn yolo_mode_seconds(settings: &LabsSettings) -> u32 {
-    let seconds = settings.yolo_mode_seconds;
-    if yolo_mode_enabled(settings) && crate::app_settings::YOLO_MODE_SECONDS.contains(&seconds) {
-        seconds
-    } else {
-        0
-    }
+        .unwrap_or_else(|error| error.into_inner()) =
+        yolo_mode_enabled(settings).then(|| settings.yolo_mode_apps.clone());
 }
 
 /// Whether `settings` turn on Labs › Clean up with Apple Intelligence in this
@@ -1951,13 +1933,8 @@ mod tests {
         labs.yolo_mode = true;
         labs.unload_idle_minutes = 24 * 60;
         assert!(yolo_mode_enabled(&labs));
-        assert_eq!(yolo_mode_seconds(&labs), 2);
-        labs.yolo_mode_seconds = 5;
-        assert_eq!(yolo_mode_seconds(&labs), 5);
-        labs.yolo_mode_seconds = 4;
-        assert_eq!(yolo_mode_seconds(&labs), 0);
         assert_eq!(
-            Feature::for_settings_key("labs.yolo_mode_seconds"),
+            Feature::for_settings_key("labs.yolo_mode_apps"),
             Some(Feature::YoloMode)
         );
         // The state word has no bit for it: the other switches keep theirs.
