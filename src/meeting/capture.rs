@@ -62,7 +62,7 @@ impl PacketSink {
 
 /// The newest buffer's loudness per source (f32 bits, 0 to 1) and when it
 /// arrived (milliseconds since [`level_epoch`]), for the recording pill's
-/// voice bars. One meeting records at a time.
+/// level histories. One meeting records at a time.
 static LEVELS: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
 static LEVEL_AT_MS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 /// A reading older than this is silence: the source stopped delivering.
@@ -80,33 +80,39 @@ fn level_slot(source: MeetingSource) -> usize {
     }
 }
 
-/// Maps a buffer's RMS from -50 to -10 dBFS onto 0 to 1.
-fn loudness(samples: &[f32]) -> f32 {
-    let power = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
-    let db = 10.0 * power.max(1e-10).log10();
-    ((db + 50.0) / 40.0).clamp(0.0, 1.0)
-}
-
 fn record_level(source: MeetingSource, samples: &[f32]) {
     let slot = level_slot(source);
-    LEVELS[slot].store(loudness(samples).to_bits(), Ordering::Relaxed);
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    LEVELS[slot].store(rms.to_bits(), Ordering::Relaxed);
     let now = level_epoch().elapsed().as_millis() as u64;
     LEVEL_AT_MS[slot].store(now.max(1), Ordering::Relaxed);
 }
 
-/// How loud the recording meeting is right now, 0 to 1: the louder of the
-/// microphone and the system audio, each read from its newest buffer and
-/// silent once that is over 300 ms old.
-pub fn voice_level() -> f32 {
+/// Latest microphone and system RMS, in that order, in the same units Dot scope takes.
+pub fn track_levels() -> [f32; 2] {
     let now = level_epoch().elapsed().as_millis() as u64;
-    let stale = LEVEL_STALE.as_millis() as u64;
-    (0..2)
-        .filter(|&slot| {
-            let at = LEVEL_AT_MS[slot].load(Ordering::Relaxed);
-            at != 0 && now.saturating_sub(at) <= stale
-        })
-        .map(|slot| f32::from_bits(LEVELS[slot].load(Ordering::Relaxed)))
-        .fold(0.0, f32::max)
+    std::array::from_fn(|slot| {
+        fresh_level(
+            now,
+            LEVEL_AT_MS[slot].load(Ordering::Relaxed),
+            f32::from_bits(LEVELS[slot].load(Ordering::Relaxed)),
+        )
+    })
+}
+
+fn fresh_level(now: u64, at: u64, level: f32) -> f32 {
+    if at != 0 && now.saturating_sub(at) <= LEVEL_STALE.as_millis() as u64 {
+        level
+    } else {
+        0.0
+    }
+}
+
+#[test]
+fn a_missing_or_stale_track_reads_as_silence() {
+    assert_eq!(fresh_level(500, 0, 0.8), 0.0);
+    assert_eq!(fresh_level(500, 199, 0.8), 0.0);
+    assert_eq!(fresh_level(500, 200, 0.8), 0.8);
 }
 
 /// An open source that the supervisor polls until it fails.

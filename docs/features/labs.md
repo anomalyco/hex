@@ -57,7 +57,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
-├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the onboarding HUD preview and the Sounds sheet's HUD replay inside the window, and every overlay window, keep following the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
+├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -670,8 +670,17 @@ in a real window; the Labs page goldens were regenerated for macOS
 (`mac-labs`, `mac-labs-link`, light and dark), Windows (`windows-labs`,
 light), and Linux (`linux-labs`, light).
 
+The sidebar footer's **What's new** opens a short feed of shipped features,
+newest first. Each entry has a decorative feature icon. Entries shipped on the
+same date share a heading: Today, Yesterday, or 2–6 days ago by local calendar
+day; older entries show the month and day, and the year outside the current
+year. YOLO mode opens and highlights its Labs card without changing
+the switch; Sounds opens General's sound picker without selecting or playing
+a set. `whats_new_opens_controls_without_changing_them` follows both links
+with a fixture and compares the settings before and after.
+
 Release notes link (`release-notes-link`, every OS): while on, the sidebar
-footer shows a small Release notes link under the version and update status.
+version is a link to the running build's notes.
 Only a release build shows it, and that exclusion is by build kind, not
 version string: local and test builds (`HEX_LOCAL_BUILD=1`,
 `HEX_TEST_BUILD=1`) get no link even when their version is plain. Then
@@ -682,7 +691,7 @@ version (`0.0.0-dev-N`) opens `https://anoma.ly/hex/dev#<version>`, a plain
 version shows no link. The gate is the footer row
 ([sidebar.rs](../../src/rune_ui/sidebar.rs) reads
 `labs::Feature::ReleaseNotesLink`), so off, the footer is exactly as before
-and What's new keeps its place under a staged update. Checks:
+and a staged update still links to its own release notes. Checks:
 `a_dev_build_opens_the_changelog_at_itself`,
 `a_stable_build_opens_its_github_release`, and
 `an_odd_version_has_no_release_notes` in

@@ -2384,7 +2384,10 @@ fullscreen app on a notched Mac is not yet observed.
 
 The HUD is Dot scope on every OS ([rune_hud/dot_scope.rs](../../src/rune_hud/dot_scope.rs),
 `dot_scope_fragment` in [rune_hud.wgsl](../../src/rune_hud.wgsl), drawn by
-a Rune overlay). It was the `dot-scope` experiment (#264) until 2026-10-29,
+a Rune overlay). Its surface uses the dark palette in either OS appearance,
+from the first visible frame through listening, processing, completion, and
+failure. The Sounds and onboarding previews use the same renderer; their
+surrounding windows keep their normal appearance. It was the `dot-scope` experiment (#264) until 2026-10-29,
 when it replaced the glossy capsule, which Omarchy users on X called a
 "static red thingy"; the capsule's shader and HUD Lab styles are deleted. It is the t422 prototype's look A with its values.
 Linux and Windows draw it in a 304×80 pt window at the HUD's edge (no

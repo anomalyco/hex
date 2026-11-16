@@ -236,7 +236,6 @@ impl Preview {
             ],
             // The modal's scale included.
             scale: px[2] / WINDOW.0,
-            dark: f.rt.env.system_dark,
         };
         let uniforms = painter.write(&frame, Layout::default(), target, |buffer, data| {
             f.write_buffer(buffer, 0, data)

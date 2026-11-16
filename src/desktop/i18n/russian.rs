@@ -15,6 +15,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("{} days ago", "{} дн. назад"),
+    ("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", "янв. февр. мар. апр. мая июн. июл. авг. сент. окт. нояб. дек."),
+    ("{month} {day}", "{day} {month}"),
+    ("{month} {day}, {year}", "{day} {month} {year} г."),
+    ("Preview the tones Hex plays when you dictate.", "Послушайте звуки, которые Hex воспроизводит во время диктовки."),
     ("Voice prompt", "Голосовая инструкция"),
     ("Copy captures as a zip", "Копировать записи как zip"),
     ("A finished capture copies as one zip file, without video or audio.", "Готовая запись копируется одним zip-файлом, без видео и звука"),

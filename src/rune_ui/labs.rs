@@ -413,6 +413,13 @@ fn shown(ui: &Ui) -> Vec<Row> {
         .collect()
 }
 
+pub(super) fn offered(ui: &Ui, feature: Feature) -> bool {
+    feature.audience() == crate::labs::Audience::Everyone
+        && shown(ui)
+            .iter()
+            .any(|row| row.lab.id() == feature.name() && !row.locked)
+}
+
 fn rows(ui: &Ui) -> Vec<Row> {
     let caps = ui.platform.caps;
     let settings = &ui.settings;
@@ -784,7 +791,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
         Feature::CleanUpWithAppleIntelligence => "lab-clean-up",
-        Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",
@@ -800,7 +806,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
-        Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
         Feature::OutputFixes => "lab-output-fixes",
         Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
@@ -819,23 +824,15 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CalendarMenu => "lab-calendar-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
-        Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::TypedText => "lab-typed-text",
-        Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
-        Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::GnomeAnnotate => "lab-gnome-annotate",
         Feature::Screenshots => "lab-screenshots",
-        Feature::FollowLiveTranscript => "lab-follow-live-transcript",
-        Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::MeetingImport => "lab-meeting-import",
-        Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
-        Feature::MeetingNotesFile => "lab-meeting-notes-file",
-        Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::ShellCompletions => "lab-shell-completions",
         Feature::YoloMode => "lab-yolo-mode",
