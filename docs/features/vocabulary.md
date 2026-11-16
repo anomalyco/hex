@@ -12,8 +12,6 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   -> muted note on the row and under the sheet's description: "SenseVoice
 │   Small doesn't use these terms; rewriting and search still do"; Parakeet,
 │   Underdog Bark, Whisper, and Qwen3-ASR (QwenCleo too) show none
-├── Parakeet-based model with Labs › Vocabulary biasing off -> the sheet says
-│   transcription uses the terms only with it on
 ├── Selected model reads fewer terms than the list holds -> muted line under
 │   the sheet's description: "This model reads the first 38 of 52 terms"
 │   (dictation::vocabulary::terms_read: Parakeet's 64-term cap or the
@@ -38,9 +36,6 @@ General › Vocabulary   // vocabulary.settings; after Language
     (settings.json `vocabulary_boost`)  // vocabulary.boost
 
 Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too)  // vocabulary.transcription; transcription::gguf_session::with_vocabulary
-├── Only with Labs › Vocabulary biasing on (`labs.vocabulary_biasing`, off by
-│   default; labs.md) -> off: no run takes the list; the sheet says so, and
-│   rewriting and search still use it
 ├── Every run and live stream reads the list and the boost at its start:
 │   dictation, meetings, captures, the local API
 │   └── `hex transcribe` with no Hex running starts `hex service --embedded`,
@@ -105,8 +100,7 @@ Screen vocabulary (Labs › Screen vocabulary, macOS)  // vocabulary.screen
 ├── Joins that dictation after the mode's terms and the shared list, inside
 │   the same 64-term/character budgets; a model with VocabularyUse::None gets
 │   nothing
-├── Parakeet reads them only with Labs › Vocabulary biasing on and a boost
-│   other than Off; Whisper and Qwen3-ASR read them as a prompt
+├── Parakeet reads them only with a boost other than Off; Whisper and Qwen3-ASR read them as a prompt
 ├── A capture with terms for a model that reads them uses its whole-clip run
 │   rather than a live stream's text: a stream fixes its vocabulary when it
 │   starts, so the text arrives after release with a little more latency

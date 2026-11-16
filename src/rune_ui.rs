@@ -608,10 +608,6 @@ enum Menu {
     InputSourceModel(usize),
     /// An input source's language in keyboard model switching.
     InputSourceLanguage(usize),
-    /// A mode's speech model in the Modes pane (Labs › Switch model with app).
-    ModeSpeechModel(modes::Selection),
-    /// A mode's speech language in the Modes pane.
-    ModeSpeechLanguage(modes::Selection),
     /// How long History keeps dictations.
     HistoryRetention,
     /// The installed models History's Transcribe again offers.
@@ -729,7 +725,6 @@ struct Drafts {
     vocabulary: bool,
     phrase: bool,
     stop_phrase: bool,
-    origins: bool,
 }
 
 impl Ui {
@@ -911,10 +906,6 @@ impl Ui {
             &submitted.labs.stop_phrase_text,
             &candidate.labs.stop_phrase_text,
         );
-        self.lab_store.rebase_origins(
-            &submitted.labs.api_browser_origins,
-            &candidate.labs.api_browser_origins,
-        );
         self.settings = candidate;
         self.modes.committed(&self.settings);
         self.draft_since = None;
@@ -937,7 +928,6 @@ impl Ui {
         candidate.vocabulary = self.vocabulary.project();
         self.lab_store.project_phrase(&mut candidate);
         self.lab_store.project_stop_phrase(&mut candidate);
-        self.lab_store.project_origins(&mut candidate);
         candidate
     }
 
@@ -951,7 +941,6 @@ impl Ui {
             vocabulary: self.vocabulary.project() != settings.vocabulary,
             phrase: self.lab_store.phrase_dirty(settings),
             stop_phrase: self.lab_store.stop_phrase_dirty(settings),
-            origins: self.lab_store.origins_dirty(settings),
         }
     }
 
@@ -1158,19 +1147,6 @@ impl Ui {
                     &service.labs.stop_phrase_text,
                 );
             }
-            // The origins field follows its lab and its saved list the same
-            // way; a toggled lab resyncs it, dropping a stale draft.
-            if service.labs.api_browser_access != self.settings.labs.api_browser_access {
-                self.lab_store
-                    .sync_origins(&service.labs.api_browser_origins);
-            } else if !drafts.origins
-                && service.labs.api_browser_origins != self.settings.labs.api_browser_origins
-            {
-                self.lab_store.rebase_origins(
-                    &self.settings.labs.api_browser_origins,
-                    &service.labs.api_browser_origins,
-                );
-            }
             self.settings = service.clone();
             self.settings_changed();
         }
@@ -1366,13 +1342,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && (ui.pane == Pane::Modes || platform_settings::summary_model_shown(ui))
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
-    let history_multi = history::multi(ui);
     changed |= ui.history.poll(
         ui.pane == Pane::History
             && !ui.labs_open
             && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible),
         ui.settings.labs.keep_recordings,
-        history_multi,
     );
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
@@ -1617,9 +1591,6 @@ mod snap_isolation;
 
 #[cfg(test)]
 mod keyboard_model_tests;
-
-#[cfg(test)]
-mod speech_model_tests;
 
 #[cfg(test)]
 mod dmg_keycap;

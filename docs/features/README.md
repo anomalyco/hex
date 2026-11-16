@@ -918,11 +918,11 @@ Completed output                         // output
     ├── Retention ("Kept 7 days ▾" menu) -> Seven days by default, always hard-capped
     ├── Off ("History off") -> Stop new entries; preserve existing entries
     ├── Same menu > Clear all history… -> asks in the header; only the red confirm clears
-    ├── Labs > Select multiple dictations (off, every OS) -> one row as before   // labs.history_multi_select
+    ├── Select rows as a list (every OS)
     │   ├── Plain click, Shift-click on the visible (searched) rows, Cmd-click (Ctrl), or a drag -> one, a range, or a toggled set
     │   ├── Two or more selected -> "{count} dictations selected": Copy (final texts, oldest first, a blank line between each) / Delete… (asks once)
     │   ├── One selected -> the ordinary card, Copy, Delete… (asks once, then Cancel), Transcribe again with Keep recordings
-    │   └── A search, new entries, or a delete prune it; turning the lab off keeps one entry (labs.md)
+    │   └── A search, new entries, or a delete prune it
     ├── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
     │   -> also "Keep audio too" in the retention menu while the lab is offered
     │   -> the card's "Transcribe again" menu runs it through any installed model
@@ -1673,8 +1673,6 @@ Menu bar and Settings                    // maintenance
 │   │   Copy Last Meeting Transcript (Meetings on), Restore Last Capture (Labs ›
 │   │   Screenshots on; dimmed until a capture card was closed), Speech Model ▸
 │   ├── Settings… ⌘, · Check for Updates… · Quit Hex ⌘Q
-│   │   └── Labs > ⌘Q closes Settings (off, #1473) -> ⌘Q closes the Settings
-│   │       window instead; dictation keeps running, the menu bar icon quits (labs.md)
 │   ├── No Meetings… (Settings… opens the same window) and no Show Hex in
 │   │   Screen Recordings (Annotate's pane has it)
 │   ├── In the interface language: macOS title case in English, else the
@@ -1693,7 +1691,7 @@ Menu bar and Settings                    // maintenance
 ├── Check for Updates -> The updater (maintain.updates); opens the window, whose
 │   footer then says "Checking for updates…", "Hex is up to date", or
 │   "Couldn't check for updates" (#1120)
-└── Quit -> Orderly shutdown (⌘Q closes Settings instead while its Lab is on)
+└── Quit (⌘Q) -> Orderly shutdown
 ```
 
 ```ts
@@ -2656,9 +2654,6 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
-├── A web page's fetch -> Labs › Browser access to the local API
-│   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
-│   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No capture silence gate           // model output, unlike hotkey dictation;
 │   │   └── its whole-clip run still drops a Whisper clip's silent edges,
@@ -2725,25 +2720,6 @@ response unchanged; off, a timed request is `403 timestamps-disabled`, and a
 model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
-
-Browser access (Labs › Browser access to the local API, off by default) lets a
-web page served from an origin listed in `labs.api_browser_origins` call this
-API with `fetch`. A browser sends its `OPTIONS` preflight without the bearer
-token, so Hex answers `204` for an allowed `Origin` before authentication, with
-`Access-Control-Allow-Origin` naming that origin, `GET, POST`, the four request
-headers, a 10-minute cache, and private-network permission only when the
-browser asked for it. Every other response, `401`, `404`, and SSE streams
-included, carries the same origin and `Vary: Origin`; the token is still
-required for every request. An origin that isn't listed, a missing `Origin`,
-and the lab off answer exactly as before (`OPTIONS` is `401`, with no CORS
-headers), and nothing allows credentials or `*`. Saved entries are normalized
-to `http://` or `https://` `scheme://host[:port]`; `*`, `null`, paths, queries,
-fragments, and userinfo are ignored. An IPv6 origin takes the browser's
-compressed form (`http://[::1]:5173`) and a non-ASCII host its punycode, since
-a request's `Origin` is matched exactly. Errors answered before a request is
-read (`400`, `408`, `431`, and the queue-full `503`) carry no CORS headers.
-Route tests inject the gate (`cors::Cors::gated`); nothing was observed from a
-real browser page.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

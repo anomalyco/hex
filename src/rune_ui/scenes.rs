@@ -104,7 +104,6 @@ pub(super) const SCENES: &[Scene] = &[
     ("history-selection", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture_selection();
-        ui.settings.labs.history_multi_select = true;
         ui.pane = Pane::History;
     }),
     // Labs › Screenshots' Captures: a shot, a recording with its words, and
@@ -178,19 +177,6 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         modes::fixture(ui);
         ui.open = Some(Menu::Transformations);
-        ui.pane = Pane::Modes;
-    }),
-    // Labs › Switch model with app: each mode's speech model and language.
-    ("modes-speech", |ui| {
-        *ui = mac_fixture();
-        modes::fixture(ui);
-        ui.settings.labs.app_model_switching = true;
-        ui.settings.dictation_processing.modes[0].speech =
-            Some(crate::app_settings::KeyboardModelChoice {
-                model: TranscriptionModelId::ParakeetV3,
-                language: "es".into(),
-            });
-        ui.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
         ui.pane = Pane::Modes;
     }),
     ("picker", |ui| {
@@ -728,7 +714,7 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();
         ui.labs_open = true;
-        ui.lab_store.group = Some(crate::labs::Feature::VocabularyBiasing.group());
+        ui.lab_store.group = Some(crate::labs::Feature::LiveText.group());
     }),
     ("mac-labs-on", |ui| {
         labs_with_some_on(ui);

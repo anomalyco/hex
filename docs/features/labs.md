@@ -62,18 +62,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
-├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
-├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Screen vocabulary no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
-├── Switch model with app no  labs.app_model_switching       (macOS, Windows)
-│                                        each mode, Global included, picks a speech model and language; Modes shows the choice
-│                                        while on, and Hex switches when the app in front changes. Both OSes match by
-│                                        application, never by website, and Hex's own window is ignored; Linux has no
-│                                        runtime for it; a switch never downloads a model
 ├── Mouse shortcuts no    labs.mouse_shortcuts         (macOS)   mouse buttons record as shortcuts (#209)
 ├── Also pause the browser no pause_browser_media      (macOS)   pause a playing tab too, with Pause media (#301); General shows its permission row
 ├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
@@ -86,7 +79,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── YOLO mode no labs.yolo_mode (every OS) a shortcut dictation held at least its chosen time (2 s default), in one of its chosen apps if any, presses Return after its paste unless Escape came after the release (macOS); History records it as Send
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
-├── Print-only CLI dictation no labs.print_start        (macOS)   hex dictation start --print answers with the transcript however the recording ends; never pasted or copied
 ├── Voice prompt    no    labs.voice_prompt + labs.voice_prompt_phrase ("rewrite this", every OS)
 │                                        a spoken phrase inside a dictation hands the mode's OpenCode model a one-off
 │                                        instruction for that dictation; without one, processing is unchanged
@@ -130,8 +122,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Section key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations; hex history stats prints it (#790)
-├── Select multiple dictations no labs.history_multi_select  History selects several dictations with Shift-click, Cmd-click (Ctrl on
-│                                        Windows and Linux), or a drag, and copies or deletes them together
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
@@ -148,32 +138,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
 │                                        // clamping, empty arrays), transcription::service (the 422 decision), and
 │                                        // gguf_session (chunk offsets); no real-model transcript with times
-├── Browser access to the local API no labs.api_browser_access + labs.api_browser_origins (every OS)
-│                                        a web page served from one of the listed origins can call Hex's local API with
-│                                        fetch: its unauthenticated OPTIONS preflight for that exact origin answers 204
-│                                        with Access-Control-Allow-Origin, the methods and headers, and a 10-minute
-│                                        preflight cache, and every response (401, 404, and SSE streams included) carries
-│                                        Access-Control-Allow-Origin and Vary: Origin. Requests still need the API
-│                                        token, and no response allows credentials or `*`. Off, an origin not listed,
-│                                        or no Origin header answers exactly as before (OPTIONS is 401, no CORS headers).
-│                                        Entries are scheme://host[:port] only: *, null, paths, queries, fragments,
-│                                        and userinfo are ignored, a single trailing / and a default port are dropped,
-│                                        and scheme and host are lowercased. An IPv6 origin takes the browser's
-│                                        compressed form (http://[::1]:5173) and a non-ASCII host its punycode
-│                                        (xn--…), since a request's Origin is matched exactly. Errors answered before
-│                                        a request is read (400, 408, 431, and 503 when the connection queue is full)
-│                                        carry no CORS headers
-│                                        // checks: local_api::browser_access_is_off_unless_the_lab_lists_the_origin,
-│                                        // an_allowed_origin_gets_its_preflight_without_a_token,
-│                                        // a_duplicate_origin_header_never_earns_cors_but_still_routes,
-│                                        // authenticated_responses_carry_only_the_allowed_origin,
-│                                        // a_streams_events_response_carries_the_allowed_origin;
-│                                        // app_settings::browser_origins normalization tests;
-│                                        // api_browser_access_is_its_own_switch_and_keeps_normalized_origins (labs.rs);
-│                                        // browser_access_shows_its_origins_on_its_card_while_on and
-│                                        // browser_access_keeps_its_typing_through_its_own_save (rune_ui); not observed
-│                                        // from a real browser page, and no live macOS or Windows request
-├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Smaller model files no labs.k_quant_models         (macOS) adding a model file also accepts Q6_K, Q5_K, and Q4_K weights, smaller than Q8_0 and unverified
 │                                        // checks: k_quants_are_known_only_where_the_caller_runs_them,
@@ -181,15 +145,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_k_quant_import_needs_the_lab_and_falls_back_without_it (custom_models);
 │                                        // smaller_model_files_is_its_own_switch_and_macos_only (labs.rs); not observed on Metal
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
-├── Shell completions no  labs.shell_completions        (every OS) `hex completions <shell>` prints a bash, zsh, fish,
-│                                        elvish, or PowerShell completion script for `hex`, generated at runtime from the
-│                                        same clap tree the CLI parses, so new commands and flags are in it; off, it
-│                                        answers disabled and names its toggle, and the command stays out of `hex --help`
-│                                        // checks: the_lab_off_refuses_and_names_its_toggle and
-│                                        // every_shell_gets_a_script_with_the_command_tree (control/cli/completions.rs);
-│                                        // the_cli_prints_completion_scripts (linux.rs, main.rs, windows.rs);
-│                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
-│                                        // a sourced script in a real shell
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Copy dictation audio no labs.copy_dictation_audio  History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one WAV file on the clipboard, ready to attach. Needs Keep recordings and stores no audio itself
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
@@ -214,7 +169,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // calendar_menu_is_its_own_switch_and_macos_only (labs.rs);
 │                                        // the_menu_reads_upcoming_then_meetings_then_actions_then_the_app (macos_rune/status_item.rs);
 │                                        // not observed on a real Mac, in a real menu, or opening a real call link
-├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
@@ -396,7 +350,7 @@ playground only after Hex restarts.
 
 Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
-`labs::playground()`, `labs::vocabulary_biasing()`,
+`labs::playground()`,
 `labs::microphone_linger()`,
 `labs::voice_prompt()`, `labs::stop_phrase()`,
 `app_settings::meetings_enabled()`, or
@@ -425,7 +379,7 @@ appearance order them. The terms attach to that capture's context
 (`ContextSnapshot::screen_terms`) and join its transcription vocabulary after
 the mode's own terms and the shared list, inside the existing 64-term bias cap
 and prompt character budgets (`dictation::vocabulary::for_capture`). Parakeet
-reads them only with Labs › Vocabulary biasing on and a boost other than Off;
+reads them only with a boost other than Off;
 Whisper and Qwen3-ASR read them as a prompt; Apple Speech and other models
 that take no vocabulary never read them. A capture with terms for a model
 that reads them takes its whole clip after release rather than a live stream's
@@ -497,53 +451,6 @@ text made inert); the golden
 and the Labs card tests in `rune_ui/tests/panes.rs`. Not observed: a real Mac
 reading a real text field, or a dictated word corrected by the text around the
 cursor; the Accessibility function itself has no host test here.
-
-Switch model with app (`app-model-switching`, macOS and Windows): while on,
-the Modes pane gives each mode, Global included, a "Speech model" row:
-Don't switch, or any installed GGUF model the picker offers, then a language
-that model supports (shown fixed for a one-language model). A new model
-choice starts on that model's last-used language, else the saved language it
-supports. The choice saves to the mode's `speech` (in
-`dictation_processing.modes[]`, and Global's in
-`dictation_processing.default_mode`) as `{"model": ..., "language": ...}`.
-When the app in front changes, `transcription/app_model_switching` matches it
-to a mode by application and, 300 ms after the last change, starts the shared
-picker's installed-only preparation for the mode's choice; a mode without a
-choice switches nothing. Matching is by application on macOS and Windows
-alike: a mode's website rules are ignored, so a mode chosen only by website
-never switches. Hex's own window, and a moment with no application in front,
-are ignored: they neither schedule nor cancel a switch. A manual model
-choice cancels a pending switch, launching Hex records the mode in front
-without switching it, and a switch due while a dictation records or
-transcribes waits until it is idle (macOS knows a capture from its press;
-Windows sees only the engine's streams and finishes). It never downloads a
-model: a choice whose model is no longer downloaded shows Not installed, its
-preparation refuses it, and the selected model stays. Enabling the lab while
-Hex is in front applies nothing; the choice applies when you next focus an
-app other than Hex, after the same 300 ms. Editing a mode's choice, Global's
-included, likewise applies when you next focus an app whose mode carries it,
-never while Hex is in front. With keyboard switching also on, the source
-whose switch is due later wins, and an app switch wins a tie in the same
-tick. There is no Linux runtime for it, so Linux does not list the lab. Off,
-the Modes pane is exactly as before and nothing reads the frontmost app for
-models. Checks:
-`app_model_switching_is_a_labs_toggle_on_macos_and_windows`,
-`a_mode_picks_an_installed_speech_model_and_language`, and
-`the_speech_row_needs_the_lab_and_a_capable_os` in
-[speech_model_tests.rs](../../src/rune_ui/speech_model_tests.rs); the switch
-policy tests in
-[app_model_switching.rs](../../src/transcription/app_model_switching.rs);
-`app_model_switching_is_opt_in_and_mode_speech_choices_round_trip` and
-`loading_drops_mode_speech_choices_that_no_longer_validate` in
-[app_settings.rs](../../src/app_settings.rs); and
-`a_modes_speech_choice_uses_the_same_selectors_as_its_processing` in
-[dictation/config.rs](../../src/dictation/config.rs) and
-`a_modes_speech_choice_matches_its_application_or_website_else_global` in
-[dictation/modes.rs](../../src/dictation/modes.rs). Not yet observed: a
-real Mac or Windows PC switching apps while dictating, and the runtime
-scheduling on either host; the `mac-labs` and `windows-labs` goldens were
-regenerated for the new card, the Modes goldens did not change with the lab
-off, and the new `modes-speech` golden shows the on state.
 
 Mouse shortcuts off: the recorder ignores mouse buttons, `hex settings`
 refuses one, and a saved mouse-button shortcut goes back to its default when
@@ -684,27 +591,6 @@ year. YOLO mode opens and highlights its Labs card without changing
 the switch; Sounds opens General's sound picker without selecting or playing
 a set. `whats_new_opens_controls_without_changing_them` follows both links
 with a fixture and compares the settings before and after.
-
-Release notes link (`release-notes-link`, every OS): while on, the sidebar
-version is a link to the running build's notes.
-Only a release build shows it, and that exclusion is by build kind, not
-version string: local and test builds (`HEX_LOCAL_BUILD=1`,
-`HEX_TEST_BUILD=1`) get no link even when their version is plain. Then
-`updater::notes::release_notes_url` chooses from `crate::VERSION`: a dev
-version (`0.0.0-dev-N`) opens `https://anoma.ly/hex/dev#<version>`, a plain
-`major.minor.patch` opens
-`https://github.com/anomalyco/hex/releases/tag/v<version>`, and an odd
-version shows no link. The gate is the footer row
-([sidebar.rs](../../src/rune_ui/sidebar.rs) reads
-`labs::Feature::ReleaseNotesLink`), so off, the footer is exactly as before
-and a staged update still links to its own release notes. Checks:
-`a_dev_build_opens_the_changelog_at_itself`,
-`a_stable_build_opens_its_github_release`, and
-`an_odd_version_has_no_release_notes` in
-[notes.rs](../../src/updater/notes.rs), and
-`release_notes_link_shows_only_with_its_lab` in
-[tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed in a
-real window.
 
 Appearance (`appearance`, every OS): while on, its card shows "Theme"
 (System, Light mode, Dark mode; default System). `labs::window_dark` resolves
@@ -873,48 +759,6 @@ in [labs.rs](../../src/labs.rs). Not yet observed: a real Mac with another app
 taking focus mid-dictation. The `mac-labs` and `mac-labs-link` goldens moved
 with the Labs and Output card counts and were regenerated on Linux; the card
 itself sits in a folded group there.
-
-Print-only CLI dictation (`print-start`, macOS): while on, `hex dictation
-start --print` records a dictation that belongs to the command instead of the
-focused app. `control_dictation` in [recognition.rs](../../src/recognition.rs)
-starts it exactly as a plain start does and keeps the command's `PrintReply`
-on the listener's `Hotkeys` (`print_capture`). Wherever that recording ends,
-the reply is read once: the shortcut's finish (`finish_hotkey_dictation`)
-hands it to `DictationWorker::transcribe_printed` (target `Print` or
-`RawPrint`; processed like a paste, History kind Printed, Paste Last skipped);
-`hex dictation stop` and `toggle` join their own reply with it so both
-commands get the one transcript (a plain stop still answers as a plain stop
-does); `hex dictation cancel`, Toggle's cancel
-shortcut, and the Paste Last shortcut answer it as cancelled; a short-tap
-discard and a near-silent kept clip answer `no-speech`; a paused shortcut,
-an unopened microphone, or a microphone loss with no kept audio answers
-failed; and a reply still held when the next recording starts is failed
-rather than left to answer that one. Nothing pastes or copies the text, and a
-start while anything already
-records is refused with `busy`. Off, the command answers `disabled`; Linux and
-Windows answer `unsupported`; neither changes anything else. The printing
-start waits at most `PRINT_START_WAIT` (31 minutes), and
-`ControlCommand::deadline` gives its transport 5 s more; a timeout leaves the
-recording print-only. While it waits, it holds one of the local API's four
-connection workers (`local_api::HTTP_WORKERS`) until it answers or hits that
-cap, even if the client that asked is killed. Checks:
-`a_printing_stop_answers_through_its_reply_channel` (a joined `PrintReply`
-answers both waiters, `start --print` is accepted, `toggle`/`cancel --print`
-are refused, and the two deadlines) and `cancel_parses_and_takes_no_flags` in
-[control.rs](../../src/control.rs); the Linux and Windows `unsupported` answer
-in `a_printing_stop_answers_with_the_transcript`
-([control/host.rs](../../src/control/host.rs));
-`a_printing_start_follows_the_shortcut_that_finishes_it` and
-`a_held_print_reply_never_answers_a_later_dictation` in
-[recognition/hotkeys.rs](../../src/recognition/hotkeys.rs) (compiled only on
-macOS); `print_start_is_its_own_switch_and_macos_only` in
-[labs.rs](../../src/labs.rs); the row in
-`contributed_options_are_labs_toggles_off_by_default`
-([panes.rs](../../src/rune_ui/tests/panes.rs)); `desktop::i18n`'s tables carry
-the row's name and description in every language. Not yet observed: a real Mac
-with a microphone, so every path that ends a recording is a unit test and a
-reading of the code, not an end-to-end run. The `mac-labs` goldens change with
-the new row and are regenerated on Linux.
 
 Voice prompt (`voice-prompt`, every OS): for giving one dictation a one-off
 instruction for the mode's OpenCode model. While on, `Profiles::process_cancellable`
@@ -2032,54 +1876,6 @@ cap); `history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
 in both themes. Not yet observed: the dialog in a real window, and the Labs
 page goldens need regenerating on Linux with the new row.
 
-Select multiple dictations (`history-multi-select`, every OS): while on,
-History's rows select as a list does. A plain click selects one entry and
-makes it the range anchor; Shift-click selects every visible row from the
-anchor through the row clicked (the search's matches, so a filter narrows the
-range); Cmd-click (Ctrl on Windows and Linux) toggles one row and makes it
-the anchor; and a press dragged over other rows selects from the row it
-started on through the row under the pointer (Rune resolves that row from the
-`history-entry{id}` key of the element picked at the drag's window point,
-[selection.rs](../../src/rune_ui/history/selection.rs)). A Command press on an
-empty set adds the row History already had selected first, so a row selected
-before the lab was turned on stays selected. Every selected row draws the
-selected fill, and while two or more are selected the detail area shows
-"{count} dictations selected" with Copy (the selected final texts that have
-any, oldest first, a blank line between each, through the window's clipboard
-write like every other Copy) and Delete…, which asks once in the card ("Delete
-N dictations", then Cancel) and then deletes every selected entry in one save
-through `History::delete_many`; a failed save puts every removed entry back,
-keeps the selection, and shows the error the same way single Delete… does, so
-the delete can be tried again. One selected entry keeps the ordinary card with
-its facts, Copy, Delete… (which asks once in the card, Confirm delete or
-Cancel), and, with Keep recordings, Transcribe again and its versions. A
-search, new dictations, and a delete prune the selection to rows that still
-show; turning the switch off collapses it to the one entry the card shows. Off,
-History is exactly as before: one selected entry, the same rows, and Shift and
-Command change nothing. The pane reads its own switch
-(`ui.settings.labs.history_multi_select`, through `Feature::on`, as it reads
-Keep recordings); `labs::history_multi_select()` is the same switch for this
-process and is logged at launch with the other labs. Checks:
-`history_multi_select_is_its_own_bit_and_off_by_default` in
-[labs.rs](../../src/labs.rs);
-`delete_many_removes_only_the_listed_entries` and
-`failed_clear_and_delete_keep_entries_for_a_retry` in
-[history.rs](../../src/history.rs);
-`history_selects_several_with_shift_command_and_drag`,
-`history_selection_copies_oldest_first`,
-`history_selection_deletes_in_two_steps`,
-`history_command_click_keeps_the_row_selected_before_the_lab`,
-`history_shift_click_selects_one_without_the_lab`, and
-`history_multi_select_turns_off_to_one_entry` in
-[rune_ui/tests.rs](../../src/rune_ui/tests.rs), which press rows with Shift
-and Command held and drag from one row to another. `history-selection` in
-[rune_ui/scenes.rs](../../src/rune_ui/scenes.rs) renders the card with two
-entries selected. Not yet observed: a real pointer drag in a window (the test
-drives Rune's pointer directly). The Labs page goldens (`mac-labs-dark`,
-`mac-labs-light`, `mac-labs-link-dark`, `mac-labs-link-light`,
-`windows-labs-light`, and `linux-labs-light`) are regenerated on Linux with
-the new featured row.
-
 Copy recent dictations (`recent-dictations`, issue 877, macOS): while on,
 the menu-bar menu shows a Copy Recent Dictation submenu right under Paste
 Last Dictation. It lists the five newest History entries within retention,
@@ -2149,30 +1945,6 @@ in [rune_ui/tests.rs](../../src/rune_ui/tests.rs) and
 [rune_ui/output.rs](../../src/rune_ui/output.rs). Not yet observed: the row
 in a real window; the Labs page goldens need regenerating on Linux with the
 new row (the Output goldens keep the toggle off and are unchanged).
-
-Model in use first (`picker-active-first`, issue 1019, every OS): while on,
-the speech model picker remembers the saved model when it opens, only if it
-is installed (`Picker::in_use_first`, set in `picker::open`, cleared in
-`close`), so the order never moves while the picker is open, even if another
-model is chosen or prepared. Compare puts it in the first column and fills
-the rest with the first models that speak the language, without it; a model
-being prepared that the three leave out still takes the last column. Every
-model moves it to the top of its group, and an import in use puts "Your
-model files" above the language's group; with Labs › Sort and filter models
-sorting By size or By name the list keeps that exact order, and By
-recommendation leads with it. The gate is the ordering itself
-(`picker::pinned` and `list_first` read the toggle; `compare::columns` and
-`list::groups` take what they return); off, both views are exactly as
-before. Checks: `the_model_in_use_is_fixed_while_the_picker_is_open` and
-`without_model_in_use_first_nothing_is_pinned` in
-[picker.rs](../../src/rune_ui/picker.rs),
-`the_model_in_use_takes_the_first_column_only_when_pinned` in
-[picker/compare.rs](../../src/rune_ui/picker/compare.rs), and
-`the_model_in_use_leads_its_group_only_when_pinned` in
-[picker/list.rs](../../src/rune_ui/picker/list.rs). Not yet observed: the
-picker in a real window with the toggle on, or an import's group moving
-(no automated check builds an import entry); the Labs page goldens need
-regenerating on Linux with the new row.
 
 Use model files where they are (`model-in-place`, issue 941, every OS): for
 one speech model file shared by several accounts. While on, the speech model
@@ -2517,22 +2289,6 @@ no permission-granted keyboard test ran. The pause machine's checks run on
 Linux too, while the tap, secure-input, listener, and menu tests, and the
 neutral-keyboard rules, run only in macOS builds. The row renders only in macOS
 builds, so no golden changes.
-
-⌘Q closes Settings (`quit-closes-window`, issue 1473, macOS): for people who
-press ⌘Q to put the Settings window away and expect dictation to keep running.
-Only the app menu's Quit Hex item (⌘Q, `quitHex:` in the main menu) changes:
-while the lab is on it closes the window, exactly as Close Window (⌘W) does, so
-Hex hides the window, restores the Dock policy for a closed window, and keeps
-listening. The gate, `labs::quit_closes_window()`, is read each time
-`macos_rune::MenuTarget::quit_hex` runs, so turning it on or off applies at
-once. The status item's Quit Hex (⌘Q in its own menu), AppKit's terminate (the
-quit Apple event, logout, the Dock's Quit), `hex quit`, and `hex restart` still
-quit and drain as before, and with the lab off ⌘Q quits exactly as it did.
-Checks: `quit_closes_window_is_its_own_bit_and_off_by_default` in
-[labs.rs](../../src/labs.rs); the existing menu, close, and drain tests are
-unchanged. The handler is compiled, clippy-linted, and covered by the macOS test
-build in CI (the Check macOS run for #1480), but it is not yet observed on a
-real Mac; the row renders only in macOS builds, so no golden changes.
 
 Notch indicator (`notch-indicator`, macOS only): for MacBooks with a
 notch, a recording indicator in the Dynamic Island's compact style that
@@ -3420,16 +3176,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   ([rune_ui/meetings.rs](../../src/rune_ui/meetings.rs)). The decoder tests run
   in Check macOS. Not verified on a real Mac: the native picker and quitting
   at each mid-import moment have no automated end-to-end check.
-- Vocabulary biasing: Parakeet transcription biased toward the
-  [vocabulary](vocabulary.md) (`transcribe_cpp::RunExtension::ParakeetVocabulary`),
-  the request behind issue 452 / PR 457. Off (the default),
-  `dictation::vocabulary::transcription_bias` returns nothing, so no run or stream takes
-  the list; rewriting and search still use it, and the Vocabulary sheet says
-  so.
 - Screen vocabulary (macOS): each dictation may read the focused window's
   visible text through Accessibility as temporary vocabulary. Off by default
-  (`labs.screen_vocabulary`). Parakeet reads the terms only with Vocabulary
-  biasing on and a boost other than Off; Whisper and Qwen3-ASR read them as a
+  (`labs.screen_vocabulary`). Parakeet reads the terms only with a boost other
+  than Off; Whisper and Qwen3-ASR read them as a
   prompt; Apple Speech and models that take no vocabulary read nothing. A
   capture with terms for such a model uses its whole-clip run rather than a
   live stream's text, so the text arrives after release with a little more

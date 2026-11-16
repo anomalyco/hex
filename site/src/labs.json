@@ -60,19 +60,6 @@
       "title": "Live chapters"
     },
     {
-      "added": "2026-10-30",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "vocabulary-biasing",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Help the Parakeet model hear your Vocabulary words. Rewriting and search use them anyway",
-      "title": "Vocabulary biasing"
-    },
-    {
       "added": "2026-11-12",
       "group": "dictation",
       "groupTitle": "Dictation",
@@ -106,18 +93,6 @@
       ],
       "summary": "When you switch keyboard language, Hex switches to the speech model you picked for it",
       "title": "Switch model with keyboard language"
-    },
-    {
-      "added": "2026-11-10",
-      "group": "models",
-      "groupTitle": "Models",
-      "id": "app-model-switching",
-      "oses": [
-        "macos",
-        "windows"
-      ],
-      "summary": "Each mode can pick a speech model; Hex switches to it when you change apps",
-      "title": "Switch model with app"
     },
     {
       "added": "2026-10-30",
@@ -399,19 +374,6 @@
       "title": "Dictation stats"
     },
     {
-      "added": "2026-11-10",
-      "group": "history",
-      "groupTitle": "History",
-      "id": "history-multi-select",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together",
-      "title": "Select multiple dictations"
-    },
-    {
       "added": "2026-11-01",
       "group": "history",
       "groupTitle": "History",
@@ -446,19 +408,6 @@
       ],
       "summary": "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result",
       "title": "Fix results in Output"
-    },
-    {
-      "added": "2026-11-02",
-      "group": "models",
-      "groupTitle": "Models",
-      "id": "picker-active-first",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "The speech model picker lists the model you're using first",
-      "title": "Model in use first"
     },
     {
       "added": "2026-11-02",
@@ -560,19 +509,6 @@
       "title": "Appearance"
     },
     {
-      "added": "2026-11-08",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "release-notes-link",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Show a link to this build's release notes in the sidebar footer",
-      "title": "Release notes link"
-    },
-    {
       "added": "2026-11-02",
       "group": "dictation",
       "groupTitle": "Dictation",
@@ -651,17 +587,6 @@
     },
     {
       "added": "2026-11-07",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "quit-closes-window",
-      "oses": [
-        "macos"
-      ],
-      "summary": "⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon",
-      "title": "⌘Q closes Settings"
-    },
-    {
-      "added": "2026-11-07",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",
       "id": "caps-lock-dictation",
@@ -707,19 +632,6 @@
       ],
       "summary": "Apps can ask Hex's local API for each segment's or word's start and end times.",
       "title": "Timestamps in API transcripts"
-    },
-    {
-      "added": "2026-11-12",
-      "group": "output",
-      "groupTitle": "Output",
-      "id": "api-browser-access",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Let web pages from these origins call Hex's local API. Requests still need the API token.",
-      "title": "Browser access to the local API"
     },
     {
       "added": "2026-11-09",
@@ -768,17 +680,6 @@
       "title": "Pause from menu bar"
     },
     {
-      "added": "2026-11-11",
-      "group": "output",
-      "groupTitle": "Output",
-      "id": "print-start",
-      "oses": [
-        "macos"
-      ],
-      "summary": "Let hex dictation start --print answer with the transcript when it ends",
-      "title": "Print-only CLI dictation"
-    },
-    {
       "added": "2026-11-12",
       "group": "output",
       "groupTitle": "Output",
@@ -790,19 +691,6 @@
       ],
       "summary": "Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model",
       "title": "Voice prompt"
-    },
-    {
-      "added": "2026-11-13",
-      "group": "output",
-      "groupTitle": "Output",
-      "id": "shell-completions",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>",
-      "title": "Shell completions"
     },
     {
       "added": "2026-11-13",

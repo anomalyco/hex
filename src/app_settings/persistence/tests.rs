@@ -117,11 +117,8 @@ fn a_delayed_read_cannot_republish_runtime_values_from_before_a_save() {
 #[test]
 fn the_embedded_service_reads_the_saved_vocabulary() {
     let _restore = RestoredRuntime;
-    let file = SettingsFile::new(
-        br#"{"vocabulary":["Rune"],"vocabulary_boost":"strong","labs":{"vocabulary_biasing":true}}"#,
-    );
+    let file = SettingsFile::new(br#"{"vocabulary":["Rune"],"vocabulary_boost":"strong"}"#);
     let settings = AppSettings::apply_for_embedded_service_at(&file.path).expect("read settings");
-    assert!(settings.labs.vocabulary_biasing);
     assert_eq!(
         settings.vocabulary,
         [VocabularyEntry {
@@ -470,26 +467,6 @@ fn an_invalid_stop_phrase_loads_the_default_and_keeps_its_switch() {
     assert!(settings.labs.live_text);
     assert_eq!(fs::read(&file.path).unwrap(), original);
     assert!(file.backups().is_empty());
-}
-
-#[test]
-fn browser_origins_load_normalized_and_ignore_anything_that_is_not_one() {
-    let file = SettingsFile::new(
-        br#"{"labs":{"api_browser_access":true,"api_browser_origins":["HTTPS://Example.com:443/","*","not an origin","http://localhost:5173"]}}"#,
-    );
-    let settings = AppSettings::load_from(&file.path).unwrap();
-    assert!(settings.labs.api_browser_access);
-    assert_eq!(
-        settings.labs.api_browser_origins,
-        vec!["https://example.com", "http://localhost:5173"]
-    );
-    // The normalized list is what the next read sees, so an entry that
-    // isn't an origin can never widen what the local API allows.
-    let saved: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
-    assert_eq!(
-        saved["labs"]["api_browser_origins"],
-        json!(["https://example.com", "http://localhost:5173"])
-    );
 }
 
 #[test]

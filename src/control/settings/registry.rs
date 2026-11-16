@@ -96,7 +96,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.app_model_switching",
         Kind::Bool,
-        "Labs: switch the speech model and language with the foreground application (macOS, Windows)",
+        "Saved opt-in: switch the speech model and language with the foreground application (macOS, Windows)",
     ),
     key(
         "release_microphone_while_idle",
@@ -298,11 +298,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a search field at the top of General that filters its rows",
     ),
     key(
-        "labs.release_notes_link",
-        Kind::Bool,
-        "Labs: a link to this build's release notes in the sidebar footer",
-    ),
-    key(
         "labs.live_chapters",
         Kind::Bool,
         "Labs: chapter meeting transcripts while recording",
@@ -311,11 +306,6 @@ pub(super) const KEYS: &[Key] = &[
         "labs.playground",
         Kind::Bool,
         "Labs: the scene and story browser in the window",
-    ),
-    key(
-        "labs.vocabulary_biasing",
-        Kind::Bool,
-        "Labs: bias Parakeet transcription toward the vocabulary",
     ),
     key(
         "labs.screen_vocabulary",
@@ -486,11 +476,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
-        "labs.history_multi_select",
-        Kind::Bool,
-        "Labs: select several dictations in History with Shift-click, Cmd-click (Ctrl on Windows and Linux), or a drag, then copy or delete them together",
-    ),
-    key(
         "labs.recent_dictations",
         Kind::Bool,
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
@@ -499,11 +484,6 @@ pub(super) const KEYS: &[Key] = &[
         "labs.hide_menu_bar_icon",
         Kind::Bool,
         "Labs: hide Hex's menu bar icon while nothing records; shortcuts keep working, and opening Hex again from Finder or Spotlight shows Settings (macOS)",
-    ),
-    key(
-        "labs.quit_closes_window",
-        Kind::Bool,
-        "Labs: the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits (macOS)",
     ),
     key(
         "labs.caps_lock_dictation",
@@ -581,11 +561,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
     ),
     key(
-        "labs.picker_active_first",
-        Kind::Bool,
-        "Labs: the speech model picker lists the model in use first",
-    ),
-    key(
         "labs.model_in_place",
         Kind::Bool,
         "Labs: the speech model picker's Use model file where it is… adds a GGUF file without copying it, so several accounts can share one file",
@@ -599,12 +574,6 @@ pub(super) const KEYS: &[Key] = &[
         "labs.picker_downloaded",
         Kind::Bool,
         "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",
-    ),
-    key(
-        "labs.shell_completions",
-        Kind::Bool,
-        "Labs: hex completions <shell> prints a completion script for bash, zsh, fish, elvish, or \
-         PowerShell, generated from Hex's own commands",
     ),
     key(
         "labs.yolo_mode",
@@ -635,18 +604,6 @@ pub(super) const KEYS: &[Key] = &[
          in a transcript, as the speech model heard them (timestamps=segment|word)",
     ),
     key(
-        "labs.api_browser_access",
-        Kind::Bool,
-        "Labs: web pages from the origins in labs.api_browser_origins can call Hex's local API \
-         from the browser; every request still needs the API token",
-    ),
-    key(
-        "labs.api_browser_origins",
-        Kind::Json,
-        "Labs: the browser origins allowed to call Hex's local API, as a JSON list of \
-         http:// or https:// scheme://host[:port] origins; an entry that isn't one is ignored",
-    ),
-    key(
         "labs.speakers_only",
         Kind::Bool,
         "Labs: While dictating applies only while the default output is speakers; headphones are \
@@ -664,12 +621,6 @@ pub(super) const KEYS: &[Key] = &[
         Kind::Bool,
         "Labs: the menu bar offers Pause Hex, which makes every capture shortcut inert until \
          Resume; a restart starts unpaused (macOS)",
-    ),
-    key(
-        "labs.print_start",
-        Kind::Bool,
-        "Labs: `hex dictation start --print` records a dictation whose transcript goes to \
-         that command, never pasted or copied, however the recording ends (macOS)",
     ),
     key(
         "labs.voice_prompt",
@@ -948,7 +899,7 @@ pub(super) const NEEDS: &[(&str, &str)] = &[
     ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
-    ("labs.quit_closes_window", "dock_icon"),
+    ("labs.app_model_switching", "app_model_switching"),
     ("keyboard_model_switching.", "keyboard_model_switching"),
     ("enable_on_launch", "listener_control"),
     ("share_dictation_shortcut", "share_shortcut"),

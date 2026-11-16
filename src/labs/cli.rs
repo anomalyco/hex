@@ -137,7 +137,7 @@ fn live_typing_note() -> Option<&'static str> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 14] = [
+const GRADUATED: [(&str, &str); 23] = [
     (
         "custom-models",
         "custom-models graduated: adding a model file and models found on this computer are always on now",
@@ -193,6 +193,42 @@ const GRADUATED: [(&str, &str); 14] = [
     (
         "meeting-notes-file",
         "meeting-notes-file moved: turn on Separate notes file in Meetings › Settings › Export, or hex settings set meetings.export.notes_file true",
+    ),
+    (
+        "shell-completions",
+        "shell-completions graduated: hex completions <shell> always prints a completion script",
+    ),
+    (
+        "print-start",
+        "print-start graduated: hex dictation start --print works on macOS without a switch",
+    ),
+    (
+        "vocabulary-biasing",
+        "vocabulary-biasing graduated: Parakeet uses your vocabulary unless the boost is Off",
+    ),
+    (
+        "history-multi-select",
+        "history-multi-select graduated: select, copy, or delete several dictations in History",
+    ),
+    (
+        "picker-active-first",
+        "picker-active-first graduated: the speech model in use comes first in the picker",
+    ),
+    (
+        "release-notes-link",
+        "release-notes-link graduated: select the version in the sidebar to read a published build's notes",
+    ),
+    (
+        "app-model-switching",
+        "app-model-switching left Labs: saved mode choices and the existing opt-in still work",
+    ),
+    (
+        "quit-closes-window",
+        "quit-closes-window was removed: ⌘Q quits Hex",
+    ),
+    (
+        "api-browser-access",
+        "api-browser-access was removed: the local API no longer allows cross-origin browser requests",
     ),
 ];
 

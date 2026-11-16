@@ -68,17 +68,14 @@ impl Feature {
             | Self::FailureNotices
             | Self::LiveTyping
             | Self::NotchIndicator
-            | Self::VocabularyBiasing
             | Self::ScreenVocabulary
             | Self::PauseBrowser
             | Self::KeepMicrophoneOpen
             | Self::SkipPauses
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
-            | Self::QuitClosesWindow
             | Self::SettingsSearch
             | Self::Appearance
-            | Self::ReleaseNotesLink
             | Self::SpeakersOnly
             | Self::Playground
             | Self::StopPhrase => Group::Dictation,
@@ -97,15 +94,11 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps
-            | Self::ApiBrowserAccess
-            | Self::PrintStart
-            | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
             | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
-            | Self::HistoryMultiSelect
             | Self::RecentDictations
             | Self::CopyDictationAudio => Group::History,
             Self::Meetings
@@ -132,11 +125,9 @@ impl Feature {
             | Self::PauseMenu
             | Self::HoldThroughKeys => Group::Shortcuts,
             Self::KeyboardModelSwitching
-            | Self::AppModelSwitching
             | Self::UnloadIdle
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
-            | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::KQuantModels
             | Self::PickerDownloaded
