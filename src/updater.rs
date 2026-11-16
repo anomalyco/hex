@@ -604,11 +604,25 @@ fn adopts_staged_update(state: &State, quitting: bool) -> bool {
     !quitting && !matches!(state, State::Applied)
 }
 
-/// Why Restart to update has to wait: a meeting that is still recording
-/// would lose its audio to the relaunch.
+/// The state a check leaves when it discards the release it staged because a
+/// quit is installing (or already installed) another. The older staged update
+/// must stay installable at quit (`Ready`), and an installed one keeps
+/// `Applied`; `Current` is the honest result when nothing is staged.
+fn discarded_state(state: &State, staged: bool) -> State {
+    if matches!(state, State::Applied) {
+        State::Applied
+    } else if staged {
+        State::Ready
+    } else {
+        State::Current
+    }
+}
+
+/// Why Restart to update has to wait: a recording or a launch recovery is
+/// still finishing a meeting, and the relaunch would cut it off.
 fn restart_hold() -> Option<&'static str> {
     crate::meeting::recording()
-        .then_some("Hex is recording a meeting; restart to update when it finishes")
+        .then_some("Hex is finishing a meeting; restart to update when it's done")
 }
 
 /// Writes `next` unless a quit already installed the staged update. That
@@ -799,11 +813,12 @@ fn check(
                 let state = lock(&shared.state);
                 let mut staged_updates = lock(&shared.staged);
                 if !adopts_staged_update(&state, crate::desktop::process_exit::quitting()) {
+                    let next = discarded_state(&state, staged_updates.is_some());
                     drop(staged_updates);
                     drop(state);
                     #[cfg(target_os = "macos")]
                     platform::discard(&kept);
-                    return Ok(State::Applied);
+                    return Ok(next);
                 }
                 *staged_updates = Some(StagedUpdate {
                     staged,
@@ -1259,6 +1274,24 @@ mod tests {
     }
 
     #[test]
+    fn a_release_discarded_at_quit_leaves_the_older_one_installable() {
+        // v1 is staged and a quit begins while v2 finishes downloading: v2 is
+        // discarded, but the state must stay Ready so install_on_quit (which
+        // skips only Applied) still installs v1.
+        assert!(matches!(discarded_state(&State::Ready, true), State::Ready));
+        // A quit that already installed the update keeps Applied.
+        assert!(matches!(
+            discarded_state(&State::Applied, true),
+            State::Applied
+        ));
+        // Nothing staged: a plain current result, not a claim of installation.
+        assert!(matches!(
+            discarded_state(&State::Current, false),
+            State::Current
+        ));
+    }
+
+    #[test]
     fn a_quit_that_installed_the_update_is_never_overwritten() {
         let mut state = State::Applied;
         keep_applied(&mut state, State::Current);
@@ -1272,9 +1305,9 @@ mod tests {
     fn restart_to_update_waits_while_a_meeting_records() {
         let updater = Updater::idle_checking();
         *lock(&updater.shared.state) = State::Ready;
-        let hold = Some("Hex is recording a meeting; restart to update when it finishes");
+        let hold = Some("Hex is finishing a meeting; restart to update when it's done");
         let error = updater.request_restart(hold).unwrap_err();
-        assert!(error.to_string().contains("recording"));
+        assert!(error.to_string().contains("meeting"));
         assert!(matches!(*lock(&updater.shared.state), State::Ready));
         assert!(
             matches!(*lock(&updater.shared.restart), Restart::Idle),

@@ -471,6 +471,8 @@ pub fn record(
     // A quit may have begun while this recording was being set up: refuse
     // rather than start audio the drain will cut off.
     if crate::desktop::process_exit::quitting() {
+        drop(_active);
+        recovery::discard_refused_start(&meeting_dir);
         return Err(eyre!("Hex is quitting"));
     }
     // Held until this recording returns: a quit or a restart to update can

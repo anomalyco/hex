@@ -1278,7 +1278,8 @@ Stop & Transcribe
   -> Join on one timeline -> Echo suppression -> Final publication
 
 Hex quits while recording                           // meetings.quit
-  -> The drain joins the meeting controller first; capture stops, no chunk starts
+  -> The drain installs any staged update, then joins the meeting controller;
+     capture stops, no chunk starts
   -> WAVs and manifest finalized; Interrupted with its rolling draft and
      final.pending beside the manifest
 Hex quits during Stop & Transcribe's final pass (#1284)

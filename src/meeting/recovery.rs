@@ -342,6 +342,26 @@ fn clear_attempt(directory: &Path) {
     }
 }
 
+/// Removes a meeting folder a start refused while quitting left holding only
+/// its lock file. Anything else in the folder keeps it.
+pub(super) fn discard_refused_start(directory: &Path) {
+    let only_lock = fs::read_dir(directory).is_ok_and(|mut entries| {
+        entries
+            .all(|entry| entry.is_ok_and(|entry| entry.file_name().to_str() == Some("active.lock")))
+    });
+    if !only_lock {
+        return;
+    }
+    let _ = fs::remove_file(directory.join("active.lock"));
+    if let Err(error) = fs::remove_dir(directory) {
+        tracing::warn!(
+            %error,
+            path = %directory.display(),
+            "could not remove a refused meeting folder"
+        );
+    }
+}
+
 /// Settles a marker left by the last allowed recovery attempt. The meeting
 /// keeps its audio but is never handed to the model again.
 fn settle_attempt(directory: &Path, manifest: &mut MeetingManifest) -> Result<bool> {
@@ -832,6 +852,24 @@ mod tests {
             "the audio's length wins over the relabel's time"
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_refused_start_leaves_no_folder_behind() {
+        let root = temporary("refused-start");
+        let empty = root.join("empty");
+        fs::create_dir_all(&empty).unwrap();
+        fs::write(empty.join("active.lock"), b"").unwrap();
+        discard_refused_start(&empty);
+        assert!(!empty.exists(), "a folder holding only its lock goes");
+
+        let kept = root.join("kept");
+        fs::create_dir_all(&kept).unwrap();
+        fs::write(kept.join("active.lock"), b"").unwrap();
+        fs::write(kept.join("manifest.json"), b"{}").unwrap();
+        discard_refused_start(&kept);
+        assert!(kept.exists(), "a folder with other content stays");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
