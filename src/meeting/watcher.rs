@@ -1020,7 +1020,7 @@ fn poll_recording(
         if present {
             detector.keep_snooze_alive();
         }
-        // The call came back (or the lab went off mid-count): the stop it
+        // The call came back (or its setting went off mid-count): the stop it
         // armed is gone, and its notice goes with the last one counting.
         if (present || !auto_stop)
             && withdraw_stop(&mut active.auto_stop, &active.call_stop, events)
@@ -1103,20 +1103,14 @@ fn poll_recording(
         }
     }
 
-    // Stop when the call ends turned off while a page change was
-    // counting: the watch is gone, so its deadline goes with it instead of
-    // stopping the recording the moment the setting comes back on.
-    disarm_call_stop_unless_watching(
-        recording,
-        crate::app_settings::meeting_stop_when_call_ends(),
-        events,
-    );
+    // Stop when the call ends turned off while a page change was counting:
+    // the deadline goes rather than stopping the recording when it comes back.
+    let stop_on_end = crate::app_settings::meeting_stop_when_call_ends();
+    disarm_call_stop_unless_watching(recording, stop_on_end, events);
     Ok(())
 }
 
-/// Drops an armed stop whose call came back, or whose lab went off mid-count.
-/// Both automatic stops share one notice, so the notice goes only once no
-/// other stop is still counting. Returns whether this stop was pending.
+/// Drops an armed stop whose call came back or whose setting went off (both share one notice).
 fn withdraw_stop(
     stop: &mut AutoStop,
     other: &AutoStop,
@@ -1144,8 +1138,8 @@ fn withdraw_call_switch_stop(
     }
 }
 
-/// Drops an armed call-switch stop whenever nothing watches the page: a
-/// deadline counted under a lab that is now off must not carry over.
+/// Drops an armed call-switch stop when nothing watches the page: a deadline
+/// counted under a setting that is now off must not carry over.
 fn disarm_call_stop_unless_watching(
     recording: &mut Option<ActiveRecording>,
     lab_on: bool,
@@ -1808,7 +1802,7 @@ mod tests {
         ));
         assert!(received.try_recv().is_err(), "one withdrawal only");
 
-        // While the lab is on and the page watched, the deadline stays.
+        // While its setting is on and the page watched, the deadline stays.
         let mut active = active_recording(arc, true, Some("abc-defg-hij"));
         active.call_stop.arm();
         let mut recording = Some(active);

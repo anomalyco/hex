@@ -1026,8 +1026,7 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
-        // Capsules live in the saved corner, and a finished meeting keeps
-        // the corner its recording ended in.
+        // The saved corner, and a finished meeting its recording's corner.
         let corner = panel::show_corner(
             &kind,
             true,
@@ -1184,8 +1183,7 @@ fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
 }
 
 fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
-    // Recording and its summary stay dark. Offers and reminders
-    // still belong to the host appearance.
+    // Recording and its summary stay dark; offers and reminders follow the host.
     let dark =
         matches!(capsule.kind, Some(Kind::Recording(_) | Kind::Ready(_))) || cx.system_dark();
     let p = Paint::new(dark, cx.env().scale);
