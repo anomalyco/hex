@@ -314,6 +314,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
 ├── Group chips with counts -> All, Dictation, Output, History, Meetings, Annotate, Shortcuts, Models
+│   on one line; More… lists only the groups that don't fit. Choosing one brings its chip onto the row.
 │   (labs/group.rs; a group this OS has no lab in hides)
 ├── Discover, no chip or search -> New in Labs: the two newest labs, then every other lab
 │   under its group's header; a lab added on the newest date among those shown carries New
