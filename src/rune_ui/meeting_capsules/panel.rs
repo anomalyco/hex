@@ -321,26 +321,7 @@ fn result(
         .center_y();
     // The title has its final column even before Close is available. It may
     // grow vertically without moving the time off the recording baseline.
-    let label = text(title.clone())
-        .key(if manifest.is_some() {
-            "title"
-        } else {
-            "finalizing"
-        })
-        .transition(replace(capsule))
-        .font(TextStyle::new(13.0, 600.0).lh(20.0))
-        .color(p.text())
-        .wrap_anywhere()
-        .max_lines(TITLE_LINES)
-        .grow(1.0)
-        .min_w(0.0)
-        .my(TITLE_INSET)
-        .a11y_hidden();
-    let label = if top {
-        label.self_start()
-    } else {
-        label.self_end()
-    };
+    let label = handoff_label(p, capsule, &title, false).grow(1.);
     let clock = duration.map(|duration| {
         let meter = row().key("meter").h(REST_HEIGHT).center_y().child(
             text(meeting::format_duration(duration))
@@ -381,8 +362,7 @@ fn result(
             .mt(2.0)
             .mb(ROW_PX)
     });
-    // The measured lane and the following rows move on the same spring.
-    // Reveal the words inside the growing gap, never over the copy buttons.
+    // Reveal the words within the growing surface, never over the copy buttons.
     let summary = col().key("summary-lane").clip_rounded(0.).children(summary);
     let rows = col()
         .key("rows")
@@ -413,6 +393,34 @@ fn result(
         .cursor(Cursor::Grab)
         .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx));
     in_corner(capsule, body)
+}
+
+/// A fast worker can report every phase within a few frames. Keep one text
+/// run instead of leaving several fading titles in the same place. Only its
+/// slot moves: the words wrap at their destination width from the first frame.
+fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
+    let label = text(title.to_owned())
+        .key("title")
+        .w_full()
+        .motion(Spring::NONE)
+        .font(TextStyle::new(13., 600.).lh(20.))
+        .color(if stopping { p.muted() } else { p.text() });
+    let label = if stopping {
+        label.truncate_fade()
+    } else {
+        label.wrap_anywhere().max_lines(TITLE_LINES).a11y_hidden()
+    };
+    let slot = col()
+        .key("caption")
+        .min_w(0.)
+        .my(TITLE_INSET)
+        .transition(replace(c))
+        .child(label);
+    if c.corner.is_top() {
+        slot.self_start()
+    } else {
+        slot.self_end()
+    }
 }
 
 /// The recording: at rest only its status, levels and time; under the
@@ -452,17 +460,16 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     };
     let accessory = if capsule.stopping {
         Some(
-            text(tr("Stopping…").to_owned())
-                .key("stopping")
-                .font(p.k.ty.text_xsmall)
-                .color(p.muted())
-                .mx(ROW_PX)
-                .transition(replace(capsule)),
+            handoff_label(p, capsule, tr("Stopping…"), true)
+                .w(76.)
+                .shrink()
+                .mx(REST_PX - PANEL_PAD),
         )
     } else if open {
         Some(
             row()
                 .key("stop")
+                .transition(Transition::identity())
                 .h(STOP_TARGET)
                 .min_w(STOP_TARGET)
                 .px(ROW_PX + 4.)
