@@ -87,7 +87,8 @@ impl Feature {
             | Self::CursorContext
             | Self::MoreDictationShortcuts
             | Self::CopyDictationAudio
-            | Self::StopPhrase => Audience::Everyone,
+            | Self::StopPhrase
+            | Self::HoldThroughKeys => Audience::Everyone,
         }
     }
 
@@ -163,7 +164,7 @@ impl Feature {
             | Self::CleanUpWithAppleIntelligence => 20261113,
             Self::CalendarMenu => 20261114,
             Self::CopyDictationAudio | Self::MicrophoneKeyAlone => 20261115,
-            Self::StopPhrase => 20261116,
+            Self::StopPhrase | Self::HoldThroughKeys => 20261116,
         }
     }
 
@@ -275,6 +276,7 @@ impl Feature {
             | Self::CalendarMenu => MACOS,
             Self::CleanUpWithAppleIntelligence => MACOS,
             Self::CopyOnly => MACOS_WINDOWS,
+            Self::HoldThroughKeys => MACOS_WINDOWS,
             Self::ReturnToApp => MACOS,
             Self::TapOrHold => MACOS_LINUX,
             Self::AppModelSwitching => MACOS_WINDOWS,
@@ -397,6 +399,7 @@ impl Feature {
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
             Self::CopyDictationAudio => "copy-dictation-audio",
             Self::StopPhrase => "stop-phrase",
+            Self::HoldThroughKeys => "hold-through-keys",
         }
     }
 
@@ -479,6 +482,7 @@ impl Feature {
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
             Self::CopyDictationAudio => "labs.copy_dictation_audio",
             Self::StopPhrase => "labs.stop_phrase",
+            Self::HoldThroughKeys => "labs.hold_through_keys",
         }
     }
 

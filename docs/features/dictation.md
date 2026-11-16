@@ -768,6 +768,9 @@ Ordinary hold                            // lock activation is mapped below
   │       (Spaceman's Option-1) -> Seen at HID -> Discard, no double-tap lock
   ├── Modifier-only hold + any key, at any time -> Discard  // dictate.held-chord
   │   (key reaches the app; locked and toggle captures keep recording)
+  │   ├── Hold through other keys, a key at or after 1 s ->
+  │   │   Nothing: the capture goes on, the key reaches the app,
+  │   │   and the release still finishes it                // dictate.held-chord-lab
   │   └── Return or keypad Enter past 300 ms -> Nothing: the capture goes on,
   │       Return reaches the app                          // dictate.held-return
   ├── Escape while held past 300 ms -> Cancel, cancel tone; the tap keeps
@@ -792,6 +795,29 @@ with the key code, the milliseconds after the press, and for HID evidence the
 raw timestamp, how it was read, and its arrival delay. The `discarded` event in
 `live.ndjson` carries the same cause as `reason`: `key`, `hid-key`, `mouse`, or
 `extra-modifier`. Short taps have no `reason`.
+
+With Labs › Hold through other keys on (macOS and Windows), a
+modifier-only Hold press stops taking keys as a chord a second or more after
+it started: at or after `HOLD_THROUGH_KEYS_AFTER` (1 s, counted from the
+press)
+a key goes to the app in front and the capture keeps recording, and its
+release still finishes with the usual tail, even while that key is still
+down (`dictate.held-chord-lab`). Inside the first second nothing changes, and
+neither do Toggle, a hands-free lock, shortcuts with a key, meetings, or the
+local API. Off, every chord is discarded exactly as above. macOS reads the
+gate in `DictationHotkey` ([suppression/hotkey.rs](../../src/suppression/hotkey.rs))
+as each chord key arrives; its clicks are unchanged, since the 300 ms hold
+threshold already ignores them. Windows reads the same second in its keyboard
+hook from the press's tick count, and a key or mouse button joining a long
+hold neither marks the capture dirty nor cancels it
+([windows/input/hold_through.rs](../../src/windows/input/hold_through.rs)).
+Checks: `hold_through_keys_keeps_a_long_hold_through_a_joining_key` in
+[suppression/tests.rs](../../src/suppression/tests.rs);
+`a_long_hold_keeps_recording_through_a_joining_key_or_button` and
+`toggle_and_a_wrapping_tick_count_keep_the_second` in
+[windows/input/hold_through.rs](../../src/windows/input/hold_through.rs).
+Neither was observed on a real keyboard yet; the Windows tests need Windows
+and run in Check Windows.
 
 **Fixed October 22, 2026:** a global shortcut registered with Carbon (Spaceman's
 Option-1 to Option-0 workspace keys, for example) consumes its key before the

@@ -187,6 +187,7 @@ impl Feature {
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
             Self::StopPhrase => settings.labs.stop_phrase,
+            Self::HoldThroughKeys => settings.labs.hold_through_keys,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::ShellCompletions => settings.labs.shell_completions,
             Self::YoloMode => settings.labs.yolo_mode,
@@ -271,6 +272,7 @@ impl Feature {
             &mut labs.print_start,
             &mut labs.voice_prompt,
             &mut labs.stop_phrase,
+            &mut labs.hold_through_keys,
             &mut labs.copy_capture_zip,
             &mut labs.shell_completions,
             &mut labs.yolo_mode,
@@ -361,6 +363,7 @@ impl Feature {
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
             Self::StopPhrase => settings.labs.stop_phrase = on,
+            Self::HoldThroughKeys => settings.labs.hold_through_keys = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::ShellCompletions => settings.labs.shell_completions = on,
             Self::YoloMode => settings.labs.yolo_mode = on,
@@ -396,7 +399,9 @@ const KEEP_ON_CLIPBOARD: u64 = 1 << 7;
 const COPY_ONLY: u64 = 1 << 8;
 const SPOKEN_FORMATTING: u64 = 1 << 9;
 const FILLER_WORDS: u64 = 1 << 10;
-// 1 << 11 is free (Subtitle export graduated).
+/// A key or click joining a held modifier-only shortcut a second or more in
+/// is left to the app in front (macOS and Windows).
+const HOLD_THROUGH_KEYS: u64 = 1 << 11;
 const SMART_SPACING: u64 = 1 << 12;
 const SPOKEN_SYMBOLS: u64 = 1 << 13;
 const SIDED_CHORDS: u64 = 1 << 14;
@@ -884,6 +889,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         ),
         (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
         (
+            Feature::HoldThroughKeys,
+            settings.hold_through_keys,
+            HOLD_THROUGH_KEYS,
+        ),
+        (
             Feature::KeepRecordings,
             settings.keep_recordings,
             KEEP_RECORDINGS,
@@ -995,6 +1005,7 @@ pub fn log_launch() {
         cursor_context = cursor_context(),
         history_multi_select = history_multi_select(),
         copy_dictation_audio = copy_dictation_audio(),
+        hold_through_keys = hold_through_keys(),
         "labs"
     );
 }
@@ -1357,6 +1368,36 @@ mod tests {
             cfg!(target_os = "macos")
         );
         assert_eq!(Feature::DoubleTapModifiers.group(), Group::Shortcuts);
+    }
+
+    #[test]
+    fn hold_through_keys_is_its_own_bit_and_macos_and_windows_only() {
+        assert_eq!(HOLD_THROUGH_KEYS, 1 << 11);
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & HOLD_THROUGH_KEYS, 0);
+        labs.hold_through_keys = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HOLD_THROUGH_KEYS, 0);
+        assert_eq!(state & SMART_SPACING, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::HoldThroughKeys.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+        assert!(!Feature::HoldThroughKeys.on(&AppSettings::default()));
+        assert_eq!(Feature::HoldThroughKeys.group(), Group::Shortcuts);
+        assert_eq!(Feature::HoldThroughKeys.added(), 20261116);
+        assert_eq!(Feature::HoldThroughKeys.audience(), Audience::Everyone);
+        assert_eq!(
+            Feature::HoldThroughKeys.settings_key(),
+            "labs.hold_through_keys"
+        );
+        assert_eq!(Feature::HoldThroughKeys.name(), "hold-through-keys");
+        assert_eq!(
+            Feature::for_settings_key("labs.hold_through_keys"),
+            Some(Feature::HoldThroughKeys)
+        );
     }
 
     #[test]

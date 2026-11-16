@@ -582,6 +582,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     // macOS's shortcut machine takes a shortcut without a key.
     if caps.os == super::platform::Os::Macos {
         rows.push(row(Feature::DoubleTapModifiers, Some(&KEYBOARD)));
+        // A held Option long enough keeps recording through a joining key.
+        rows.push(row(Feature::HoldThroughKeys, Some(&KEYBOARD)));
     }
     if caps.os == super::platform::Os::Macos {
         rows.push(row(Feature::MouseShortcuts, Some(&MOUSE)));
@@ -714,6 +716,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.os == super::platform::Os::Windows {
         rows.push(row(Feature::TerminalPaste, Some(&TERMINAL)));
         rows.push(row(Feature::OpenCodeInWsl, Some(&TERMINAL)));
+        // Windows's keyboard hook holds a modifier-only shortcut through a
+        // joining key.
+        rows.push(row(Feature::HoldThroughKeys, Some(&KEYBOARD)));
     }
     // Another shortcut dictates exactly like the main one, on every OS (#627).
     rows.push(row(Feature::SecondDictationShortcut, Some(&KEYBOARD)));
@@ -888,6 +893,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VoicePrompt => "lab-voice-prompt",
         Feature::CursorContext => "lab-cursor-context",
         Feature::StopPhrase => "lab-stop-phrase",
+        Feature::HoldThroughKeys => "lab-hold-through-keys",
     }
 }
 

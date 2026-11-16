@@ -853,6 +853,18 @@
       ],
       "summary": "Say a phrase to finish a hands-free dictation",
       "title": "Stop phrase"
+    },
+    {
+      "added": "2026-11-16",
+      "group": "shortcuts",
+      "groupTitle": "Shortcuts",
+      "id": "hold-through-keys",
+      "oses": [
+        "macos",
+        "windows"
+      ],
+      "summary": "Keys a second or more into a held modifier-only shortcut no longer end the dictation",
+      "title": "Hold through other keys"
     }
   ]
 }

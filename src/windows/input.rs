@@ -299,6 +299,10 @@ struct CaptureState {
     second_tap: bool,
     recording: bool,
     last_release_ms: Option<u32>,
+    /// When the held press that records began, from the hook's tick count:
+    /// a key joining it a second or more later is the app's (Labs › Hold
+    /// through other keys).
+    pressed_at_ms: Option<u32>,
     /// Every press acts as the second tap of a double-tap: releasing it
     /// locks the capture, and the next press finishes it.
     toggle: bool,
@@ -307,6 +311,7 @@ struct CaptureState {
 }
 
 mod commands;
+mod hold_through;
 
 impl CaptureState {
     /// Whether another shortcut owns a capture in progress.
@@ -351,6 +356,7 @@ impl CaptureState {
             return None;
         }
         self.recording = true;
+        self.pressed_at_ms = Some(timestamp_ms);
         Some(HotkeyAction::Start)
     }
 
@@ -372,21 +378,6 @@ impl CaptureState {
         }
         self.recording = false;
         Some(HotkeyAction::Finish)
-    }
-
-    /// Another key joined a held modifier-only shortcut: it was a chord
-    /// meant for another application. Only a recording capture reports
-    /// it, since a bare cancel also cancels the newest unfinished job.
-    fn interrupt(&mut self) -> Option<HotkeyAction> {
-        if !self.active {
-            return None;
-        }
-        let recording = self.recording;
-        self.active = false;
-        self.second_tap = false;
-        self.recording = false;
-        self.last_release_ms = None;
-        recording.then_some(HotkeyAction::Cancel)
     }
 
     /// Whether Toggle's cancel shortcut is Hex's now: only while a toggled
@@ -1112,11 +1103,16 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                 // the app (#786).
             } else if !modifier_event {
                 // A key or button joining a held modifier-only shortcut makes
-                // a chord meant for another application, such as Alt+Tab.
+                // a chord meant for another application, such as Alt+Tab,
+                // unless Labs › Hold through other keys keeps the long hold
+                // and leaves the key to the app in front.
                 if is_down
                     && state.trigger_vk.is_none()
                     && state.capture.active
                     && state.capture.flavour.normal()
+                    && !state
+                        .capture
+                        .holds_through_joining_keys(crate::labs::hold_through_keys(), time)
                 {
                     state.dirty = true;
                     if let Some(action) = state.capture.interrupt() {

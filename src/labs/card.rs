@@ -84,6 +84,7 @@ impl Feature {
             Self::YoloMode => "YOLO mode",
             Self::CopyDictationAudio => "Copy dictation audio",
             Self::StopPhrase => "Stop phrase",
+            Self::HoldThroughKeys => "Hold through other keys",
         }
     }
 
@@ -293,6 +294,9 @@ impl Feature {
                 "Copy a kept WAV as a file from History and the menu bar or tray; needs Keep recordings"
             }
             Self::StopPhrase => "Say a phrase to finish a hands-free dictation",
+            Self::HoldThroughKeys => {
+                "Keys a second or more into a held modifier-only shortcut no longer end the dictation"
+            }
         }
     }
 }

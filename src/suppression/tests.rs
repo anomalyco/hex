@@ -4391,6 +4391,97 @@ fn held_modifier_only_shortcut_plus_any_key_discards_after_the_hold_threshold() 
     assert!(hotkey.is_recording());
 }
 
+/// Labs › Hold through other keys: with the lab on, a key joining a held
+/// modifier-only press a second or more in reaches the app and the capture
+/// keeps recording, and the release still finishes it. Inside the first
+/// second the chord still discards, and off, every chord does.
+#[test]
+fn hold_through_keys_keeps_a_long_hold_through_a_joining_key() {
+    let now = capture_time();
+    let press = InputEvent::Flags(OPTION_KEY_MASK);
+    let release = InputEvent::Flags(NO_FLAGS);
+    for (chord_ms, hidden) in [(0, true), (500, true), (500, false), (999, false)] {
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.hold_through_keys = || true;
+        hotkey.process(press, now);
+        let chord = now + Duration::from_millis(chord_ms);
+        let event = if hidden {
+            hid_key(18)
+        } else {
+            option_key(18, true, OPTION_KEY_MASK)
+        };
+        assert_eq!(
+            hotkey.process(event, chord),
+            Some(HotkeyAction::Discard(if hidden {
+                DiscardCause::HidKey
+            } else {
+                DiscardCause::Key
+            })),
+            "hidden={hidden} at {chord_ms} ms, before the first second"
+        );
+        assert!(!hotkey.is_recording());
+    }
+    // At and after one second the key is the app's, hidden or visible, as
+    // long as the shortcut is held.
+    for (chord_ms, hidden) in [(1_000, true), (1_000, false), (5_000, true), (5_000, false)] {
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.hold_through_keys = || true;
+        hotkey.process(press, now);
+        let chord = now + Duration::from_millis(chord_ms);
+        let event = if hidden {
+            hid_key(18)
+        } else {
+            option_key(18, true, OPTION_KEY_MASK)
+        };
+        assert_eq!(
+            hotkey.process(event, chord),
+            None,
+            "hidden={hidden} at {chord_ms} ms keeps recording"
+        );
+        assert!(hotkey.is_recording());
+        // The extra key is still down as the shortcut lets go: Finish.
+        let released = chord + Duration::from_millis(200);
+        assert_eq!(
+            hotkey.process(release, released),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(!hotkey.is_recording());
+    }
+    // Once both are up, the next press pairs with that release as any press
+    // after a release does: it starts, and its release inside the double-tap
+    // window locks the capture for hands-free dictation.
+    let mut hotkey = test_hotkey(false, now);
+    hotkey.hold_through_keys = || true;
+    hotkey.process(press, now);
+    hotkey.process(
+        option_key(18, true, OPTION_KEY_MASK),
+        now + Duration::from_millis(1_500),
+    );
+    let released = now + Duration::from_millis(2_000);
+    assert_eq!(
+        hotkey.process(release, released),
+        Some(HotkeyAction::Finish)
+    );
+    hotkey.process(option_key(18, false, OPTION_KEY_MASK), released);
+    assert_eq!(
+        hotkey.process(press, released + Duration::from_millis(100)),
+        Some(HotkeyAction::Start)
+    );
+    assert_eq!(
+        hotkey.process(release, released + Duration::from_millis(200)),
+        None
+    );
+    assert!(hotkey.is_locked());
+    // Off, a long hold still discards the key.
+    let mut hotkey = test_hotkey(false, now);
+    hotkey.process(press, now);
+    assert_eq!(
+        hotkey.process(hid_key(18), now + Duration::from_millis(5_000)),
+        Some(HotkeyAction::Discard(DiscardCause::HidKey))
+    );
+    assert!(!hotkey.is_recording());
+}
+
 /// Return pressed while dictating (the session event and its HID echo) keeps
 /// the capture once the hold made the press Hex's; inside the threshold it is
 /// still Option-Return, a chord.

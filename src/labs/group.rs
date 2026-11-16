@@ -129,7 +129,8 @@ impl Feature {
             | Self::MicrophoneKeyAlone
             | Self::ShareShortcut
             | Self::CapsLockDictation
-            | Self::PauseMenu => Group::Shortcuts,
+            | Self::PauseMenu
+            | Self::HoldThroughKeys => Group::Shortcuts,
             Self::KeyboardModelSwitching
             | Self::AppModelSwitching
             | Self::UnloadIdle

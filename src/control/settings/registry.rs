@@ -437,6 +437,13 @@ pub(super) const KEYS: &[Key] = &[
          modifiers such as Option, Globe, or ⌃⌥ (macOS)",
     ),
     key(
+        "labs.hold_through_keys",
+        Kind::Bool,
+        "Labs: a key or click joining a held shortcut with no key a second or more after it \
+         went down reaches the app in front and leaves the dictation recording, which the \
+         release still finishes (macOS and Windows)",
+    ),
+    key(
         "labs.benchmark_details",
         Kind::Bool,
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
