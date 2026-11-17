@@ -613,15 +613,22 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         None => {
             let mut list = col().key("history-list").label(tr("History"));
             let count = pane.entries.len();
-            for (index, entry) in pane.entries.iter().enumerate() {
+            let mut rows = pane
+                .entries
+                .iter()
+                .map(|e| (e, pane.is_selected(e.id)))
+                .enumerate()
+                .peekable();
+            let mut selected_above = false;
+            while let Some((index, (entry, selected))) = rows.next() {
                 let id = entry.id;
                 let mut meta = tr(entry.kind.label()).to_string();
                 if let Some(application) = &entry.application {
                     meta.push_str(" · ");
                     meta.push_str(application);
                 }
-                let selected = pane.is_selected(id);
                 let primary = pane.selected == Some(id);
+                let selected_below = rows.peek().is_some_and(|(_, (_, selected))| *selected);
                 list = list.child(
                     ld::item_with_press(
                         p,
@@ -634,10 +641,20 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                             hover: vec![copy_action(ui, p, id, true)],
                             selected,
                         },
-                        move |row| selection::gesture(row, id, primary),
+                        move |row| {
+                            let row = if selected && (selected_above || selected_below) {
+                                let top = if selected_above { 0.0 } else { p.k.radius.md };
+                                let bottom = if selected_below { 0.0 } else { p.k.radius.md };
+                                row.corners([top, top, bottom, bottom])
+                            } else {
+                                row
+                            };
+                            selection::gesture(row, id, primary)
+                        },
                     )
                     .position_in_set(index + 1, count),
                 );
+                selected_above = selected;
             }
             let search = TextInput::new(&pane.search)
                 .placeholder(tr("Search history"))

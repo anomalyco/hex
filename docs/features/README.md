@@ -921,6 +921,7 @@ Completed output                         // output
     ├── Same menu > Clear all history… -> asks in the header; only the red confirm clears
     ├── Select dictations (every OS, no setup)   // history.selection
     │   ├── Plain click, Shift-click on the visible (searched) rows, Cmd-click (Ctrl), or a drag -> one, a range, or a toggled set
+    │   ├── Adjacent selected rows share one highlight; an unselected search result separates two highlights
     │   ├── Two or more selected -> "{count} dictations selected": Copy (final texts, oldest first, a blank line between each) / Delete… (asks once)
     │   ├── One selected -> the ordinary card, Copy, Delete… (asks once, then Cancel), Transcribe again with Keep recordings
     │   └── A search, new entries, or a delete prune the selection

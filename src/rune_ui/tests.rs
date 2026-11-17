@@ -1613,6 +1613,55 @@ fn history_selection_copies_oldest_first() {
     assert!(texts(&rt).iter().any(|text| text == "Copied"));
 }
 
+// The notches affect too few pixels to trip the whole-window golden tolerance.
+#[test]
+fn history_rounds_only_the_exposed_ends_of_selected_rows() {
+    let _goldens = Goldens::collect();
+    for dark in [false, true] {
+        for separated in [false, true] {
+            let mut rt = runtime("history", dark, PANE_SIZE);
+            // A search-result snapshot: adjacent entries need not have consecutive ids.
+            rt.state.history.entries[0].id = 17;
+            rt.invalidate();
+            settle(&mut rt);
+            tap(&mut rt, "history-entry17");
+            hold(&mut rt, if separated { command() } else { shift() });
+            tap(&mut rt, "history-entry1");
+            hold(&mut rt, Mods::default());
+            rt.pointer_move(0.0, 0.0);
+            settle(&mut rt);
+            let rows = [17, 2, 1].map(|id| element(&rt, &format!("history-entry{id}")).rect);
+            let render = render_runtime(rt, PANE_SIZE);
+            if let Some((w, _, pixels)) = &render {
+                let pixel = |x: f32, y: f32| {
+                    let at = ((y * GOLDEN_SCALE) as usize * *w as usize
+                        + (x * GOLDEN_SCALE) as usize)
+                        * 4;
+                    &pixels[at..at + 4]
+                };
+                let [x, top, width, height] = rows[0];
+                let fill = pixel(x + 2.0, top + height / 2.0);
+                for edge in [x + 1.0, x + width - 1.5] {
+                    assert_ne!(pixel(edge, top + 0.5), fill, "rounded top");
+                    for [_, join, _, _] in &rows[1..] {
+                        for y in [join - 0.5, join + 0.5] {
+                            assert_eq!(pixel(edge, y) == fill, !separated, "join at {join}");
+                        }
+                    }
+                    assert_ne!(
+                        pixel(edge, rows[2][1] + rows[2][3] - 1.0),
+                        fill,
+                        "rounded bottom"
+                    );
+                }
+            }
+            if !separated {
+                check_render("history-selected-range", dark, render);
+            }
+        }
+    }
+}
+
 #[test]
 fn history_selection_deletes_in_two_steps() {
     let mut rt = history_multi();
