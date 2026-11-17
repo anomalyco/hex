@@ -2255,10 +2255,11 @@ Linux beta                               // not macOS feature parity
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
 │       │   (onboarding or Settings can ask first, `setup.paste-access`)
-│       │   (restore token, persist_mode 2) -> Ctrl+V as evdev keycodes
-│       │   // KEY_LEFTCTRL 29, KEY_V 47: a keysym is looked up in the active
-│       │   // layout group, and KWin's fallback for Latin `v` under a Russian
-│       │   // layout dropped the held Ctrl and sent a bare `v`
+│       │   (restore token, persist_mode 2) -> keymap-resolved evdev keycodes
+│       │   // wl_seat keymap, level-1 letters: one code for every group that
+│       │   // has the letter (Dvorak v = KEY_DOT, AZERTY a = KEY_Q), else the
+│       │   // whole chord as keysyms; KWin 6.8's fake input and Mutter both
+│       │   // lose a keysym outside the active group
 │       │   ├── 15 s after the last paste -> session closes when its grant restores, so
 │       │   │   GNOME's remote-control indicator shows only around pastes (#718); a grant
 │       │   │   that can't restore keeps its session
@@ -2319,22 +2320,24 @@ reads only. The owner-change guards are not covered by any test: X11 compares
 the selection's owner window, so the same window replacing its contents mid-read
 is not seen, and Wayland compares the selection offer after one roundtrip.
 The Wayland paste choice lives in [linux/paste.rs](../../src/linux/paste.rs) and
-[linux/remote_desktop.rs](../../src/linux/remote_desktop.rs). Observed: the
-wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri
-(apollo). niri's portal frontend advertises RemoteDesktop but its GNOME
-backend fails CreateSession, so wtype stays first there. The RemoteDesktop
-paste itself (KWin, Mutter) has unit tests for its key sequence only and is not
-yet observed on a real desktop; its chords now go out as evdev keycodes
-(`KEY_LEFTCTRL`, `KEY_V`) instead of keysyms, whose lookup in a non-Latin
-layout group KWin answered with a bare `v` and a stuck Ctrl (#1939), and that
-fix is not observed on a real KDE session either. The modifier wait
+[linux/remote_desktop.rs](../../src/linux/remote_desktop.rs), whose
+[keymap.rs](../../src/linux/remote_desktop/keymap.rs) reads the desktop's
+keymap. Observed: the wtype path in the headless-Sway smoke and the
+virtual-keyboard probe on niri (apollo). niri's portal frontend advertises
+RemoteDesktop but its GNOME backend fails CreateSession, so wtype stays first
+there. The RemoteDesktop paste itself (KWin, Mutter) has unit tests for its key
+sequences and its keymap resolution only and is not yet observed on a real
+desktop: it sends resolved evdev keycodes rather than keysyms, which fixes KWin
+6.8's fake input, where a Latin `v` under a Russian layout arrived as a bare
+`v` with Ctrl stuck down (#1939), and Mutter, which drops the `v` the same way.
+Neither fix is observed on a real KDE or GNOME session. The modifier wait
 (`ShortcutKeys` in [linux/input.rs](../../src/linux/input.rs)) has unit tests
 for its timing only; it is not yet observed on Hyprland, and a modifier held
-past the wait still changes the paste. wtype numbers its keymap from evdev code 1 in order of first
-use, and Hyprland matches binds through its configured layout, so a bare
-`-k v` read as Escape and a Ctrl+Shift+Escape bind swallowed Terminal paste
-([#444](https://github.com/anomalyco/hex/issues/444)). Hex now releases 46
-never-pressed placeholder keysyms first so V lands on `KEY_V`;
+past the wait still changes the paste. wtype numbers its keymap from evdev code
+1 in order of first use, and Hyprland matches binds through its configured
+layout, so a bare `-k v` read as Escape and a Ctrl+Shift+Escape bind swallowed
+Terminal paste ([#444](https://github.com/anomalyco/hex/issues/444)). Hex now
+releases 46 never-pressed placeholder keysyms first so V lands on `KEY_V`;
 `wtype_sends_v_on_the_v_key` checks the numbering against wtype's rule, not a
 real Hyprland session.
 

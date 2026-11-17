@@ -2340,6 +2340,7 @@ dependencies = [
  "winreg",
  "x11-clipboard",
  "x11rb 0.14.0",
+ "xkbcommon",
  "zbus 6.1.0",
 ]
 
