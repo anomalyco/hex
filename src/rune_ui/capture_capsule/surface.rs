@@ -355,8 +355,15 @@ fn chip_width(label: f32) -> f32 {
     label + 2.0 * CHIP_PX
 }
 
+#[cfg(test)]
+thread_local! { pub(super) static FIXTURE_SHORTCUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
 /// The capture shortcut's keycaps, as Settings draws them.
 pub(crate) fn shortcut_keycaps() -> Vec<String> {
+    #[cfg(test)]
+    if FIXTURE_SHORTCUT.get() {
+        return ["⌥", "⇧", "S"].map(str::to_owned).into();
+    }
     crate::app_settings::capture_hotkey_keycaps()
 }
 

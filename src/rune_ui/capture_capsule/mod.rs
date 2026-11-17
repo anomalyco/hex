@@ -27,8 +27,8 @@ pub(crate) mod tuning;
 mod undo_ring;
 mod view;
 
-// Its scenes and goldens are macOS's chips and labels.
-#[cfg(all(test, target_os = "macos"))]
+// The macOS fixture is also rendered on the Linux golden runner.
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests;
 
 use std::cell::Cell;
