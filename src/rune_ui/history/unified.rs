@@ -18,7 +18,7 @@ enum Filter {
     #[default]
     All,
     Dictations,
-    Scrawls,
+    Annotations,
     Screenshots,
     Recordings,
     Captures,
@@ -28,7 +28,7 @@ impl Filter {
         match self {
             Self::All => tr("All types"),
             Self::Dictations => tr("Dictations"),
-            Self::Scrawls => tr("Scrawls"),
+            Self::Annotations => tr("Annotations"),
             Self::Screenshots => tr("Screenshots"),
             Self::Recordings => tr("Screen recordings"),
             Self::Captures => tr("Captures"),
@@ -224,14 +224,16 @@ fn types(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     for f in [
         Filter::All,
         Filter::Dictations,
-        Filter::Scrawls,
+        Filter::Annotations,
         Filter::Screenshots,
         Filter::Recordings,
     ] {
         if matches!(f, Filter::Screenshots | Filter::Recordings) && !ui.settings.labs.screenshots {
             continue;
         }
-        if f == Filter::Scrawls && !(ui.settings.capture.enabled || ui.settings.labs.screenshots) {
+        if f == Filter::Annotations
+            && !(ui.settings.capture.enabled || ui.settings.labs.screenshots)
+        {
             continue;
         }
         menu = menu.item(
@@ -252,7 +254,7 @@ impl Entry<'_> {
     fn kind(self) -> Filter {
         match self {
             Self::Words(_) => Filter::Dictations,
-            Self::File(Listed::Annotated(_)) => Filter::Scrawls,
+            Self::File(Listed::Annotated(_)) => Filter::Annotations,
             Self::File(Listed::Saved(e)) => match e.kind {
                 saved::CaptureKind::Shot => Filter::Screenshots,
                 saved::CaptureKind::Recording => Filter::Recordings,
@@ -285,7 +287,7 @@ impl Entry<'_> {
                 let fields = match e {
                     Listed::Saved(e) => format!("{} {} {}", e.words, e.name(), e.kind.label()),
                     Listed::Annotated(a) => format!(
-                        "{} {} {} annotation scrawl",
+                        "{} {} {} annotation",
                         a.words,
                         a.app.as_deref().unwrap_or(""),
                         a.sent_to.as_deref().unwrap_or("")

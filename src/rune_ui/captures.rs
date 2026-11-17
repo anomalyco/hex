@@ -523,12 +523,6 @@ pub(super) fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
     let id = entry.id();
     let title = entry.title();
     let meta = meta(entry);
-    #[cfg(all(target_os = "macos", hex_capture))]
-    let meta = if ui.history.unified.enabled && matches!(entry, Listed::Annotated(_)) {
-        meta.replacen(tr("Annotation"), tr("Scrawl"), 1)
-    } else {
-        meta
-    };
     let time = event_age(entry.at_ms());
     let mut thumb = el()
         .key("thumb")

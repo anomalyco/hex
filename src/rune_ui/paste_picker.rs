@@ -98,7 +98,7 @@ pub(super) fn card<S: 'static>(
     for (i, item) in rows.iter().enumerate() {
         let kind = match &item.id {
             Id::Dictation(_) => tr("Dictation"),
-            Id::Capture(_) => tr("Scrawl"),
+            Id::Capture(_) => tr("Annotation"),
         };
         let kind = if item.cancelled {
             format!("{kind} · {}", tr("Cancelled"))

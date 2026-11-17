@@ -190,7 +190,7 @@ fn walkthrough(recover: bool) {
     assert_eq!(
         entries.len(),
         4,
-        "one row per owner, no duplicate marked Scrawl"
+        "one row per owner, no duplicate annotation row"
     );
     let mut ui = window::scenes::mac_fixture();
     ui.settings.labs.screenshots = true;
@@ -225,7 +225,7 @@ fn walkthrough(recover: bool) {
     assert!(rt.find("nav-captures").is_none());
     assert_eq!(
         rows(&rt.state)[usize::from(recover)].kind(),
-        Filter::Scrawls
+        Filter::Annotations
     );
     frame(&mut rt, "dark-all");
     press(&mut rt, "history-type-trigger");

@@ -745,7 +745,7 @@ Stable builds and managed DisableLabs don't opt in. Without the experiment,
 Paste Last still pastes a dictation. Windows and Linux are unchanged.
 
 ```ts
-Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked Scrawl
+Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation
 Hold 300 ms on the Mac event tap → up to eight recent items, without taking focus
 ├── Initially select what tap would paste; with only Cancelled rows select nothing
 ├── Show all History → open the searchable archive, not a paste
@@ -754,7 +754,7 @@ Hold 300 ms on the Mac event tap → up to eight recent items, without taking fo
 └── Escape or changed focus → close without touching the clipboard
 ```
 
-The same Mac preview puts dictations, Scrawls, screenshots and screen
+The same Mac preview puts dictations, annotations, screenshots and screen
 recordings in **History**. All types is the default. Search works inside the
 selected type and beyond the eight picker rows. Capture files keep their
 editor, copy, reveal, drag and Trash actions. Clear dictation history affects
