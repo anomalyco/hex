@@ -174,9 +174,10 @@ browser lost its copy. Native callers use socket peer identity instead.
 
 A client **pairs with Hex once**. The person sees the caller's verified
 identity and allows it to *start recordings*; Hex keeps a revocable grant.
-Pairing itself starts nothing: every `POST /record/start` opens a separate,
-short-lived session that stops itself at the lease and ends with one
-transcript (`finish`) or nothing (`cancel`). Allow Once gives one session. Always Allow permits repeated sessions until revoked.
+Pairing itself starts nothing: every `POST /record/start` opens a separate
+session that records for as long as the client keeps checking in
+(`POST /record/heartbeat`), stops itself when the check-ins stop, and ends
+with one transcript (`finish`) or nothing (`cancel`). Allow Once gives one session. Always Allow permits repeated sessions until revoked.
 
 Raw audio, levels, partials, History, paste, microphone selection, and desktop
 control are not exposed.
@@ -198,9 +199,14 @@ Native client (record.sock)        Web page (loopback + Origin)
              │   └── correct, same verified channel -> 200 { grantId, grantToken,
              │       scope: "record:any", duration: "once" | "always" }            // no recording yet
              ├── POST /record/start    X-Hex-Record-Grant -> 201 { id, sessionToken,
-             │       state: "recording", maxRecordingMs }
+             │       state: "recording", leaseMs }
+             ├── POST /record/heartbeat X-Hex-Record-Token          // every few seconds
+             │   ├── recording, inside the lease -> 204, another leaseMs
+             │   ├── lease already lapsed -> 409 stopped (never restarts it)
+             │   └── stopped / finished / cancelled / expired -> 409 with that state
              ├── GET  /record/status   X-Hex-Record-Token
-             │       -> recording | stopped | finished | cancelled | expired
+             │       -> { state, elapsedMs, remainingMs, leaseMs }
+             │       state: recording | stopped | finished | cancelled | expired
              ├── POST /record/finish   -> 200 { transcript, durationMs }   (once)
              ├── POST /record/cancel   -> 204, discards
              └── POST /record/revoke   X-Hex-Record-Grant -> 204, ends the grant
@@ -208,7 +214,7 @@ Native client (record.sock)        Web page (loopback + Origin)
 
 With Always Allow, repeat `start` … `finish` for each distinct recording; each start mints a new
 session token. While a session is live, Hex's window shows a non-modal card
-naming the recipient, the time left on the lease, **Stop recording** (keeps
+naming the recipient, how long it has recorded, **Stop recording** (keeps
 the transcript for the client's `finish`) and **Cancel** (discards it). The
 client can stop or cancel through its session token too.
 
@@ -241,14 +247,28 @@ loopback API is not their channel, and the Unix socket has no route for it.
 | --- | --- |
 | Pairing code lifetime | 120 s, one use |
 | Grant token | Process-local; one session for Allow Once, reusable for Always Allow |
-| One recording | 120 s maximum; it stops itself |
+| One recording | No length limit while the client checks in |
+| Check-in lease | 10 s (`leaseMs`); the microphone stops when it lapses |
 | After the stop | 30 s for `finish`, then discarded (`409 session-expired`) |
 | Concurrent recordings | 1 (`409 session-busy` on the next start) |
-| Body | 8 KiB; start/status/finish/cancel/revoke take no body |
+| Body | 8 KiB; start/status/heartbeat/finish/cancel/revoke take no body |
 
-`maxRecordingMs` and `remainingMs` are reported; the window's card counts down
-the same lease. A recording stopped by the lease is still finishable inside
-the grace window.
+The lease is the one Hex's `/dictations` and `/streams` use. Only
+`POST /record/heartbeat` with the session's own token, on the channel that
+started it (the same `Origin` or audit token), renews it; `status` does not.
+Send one every few seconds (`leaseMs / 3` in the examples). When a client
+quits, crashes, or hangs, its check-ins stop and Hex stops the microphone
+within one lease; the transcript is then finishable for the 30 s grace like
+any other stop. A check-in after the lease lapsed is refused and starts
+nothing again. While the session records, Hex keeps its own capture lease
+alive, so the client's check-ins alone decide how long it runs; Stop, Cancel,
+and Revoke in Hex end it at any time. `status` reports `elapsedMs`, and
+`remainingMs` until the lease lapses (recording) or the grace ends (stopped).
+
+A browser may slow a hidden tab's timers (Chrome checks in at most once a
+minute after five hidden minutes), which lets the lease lapse; a page that
+must keep recording in the background should do so from a visible tab or a
+native client.
 
 ### Revocation and persistence
 
@@ -275,6 +295,7 @@ save never grants access, and a failed revoke does not disappear from the list.
 | 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Deny, no answer, no window/gate |
 | 403 | `invalid-grant` | Wrong, spent, or expired pairing code |
 | 404 | `record-not-found` | Unknown session token or one bound to another channel |
+| 409 | `stopped` | A check-in after the recording stopped (lease, Stop in Hex, or the client's `finish`) |
 | 409 | `already-paired` | That recipient already has a grant |
 | 409 | `session-busy`, `session-expired`, `session-finished`, `session-cancelled`, `not-started`, `finish-in-progress` | Session state |
 | 429 | `consent-cooldown` | The recipient was denied less than 30 s ago |
@@ -283,8 +304,8 @@ save never grants access, and a failed revoke does not disappear from the list.
 ### What is not exposed
 
 - No raw audio, no `/record/audio`; a grant token reaches only `start` and
-  `revoke`, and a session token only `status`, `finish`, and `cancel` for its
-  own session.
+  `revoke`, and a session token only `status`, `heartbeat`, `finish`, and
+  `cancel` for its own session.
 - No `/dictations`, `/streams`, `/transcriptions`, `/control`, `/models`,
   History, clipboard, Accessibility, or settings. Both record headers are
   checked before the bearer token and never become it.
@@ -299,17 +320,24 @@ is an Electron main-process example,
 [`native-rust.rs`](../prototypes/record-clients/native-rust.rs) a Rust example
 that also runs inside a Rune host, and
 [`browser-connect/index.html`](../prototypes/browser-connect/index.html) drives
-the browser upload flow (the recording routes are the same exchange with
-`/record/*`).
+the browser transcription flow and a recording that checks in until the page
+stops it.
 
 ### What is tested, and what is not
 
 `local_api` tests drive the whole exchange over loopback HTTP with a recording
 backend that never opens a microphone: allow and deny, one prompt for repeated
-recordings, distinct sessions, code use and expiry, lease stop and grace, the
-window's Stop and Cancel, revoke from the client (and that a revoked grant
-opens nothing), and neither token's ability to reach any other route or
-origin. On macOS, one test connects to the real `record.sock`, reads the
+recordings, distinct sessions, code use and expiry, the window's Stop and
+Cancel, revoke from the client (and that a revoked grant opens nothing), and
+neither token's ability to reach any other route or origin. The check-in
+lease is tested with shortened leases: a recording that checks in runs for 25
+leases and still finishes; one that never checks in stops and stays
+finishable for the grace; a late check-in is refused and restarts nothing;
+check-ins from another origin, with the grant token, a guessed token, or a
+body leave the lease to lapse; Stop, Cancel, and both revokes end a
+checking-in recording and refuse its next check-in; and a recording the
+capture loop lost is cancelled. One ignored test runs the real 10 s lease for
+125 s, past the old two-minute cap. On macOS, one test connects to the real `record.sock`, reads the
 peer's audit token, pairs, records twice through the fake backend, and revokes;
 it skips (with a printed note) when the test binary has no signing identity.
 The dialog, the live card, and the Labs › Browser access revoke rows are

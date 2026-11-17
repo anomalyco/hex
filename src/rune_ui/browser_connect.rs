@@ -72,9 +72,6 @@ struct Ask {
 fn ask_copy(intent: Intent, recipient: &Recipient) -> Ask {
     let page = matches!(recipient, Recipient::Web { .. });
     if intent == Intent::Record {
-        let seconds = crate::local_api::record_max_recording()
-            .as_secs()
-            .to_string();
         Ask {
             glyph: &MIC,
             capability: tr("Microphone"),
@@ -95,10 +92,12 @@ fn ask_copy(intent: Intent, recipient: &Recipient) -> Ask {
                 ),
                 (
                     &CLOCK,
-                    tr_fill(
-                        "Each recording stops after {} seconds, or sooner in Hex",
-                        &seconds,
-                    ),
+                    if page {
+                        tr("Recording stops when the page ends it or stops responding, or anytime in Hex")
+                    } else {
+                        tr("Recording stops when the app ends it or stops responding, or anytime in Hex")
+                    }
+                    .to_owned(),
                 ),
             ],
         }

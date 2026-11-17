@@ -9,7 +9,7 @@ trusted or read.
 
 - [`electron-main.mjs`](electron-main.mjs) — an Electron **main process**
   (Node 18+). Run it with `node electron-main.mjs`; it pairs once, records
-  twice, prints each transcript, and revokes the grant.
+  twice while checking in, prints each transcript, and revokes the grant.
 - [`native-rust.rs`](native-rust.rs) — a standalone Rust example, also usable
   from a Rune host. Copy it into a binary with `sha2` and `serde_json`, then
   run it; it uses `HEX_RECORD_SOCKET` or the default path and does the same
@@ -18,8 +18,11 @@ trusted or read.
 Both record once for **Allow Once**, or twice then revoke for **Always Allow**. **Deny**, Escape, the
 scrim, or letting the dialog time out fails the pairing without recording.
 Pairing starts nothing; each `POST /record/start` under the grant opens a
-fresh session that stops itself at the lease, and Hex's window shows the live
-card with **Stop recording** and **Cancel**. **Revoke** in Hex's window
+fresh session that runs for as long as the client checks in
+(`POST /record/heartbeat` every `leaseMs / 3`; the demos record five seconds,
+`HEX_RECORD_MS` for the Electron one). Stop checking in (quit, crash) and Hex
+stops the microphone within one lease (10 s). Hex's window shows the live card
+with **Stop recording** and **Cancel**. **Revoke** in Hex's window
 (Labs › Browser access) or `POST /record/revoke` ends the grant, cancelling a
 live session and making further starts fail.
 

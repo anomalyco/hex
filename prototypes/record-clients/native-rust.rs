@@ -7,7 +7,9 @@
 // its code signature instead of a name or an Origin. No API token is read.
 //
 // Pairing asks the person once and starts nothing. The grant it returns opens
-// each recording; `record_once` starts one short session under it. Revoking
+// each recording; `record_once` starts one session under it, which runs for
+// as long as this process checks in (`POST /record/heartbeat`) and stops
+// itself within one lease (10 s) after the check-ins stop. Revoking
 // the grant (here, or in Hex's window under Labs › Browser access) ends the
 // permission; the next run pairs and asks again.
 //
@@ -24,6 +26,7 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -66,8 +69,9 @@ pub fn pair(socket: &Path) -> Result<(String, bool), String> {
         .ok_or_else(|| "Hex refused the grant".to_owned())
 }
 
-/// One recording under `grant`: a fresh session token, start, finish.
-pub fn record_once(socket: &Path, grant: &str) -> Result<String, String> {
+/// One recording under `grant`: a fresh session token, start, check in until
+/// `stop` fires (or is dropped), then finish.
+pub fn record_once(socket: &Path, grant: &str, stop: &Receiver<()>) -> Result<String, String> {
     let started = call(
         socket,
         "POST",
@@ -83,6 +87,28 @@ pub fn record_once(socket: &Path, grant: &str) -> Result<String, String> {
         .get("sessionToken")
         .and_then(|token| token.as_str())
         .ok_or("Hex returned no session token")?;
+    let lease = Duration::from_millis(session["leaseMs"].as_u64().unwrap_or(10_000));
+
+    // Check in well inside the lease while the recording runs. A refused
+    // check-in means it already ended: stopped or cancelled in Hex, or the
+    // grant was revoked. A stopped recording's transcript is still finishable.
+    loop {
+        match stop.recv_timeout(lease / 3) {
+            Err(RecvTimeoutError::Timeout) => {}
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+        let beat = call(
+            socket,
+            "POST",
+            "/record/heartbeat",
+            None,
+            Some(("X-Hex-Record-Token", token)),
+        )?;
+        if !beat.starts_with("HTTP/1.1 204") {
+            eprintln!("recording ended in Hex: {beat}");
+            break;
+        }
+    }
 
     // Finish (keep the transcript) or `/record/cancel` (discard it).
     let finished = call(
@@ -192,13 +218,23 @@ fn main() {
             PathBuf::from(std::env::var("HOME").expect("HOME"))
                 .join("Library/Application Support/hex/record.sock")
         });
+    // Each demo recording runs five seconds; a real app sends on `stop` when
+    // its UI says so.
+    let five_seconds = || {
+        let (stop, stopped) = mpsc::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            let _ = stop.send(());
+        });
+        stopped
+    };
     let result = pair(&socket).and_then(|(grant, reusable)| {
-        let first = record_once(&socket, &grant)?;
+        let first = record_once(&socket, &grant, &five_seconds())?;
         println!("{first}");
         if !reusable {
             return Ok(());
         }
-        let second = record_once(&socket, &grant)?;
+        let second = record_once(&socket, &grant, &five_seconds())?;
         println!("{second}");
         revoke(&socket, &grant)
     });

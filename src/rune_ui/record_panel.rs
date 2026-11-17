@@ -1,5 +1,5 @@
-//! The live consented-recording card: who the recording is for, how long its
-//! lease has left, and Stop or Cancel.
+//! The live consented-recording card: who the recording is for, how long it
+//! has run, and Stop or Cancel.
 //!
 //! It is not a modal: the person can keep using Hex while a client records.
 //! Closing it is not a dismissal, because the card has no close; only Stop
@@ -43,17 +43,27 @@ pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
         _ => return None,
     };
     let recipient = view.recipient.label();
-    let seconds = view.remaining_ms.div_ceil(1000);
-    let clock = format!("{}:{:02}", seconds / 60, seconds % 60);
+    let page = matches!(view.recipient, crate::local_api::Recipient::Web { .. });
     let title = if recording {
         tr_fill("Recording for {}", &recipient)
     } else {
         tr_fill("Recording stopped for {}", &recipient)
     };
-    let note = if recording {
-        tr_fill("Stops itself in {} · raw audio stays in Hex", &clock)
-    } else {
-        tr_fill("Waiting {} s for the app to collect the transcript", &clock)
+    // A recording runs for as long as its client checks in, so the card
+    // counts up; once stopped, it counts down the time left to collect.
+    let note = match (recording, page) {
+        (true, false) => tr_fill(
+            "{} · stops when the app ends it or stops responding · raw audio stays in Hex",
+            &elapsed(view.elapsed_ms),
+        ),
+        (true, true) => tr_fill(
+            "{} · stops when the page ends it or stops responding · raw audio stays in Hex",
+            &elapsed(view.elapsed_ms),
+        ),
+        (false, _) => tr_fill(
+            "Waiting {} s for the app to collect the transcript",
+            &view.remaining_ms.div_ceil(1000).to_string(),
+        ),
     };
     let mut footer = row().key("record-actions").gap(8.0).justify_end();
     if recording {
@@ -123,4 +133,25 @@ pub(super) fn panel(ui: &Ui, p: Paint) -> Option<El> {
             .items_end()
             .child(card),
     )
+}
+
+/// A recording's running time: 0:07, 12:30, then 1:02:05 past an hour.
+fn elapsed(ms: u64) -> String {
+    let seconds = ms / 1000;
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_running_time_has_no_ceiling() {
+        assert_eq!(super::elapsed(7_400), "0:07");
+        assert_eq!(super::elapsed(750_000), "12:30");
+        assert_eq!(super::elapsed(3_725_000), "1:02:05");
+    }
 }
