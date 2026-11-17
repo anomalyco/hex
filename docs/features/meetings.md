@@ -634,6 +634,16 @@ checks the Rune actions (native panels do not take keyboard focus).
 the production view for each detected source on a GPU, using synthetic detector
 inputs and the rendering computer's installed app icons. No network or call is needed.
 
+`a_record_click_keeps_its_corner_until_the_worker_is_live` exercises Record
+on the same surface at each corner, with an immediate or delayed start, a
+second click and Reduce Motion. `HEX_RECORD_CLICK=<folder>` with
+`record_click_frames` renders successful and refused starts without audio.
+Observed on macOS with synthetic events: the 500 ms open lost no frames of
+the capsule (previously 30 at 60 fps). An AppKit probe addressed mouse events
+to the real panel: one visible window and frame across 50 samples, never key,
+one start command and no stop; the clear margin ignored the pointer. This
+does not exercise the recorder, permission dialogs or native Linux/Windows input.
+
 Sources: [meeting/detection.rs](../../src/meeting/detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
 [dictation/context.rs](../../src/dictation/context.rs), the controller in
