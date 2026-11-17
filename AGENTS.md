@@ -372,7 +372,8 @@ substitute for source inspection or a second roadmap.
   session-closed reporting.
 - `linux/remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
-  persisted owner-only restore token, and Ctrl+V as keysyms.
+  persisted owner-only restore token, and Ctrl+V as keymap-resolved evdev
+  keycodes, keysyms as fallback.
 - `linux/context`: the focused application for modes: the X11 active
   window's process, or on Wayland the activated `zwlr_foreign_toplevel`
   window's app ID named by its `.desktop` entry (none on GNOME and KDE).

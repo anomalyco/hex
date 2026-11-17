@@ -2255,7 +2255,12 @@ Linux beta                               // not macOS feature parity
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
 │       │   (onboarding or Settings can ask first, `setup.paste-access`)
-│       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms
+│       │   (restore token, persist_mode 2) -> keymap-resolved evdev keycodes
+│       │   // wl_seat keymap: a letter needs one code across every group that
+│       │   // has it (Dvorak v = KEY_DOT, AZERTY a = KEY_Q), while
+│       │   // Ctrl/Shift/Enter must be on 29/42/28 in every group; else the
+│       │   // whole chord as keysyms; KWin 6.8's fake input and Mutter lose a
+│       │   // keysym outside the active group
 │       │   ├── 15 s after the last paste -> session closes when its grant restores, so
 │       │   │   GNOME's remote-control indicator shows only around pastes (#718); a grant
 │       │   │   that can't restore keeps its session
@@ -2316,12 +2321,19 @@ reads only. The owner-change guards are not covered by any test: X11 compares
 the selection's owner window, so the same window replacing its contents mid-read
 is not seen, and Wayland compares the selection offer after one roundtrip.
 The Wayland paste choice lives in [linux/paste.rs](../../src/linux/paste.rs) and
-[linux/remote_desktop.rs](../../src/linux/remote_desktop.rs). Observed: the
-wtype path in the headless-Sway smoke and the virtual-keyboard probe on niri
-(apollo). niri's portal frontend advertises RemoteDesktop but its GNOME
-backend fails CreateSession, so wtype stays first there. The RemoteDesktop
-paste itself (KWin, Mutter) has unit tests for its key sequence only and is not
-yet observed on a real desktop. The modifier wait (`ShortcutKeys` in
+[linux/remote_desktop.rs](../../src/linux/remote_desktop.rs), whose
+[keymap.rs](../../src/linux/remote_desktop/keymap.rs) reads the desktop's
+keymap. Observed: the wtype path in the headless-Sway smoke and the
+virtual-keyboard probe on niri (apollo). niri's portal frontend advertises
+RemoteDesktop but its GNOME backend fails CreateSession, so wtype stays first
+there. The RemoteDesktop paste itself (KWin, Mutter) has unit tests for its key
+sequences and its keymap resolution only and is not yet observed on a real
+desktop: it sends evdev keycodes only where the keymap confirms each letter and
+Ctrl, Shift, and Enter (`ctrl:swapcaps` and the like fall back to keysyms),
+rather than keysyms, which fixes KWin 6.8's fake input, where a Latin `v` under
+a Russian layout arrived as a bare `v` with Ctrl stuck down (#1939), and Mutter,
+which drops a keysym outside the active group. Neither fix is observed on a
+real KDE or GNOME session either. The modifier wait (`ShortcutKeys` in
 [linux/input.rs](../../src/linux/input.rs)) has unit tests for its timing only;
 it is not yet observed on Hyprland, and a modifier held past the wait still
 changes the paste. wtype numbers its keymap from evdev code 1 in order of first

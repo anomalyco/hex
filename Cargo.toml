@@ -134,6 +134,11 @@ wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 wayland-scanner = "0.31.11"
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xkb", "xtest"] }
+# Wayland paste reads the compositor's keymap to send the paste chord on the
+# key each layout puts the letter on (`linux/remote_desktop/keymap.rs`). Rune
+# already links libxkbcommon on Linux, so this adds no crate to Cargo.lock and
+# no library to the link; the `wayland` feature's memmap path is unused.
+xkbcommon = { version = "=0.9.0", default-features = false }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
 
 # The desktop UI, and Annotate (Scrawl's capture engine), compiled into
