@@ -1,10 +1,12 @@
 use std::cell::UnsafeCell;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::audio::voice_filter::{
     DictationSpan, HexMicEngine, ModeSpec, StageSpec, VoiceFilterMode,
@@ -816,7 +818,9 @@ pub fn status() -> HexMicrophoneStatus {
     let driver_loaded = mic_id.is_some() && sink_id.is_some();
     let mic_in_use = mic_id.is_some_and(macos_hal::device_is_running_somewhere);
     let my_pid = std::process::id() as i32;
-    let active_apps: Vec<String> = crate::microphone_activity::active_microphone_applications()
+    let active_apps: Vec<String> = mic_id
+        .filter(|_| mic_in_use)
+        .and_then(|id| crate::microphone_activity::applications_using_input(id).ok())
         .unwrap_or_default()
         .into_iter()
         .filter(|proc| proc.pid != my_pid && !proc.name.eq_ignore_ascii_case("hex"))
@@ -907,7 +911,7 @@ pub enum DemoSourceKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DemoPlaybackTrack {
-    CallHears,
+    Effect(VoiceFilterMode),
     You,
 }
 
@@ -927,12 +931,7 @@ pub struct DemoSnapshot {
 
 static DEMO_RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 static DEMO_RECORDED_LEN: AtomicUsize = AtomicUsize::new(0);
-static DEMO_PLAYBACK_GEN: AtomicU64 = AtomicU64::new(0);
-static DEMO_PLAYING_TRACK: AtomicU32 = AtomicU32::new(0); // 0 = none, 1 = CallHears, 2 = You
-static DEMO_PLAYBACK_PROGRESS_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
 static DEMO_CLOCK_EPOCH: OnceLock<Instant> = OnceLock::new();
-static DEMO_PLAYBACK_START_NS: AtomicU64 = AtomicU64::new(0);
-static DEMO_PLAYBACK_DURATION_NS: AtomicU64 = AtomicU64::new(0);
 static DEMO_RECORDING_START_NS: AtomicU64 = AtomicU64::new(0);
 static DEMO_RECOMPUTE_RUNNING: AtomicBool = AtomicBool::new(false);
 static DEMO_RECOMPUTE_DIRTY: AtomicBool = AtomicBool::new(false);
@@ -943,7 +942,7 @@ fn demo_now_ns() -> u64 {
 }
 
 pub fn demo_is_busy() -> bool {
-    DEMO_RECORDING_ACTIVE.load(Ordering::Acquire) || DEMO_PLAYING_TRACK.load(Ordering::Acquire) != 0
+    DEMO_RECORDING_ACTIVE.load(Ordering::Acquire) || audition::busy()
 }
 
 pub fn demo_recompute_is_running() -> bool {
@@ -988,7 +987,6 @@ fn schedule_demo_recompute() {
                 if let Ok(mut guard) = demo_buffers_lock().lock()
                     && guard.source == source
                 {
-                    guard.processed_samples = processed_samples;
                     guard.peaks_you = peaks_you;
                     guard.peaks_call = peaks_call;
                     guard.cached_mode = Some(cfg);
@@ -1007,7 +1005,6 @@ struct DemoBuffers {
     cached_source: Option<DemoSourceKind>,
     peaks_you: Vec<f32>,
     peaks_call: Vec<f32>,
-    processed_samples: Vec<f32>,
 }
 
 impl DemoBuffers {
@@ -1033,7 +1030,6 @@ fn demo_buffers_lock() -> &'static Mutex<DemoBuffers> {
             cached_source: None,
             peaks_you: vec![0.0; WAVEFORM_BARS],
             peaks_call: vec![0.0; WAVEFORM_BARS],
-            processed_samples: Vec::new(),
         };
         recompute_demo_cache(&mut buffers);
         Mutex::new(buffers)
@@ -1118,7 +1114,6 @@ fn recompute_demo_cache(buffers: &mut DemoBuffers) {
     );
     let peaks_you = compute_peaks(active_samples, WAVEFORM_BARS);
     let peaks_call = compute_peaks(&processed_samples, WAVEFORM_BARS);
-    buffers.processed_samples = processed_samples;
     buffers.peaks_you = peaks_you;
     buffers.peaks_call = peaks_call;
     buffers.cached_mode = Some(cfg);
@@ -1178,81 +1173,10 @@ pub fn select_demo_source(source: DemoSourceKind) {
     schedule_demo_recompute();
 }
 
-pub fn stop_demo_playback() {
-    if DEMO_PLAYING_TRACK.load(Ordering::Acquire) != 0 {
-        let start = DEMO_PLAYBACK_START_NS.load(Ordering::Acquire);
-        let dur = DEMO_PLAYBACK_DURATION_NS.load(Ordering::Acquire);
-        if dur > 0 {
-            let elapsed = demo_now_ns().saturating_sub(start);
-            let p = ((elapsed as f64) / (dur as f64)).clamp(0.0, 1.0) as f32;
-            DEMO_PLAYBACK_PROGRESS_BITS.store(p.to_bits(), Ordering::Release);
-        }
-    }
-    DEMO_PLAYBACK_GEN.fetch_add(1, Ordering::AcqRel);
-    DEMO_PLAYING_TRACK.store(0, Ordering::Release);
-}
-
-pub fn play_demo_track(track: DemoPlaybackTrack) {
-    stop_demo_recording();
-    let samples = {
-        let Ok(mut guard) = demo_buffers_lock().lock() else {
-            return;
-        };
-        let cfg = current_tuned_config();
-        if guard.cached_mode.as_ref() != Some(&cfg) || guard.cached_source != Some(guard.source) {
-            recompute_demo_cache(&mut guard);
-        }
-        match track {
-            DemoPlaybackTrack::CallHears => guard.processed_samples.clone(),
-            DemoPlaybackTrack::You => guard.active_samples().to_vec(),
-        }
-    };
-    if samples.is_empty() {
-        return;
-    }
-
-    let generation = DEMO_PLAYBACK_GEN.fetch_add(1, Ordering::AcqRel) + 1;
-    let track_code = match track {
-        DemoPlaybackTrack::CallHears => 1,
-        DemoPlaybackTrack::You => 2,
-    };
-    let duration =
-        Duration::from_secs_f64((samples.len() as f64) / f64::from(HEX_MICROPHONE_SAMPLE_RATE));
-    DEMO_PLAYBACK_START_NS.store(demo_now_ns(), Ordering::Release);
-    DEMO_PLAYBACK_DURATION_NS.store(duration.as_nanos() as u64, Ordering::Release);
-    DEMO_PLAYBACK_PROGRESS_BITS.store(0.0_f32.to_bits(), Ordering::Release);
-    DEMO_PLAYING_TRACK.store(track_code, Ordering::Release);
-
-    thread::spawn(move || {
-        let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
-            if DEMO_PLAYBACK_GEN.load(Ordering::Acquire) == generation {
-                DEMO_PLAYING_TRACK.store(0, Ordering::Release);
-            }
-            return;
-        };
-        sink.log_on_drop(false);
-        let Some(ch) = std::num::NonZeroU16::new(1) else {
-            return;
-        };
-        let Some(sr) = std::num::NonZeroU32::new(HEX_MICROPHONE_SAMPLE_RATE) else {
-            return;
-        };
-        let buffer = rodio::buffer::SamplesBuffer::new(ch, sr, samples);
-        sink.mixer().add(buffer);
-        DEMO_PLAYBACK_START_NS.store(demo_now_ns(), Ordering::Release);
-        let started = Instant::now();
-        while started.elapsed() < duration {
-            if DEMO_PLAYBACK_GEN.load(Ordering::Acquire) != generation {
-                return;
-            }
-            thread::sleep(Duration::from_millis(16));
-        }
-        if DEMO_PLAYBACK_GEN.load(Ordering::Acquire) == generation {
-            DEMO_PLAYBACK_PROGRESS_BITS.store(1.0_f32.to_bits(), Ordering::Release);
-            DEMO_PLAYING_TRACK.store(0, Ordering::Release);
-        }
-    });
-}
+mod audition;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub use audition::play_demo_track;
+pub use audition::stop_demo_playback;
 
 pub fn demo_snapshot() -> DemoSnapshot {
     let cfg = current_tuned_config();
@@ -1271,26 +1195,7 @@ pub fn demo_snapshot() -> DemoSnapshot {
     } else {
         1.0
     };
-    let playing = match DEMO_PLAYING_TRACK.load(Ordering::Acquire) {
-        1 => Some(DemoPlaybackTrack::CallHears),
-        2 => Some(DemoPlaybackTrack::You),
-        _ => None,
-    };
-    let playback_progress = if playing.is_some() {
-        let start = DEMO_PLAYBACK_START_NS.load(Ordering::Acquire);
-        let dur = DEMO_PLAYBACK_DURATION_NS.load(Ordering::Acquire);
-        if dur > 0 {
-            let elapsed = demo_now_ns().saturating_sub(start);
-            let p = ((elapsed as f64) / (dur as f64)).clamp(0.0, 1.0) as f32;
-            DEMO_PLAYBACK_PROGRESS_BITS.store(p.to_bits(), Ordering::Release);
-            p
-        } else {
-            f32::from_bits(DEMO_PLAYBACK_PROGRESS_BITS.load(Ordering::Acquire))
-        }
-    } else {
-        f32::from_bits(DEMO_PLAYBACK_PROGRESS_BITS.load(Ordering::Acquire))
-    };
-
+    let (playing, playback_progress, preview_peaks) = audition::snapshot();
     let Ok(mut guard) = demo_buffers_lock().lock() else {
         return DemoSnapshot {
             source: DemoSourceKind::Example,
@@ -1331,7 +1236,7 @@ pub fn demo_snapshot() -> DemoSnapshot {
         duration_ms,
         span,
         peaks_you: guard.peaks_you.clone(),
-        peaks_call: guard.peaks_call.clone(),
+        peaks_call: preview_peaks.unwrap_or_else(|| guard.peaks_call.clone()),
     }
 }
 

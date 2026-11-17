@@ -68,10 +68,8 @@ struct Job {
     flavour: crate::dictation::DictationFlavour,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
-    /// How long a shortcut-started capture's shortcut was held, press to
-    /// release; `None` for a `hex dictation` capture (Labs › YOLO
-    /// mode).
-    held_ms: Option<u64>,
+    /// A physical dictation shortcut, not a control or API request.
+    by_shortcut: bool,
     /// Labs › Stop phrase: the words its capture ended with, read when the
     /// phrase was heard and removed from the transcript before processing.
     stop_phrase: Option<String>,
@@ -1210,9 +1208,9 @@ fn process_dictation_job(
             // Labs › YOLO mode, read as the output commits.
             sent = pasted.is_ok()
                 && !copy_only
-                && job.held_ms.is_some_and(|held_ms| {
-                    crate::dictation::yolo_mode::sends(held_ms, application.as_deref())
-                });
+                && job.by_shortcut
+                && !job.flavour.raw()
+                && crate::dictation::yolo_mode::sends(application.as_deref());
             let pasted = if sent { paster.press_return() } else { pasted };
             // A failed paste still keeps the text for Paste Last.
             *last_dictation

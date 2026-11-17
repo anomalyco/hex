@@ -58,10 +58,8 @@ struct Job {
     /// text is committed instead of pasted. Dropping an unfinished job
     /// cancels it.
     typing: Option<crate::linux::live_typing::Session>,
-    /// How long a shortcut-started capture's shortcut was held, press to
-    /// release; `None` for a `hex dictation` capture (Labs › YOLO
-    /// mode).
-    held_ms: Option<u64>,
+    /// A physical dictation shortcut, not a control or API request.
+    by_shortcut: bool,
     /// Labs › Stop phrase: the words its capture ended with, read when the
     /// phrase was heard and removed from the transcript before processing.
     stop_phrase: Option<String>,
@@ -349,7 +347,7 @@ pub(crate) fn run(
                         job.recording.take(),
                         job.typing.take(),
                         job.context.finish(),
-                        None,
+                        job.by_shortcut,
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
@@ -372,7 +370,7 @@ pub(crate) fn run(
                     job.recording.take(),
                     job.typing.take(),
                     job.context.finish(),
-                    job.held_ms,
+                    job.by_shortcut,
                 )
             })()
             .map_err(|error| format!("{error:#}"));
@@ -1378,10 +1376,6 @@ fn submit_capture(
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
-            // Labs › YOLO mode judges only a shortcut's processed
-            // paste, on how long the shortcut was held.
-            let held_ms =
-                (by_shortcut && !flavour.raw() && print.is_none()).then(|| clip.held_ms());
             let stream = clip.take_stream();
             let samples = clip.into_transcription_samples();
             let language = engine
@@ -1398,7 +1392,7 @@ fn submit_capture(
                 print,
                 flavour,
                 typing: typing.map(|CaptureTyping { session, .. }| session),
-                held_ms,
+                by_shortcut,
                 stop_phrase,
             }));
             match jobs.try_send(job) {
@@ -2003,7 +1997,7 @@ mod tests {
             None,
             None,
             Default::default(),
-            None,
+            true,
         );
 
         assert!(result.is_err(), "the failed paste is still reported");

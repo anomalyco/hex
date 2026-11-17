@@ -9,6 +9,28 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
+#[test]
+fn old_yolo_durations_leave_the_switch_and_apps_alone() {
+    for seconds in [1, 2, 3, 5, 10] {
+        for enabled in [false, true] {
+            for apps in [vec![], vec!["Messages", "Slack"]] {
+                let (settings, repaired) = decode_value(&mut json!({"labs": {
+                    "yolo_mode": enabled, "yolo_mode_apps": apps, "yolo_mode_seconds": seconds
+                }}));
+                assert!(!repaired);
+                assert_eq!(settings.labs.yolo_mode, enabled);
+                assert_eq!(settings.labs.yolo_mode_apps, apps);
+                assert!(
+                    serde_json::to_value(&settings.labs)
+                        .unwrap()
+                        .get("yolo_mode_seconds")
+                        .is_none()
+                );
+            }
+        }
+    }
+}
+
 struct SettingsFile {
     path: PathBuf,
 }

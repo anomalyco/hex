@@ -84,7 +84,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        long after a capture, so the next dictation starts at once
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
-├── YOLO mode no labs.yolo_mode (every OS) a shortcut dictation held at least its chosen time (2 s default), in one of its chosen apps if any, presses Return after its paste unless Escape came after the release (macOS); History records it as Send
+├── YOLO mode no labs.yolo_mode (every OS) press Return after pasting a shortcut dictation in a chosen app (none chosen = everywhere); Escape after release skips Return on macOS
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
 ├── Print-only CLI dictation no labs.print_start        (macOS)   hex dictation start --print answers with the transcript however the recording ends; never pasted or copied
 ├── Voice prompt    no    labs.voice_prompt + labs.voice_prompt_phrase ("rewrite this", every OS)
@@ -312,6 +312,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
 ├── Group chips with counts -> All, Dictation, Output, History, Meetings, Annotate, Shortcuts, Models
+│   on one line; More… lists only the groups that don't fit. Choosing one brings its chip onto the row.
 │   (labs/group.rs; a group this OS has no lab in hides)
 ├── Discover, no chip or search -> New in Labs: the two newest labs, then every other lab
 │   under its group's header; a lab added on the newest date among those shown carries New
@@ -799,13 +800,11 @@ dictation on a Mac or Windows PC with the toggle on.
 
 YOLO mode (`yolo-mode`, every OS): while on, a
 dictation started by a dictation shortcut (hold, double-tap lock, Toggle, a
-second or extra shortcut, Caps Lock dictation on macOS) whose shortcut was
-held at least `labs.yolo_mode_seconds` (1, 2, 3, 5, or 10 s,
-2 s by default; the card's Longer than picker) pastes as usual,
-then presses Return once, 100 ms later (`yolo_mode::SETTLE`), so a chat
-message sends itself. The hold is `DictationClip::held_ms`: the audio from
-the press to the release, without the pre-roll before it or the release
-tail after. Shorter dictations paste as usual. The card's Only in row
+second or extra shortcut, Caps Lock dictation on macOS) presses Return once
+after Hex pastes its nonempty final text. A one-second “yep” sends just like
+a longer message. The ordinary 300 ms hold threshold still discards short
+taps. Silence, cancellation, empty output, and a failed insertion never
+press Return. Old saved durations are ignored. The card's Only in row
 (`labs.yolo_mode_apps`, empty by default: every app) limits it to
 chosen apps, picked with the Modes pane's application picker
 (`modes::PickerTarget::YoloMode`; a popover over the cards below its +,
@@ -834,12 +833,12 @@ dictation. Pastes usually land 0.25–0.5 s after submission and Return went
 portal on Wayland), with no Escape window. A sent dictation's History entry is kind Send. On Linux
 a desktop keybinding that runs `hex dictation toggle` (Wayland without the
 GlobalShortcuts portal, GNOME custom shortcuts) is a command, so it never
-sends. Checks: `a_hold_reaching_the_chosen_time_is_long_enough`,
+sends. Checks: `yolo_sends_yep_only_after_a_successful_paste`,
 `chosen_apps_limit_where_it_sends`, `escape_after_submission_closes_the_gate`,
 and `return_waits_for_the_window_and_the_settle` (yolo_mode.rs);
 `escape_after_release_pastes_a_yolo_dictation_without_return` (parakeet.rs);
-`release_tail_keeps_audio_through_the_tail_and_no_further` checks
-`held_ms` (dictation.rs); `return_sends_no_modifier` (linux/paste.rs);
+`old_yolo_durations_leave_the_switch_and_apps_alone` (settings persistence);
+`return_sends_no_modifier` (linux/paste.rs);
 `yolo_mode_is_its_own_switch_and_everywhere` (labs.rs). Not yet
 observed: a real dictation sending a message on any OS.
 

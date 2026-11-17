@@ -801,7 +801,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Send dictations automatically",
+      "summary": "Press Return after pasting a dictation",
       "title": "YOLO mode"
     },
     {
