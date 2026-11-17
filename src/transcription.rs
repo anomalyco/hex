@@ -343,3 +343,23 @@ mod padding_tests {
         assert!(samples[1_600..].iter().all(|sample| *sample == 0.0));
     }
 }
+
+#[cfg(test)]
+mod closing_mark_tests {
+    use super::requires_closing_mark;
+    use crate::transcription::models::{CustomModelId, TranscriptionModelId};
+
+    #[test]
+    fn only_unified_english_streams_require_a_closing_mark() {
+        assert!(requires_closing_mark(Some(
+            TranscriptionModelId::ParakeetUnifiedEnglish
+        )));
+        assert!(!requires_closing_mark(None));
+        assert!(!requires_closing_mark(Some(
+            TranscriptionModelId::ParakeetV2
+        )));
+        assert!(!requires_closing_mark(Some(TranscriptionModelId::Custom(
+            CustomModelId::parse("custom-0123456789abcdef").expect("16 hex digits")
+        ))));
+    }
+}

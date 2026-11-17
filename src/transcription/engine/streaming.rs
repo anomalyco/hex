@@ -160,8 +160,10 @@ pub(super) fn stream_requires_closing_mark(model: &Model) -> bool {
 
 /// Refuses a stream's `text` when it must close a sentence and, past trailing
 /// spaces and closing quotes or brackets, ends in something other than `.`,
-/// `?`, `!`, or `…`, so the whole clip decides instead. Empty text passes
-/// through: [`finish_stream`] already rejects it.
+/// `?`, `!`, or `…`, so the whole clip decides instead. Text with nothing left
+/// by then is refused too: a stream that dropped its whole last words is no
+/// more trustworthy than one that dropped the mark. [`finish_stream`] rejects
+/// text that is empty outright.
 pub(super) fn check_closing_mark(text: String, required: bool) -> Result<String, String> {
     if !required || has_closing_mark(&text) {
         return Ok(text);
@@ -170,15 +172,15 @@ pub(super) fn check_closing_mark(text: String, required: bool) -> Result<String,
 }
 
 /// Whether `text` ends in a sentence mark once trailing spaces and closing
-/// quotes or brackets are stripped. A sentence that is empty by then has no
-/// text to judge and passes.
+/// quotes or brackets are stripped. Text with nothing left by then has no mark
+/// to judge and fails.
 fn has_closing_mark(text: &str) -> bool {
     const CLOSERS: [char; 8] = ['"', '\'', '”', '’', ')', ']', '}', '»'];
     text.trim_end()
         .trim_end_matches(CLOSERS)
         .chars()
         .last()
-        .is_none_or(|last| matches!(last, '.' | '?' | '!' | '…'))
+        .is_some_and(|last| matches!(last, '.' | '?' | '!' | '…'))
 }
 
 /// Pause audio a dictation stream still hears before its long pauses are
@@ -644,7 +646,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_text_passes_through_the_mark_check() {
-        assert_eq!(check_closing_mark(String::new(), true), Ok(String::new()));
+    fn text_with_nothing_before_the_closers_fails_the_mark_check() {
+        for text in ["", "\")"] {
+            assert_eq!(
+                check_closing_mark(text.into(), true),
+                Err("the stream ended without closing sentence punctuation".into())
+            );
+            assert_eq!(check_closing_mark(text.into(), false), Ok(text.into()));
+        }
     }
 }

@@ -1810,13 +1810,18 @@ keeps, so the paste lost the sentence mark. The native chunked decode still
 drops it; Hex now refuses a stream whose text, past trailing spaces and
 closing quotes or brackets, ends in anything but `.`, `?`, `!`, or `…`, and
 transcribes that clip whole (`source=fallback`, reason "the stream ended
-without closing sentence punctuation"). It costs one extra whole-clip run on
-those clips only. Checks: `a_sentence_mark_ends_every_accepted_stream`,
+without closing sentence punctuation"). That also refuses text with nothing
+left once those are stripped, so it costs one extra whole-clip run on clips
+whose right text has no closing mark at all: single words, fragments, or a
+sentence whose trailing punctuation a transformation removed. The added
+latency was not measured. Checks:
+`a_sentence_mark_ends_every_accepted_stream`,
 `closing_quotes_and_brackets_do_not_hide_the_mark`,
 `a_stream_that_must_close_a_sentence_without_a_mark_falls_back`,
-`a_missing_mark_is_accepted_when_the_model_does_not_require_one`, and
-`empty_text_passes_through_the_mark_check` (synthetic text). Not measured on a
-real model or microphone.
+`a_missing_mark_is_accepted_when_the_model_does_not_require_one`,
+`text_with_nothing_before_the_closers_fails_the_mark_check`, and
+`only_unified_english_streams_require_a_closing_mark` (synthetic text). Not
+measured on a real model or microphone.
 
 ### Ongoing Jobs And Output
 
