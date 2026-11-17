@@ -1280,6 +1280,28 @@ mod tests {
         assert_eq!(shown.why.as_deref(), Some("OpenCode can't see files"));
     }
 
+    #[test]
+    fn a_ready_title_never_masks_pending_or_delivery_status() {
+        let mut flow = Flow::new();
+        flow.input(
+            Input::Written {
+                bundle: "sample.scrawl".into(),
+                routing: true,
+            },
+            0.0,
+        );
+        assert_eq!(done(&flow, 0.0).text, "Looking for sessions…");
+        for (input, title, paste) in [
+            (Input::Routed(guess()), "Annotation", true),
+            (Input::Sending, "Sending…", false),
+            (Input::Settled, "Sent", false),
+        ] {
+            flow.input(input, 1.0);
+            let shown = done(&flow, 1.0);
+            assert_eq!((shown.text.as_str(), shown.paste), (title, paste));
+        }
+    }
+
     /// The toast offers one guess at a time: ⇥ moves on, ⏎ (or a click
     /// on the line) sends the one it shows.
     #[test]

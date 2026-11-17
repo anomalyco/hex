@@ -403,6 +403,10 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             window,
             ..Done::plain(Lead::Check, tr_fill("Sending to {}", &short(name)))
         },
+        // An explicit send can arrive while suggestions are still open.
+        // Its destination isn't part of this suggestions list's selection.
+        _ if routed.delivered => Done::plain(Lead::Check, tr("Sent")),
+        _ if routed.sending => Done::plain(Lead::Check, tr("Sending…")),
         // The suggestions are the ask (closed, Send to… opens them).
         Route::Guess { .. } => Done {
             ask: Some(tr("Send to…").into()),

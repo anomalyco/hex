@@ -171,7 +171,7 @@ On Linux                                 // capture.linux
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
 │   pastes a terminal the sheet's path instead
-├── Finished capsule -> "Copied" with Paste (accent), Inspect, and Send to…;
+├── Finished capsule -> "Annotation" with Paste and, if there are destinations, Send to…;
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
@@ -467,15 +467,16 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       `capture_host::routing` `an_always_rule_from_a_terminal_keys_on_its_folder`.
 │   │       The process walk was measured once against a real Ghostty; no
 │   │       end-to-end capture of a TUI was run
-├── A finished capture with nowhere sent yet reads "Copied" from the start
+├── A finished capture reads "Annotation". While routing is pending it reads
+│   "Looking for sessions…" instead. Copy failure has its own warning
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> macOS: "Summary copied", Paste, then Search with the capture shortcut's
-│   │   keycaps (as Settings draws them) and ✕, the suggestions open under
+│   │   answer) -> macOS: "Annotation", Paste, a magnifier and ✕. The
+│   │   magnifier is named Search with the current binding. Suggestions open under
 │   │   it; nothing sends until Kit picks. Linux: closed,
-│   │   with Paste, Inspect, and Send to…, which opens them on a click
+│   │   with Paste and Send to…, which opens them on a click
 │   │   ├── "Send to" over up to five rows, suggested then the newest
 │   │   │   sessions, with no numbers and no footer; "⇧-click to always send
-│   │   │   [site] here" on the header's right when a pick can save a rule.
+│   │   │   [site] here" appears on hover when a pick can save a rule.
 │   │   │   The first carries its reason in the accent. A reason is a real one
 │   │   │   in plain words ("you were just in it", "same page", "mentioned",
 │   │   │   "recent") or nothing; never "guess". No row moves once shown: a
@@ -579,8 +580,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   corners (`SHELL_RADIUS`), not a pill, and its chips and icon buttons
 │   │   round concentrically inside it. Two looks while Kit picks (tuning `top_line`):
 │   │   TopLine::Quiet (default) says the label in quiet MEDIUM ink;
-│   │   TopLine::Icons says it in STRONG. A capture that only copied has no
-│   │   label, the lead alone
+│   │   TopLine::Icons uses stronger ink. Both retain the annotation label
 │   ├── The lead is the capture's first frame (`frames/frame-01.png`, else the
 │   │   contact sheet), cropped to a small rounded card once the bundle is
 │   │   written and decoded off the UI thread; until then, or without one, a
@@ -588,14 +588,14 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   ├── Paste -> CaptureCommand::Paste: the contact sheet, then the summary,
 │   │   │   into the focused field, from the bundle shown, not the newest output.
 │   │   │   No Return, send, Undo or rule change
-│   │   └── Inspect -> CaptureCommand::Inspect: opens the contact sheet (Hex
+│   │   └── Click the finished preview, when Inspect is available, or the
+│   │       Inspect button on other outcomes -> opens the contact sheet (Hex
 │   │       has no review window, and opening the bundle could launch
 │   │       Scrawl.app)
 │   ├── Undo is a click only, with no shortcut: Escape meant for another app
 │   │   was taking sends back
-│   ├── Shortcuts read as quiet text after what they do, never a keycap per
-│   │   key, except Search's capture shortcut, drawn as Settings' keycaps: a
-│   │   hint's keys sit in one small rounded rect, on a quiet fill. The
+│   ├── Search's tooltip and accessible name include the configured capture
+│   │   shortcut; no keycaps appear in the ordinary completed header. The
 │   │   search's footer reads "Send ⏎", "Remember ⇧⏎", "New capture ⌥⇧S"; the
 │   │   cursor's and the notch's cards end in "Search ⌥⇧S" under their guesses.
 │   │   The footer sits apart from the rows in one of

@@ -15,7 +15,7 @@ use rune::{Spring, TextStyle};
 
 use super::flow::{Done, Lead, Mode, Pen, Pres};
 use super::notch;
-use super::tuning::{self, CapsuleFlow, TopLine};
+use super::tuning::{self, CapsuleFlow};
 use crate::desktop::i18n::tr;
 use crate::rune_hud::spring::REDUCED_FADE;
 
@@ -146,14 +146,9 @@ pub(crate) fn chord<S: AsRef<str>>(keys: &[S]) -> String {
     out
 }
 
-/// The finished capsule's label: [`TopLine::Quiet`] only inks it fainter.
+/// The finished capsule's label. Both appearances share its metrics.
 pub(crate) fn done_style() -> TextStyle {
     medium()
-}
-
-/// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
-pub(crate) fn bare(done: &Done) -> bool {
-    tuning::get().top_line == TopLine::Icons && done.text.is_empty() && done.why.is_none()
 }
 
 /// The capsule unfolds from this fraction of its height, anchored on its
@@ -430,7 +425,7 @@ fn done_items(done: &Done, raw: &mut Vec<(Id, String, f32, bool)>) {
 
 fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
     let text_x = done_text_x(done.lead);
-    if bare(done) || done.text.is_empty() {
+    if done.text.is_empty() {
         // The lead alone, as wide as the dot's.
         raw.push((Id::Done, String::new(), text_x, false));
     } else {

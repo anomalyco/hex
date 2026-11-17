@@ -541,6 +541,28 @@ fn the_widest_states_fit_the_panel() {
     }
 }
 
+#[test]
+fn the_annotation_toolbar_names_the_local_action_and_the_search_binding() {
+    super::surface::FIXTURE_SHORTCUT.set(true);
+    let pres = after(&[
+        In(Input::Written {
+            bundle: "example.scrawl".into(),
+            routing: true,
+        }),
+        In(Input::Routed(guess())),
+    ]);
+    let rt = runtime(pres, true);
+    let elements = rt.elements();
+    for label in ["Paste", "Search ⌥⇧S", "Close"] {
+        assert!(
+            elements
+                .iter()
+                .any(|e| e.role == "button" && e.label.as_deref() == Some(label)),
+            "missing {label}"
+        );
+    }
+}
+
 /// Keycaps, as Settings draws a shortcut, are for Search's chip and the
 /// hints under the list; a chip on the top line says its shortcut in quiet
 /// text ("Next ⇥").
