@@ -130,7 +130,13 @@ fn processing() -> Beat {
 
 /// Every state the capsule rests in, by name.
 fn stills() -> Vec<(&'static str, Pres)> {
-    let routed = |route: Route| vec![processing(), In(Input::Routed(route))];
+    let written = |routing| {
+        In(Input::Written {
+            bundle: "example.scrawl".into(),
+            routing,
+        })
+    };
+    let routed = |route: Route| vec![processing(), written(true), In(Input::Routed(route))];
     let open = |route: Route| {
         let mut beats = routed(route);
         beats.push(In(Input::OpenList));
@@ -159,10 +165,10 @@ fn stills() -> Vec<(&'static str, Pres)> {
             ]),
         ),
         ("processing", after(&[processing()])),
-        ("saved", after(&[In(Input::Stage(Stage::Done))])),
+        ("saved", after(&[written(false)])),
         (
             "copy-failed",
-            after(&[In(Input::CopyFailed), In(Input::Stage(Stage::Done))]),
+            after(&[In(Input::CopyFailed), written(false)]),
         ),
         ("failed", after(&[In(failed())])),
         (
@@ -387,8 +393,11 @@ fn every_state_draws_its_pieces() {
         ("failed", &["done", "close"]),
         // A rule's send counts down on the Undo chip, with no words.
         ("rule-sent", &["done", "undo", "close"]),
-        ("rule-final", &["done", "paste", "inspect", "close"]),
-        ("guess", &["done", "ask", "list", "row-SEER", "shift-hint"]),
+        ("rule-final", &["done", "inspect", "close"]),
+        (
+            "guess",
+            &["done", "paste", "ask", "list", "row-SEER", "shift-hint"],
+        ),
         ("guess-five", &["done", "ask", "list", "row-SEER"]),
         ("no-answer", &["done", "why", "ask", "list"]),
         (
@@ -401,7 +410,7 @@ fn every_state_draws_its_pieces() {
             "taken-back",
             &["done", "list", "row-HOME", "row-RUNE", "row-SEER"],
         ),
-        ("queued", &["done", "why", "paste", "close"]),
+        ("queued", &["done", "why", "close"]),
     ];
     // Paste and Inspect are for a written capture, and the open list's
     // field takes their place. The top line holds one action at most: Undo
@@ -411,10 +420,10 @@ fn every_state_draws_its_pieces() {
         ("failed", &["paste", "inspect"]),
         ("failed-start", &["paste", "inspect"]),
         ("list-guess", &["paste", "inspect"]),
-        // Trimmed to Search and ✕: the capture is already copied.
-        ("guess", &["field", "paste", "inspect", "footer"]),
+        ("guess", &["field", "inspect", "footer"]),
+        ("queued", &["paste"]),
         ("rule-sent", &["why", "paste", "ask", "inspect"]),
-        ("rule-final", &["ask"]),
+        ("rule-final", &["ask", "paste"]),
         ("sent", &["paste", "inspect"]),
     ];
     let all = stills();

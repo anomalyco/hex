@@ -227,6 +227,12 @@ pub(crate) enum Input {
     Permission(CaptureNeed, Grant),
     /// A capture's stage, from `capture_host`'s engine events.
     Stage(Stage),
+    /// The finished annotation this capsule represents. A routed annotation
+    /// waits for its answer before offering local paste.
+    Written {
+        bundle: std::path::PathBuf,
+        routing: bool,
+    },
     Delivered(Delivered),
     Routed(Route),
     Refined(Route),
@@ -331,7 +337,7 @@ pub(crate) enum Action {
         always: Option<String>,
     },
     /// Paste the capture into the app in front.
-    Paste,
+    Paste(std::path::PathBuf),
     /// Open the capture to look it over.
     Inspect,
     /// The pen: drawing on until it's clicked again.
@@ -442,8 +448,8 @@ pub(crate) struct Done {
     pub(crate) ask_keys: bool,
     /// Open: what's typed into the field, and the list under it.
     pub(crate) open: Option<(TextEdit, List)>,
-    /// A written capture: Paste and Inspect, as Scrawl's capsule offers.
-    pub(crate) hand_off: bool,
+    pub(crate) inspect: bool,
+    pub(crate) paste: bool,
     /// The guesses in the capsule itself, picked with a click: chips
     /// in the menu-bar flow, rows in the cursor's card and the notch.
     /// Each is a name and its quiet reason.
@@ -470,7 +476,8 @@ impl Done {
             ask: None,
             ask_keys: false,
             open: None,
-            hand_off: false,
+            inspect: false,
+            paste: false,
             picks: Vec::new(),
             cycle: false,
             sends: false,
@@ -672,6 +679,7 @@ struct Pause {
 #[derive(Clone, Debug)]
 pub(crate) struct Flow {
     phase: Phase,
+    written: Option<(std::path::PathBuf, bool)>,
     /// The pointer is on the capsule.
     hovered: bool,
     /// The pointer moved on the capsule since its suggestions last
@@ -727,6 +735,7 @@ impl Flow {
     pub(crate) fn new() -> Self {
         Self {
             phase: Phase::Hidden,
+            written: None,
             hovered: false,
             aimed: false,
             pause: None,
@@ -915,6 +924,17 @@ impl Flow {
     }
 
     pub(crate) fn input(&mut self, input: Input, now: f64) -> Vec<Action> {
+        let input = match input {
+            Input::Written { bundle, routing } => {
+                self.written = Some((bundle, routing));
+                Input::Stage(Stage::Done)
+            }
+            Input::Stage(_) => {
+                self.written = None;
+                input
+            }
+            input => input,
+        };
         // A new capture or a new answer may change the list under a resting
         // pointer: it has to move again before typing searches.
         if matches!(
@@ -1110,6 +1130,9 @@ impl Flow {
     /// What the capsule draws at `now`.
     pub(crate) fn pres(&self, now: f64) -> Pres {
         let mut pres = self.pres_of(now);
+        if let Pres::Done(done) = &mut pres {
+            done.paste = self.paste_bundle().is_some();
+        }
         if let (Pres::Done(done), Some(pause)) = (&mut pres, self.pause)
             && done.countdown == Some(pause.end)
         {
@@ -1159,7 +1182,7 @@ impl Flow {
             }
             Phase::Processing => Pres::Processing,
             Phase::Saved { .. } => Pres::Done(Done {
-                hand_off: true,
+                inspect: true,
                 ..Done::plain(Lead::Check, copied())
             }),
             Phase::Failed { what, why, .. } => Pres::Done(Done {
@@ -1177,12 +1200,12 @@ impl Flow {
             Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, tr("Taken back"))),
             Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, tr("Kept"))),
             Phase::TooLate { to, .. } => Pres::Done(Done {
-                hand_off: true,
+                inspect: true,
                 ..Done::plain(Lead::Check, already_sent_to(to))
             }),
             Phase::Queued { why, .. } => Pres::Done(Done {
                 why: Some(why.clone()),
-                hand_off: true,
+                inspect: true,
                 ..Done::plain(Lead::Check, "")
             }),
             // A pick went at once: the check, and Undo with its ring while
@@ -1191,7 +1214,7 @@ impl Flow {
                 why: sent.rule_saved.then(|| tr("always").into()),
                 undo: sent.undoable && undo_left(sent.at),
                 countdown: (sent.undoable && undo_left(sent.at)).then(|| sent.at + undo_s()),
-                hand_off: true,
+                inspect: true,
                 ..Done::plain(Lead::Check, sent_to(&sent.to))
             }),
             Phase::Routed(routed) => Pres::Done(routed_done(routed, now)),
@@ -1324,32 +1347,40 @@ mod tests {
     }
 
     #[test]
-    fn paste_takes_back_a_send_still_undoable_and_the_capsule_stays_gone() {
+    fn paste_only_hands_off_the_shown_written_annotation_once() {
         use super::super::surface::Id;
         let mut flow = Flow::new();
-        flow.input(Input::Routed(rule()), 0.0);
-        assert!(done(&flow, 1.0).hand_off);
-        assert_eq!(
-            flow.click(Id::Paste, 1.0),
-            [Action::Undo { to: "SEER".into() }, Action::Paste]
+        assert!(flow.click(Id::Paste, 0.0).is_empty());
+        for routing in [false, true] {
+            flow.input(
+                Input::Written {
+                    bundle: "shown.scrawl".into(),
+                    routing,
+                },
+                1.0,
+            );
+            if routing {
+                assert!(!done(&flow, 1.0).paste, "a rule may still be found");
+                flow.input(Input::Routed(guess()), 1.1);
+                flow.input(Input::Shift(true), 1.2);
+            }
+            assert!(done(&flow, 1.3).paste);
+            assert_eq!(
+                flow.click(Id::Paste, 1.3),
+                [Action::Paste("shown.scrawl".into())]
+            );
+            assert!(flow.click(Id::Paste, 1.4).is_empty());
+        }
+        flow.input(
+            Input::Written {
+                bundle: "ruled.scrawl".into(),
+                routing: true,
+            },
+            2.0,
         );
-        assert_eq!(flow.pres(1.0), Pres::Hidden);
-        flow.input(Input::Undone(Undone::TakenBack), 1.2);
-        assert_eq!(flow.pres(1.2), Pres::Hidden, "the take-back says nothing");
-
-        // Once it's gone, Paste only pastes.
-        flow.input(Input::Routed(rule()), 2.0);
-        assert_eq!(flow.click(Id::Paste, 2.5 + undo_s()), [Action::Paste]);
-
-        // Inspect never takes a send back.
-        flow.input(Input::Routed(rule()), 10.0);
-        assert_eq!(flow.click(Id::Inspect, 10.5), [Action::Inspect]);
-        assert_eq!(flow.pres(10.5), Pres::Hidden);
-
-        flow.input(Input::Stage(Stage::Done), 20.0);
-        assert!(done(&flow, 20.0).hand_off);
-        flow.input(Input::Failed(Failure::Save, None), 21.0);
-        assert!(!done(&flow, 21.0).hand_off, "nothing was written");
+        flow.input(Input::Routed(rule()), 2.1);
+        assert!(!done(&flow, 2.1).paste);
+        assert!(flow.click(Id::Paste, 2.2).is_empty());
     }
 
     #[test]
@@ -2071,10 +2102,7 @@ mod tests {
         assert!(!shown.undo);
         assert_eq!(flow.keys(), None);
         assert!(flow.input(Input::Escape, 0.5).is_empty());
-        assert_eq!(
-            flow.click(super::super::surface::Id::Paste, 0.6),
-            [Action::Paste]
-        );
+        assert!(flow.click(super::super::surface::Id::Paste, 0.6).is_empty());
     }
 
     /// A rule reads Sending until the router acknowledges its delivery.
@@ -2394,7 +2422,7 @@ mod tests {
         let asked = done(&flow, 0.0);
         assert_eq!(asked.ask.as_deref(), Some("Search"));
         assert!(asked.ask_keys, "with the shortcut that opens it");
-        assert!(!asked.hand_off, "trimmed to Search and ✕");
+        assert!(!asked.inspect, "Inspect is only on the folded capsule");
         let (_, suggestions) = asked.open.expect("a guess opens on its suggestions");
         assert!(suggestions.suggesting());
         flow.input(Input::OpenList, 1.0);
@@ -2993,7 +3021,7 @@ mod tests {
         assert_eq!(shown.text, "Couldn't reach OpenCode");
         assert_eq!(shown.why.as_deref(), Some("OpenCode didn't answer"));
         assert_eq!(shown.ask, None);
-        assert!(shown.hand_off);
+        assert!(shown.inspect);
         // Nothing to list, and a stray OpenList opens
         // nothing.
         assert_eq!(flow.keys(), None);

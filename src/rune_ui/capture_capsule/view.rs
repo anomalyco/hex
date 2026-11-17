@@ -466,27 +466,23 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .on_press_tx(press(id))
         }
         Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
-        Id::Paste | Id::Inspect => {
-            let (name, help) = if id == Id::Paste {
-                (tr("Paste"), tr("Paste the capture"))
-            } else {
-                (tr("Inspect"), tr("Open the capture"))
-            };
-            base.child(
-                row()
-                    .center()
-                    .size(28.0, 28.0)
-                    .radius(ICON_BUTTON_RADIUS)
-                    .hover(c.hover)
-                    .press(c.pressed)
-                    .child(mark(id, 16.0, p.muted()))
-                    .role("button")
-                    .label(name)
-                    .help(help)
-                    .hit()
-                    .on_press_tx(press(id)),
-            )
-        }
+        Id::Paste => keyed(p, base.bg(c.hover), &[], &shown.ident, medium())
+            .help(tr("Paste the capture"))
+            .on_press_tx(press(id)),
+        Id::Inspect => base.child(
+            row()
+                .center()
+                .size(28.0, 28.0)
+                .radius(ICON_BUTTON_RADIUS)
+                .hover(c.hover)
+                .press(c.pressed)
+                .child(mark(id, 16.0, p.muted()))
+                .role("button")
+                .label(tr("Inspect"))
+                .help(tr("Open the capture"))
+                .hit()
+                .on_press_tx(press(id)),
+        ),
         Id::Field => {
             let empty = rune::TextEdit::default();
             let typed = match &surface.pres {

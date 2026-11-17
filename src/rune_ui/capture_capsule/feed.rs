@@ -416,7 +416,19 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
                         show_helper(&capsule, CaptureNeed::ScreenRecording, follow.asked_by());
                         continue;
                     }
-                    capsule.input(input);
+                    if input == Input::Stage(Stage::Done)
+                        && let Some((bundle, Stage::Done)) = &follow.shown
+                    {
+                        capsule.input(Input::Written {
+                            bundle: bundle.clone(),
+                            routing: snapshot
+                                .last
+                                .as_ref()
+                                .is_some_and(|last| last.route.is_some()),
+                        });
+                    } else {
+                        capsule.input(input);
+                    }
                 }
                 // Sent with only the voice and marks: the helper follows
                 // once its capsule folds.
@@ -543,7 +555,7 @@ pub(crate) fn act(action: Action) {
             crate::capture_host::toggle_pen();
             return;
         }
-        Action::Paste => vec![command(CaptureCommand::Paste)],
+        Action::Paste(bundle) => vec![command(CaptureCommand::Paste(bundle))],
         Action::Inspect => vec![command(CaptureCommand::Inspect)],
         Action::Allow(need) => {
             crate::capture_host::allow_permission(need);

@@ -440,7 +440,7 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             ..base
         },
         None => Done {
-            hand_off: true,
+            inspect: true,
             ..base
         },
     }
@@ -465,7 +465,7 @@ pub(super) fn offered(base: Done, list: List) -> Done {
             ask: Some(tr("Search").into()),
             ask_keys: true,
             open: Some((TextEdit::default(), list)),
-            hand_off: false,
+            inspect: false,
             ..base
         },
         // One guess at a time on one quiet line; ⏎ sends it, ⇥ moves on.

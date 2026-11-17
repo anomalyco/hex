@@ -488,8 +488,16 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             false,
         ));
     } else {
-        if done.hand_off {
-            raw.push((Id::Paste, String::new(), CHIP_H, false));
+        if done.paste {
+            let label = tr("Paste");
+            raw.push((
+                Id::Paste,
+                label.into(),
+                keyed_width(&[], label, medium()),
+                false,
+            ));
+        }
+        if done.inspect {
             raw.push((Id::Inspect, String::new(), CHIP_H, false));
         }
         // Where to send it is a click away, beside Paste, never opened for you.
@@ -1543,18 +1551,19 @@ mod tests {
     }
 
     #[test]
-    fn a_written_copy_offers_paste_and_inspect_as_icons() {
+    fn a_written_copy_has_room_for_the_paste_label_beside_inspect() {
         let copied = Pres::Done(Done {
-            hand_off: true,
+            paste: true,
+            inspect: true,
             ..Done::plain(Lead::Check, "")
         });
         let (_, items) = layout(&copied, "0:00");
         let ids: Vec<Id> = items.iter().map(|i| i.id).collect();
         assert_eq!(ids, [Id::Done, Id::Paste, Id::Inspect, Id::Close]);
-        for id in [Id::Paste, Id::Inspect] {
-            let icon = items.iter().find(|i| i.id == id).unwrap();
-            assert_eq!(icon.rect[2], CHIP_H, "{id:?} is an icon");
-        }
+        let paste = &items[1];
+        assert_eq!(paste.ident, tr("Paste"));
+        assert_eq!(paste.rect[2], chip_width(measure(&paste.ident, medium())));
+        assert!(paste.rect[0] + paste.rect[2] < items[2].rect[0]);
     }
 
     #[test]

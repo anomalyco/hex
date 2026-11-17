@@ -450,7 +450,7 @@ impl Playground {
             | Action::Discard
             | Action::OpenScreenshots { .. }
             | Action::Send { .. }
-            | Action::Paste
+            | Action::Paste(_)
             | Action::Pen
             | Action::Hold(_)
             | Action::Inspect => {}

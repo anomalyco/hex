@@ -2,6 +2,23 @@
 use super::*;
 
 impl Flow {
+    pub(super) fn paste_bundle(&self) -> Option<&std::path::PathBuf> {
+        let (bundle, routing) = self.written.as_ref()?;
+        match &self.phase {
+            Phase::Saved { .. } if !routing => Some(bundle),
+            Phase::Routed(r)
+                if !r.sending
+                    && !r.delivered
+                    && !r.taken_back
+                    && !matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. })
+                    && r.open.as_ref().is_none_or(|open| !open.typing) =>
+            {
+                Some(bundle)
+            }
+            _ => None,
+        }
+    }
+
     /// What a click on `id` does: the action for the host, after moving
     /// the capsule as the click shows.
     pub(crate) fn click(&mut self, id: super::super::surface::Id, now: f64) -> Vec<Action> {
@@ -82,13 +99,12 @@ impl Flow {
                 self.phase = Phase::Hidden;
                 vec![Action::Cancel]
             }
-            // Pasting here takes back a send still waiting out its Undo, as
-            // Scrawl's Paste does.
             (_, Id::Paste) => {
-                let mut actions: Vec<Action> = self.undoable(now).into_iter().collect();
-                actions.push(Action::Paste);
+                let Some(bundle) = self.paste_bundle().cloned() else {
+                    return Vec::new();
+                };
                 self.phase = Phase::Hidden;
-                actions
+                vec![Action::Paste(bundle)]
             }
             (_, Id::Inspect) => {
                 self.phase = Phase::Hidden;
