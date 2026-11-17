@@ -42,6 +42,17 @@ pub fn publish(dir: &Path, bundle: &ScrawlBundle) -> Result<()> {
     } else {
         serde_json::to_vec_pretty(bundle)?
     };
+    replace_private(&dir.join(name), &bytes)
+}
+
+/// Adjacent staging keeps the rename atomic across custom volumes and
+/// replaces a destination symlink rather than writing through it.
+pub(crate) fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    let dir = path.parent().context("Missing parent directory")?;
+    let name = path
+        .file_name()
+        .context("Missing file name")?
+        .to_string_lossy();
     let tmp = dir.join(format!(".{name}.{}.tmp", crate::util::make_bundle_id()));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -49,10 +60,13 @@ pub fn publish(dir: &Path, bundle: &ScrawlBundle) -> Result<()> {
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let mut file = options.open(&tmp)?;
     let result = (|| {
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&tmp, dir.join(name))
+        fs::rename(&tmp, path)?;
+        #[cfg(unix)]
+        fs::File::open(dir)?.sync_all()?;
+        Ok::<_, std::io::Error>(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(tmp);
@@ -108,6 +122,7 @@ pub fn read_manifest(dir: &Path) -> Result<ScrawlBundle> {
         .chain(&bundle.audio)
         .chain(std::iter::once(&bundle.contact_sheet).filter(|s| !s.is_empty()))
         .chain(bundle.keyframes.iter().map(|k| &k.file))
+        .chain(bundle.marks.iter().filter_map(|m| m.frame.as_ref()))
         .chain(
             bundle
                 .autocrop

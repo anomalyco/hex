@@ -161,6 +161,7 @@ fn excluded(name: &str) -> bool {
     HEAVY_MEDIA.contains(&name)
         || name == ".hex-annotate-v1"
         || name.starts_with(".annotation.json.")
+        || name.starts_with("..deliver.json.")
         || name == crate::recover::PARTIAL_AUDIO
         || name == MEDIA_PENDING
         || name == MEDIA_SENDING

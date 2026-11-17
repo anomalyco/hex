@@ -951,7 +951,7 @@ pub fn record_destination(dir: &Path, bundle: &mut ScrawlBundle, dest: Destinati
     bundle.destination = Some(dest);
     crate::bundle::publish(dir, bundle)?;
     if let Some(summary) = crate::env::get().summary {
-        std::fs::write(dir.join("summary.md"), summary(bundle, dir))?;
+        crate::bundle::replace_private(&dir.join("summary.md"), summary(bundle, dir).as_bytes())?;
     }
     Ok(())
 }

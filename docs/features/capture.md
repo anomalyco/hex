@@ -68,7 +68,7 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   Check: capture_host the_shortcut_records_once_its_keys_come_up; none
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
-│   the bundle (keyframes, contact sheet, scrawl.json)
+│   the bundle (keyframes, contact sheet, annotation.json)
 ├── Linux: strokes are placed on the recorded screen in its logical points.
 │   A monitor pick whose portal names the output (`mapping_id`, as
 │   xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`) opens the pen on
@@ -166,7 +166,7 @@ On Linux                                 // capture.linux
 ├── Words -> one foreground job on the listener's engine (its loaded model)
 ├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
 │   X11 clipboard), as the Mac copies it; Labs › Copy a capture as one file puts
-│   `<stem>.scrawl.slim.zip` there instead, as a `text/uri-list` file
+│   `<stem>.hexannotation.slim.zip` there instead, as a `text/uri-list` file
 ├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
@@ -774,7 +774,7 @@ Never on Hex's path                      // capture.isolation
 Retention                                // capture.retention
 ├── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
 │   captures turn on, then hourly; skipped while a capture records or writes,
-│   or while Scrawl.app runs (it cleans the shared folder then)
+│   or while Scrawl.app runs; Hex only cleans complete Hex v1 packages
 ├── Linux sends media to the desktop Trash itself (the freedesktop.org Trash
 │   layout, no `trash` command; macOS uses /usr/bin/trash, Windows the
 │   Recycle Bin), so file managers can restore it
@@ -817,14 +817,13 @@ hex capture stop                         // capture.stop
     │   `words_for_editor`)
     ├── Past 8 h -> audio.wav stops growing and the rest is one gap; a disk
     │   guard, never a memory bound (iPhone and replay narration are decoded in
-    │   memory and so are not covered by it), and scrawl.json's
+    │   memory and so are not covered by it), and the manifest's
     │   audioStoppedAtMs makes summary.md say "Audio stopped at 8:00:00; the
     │   rest of this capture has no audio" (a failed audio write says where too)
     ├── Cancel or a failed screen source -> the partial audio is closed and
-    │   removed with the bundle; a crash leaves it, and retention trashes it
-    │   like any other media (a movie and a partial are never a bundle recover
-    │   rebuilds)
-    ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
+    │   removed with the bundle; a crash leaves it. With no published manifest,
+    │   Hex neither retries the build nor removes the partial media on startup
+    ├── recording.mp4, capture.json, audio.wav, frames/, annotation.json,
     │   summary.md; then every file 0600 and folder 0700
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
     │   Hex.app's Contents/MacOS or target/<profile>; or $SCRAWL_HELPER); helper
@@ -844,7 +843,7 @@ Copying a written capture                 // capture.copy; Labs › Copy a captu
 │   macOS and Windows through Scrawl's handoff (Windows may also put the
 │   contact sheet PNG when the clipboardImage experiment is on), Linux the
 │   summary text through Hex's paster
-├── On -> crates/capture/src/slim_zip.rs writes <stem>.scrawl.slim.zip inside
+├── On -> crates/capture/src/slim_zip.rs writes <package-name>.slim.zip inside
 │   the bundle (a temp name, then rename) and puts only that file on the
 │   clipboard: macOS a file URL through handoff::copy_file_to_clipboard (the
 │   screenshot card's file copy uses it too), Windows CF_HDROP (a DROPFILES
@@ -864,7 +863,7 @@ Copying a written capture                 // capture.copy; Labs › Copy a captu
 │   ├── Refused rather than written as ZIP64 at 0xFFFF files or 0xFFFFFFFF
 │   │   bytes
 │   ├── A terminal paste gets no text: the clipboard holds only the file
-│   ├── scrawl.json and summary.md still name media the zip leaves out
+│   ├── The manifest and summary.md still name media the zip leaves out
 │   │   (recording.mp4, audio.wav, frames-full/), because they describe the
 │   │   whole capture
 │   └── The capsule's Paste, Inspect, Send to…, routing, and retention still

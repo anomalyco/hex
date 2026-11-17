@@ -6,6 +6,8 @@
 //! 30 min) for a day, then renames it `.deliver-failed.json`. Retention leaves a bundle with a
 //! pending delivery alone.
 
+pub mod annotations;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -144,9 +146,7 @@ impl Pending {
     }
 
     pub fn write(&self, bundle: &Path) -> Result<()> {
-        let tmp = bundle.join(".deliver.json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
-        std::fs::rename(&tmp, bundle.join(PENDING))
+        crate::bundle::replace_private(&bundle.join(PENDING), &serde_json::to_vec_pretty(self)?)
             .with_context(|| format!("Could not write {}", bundle.join(PENDING).display()))
     }
 
@@ -232,20 +232,6 @@ fn retry_due_on(captures: &Path, now: u64, forward: Forward, machine: Option<&st
     })
 }
 
-/// The Hex host must not adopt pending deliveries from a legacy library.
-pub fn retry_annotations(captures: &Path, now: u64, forward: Forward) -> Report {
-    retry_matching(
-        captures,
-        now,
-        forward,
-        crate::util::machine_id().as_deref(),
-        |p| {
-            crate::bundle::manifest_name(p) == Some(crate::bundle::MANIFEST)
-                && crate::bundle::read_manifest(p).is_ok()
-        },
-    )
-}
-
 fn retry_matching(
     captures: &Path,
     now: u64,
@@ -253,9 +239,8 @@ fn retry_matching(
     machine: Option<&str>,
     accepts: impl Fn(&Path) -> bool,
 ) -> Report {
-    let mut report = Report::default();
     let Ok(entries) = std::fs::read_dir(captures) else {
-        return report;
+        return Report::default();
     };
     let mut bundles: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -267,6 +252,19 @@ fn retry_matching(
         })
         .collect();
     bundles.sort();
+    retry_selected(bundles, now, forward, machine, |_, _| true)
+}
+
+/// Retry only locations selected by the host, checking the exact pending
+/// record it authorized. A package arriving in a folder is not a send.
+fn retry_selected(
+    bundles: Vec<PathBuf>,
+    now: u64,
+    forward: Forward,
+    machine: Option<&str>,
+    authorized: impl Fn(&Path, &Pending) -> bool,
+) -> Report {
+    let mut report = Report::default();
     for dir in bundles {
         let mut pending = match Pending::read(&dir) {
             Ok(pending) => pending,
@@ -277,6 +275,9 @@ fn retry_matching(
                 continue;
             }
         };
+        if !authorized(&dir, &pending) {
+            continue;
+        }
         if !pending.retried_on(machine) {
             // Copied from another Mac, which retries its own; once that Mac would have given
             // up, it stops keeping the bundle from retention here.

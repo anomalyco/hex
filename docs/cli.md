@@ -288,8 +288,10 @@ had to stop keeping its audio, a streamed capture past its 8 h disk guard or a
 failed audio write). A start or replay while two captures
 are still writing is refused with `busy`. Every action is idempotent.
 
-`<capture>` is a bundle name (`1792933491953.scrawl`, the extension
-optional), a path, or `latest`. `list`, `show`, and `route` read the captures
+`<capture>` is a bundle name (`<id>.hexannotation` or `<id>.scrawl`, the extension
+optional), a path, or `latest` (newest readable completed package, not a paste receipt).
+`show` reads [both formats](hex-annotation.md) in place. `send` on legacy originals
+is refused rather than modifying them. `list`, `show`, and `route` read the captures
 folder and need only the experiment; `send` needs captures on and a listening
 Hex. `send` with `--to` takes a session ID; for the newest capture it also
 takes a name its route lists, and it acts as the capsule's pick, so the
@@ -473,7 +475,7 @@ read-only              the key can't be set here (the message says where)
 invalid-value          the value doesn't parse or is out of range
 confirmation-required  clears history; pass --yes
 shortcut-in-use        another Hex shortcut already uses that binding
-not-found              no such capture, or it has no scrawl.json yet
+not-found              no such capture, or no readable supported annotation manifest
 unknown-model          no such model id (`hex model list`)
 model-unavailable      an imported model that is missing, changed, or behind its Labs toggle,
                        or one `hex transcribe` named that isn't downloaded or ready

@@ -66,16 +66,16 @@ impl Annotation {
 pub fn read(bundle: &Path) -> Option<Annotation> {
     let manifest = read_manifest(bundle).ok()?;
     let movie = manifest.video.as_ref().map(|video| bundle.join(video));
-    let present = movie.as_ref().filter(|movie| movie.exists()).cloned();
+    let present = movie.as_ref().filter(|movie| movie.is_file()).cloned();
     let picture = manifest
         .keyframes
-        .first()
+        .iter()
         .map(|keyframe| bundle.join(&keyframe.file))
-        .filter(|path| path.exists())
+        .find(|path| path.is_file())
         .or_else(|| {
             (!manifest.contact_sheet.is_empty())
                 .then(|| bundle.join(&manifest.contact_sheet))
-                .filter(|path| path.exists())
+                .filter(|path| path.is_file())
         });
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(manifest.id.as_bytes());
@@ -91,8 +91,8 @@ pub fn read(bundle: &Path) -> Option<Annotation> {
             .words
             .into_iter()
             .map(|w| CaptureWord {
-                t0: w.t0,
-                t1: w.t1,
+                t0: w.t0.saturating_sub(manifest.video_offset_ms),
+                t1: w.t1.saturating_sub(manifest.video_offset_ms),
                 text: w.text,
             })
             .collect(),
@@ -352,7 +352,10 @@ mod tests {
         assert_eq!(listed[0].at_ms, b.created_at_ms);
         assert!(listed[0].expired);
         assert_eq!(listed[0].words, "Move this");
-        assert_eq!(listed[0].timed[1].t1, 1050);
+        assert_eq!(
+            listed[0].timed[1].t1, 930,
+            "word on the editor's movie clock"
+        );
         assert_eq!(
             fs::read_dir(legacy).unwrap().count(),
             1,

@@ -226,3 +226,16 @@ pub fn scrawl_app_running() -> bool {
 pub fn set_scrawl_app_running(running: bool) {
     SCRAWL_APP_RUNNING.store(running, Ordering::Release);
 }
+
+#[cfg(all(test, hex_capture))]
+#[test]
+fn hex_annotation_location_respects_the_hex_data_root_and_an_explicit_folder() {
+    let mut settings = CaptureSettings::default();
+    let owned = crate::app_paths::support_dir().unwrap().join("annotations");
+    assert_eq!(settings.captures_dir(), owned);
+    assert_eq!(settings.annotation_roots(), [owned]); // no implicit legacy search in tests
+    let chosen = std::env::temp_dir().join("chosen");
+    settings.folder = Some(chosen.clone());
+    assert_eq!(settings.captures_dir(), chosen);
+    assert_eq!(settings.annotation_roots(), [chosen]);
+}

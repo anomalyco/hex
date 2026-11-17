@@ -177,6 +177,7 @@ fn light_files_tar(parent: &Path, name: &std::ffi::OsStr) -> Command {
             // Retries belong to this Mac; a copied marker would only sit there.
             "--exclude=*/.deliver.json",
             "--exclude=*/.deliver.json.tmp",
+            "--exclude=*/..deliver.json.*.tmp",
             "--exclude=*/.hex-annotate-v1",
             "--exclude=*/.annotation.json.*.tmp",
             "--exclude=*/audio.wav.partial",
