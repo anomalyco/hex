@@ -88,11 +88,6 @@ let
     };
     "rune-0.0.1" = {
       rev = "c853811c8e0e60a632eaa2e72992f871225737ef";
-||||||| parent of c62eab5ba (Update Rune and its Nix source hash for the picker work)
-      rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90";
-      hash = "sha256-0yJb+UFu47T2pgDIi9B9IAxbCWNu0/OMVG5uGNF6lyI=";
-||||||| parent of c62eab5ba (Update Rune and its Nix source hash for the picker work)
-      hash = "sha256-aXs5tgrATglYprmwjDdIFkyp9gHCor7CFdla1aqJfZo=";
     };
     "transcribe-cpp-sys-0.4.1" = {
       rev = "295c7e601ee5a25da0d1f169c996aee839d49943";
