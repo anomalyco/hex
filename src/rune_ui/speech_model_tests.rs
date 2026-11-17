@@ -129,11 +129,13 @@ fn a_mode_picks_an_installed_speech_model_and_language() {
     assert!(rt.find("mode-speech-model-0-trigger").is_some());
     assert!(rt.find("mode-speech-language-0-trigger").is_some());
 
-    let french = transcription_models::definition(TranscriptionModelId::ParakeetV3)
-        .language_choices()
-        .iter()
-        .position(|code| *code == "fr")
-        .unwrap();
+    // The language menu sorts by name, so French's index comes from there.
+    let french = transcription_models::menu_order(
+        &transcription_models::definition(TranscriptionModelId::ParakeetV3).language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "fr")
+    .unwrap();
     tap(&mut rt, "mode-speech-language-0-trigger");
     tap(&mut rt, &format!("mode-speech-language-0-item{french}"));
     assert_eq!(speech(&rt, Some(0)).unwrap().language, "fr");

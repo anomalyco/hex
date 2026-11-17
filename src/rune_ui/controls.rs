@@ -660,6 +660,25 @@ pub(super) fn select(
     )
 }
 
+/// The press that opens a select's menu, telling Rune to reveal the chosen
+/// row: a menu shows only six or seven rows of a long list, so a choice
+/// further down would open below the edge with its check out of sight.
+/// `scope` is the key around that menu's rows, so rows keyed alike
+/// elsewhere never answer for it.
+pub(super) fn revealing_press(
+    open: bool,
+    scope: String,
+    chosen: Option<String>,
+    toggle: impl Fn(&mut Ui) + 'static,
+) -> impl Fn(&mut Ui, &mut Tx) + 'static {
+    move |ui: &mut Ui, tx: &mut Tx| {
+        toggle(ui);
+        if !open && let Some(chosen) = chosen.clone() {
+            tx.scroll_into_view_in(scope.clone(), chosen);
+        }
+    }
+}
+
 /// A [`select`] `width` points wide, for labels such as device names that
 /// would truncate at the usual width. A `detail` follows the field's label
 /// in faint text.
@@ -676,19 +695,24 @@ pub(super) fn select_sized(
     layer: &mut Vec<El>,
     width: f32,
 ) -> El {
+    let chosen = choices
+        .iter()
+        .position(|choice| choice.selected)
+        .map(|index| format!("{key}-item{index}"));
+    let press = revealing_press(open, format!("{key}-menu"), chosen, toggle);
     let trigger = match detail {
         None => Select::new::<&str>(format!("{key}-field"), &[])
             .appearance(SelectAppearance::Field)
             .width(width)
             .current(Some(label))
             .open(open)
-            .on_toggle(toggle)
             .trigger(p.k)
+            .on_press_tx(press)
             .label(name)
             .a11y_value(label),
         Some(detail) => detailed_field(p, key, label, detail, open, width)
             .label(name)
-            .on_press(toggle),
+            .on_press_tx(press),
     };
     let mut menu = Menu::new(key)
         .trigger(trigger)

@@ -46,6 +46,14 @@ pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (Some("ru"), "Русский"),
 ];
 
+/// [`LANGUAGE_CHOICES`] in the order the select offers them: System first,
+/// then every language by the name it displays.
+pub(crate) fn language_menu_order() -> Vec<LanguageChoice> {
+    let mut ordered = LANGUAGE_CHOICES.to_vec();
+    ordered.sort_by_cached_key(|(code, name)| (code.is_some(), tr(name).to_lowercase()));
+    ordered
+}
+
 /// Active language column into [`TRANSLATIONS`]; 255 means English.
 #[cfg(not(test))]
 static CURRENT: AtomicU8 = AtomicU8::new(255);
@@ -1513,6 +1521,26 @@ mod tests {
         );
         assert_eq!(column_for_code("ru"), super::RUSSIAN_COLUMN);
         assert!(LANGUAGE_CHOICES.contains(&(Some("ru"), "Русский")));
+    }
+
+    #[test]
+    fn the_interface_language_menu_is_system_first_then_alphabetical() {
+        use super::{LANGUAGE_CHOICES, language_menu_order, tr};
+        let ordered = language_menu_order();
+        assert_eq!(ordered[0], (None, "System"), "System stays first");
+        let labels: Vec<&str> = ordered[1..].iter().map(|(_, name)| tr(name)).collect();
+        assert!(
+            labels
+                .windows(2)
+                .all(|pair| pair[0].to_lowercase() <= pair[1].to_lowercase()),
+            "{labels:?}"
+        );
+        let mut codes: Vec<Option<&str>> = ordered.iter().map(|(code, _)| *code).collect();
+        codes.sort();
+        let mut wanted: Vec<Option<&str>> =
+            LANGUAGE_CHOICES.iter().map(|(code, _)| *code).collect();
+        wanted.sort();
+        assert_eq!(codes, wanted, "every language is still offered once");
     }
 
     #[test]

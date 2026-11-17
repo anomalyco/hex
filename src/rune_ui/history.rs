@@ -1290,9 +1290,11 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
 
 /// The chosen model's language for this run, and Transcribe.
 fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El {
-    use crate::transcription::models::language_name;
-    let choices = language_choices(pending.model).unwrap_or_default();
-    let labels: Vec<&str> = choices.iter().map(|code| language_name(code)).collect();
+    use crate::transcription::models::{language_name, menu_order};
+    let choices = language_choices(pending.model)
+        .map(|choices| menu_order(&choices))
+        .unwrap_or_default();
+    let labels: Vec<&'static str> = choices.iter().copied().map(language_name).collect();
     let current = tr_named(
         "{model} · Language: {language}",
         &[
@@ -1300,28 +1302,37 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
             ("language", language_name(&pending.language)),
         ],
     );
+    let open = ui.open == Some(Menu::HistoryAgainLanguage);
+    let chosen = choices
+        .iter()
+        .position(|code| *code == pending.language)
+        .map(|index| format!("option{index}"));
     let languages = Select::new("again-language", &labels)
         .appearance(SelectAppearance::Inline)
         .current(Some(&current))
-        .open(ui.open == Some(Menu::HistoryAgainLanguage))
-        .on_toggle(|ui: &mut Ui| {
-            ui.open =
-                (ui.open != Some(Menu::HistoryAgainLanguage)).then_some(Menu::HistoryAgainLanguage);
-        })
+        .open(open)
         .on_close(|ui: &mut Ui| ui.open = None)
-        .on_choose(|ui: &mut Ui, choice: &str, _: &mut Tx| {
+        .on_choose(move |ui: &mut Ui, choice: &str, _: &mut Tx| {
             ui.open = None;
             if let Some(pending) = &mut ui.history.pending
-                && let Some(code) = language_choices(pending.model).and_then(|choices| {
-                    choices
-                        .into_iter()
-                        .find(|code| crate::transcription::models::language_name(code) == choice)
-                })
+                && let Some(code) = choices
+                    .iter()
+                    .copied()
+                    .find(|code| language_name(code) == choice)
             {
                 pending.language = code.into();
             }
         })
         .build(p.k, layer)
+        .on_press_tx(super::controls::revealing_press(
+            open,
+            "again-language-content".into(),
+            chosen,
+            |ui: &mut Ui| {
+                ui.open = (ui.open != Some(Menu::HistoryAgainLanguage))
+                    .then_some(Menu::HistoryAgainLanguage);
+            },
+        ))
         .label(tr("Language"))
         .a11y_value(current.clone());
     row()

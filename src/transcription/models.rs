@@ -22,7 +22,7 @@ use super::artifacts::{
     WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
-pub use super::languages::{LANGUAGES, language_name};
+pub use super::languages::{LANGUAGES, language_name, menu_order};
 pub(crate) use super::model_benchmarks::most_accurate_is_comparable;
 pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 
