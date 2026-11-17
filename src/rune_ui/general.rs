@@ -323,7 +323,7 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let selection = &ui.settings.transcription;
     let model = transcription_models::definition(selection.model);
     let current = transcription_models::language_name(&selection.language);
-    let codes = model.language_choices();
+    let codes = transcription_models::menu_order(&model.language_choices());
     let fallback = super::picker::fallback_note(ui);
     if codes.len() <= 1 && fallback.is_none() {
         return None;
@@ -348,6 +348,7 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             .iter()
             .position(|code| *code == selection.language)
             .unwrap_or(0);
+        let menu_codes = codes.clone();
         pick_select(
             ui,
             p,
@@ -355,9 +356,8 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             tr("Language"),
             labels,
             selected,
-            |ui, index| {
-                let model = transcription_models::definition(ui.settings.transcription.model);
-                if let Some(code) = model.language_choices().get(index) {
+            move |ui, index| {
+                if let Some(code) = menu_codes.get(index).copied() {
                     super::picker::choose_language(ui, code);
                 }
             },
@@ -1016,7 +1016,7 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow
         )
         .into(),
     );
-    let languages = crate::desktop::i18n::LANGUAGE_CHOICES;
+    let languages = crate::desktop::i18n::language_menu_order();
     rows.push(pick_row(
         ui,
         p,
@@ -1028,10 +1028,8 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow
             .iter()
             .position(|(code, _)| *code == settings.ui_language.as_deref())
             .unwrap_or(0),
-        |ui, index| {
-            let code = crate::desktop::i18n::LANGUAGE_CHOICES[index]
-                .0
-                .map(str::to_string);
+        move |ui, index| {
+            let code = languages[index].0.map(str::to_string);
             if ui.update(|settings| settings.ui_language = code.clone()) {
                 crate::desktop::i18n::apply(code.as_deref());
             }
@@ -1237,7 +1235,7 @@ pub(super) fn pick_row(
     title: &str,
     labels: Vec<&'static str>,
     selected: usize,
-    pick: fn(&mut Ui, usize),
+    pick: impl Fn(&mut Ui, usize) + 'static,
     layer: &mut Vec<El>,
 ) -> CardRow {
     let control = pick_select(ui, p, key, title, labels, selected, pick, layer);
@@ -1255,7 +1253,7 @@ pub(super) fn pick_select(
     name: &str,
     labels: Vec<&'static str>,
     selected: usize,
-    pick: fn(&mut Ui, usize),
+    pick: impl Fn(&mut Ui, usize) + 'static,
     layer: &mut Vec<El>,
 ) -> El {
     quiet_select(

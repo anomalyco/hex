@@ -100,10 +100,12 @@ fn tap_option(rt: &mut Runtime<Ui>, index: usize) {
         if middle > list[1] && middle < list[1] + list[3] {
             break;
         }
+        // A positive delta moves the content down, so bringing a row below
+        // the list into view needs a negative one.
         let dy = if middle > list[1] + list[3] {
-            20.0
-        } else {
             -20.0
+        } else {
+            20.0
         };
         rt.wheel(list[0] + list[2] / 2.0, list[1] + list[3] / 2.0, dy);
         rt.frame(1.0 / 60.0);
@@ -472,6 +474,26 @@ fn installs_that_never_update_hide_the_update_channel() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("update-channel").is_none());
+}
+
+#[test]
+fn the_interface_language_menu_is_system_first_then_alphabetical() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    let ordered = crate::desktop::i18n::language_menu_order();
+    assert_eq!(ordered[0], (None, "System"));
+    let deutsch = ordered
+        .iter()
+        .position(|(code, _)| *code == Some("de"))
+        .unwrap();
+    pick(&mut rt, "interface-language", deutsch);
+    assert_eq!(
+        rt.state.settings.ui_language.as_deref(),
+        Some("de"),
+        "the chosen row is the language it shows, not the catalog's index"
+    );
+    pick(&mut rt, "interface-language", 0);
+    assert_eq!(rt.state.settings.ui_language, None);
 }
 
 #[test]
@@ -2531,13 +2553,14 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     settle(&mut rt);
     tap(&mut rt, "transcription-language-control-trigger");
     assert_eq!(rt.state.open, Some(Menu::Pick("transcription-language")));
-    // Whisper lists every language in the catalog's order.
-    let japanese =
-        crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
-            .language_choices()
-            .iter()
-            .position(|code| *code == "ja")
-            .unwrap();
+    // Whisper lists every language by name, Auto first.
+    let japanese = crate::transcription::models::menu_order(
+        &crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+            .language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "ja")
+    .unwrap();
     tap_option(&mut rt, japanese);
     assert_eq!(rt.state.open, None);
     assert_eq!(

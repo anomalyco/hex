@@ -2196,8 +2196,8 @@ Labs › Keep recordings on                     // labs.keep-recordings
 │   ├── Lists every available model installed for the language it would use
 │   ├── A model that takes a language hint (not Parakeet v3/Ultra, GigaAM,
 │   │   Granite, Bark) -> "<model> · Language: <saved language>" menu (Auto when it
-│   │   detects, then its languages) + Transcribe; the language applies to
-│   │   that run only, never to settings (#1068)
+│   │   detects, then its languages by name) + Transcribe; the language applies
+│   │   to that run only, never to settings (#1068)
 │   ├── Choose one -> "Transcribing with <model>…" on a worker: its own
 │   │   transcription service, sharing the dictation engine's model when it is
 │   │   the one chosen, yielding to dictation; otherwise loads a copy for the run
