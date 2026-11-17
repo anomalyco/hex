@@ -2250,6 +2250,11 @@ mod tests {
         /// arriving with the final session list. Only a saved rule can send.
         #[test]
         fn page_metadata_is_only_a_suggestion_and_never_overrides_a_saved_rule() {
+            static POSTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+            fn post(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                POSTS.lock().unwrap().push(id.into());
+                posted(path, id)
+            }
             for saved in [false, true] {
                 for early in [false, true] {
                     for source in [smart::Source::Signed, smart::Source::Page] {
@@ -2261,7 +2266,7 @@ mod tests {
                             }
                         });
                         let url = "https://gallery.example/2026-01-02-demo/";
-                        let live = look::Live {
+                        let mut live = look::Live {
                             url: Some(url.into()),
                             clues: vec![smart::Clue::new(
                                 source,
@@ -2283,12 +2288,27 @@ mod tests {
                         );
                         let outcomes = SharedOutcomes::default();
                         let mut worker = worker(outcomes.clone());
+                        worker.forward = post;
                         let bundle = written("com.example.browser");
                         lock(&outcomes).fail(bundle.clone(), "test".into());
-                        worker.written(bundle, look);
+                        worker.written(bundle.clone(), look);
                         assert!(worker.current.as_ref().unwrap().sent.is_none());
+                        worker.hold(true);
+                        // The local tab matched a rule. A later partial read
+                        // can return the page clue without repeating the URL.
+                        if early {
+                            live.url = None;
+                        }
                         found.send(Some(live)).unwrap();
                         drop(found);
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        while worker.pending.is_some() {
+                            assert!(Instant::now() < deadline);
+                            worker.prepared();
+                            std::thread::yield_now();
+                        }
+                        assert!(POSTS.lock().unwrap().is_empty(), "not during Undo");
+                        worker.hold(false);
                         settle(&mut worker); // Advance any send deadline and drain finalization.
                         let current = worker.current.unwrap();
                         if saved {
@@ -2296,7 +2316,9 @@ mod tests {
                             assert!(
                                 matches!(current.route.answer, RouteAnswer::Rule { to, .. } if to.session == "ses_ruled")
                             );
+                            assert_eq!(std::mem::take(&mut *POSTS.lock().unwrap()), ["ses_ruled"]);
                         } else {
+                            assert!(POSTS.lock().unwrap().is_empty(), "no automatic post");
                             assert!(current.route.delivery.is_none());
                             assert!(current.sent.is_none() && current.due.is_none());
                             assert!(
@@ -2305,6 +2327,7 @@ mod tests {
                                 current.route.answer
                             );
                         }
+                        std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
                     }
                 }
             }

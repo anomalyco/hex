@@ -363,6 +363,7 @@ fn runtime(pres: Pres, dark: bool) -> Runtime<CapsuleState> {
 }
 
 /// Live element keys, without their generations.
+#[cfg(target_os = "macos")]
 fn keys(rt: &Runtime<CapsuleState>) -> Vec<String> {
     rt.elements()
         .iter()
@@ -373,6 +374,7 @@ fn keys(rt: &Runtime<CapsuleState>) -> Vec<String> {
 }
 
 #[test]
+#[cfg(target_os = "macos")] // Includes the Mac's picker modes.
 fn every_state_draws_its_pieces() {
     let expect: &[(&str, &[&str])] = &[
         (
@@ -608,6 +610,7 @@ fn read_png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
 }
 
 /// The goldens' states: one of each kind of capsule.
+#[cfg(target_os = "macos")]
 const GOLDENS: &[&str] = &[
     "picker-area",
     "picker-window",
@@ -636,6 +639,11 @@ const GOLDENS: &[&str] = &[
     "permission-ready",
 ];
 
+// The two ready surfaces also run on the Linux golden runner. Vulkan's
+// glyph coverage differs from Metal's; do not replace the Mac references.
+#[cfg(target_os = "linux")]
+const GOLDENS: &[&str] = &["guess", "saved"];
+
 /// States against `tests/golden/capture-capsule-*.png`;
 /// `HEX_UPDATE_GOLDENS=1` rewrites them. Without a GPU adapter they skip.
 #[test]
@@ -646,6 +654,8 @@ fn capture_capsule_goldens() {
         return;
     };
     let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    #[cfg(target_os = "linux")]
+    let folder = folder.join("linux");
     let mut misses = Vec::new();
     for (name, pres) in stills().into_iter().filter(|(n, _)| GOLDENS.contains(n)) {
         for dark in [false, true] {

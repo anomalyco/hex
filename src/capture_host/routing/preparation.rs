@@ -194,7 +194,12 @@ impl Worker {
                     return;
                 }
                 look.router.run(|| {
-                    let rules = rule_live(&look.router, &loaded, &live);
+                    let mut rules = rule_live(&look.router, &loaded, &live);
+                    // A partial final read cannot unmatch a rule already
+                    // established locally for this same capture.
+                    if rules.clues.is_empty() {
+                        rules.clues = ruled.clues;
+                    }
                     let ruled = !rules.clues.is_empty();
                     // A saved rule is explicit. Background suggestions cannot override it,
                     // including a newly recognized spoken name.
