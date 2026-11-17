@@ -466,7 +466,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .on_press_tx(press(id))
         }
         Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
-        Id::Paste => keyed(p, base.bg(c.hover), &[], &shown.ident, medium())
+        Id::Paste => keyed(p, base.fill(c.layer_02), &[], &shown.ident, medium())
             .help(tr("Paste the capture"))
             .on_press_tx(press(id)),
         Id::Inspect => base.child(

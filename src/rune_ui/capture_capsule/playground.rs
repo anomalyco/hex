@@ -361,7 +361,10 @@ fn stop() -> Input {
 }
 
 fn done() -> Step {
-    Step::Input(Input::Stage(scrawl_capture::capture::Stage::Done))
+    Step::Input(Input::Written {
+        bundle: "example.scrawl".into(),
+        routing: false,
+    })
 }
 
 fn routed(route: Route) -> Step {
