@@ -588,9 +588,9 @@ fn clicks_on_the_capsule_do_what_they_say() {
         click_on(&mut rt, "row-RUNE", 0);
         assert_eq!(*actions.lock().unwrap(), vec![send("RUNE")]);
 
-        // Search, beside "Copied", opens the search.
+        // The magnifier opens the search without picking a destination.
         let (mut rt, _) = live(routed(guess()));
-        click_on(&mut rt, "ask", 0);
+        click_on(&mut rt, "search", 0);
         assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
 
         // A rule's send: pointing at Undo holds it, Undo takes it back and

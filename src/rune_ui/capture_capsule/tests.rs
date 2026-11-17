@@ -170,6 +170,17 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ),
         ("processing", after(&[processing()])),
         ("saved", after(&[written(false)])),
+        ("audio-only", {
+            let Pres::Done(mut done) = after(&[written(false)]) else {
+                unreachable!()
+            };
+            done.no_frame = true;
+            Pres::Done(done)
+        }),
+        (
+            "hover",
+            after(&[written(true), In(Input::Routed(guess())), Point(1)]),
+        ),
         (
             "copy-failed",
             after(&[In(Input::CopyFailed), written(false)]),
@@ -337,13 +348,11 @@ fn env(dark: bool) -> rune::Env {
     }
 }
 
-/// Every scene's first frame: a real capture's keyframe (an OpenCode
-/// settings screen), cropped and scaled to the thumbnail's 2× size.
+/// A synthetic marked card, independent of any screen or settings.
 fn thumb() -> Option<rune::Image> {
     static IMAGES: std::sync::OnceLock<rune::ImageCache> = std::sync::OnceLock::new();
     let images = IMAGES.get_or_init(|| rune::ImageCache::new(Arc::new(|| {})));
-    let image =
-        images.load(include_bytes!("../../../tests/fixtures/capture-thumbnail.png").to_vec());
+    let image = images.load(include_bytes!("../../../tests/fixtures/annotation-card.png").to_vec());
     image.wait().ok()?;
     // Decoding marks the image ready a moment before its pixels hold it.
     while image.pixels().size() == (0, 0) {
@@ -395,17 +404,16 @@ fn every_state_draws_its_pieces() {
             &["lead", "chip:Area", "chip:Screen", "chip:iPhone", "close"],
         ),
         ("processing", &["processing"]),
-        ("saved", &["done", "paste", "inspect", "close"]),
+        ("saved", &["done", "paste", "close"]),
         ("failed", &["done", "close"]),
         // A rule's send counts down on the Undo chip, with no words.
         ("rule-sent", &["done", "undo", "close"]),
         ("rule-final", &["done", "inspect", "close"]),
-        (
-            "guess",
-            &["done", "paste", "ask", "list", "row-SEER", "shift-hint"],
-        ),
-        ("guess-five", &["done", "ask", "list", "row-SEER"]),
-        ("no-answer", &["done", "why", "ask", "list"]),
+        ("guess", &["done", "paste", "search", "list", "row-SEER"]),
+        ("guess-five", &["done", "search", "list", "row-SEER"]),
+        ("no-answer", &["done", "why", "search", "list"]),
+        ("hover", &["shift-hint"]),
+        ("shift", &["shift-hint"]),
         (
             "list-guess",
             &["done", "field", "list", "row-SEER", "footer"],
@@ -426,7 +434,10 @@ fn every_state_draws_its_pieces() {
         ("failed", &["paste", "inspect"]),
         ("failed-start", &["paste", "inspect"]),
         ("list-guess", &["paste", "inspect"]),
-        ("guess", &["field", "inspect", "footer"]),
+        (
+            "guess",
+            &["field", "inspect", "footer", "shift-hint", "ask-keys"],
+        ),
         ("queued", &["paste"]),
         ("rule-sent", &["why", "paste", "ask", "inspect"]),
         ("rule-final", &["ask", "paste"]),
@@ -521,7 +532,9 @@ fn the_widest_states_fit_the_panel() {
                 "long rows don't widen the header"
             );
             let paste = items.iter().find(|i| i.id == Id::Paste).unwrap();
-            let search = items.iter().find(|i| i.id == Id::Ask).unwrap();
+            let search = items.iter().find(|i| i.id == Id::Search).unwrap();
+            let close = items.iter().find(|i| i.id == Id::Close).unwrap();
+            assert!(search.rect[0] + search.rect[2] < close.rect[0]);
             assert!(paste.rect[0] + paste.rect[2] < search.rect[0]);
             assert!(paste.rect[2] >= 44.0);
         }
@@ -746,6 +759,7 @@ fn top_line_from_env() {
 /// `HEX_CAPSULE_LANGUAGE=de` (any interface language code) in that language.
 #[test]
 fn capture_capsule_snapshots() {
+    super::surface::FIXTURE_SHORTCUT.set(true);
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };

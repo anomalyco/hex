@@ -149,7 +149,7 @@ impl Flow {
                     }
                 }
             }
-            (_, Id::Ask) => self.input(Input::OpenList, now),
+            (_, Id::Ask | Id::Search) => self.input(Input::OpenList, now),
             (_, Id::Row(row) | Id::Pick(row)) => self.input(Input::SendRow(row), now),
             (_, Id::Next) => self.input(Input::Cycle(1), now),
             // The toast's line is its one guess: a click sends it.

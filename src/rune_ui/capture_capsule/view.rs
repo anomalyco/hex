@@ -407,11 +407,19 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .hit()
                     .on_press_tx(press(id));
             }
-            done.role("text").label(if shown.ident.is_empty() {
-                super::flow::copied().to_owned()
-            } else {
-                shown.ident.clone()
-            })
+            if matches!(&surface.pres, Pres::Done(d) if d.inspect_preview() && d.lead == Lead::Thumbnail)
+            {
+                return done
+                    .radius(surface::CHIP_RADIUS)
+                    .hover(c.hover)
+                    .press(c.pressed)
+                    .role("button")
+                    .label(format!("{} · {}", shown.ident, tr("Inspect")))
+                    .help(tr("Open the capture"))
+                    .hit()
+                    .on_press_tx(press(Id::Inspect));
+            }
+            done.role("text").label(shown.ident.clone())
         }
         Id::Next => keyed(p, base, &["⇥"], tr("Next"), medium()).on_press_tx(press(id)),
         // A chip beside the frame in the menu-bar flow.
@@ -439,7 +447,24 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             };
             undo_ring::chip(p, base, [w, h], ground, live.ring.as_ref()).on_press_tx(press(id))
         }
-        // Search, with the capture shortcut that opens it as Settings draws it.
+        Id::Search => {
+            let keys = chord(&surface::shortcut_keycaps());
+            let help = if keys.is_empty() {
+                tr("Search").into()
+            } else {
+                tr_fill("Search {}", &keys)
+            };
+            base.child(icon_button(
+                p,
+                rune::icon(p.k.glyph.search, 16.0).color(p.muted()),
+            ))
+            .role("button")
+            .label(help.clone())
+            .help(help)
+            .hit()
+            .on_press_tx(press(id))
+        }
+        // A permission helper's Capture action retains its keycaps.
         Id::Ask
             if matches!(
                 &surface.pres,

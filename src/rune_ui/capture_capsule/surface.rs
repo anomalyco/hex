@@ -153,9 +153,7 @@ pub(crate) fn done_style() -> TextStyle {
 
 /// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
 pub(crate) fn bare(done: &Done) -> bool {
-    tuning::get().top_line == TopLine::Icons
-        && (done.text.is_empty() || done.text == super::flow::copied())
-        && done.why.is_none()
+    tuning::get().top_line == TopLine::Icons && done.text.is_empty() && done.why.is_none()
 }
 
 /// The capsule unfolds from this fraction of its height, anchored on its
@@ -223,6 +221,7 @@ pub(crate) enum Id {
     Paste,
     /// The Send to… chip.
     Ask,
+    Search,
     Inspect,
     /// The open capsule's field.
     Field,
@@ -262,6 +261,7 @@ impl Id {
             Id::Undo => "undo",
             Id::Paste => "paste",
             Id::Ask => "ask",
+            Id::Search => "search",
             Id::Inspect => "inspect",
             Id::Field => "field",
             Id::Row(_) => "row",
@@ -298,7 +298,7 @@ impl Id {
             // action's right padding; drawn later, it takes the overlap's
             // presses. Icons beside ✕ keep one even step.
             (Id::Undo | Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
-            (Id::Paste | Id::Inspect, Id::Close) => CHIP_GAP,
+            (Id::Paste | Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
             _ if self.group() == next.group() => CHIP_GAP,
             _ => GROUP_GAP,
         }
@@ -324,7 +324,7 @@ impl Id {
             Id::Inspect => 14,
             Id::Next => 15,
             Id::Pick(row) => 16 + row.min(1) as u8,
-            Id::Ask => 18,
+            Id::Ask | Id::Search => 18,
             Id::Close => 20,
             Id::Row(_) | Id::CardHints => 21,
         }
@@ -500,23 +500,27 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             raw.push((
                 Id::Paste,
                 label.into(),
-                keyed_width(&[], label, medium()),
+                keyed_width(&[], label, medium()).max(44.0),
                 false,
             ));
         }
-        if done.inspect {
+        if done.inspect && !done.inspect_preview() {
             raw.push((Id::Inspect, String::new(), CHIP_H, false));
         }
         // Where to send it is a click away, beside Paste, never opened for you.
         // Over the suggestions it's Search, with the capture shortcut that
         // opens it.
         if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
-            let width = if done.ask_keys {
-                keycaps_chip_width(ask, medium())
+            if listed && done.ask_keys {
+                raw.push((Id::Search, ask.clone(), CHIP_H, false));
             } else {
-                keyed_width(&[], ask, medium())
-            };
-            raw.push((Id::Ask, ask.clone(), width, false));
+                let width = if done.ask_keys {
+                    keycaps_chip_width(ask, medium())
+                } else {
+                    keyed_width(&[], ask, medium())
+                };
+                raw.push((Id::Ask, ask.clone(), width, false));
+            }
         }
     }
     raw.push((Id::Close, String::new(), CHIP_H, false));

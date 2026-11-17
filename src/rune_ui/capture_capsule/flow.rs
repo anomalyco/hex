@@ -18,7 +18,7 @@ mod step;
 mod words;
 use done::*;
 use routes::{sections, sent_to, short};
-pub(crate) use words::copied;
+pub(crate) use words::annotation;
 use words::{already_sent_to, not_running, plain_reason};
 
 /// A send, a rule's or a pick's, can be taken back with the Undo button for this
@@ -464,6 +464,11 @@ pub(crate) struct Done {
 }
 
 impl Done {
+    /// On an ordinary result its preview doubles as Inspect. The explicit
+    /// Inspect icon stays on outcomes whose title describes something else.
+    pub(super) fn inspect_preview(&self) -> bool {
+        self.inspect && self.paste && self.text == annotation()
+    }
     pub(crate) fn plain(lead: Lead, text: impl Into<String>) -> Self {
         Self {
             lead,
@@ -1137,7 +1142,7 @@ impl Flow {
         if let Pres::Done(done) = &mut pres
             && self.uncopied
             && done.lead == Lead::Check
-            && (done.text == copied() || (done.text.is_empty() && done.why.is_none()))
+            && (done.text == annotation() || (done.text.is_empty() && done.why.is_none()))
         {
             done.lead = Lead::Warning;
             done.text = tr("Couldn't copy").into();
@@ -1145,7 +1150,7 @@ impl Flow {
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
             && self.silent
-            && (done.text.is_empty() || done.text == copied())
+            && (done.text.is_empty() || done.text == annotation())
             && done.why.is_none()
         {
             done.why = Some(tr("no speech").into());
@@ -1176,9 +1181,14 @@ impl Flow {
                 }
             }
             Phase::Processing => Pres::Processing,
+            Phase::Saved { .. }
+                if self.written.as_ref().is_some_and(|(_, routing)| *routing) && !self.uncopied =>
+            {
+                Pres::Done(Done::plain(Lead::Check, tr("Looking for sessions…")))
+            }
             Phase::Saved { .. } => Pres::Done(Done {
                 inspect: true,
-                ..Done::plain(Lead::Check, copied())
+                ..Done::plain(Lead::Check, annotation())
             }),
             Phase::Failed { what, why, .. } => Pres::Done(Done {
                 why: why.clone(),
@@ -1201,7 +1211,7 @@ impl Flow {
             Phase::Queued { why, .. } => Pres::Done(Done {
                 why: Some(why.clone()),
                 inspect: true,
-                ..Done::plain(Lead::Check, "")
+                ..Done::plain(Lead::Check, tr("Queued"))
             }),
             // A pick went at once: the check, and Undo with its ring while
             // it can still be taken back.
@@ -1266,7 +1276,7 @@ mod tests {
             0.5,
         );
         let shown = done(&flow, 0.5);
-        assert_eq!(shown.text, "");
+        assert_eq!(shown.text, "Queued");
         assert_eq!(shown.why.as_deref(), Some("OpenCode can't see files"));
     }
 
@@ -1486,7 +1496,7 @@ mod tests {
             assert_eq!(flow.pres(6.0), Pres::Processing);
         }
         flow.input(Input::Stage(Stage::Done), 7.0);
-        assert_eq!(done(&flow, 7.0).text, copied());
+        assert_eq!(done(&flow, 7.0).text, annotation());
         assert!(flow.tick(7.0 + tuning::get().done_hold_s));
         assert_eq!(flow.pres(40.0), Pres::Hidden);
     }
@@ -2917,7 +2927,7 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), 1.0);
         flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 1.0);
         let shown = done(&flow, 1.0);
-        assert_eq!(shown.text, "");
+        assert_eq!(shown.text, "Annotation");
         assert_eq!(shown.why.as_deref(), Some("no speech"));
         // The next recording starts fresh.
         flow.input(Input::Stage(Stage::Recording), 2.0);
@@ -2934,7 +2944,7 @@ mod tests {
         flow.input(Input::Stage(Stage::Recording), 0.0);
         flow.input(Input::Stage(Stage::Done), 1.0);
         let shown = done(&flow, 1.0);
-        assert_eq!(shown.text, "Summary copied");
+        assert_eq!(shown.text, "Annotation");
         assert_eq!(shown.lead, Lead::Check);
 
         for route in [
@@ -2955,7 +2965,7 @@ mod tests {
             // The next recording starts fresh.
             flow.input(Input::Stage(Stage::Recording), 2.0);
             flow.input(Input::Stage(Stage::Done), 3.0);
-            assert_eq!(done(&flow, 3.0).text, "Summary copied");
+            assert_eq!(done(&flow, 3.0).text, "Annotation");
         }
     }
 
