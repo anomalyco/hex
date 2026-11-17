@@ -1159,7 +1159,7 @@ impl AppSettings {
         self.capture.enabled
     }
 
-    /// Labs › Annotate last 15 seconds's shortcut while it takes effect: macOS 27+,
+    /// Labs › Annotate last 15 seconds shortcut while it takes effect: macOS 27+,
     /// Annotate and the Lab on, bound, and sharing no key with another active
     /// shortcut.
     #[cfg(hex_capture)]

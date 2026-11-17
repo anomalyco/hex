@@ -27,7 +27,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Preview the tones Hex plays when you dictate.", "Послушайте звуки, которые Hex воспроизводит во время диктовки."),
     ("Stop phrase", "Фраза остановки"),
     ("Hold through other keys", "Другие клавиши не мешают"),
-    ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Скажите «rewrite this» во время диктовки, а затем инструкцию; Hex применит её моделью OpenCode режима"),
     ("Phrase", "Фраза"),
     ("Use at least two words", "Используйте как минимум два слова"),
     ("Use at least six letters", "Используйте как минимум шесть букв"),
@@ -1332,7 +1331,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Left and right keys", "Левые и правые клавиши"),
     ("Model test details", "Подробности проверки моделей"),
     ("Call recording controls on GNOME", "Управление записью звонков в GNOME"),
-    ("Annotate last 15 seconds", "Последние 15 секунд в Заметках"),
+    ("Annotate last 15 seconds", "Последние 15 секунд в Annotate"),
     ("Dictation for a command", "Диктовка для команды"),
     ("Rewrite by voice", "Переписывать голосом"),
     ("Copy a capture as one file", "Копировать запись одним файлом"),
@@ -1380,6 +1379,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it", "Команда вроде hex dictation start --print получает текст по окончании диктовки, без вставки и копирования"),
     ("A finished Annotate capture copies as one zip file, without the video or audio", "Готовая запись Annotate копируется одним zip-файлом, без видео и звука"),
     ("Add a Stats button to History that summarizes the dictations you kept. The hex history stats command prints it too", "Добавляет в Историю кнопку «Статистика», которая подводит итог сохранённым диктовкам. Команда hex history stats тоже это выводит"),
+    ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Если сочетание состоит только из Ctrl, Alt, Shift или клавиши Windows, без буквенной или цифровой клавиши, нажатие другой клавиши или клик после первой секунды больше не завершает диктовку; отпустите, чтобы закончить"),
 ];
 
 #[cfg(test)]

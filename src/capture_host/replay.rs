@@ -278,7 +278,7 @@ impl Controller {
             if !crate::labs::annotate_replay() {
                 return Err(ControlReply::error(
                     "feature-off",
-                    "Annotate replay is off; turn it on with: hex labs on annotate-replay",
+                    "Annotate last 15 seconds is off; turn it on with: hex labs on annotate-replay",
                 ));
             }
             if active_recording || self.narrating.is_some() {

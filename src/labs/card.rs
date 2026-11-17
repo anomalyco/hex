@@ -294,6 +294,9 @@ impl Feature {
             Self::StopPhrase => {
                 "Say a phrase to finish a hands-free dictation; the phrase isn't added to the text"
             }
+            Self::HoldThroughKeys if cfg!(target_os = "windows") => {
+                "If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"
+            }
             Self::HoldThroughKeys => {
                 "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"
             }

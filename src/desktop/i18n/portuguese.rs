@@ -27,7 +27,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Preview the tones Hex plays when you dictate.", "Ouça os sons que o Hex toca durante o ditado."),
     ("Stop phrase", "Frase de parada"),
     ("Hold through other keys", "Segurar apesar de outras teclas"),
-    ("Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model", "Diga «rewrite this» em um ditado e depois uma instrução; o Hex aplica com o modelo OpenCode do modo"),
     ("Phrase", "Frase"),
     ("Use at least two words", "Use pelo menos duas palavras"),
     ("Use at least six letters", "Use pelo menos seis letras"),
@@ -1329,7 +1328,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Left and right keys", "Teclas da esquerda e da direita"),
     ("Model test details", "Detalhes dos testes dos modelos"),
     ("Call recording controls on GNOME", "Controles de gravação de chamadas no GNOME"),
-    ("Annotate last 15 seconds", "Anotar os últimos 15 segundos"),
+    ("Annotate last 15 seconds", "Últimos 15 segundos no Annotate"),
     ("Dictation for a command", "Ditado para um comando"),
     ("Rewrite by voice", "Reescrever por voz"),
     ("Copy a capture as one file", "Copiar uma captura como um arquivo"),
@@ -1377,6 +1376,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it", "Um comando como hex dictation start --print recebe o texto no fim de um ditado, sem colar nem copiar"),
     ("A finished Annotate capture copies as one zip file, without the video or audio", "Uma captura do Annotate concluída é copiada como um único arquivo zip, sem o vídeo nem o áudio"),
     ("Add a Stats button to History that summarizes the dictations you kept. The hex history stats command prints it too", "Adiciona um botão Estatísticas ao Histórico, que resume os ditados que você manteve. O comando hex history stats também mostra isso"),
+    ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Se um atalho é feito só de Ctrl, Alt, Shift ou da tecla Windows, sem tecla de letra ou número, pressionar outra tecla ou clicar depois do primeiro segundo não termina mais o ditado; solte para terminar"),
 ];
 
 #[cfg(test)]

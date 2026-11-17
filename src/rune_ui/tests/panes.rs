@@ -3227,7 +3227,7 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text.starts_with("On Wayland, show your words in the text field")),
+            .any(|text| text.starts_with("On Wayland, show your words in the text box")),
         "its description stays under the note"
     );
 
