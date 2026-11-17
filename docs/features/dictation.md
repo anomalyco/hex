@@ -738,6 +738,12 @@ real Wayland grant or X11 grab run, and no Windows hook run.
 
 ### Paste Last After A Failed Paste (every OS)
 
+The macOS [capture insertion tests](../../src/paste/capture.rs) exercise a
+sheet followed by a summary on a private pasteboard. An intervening copy or
+change of target stops the second paste. This adapter is staged: neither the
+shortcut nor Annotate's explicit Paste uses it yet. A posted paste key is not
+an acknowledgement from the target app.
+
 A paste that fails (another app changed the clipboard while Hex saved it, or a
 format couldn't be read) still makes that dictation Paste Last's, unless its
 job was cancelled: the words aren't lost, and the failure still reports as
