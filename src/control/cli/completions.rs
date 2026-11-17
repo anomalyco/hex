@@ -51,7 +51,7 @@ fn prepare(settings: &AppSettings) -> std::result::Result<(), ControlReply> {
         let message = match Feature::ShellCompletions.managed() {
             Some(lock) => lock.refusal().to_owned(),
             None => {
-                "Labs › Shell completions is off; turn it on with `hex labs on shell-completions`"
+                "Labs › Tab completion for hex is off; turn it on with `hex labs on shell-completions`"
                     .to_owned()
             }
         };

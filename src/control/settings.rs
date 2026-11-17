@@ -319,7 +319,7 @@ pub fn apply(
                     && !candidate.double_tap_modifiers_allowed())
             {
                 let modifier_only = if cfg!(target_os = "macos") {
-                    ", or with Labs › Double-tap on a lone modifier on, a shortcut without a key"
+                    ", or with Labs › Double-tap a key on its own on, a shortcut without a key"
                 } else {
                     ""
                 };
@@ -1723,7 +1723,7 @@ mod tests {
         assert_eq!(
             refused
                 .message
-                .contains("Labs › Double-tap on a lone modifier"),
+                .contains("Labs › Double-tap a key on its own"),
             cfg!(target_os = "macos"),
             "{}",
             refused.message

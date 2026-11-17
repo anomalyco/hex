@@ -183,7 +183,7 @@ impl Controller {
                         let snap = current_exclusions();
                         self.last_exclusions = Some(snap);
                         self.worker = Some(handle);
-                        tracing::info!("Annotate 15 s replay buffer enabled");
+                        tracing::info!("Annotate last 15 seconds buffer enabled");
                     }
                     Err(error) => {
                         tracing::warn!(%error, "could not start Annotate replay worker");
@@ -192,7 +192,7 @@ impl Controller {
                 (true, false) => {
                     self.cancel_narration(CaptureInstant::now(), audio, outcomes);
                     self.stop_worker();
-                    tracing::info!("Annotate 15 s replay buffer stopped");
+                    tracing::info!("Annotate last 15 seconds buffer stopped");
                 }
                 (true, true) => {
                     let snap = current_exclusions();

@@ -162,7 +162,7 @@ pub(super) fn special_key_refusal(
         && binding.is_lone_section_key()
         && !settings.section_key_allowed()
     {
-        return Some("section needs Labs › Section key alone: hex labs on section-key".into());
+        return Some("section needs Labs › Key left of 1 alone: hex labs on section-key".into());
     }
     // Any shortcut on the microphone key needs Labs › Microphone key alone
     // (macOS); a modifier doesn't excuse it.

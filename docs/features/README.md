@@ -34,13 +34,13 @@ Agents can [read retained transcripts](transcript-cli.md) and
 default, listed under collapsible groups (Dictation, Output, History,
 Meetings, Annotate, Shortcuts, Models) with only this OS's labs.
 Its Sort and filter models toggle (off by default) adds a sort and a saved-language filter to the
-Local transcription picker (#645); its Benchmark details toggle (off by
+Local transcription picker (#645); its Model test details toggle (off by
 default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647); its Release notes
 link toggle (off by default) puts a link to this build's release notes in the
 sidebar footer; its Appearance toggle (off by default) forces the main window
 light or dark instead of following the OS. The dictation HUD and meeting
-recording pill always stay dark; other overlays follow the OS; its Screen vocabulary
+recording pill always stay dark; other overlays follow the OS; its Words on screen
 toggle (off by default, macOS) uses names and terms visible in the focused
 window as temporary vocabulary for each dictation, read locally through
 Accessibility and never saved ([vocabulary.md](vocabulary.md)). Its Rewrite
@@ -457,7 +457,7 @@ Settings picker > Every model row          // fixed height; scrolls
 ├── Name, role, blurb, then "No wait · 1 in 50 words wrong · 25 languages · 2.5 GB"
 ├── Saved language unsupported -> Warning line naming the language it switches to
 ├── Trailing edge -> In use dot; progress with Cancel; else Use/Download; Delete when downloaded
-├── Labs > Benchmark details (off) -> raw error rate "7.57% CER", a wrapping line:
+├── Labs > Model test details (off) -> raw error rate "7.57% CER", a wrapping line:
 │   language · dataset/split · source · conditions or "unknown" ·
 │   speed qualified; "Most accurate" only between comparable records (labs.md)
 ├── Labs > Parakeet Ultra (off) -> its row with a Labs tag and Details: languages,  // setup.parakeet-ultra
@@ -849,7 +849,7 @@ Saved shortcut                           // dictation; Option by default; Window
 General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
   -> Modal: each choice with its keys and a looping key/recording timeline
   -> Double-tap needs a key binding; with a shortcut that has no key (one or
-     more modifiers) it says so, unless Labs > Double-tap on a lone modifier
+     more modifiers) it says so, unless Labs > Double-tap a key on its own
      is on (macOS)
 
 Dictate without processing (Output pane; unbound)   // dictation.md
@@ -867,7 +867,7 @@ Labs > Second dictation shortcut (off)   // labs.md; issue 627
 
 Labs > More dictation shortcuts (macOS, off)   // labs.md
   -> General shows a numbered row per extra (recorder, shortcut mode, Remove) and Add shortcut under four
-  -> each row dictates like the shortcut in its own mode; Double-tap also takes a lone modifier while Labs > Double-tap on a lone modifier is on
+  -> each row dictates like the shortcut in its own mode; Double-tap also takes a lone modifier while Labs > Double-tap a key on its own is on
   -> Escape cancels once it's locked, in Tap, or on a bare key or mouse button
   -> off, the saved rows stay and nothing matches; on, each needs its own keys
 
@@ -887,7 +887,7 @@ Labs > Caps Lock dictation (macOS, off)   // labs.md
      Lock capture; the normal shortcut stands down while one runs; off or
      quit clears the light and restores Caps Lock
 
-Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
+Labs > Free memory when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
   -> nothing used the model that long and nothing records -> the model unloads
   -> next press, meeting chunk, or API request -> reloads first; audio waits, nothing lost
 ```
@@ -1396,7 +1396,7 @@ Selected mode                            // replaces Global's rewrite and transf
   -> Its vocabulary, then the shared one   // features/vocabulary.md (vocabulary.modes)
   -> Speech Labs preparation              // formatting, symbols, English filler removal
   -> Global's corrections, then the mode's  // every OS
-  -> Labs > Voice prompt's phrase          // Labs off, or no phrase, processes as before
+  -> Labs > Rewrite by voice's phrase          // Labs off, or no phrase, processes as before
      -> one spoken instruction replaces the rewrite, with the mode's model and deadline (labs.md)
   -> OpenCode transformation             // optional provider-backed rewrite
   -> Transformations                     // ordered text chain
@@ -2155,7 +2155,7 @@ Linux beta                               // not macOS feature parity
 │       │   // centre, animating, focus unchanged, the pointer over it hits the
 │       │   // window below; not yet on a real GNOME Shell session
 │       │   ├── Meeting capsules take clicks, so they open there only with Labs ›
-│       │   │   Floating meeting capsules on GNOME on and Xwayland already running
+│       │   │   Call recording controls on GNOME on and Xwayland already running
 │       │   │   (meetings.md, labs.md; #1274)
 │       │   ├── Annotate's capsule and ink take clicks too, so they open there only
 │       │   │   with Labs › Annotate on GNOME and Xwayland already running; the ink
@@ -2678,10 +2678,10 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── Otherwise the service's own copy of the requested model
 │   ├── Whole-clip run -> A Whisper clip's silent edges dropped, and a window
 │   │   the detector hears no speech in skipped (see dictation)
-│   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
+│   ├── ?process=global -> Global mode's output processing (Labs › Text for other apps)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
-│       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
-├── A web page's fetch -> Labs › Browser access to the local API
+│       └── 422 unsupported-timestamps when it has no such level (Labs › Word times for other apps)
+├── A web page's fetch -> Labs › Web pages can ask Hex
 │   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
 │   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
@@ -2732,7 +2732,7 @@ dictation ends; it is provisional, and `/finish` returns the transcript.
 (start, partials subscription, finish, a silent room's empty transcript);
 not run on Linux.
 
-`process=global` (Labs › Process API transcripts, off by default) lets a host
+`process=global` (Labs › Text for other apps, off by default) lets a host
 ask the running app for the text after its Global mode's output processing, on
 `POST /transcriptions` and `POST /streams/{id}/finish`
 ([streams.md](../streams.md#post-streamsidfinish),
@@ -2742,7 +2742,7 @@ embedded helper installs no processor (`409 processing-unavailable`, even
 with the lab off). Processing runs one at a time (`429 queue-full`).
 `/capabilities` always includes `outputProcessing`.
 
-`timestamps=segment|word` (Labs › Timestamps in API transcripts, off by
+`timestamps=segment|word` (Labs › Word times for other apps, off by
 default) makes `POST /transcriptions` return the speech model's own
 `segments`, and for `word` its `words`, with `timestampGranularity`; times
 are milliseconds from the submitted audio's start. Absent and `none` keep the
@@ -2751,7 +2751,7 @@ model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
 
-Browser access (Labs › Browser access to the local API, off by default) lets a
+Browser access (Labs › Web pages can ask Hex, off by default) lets a
 web page served from an origin listed in `labs.api_browser_origins` call this
 API with `fetch`. A browser sends its `OPTIONS` preflight without the bearer
 token, so Hex answers `204` for an allowed `Origin` before authentication, with

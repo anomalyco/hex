@@ -86,7 +86,7 @@ export interface TranscriptionRequest extends RequestOptions {
   readonly language?: string
   /**
    * Ask the running desktop app for the text after its Global mode's output
-   * processing (Labs › Process API transcripts). Absent, the transcript is
+   * processing (Labs › Text for other apps). Absent, the transcript is
    * raw as before.
    */
   readonly process?: "global"

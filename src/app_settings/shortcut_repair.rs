@@ -153,7 +153,7 @@ impl AppSettings {
         }
         if self.reset_shortcuts(HotkeyBinding::is_lone_section_key) {
             tracing::info!(
-                "reset section-key shortcuts without a modifier: Labs › Section key alone is off"
+                "reset section-key shortcuts without a modifier: Labs › Key left of 1 alone is off"
             );
         }
     }

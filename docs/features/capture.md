@@ -165,7 +165,7 @@ On Linux                                 // capture.linux
 │   open for the capture
 ├── Words -> one foreground job on the listener's engine (its loaded model)
 ├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
-│   X11 clipboard), as the Mac copies it; Labs › Copy captures as a zip puts
+│   X11 clipboard), as the Mac copies it; Labs › Copy a capture as one file puts
 │   `<stem>.scrawl.slim.zip` there instead, as a `text/uri-list` file
 ├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
@@ -225,7 +225,7 @@ On Windows                               // capture.windows
 ├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
 ├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
-│   contact sheet, then the summary; with Labs › Copy captures as a zip, the
+│   contact sheet, then the summary; with Labs › Copy a capture as one file, the
 │   copy is the light zip as CF_HDROP instead
 ├── Pane -> no Screen Recording row, no transcriber choice
 ├── Overlays -> Rune waits for a swap-chain slot before each frame (Rune
@@ -836,10 +836,10 @@ hex capture stop                         // capture.stop
     │   spoken_cues_count_in_other_languages
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
     ├── Written -> image and text copied to the clipboard (Scrawl's handoff),
-    │   or the light zip alone with Labs › Copy captures as a zip (capture.copy)
+    │   or the light zip alone with Labs › Copy a capture as one file (capture.copy)
     └── Sent -> the capture-route thread (capture.route)
 
-Copying a written capture                 // capture.copy; Labs › Copy captures as a zip
+Copying a written capture                 // capture.copy; Labs › Copy a capture as one file
 ├── Off (default) -> the bundle's summary text on the clipboard, as before:
 │   macOS and Windows through Scrawl's handoff (Windows may also put the
 │   contact sheet PNG when the clipboardImage experiment is on), Linux the
