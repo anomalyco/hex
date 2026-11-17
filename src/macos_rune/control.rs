@@ -560,7 +560,7 @@ fn listener_command(
             if printing_start && !crate::labs::print_start() {
                 return Err(control::ControlError::new(
                     "disabled",
-                    "Labs › Print-only CLI dictation is off; turn it on with \
+                    "Labs › Dictation for a command is off; turn it on with \
                      `hex labs on print-start`",
                 ));
             }

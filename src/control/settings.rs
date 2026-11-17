@@ -319,7 +319,7 @@ pub fn apply(
                     && !candidate.double_tap_modifiers_allowed())
             {
                 let modifier_only = if cfg!(target_os = "macos") {
-                    ", or with Labs › Double-tap on a lone modifier on, a shortcut without a key"
+                    ", or with Labs › Double-tap Option, Command, or Globe on, a shortcut without a key"
                 } else {
                     ""
                 };
@@ -397,7 +397,7 @@ pub fn apply(
                 }
             }
             // A row can't be double-tap only without a key, or with Labs ›
-            // Double-tap on a lone modifier, without a key but modifiers.
+            // Double-tap Option, Command, or Globe, without a key but modifiers.
             let modifiers_allowed = candidate.double_tap_modifiers_allowed();
             for row in &mut candidate.extra_dictation_hotkeys {
                 row.mode = row
@@ -1723,7 +1723,7 @@ mod tests {
         assert_eq!(
             refused
                 .message
-                .contains("Labs › Double-tap on a lone modifier"),
+                .contains("Labs › Double-tap Option, Command, or Globe"),
             cfg!(target_os = "macos"),
             "{}",
             refused.message

@@ -31,7 +31,7 @@
 //! throw carries a capsule toward the corner it heads for ([`throw`]).
 //!
 //! On a Linux Wayland compositor without layer-shell (GNOME) the capsules
-//! float on XWayland only with Labs › Floating meeting capsules on GNOME
+//! float on XWayland only with Labs › Call recording controls on GNOME
 //! (`linux::meeting_capsules`); otherwise an offer opens the Meetings pane.
 
 use std::cell::Cell;
@@ -648,7 +648,7 @@ fn place_capsule(
 }
 
 /// Linux: lets the capsule's next show float on XWayland where Wayland has
-/// no layer-shell, only by Labs › Floating meeting capsules on GNOME (#1274).
+/// no layer-shell, only by Labs › Call recording controls on GNOME (#1274).
 /// Off, Rune can't open it there and the Meetings pane stands in (#1271).
 fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
     #[cfg(target_os = "linux")]

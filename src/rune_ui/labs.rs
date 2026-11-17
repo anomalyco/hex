@@ -209,7 +209,7 @@ pub(super) struct Store {
     pub(super) tab: Tab,
     /// The chip selected: only this group's labs show.
     pub(super) group: Option<Group>,
-    /// Labs › Voice prompt's phrase while it's on: a draft, so invalid words
+    /// Labs › Rewrite by voice's phrase while it's on: a draft, so invalid words
     /// stay in its field instead of replacing the saved phrase.
     pub(super) phrase: TextEdit,
     /// Whether `phrase` started from the saved phrase.
@@ -643,7 +643,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         }
     }
     // The ISO section key, left of 1, may be a shortcut with no modifier
-    // (Labs › Section key alone, Linux and macOS).
+    // (Labs › § key alone, Linux and macOS).
     if matches!(
         caps.os,
         super::platform::Os::Linux | super::platform::Os::Macos

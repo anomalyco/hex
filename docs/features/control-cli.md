@@ -38,7 +38,7 @@ Agent or terminal                                  // control.cli; every OS
 │       ├── Not recording -> not-recording, exit 1
 │       ├── Failure or timeout -> exit 1, prints nothing, never pastes
 │       └── History keeps it as Printed; Paste Last skips it (also on Linux)
-│   ├── dictation start --print -> Labs › Print-only CLI dictation (macOS, off
+│   ├── dictation start --print -> Labs › Dictation for a command (macOS, off
 │   │   by default): starts the same locked recording, but its text comes back
 │   │   here however it ends: the shortcut that finishes it, stop, or a kept
 │   │   microphone loss. Never pasted or copied. No speech -> no-speech, exit 4;
@@ -76,7 +76,7 @@ Agent or terminal                                  // control.cli; every OS
 │   └── No speech in every piece -> no-speech, exit 4; nothing pasted, kept,
 │       or processed
 ├── hex completions <bash|zsh|fish|elvish|powershell>
-│   ├── Labs › Shell completions off -> disabled, exit 1; nothing printed
+│   ├── Labs › Tab completion for hex off -> disabled, exit 1; nothing printed
 │   ├── Runs here: no running Hex, no /control request
 │   └── On -> the script on stdout and nothing else, generated from the same
 │       clap tree every command parses (hidden from hex --help)
@@ -206,7 +206,7 @@ and `model_selection` (remembered hints, wildcard-language validation); `control
 and zero volume (`enabling_tones_restores_a_nonzero_level` covers enabling a
 saved zero); `control::cli::tests` pin
 exit codes, output, and `hex start`'s `open`
-arguments; `control::cli::completions::tests` pin the Shell completions gate
+arguments; `control::cli::completions::tests` pin the Tab completion for hex gate
 and that every shell gets a script naming the command tree, and the
 `the_cli_prints_completion_scripts` tests in `linux.rs`, macOS's `main.rs`, and
 `windows.rs` each generate bash, zsh, and fish from that OS's own top-level

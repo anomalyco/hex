@@ -42,10 +42,10 @@ feature with its own pane joins the sidebar as a normal item while on and is
 hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
 (beta), Voice Filter (Dev; locked on while its macOS driver is installed, and
 a stable build with the driver keeps its pane for Uninstall alone), Playground
-(Dev), Live text, Live chapters, Vocabulary biasing, Screen vocabulary
+(Dev), Live text, Live chapters, Vocabulary help, Words on screen
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
-macOS), Share dictation shortcut (#176, Windows), Unload model when idle
+macOS), Share dictation shortcut (#176, Windows), Free memory when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
 paste shortcut (Windows, Linux), Stop phrase, Hold through other keys
 (macOS and Windows), and Microphone key alone (#181, macOS).
@@ -181,7 +181,7 @@ substitute for source inspection or a second roadmap.
   `transcription::engine::dictation_busy` is the press-to-paste capture state
   on macOS, and on Linux and Windows only the engine's dictation streams and
   finishes, so a host clip can start during a CPU-only capture's hold. With
-  Labs › Unload model when idle on, its worker unloads the GGUF model after
+  Labs › Free memory when idle on, its worker unloads the GGUF model after
   the chosen idle time when nothing records (`audio::idle_sleep::held`) and reloads
   it before the next command that needs it; the parked model still counts as
   held, so callers never load a second copy.
@@ -251,7 +251,7 @@ substitute for source inspection or a second roadmap.
   clipboard restoration.
 - `accessibility`: bounded focused-window and selected-text capture through
   Accessibility without touching the clipboard, including the bounded visible
-  window text Labs › Screen vocabulary reads (macOS).
+  window text Labs › Words on screen reads (macOS).
 - `recognition`: the macOS listener coordinator for hotkey and programmatic
   dictation controls, workers, and observations. It does not own the
   authoritative microphone timeline.
@@ -1438,7 +1438,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   this user's XWayland process already runs with `DISPLAY` set; Hex never
   connects first, so it never starts XWayland. While it is off there, Settings
   › Output says the clipboard can't be restored and points to the toggle.
-  A second explicit opt-in exception: Labs › Floating meeting capsules on
+  A second explicit opt-in exception: Labs › Call recording controls on
   GNOME (`gnome-meeting-capsules`, off by default) lets the meeting capsules
   (recording offer, recording capsule) open on XWayland through Rune's
   `OverlayOptions::xwayland_input`, as override-redirect windows that take

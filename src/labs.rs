@@ -4,7 +4,7 @@
 //! group's collapsible header (`Feature::group`). A feature
 //! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
 //! as a normal item while on and is hidden while off; a behaviour-only
-//! feature (Live text, Live chapters, Vocabulary biasing, Screen vocabulary,
+//! feature (Live text, Live chapters, Vocabulary help, Words on screen,
 //! the rewrite reading the text around the cursor (macOS),
 //! keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, a spoken phrase
@@ -446,7 +446,7 @@ const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 /// The next bit above Process API transcripts' switch: Double-tap accepts a
 /// shortcut without a key (macOS).
 const DOUBLE_TAP_MODIFIERS: u64 = API_PROCESSING << 1;
-/// The next bit above Double-tap on a lone modifier's switch: a dictation
+/// The next bit above Double-tap Option, Command, or Globe's switch: a dictation
 /// pastes into the app its capture started in (macOS).
 const RETURN_TO_APP: u64 = DOUBLE_TAP_MODIFIERS << 1;
 /// The next bit above Return to app's switch: "While dictating" applies only
@@ -481,7 +481,7 @@ static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 /// atomic, written by [`state`] and [`apply`].
 static PRINT_START: AtomicBool = AtomicBool::new(false);
 
-/// Labs › Screen vocabulary's switch, set beside [`STATE`] like [`PRINT_START`]:
+/// Labs › Words on screen's switch, set beside [`STATE`] like [`PRINT_START`]:
 /// that lab reads the focused window once per dictation.
 static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 
@@ -490,7 +490,7 @@ static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 /// once per dictation, and the state word has no bit for it.
 static CURSOR_CONTEXT: AtomicBool = AtomicBool::new(false);
 
-/// Labs › Voice prompt's switch in its own atomic, written by [`state`] and
+/// Labs › Rewrite by voice's switch in its own atomic, written by [`state`] and
 /// [`apply`].
 static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 
@@ -499,7 +499,7 @@ static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 /// [`state`] and [`apply`].
 static STOP_PHRASE: AtomicBool = AtomicBool::new(false);
 
-/// Labs › Copy captures as a zip's switch, set beside [`STATE`] like
+/// Labs › Copy a capture as one file's switch, set beside [`STATE`] like
 /// [`PRINT_START`]: a written capture copies as one zip file.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 
@@ -602,7 +602,7 @@ fn print_start_enabled(settings: &LabsSettings) -> bool {
     settings.print_start && Feature::PrintStart.shipped() && Feature::PrintStart.managed().is_none()
 }
 
-/// Whether `settings` turn on Labs › Screen vocabulary in this build, before
+/// Whether `settings` turn on Labs › Words on screen in this build, before
 /// its managed lock; the state word has no bit for it.
 fn screen_vocabulary_enabled(settings: &LabsSettings) -> bool {
     settings.screen_vocabulary
@@ -618,7 +618,7 @@ fn cursor_context_enabled(settings: &LabsSettings) -> bool {
         && Feature::CursorContext.managed().is_none()
 }
 
-/// Whether `settings` turn on Labs › Voice prompt in this build, before its
+/// Whether `settings` turn on Labs › Rewrite by voice in this build, before its
 /// managed lock; the state word has no bit for it.
 fn voice_prompt_enabled(settings: &LabsSettings) -> bool {
     settings.voice_prompt
@@ -632,7 +632,7 @@ fn stop_phrase_enabled(settings: &LabsSettings) -> bool {
     settings.stop_phrase && Feature::StopPhrase.shipped() && Feature::StopPhrase.managed().is_none()
 }
 
-/// Whether `settings` turn on Labs › Copy captures as a zip in this build,
+/// Whether `settings` turn on Labs › Copy a capture as one file in this build,
 /// before its managed lock; the state word has no bit for it.
 fn copy_capture_zip_enabled(settings: &LabsSettings) -> bool {
     settings.copy_capture_zip

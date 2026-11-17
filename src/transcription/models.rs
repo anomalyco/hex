@@ -215,7 +215,7 @@ pub struct ModelDefinition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VocabularyUse {
     /// Parakeet's transducer heads bias their decode toward the terms
-    /// (Labs › Vocabulary biasing).
+    /// (Labs › Vocabulary help).
     Bias,
     /// Whisper and Qwen3-ASR read the terms as their context prompt.
     Prompt,

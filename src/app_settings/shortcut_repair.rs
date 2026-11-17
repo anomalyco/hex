@@ -1,10 +1,10 @@
 //! Shortcut keys a Labs feature allows, and the repair that puts a saved
 //! shortcut on one back while the feature is off: mouse buttons (Labs ›
 //! Mouse shortcuts, macOS), Menu, Pause, or Scroll Lock (Labs › Special
-//! keys alone, Linux), the ISO section key (Labs › Section key alone, Linux
+//! keys alone, Linux), the ISO section key (Labs › § key alone, Linux
 //! and macOS), the microphone key (Labs › Microphone key alone, macOS),
-//! shortcuts without a key (Labs › Double-tap on a lone
-//! modifier, macOS), and the persisted double-tap mode those need.
+//! shortcuts without a key (Labs › Double-tap Option, Command, or
+//! Globe, macOS), and the persisted double-tap mode those need.
 
 use super::hotkeys::{ISO_SECTION_KEY_CODE, MICROPHONE_KEY_CODE};
 use super::{AppSettings, HotkeyBinding, HotkeyKey, MAX_EXTRA_DICTATION_SHORTCUTS};
@@ -22,7 +22,7 @@ impl HotkeyKey {
             || matches!(name.trim().to_ascii_lowercase().as_str(), "menu" | "pause")
     }
 
-    /// The § key, left of 1 on ISO keyboards, which Labs › Section key
+    /// The § key, left of 1 on ISO keyboards, which Labs › § key
     /// alone lets a shortcut use on its own (issue 1050). macOS knows it by
     /// virtual key code too, because a dead-key layout labels it `^`, `´`,
     /// or `` ` `` rather than §.
@@ -101,7 +101,7 @@ impl AppSettings {
             && crate::labs::Feature::StandaloneSpecialKeys.shipped()
     }
 
-    /// Whether Labs › Section key alone is on: on Linux and macOS a shortcut
+    /// Whether Labs › § key alone is on: on Linux and macOS a shortcut
     /// may be the ISO section key, left of 1, with no modifier.
     pub fn section_key_allowed(&self) -> bool {
         cfg!(any(target_os = "linux", target_os = "macos"))
@@ -118,7 +118,7 @@ impl AppSettings {
             && crate::labs::Feature::MicrophoneKeyAlone.shipped()
     }
 
-    /// Whether Labs › Double-tap on a lone modifier is on: Double-tap
+    /// Whether Labs › Double-tap Option, Command, or Globe is on: Double-tap
     /// shortcut mode accepts a dictation shortcut without a key (macOS).
     pub fn double_tap_modifiers_allowed(&self) -> bool {
         cfg!(target_os = "macos")
@@ -143,7 +143,7 @@ impl AppSettings {
         }
     }
 
-    /// With Labs › Section key alone off, a Linux or macOS shortcut on the
+    /// With Labs › § key alone off, a Linux or macOS shortcut on the
     /// ISO section key alone goes back to its default (an optional one is
     /// unbound), so the listener never registers one. The section key with a
     /// modifier is unaffected.
@@ -153,7 +153,7 @@ impl AppSettings {
         }
         if self.reset_shortcuts(HotkeyBinding::is_lone_section_key) {
             tracing::info!(
-                "reset section-key shortcuts without a modifier: Labs › Section key alone is off"
+                "reset section-key shortcuts without a modifier: Labs › § key alone is off"
             );
         }
     }
@@ -224,7 +224,7 @@ impl AppSettings {
     /// Labs › More dictation shortcuts keeps at most
     /// [`MAX_EXTRA_DICTATION_SHORTCUTS`] rows, and each row's mode folds to
     /// one its binding can trigger (double-tap only needs a key, or Labs ›
-    /// Double-tap on a lone modifier). The rows stay saved while the Lab is
+    /// Double-tap Option, Command, or Globe). The rows stay saved while the Lab is
     /// off.
     pub(crate) fn repair_extra_dictation_shortcuts(&mut self) {
         self.extra_dictation_hotkeys
