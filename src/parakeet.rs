@@ -2071,7 +2071,33 @@ mod tests {
             for (fed_ms, stable, tentative) in &timeline {
                 println!("    audio_ms={fed_ms} stable_words={stable} tentative_words={tentative}");
             }
-            assert_eq!(streamed.source, Source::Stream);
+            let closing_mark = |text: &str| {
+                const CLOSERS: [char; 8] = ['"', '\'', '”', '’', ')', ']', '}', '»'];
+                text.trim_end()
+                    .trim_end_matches(CLOSERS)
+                    .chars()
+                    .last()
+                    .is_some_and(|last| matches!(last, '.' | '?' | '!' | '…'))
+            };
+            // A stream that dropped its closing mark takes the whole-clip
+            // fallback for that reason only (#1933).
+            assert!(
+                streamed.source == Source::Stream
+                    || matches!(
+                        &streamed.source,
+                        Source::Fallback(reason)
+                            if reason.as_str() == "the stream ended without closing sentence punctuation"
+                    ),
+                "unexpected source {}",
+                streamed.source.label()
+            );
+            if closing_mark(&whole.text) {
+                assert!(
+                    closing_mark(&streamed.text),
+                    "the stream dropped the offline text's closing mark: {}",
+                    streamed.text
+                );
+            }
             assert!(differences * 20 <= reference.len().max(20));
         }
     }

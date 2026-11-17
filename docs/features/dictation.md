@@ -1503,6 +1503,8 @@ Model advertises streaming, GPU device             // dictate.streaming
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
        ├── The raw decode carries two different <ll-RR> language tags
        │   -> Transcribe the whole clip offline (source=fallback)   // language switch
+       ├── Unified English: the text has no closing sentence mark
+       │   -> Transcribe the whole clip offline (source=fallback)   // #1933
        ├── No final text within 1.5 s -> Abort the stream -> Whole clip
        └── Model switched during the capture -> Stream closed -> Whole clip
   Short tap, chord discard -> Drop the stream
@@ -1801,6 +1803,25 @@ clip. Checks:
 `a_stream_that_switched_language_falls_back_to_the_whole_clip` (synthetic
 tones and tags, a fake stream). Not measured on a real model, microphone, or
 device; the stream's own loss is not fixed upstream.
+
+**Mitigation, November 17, 2026 (issue 1933):** a Unified English stream often
+finalizes without the closing full stop or question mark its whole-clip run
+keeps, so the paste lost the sentence mark. The native chunked decode still
+drops it; Hex now refuses a stream whose text, past trailing spaces and
+closing quotes or brackets, ends in anything but `.`, `?`, `!`, or `…`, and
+transcribes that clip whole (`source=fallback`, reason "the stream ended
+without closing sentence punctuation"). That also refuses text with nothing
+left once those are stripped, so it costs one extra whole-clip run on clips
+whose right text has no closing mark at all: single words, fragments, or a
+sentence whose trailing punctuation a transformation removed. The added
+latency was not measured. Checks:
+`a_sentence_mark_ends_every_accepted_stream`,
+`closing_quotes_and_brackets_do_not_hide_the_mark`,
+`a_stream_that_must_close_a_sentence_without_a_mark_falls_back`,
+`a_missing_mark_is_accepted_when_the_model_does_not_require_one`,
+`text_with_nothing_before_the_closers_fails_the_mark_check`, and
+`only_unified_english_streams_require_a_closing_mark` (synthetic text). Not
+measured on a real model or microphone.
 
 ### Ongoing Jobs And Output
 
