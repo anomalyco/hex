@@ -15,6 +15,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Find a setting or lab", "Rechercher un réglage ou une fonction Labs"),
+    ("No matching settings or labs", "Aucun réglage ni aucune fonction Labs ne correspond"),
+    ("The keys you press to dictate", "Les touches utilisées pour dicter"),
+    ("How the dictation shortcut starts and stops recording", "Comment le raccourci de dictée démarre et arrête l’enregistrement"),
+    ("Shortcut to paste your last dictation again", "Raccourci pour coller à nouveau la dernière dictée"),
     ("{} days ago", "il y a {} jours"),
     ("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", "janv. févr. mars avr. mai juin juil. août sept. oct. nov. déc."),
     ("{month} {day}", "{day} {month}"),

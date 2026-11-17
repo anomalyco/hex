@@ -737,6 +737,9 @@ fn slider_track<S: 'static>(
     row()
         .key("track")
         .role("slider")
+        // Find can focus the track without starting a drag or committing a value.
+        .focusable(true)
+        .tab_index(-1)
         .label(label)
         .range_value(f64::from(value), 0.0, 1.0)
         .a11y_value(display.clone())

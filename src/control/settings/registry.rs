@@ -293,11 +293,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
     ),
     key(
-        "labs.settings_search",
-        Kind::Bool,
-        "Labs: a search field at the top of General that filters its rows",
-    ),
-    key(
         "labs.release_notes_link",
         Kind::Bool,
         "Labs: a link to this build's release notes in the sidebar footer",

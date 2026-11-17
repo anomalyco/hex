@@ -36,8 +36,7 @@ Meetings, Annotate, Shortcuts, Models) with only this OS's labs.
 Its Sort and filter models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each model's raw WER or CER with its language, dataset, source,
-and conditions (#647); its Settings search toggle (off by default) puts a
-search field at the top of General that filters its rows; its Release notes
+and conditions (#647); its Release notes
 link toggle (off by default) puts a link to this build's release notes in the
 sidebar footer; its Appearance toggle (off by default) forces the main window
 light or dark instead of following the OS. The dictation HUD and meeting
@@ -972,6 +971,26 @@ An optimized isolated harness using the production reader and a synthetic
 64 MiB log reduced peak process RSS from about 204 MB to 2.4 MB; refresh took
 254 ms before and 222 ms after. This is reader evidence, not a native Settings
 latency measurement.
+
+## Find a setting or lab
+
+```ts
+Focused Hex window → ⌘K (Ctrl+K off macOS; ⌘F / Ctrl+F also works on General)
+├── Type a title, description or breadcrumb → one list of settings and Labs cards
+├── ↑ / ↓, then Return, or click → reveal and focus the control; no value changes
+│   ├── General › Advanced → unfold in this window only
+│   └── Labs → show the destination’s group and outline its card, without opting in
+└── Escape or press outside → close and restore focus
+```
+
+The [destination list](../../src/rune_ui/find_popover/catalog.rs) covers the
+ordinary General controls (including shortcut bindings, microphone, speech
+model and language, sound, HUD and application preferences), Output’s raw
+dictation shortcut, and every available unlocked Labs card, including Annotate.
+It does not index values, history, transcripts, files, commands, model choices,
+per-device mappings, per-app rules, inline lab controls, diagnostic or
+permission notices, or the contents of other panes. A focused editor, shortcut
+recorder, onboarding or another modal keeps its keys. Labs keeps its own ⌘F.
 
 ## Adjust Behavior
 

@@ -364,6 +364,11 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Find a setting or lab", ["Znajdź ustawienie lub funkcję Labs", "查找设置或实验功能", "設定や Labs の機能を検索", "Einstellung oder Labs-Funktion suchen", "Buscar un ajuste o una función de Labs", "Знайти налаштування або функцію Labs"]),
+    ("No matching settings or labs", ["Brak pasujących ustawień lub funkcji Labs", "没有匹配的设置或实验功能", "一致する設定や Labs の機能はありません", "Keine passenden Einstellungen oder Labs-Funktionen", "No hay ajustes ni funciones de Labs que coincidan", "Немає відповідних налаштувань або функцій Labs"]),
+    ("The keys you press to dictate", ["Klawisze naciskane podczas dyktowania", "用于听写的按键", "音声入力に使うキー", "Die Tasten zum Diktieren", "Las teclas que pulsas para dictar", "Клавіші для диктування"]),
+    ("How the dictation shortcut starts and stops recording", ["Jak skrót dyktowania rozpoczyna i kończy nagrywanie", "听写快捷键如何开始和停止录音", "音声入力のショートカットで録音を開始・停止する方法", "Wie das Diktierkürzel die Aufnahme startet und stoppt", "Cómo inicia y detiene la grabación el atajo de dictado", "Як скорочення для диктування починає та зупиняє запис"]),
+    ("Shortcut to paste your last dictation again", ["Skrót do ponownego wklejenia ostatniego dyktowania", "再次粘贴上一次听写内容的快捷键", "直前の音声入力をもう一度貼り付けるショートカット", "Tastenkürzel zum erneuten Einfügen des letzten Diktats", "Atajo para volver a pegar el último dictado", "Скорочення для повторного вставлення останнього диктування"]),
     ("{} days ago", ["{} dni temu", "{} 天前", "{}日前", "vor {} Tagen", "hace {} días", "{} дн. тому"]),
     ("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", ["sty lut mar kwi maj cze lip sie wrz paź lis gru", "1月 2月 3月 4月 5月 6月 7月 8月 9月 10月 11月 12月", "1月 2月 3月 4月 5月 6月 7月 8月 9月 10月 11月 12月", "Jan. Feb. März Apr. Mai Juni Juli Aug. Sept. Okt. Nov. Dez.", "ene feb mar abr may jun jul ago sept oct nov dic", "січ. лют. бер. квіт. трав. черв. лип. серп. вер. жовт. лист. груд."]),
     ("{month} {day}", ["{day} {month}", "{month}{day}日", "{month}{day}日", "{day}. {month}", "{day} {month}", "{day} {month}"]),
@@ -1654,7 +1659,9 @@ mod tests {
         include_str!("../rune_ui/fun.rs"),
         include_str!("../rune_ui/general.rs"),
         include_str!("../rune_ui/general/extra_shortcuts.rs"),
-        include_str!("../rune_ui/general/search.rs"),
+        include_str!("../rune_ui/general/page.rs"),
+        include_str!("../rune_ui/find_popover.rs"),
+        include_str!("../rune_ui/find_popover/catalog.rs"),
         include_str!("../rune_ui/history.rs"),
         include_str!("../rune_ui/history/selection.rs"),
         include_str!("../rune_ui/hud_lab.rs"),

@@ -13,7 +13,7 @@ use super::*;
 
 const SIZE: (f32, f32) = (980.0, 760.0);
 
-fn runtime(scene: &str) -> Runtime<Ui> {
+pub(super) fn runtime(scene: &str) -> Runtime<Ui> {
     let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
     let (_, apply) = SCENES
         .iter()
