@@ -353,12 +353,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id)),
         Id::Close => base.child(
-            row()
-                .center()
-                .size(28.0, 28.0)
-                .radius(ICON_BUTTON_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
+            button_box(p, BUTTON_H)
                 .child(close_glyph(p))
                 .role("button")
                 .label(tr("Close"))
@@ -454,10 +449,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             } else {
                 tr_fill("Search {}", &keys)
             };
-            base.child(icon_button(
-                p,
-                rune::icon(p.k.glyph.search, 16.0).color(p.muted()),
-            ))
+            base.child(
+                button_box(p, BUTTON_H).child(rune::icon(p.k.glyph.search, 16.0).color(p.muted())),
+            )
             .role("button")
             .label(help.clone())
             .help(help)
@@ -491,16 +485,22 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .on_press_tx(press(id))
         }
         Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
-        Id::Paste => keyed(p, base.fill(c.layer_02), &[], &shown.ident, medium())
+        // The line's one worded action: a filled button the height of the
+        // icon buttons beside it, so the three are one row of boxes 6 pt
+        // apart and 6 pt in from the walls. The chip around it is its target.
+        Id::Paste => base
+            .child(
+                button_box(p, shown.rect[2] - 2.0 * surface::BUTTON_INSET)
+                    .fill(c.layer_02)
+                    .child(label(&shown.ident, medium(), p.text())),
+            )
+            .role("button")
+            .label(shown.ident.clone())
             .help(tr("Paste into the current field"))
+            .hit()
             .on_press_tx(press(id)),
         Id::Inspect => base.child(
-            row()
-                .center()
-                .size(28.0, 28.0)
-                .radius(ICON_BUTTON_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
+            button_box(p, BUTTON_H)
                 .child(mark(id, 16.0, p.muted()))
                 .role("button")
                 .label(tr("Inspect"))
@@ -658,14 +658,28 @@ pub(super) fn mark(id: Id, size: f32, color: Color) -> El {
 }
 
 pub(super) const CHECK: f32 = 16.0;
-/// A 28 pt icon button's corners, concentric with the shell's.
+/// The finished line's buttons (Paste, Search, Inspect, ✕) are 28 pt tall,
+/// 6 pt in from the walls, their corners concentric with the shell's.
+pub(super) const BUTTON_H: f32 = CHIP_H - 2.0 * surface::BUTTON_INSET;
 pub(super) const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
+
+/// One of those buttons, `w` wide, its content centred.
+pub(super) fn button_box(p: Paint, w: f32) -> El {
+    row()
+        .key("box")
+        .center()
+        .size(w, BUTTON_H)
+        .radius(ICON_BUTTON_RADIUS)
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+}
 pub(super) const THUMB_RADIUS: f32 = 4.0;
 
 /// The capture's first frame, cropped to fill a small rounded card, with a
 /// hairline over its edge so a white page still reads on the capsule.
 pub(super) fn thumbnail(p: Paint, pixels: &rune::Pixels) -> El {
-    el().absolute(THUMB_X, (CHIP_H - THUMB_H) * 0.5)
+    el().key("thumb")
+        .absolute(THUMB_X, (CHIP_H - THUMB_H) * 0.5)
         .size(THUMB_W, THUMB_H)
         .radius(THUMB_RADIUS)
         .fill(p.k.c.layer_02)

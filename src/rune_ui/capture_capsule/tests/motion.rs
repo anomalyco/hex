@@ -542,6 +542,49 @@ fn capture_capsule_hover_snapshots() {
             rune::render::write_png(&path, w, h, &pixels).unwrap();
         }
     }
+    // The pointer resting on each of the ready line's controls, and Paste
+    // held down.
+    for (key, held) in [
+        ("done", false),
+        ("paste", false),
+        ("paste", true),
+        ("search", false),
+        ("close", false),
+    ] {
+        for dark in [false, true] {
+            // The preview is a button only on the folded capsule.
+            let routing = key != "done";
+            let mut inputs = vec![Input::Written {
+                bundle: "example.scrawl".into(),
+                routing,
+            }];
+            if routing {
+                inputs.push(Input::Routed(guess()));
+            }
+            let (mut rt, _) = live_in(inputs, dark);
+            rt.state.backdrop = true;
+            rt.state.live.thumb = thumb();
+            tap(&mut rt, Input::Shift(false));
+            let [x, y, w, h] = rt
+                .elements()
+                .iter()
+                .find(|e| {
+                    !e.exiting && e.key.as_deref().and_then(|k| k.split('#').next()) == Some(key)
+                })
+                .unwrap_or_else(|| panic!("no {key} in {:?}", keys(&rt)))
+                .rect;
+            point_at(&mut rt, key);
+            if held {
+                rt.pointer_down(x + w * 0.5, y + h * 0.5);
+                rt.frame(1.0 / FPS);
+            }
+            let (w, h, pixels) = draw(&gpu, &mut rt, 180.0);
+            let theme = if dark { "dark" } else { "light" };
+            let state = if held { "press" } else { "point" };
+            let path = folder.join(format!("{state}-{key}-{theme}.png"));
+            rune::render::write_png(&path, w, h, &pixels).unwrap();
+        }
+    }
 }
 
 /// Clicking any of the capsule's choices does what it says, in every flow:

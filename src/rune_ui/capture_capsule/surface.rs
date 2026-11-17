@@ -37,9 +37,10 @@ const PROCESSING_TRAIL: f32 = 8.5;
 /// The check's ink spans 12…20, as the dot's does; its label starts where
 /// the timer does.
 pub(crate) const DONE_TEXT_X: f32 = LEAD_TEXT_X;
-/// The capture's first frame in the check's place: a 28 × 20 card 8 pt in
-/// from the capsule's curve, its label 8 pt after it.
-pub(crate) const THUMB_X: f32 = 8.0;
+/// The capture's first frame in the check's place: a 28 × 20 card whose
+/// left edge is where the check's ink starts, 16 pt in from the wall and
+/// over the list's names, its label 8 pt after it.
+pub(crate) const THUMB_X: f32 = 12.0;
 pub(crate) const THUMB_W: f32 = 28.0;
 pub(crate) const THUMB_H: f32 = 20.0;
 
@@ -52,6 +53,11 @@ pub(crate) fn done_text_x(lead: Lead) -> f32 {
 }
 const CHIP_GAP: f32 = 2.0;
 const GROUP_GAP: f32 = 6.0;
+/// The finished line's buttons (Paste, Search, Inspect, ✕) draw 2 pt
+/// inside their chips: 28 pt boxes 6 pt apart and 6 pt in from the walls.
+pub(crate) const BUTTON_INSET: f32 = 2.0;
+/// From the finished line's words to Paste's fill.
+const PASTE_LEAD: f32 = 16.0;
 /// How far ✕ tucks into the action before it.
 const CLOSE_HUG: f32 = 6.0;
 pub(crate) const CHIP_PX: f32 = 12.0;
@@ -286,6 +292,11 @@ impl Id {
             // The field's well starts the label's trail after it: 12 pt,
             // as the lead's inset is.
             (Id::Done | Id::Why, Id::Field) => 0.0,
+            // Paste's fill starts 16 pt after the words, as far as the
+            // lead sits from the wall and ✕ from the other: the words'
+            // trail, this, and the fill's 2 pt inset in its chip.
+            (Id::Done, Id::Paste) => PASTE_LEAD - LEAD_TRAIL - BUTTON_INSET,
+            (Id::Why, Id::Paste) => PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
             // The label's trail and the action's padding already part
             // them.
             (Id::Done | Id::Why, _) => GROUP_GAP,

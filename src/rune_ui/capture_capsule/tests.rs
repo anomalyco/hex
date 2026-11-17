@@ -563,6 +563,112 @@ fn the_annotation_toolbar_names_the_local_action_and_the_search_binding() {
     }
 }
 
+/// The ready line and the list under it are one layout: the preview's left
+/// edge is the header's and the names', 16 pt in from the wall; Paste,
+/// Search and ✕ are one row of 28 pt boxes 6 pt apart and 6 pt in from the
+/// walls; and Paste's target stays the whole chip around its fill.
+#[test]
+fn the_ready_line_and_its_list_share_their_edges() {
+    use super::surface::{CHIP_H, ISLAND_H};
+    let still = |name: &str| {
+        let pres = stills().into_iter().find(|(n, _)| *n == name).unwrap().1;
+        runtime(pres, true)
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 0.26;
+    let rt = still("guess");
+    let elements = rt.elements();
+    let keyed = |key: &str| {
+        elements
+            .iter()
+            .find(|e| e.key.as_deref().and_then(|k| k.split('#').next()) == Some(key))
+            .unwrap_or_else(|| panic!("no {key}"))
+            .rect
+    };
+    let worded = |text: &str| {
+        elements
+            .iter()
+            .find(|e| e.text.as_deref() == Some(text))
+            .unwrap_or_else(|| panic!("no {text:?}"))
+            .rect
+    };
+    let boxed = |chip: &str| {
+        elements
+            .iter()
+            .find(|e| e.key.as_deref() == Some("box") && e.path.contains(chip))
+            .unwrap_or_else(|| panic!("no box in {chip}"))
+            .rect
+    };
+    let (shell, list) = (keyed("shell"), keyed("list"));
+    assert!(near(shell[0], list[0]) && near(shell[2], list[2]));
+
+    let spine = keyed("thumb")[0];
+    assert!(near(spine - shell[0], 16.0), "the preview at {spine}");
+    for text in ["Send to", "SEER", "RUNE"] {
+        assert!(
+            near(worded(text)[0], spine),
+            "{text} off the preview's edge"
+        );
+    }
+    let right = shell[0] + shell[2];
+    for text in ["same page", "2 days ago"] {
+        let [x, _, w, _] = worded(text);
+        assert!(near(right - (x + w), 16.0), "{text} off the right edge");
+    }
+
+    let boxes = ["paste", "search", "close"].map(boxed);
+    for [_, y, _, h] in boxes {
+        assert!(
+            near(h, 28.0) && near(y - shell[1], 6.0),
+            "a box at {y}, {h}"
+        );
+        assert!(near(shell[1] + ISLAND_H - (y + h), 6.0));
+    }
+    for pair in boxes.windows(2) {
+        let gap = pair[1][0] - (pair[0][0] + pair[0][2]);
+        assert!(near(gap, 6.0), "boxes {gap} apart");
+    }
+    let [x, _, w, _] = boxes[2];
+    assert!(
+        near(right - (x + w), 6.0),
+        "✕ is {} from the wall",
+        right - (x + w)
+    );
+
+    // The fill is smaller than what takes the click.
+    let [x, y, w, h] = keyed("paste");
+    assert!(near(h, CHIP_H) && w >= 44.0);
+    assert!(
+        rt.hit_regions()
+            .iter()
+            .any(|r| near(r[0], x) && near(r[1], y) && near(r[2], x + w) && near(r[3], y + h)),
+        "Paste's chip isn't a hit region: {:?}",
+        rt.hit_regions()
+    );
+
+    // Folded, the words, Paste and ✕ keep the same 16 pt.
+    let rt = still("saved");
+    let elements = rt.elements();
+    let mut found = [[0.0; 4]; 4];
+    for e in &elements {
+        let slot = match (e.key.as_deref(), e.text.as_deref()) {
+            (Some("shell"), _) => 0,
+            (Some("thumb"), _) => 1,
+            (_, Some("Annotation")) => 2,
+            (Some("box"), _) if e.path.contains("paste") => 3,
+            _ => continue,
+        };
+        found[slot] = e.rect;
+    }
+    let [shell, thumb, words, fill] = found;
+    assert!(near(thumb[0] - shell[0], 16.0), "{found:?}");
+    assert!(near(fill[0] - (words[0] + words[2]), 16.0), "{found:?}");
+    let right = shell[0] + shell[2];
+    assert!(
+        near(right - (fill[0] + fill[2]), 6.0 + 28.0 + 6.0),
+        "{found:?}"
+    );
+}
+
 /// Keycaps, as Settings draws a shortcut, are for Search's chip and the
 /// hints under the list; a chip on the top line says its shortcut in quiet
 /// text ("Next ⇥").
