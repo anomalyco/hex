@@ -744,6 +744,14 @@ change of target stops the second paste. This adapter is staged: neither the
 shortcut nor Annotate's explicit Paste uses it yet. A posted paste key is not
 an acknowledgement from the target app.
 
+The staged [mixed selection check](../../src/paste/recent.rs) opens a temporary
+History file and a shared capture folder. The first row and the tap select the
+same ready item; a newer incomplete folder does not hide it. An unmarked
+bundle is never taken as Hex output. Removing a selected bundle makes its ID
+unavailable, rather than silently pasting the next item. Failed insertion
+recovery in this projection has one RAM slot, cleared with History and never
+written to the file. These checks don't drive the global shortcut.
+
 A paste that fails (another app changed the clipboard while Hex saved it, or a
 format couldn't be read) still makes that dictation Paste Last's, unless its
 job was cancelled: the words aren't lost, and the failure still reports as

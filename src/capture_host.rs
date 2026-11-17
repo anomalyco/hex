@@ -70,6 +70,8 @@ use scrawl_capture::transcribe::Transcriber;
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
+#[cfg(target_os = "macos")]
+pub(crate) mod paste_source;
 mod permissions;
 mod replay;
 mod routing;

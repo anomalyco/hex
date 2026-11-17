@@ -1,0 +1,95 @@
+//! The dictation owner's projection for Paste Last. Only an output that has
+//! no retained entry needs a RAM slot. Row previews never authorize a paste.
+#![allow(dead_code, reason = "staged until the mixed shortcut is enabled")]
+
+use super::{HistoryEntry, HistoryKind, HistoryStore};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum Id {
+    Retained(u64),
+    Session(u64),
+}
+
+pub(crate) struct Row {
+    pub id: Id,
+    pub ready_at: u64,
+    pub preview: String,
+}
+
+pub(super) struct Recovery {
+    id: Id,
+    ready_at: u64,
+    text: String,
+}
+
+impl HistoryStore {
+    pub(crate) fn recover_paste(&mut self, text: String, now: u64) {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        if !text.trim().is_empty() {
+            self.recovery = Some(Recovery {
+                id: Id::Session(NEXT.fetch_add(1, Ordering::Relaxed)),
+                ready_at: now,
+                text,
+            });
+        }
+    }
+
+    pub(super) fn pasteable(&self, e: &HistoryEntry, now: u64) -> bool {
+        !self.retention.is_off()
+            && self
+                .retention
+                .cutoff(now)
+                .is_none_or(|cut| e.timestamp_ms >= cut)
+            && matches!(
+                e.kind,
+                HistoryKind::Dictation | HistoryKind::Raw | HistoryKind::Send
+            )
+            && !e.final_text.trim().is_empty()
+    }
+
+    pub(crate) fn paste_rows(&self, count: usize, now: u64) -> Vec<Row> {
+        let mut rows: Vec<_> = self
+            .entries()
+            .filter(|e| self.pasteable(e, now))
+            .map(|e| (e.timestamp_ms, Id::Retained(e.id), e.final_text.as_str()))
+            .collect();
+        if let Some(r) = &self.recovery
+            && self
+                .retention
+                .cutoff(now)
+                .is_none_or(|cut| r.ready_at >= cut)
+        {
+            rows.push((r.ready_at, r.id, &r.text));
+        }
+        rows.sort_unstable_by_key(|(at, id, _)| std::cmp::Reverse((*at, *id)));
+        rows.into_iter()
+            .take(count)
+            .map(|(ready_at, id, text)| Row {
+                ready_at,
+                id,
+                preview: text.chars().take(100).collect(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn resolve_paste(&self, id: Id, now: u64) -> Option<&str> {
+        match id {
+            Id::Session(_) => self
+                .recovery
+                .as_ref()
+                .filter(|r| {
+                    r.id == id
+                        && self
+                            .retention
+                            .cutoff(now)
+                            .is_none_or(|cut| r.ready_at >= cut)
+                })
+                .map(|r| r.text.as_str()),
+            Id::Retained(id) => self
+                .entries()
+                .find(|e| e.id == id && self.pasteable(e, now))
+                .map(|e| e.final_text.as_str()),
+        }
+    }
+}

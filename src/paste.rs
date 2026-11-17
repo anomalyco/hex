@@ -1,5 +1,7 @@
 #[cfg(hex_capture)]
 pub(crate) mod capture;
+#[cfg(hex_capture)]
+pub(crate) mod recent;
 pub(crate) mod return_to_app;
 
 use std::ffi::{c_char, c_void};

@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(hex_capture)]
 pub mod annotations;
 pub mod captures;
+#[cfg(target_os = "macos")]
+pub(crate) mod paste_source;
 pub mod playback;
 pub mod recordings;
 pub mod stats;
@@ -273,6 +275,8 @@ pub fn read_snapshot(path: &std::path::Path) -> io::Result<Vec<HistoryEntry>> {
 
 /// Owner-only bounded history store. Entries are held oldest-first.
 pub struct HistoryStore {
+    #[cfg(target_os = "macos")]
+    recovery: Option<paste_source::Recovery>,
     path: PathBuf,
     /// Labs › Keep recordings' audio, one file per entry.
     recordings: PathBuf,
@@ -305,6 +309,8 @@ impl HistoryStore {
     /// being silently destroyed.
     pub fn open(path: PathBuf, retention: HistoryRetention, now_ms: u64) -> Self {
         let mut store = Self {
+            #[cfg(target_os = "macos")]
+            recovery: None,
             recordings: recordings::directory(&path),
             usage: usage::path(&path),
             recording_cap: recordings::MAX_RECORDING_BYTES,
@@ -456,6 +462,14 @@ impl HistoryStore {
         if yearly {
             self.note_usage(seed, now_ms, words, audio_ms);
         }
+        #[cfg(target_os = "macos")]
+        if self
+            .entries
+            .last()
+            .is_some_and(|e| e.id == id && self.pasteable(e, now_ms))
+        {
+            self.recovery = None;
+        }
         Ok(Some(id))
     }
 
@@ -605,6 +619,10 @@ impl HistoryStore {
     /// Delete every entry, and the Labs › Dictation stats rollup with them. A
     /// failed save keeps the entries, so the clear can be retried.
     pub fn clear(&mut self) -> io::Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            self.recovery = None;
+        }
         if !self.entries.is_empty() || self.prune_pending {
             let entries = std::mem::take(&mut self.entries);
             if let Err(error) = self.persist() {
@@ -624,6 +642,10 @@ impl HistoryStore {
             return Ok(());
         }
         self.retention = retention;
+        #[cfg(target_os = "macos")]
+        if retention.is_off() {
+            self.recovery = None;
+        }
         self.touch();
         if self.prune(now_ms) {
             self.persist()?;
@@ -1644,6 +1666,32 @@ mod tests {
             .set_retention(HistoryRetention::Off, day_ms + 1_001)
             .unwrap();
         assert!(texts(&store, 5).is_empty(), "Off lists nothing");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn failed_paste_appears_once_and_clear_invalidates_even_a_selected_session_row() {
+        let path = temp_path("paste-source");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 100);
+        let older = store.record(draft("older"), 100).unwrap().unwrap();
+        let before = fs::read(&path).unwrap();
+        store.recover_paste("could not insert".into(), 101);
+        let rows = store.paste_rows(8, 102);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            store.resolve_paste(rows[0].id, 102),
+            Some("could not insert")
+        );
+        assert_eq!(rows[1].id, paste_source::Id::Retained(older));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            HistoryStore::open(path, HistoryRetention::Day, 102)
+                .paste_rows(8, 102)
+                .len(),
+            1
+        );
+        store.clear().unwrap();
+        assert_eq!(store.resolve_paste(rows[0].id, 102), None);
     }
 
     #[test]
