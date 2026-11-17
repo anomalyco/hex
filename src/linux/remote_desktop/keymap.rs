@@ -308,9 +308,9 @@ mod tests {
     const KEY_LEFTCTRL: u16 = 29;
     const KEY_LEFTSHIFT: u16 = 42;
     const KEY_ENTER: u16 = 28;
-    /// A key no keyboard has, standing in for `ctrl:swapcaps`' Caps_Lock on
-    /// 29 and Control_L on 58.
-    const KEY_CAPS: u16 = 58;
+    /// `KEY_CAPSLOCK`, where `ctrl:swapcaps` puts Control_L (and Caps_Lock on
+    /// 29).
+    const KEY_CAPSLOCK: u16 = 58;
 
     const XK_A: u32 = 0x61;
     const XK_C: u32 = 0x63;
@@ -388,11 +388,11 @@ mod tests {
     fn a_moved_modifier_fails_the_fixed_key_check() {
         let swapped = vec![group(&[
             (KEY_LEFTCTRL, XK_CAPS_LOCK),
-            (KEY_CAPS, XK_CONTROL_L),
+            (KEY_CAPSLOCK, XK_CONTROL_L),
             (KEY_V, XK_V),
         ])];
         assert!(!every_group(&swapped, KEY_LEFTCTRL, XK_CONTROL_L));
-        assert!(every_group(&swapped, KEY_CAPS, XK_CONTROL_L));
+        assert!(every_group(&swapped, KEY_CAPSLOCK, XK_CONTROL_L));
 
         let plain = vec![group(&[
             (KEY_LEFTCTRL, XK_CONTROL_L),

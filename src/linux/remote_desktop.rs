@@ -176,7 +176,12 @@ impl RemoteDesktop {
         // lifetime), and changing a layout or variant replaces the keymap.
         let keymap = keymap::read();
         let (encoding, keys) = chord_keys(chord, with_shift, keymap.as_ref());
-        if encoding == Encoding::Keysym && keymap.is_some() {
+        if keymap.is_none() {
+            tracing::debug!(
+                chord = ?chord,
+                "could not read the desktop's keymap; sending keysyms"
+            );
+        } else if encoding == Encoding::Keysym {
             tracing::debug!(
                 chord = ?chord,
                 "the keymap names no single key for this chord; sending keysyms"
