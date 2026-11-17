@@ -218,7 +218,7 @@ impl PillModel {
             ControllerEvent::Offer(..) | ControllerEvent::Reminder { .. } => {
                 self.call_ended = false;
             }
-            ControllerEvent::Starting
+            ControllerEvent::Starting(_)
             | ControllerEvent::Transcribing
             | ControllerEvent::Finished(_)
             | ControllerEvent::Failed { .. } => {
@@ -338,6 +338,9 @@ impl Capsule {
     /// takes the pointer.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     fn fit_recording_window(&self) {
+        if self.presentation.from_offer() {
+            return;
+        }
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
             resize(recording_window_size(
                 self.hovered,
@@ -347,6 +350,9 @@ impl Capsule {
     }
 
     fn set_hovered(&mut self, inside: bool) {
+        if self.presentation.blocks_hover(inside) {
+            return;
+        }
         self.hovered = inside;
         #[cfg(target_os = "windows")]
         self.fit_recording_window();
@@ -500,6 +506,9 @@ impl Capsule {
 
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
+        if self.presentation.from_offer() {
+            return self.presentation.window();
+        }
         match &self.kind {
             Some(Kind::Recording(shown)) => {
                 recording_window_size(self.hovered, panel::rest_width(shown))
@@ -662,6 +671,8 @@ fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
 pub(crate) struct MeetingCapsules {
     panel: OverlayHandle<Capsule>,
     panel_offer: Option<OfferId>,
+    /// While a real offer is visible it already occupies the recording host.
+    handoff: offer::Host,
     pill: Pill,
     /// Bumped whenever the panel shows something new, so a stale timeout
     /// doesn't close it.
@@ -678,9 +689,12 @@ struct Pill {
 }
 
 impl Pill {
-    fn apply(&self, event: &ControllerEvent) {
-        self.lock().apply(event, Instant::now());
-        self.reconcile();
+    fn apply(&self, event: &ControllerEvent, inherit: bool) {
+        {
+            let mut model = self.lock();
+            model.apply(event, Instant::now());
+            self.reconcile_locked(&mut model, inherit);
+        }
         if let ControllerEvent::RecordingStarted { id, .. } = event {
             self.tick(id.clone());
         }
@@ -698,12 +712,15 @@ impl Pill {
     /// Shows, refreshes, or hides the pill to match the model; returns the
     /// recording it shows.
     fn reconcile(&self) -> Option<String> {
-        let mut model = self.lock();
+        self.reconcile_locked(&mut self.lock(), false)
+    }
+
+    fn reconcile_locked(&self, model: &mut PillModel, inherit: bool) -> Option<String> {
         let Some(recording) = model
             .pill(crate::app_settings::meeting_indicator_enabled())
             .cloned()
         else {
-            if model.shown.take().is_some() {
+            if model.shown.take().is_some() || inherit {
                 self.handle.update(|capsule, _| capsule.kind = None);
                 self.handle.hide();
             }
@@ -722,20 +739,21 @@ impl Pill {
         model.shown = Some(id.clone());
         let corner = crate::app_settings::meeting_indicator_corner();
         model.last_anchor = Some((id.clone(), corner));
+        if inherit {
+            self.handle
+                .update(move |c, tx| c.start_recording(recording, tx));
+            return Some(id);
+        }
         place_capsule(&self.handle, corner, 0.0, 0.0);
         // Windows: a shown pill starts at rest.
-        #[cfg(target_os = "windows")]
         self.handle
             .resize(recording_window_size(false, panel::rest_width(&recording)));
+        #[cfg(target_os = "windows")]
+        self.handle.set_input(rune::OverlayInput::All);
         self.handle.update(move |capsule, tx| {
-            capsule.kind = Some(Kind::Recording(recording));
-            capsule.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
-            tx.wake_after(Duration::ZERO);
-            capsule.live = Live::default();
-            capsule.hovered = false;
+            capsule.presentation = Default::default();
             capsule.corner = corner;
-            capsule.throw.stop();
-            tx.instant();
+            capsule.start_recording(recording, tx);
         });
         float_on_xwayland(&self.handle);
         self.handle.show();
@@ -899,6 +917,7 @@ impl MeetingCapsules {
         Self {
             panel,
             panel_offer: None,
+            handoff: Default::default(),
             pill,
             generation: Arc::default(),
         }
@@ -906,7 +925,14 @@ impl MeetingCapsules {
 
     /// Shows, updates, or closes a capsule for each controller event.
     pub(crate) fn event(&mut self, event: &ControllerEvent) {
-        self.pill.apply(event);
+        let route = self.handoff.route(event);
+        let inherit = route == offer::Route::Inherit;
+        if inherit {
+            self.handoff = Default::default();
+        } else if route == offer::Route::Close {
+            self.close_panel();
+        }
+        self.pill.apply(event, inherit);
         match event {
             ControllerEvent::Reminder { meeting, automatic } => {
                 // Unanswered, it closes without recording or snoozing
@@ -948,7 +974,9 @@ impl MeetingCapsules {
                     self.close_panel();
                 }
             }
-            ControllerEvent::Starting | ControllerEvent::Transcribing => self.close_panel(),
+            ControllerEvent::Starting(_) | ControllerEvent::Transcribing
+                if route != offer::Route::Ordinary => {}
+            ControllerEvent::Starting(_) | ControllerEvent::Transcribing => self.close_panel(),
             ControllerEvent::RecordingStarted {
                 title, automatic, ..
             } => {
@@ -1017,6 +1045,15 @@ impl MeetingCapsules {
     }
 
     fn show_panel(&mut self, kind: Kind, timeout: Option<Duration>) {
+        let host = match &kind {
+            Kind::Offer(id, c) if c.key != "preview" => offer::Host::Offered(*id),
+            _ => offer::Host::Panel,
+        };
+        if host.on_pill() != self.handoff.on_pill() {
+            self.close_panel();
+        }
+        self.handoff = host;
+        let panel = self.panel_handle().clone();
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
         // The saved corner, and a finished meeting its recording's corner.
@@ -1026,45 +1063,46 @@ impl MeetingCapsules {
             self.pill.lock().last_anchor.as_ref(),
             crate::app_settings::meeting_indicator_corner,
         );
-        place_capsule(&self.panel, corner, 0.0, 0.0);
+        place_capsule(&panel, corner, 0.0, 0.0);
         let presentation = offer_surface::Presentation::for_kind(&kind, false);
         // Only the detected offer reserves space for its wider page. The
         // other Windows panels retain their original, window-sized input.
         #[cfg(target_os = "windows")]
-        self.panel.set_input(if matches!(kind, Kind::Offer(..)) {
+        panel.set_input(if matches!(kind, Kind::Offer(..)) {
             rune::OverlayInput::Regions
         } else {
             rune::OverlayInput::All
         });
-        self.panel.resize(match &kind {
+        panel.resize(match &kind {
             Kind::Offer(..) => presentation.window(),
             Kind::Ready(manifest) => ready_window_size(manifest),
             kind => (panel_width(kind), MEETING_PANEL_HEIGHT),
         });
-        self.panel_offer = match kind {
+        let offer_id = match kind {
             Kind::Offer(id, _) => Some(id),
             _ => None,
         };
-        let rearm = self
-            .panel_offer
+        self.panel_offer = offer_id.filter(|_| !host.on_pill());
+        let rearm = offer_id
             .is_some()
-            .then(|| offer::timer(self.panel.clone(), self.generation.clone(), generation));
-        self.panel.update(move |capsule, tx| {
+            .then(|| offer::timer(panel.clone(), self.generation.clone(), generation));
+        panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.presentation = presentation;
             capsule.more_open = false;
             capsule.set_offer_timer(rearm);
             capsule.live = Live::default();
+            capsule.waveform = None;
             capsule.hovered = false;
             capsule.expired = false;
             capsule.corner = corner;
             capsule.throw.stop();
             tx.instant();
         });
-        float_on_xwayland(&self.panel);
-        self.panel.show();
-        if let Some(id) = self.panel_offer {
-            offer_surface::load_icon(self.panel.clone(), id);
+        float_on_xwayland(&panel);
+        panel.show();
+        if let Some(id) = offer_id {
+            offer_surface::load_icon(panel, id);
         }
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
@@ -1105,7 +1143,7 @@ impl MeetingCapsules {
     /// interactive overlays, #1271), unless a newer capsule replaced it.
     #[cfg(target_os = "linux")]
     pub(crate) fn when_offer_unshown(&self, unshown: impl FnOnce(String) + Send + 'static) {
-        let (panel, current) = (self.panel.clone(), self.generation.clone());
+        let (panel, current) = (self.panel_handle().clone(), self.generation.clone());
         let generation = current.load(Ordering::SeqCst);
         std::thread::spawn(move || {
             std::thread::sleep(OFFER_CHECK);
@@ -1128,8 +1166,17 @@ impl MeetingCapsules {
     fn close_panel(&mut self) {
         self.panel_offer = None;
         self.generation.fetch_add(1, Ordering::SeqCst);
-        self.panel.update(|capsule, _| capsule.kind = None);
-        self.panel.hide();
+        self.panel_handle().update(|capsule, _| capsule.kind = None);
+        self.panel_handle().hide();
+        self.handoff = Default::default();
+    }
+
+    fn panel_handle(&self) -> &OverlayHandle<Capsule> {
+        if self.handoff.on_pill() {
+            &self.pill.handle
+        } else {
+            &self.panel
+        }
     }
 }
 
@@ -1168,6 +1215,16 @@ fn dismiss_button(p: Paint) -> El {
 /// The overlay's frame hook: steps a glide into its corner, a frame at a
 /// time, until it rests, and keeps a recording's waveform fed.
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
+    let changed = waveform::poll(capsule, now, tx);
+    if capsule.presentation.step_handoff(
+        matches!(capsule.kind, Some(Kind::Recording(_))),
+        capsule.reduced.get(),
+        now,
+    ) {
+        tx.instant();
+        tx.wake_after(Duration::ZERO);
+        return true;
+    }
     if matches!(capsule.kind, Some(Kind::Offer(..)))
         && capsule
             .presentation
@@ -1177,7 +1234,6 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
         tx.wake_after(Duration::ZERO);
         return true;
     }
-    let changed = waveform::poll(capsule, now, tx);
     if !capsule.throw.gliding() {
         return changed;
     }
@@ -1202,6 +1258,13 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     let dark =
         matches!(capsule.kind, Some(Kind::Recording(_) | Kind::Ready(_))) || cx.system_dark();
     let p = Paint::new(dark, cx.env().scale);
+    if let Some(el) = offer_surface::transition(
+        capsule,
+        Paint::new(cx.system_dark(), cx.env().scale),
+        Paint::new(true, cx.env().scale),
+    ) {
+        return el;
+    }
     let Some(kind) = &capsule.kind else {
         return row().key("empty");
     };
@@ -1637,7 +1700,7 @@ mod tests {
             commands.try_recv(),
             Ok(ControllerCommand::Record(candidate, Some(_))) if candidate.key == "meeting-slack"
         ));
-        assert!(rt.state.kind.is_none());
+        assert!(rt.state.presentation.from_offer());
     }
 
     #[test]

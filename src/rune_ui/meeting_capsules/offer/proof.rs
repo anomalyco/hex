@@ -280,3 +280,220 @@ fn detected_offer_sheet() {
     }
     std::fs::write(dir.join("providers.tsv"), report).unwrap();
 }
+// Replay Record (not More) with the worker's Started event 500 ms later.
+#[test]
+fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopRight, BottomRight, TopLeft, BottomLeft] {
+        for reduced in [false, true] {
+            for started_frame in [1, 75] {
+                let (mut rt, commands, _) = runtime(offer(slack_huddle()), false, false, PANEL);
+                rt.update(move |c, tx| {
+                    c.corner = corner;
+                    tx.instant()
+                });
+                rt.set_system_reduced_motion(reduced);
+                rt.frame(0.);
+                let size = rt.state.presentation.window();
+                let (x, y) = rt.find("record").unwrap();
+                rt.pointer_move(x, y);
+                tap(&mut rt, "record");
+                let Ok(ControllerCommand::Record(_, Some(id))) = commands.try_recv() else {
+                    panic!("no Record")
+                };
+                let mut host = offer::Host::Offered(id);
+                assert_eq!(
+                    host.route(&ControllerEvent::Starting(Some(id))),
+                    offer::Route::Keep
+                );
+                assert_eq!(
+                    host.route(&ControllerEvent::OfferWithdrawn(id)),
+                    offer::Route::Ordinary
+                );
+                rt.update(|c, _| c.expire_offer());
+                let mut last = (f32::MAX, 44.);
+                for frame in 0..started_frame + 70 {
+                    if frame == started_frame {
+                        let event = started("fixture");
+                        assert_eq!(host.route(&event), offer::Route::Inherit);
+                        let mut model = PillModel::default();
+                        model.apply(&event, Instant::now());
+                        let r = model.pill(true).unwrap().clone();
+                        rt.update(move |c, tx| c.start_recording(r, tx));
+                    }
+                    if [1, started_frame + 50].contains(&frame) {
+                        rt.pointer_down(x, y);
+                        rt.pointer_up(x, y);
+                    }
+                    advance_offer(&mut rt, frame as f64 / 60.);
+                    let elements = rt.elements();
+                    let [x, y, w, h] = elements
+                        .iter()
+                        .find(|e| e.key.as_deref() == Some("pill"))
+                        .unwrap()
+                        .rect;
+                    let near = |x: f32, y: f32| (x - y).abs() < 0.03;
+                    assert!(near(
+                        if corner.is_right() { size.0 - x - w } else { x },
+                        CAPSULE_INSET
+                    ));
+                    assert!(near(
+                        if corner.is_top() { y } else { size.1 - y - h },
+                        CAPSULE_INSET
+                    ));
+                    assert!(w <= last.0 + 0.02 && h <= last.1 + 0.02);
+                    assert!(rt.hit_regions().iter().all(|[l, t, r, b]| *l >= x - 0.03
+                        && *r <= x + w + 0.03
+                        && *t >= y - 0.03
+                        && *b <= y + h + 0.03));
+                    if reduced {
+                        assert!(near(h, 44.) || near(h, 36.));
+                    }
+                    if frame < started_frame {
+                        assert!(
+                            rt.state.waveform.is_none()
+                                && rt.find("elapsed").is_none()
+                                && rt.find("meeting-listening-field").is_none()
+                        );
+                        if frame == 60 {
+                            assert!(texts(&rt).contains(&tr("Starting…").to_owned()));
+                        }
+                    }
+                    assert!(rt.find("stop").is_none() && !rt.state.hovered);
+                    assert!(commands.try_recv().is_err());
+                    last = (w, h);
+                }
+                assert_eq!(last, (REST_WIDTH, REST_HEIGHT));
+                assert!(rt.find("elapsed").is_some());
+                rt.pointer_leave();
+                rt.frame(0.);
+                open_recording(&mut rt);
+                assert!(rt.find("stop").is_some());
+            }
+        }
+    }
+}
+
+#[test]
+fn pending_offers_never_mask_a_failure_or_adopt_another_start() {
+    use offer::{Host, Route};
+    let id = OfferId::at(Instant::now());
+    let other = OfferId::at(Instant::now() + Duration::from_secs(1));
+    let failed = ControllerEvent::Failed {
+        title: "Fixture".into(),
+        error: "Permission denied".into(),
+    };
+    let mut host = Host::Offered(id);
+    assert_eq!(
+        host.route(&ControllerEvent::OfferWithdrawn(other)),
+        Route::Ordinary
+    );
+    assert_eq!(
+        host.route(&ControllerEvent::OfferWithdrawn(id)),
+        Route::Close
+    );
+    assert_eq!(host.route(&ControllerEvent::Starting(None)), Route::Close);
+    assert_eq!(
+        host.route(&ControllerEvent::Starting(Some(other))),
+        Route::Close
+    );
+    assert_eq!(
+        host.route(&ControllerEvent::Starting(Some(id))),
+        Route::Keep
+    );
+    assert_eq!(host.route(&failed), Route::Close);
+    assert_eq!(host.route(&ControllerEvent::Transcribing), Route::Close);
+    assert_eq!(Host::Panel.route(&started("manual")), Route::Ordinary);
+    let (mut rt, rx, _) = runtime(offer(slack_huddle()), false, false, PANEL);
+    drop(rx); // A rejected send is still an offer, not a pending recording.
+    tap(&mut rt, "record");
+    assert!(!rt.state.presentation.from_offer());
+    assert!(rt.find("record").is_some() && rt.find("elapsed").is_none());
+}
+
+#[test]
+fn record_click_frames() {
+    use crate::rune_ui::offscreen;
+    let Some(dir) = std::env::var_os("HEX_RECORD_CLICK") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(dir);
+    let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
+    for (scenario, confirmed, dark) in [
+        ("delayed", 54, true),
+        ("fast", 25, false),
+        ("failed", 54, false),
+    ] {
+        let dir = root.join(scenario);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut renderer = offscreen::renderer(&gpu.device);
+        let mut ink = waveform::Ink::default();
+        let candidate = provider_cases()
+            .into_iter()
+            .find(|(s, _)| *s == "meet")
+            .unwrap()
+            .1;
+        let (mut rt, commands, _) = runtime(offer(candidate), false, dark, PANEL);
+        let size = rt.state.presentation.window();
+        let Kind::Offer(id, _) = rt.state.kind.as_ref().unwrap() else {
+            unreachable!()
+        };
+        let mut host = offer::Host::Offered(*id);
+        let mut model = PillModel::default();
+        let mut missing = 0;
+        let mut trace = String::from("frame,host_w,host_h,body_xywh\n");
+        for frame in 0..96 {
+            if frame == 24 {
+                let (x, y) = rt.find("record").unwrap();
+                rt.pointer_move(x, y);
+                tap(&mut rt, "record");
+                let Ok(ControllerCommand::Record(_, Some(id))) = commands.try_recv() else {
+                    panic!("Record not sent")
+                };
+                assert_eq!(
+                    host.route(&ControllerEvent::Starting(Some(id))),
+                    offer::Route::Keep
+                );
+            }
+            if frame == confirmed && scenario == "failed" {
+                let event = ControllerEvent::Failed {
+                    title: "Fixture".into(),
+                    error: "Permission denied".into(),
+                };
+                assert_eq!(host.route(&event), offer::Route::Close);
+                rt.update(|c, _| c.close());
+            } else if frame == confirmed {
+                let event = started("fixture");
+                assert_eq!(host.route(&event), offer::Route::Inherit);
+                model.apply(&event, Instant::now());
+                let shown = model.pill(true).unwrap().clone();
+                rt.update(move |c, tx| c.start_recording(shown, tx));
+            }
+            if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+                shown.started =
+                    Instant::now() - Duration::from_millis((frame - confirmed) * 1000 / 60);
+            }
+            rt.transparent = true;
+            advance_offer(&mut rt, frame as f64 / 60.);
+            let rect = rt
+                .elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some("pill"))
+                .map(|e| e.rect);
+            trace.push_str(&format!("{frame},{},{},{rect:?}\n", size.0, size.1));
+            missing += usize::from(rect.is_none());
+            let (w, h) = ((size.0 * 2.) as u32, (size.1 * 2.) as u32);
+            let target = offscreen::target(&gpu.device, w, h);
+            let pixels = if rt.state.kind.is_some() {
+                paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink)
+            } else {
+                vec![0; (w * h * 4) as usize]
+            };
+            rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &pixels).unwrap();
+        }
+        std::fs::write(dir.join("trace.csv"), trace).unwrap();
+        if scenario != "failed" {
+            assert_eq!(missing, 0, "frames with no capsule after clicking Record");
+        }
+    }
+}

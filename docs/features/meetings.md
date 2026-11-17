@@ -339,7 +339,13 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
           ├── The app's local icon, or the website's bundled service mark when
           │   known. Otherwise a neutral call icon, never the hosting browser's.
           │   The same 24 pt slot keeps the title aligned as a local icon loads.
-          ├── Record -> Start recording
+          ├── Record -> request this call once, without waiting for the animation
+          │   ├── The same surface contracts in its corner; “Starting…” while opening
+          │   ├── Only once capture starts -> live field + timer, or hide if the indicator is off
+          │   ├── A pointer left over Record doesn't expand the pill or press Stop
+          │   └── Withdrawal before acceptance, replacement, or failure ends the pending view;
+          │       recording failures keep the usual recovery. Manual and automatic starts
+          │       without an offer don't show this transition.
          ├── Not now -> Close
          ├── … -> "<provider>" · "Change anytime in Settings" (capsule widens)
          │   │   No rule is saved and no recording starts. The choices stay

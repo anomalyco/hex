@@ -1051,7 +1051,7 @@ impl Pump {
             | ControllerEvent::Reminder { .. }
             | ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::CallEndedWithdrawn => {}
-            ControllerEvent::Starting => self.meeting_state = MeetingMenuState::Starting,
+            ControllerEvent::Starting(_) => self.meeting_state = MeetingMenuState::Starting,
             ControllerEvent::RecordingStarted { id, title, .. } => {
                 self.meeting_state = MeetingMenuState::Recording {
                     started: Instant::now(),

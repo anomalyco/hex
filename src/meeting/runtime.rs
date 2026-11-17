@@ -163,7 +163,7 @@ fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
 fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
     let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
     match event {
-        ControllerEvent::Starting => *state = MeetingMenuState::Starting,
+        ControllerEvent::Starting(_) => *state = MeetingMenuState::Starting,
         ControllerEvent::RecordingStarted { id, title, .. } => {
             *state = MeetingMenuState::Recording {
                 started: Instant::now(),
