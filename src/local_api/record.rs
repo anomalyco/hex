@@ -1,13 +1,21 @@
-//! One microphone recording for a local client: ask the window, record once,
-//! answer with the transcript.
+//! Consented recording for local clients: one pairing, then repeated
+//! one-off recordings.
+//!
+//! A client pairs with Hex's window once. The person sees the caller's
+//! verified identity and allows it to *start recordings*; the pairing issues
+//! a revocable grant token. The grant never starts a recording by itself:
+//! each `POST /record/start` opens a separate short-lived session that stops
+//! itself at the lease and ends with one transcript (`finish`) or nothing
+//! (`cancel`).
 //!
 //! The recording itself is Hex's existing programmatic dictation (the same
 //! path `/dictations` drives), so the microphone, pre-roll, and model choice
-//! are Hex's own. What a client gets is narrower: one session token that
-//! starts, observes, finishes, or cancels *this one recording* and receives
-//! only its transcript. Raw audio, levels, partials, History, paste, and
-//! every other local API route stay out of reach (`X-Hex-Record-Token` is
-//! checked before the bearer token and only for `/record/*`).
+//! are Hex's own. What a client gets is narrow: a grant token that can only
+//! open a session, and a session token that starts, observes, finishes, or
+//! cancels *that one recording*. Raw audio, levels, partials, History,
+//! paste, and every other local API route stay out of reach
+//! (`X-Hex-Record-Grant` and `X-Hex-Record-Token` are checked before the
+//! bearer token and only for `/record/*`).
 //!
 //! A client reaches the consent in one of two ways, and the grant is bound
 //! to which:
@@ -18,9 +26,9 @@
 //!   `Security.framework` resolves from the peer, never by a name or path the
 //!   process claims.
 //!
-//! Every session is bounded: a token that never starts expires, a recording
-//! stops itself at [`MAX_RECORDING`], and a stopped recording waits
-//! [`FINISH_GRACE`] for the client before it is discarded.
+//! Pairings live in this process only. They are revocable from Hex's window
+//! and end when Hex quits; nothing about a client's identity is written to
+//! disk (see `docs/connect.md`).
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -34,24 +42,23 @@ use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 use super::http::HttpResponse;
 use super::read_body_bounded;
 
-pub(super) const AUTHORIZE_PATH: &str = "/record/authorize";
+pub(super) const PAIR_PATH: &str = "/record/pair";
 pub(super) const TOKEN_PATH: &str = "/record/token";
 pub(super) const START_PATH: &str = "/record/start";
 pub(super) const STATUS_PATH: &str = "/record/status";
 pub(super) const FINISH_PATH: &str = "/record/finish";
 pub(super) const CANCEL_PATH: &str = "/record/cancel";
+pub(super) const REVOKE_PATH: &str = "/record/revoke";
 
-/// A token that never starts a recording dies here.
-pub(super) const WAITING_LIFETIME: Duration = Duration::from_secs(60);
 /// One recording can last this long and no longer; it stops itself.
 pub(crate) const MAX_RECORDING: Duration = Duration::from_secs(120);
 /// A stopped recording waits this long for the client's `finish`.
 pub(super) const FINISH_GRACE: Duration = Duration::from_secs(30);
-/// How long an allowed grant's code lives.
+/// How long an allowed pairing's code lives.
 pub(super) const CODE_LIFETIME: Duration = Duration::from_secs(120);
 /// How long the person has to answer the window's dialog.
 pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(60);
-/// How long a denied recipient waits before it may prompt again.
+/// How long a denied recipient waits before it may ask again.
 pub(super) const DENY_COOLDOWN: Duration = Duration::from_secs(30);
 pub(super) const MAX_BODY_BYTES: usize = 8 * 1024;
 const BODY_DEADLINE: Duration = Duration::from_secs(5);
@@ -69,7 +76,7 @@ pub(crate) struct Identity {
     pub(crate) team: Option<String>,
 }
 
-/// How a request reached Hex, and what the grant is bound to.
+/// How a request reached Hex, and what a grant is bound to.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Channel {
     /// A browser page's verified `Origin` over loopback HTTP.
@@ -105,8 +112,6 @@ pub(crate) trait Recording: Send + Sync {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Phase {
-    /// The token exists; no recording has started.
-    Waiting,
     Recording,
     /// Stopped (by the client, Hex's window, or the lease); the transcript
     /// waits for `finish`.
@@ -119,7 +124,6 @@ pub(crate) enum Phase {
 impl Phase {
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::Waiting => "waiting",
             Self::Recording => "recording",
             Self::Stopped => "stopped",
             Self::Finished => "finished",
@@ -129,7 +133,7 @@ impl Phase {
     }
 
     fn live(self) -> bool {
-        matches!(self, Self::Waiting | Self::Recording | Self::Stopped)
+        matches!(self, Self::Recording | Self::Stopped)
     }
 }
 
@@ -145,6 +149,13 @@ pub(crate) struct View {
     pub(crate) max_recording_ms: u64,
 }
 
+/// One paired client, as Hex's window lists it for revocation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GrantView {
+    pub(crate) id: u64,
+    pub(crate) recipient: Recipient,
+}
+
 struct Code {
     challenge: [u8; 32],
     channel: Channel,
@@ -152,10 +163,16 @@ struct Code {
     expires: Instant,
 }
 
-struct Session {
+struct Grant {
     id: u64,
     channel: Channel,
     recipient: Recipient,
+}
+
+struct Session {
+    id: u64,
+    grant: u64,
+    channel: Channel,
     phase: Phase,
     started: Option<Started>,
     transcript: Option<Transcript>,
@@ -168,20 +185,24 @@ struct Session {
 #[derive(Default)]
 struct State {
     codes: HashMap<String, Code>,
+    /// Grant tokens, keyed by the secret the client holds.
+    grants: HashMap<String, Grant>,
+    /// Session tokens, keyed by the secret the client holds.
     sessions: HashMap<String, Session>,
     /// The one live session's token, if any.
     active: Option<String>,
+    /// A start is opening the microphone outside the lock.
+    starting: bool,
     denied: HashMap<String, Instant>,
     next_prompt: u64,
     prompting: bool,
     next_id: u64,
 }
 
-/// How long each part of the lease lasts, injectable for tests.
+/// How long each part of a session lasts, injectable for tests.
 #[derive(Clone, Copy)]
 pub(crate) struct Timings {
     pub(super) code: Duration,
-    pub(super) waiting: Duration,
     pub(super) recording: Duration,
     pub(super) grace: Duration,
     pub(super) prompt: Duration,
@@ -192,7 +213,6 @@ impl Default for Timings {
     fn default() -> Self {
         Self {
             code: CODE_LIFETIME,
-            waiting: WAITING_LIFETIME,
             recording: MAX_RECORDING,
             grace: FINISH_GRACE,
             prompt: PROMPT_WAIT,
@@ -201,7 +221,7 @@ impl Default for Timings {
     }
 }
 
-/// Every recording session the running app serves.
+/// Every pairing and recording session the running app serves.
 pub(crate) struct Sessions {
     origins: fn() -> Vec<String>,
     enabled: fn() -> bool,
@@ -246,7 +266,7 @@ impl Sessions {
         }
     }
 
-    /// Whether a browser page may prompt or spend a session: its origin is
+    /// Whether a browser page may pair or spend a grant: its origin is
     /// canonical and listed.
     pub(super) fn origin_allowed(&self, origin: &str) -> bool {
         let canonical = crate::app_settings::normalize_browser_origins(&[origin.to_owned()]);
@@ -271,13 +291,81 @@ impl Sessions {
         if !matches!(session.phase, Phase::Recording | Phase::Stopped) {
             return None;
         }
+        let recipient = state
+            .grants
+            .values()
+            .find(|grant| grant.id == session.grant)
+            .map(|grant| grant.recipient.clone())?;
         Some(View {
             id: session.id,
-            recipient: session.recipient.clone(),
+            recipient,
             phase: session.phase,
             remaining_ms: remaining(session.deadline),
             max_recording_ms: self.timings.recording.as_millis() as u64,
         })
+    }
+
+    /// Every paired client, in pairing order.
+    pub(crate) fn grants(&self) -> Vec<GrantView> {
+        let state = lock(&self.state);
+        let mut grants: Vec<GrantView> = state
+            .grants
+            .values()
+            .map(|grant| GrantView {
+                id: grant.id,
+                recipient: grant.recipient.clone(),
+            })
+            .collect();
+        grants.sort_by_key(|grant| grant.id);
+        grants
+    }
+
+    /// Revokes pairing `id` (the window's Revoke). A recording it is running
+    /// stops and is discarded. False when no pairing has that id.
+    pub(crate) fn revoke(&self, id: u64) -> bool {
+        let mut state = lock(&self.state);
+        let Some(token) = state
+            .grants
+            .iter()
+            .find(|(_, grant)| grant.id == id)
+            .map(|(token, _)| token.clone())
+        else {
+            return false;
+        };
+        self.revoke_locked(&mut state, &token);
+        true
+    }
+
+    /// Forgets `token` and everything it authorized. The caller holds the
+    /// state lock.
+    fn revoke_locked(&self, state: &mut State, token: &str) -> bool {
+        let Some(grant) = state.grants.remove(token) else {
+            return false;
+        };
+        // A code issued before the revoke must not pair the same recipient
+        // again without asking.
+        let key = recipient_key(&grant.recipient);
+        state
+            .codes
+            .retain(|_, code| recipient_key(&code.recipient) != key);
+        let running = state
+            .sessions
+            .iter()
+            .find(|(_, session)| session.grant == grant.id && session.phase.live())
+            .map(|(token, session)| (token.clone(), session.started.clone()));
+        if let Some((token, started)) = running {
+            if let Some(started) = started {
+                self.recording.cancel(&started);
+            }
+            if let Some(session) = state.sessions.get_mut(&token) {
+                session.phase = Phase::Cancelled;
+                session.transcript = None;
+            }
+            if state.active.as_deref() == Some(&token) {
+                state.active = None;
+            }
+        }
+        true
     }
 
     /// Stops recording `id` (the window's Stop) and keeps its transcript for
@@ -391,9 +479,10 @@ impl Sessions {
         state.active = None;
     }
 
-    /// `POST /record/authorize`: the window asks about this recipient.
-    pub(super) fn authorize(&self, channel: Channel, body: &[u8]) -> HttpResponse {
-        let Ok(request) = serde_json::from_slice::<AuthorizeRequest>(body) else {
+    /// `POST /record/pair`: the window asks once whether this caller may
+    /// start recordings. Pairing starts nothing.
+    pub(super) fn pair(&self, channel: Channel, body: &[u8]) -> HttpResponse {
+        let Ok(request) = serde_json::from_slice::<PairRequest>(body) else {
             return HttpResponse::code(400, "invalid-request");
         };
         if request.code_challenge_method.as_deref().unwrap_or("S256") != "S256" {
@@ -417,6 +506,13 @@ impl Sessions {
         let now = Instant::now();
         let mut state = lock(&self.state);
         prune(&mut state, now);
+        if state
+            .grants
+            .values()
+            .any(|grant| recipient_key(&grant.recipient) == key)
+        {
+            return HttpResponse::code(409, "already-paired");
+        }
         if state
             .denied
             .get(&key)
@@ -442,10 +538,10 @@ impl Sessions {
         state.prompting = false;
         match answer {
             Answer::Allow => {
-                let code = match random_token("hexr_") {
+                let code = match random_token("hexp_") {
                     Ok(code) => code,
                     Err(error) => {
-                        tracing::error!(%error, "could not generate a record code");
+                        tracing::error!(%error, "could not generate a pairing code");
                         return HttpResponse::code(500, "token-generation-failed");
                     }
                 };
@@ -463,7 +559,7 @@ impl Sessions {
                     &serde_json::json!({
                         "code": code,
                         "expiresInMs": self.timings.code.as_millis(),
-                        "scope": "record:one",
+                        "scope": "record:pair",
                         "state": request.state,
                     }),
                 )
@@ -477,7 +573,8 @@ impl Sessions {
         }
     }
 
-    /// `POST /record/token`: spends the code and mints one session token.
+    /// `POST /record/token`: spends the pairing code and mints one revocable
+    /// grant token. No recording starts.
     pub(super) fn exchange(&self, channel: Channel, body: &[u8]) -> HttpResponse {
         let Ok(request) = serde_json::from_slice::<TokenRequest>(body) else {
             return HttpResponse::code(400, "invalid-request");
@@ -489,82 +586,113 @@ impl Sessions {
         let now = Instant::now();
         let mut state = lock(&self.state);
         prune(&mut state, now);
-        if state.active.is_some() {
-            return HttpResponse::code(409, "session-busy");
-        }
         let Some(code) = state.codes.remove(&request.code) else {
             return HttpResponse::code(403, "invalid-grant");
         };
         if code.expires <= now || code.channel != channel || code.challenge != challenge {
             return HttpResponse::code(403, "invalid-grant");
         }
+        if state
+            .grants
+            .values()
+            .any(|grant| recipient_key(&grant.recipient) == recipient_key(&code.recipient))
+        {
+            return HttpResponse::code(409, "already-paired");
+        }
         state.next_id += 1;
         let id = state.next_id;
-        let token = match random_token("hexs_") {
+        let token = match random_token("hexg_") {
             Ok(token) => token,
             Err(error) => {
-                tracing::error!(%error, "could not generate a record session token");
+                tracing::error!(%error, "could not generate a record grant token");
                 return HttpResponse::code(500, "token-generation-failed");
             }
         };
-        state.sessions.insert(
+        state.grants.insert(
             token.clone(),
-            Session {
+            Grant {
                 id,
-                channel,
+                channel: code.channel,
                 recipient: code.recipient,
-                phase: Phase::Waiting,
-                started: None,
-                transcript: None,
-                finishing: false,
-                deadline: now + self.timings.waiting,
             },
         );
-        state.active = Some(token.clone());
         HttpResponse::json(
             200,
             &serde_json::json!({
-                "id": id,
-                "sessionToken": token,
-                "scope": "record:one",
-                "expiresInMs": self.timings.waiting.as_millis(),
-                "maxRecordingMs": self.timings.recording.as_millis(),
+                "grantId": id,
+                "grantToken": token,
+                "scope": "record:any",
             }),
         )
     }
 
-    /// `POST /record/start`: begins the one recording this token owns.
+    /// `POST /record/start`: opens one recording session for a paired client.
     pub(super) fn start(self: &Arc<Self>, token: &str, channel: &Channel) -> HttpResponse {
         let now = Instant::now();
+        let grant_id;
+        {
+            let mut state = lock(&self.state);
+            prune(&mut state, now);
+            let Some(grant) = state.grants.get(token) else {
+                return HttpResponse::code(401, "invalid-grant");
+            };
+            let bound = grant.channel.clone();
+            let id = grant.id;
+            if bound != *channel {
+                return HttpResponse::code(401, "invalid-grant");
+            }
+            if state.starting || state.active.is_some() {
+                return HttpResponse::code(409, "session-busy");
+            }
+            state.starting = true;
+            grant_id = id;
+        }
+        // Opening the microphone is the capture loop's work; the lock is
+        // free while it happens.
+        let started = self.recording.start();
         let mut state = lock(&self.state);
-        let Some(session) = state.sessions.get_mut(token) else {
-            return HttpResponse::code(404, "record-not-found");
-        };
-        if session.channel != *channel {
-            return HttpResponse::code(404, "record-not-found");
-        }
-        match session.phase {
-            Phase::Waiting => {}
-            Phase::Recording => return HttpResponse::code(409, "already-started"),
-            phase => return phase_response(phase),
-        }
-        if session.deadline <= now {
-            let id = session.id;
-            drop(state);
-            self.expire(id);
-            return HttpResponse::code(409, "session-expired");
-        }
-        let started = match self.recording.start() {
+        state.starting = false;
+        let started = match started {
             Ok(started) => started,
             Err(error) => {
                 tracing::warn!(%error, "could not start a consented recording");
                 return HttpResponse::code(503, "capture-unavailable");
             }
         };
-        let id = session.id;
-        session.started = Some(started);
-        session.phase = Phase::Recording;
-        session.deadline = now + self.timings.recording;
+        let Some(grant) = state
+            .grants
+            .values()
+            .find(|grant| grant.id == grant_id)
+            .map(|grant| grant.channel.clone())
+        else {
+            // Revoked while the microphone opened.
+            self.recording.cancel(&started);
+            return HttpResponse::code(401, "invalid-grant");
+        };
+        state.next_id += 1;
+        let id = state.next_id;
+        let session_token = match random_token("hexs_") {
+            Ok(token) => token,
+            Err(error) => {
+                tracing::error!(%error, "could not generate a record session token");
+                self.recording.cancel(&started);
+                return HttpResponse::code(500, "token-generation-failed");
+            }
+        };
+        state.sessions.insert(
+            session_token.clone(),
+            Session {
+                id,
+                grant: grant_id,
+                channel: grant,
+                phase: Phase::Recording,
+                started: Some(started),
+                transcript: None,
+                finishing: false,
+                deadline: now + self.timings.recording,
+            },
+        );
+        state.active = Some(session_token.clone());
         let lease = self.timings.recording;
         drop(state);
         // The lease stops the recording on its own, whether or not the
@@ -583,6 +711,7 @@ impl Sessions {
             201,
             &serde_json::json!({
                 "id": id,
+                "sessionToken": session_token,
                 "state": Phase::Recording.name(),
                 "maxRecordingMs": lease.as_millis(),
             }),
@@ -601,13 +730,8 @@ impl Sessions {
         }
         if session.phase.live() && session.deadline <= now {
             let id = session.id;
-            let waiting = session.phase == Phase::Waiting;
             drop(state);
-            if waiting {
-                self.expire(id);
-            } else {
-                self.lease_expired(id);
-            }
+            self.lease_expired(id);
             return self.status(token, channel);
         }
         HttpResponse::json(
@@ -648,7 +772,6 @@ impl Sessions {
                     Step::Finish(started)
                 }
                 Phase::Stopped => Step::Take,
-                Phase::Waiting => return HttpResponse::code(409, "not-started"),
                 phase => return phase_response(phase),
             }
         };
@@ -710,7 +833,7 @@ impl Sessions {
         )
     }
 
-    /// `POST /record/cancel`: stops and discards whatever this token owns.
+    /// `POST /record/cancel`: stops and discards whatever this session owns.
     pub(super) fn cancel_token(&self, token: &str, channel: &Channel) -> HttpResponse {
         let mut state = lock(&self.state);
         let Some(session) = state.sessions.get_mut(token) else {
@@ -733,6 +856,17 @@ impl Sessions {
         HttpResponse::empty(204)
     }
 
+    /// `POST /record/revoke`: the paired client gives its grant back.
+    pub(super) fn revoke_token(&self, token: &str, channel: &Channel) -> HttpResponse {
+        let mut state = lock(&self.state);
+        match state.grants.get(token) {
+            Some(grant) if grant.channel == *channel => {}
+            _ => return HttpResponse::empty(401),
+        }
+        self.revoke_locked(&mut state, token);
+        HttpResponse::empty(204)
+    }
+
     fn recipient_for(&self, channel: &Channel, client_name: Option<&str>) -> Option<Recipient> {
         match channel {
             Channel::Web(origin) => Some(Recipient::Web {
@@ -745,6 +879,47 @@ impl Sessions {
                 identifier: identity.identifier.clone(),
                 team: identity.team.clone(),
             }),
+        }
+    }
+}
+
+fn prune(state: &mut State, now: Instant) {
+    state.codes.retain(|_, code| code.expires > now);
+    state.sessions.retain(|_, session| {
+        session.phase.live() || session.deadline + Duration::from_secs(300) > now
+    });
+    state
+        .denied
+        .retain(|_, denied| *denied + DENY_COOLDOWN > now);
+}
+
+fn phase_response(phase: Phase) -> HttpResponse {
+    HttpResponse::code(
+        409,
+        match phase {
+            Phase::Recording => "already-recording",
+            Phase::Stopped => "stopped",
+            Phase::Finished => "session-finished",
+            Phase::Cancelled => "session-cancelled",
+            Phase::Expired => "session-expired",
+        },
+    )
+}
+
+fn remaining(deadline: Instant) -> u64 {
+    deadline
+        .saturating_duration_since(Instant::now())
+        .as_millis() as u64
+}
+
+fn recipient_key(recipient: &Recipient) -> String {
+    match recipient {
+        Recipient::Web { origin, .. } => format!("web:{origin}"),
+        Recipient::Native { identifier, team } => {
+            format!(
+                "native:{identifier}:{}",
+                team.as_deref().unwrap_or_default()
+            )
         }
     }
 }
@@ -784,9 +959,14 @@ pub(crate) fn app_sessions(
 /// that announced itself as one.
 pub(super) enum Request {
     Refused(HttpResponse),
-    Call(Call),
+    Pair(Call),
     Session {
         action: Action,
+        token: String,
+        channel: Channel,
+    },
+    /// A paired client giving its grant back.
+    Revoke {
         token: String,
         channel: Channel,
     },
@@ -801,7 +981,7 @@ impl Request {
     ) -> HttpResponse {
         match self {
             Self::Refused(response) => response,
-            Self::Call(call) => match context.record.as_ref() {
+            Self::Pair(call) => match context.record.as_ref() {
                 Some(sessions) => call.respond(sessions, stream, shutdown),
                 None => HttpResponse::code(403, "record-unavailable"),
             },
@@ -811,6 +991,10 @@ impl Request {
                 channel,
             } => match context.record.as_ref() {
                 Some(sessions) => action.respond(sessions, &token, &channel),
+                None => HttpResponse::code(403, "record-unavailable"),
+            },
+            Self::Revoke { token, channel } => match context.record.as_ref() {
+                Some(sessions) => sessions.revoke_token(&token, &channel),
                 None => HttpResponse::code(403, "record-unavailable"),
             },
         }
@@ -825,9 +1009,9 @@ pub(super) enum Routed {
 }
 
 /// Routes a browser page's `/record/*` request, or passes it on when this is
-/// not one. It runs before the bearer token: `/record/authorize` and
-/// `/record/token` are the page's own, and a session token names only its
-/// own action.
+/// not one. It runs before the bearer token: `/record/pair` and
+/// `/record/token` are the page's own, and a grant or session token names
+/// only its own actions.
 pub(super) fn route(request: super::HttpRequest, context: &super::HttpContext) -> Routed {
     let path = request.path.split('?').next().unwrap_or("/").to_owned();
     if request.method == "POST"
@@ -846,17 +1030,39 @@ pub(super) fn route(request: super::HttpRequest, context: &super::HttpContext) -
             )));
         };
         return Routed::Record(match Call::admit(endpoint, request, channel) {
-            Ok(call) => Request::Call(call),
+            Ok(call) => Request::Pair(call),
             Err(response) => Request::Refused(response),
+        });
+    }
+    let Some(record) = context.record.as_ref() else {
+        return Routed::Pass(request);
+    };
+    if let Some(grant) = request.record_grant.clone() {
+        let Some(channel) = record.web_channel(request.origin.as_deref()) else {
+            return Routed::Record(Request::Refused(HttpResponse::empty(401)));
+        };
+        if !bodyless(&request) {
+            return Routed::Record(Request::Refused(HttpResponse::code(400, "invalid-request")));
+        }
+        if request.method == "POST" && path == START_PATH {
+            return Routed::Record(Request::Session {
+                action: Action::Start,
+                token: grant,
+                channel,
+            });
+        }
+        if request.method != "POST" || path != REVOKE_PATH {
+            return Routed::Record(Request::Refused(HttpResponse::empty(401)));
+        }
+        return Routed::Record(Request::Revoke {
+            token: grant,
+            channel,
         });
     }
     let Some(token) = request.record_token.clone() else {
         return Routed::Pass(request);
     };
-    let Some(sessions) = context.record.as_ref() else {
-        return Routed::Record(Request::Refused(HttpResponse::empty(401)));
-    };
-    let Some(channel) = sessions.web_channel(request.origin.as_deref()) else {
+    let Some(channel) = record.web_channel(request.origin.as_deref()) else {
         return Routed::Record(Request::Refused(HttpResponse::empty(401)));
     };
     let Some(action) = action(&request.method, &path) else {
@@ -872,50 +1078,7 @@ pub(super) fn route(request: super::HttpRequest, context: &super::HttpContext) -
     })
 }
 
-fn prune(state: &mut State, now: Instant) {
-    state.codes.retain(|_, code| code.expires > now);
-    state.sessions.retain(|_, session| {
-        session.phase.live() || session.deadline + Duration::from_secs(300) > now
-    });
-    state
-        .denied
-        .retain(|_, denied| *denied + DENY_COOLDOWN > now);
-}
-
-fn phase_response(phase: Phase) -> HttpResponse {
-    HttpResponse::code(
-        409,
-        match phase {
-            Phase::Waiting => "not-started",
-            Phase::Recording => "already-recording",
-            Phase::Stopped => "stopped",
-            Phase::Finished => "session-finished",
-            Phase::Cancelled => "session-cancelled",
-            Phase::Expired => "session-expired",
-        },
-    )
-}
-
-fn remaining(deadline: Instant) -> u64 {
-    deadline
-        .saturating_duration_since(Instant::now())
-        .as_millis() as u64
-}
-
-fn recipient_key(recipient: &Recipient) -> String {
-    match recipient {
-        Recipient::Web { origin, .. } => format!("web:{origin}"),
-        Recipient::Native { identifier, team } => {
-            format!(
-                "native:{identifier}:{}",
-                team.as_deref().unwrap_or_default()
-            )
-        }
-    }
-}
-
-/// One `/record/authorize` or `/record/token` request, before its body is
-/// read.
+/// One `/record/pair` or `/record/token` request, before its body is read.
 pub(super) struct Call {
     endpoint: Endpoint,
     channel: Channel,
@@ -964,7 +1127,7 @@ impl Call {
             return super::http::body_read_response(error);
         }
         match self.endpoint {
-            Endpoint::Authorize => sessions.authorize(self.channel, &body),
+            Endpoint::Pair => sessions.pair(self.channel, &body),
             Endpoint::Token => sessions.exchange(self.channel, &body),
         }
     }
@@ -972,14 +1135,14 @@ impl Call {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Endpoint {
-    Authorize,
+    Pair,
     Token,
 }
 
 impl Endpoint {
     pub(super) fn of(path: &str) -> Option<Self> {
         match path {
-            AUTHORIZE_PATH => Some(Self::Authorize),
+            PAIR_PATH => Some(Self::Pair),
             TOKEN_PATH => Some(Self::Token),
             _ => None,
         }
@@ -1021,15 +1184,15 @@ impl Action {
     }
 }
 
-/// A session request must not carry a body: it takes no input beyond its
-/// token, so a body of any kind is refused rather than ignored.
+/// A session or revoke request must not carry a body: it takes no input
+/// beyond its token, so a body of any kind is refused rather than ignored.
 pub(super) fn bodyless(request: &super::HttpRequest) -> bool {
     request.content_length.unwrap_or(0) == 0 && request.body_prefix.is_empty()
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthorizeRequest {
+struct PairRequest {
     code_challenge: String,
     #[serde(default)]
     code_challenge_method: Option<String>,

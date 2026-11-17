@@ -1,10 +1,11 @@
-//! A web page's one-transcription ask: a modal naming the page's verified
-//! origin, with Allow once and Deny.
+//! A local client's ask: a modal naming the caller's verified identity.
+//! An upload asks with Allow once and Deny; pairing a client to start
+//! recordings asks with Allow and Not now.
 //!
-//! Nothing happens on the page's say-so: the local API only asks while the
-//! dialog shows, and only a press answers it. Deny (or Escape, or the scrim)
-//! cancels the upload; Allow issues one code the page may exchange for one
-//! upload, scoped to the origin named here.
+//! Nothing happens on the client's say-so: the local API only asks while the
+//! dialog shows, and only a press answers it. Deny or Not now (or Escape, or
+//! the scrim) refuses; Allow issues one code the client may exchange for one
+//! upload, or for a revocable grant to start recordings.
 
 use rune::{El, col, el, row, text};
 
@@ -58,7 +59,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     let c = &p.k.c;
     let record = prompt.intent == crate::local_api::Intent::Record;
     let title = if record {
-        tr("Allow one microphone recording?")
+        tr("Allow this app to start recordings?")
     } else {
         tr("Allow one transcription?")
     };
@@ -134,10 +135,10 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         let seconds = seconds.to_string();
         (
             tr(
-                "Hex will record once through its dictation microphone and send only the transcript to this app. Raw audio stays in Hex.",
+                "Pair this app once so it can ask Hex to record through Hex's dictation microphone. Each request starts one recording, and only its transcript goes back. Raw audio stays in Hex.",
             ),
             tr_fill(
-                "Recording stops itself after {} seconds. Stop or cancel it in Hex's window at any time.",
+                "Pairing starts nothing by itself. Each recording stops itself after {} seconds and can be stopped or cancelled in Hex's window. Revoke the app any time in Labs › Browser access.",
                 &seconds,
             ),
         )
@@ -176,7 +177,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                     button(
                         p,
                         "browser-connect-deny",
-                        tr("Deny"),
+                        if record { tr("Not now") } else { tr("Deny") },
                         ButtonKind::Secondary,
                         |ui: &mut Ui, _| answer(ui, false),
                     )
@@ -185,7 +186,11 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .child(button(
                     p,
                     "browser-connect-allow",
-                    tr("Allow once"),
+                    if record {
+                        tr("Allow")
+                    } else {
+                        tr("Allow once")
+                    },
                     ButtonKind::Primary,
                     |ui: &mut Ui, _| answer(ui, true),
                 )),

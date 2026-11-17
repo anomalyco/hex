@@ -1,7 +1,7 @@
 //! What Hex's window asks about, and what the person answers.
 //!
-//! Both consents (one transcription upload, one microphone recording) name
-//! the recipient the grant is scored to. A browser page is named by the
+//! Both consents (one transcription upload, a pairing to start recordings)
+//! name the recipient the grant is scored to. A browser page is named by the
 //! `Origin` its browser sent; a native process is named by the code signing
 //! identity resolved from its Unix-socket peer audit token, never by an app
 //! name or a path it claims.

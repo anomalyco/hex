@@ -591,6 +591,9 @@ struct ServiceView {
     consent: Option<crate::local_api::Prompt>,
     /// A consented recording Hex's window can stop or cancel (macOS).
     record: Option<crate::local_api::RecordView>,
+    /// Clients paired to start recordings, which the window can revoke
+    /// (macOS).
+    grants: Vec<crate::local_api::RecordGrant>,
 }
 
 /// The one modal sheet currently open over the window.

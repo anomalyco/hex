@@ -156,6 +156,7 @@ impl Backend {
                 editing: false,
                 consent: published.consent.clone(),
                 record: published.record.clone(),
+                grants: published.grants.clone(),
             },
             settings: published.settings.clone(),
         })

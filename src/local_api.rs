@@ -32,7 +32,9 @@ mod transcriptions;
 pub(crate) use connect::Connect;
 pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 pub(crate) use record::View as RecordView;
-pub(crate) use record::{Phase as RecordPhase, Sessions as RecordSessions};
+pub(crate) use record::{
+    GrantView as RecordGrant, Phase as RecordPhase, Sessions as RecordSessions,
+};
 
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
@@ -2076,6 +2078,7 @@ mod tests {
                 dictation_token: None,
                 stream_token: None,
                 connect_token: None,
+                record_grant: None,
                 record_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
@@ -2099,6 +2102,7 @@ mod tests {
                 dictation_token: None,
                 stream_token: None,
                 connect_token: None,
+                record_grant: None,
                 record_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
@@ -2150,6 +2154,7 @@ mod tests {
                 dictation_token: None,
                 stream_token: None,
                 connect_token: None,
+                record_grant: None,
                 record_token: None,
                 content_type: None,
                 content_length: None,
@@ -2888,7 +2893,6 @@ mod tests {
     fn record_timings() -> record::Timings {
         record::Timings {
             code: Duration::from_secs(60),
-            waiting: Duration::from_secs(60),
             recording: Duration::from_secs(60),
             grace: Duration::from_secs(60),
             prompt: Duration::from_secs(1),
@@ -2923,16 +2927,20 @@ mod tests {
         (api, sessions)
     }
 
-    /// One `/record` request: a JSON body for authorize/token, a bare token
-    /// request for the session actions.
+    /// One `/record` request: a JSON body for pairing/token, a bare request
+    /// for the grant and session actions.
     fn record_request(
         port: u16,
         method: &str,
         path: &str,
         origin: &str,
+        grant: Option<&str>,
         token: Option<&str>,
         body: Option<&str>,
     ) -> String {
+        let grant = grant.map_or_else(String::new, |grant| {
+            format!("X-Hex-Record-Grant: {grant}\r\n")
+        });
         let token = token.map_or_else(String::new, |token| {
             format!("X-Hex-Record-Token: {token}\r\n")
         });
@@ -2949,20 +2957,22 @@ mod tests {
         raw_request(
             port,
             &format!(
-                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n{token}{headers}Connection: close\r\n\r\n{body}"
+                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n{grant}{token}{headers}Connection: close\r\n\r\n{body}"
             ),
         )
     }
 
-    fn record_authorize(port: u16, origin: &str) -> String {
+    /// `POST /record/pair`, answered by a gate that allows it.
+    fn record_pair(port: u16, origin: &str) -> String {
         let body = format!(
             r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","state":"r1"}}"#
         );
         let response = record_request(
             port,
             "POST",
-            record::AUTHORIZE_PATH,
+            record::PAIR_PATH,
             origin,
+            None,
             None,
             Some(&body),
         );
@@ -2973,52 +2983,94 @@ mod tests {
             .to_owned()
     }
 
-    fn record_token(port: u16, origin: &str, code: &str) -> (String, u64) {
+    /// `POST /record/token`: the pairing code for a grant token.
+    fn record_grant(port: u16, origin: &str, code: &str) -> (String, u64) {
         let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
-        let response = record_request(port, "POST", record::TOKEN_PATH, origin, None, Some(&body));
+        let response = record_request(
+            port,
+            "POST",
+            record::TOKEN_PATH,
+            origin,
+            None,
+            None,
+            Some(&body),
+        );
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let value: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
+        (
+            value["grantToken"].as_str().unwrap().to_owned(),
+            value["grantId"].as_u64().unwrap(),
+        )
+    }
+
+    /// `POST /record/start`: one recording session under a grant.
+    fn record_start(port: u16, origin: &str, grant: &str) -> (String, u64, String) {
+        let response = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            origin,
+            Some(grant),
+            None,
+            None,
+        );
+        assert!(response.starts_with("HTTP/1.1 201"), "{response}");
         let value: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
         (
             value["sessionToken"].as_str().unwrap().to_owned(),
             value["id"].as_u64().unwrap(),
+            value["state"].as_str().unwrap().to_owned(),
         )
     }
 
     #[test]
-    fn a_consented_recording_starts_and_returns_only_its_transcript() {
+    fn pairing_once_allows_repeated_distinct_recordings() {
         let gate = ScriptedGate::new(Answer::Allow);
-        let recording = FakeRecording::with_text("the consented words");
-        let (api, _sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let recording = FakeRecording::with_text("the paired words");
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
         let port = api.document.port;
+        let origin = "https://app.example";
 
-        let code = record_authorize(port, "https://app.example");
+        let code = record_pair(port, origin);
         let prompt = gate.last_prompt().unwrap();
         assert_eq!(prompt.intent, Intent::Record);
-        assert_eq!(prompt.recipient.label(), "https://app.example");
-        let (token, id) = record_token(port, "https://app.example", &code);
-        assert_eq!(id, 1);
+        assert_eq!(prompt.recipient.label(), origin);
+        // Pairing asks once and starts nothing.
+        assert_eq!(recording.starts(), 0);
+        assert_eq!(gate.asks(), 1);
 
-        let started = record_request(
+        let (grant, grant_id) = record_grant(port, origin, &code);
+        assert_eq!(grant_id, 1);
+        assert_eq!(sessions.grants().len(), 1);
+        assert_eq!(sessions.grants()[0].id, grant_id);
+        assert_eq!(recording.starts(), 0);
+        // Pairing the same verified recipient again is refused, not asked.
+        let again = record_request(
             port,
             "POST",
-            record::START_PATH,
-            "https://app.example",
-            Some(&token),
+            record::PAIR_PATH,
+            origin,
             None,
+            None,
+            Some(&format!(
+                r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256"}}"#
+            )),
         );
-        assert!(started.starts_with("HTTP/1.1 201"), "{started}");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(response_body(&started)).unwrap()["state"],
-            "recording"
-        );
+        assert!(again.starts_with("HTTP/1.1 409"), "{again}");
+        assert_eq!(body_code(&again), "already-paired");
+        assert_eq!(gate.asks(), 1);
+
+        let (first, first_id, state) = record_start(port, origin, &grant);
+        assert_eq!(state, "recording");
         assert_eq!(recording.starts(), 1);
 
         let status = record_request(
             port,
             "GET",
             record::STATUS_PATH,
-            "https://app.example",
-            Some(&token),
+            origin,
+            None,
+            Some(&first),
             None,
         );
         assert!(status.starts_with("HTTP/1.1 200"), "{status}");
@@ -3031,55 +3083,193 @@ mod tests {
             port,
             "POST",
             record::FINISH_PATH,
-            "https://app.example",
-            Some(&token),
+            origin,
+            None,
+            Some(&first),
             None,
         );
         assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
         let body: serde_json::Value = serde_json::from_str(response_body(&finished)).unwrap();
-        assert_eq!(body["transcript"], "the consented words");
+        assert_eq!(body["transcript"], "the paired words");
         assert_eq!(body["durationMs"], 1234);
         assert_eq!(recording.finishes(), 1);
 
-        // The transcript is handed over once, and the recording is over.
-        let again = record_request(
+        // The transcript is handed over once.
+        let repeated = record_request(
             port,
             "POST",
             record::FINISH_PATH,
-            "https://app.example",
-            Some(&token),
+            origin,
+            None,
+            Some(&first),
             None,
         );
-        assert!(again.starts_with("HTTP/1.1 409"), "{again}");
-        assert_eq!(body_code(&again), "session-finished");
+        assert!(repeated.starts_with("HTTP/1.1 409"), "{repeated}");
+        assert_eq!(body_code(&repeated), "session-finished");
+
+        // The same grant opens another, distinct recording without asking
+        // again.
+        let (second, second_id, _) = record_start(port, origin, &grant);
+        assert_ne!(second, first);
+        assert_ne!(second_id, first_id);
+        assert_eq!(recording.starts(), 2);
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&second),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        assert_eq!(recording.finishes(), 2);
+        assert_eq!(gate.asks(), 1);
     }
 
     #[test]
-    fn a_denied_recording_never_starts_and_cools_down() {
+    fn revoking_a_grant_ends_its_session_and_further_starts() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("revoked words");
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, _, _) = record_start(port, origin, &grant);
+        assert_eq!(
+            sessions.view().map(|view| view.phase),
+            Some(record::Phase::Recording)
+        );
+
+        let revoked = record_request(
+            port,
+            "POST",
+            record::REVOKE_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(revoked.starts_with("HTTP/1.1 204"), "{revoked}");
+        assert_eq!(recording.cancels(), 1);
+        assert!(sessions.grants().is_empty());
+        assert!(sessions.view().is_none());
+
+        // The live session is cancelled and the grant opens nothing more.
+        let cancelled = record_request(
+            port,
+            "GET",
+            record::STATUS_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(cancelled.starts_with("HTTP/1.1 200"), "{cancelled}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&cancelled)).unwrap()["state"],
+            "cancelled"
+        );
+        let start = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(start.starts_with("HTTP/1.1 401"), "{start}");
+        let again = record_request(
+            port,
+            "POST",
+            record::REVOKE_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(again.starts_with("HTTP/1.1 401"), "{again}");
+
+        // Revoking lets the recipient pair again, with a fresh prompt.
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (_, _, _) = record_start(port, origin, &grant);
+        assert_eq!(gate.asks(), 2);
+        assert_eq!(recording.starts(), 2);
+    }
+
+    #[test]
+    fn revoking_drops_pairing_codes_issued_before_it() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("codes");
+        let (api, _sessions) = start_record_api(gate, recording, record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+
+        // Two allowed asks arrive before either is exchanged; the first
+        // becomes the grant.
+        let first = record_pair(port, origin);
+        let second = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &first);
+        let revoked = record_request(
+            port,
+            "POST",
+            record::REVOKE_PATH,
+            origin,
+            Some(&grant),
+            None,
+            None,
+        );
+        assert!(revoked.starts_with("HTTP/1.1 204"), "{revoked}");
+
+        // The code that was still outstanding cannot pair the same
+        // recipient behind the person's back.
+        let body = format!(r#"{{"code":"{second}","codeVerifier":"{VERIFIER}"}}"#);
+        let late = record_request(
+            port,
+            "POST",
+            record::TOKEN_PATH,
+            origin,
+            None,
+            None,
+            Some(&body),
+        );
+        assert!(late.starts_with("HTTP/1.1 403"), "{late}");
+        assert_eq!(body_code(&late), "invalid-grant");
+    }
+
+    #[test]
+    fn a_denied_pairing_never_pairs_and_cools_down() {
         let gate = ScriptedGate::new(Answer::Deny);
         let recording = FakeRecording::with_text("never");
         let mut timings = record_timings();
         timings.cooldown = Duration::from_secs(30);
-        let (api, _sessions) = start_record_api(gate.clone(), recording.clone(), timings);
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), timings);
         let port = api.document.port;
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
         let denied = record_request(
             port,
             "POST",
-            record::AUTHORIZE_PATH,
+            record::PAIR_PATH,
             "https://app.example",
+            None,
             None,
             Some(&body),
         );
         assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
         assert_eq!(body_code(&denied), "consent-denied");
         assert_eq!(recording.starts(), 0);
+        assert!(sessions.grants().is_empty());
 
         let cooled = record_request(
             port,
             "POST",
-            record::AUTHORIZE_PATH,
+            record::PAIR_PATH,
             "https://app.example",
+            None,
             None,
             Some(&body),
         );
@@ -3088,13 +3278,15 @@ mod tests {
     }
 
     #[test]
-    fn a_recording_token_reaches_no_other_route_and_no_other_origin() {
+    fn a_grant_and_session_reach_no_other_route_and_no_other_origin() {
         let gate = ScriptedGate::new(Answer::Allow);
         let recording = FakeRecording::with_text("private words");
         let (api, _sessions) = start_record_api(gate, recording, record_timings());
         let port = api.document.port;
-        let code = record_authorize(port, "https://app.example");
-        let (token, _) = record_token(port, "https://app.example", &code);
+        let origin = "https://app.example";
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, _, _) = record_start(port, origin, &grant);
 
         for (method, path) in [
             ("GET", "/health"),
@@ -3110,8 +3302,9 @@ mod tests {
                 port,
                 method,
                 path,
-                "https://app.example",
-                Some(&token),
+                origin,
+                Some(&grant),
+                Some(&session),
                 None,
             );
             assert!(
@@ -3120,25 +3313,34 @@ mod tests {
             );
         }
 
-        // The session is bound to the origin that consented to it.
-        let stolen = record_request(
-            port,
-            "POST",
-            record::START_PATH,
-            "https://other.example",
-            Some(&token),
-            None,
-        );
-        assert!(stolen.starts_with("HTTP/1.1 401"), "{stolen}");
+        // Neither token crosses to another origin.
+        for (grant_header, session_header) in
+            [(Some(grant.as_str()), None), (None, Some(session.as_str()))]
+        {
+            let stolen = record_request(
+                port,
+                "POST",
+                record::START_PATH,
+                "https://other.example",
+                grant_header,
+                session_header,
+                None,
+            );
+            assert!(stolen.starts_with("HTTP/1.1 401"), "{stolen}");
+        }
         let right = record_request(
             port,
             "POST",
             record::START_PATH,
-            "https://app.example",
-            Some(&token),
+            origin,
+            Some(&grant),
+            None,
             None,
         );
-        assert!(right.starts_with("HTTP/1.1 201"), "{right}");
+        // The first session is still open, so a second is refused; the grant
+        // itself is accepted.
+        assert!(right.starts_with("HTTP/1.1 409"), "{right}");
+        assert_eq!(body_code(&right), "session-busy");
     }
 
     #[test]
@@ -3150,17 +3352,10 @@ mod tests {
         timings.grace = Duration::from_millis(60);
         let (api, sessions) = start_record_api(gate, recording.clone(), timings);
         let port = api.document.port;
-        let code = record_authorize(port, "https://app.example");
-        let (token, id) = record_token(port, "https://app.example", &code);
-        let started = record_request(
-            port,
-            "POST",
-            record::START_PATH,
-            "https://app.example",
-            Some(&token),
-            None,
-        );
-        assert!(started.starts_with("HTTP/1.1 201"), "{started}");
+        let origin = "https://app.example";
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, id, _) = record_start(port, origin, &grant);
         // The lease stops the recording on its own.
         let deadline = Instant::now() + Duration::from_secs(2);
         while recording.finishes() == 0 && Instant::now() < deadline {
@@ -3176,8 +3371,9 @@ mod tests {
             port,
             "POST",
             record::FINISH_PATH,
-            "https://app.example",
-            Some(&token),
+            origin,
+            None,
+            Some(&session),
             None,
         );
         assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
@@ -3190,18 +3386,19 @@ mod tests {
         let recording = FakeRecording::with_text("first");
         let (api, _sessions) = start_record_api(gate, recording, record_timings());
         let port = api.document.port;
-        let code = record_authorize(port, "https://app.example");
-        let (token, _) = record_token(port, "https://app.example", &code);
+        let origin = "https://app.example";
+        let code = record_pair(port, origin);
+        let (grant, _) = record_grant(port, origin, &code);
+        let (session, _, _) = record_start(port, origin, &grant);
 
-        let code = record_authorize(port, "https://app.example");
-        let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
         let busy = record_request(
             port,
             "POST",
-            record::TOKEN_PATH,
-            "https://app.example",
+            record::START_PATH,
+            origin,
+            Some(&grant),
             None,
-            Some(&body),
+            None,
         );
         assert!(busy.starts_with("HTTP/1.1 409"), "{busy}");
         assert_eq!(body_code(&busy), "session-busy");
@@ -3210,35 +3407,26 @@ mod tests {
             port,
             "POST",
             record::CANCEL_PATH,
-            "https://app.example",
-            Some(&token),
+            origin,
+            None,
+            Some(&session),
             None,
         );
         assert!(cancelled.starts_with("HTTP/1.1 204"), "{cancelled}");
-        let code = record_authorize(port, "https://app.example");
-        let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
-        let second = record_request(
-            port,
-            "POST",
-            record::TOKEN_PATH,
-            "https://app.example",
-            None,
-            Some(&body),
-        );
-        assert!(second.starts_with("HTTP/1.1 200"), "{second}");
+        let (second, _, _) = record_start(port, origin, &grant);
+        assert_ne!(second, session);
     }
 
     #[test]
     fn a_native_grant_is_bound_to_the_verified_peer() {
         let gate = ScriptedGate::new(Answer::Allow);
         let recording = FakeRecording::with_text("native words");
-        let timings = record_timings();
         let sessions = Arc::new(record::Sessions::with_timings(
             app_origin,
             always_enabled,
             Some(gate),
             recording,
-            timings,
+            record_timings(),
         ));
         let identity = record::Identity {
             identifier: "com.example.recorder".into(),
@@ -3249,7 +3437,7 @@ mod tests {
         let body = format!(
             r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","clientName":"ignored"}}"#
         );
-        let response = sessions.authorize(channel.clone(), body.as_bytes());
+        let response = sessions.pair(channel.clone(), body.as_bytes());
         assert_eq!(response.status, 200, "{:?}", response.body);
         let code: String =
             serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["code"]
@@ -3267,37 +3455,54 @@ mod tests {
             },
         };
         let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
-        let stolen = sessions.exchange(other, exchange.as_bytes());
+        let stolen = sessions.exchange(other.clone(), exchange.as_bytes());
         assert_eq!(stolen.status, 403);
-        let spent = sessions.exchange(channel, exchange.as_bytes());
+        let spent = sessions.exchange(channel.clone(), exchange.as_bytes());
         assert_eq!(spent.status, 403);
 
-        // The client's own name is never the native identity.
-        let prompt = {
-            let gate = ScriptedGate::new(Answer::Allow);
-            let recording = FakeRecording::with_text("x");
-            let sessions = Arc::new(record::Sessions::with_timings(
-                app_origin,
-                always_enabled,
-                Some(gate.clone()),
-                recording,
-                record_timings(),
-            ));
-            let body =
-                format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
-            let response = sessions.authorize(
-                record::Channel::Native {
-                    peer: record::PeerId([3; 8]),
-                    identity: record::Identity {
-                        identifier: "com.example.recorder".into(),
-                        team: Some("ABCDE12345".into()),
-                    },
+        // A fresh pairing mints a grant bound to the verified peer.
+        let response = sessions.pair(channel.clone(), body.as_bytes());
+        let code: String =
+            serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted = sessions.exchange(channel.clone(), exchange.as_bytes());
+        assert_eq!(minted.status, 200);
+        let grant: String =
+            serde_json::from_slice::<serde_json::Value>(&minted.body).unwrap()["grantToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        assert_eq!(sessions.start(&grant, &other).status, 401);
+        assert_eq!(sessions.start(&grant, &channel).status, 201);
+        assert_eq!(sessions.revoke_token(&grant, &other).status, 401);
+    }
+
+    #[test]
+    fn a_native_client_name_never_becomes_its_identity() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let sessions = Arc::new(record::Sessions::with_timings(
+            app_origin,
+            always_enabled,
+            Some(gate.clone()),
+            FakeRecording::with_text("x"),
+            record_timings(),
+        ));
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
+        let response = sessions.pair(
+            record::Channel::Native {
+                peer: record::PeerId([3; 8]),
+                identity: record::Identity {
+                    identifier: "com.example.recorder".into(),
+                    team: Some("ABCDE12345".into()),
                 },
-                body.as_bytes(),
-            );
-            assert_eq!(response.status, 200);
-            gate.last_prompt().unwrap()
-        };
+            },
+            body.as_bytes(),
+        );
+        assert_eq!(response.status, 200);
+        let prompt = gate.last_prompt().unwrap();
         assert_eq!(prompt.recipient.label(), "com.example.recorder");
         assert!(prompt.recipient.claimed_name().is_none());
     }
@@ -3321,7 +3526,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn a_native_socket_client_records_under_its_verified_identity() {
+    fn a_native_socket_client_pairs_then_records_twice_under_its_identity() {
         let directory = temp_directory();
         let socket = directory.join("record.sock");
         let gate = ScriptedGate::new(Answer::Allow);
@@ -3347,12 +3552,12 @@ mod tests {
         .unwrap();
 
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
-        let authorize = format!(
+        let pair = format!(
             "POST {} HTTP/1.1\r\nHost: hex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            record::AUTHORIZE_PATH,
+            record::PAIR_PATH,
             body.len()
         );
-        let (status, response) = native_request(&socket, &authorize);
+        let (status, response) = native_request(&socket, &pair);
         if status == 403 && response.contains("identity-unverified") {
             // An unsigned test binary has no identity to verify. The native
             // refusal itself is the contract then; the browser tests cover
@@ -3371,6 +3576,7 @@ mod tests {
         assert_eq!(prompt.intent, Intent::Record);
         // The claimed name never becomes the identity.
         assert!(prompt.recipient.claimed_name().is_none());
+        assert_eq!(recording.starts(), 0);
 
         let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
         let token_path = format!(
@@ -3380,24 +3586,43 @@ mod tests {
         );
         let (status, response) = native_request(&socket, &token_path);
         assert_eq!(status, 200, "{response}");
-        let token: String = serde_json::from_str::<serde_json::Value>(response_body(&response))
-            .unwrap()["sessionToken"]
+        let grant: String = serde_json::from_str::<serde_json::Value>(response_body(&response))
+            .unwrap()["grantToken"]
             .as_str()
             .unwrap()
             .to_owned();
-        let session = |path: &str, method: &str| {
+
+        let grant_request = |path: &str| {
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: hex\r\nX-Hex-Record-Grant: {grant}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        };
+        let session_request = |path: &str, method: &str, token: &str| {
             format!(
                 "{method} {path} HTTP/1.1\r\nHost: hex\r\nX-Hex-Record-Token: {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             )
         };
-        let (status, response) = native_request(&socket, &session(record::START_PATH, "POST"));
-        assert_eq!(status, 201, "{response}");
-        let (status, response) = native_request(&socket, &session(record::FINISH_PATH, "POST"));
-        assert_eq!(status, 200, "{response}");
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["transcript"],
-            "native words"
-        );
+        let mut sessions_seen = Vec::new();
+        for _ in 0..2 {
+            let (status, response) = native_request(&socket, &grant_request(record::START_PATH));
+            assert_eq!(status, 201, "{response}");
+            let started: serde_json::Value =
+                serde_json::from_str(response_body(&response)).unwrap();
+            let token = started["sessionToken"].as_str().unwrap().to_owned();
+            sessions_seen.push(token.clone());
+            assert_eq!(recording.starts() as usize, sessions_seen.len());
+            let (status, response) = native_request(
+                &socket,
+                &session_request(record::FINISH_PATH, "POST", &token),
+            );
+            assert_eq!(status, 200, "{response}");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["transcript"],
+                "native words"
+            );
+        }
+        assert_ne!(sessions_seen[0], sessions_seen[1]);
+        assert_eq!(gate.asks(), 1);
 
         // The native socket is not the local API: no health, no bearer route.
         let (status, _) = native_request(
@@ -3413,6 +3638,12 @@ mod tests {
             ),
         );
         assert_eq!(status, 404);
+
+        // The paired client can give its grant back over the same socket.
+        let (status, response) = native_request(&socket, &grant_request(record::REVOKE_PATH));
+        assert_eq!(status, 204, "{response}");
+        let (status, _) = native_request(&socket, &grant_request(record::START_PATH));
+        assert_eq!(status, 401);
     }
 
     #[test]
@@ -3429,18 +3660,25 @@ mod tests {
         let origin = "https://app.example";
         let channel = record::Channel::Web(origin.into());
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
-        let authorized = sessions.authorize(channel.clone(), body.as_bytes());
+        let paired = sessions.pair(channel.clone(), body.as_bytes());
         let code: String =
-            serde_json::from_slice::<serde_json::Value>(&authorized.body).unwrap()["code"]
+            serde_json::from_slice::<serde_json::Value>(&paired.body).unwrap()["code"]
                 .as_str()
                 .unwrap()
                 .to_owned();
         let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
-        let minted = sessions.exchange(channel.clone(), exchange.as_bytes());
-        let minted: serde_json::Value = serde_json::from_slice(&minted.body).unwrap();
-        let token = minted["sessionToken"].as_str().unwrap().to_owned();
-        let id = minted["id"].as_u64().unwrap();
-        assert_eq!(sessions.start(&token, &channel).status, 201);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        let grant = minted["grantToken"].as_str().unwrap().to_owned();
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let session =
+            serde_json::from_slice::<serde_json::Value>(&started.body).unwrap()["sessionToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let id = sessions.view().map(|view| view.id).unwrap();
         assert_eq!(
             sessions.view().map(|view| view.phase),
             Some(record::Phase::Recording)
@@ -3453,30 +3691,15 @@ mod tests {
             sessions.view().map(|view| view.phase),
             Some(record::Phase::Stopped)
         );
-        let finished = sessions.finish(&token, &channel);
+        let finished = sessions.finish(&session, &channel);
         assert_eq!(finished.status, 200);
 
         // A second recording cancelled from the window is discarded.
-        let code: String = serde_json::from_slice::<serde_json::Value>(
-            &sessions.authorize(channel.clone(), body.as_bytes()).body,
-        )
-        .unwrap()["code"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
-        let minted: serde_json::Value =
-            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
-                .unwrap();
-        let token = minted["sessionToken"].as_str().unwrap().to_owned();
-        let id = minted["id"].as_u64().unwrap();
-        assert_eq!(sessions.start(&token, &channel).status, 201);
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let id = sessions.view().map(|view| view.id).unwrap();
         sessions.cancel(id);
         assert_eq!(recording.cancels(), 1);
-        let cancelled = sessions.finish(&token, &channel);
-        assert_eq!(cancelled.status, 409);
-        let cancelled: serde_json::Value = serde_json::from_slice(&cancelled.body).unwrap();
-        assert_eq!(cancelled["code"], "session-cancelled");
         assert!(sessions.view().is_none());
     }
 

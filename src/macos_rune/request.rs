@@ -45,6 +45,10 @@ pub(crate) enum Request {
         id: u64,
         stop: bool,
     },
+    /// The window withdrew a paired client's grant to start recordings.
+    RevokeRecordGrant {
+        id: u64,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
 }

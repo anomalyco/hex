@@ -2916,6 +2916,20 @@ fn clipboard_phrase_shows_its_phrase_on_its_card_while_on() {
 
 #[test]
 fn signature_shows_its_line_on_its_card_while_on() {
+fn browser_access_lists_a_paired_client_and_revokes_it() {
+    let mut rt = runtime("mac-labs-browser-access", true, (980.0, 2000.0));
+    assert!(rt.find("api-paired-1").is_some());
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.contains("com.example.fieldnotes")),
+        "the paired client is named"
+    );
+    tap(&mut rt, "api-revoke-1");
+    assert!(matches!(sent(&rt), [Request::RevokeRecordGrant { id: 1 }]));
+}
+
+#[test]
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     rt.update(|ui, _| ui.lab_store.group = Some(Feature::Signature.group()));

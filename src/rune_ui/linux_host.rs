@@ -157,6 +157,7 @@ impl Backend {
                 editing,
                 consent: None,
                 record: None,
+                grants: Vec::new(),
             },
             settings,
         })

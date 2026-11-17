@@ -89,6 +89,11 @@ pub(crate) enum Request {
         #[allow(dead_code)]
         stop: bool,
     },
+    /// The window withdrew a client's grant; macOS only.
+    RevokeRecordGrant {
+        #[allow(dead_code)]
+        id: u64,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.

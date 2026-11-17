@@ -2878,11 +2878,13 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
 │   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
-│   ├── POST /record/authorize -> "Allow one microphone recording?"
+│   ├── POST /record/pair -> "Allow this app to start recordings?"
 │   │   ├── Web: listed Origin; native: owner-only record.sock + verified signature
-│   │   ├── Allow once -> code, PKCE token -> one start/status/finish/cancel session
+│   │   ├── Allow -> code, PKCE grant; Not now -> 403 + 30 s cooldown
+│   │   ├── Grant: repeated POST /record/start, each its own session
 │   │   ├── Window card: Stop recording / Cancel, lease countdown; 120 s max
-│   │   ├── Bind to Origin or peer audit token; one session at a time
+│   │   ├── Grant bound to Origin or peer audit token; one session at a time
+│   │   ├── Revoke in Labs › Browser access or POST /record/revoke ends it
 │   │   └── Transcript only: no raw audio, levels, partials, or other route
 │   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
@@ -2965,19 +2967,27 @@ only rendering proof is the `--scene browser-connect` snapshot; no real
 browser page, click, or model transcription was run, and its copy is English
 only.
 
-The recording slice adds `POST /record/authorize|token` and a one-session
-`start|status|finish|cancel` over a `X-Hex-Record-Token`. Web clients use the
-same listed-Origin CORS channel; native clients (Electron main, Rune, Rust)
-use the owner-only `record.sock`, whose peer audit token `Security.framework`
-resolves to a signing identifier and team. Consent names that verified
-identity, the grant and token are bound to it, and Hex's window shows a
-non-modal card with Stop recording and Cancel while the 120 s lease runs.
+The recording slice adds `POST /record/pair|token` plus a revocable
+`X-Hex-Record-Grant`, and per-recording `start` (grant) then
+`status|finish|cancel` (session token). Pairing asks once and starts nothing;
+each start mints a separate short-lived session, so a paired client records
+again without another prompt until the grant is revoked in Labs › Browser
+access or with `POST /record/revoke`. Web clients use the same listed-Origin
+CORS channel; native clients (Electron main, Rune, Rust) use the owner-only
+`record.sock`, whose peer audit token `Security.framework` resolves to a
+signing identifier and team. Consent names that verified identity, the grant
+and its sessions are bound to it, and Hex's window shows a non-modal card with
+Stop recording and Cancel while the 120 s lease runs. Grants are in memory
+only: quitting Hex revokes every pairing because there is no secure on-disk
+store for a client identity, and the contract report says so.
 `local_api` tests drive the whole exchange with a fake recording backend
-(never a microphone), including the lease, deny, one-session rule, and the
-token's inability to reach any other route; one macOS test goes through the
-real socket and peer audit token, skipping when the test binary has no signing
-identity. Dialog and card are snapshots only, no real recording or Electron
-process was run, and copy is English only.
+(never a microphone), including one prompt for repeated recordings, distinct
+sessions, revoke, the lease, deny, the one-session rule, and neither token's
+ability to reach any other route; one macOS test goes through the real socket
+and peer audit token, pairing, recording twice, and revoking, skipping when
+the test binary has no signing identity. Dialog, card, and revoke rows are
+snapshots only, no real recording or Electron process was run, and copy is
+English only.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

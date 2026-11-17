@@ -106,6 +106,8 @@ pub(crate) struct Published {
     pub(crate) consent: Option<crate::local_api::Prompt>,
     /// A consented recording Hex's window can stop or cancel.
     pub(crate) record: Option<crate::local_api::RecordView>,
+    /// Clients paired to start recordings, which the window can revoke.
+    pub(crate) grants: Vec<crate::local_api::RecordGrant>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;

@@ -246,7 +246,8 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         output::trust_fixture(ui);
     }),
-    // One microphone recording for a verified native client.
+    // Pairing a verified native client to start recordings; pairing alone
+    // starts nothing.
     ("record-consent", |ui| {
         *ui = mac_fixture();
         ui.settings.labs.api_browser_access = true;
@@ -996,6 +997,23 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.screenshots = true;
         ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
+    // Labs › Browser access with one app paired to start recordings and its
+    // Revoke button.
+    ("mac-labs-browser-access", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.api_browser_access = true;
+        ui.lab_store.search = rune::TextEdit::new("Browser access".to_owned());
+        ui.lab_store.group = Some(crate::labs::Feature::ApiBrowserAccess.group());
+        if let Some(view) = &mut ui.view {
+            view.grants = vec![crate::local_api::RecordGrant {
+                id: 1,
+                recipient: crate::local_api::Recipient::Native {
+                    identifier: "com.example.fieldnotes".into(),
+                    team: Some("K7Z4Q2M8A1".into()),
+                },
+            }];
+        }
+    }),
     // Labs › YOLO mode's card while on, limited to two apps.
     ("mac-labs-yolo-mode", |ui| {
         labs_with_some_on(ui);
@@ -1317,6 +1335,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         editing: false,
         consent: None,
         record: None,
+        grants: Vec::new(),
     });
     ui
 }

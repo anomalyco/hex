@@ -206,6 +206,11 @@ impl Runtime {
                     }
                 }
             }
+            Request::RevokeRecordGrant { id } => {
+                if let Some(record) = &self.record {
+                    record.revoke(id);
+                }
+            }
             Request::ReloadSettings => self.reload_settings(),
             Request::Desktop(_)
             | Request::CaptureShortcutFor(_)
@@ -513,6 +518,11 @@ impl Runtime {
             preparation,
             consent: self.consent.as_ref().and_then(|desk| desk.prompt()),
             record: self.record.as_ref().and_then(|record| record.view()),
+            grants: self
+                .record
+                .as_ref()
+                .map(|record| record.grants())
+                .unwrap_or_default(),
         }
     }
 }

@@ -38,6 +38,8 @@ mod model;
 mod save;
 use self::model::{PendingPreparation, TranscriptionPreparation};
 use self::save::{gnome_shortcuts_key, save_listening, save_with, settings_modified};
+mod request;
+pub(crate) use request::HostRequest;
 
 /// The host's refresh while it starts, stops, or prepares something.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
@@ -295,7 +297,9 @@ impl HostHandle {
                     }
                     Ok(())
                 }
-                HostRequest::AnswerConsent { .. } | HostRequest::RecordControl { .. } => Ok(()),
+                HostRequest::AnswerConsent { .. }
+                | HostRequest::RecordControl { .. }
+                | HostRequest::RevokeRecordGrant { .. } => Ok(()),
             }
         };
         self.wake();
