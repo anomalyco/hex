@@ -120,6 +120,8 @@ impl Paster {
     #[allow(dead_code, reason = "staged until the mixed picker is connected")]
     pub(crate) fn paste_capture(&mut self, capture: &Payload, target: i32) -> Result<()> {
         let revision = self.activity.revision();
+        let focus = crate::accessibility::PasteFocus::capture(target)
+            .ok_or_else(|| eyre!("could not confirm the capture paste target"))?;
         self.continuation = None;
         self.prepared_clipboard = None;
         insert(
@@ -133,6 +135,7 @@ impl Paster {
             || {
                 self.activity.revision() == revision
                     && crate::dictation::context::frontmost_pid() == Some(target)
+                    && focus.unchanged()
             },
             || crate::keyboard::post_command('v'),
             std::thread::sleep,
@@ -169,6 +172,9 @@ fn insert(
             // after writeObjects could instead adopt an intervening copy.
             let count = board.clearContents();
             owned = Some(count);
+            if board.changeCount() != count {
+                return Err(eyre!("clipboard changed before writing the capture"));
+            }
             write_items(board, &[item])?;
             wait(Duration::from_millis(20));
             if !focused() || board.changeCount() != count {

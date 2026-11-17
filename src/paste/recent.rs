@@ -3,7 +3,7 @@
 #![allow(dead_code, reason = "staged until the mixed shortcut is enabled")]
 
 use crate::capture_host::paste_source::{self as captures, Scope};
-use crate::history::{HistoryStore, paste_source as dictations};
+use crate::history::{History, paste_source as dictations};
 use scrawl_capture::model::ScrawlBundle;
 use std::path::PathBuf;
 
@@ -20,7 +20,7 @@ pub(crate) struct Row {
 }
 
 pub(crate) fn snapshot(
-    history: &HistoryStore,
+    history: &History,
     captures: Option<&Scope<'_>>,
     limit: usize,
     now: u64,
@@ -51,7 +51,7 @@ pub(crate) fn snapshot(
     rows
 }
 
-pub(crate) fn latest(history: &HistoryStore, captures: Option<&Scope<'_>>, now: u64) -> Option<Id> {
+pub(crate) fn latest(history: &History, captures: Option<&Scope<'_>>, now: u64) -> Option<Id> {
     snapshot(history, captures, 1, now).pop().map(|r| r.id)
 }
 
@@ -61,18 +61,63 @@ pub(crate) enum Output {
 }
 
 pub(crate) fn resolve(
-    history: &HistoryStore,
+    history: &History,
     captures: Option<&Scope<'_>>,
     id: &Id,
     now: u64,
 ) -> Option<Output> {
     match id {
-        Id::Dictation(id) => history
-            .resolve_paste(*id, now)
-            .map(|s| Output::Text(s.into())),
+        Id::Dictation(id) => history.resolve_paste(*id, now).map(Output::Text),
         Id::Capture(id) => captures?
             .resolve(id, now)
             .map(|(dir, bundle)| Output::Capture(dir, Box::new(bundle))),
+    }
+}
+
+/// Only constructed from the gesture/menu's frontmost application, never
+/// from the caller of a control request. Runs on the ordered output worker.
+pub(crate) struct Request {
+    pub id: Option<Id>,
+    pub target: i32,
+}
+
+impl Request {
+    pub(crate) fn insert(
+        self,
+        paster: &mut super::Paster,
+        history: Option<&History>,
+    ) -> color_eyre::Result<String> {
+        use color_eyre::eyre::eyre;
+        let history = history.ok_or_else(|| eyre!("paste history is unavailable"))?;
+        let settings = crate::app_settings::capture_settings();
+        let root = settings.enabled.then(|| settings.captures_dir());
+        let scope = root.as_ref().map(|p| Scope::new(p, settings.bundle_days));
+        let now = crate::history::now_ms();
+        let id = self
+            .id
+            .or_else(|| latest(history, scope.as_ref(), now))
+            .ok_or_else(|| eyre!("nothing to paste"))?;
+        let output = resolve(history, scope.as_ref(), &id, crate::history::now_ms())
+            .ok_or_else(|| eyre!("that item is no longer available"))?;
+        if crate::dictation::context::frontmost_pid() != Some(self.target) {
+            return Err(eyre!("paste target changed"));
+        }
+        match output {
+            Output::Text(text) => {
+                paster.paste(&text, super::PasteMode::Continue)?;
+                Ok(text)
+            }
+            Output::Capture(dir, bundle) => {
+                let payload = super::capture::Payload::prepare(
+                    &dir,
+                    &bundle,
+                    scrawl_capture::capture::is_frontmost_terminal(),
+                    scrawl_capture::handoff::experiment(scrawl_capture::handoff::AGENT_CONTEXT),
+                )?;
+                paster.paste_capture(&payload, self.target)?;
+                Ok(String::new())
+            }
+        }
     }
 }
 
@@ -104,6 +149,7 @@ mod tests {
                 11,
             )
             .unwrap();
+        let history = History::new(history);
         let capture = root.join("12.scrawl");
         fs::create_dir(&capture).unwrap();
         let manifest = r#"{"version":1,"id":"12","createdAtMs":12,"durationMs":1800,"target":{"mode":"display","displayId":1,"frame":{"x":0,"y":0,"width":40,"height":30,"scale":1}},"transcript":{"source":"hex","text":"move it down","segments":[],"words":[]},"strokes":[],"marks":[],"events":[],"keyframes":[],"contactSheet":"contact-sheet.png"}"#;

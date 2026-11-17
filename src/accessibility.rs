@@ -88,6 +88,42 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
     copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
 }
 
+/// Identity only, never the window's title, contents or selection. A capture
+/// with two paste commands must not put its summary in a different field of
+/// the same app, even when that field changed without any user input.
+#[cfg(hex_capture)]
+pub(crate) struct PasteFocus {
+    application: CfObject,
+    window: CfObject,
+    field: CfObject,
+}
+
+#[cfg(hex_capture)]
+impl PasteFocus {
+    pub(crate) fn capture(pid: i32) -> Option<Self> {
+        let application = foreign_application(pid)?;
+        Some(Self {
+            window: copy_element(&application, c"AXFocusedWindow")?,
+            field: copy_element(&application, c"AXFocusedUIElement")?,
+            application,
+        })
+    }
+
+    pub(crate) fn unchanged(&self) -> bool {
+        [
+            (c"AXFocusedWindow", &self.window),
+            (c"AXFocusedUIElement", &self.field),
+        ]
+        .into_iter()
+        .all(|(attribute, before)| {
+            copy_element(&self.application, attribute).is_some_and(|now| {
+                // SAFETY: both references are retained AXUIElements.
+                unsafe { CFEqual(now.0, before.0) != 0 }
+            })
+        })
+    }
+}
+
 /// How much of a focused window Labs › Words on screen reads: elements
 /// walked, depth below the window, bytes collected, characters per value,
 /// and wall-clock time.

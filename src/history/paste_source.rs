@@ -93,3 +93,27 @@ impl HistoryStore {
         }
     }
 }
+
+impl super::History {
+    pub(crate) fn paste_rows(&self, count: usize, now: u64) -> Vec<Row> {
+        self.synced().paste_rows(count, now)
+    }
+    pub(crate) fn resolve_paste(&self, id: Id, now: u64) -> Option<String> {
+        self.synced().resolve_paste(id, now).map(str::to_owned)
+    }
+    /// The ordered output worker hands its only unretained text to the same
+    /// owner Clear and retention use. No file read or write to recover it.
+    pub(crate) fn recover_output(&self, text: String) {
+        self.store
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .recover_paste(text, super::now_ms());
+    }
+
+    pub(crate) fn recovered_output(&self) -> Option<String> {
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        store
+            .resolve_paste(store.recovery.as_ref()?.id, super::now_ms())
+            .map(str::to_owned)
+    }
+}

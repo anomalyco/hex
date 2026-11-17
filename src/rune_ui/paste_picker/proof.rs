@@ -24,7 +24,7 @@ const URL: &str = "https://example.org/design";
 
 struct Doc {
     root: PathBuf,
-    store: HistoryStore,
+    store: crate::history::History,
     rows: Vec<Row>,
     body: String,
     board: objc2::rc::Retained<objc2_app_kit::NSPasteboard>,
@@ -160,7 +160,11 @@ fn a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item() {
         let doc = Doc {
             board,
             root: root.clone(),
-            store: HistoryStore::open(root.join("history.json"), HistoryRetention::Day, NOW),
+            store: crate::history::History::new(HistoryStore::open(
+                root.join("history.json"),
+                HistoryRetention::Day,
+                NOW,
+            )),
             rows: vec![],
             body: String::new(),
         };

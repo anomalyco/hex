@@ -750,7 +750,17 @@ same ready item; a newer incomplete folder does not hide it. An unmarked
 bundle is never taken as Hex output. Removing a selected bundle makes its ID
 unavailable, rather than silently pasting the next item. Failed insertion
 recovery in this projection has one RAM slot, cleared with History and never
-written to the file. These checks don't drive the global shortcut.
+written to the file. The Mac output worker now uses this slot for unretained
+output when it has a History owner. With no History owner, the existing
+listener-local fallback still works. These checks don't drive a global key.
+
+The [Mac interaction fixture](../../src/rune_ui/paste_picker/proof.rs) feeds a
+300 ms hold to the gesture tracker, clicks an older row through a Rune window
+runtime, then resolves the latest capture. Its private pasteboard receives a
+PNG and the capture's summary, and afterward still has the URL copied after
+capture completion. The fixture renders in light and dark; the receiver is
+simulated. The mixed picker is **not installed in the native listener**.
+Windows and Linux still use their existing dictation-only Paste Last paths.
 
 A paste that fails (another app changed the clipboard while Hex saved it, or a
 format couldn't be read) still makes that dictation Paste Last's, unless its
