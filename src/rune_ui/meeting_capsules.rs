@@ -94,9 +94,8 @@ const PANEL_RADIUS: f32 = 13.0;
 /// Around the open panel's rows.
 const PANEL_PAD: f32 = 5.0;
 const HEADER_HEIGHT: f32 = 36.0;
-const STOP_TARGET: f32 = 44.0;
-const OPEN_HEADER: f32 = STOP_TARGET + 2.0 * PANEL_PAD;
-const ROW_HEIGHT: f32 = 36.0;
+const ROW_HEIGHT: f32 = 44.0;
+const OPEN_HEADER: f32 = REST_HEIGHT + ROW_HEIGHT;
 /// Concentric with the panel across [`PANEL_PAD`].
 const ROW_RADIUS: f32 = PANEL_RADIUS - PANEL_PAD;
 /// A row's icon and label inset; titles and summaries share it.
@@ -109,7 +108,7 @@ const NOTICE_HEIGHT: f32 = 20.0;
 const SUMMARY_LINES: usize = 3;
 const TITLE_LINES: usize = 3;
 const TITLE_INSET: f32 = (REST_HEIGHT - 20.) / 2.;
-const RESULT_HEADER_MAX: f32 = TITLE_LINES as f32 * 20. + 2. * TITLE_INSET;
+const RESULT_HEADER_MAX: f32 = REST_HEIGHT + TITLE_LINES as f32 * 20. + 2. * TITLE_INSET;
 const SUMMARY_LINE: f32 = 19.5;
 /// One transparent window with room for the finished panel's longest summary.
 const RECORDING_WINDOW: (f32, f32) = (
@@ -267,6 +266,8 @@ enum LiveCopy {
 /// transcript by the ticker, or the ready meeting's when it shows.
 #[derive(Default)]
 struct Live {
+    /// A swipe within a wide action row is not a click, even on release inside it.
+    row_swiped: bool,
     entries: Vec<TranscriptEntry>,
     /// What Copy new would copy now.
     pending: meeting::PendingDelta,
@@ -513,11 +514,11 @@ impl Capsule {
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
         match &self.kind {
+            Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
             Some(Kind::Recording(shown)) => {
                 recording_window_size(self.hovered || self.stopping, Some(shown))
             }
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
-            Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
             Some(Kind::Offer(..)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
@@ -2108,7 +2109,7 @@ mod tests {
             }));
         });
         rt.frame(0.0);
-        let (x, y) = rt.find("header").unwrap();
+        let (x, y) = rt.find("meta").unwrap();
         rt.pointer_move(x, y);
         rt.pointer_down(x, y);
         rt.pointer_move(x - 20.0, y + 30.0);

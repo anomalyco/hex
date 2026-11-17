@@ -119,8 +119,7 @@ fn copied_hint(p: Paint) -> El {
         )
 }
 
-/// One of the panel's copies: an icon, its label, and on the right what it
-/// would copy or that it just did. The first row is raised.
+/// One action across its whole visible row, including the trailing whitespace.
 #[allow(clippy::too_many_arguments)]
 fn panel_row(
     p: Paint,
@@ -144,8 +143,11 @@ fn panel_row(
         .gap(8.0)
         .center_y()
         .radius(ROW_RADIUS)
+        .role("button")
+        .cursor(Cursor::Default)
+        .focus_ring(2., -2., p.k.c.border_focus)
         .label(label)
-        .child(icon(glyph, 16.0).color(ink))
+        .child(icon(glyph, 16.0).key("glyph").color(ink))
         .child(
             text(label.to_owned())
                 .key("label")
@@ -158,12 +160,36 @@ fn panel_row(
         )
         .children(hint);
     let row_el = if first {
-        row_el.fill(p.k.c.layer_02).mb(FIRST_ROW_GAP)
+        row_el
+            .fill(p.k.c.layer_02)
+            .hover(p.k.c.hover)
+            .mb(FIRST_ROW_GAP)
     } else {
         row_el.hover(p.k.c.hover)
     };
     if enabled {
-        row_el.focusable(true).on_press_tx(press)
+        row_el
+            .focusable(true)
+            .no_window_drag()
+            // Rune buttons accept a release anywhere inside their rectangle.
+            // Track press travel only: no window move, drag item or grab cursor.
+            .on_drag(|c: &mut Capsule, d, tx| {
+                if d.phase == Phase::Down {
+                    c.live.row_swiped = false;
+                }
+                c.live.row_swiped |= d.dx.hypot(d.dy) > 4.;
+                if d.phase == Phase::Up
+                    && (d.cancelled() || d.x < 0. || d.x >= d.w || d.y < 0. || d.y >= d.h)
+                {
+                    c.live.row_swiped = false;
+                }
+                tx.live_only();
+            })
+            .on_press_tx(move |c: &mut Capsule, tx| {
+                if !std::mem::take(&mut c.live.row_swiped) {
+                    press(c, tx);
+                }
+            })
     } else {
         row_el.disabled(true).opacity(0.5)
     }
@@ -312,28 +338,20 @@ fn result(
 ) -> El {
     let top = capsule.corner.is_top();
     let right = capsule.corner.is_right();
-    let header = row()
-        .key("header")
-        .min_h(OPEN_HEADER)
-        .clip_rounded(0.)
-        .px(REST_PX)
-        .gap(6.0)
-        .center_y();
-    // The title has its final column even before Close is available. It may
-    // grow vertically without moving the time off the recording baseline.
-    let label = handoff_label(p, capsule, &title, false).grow(1.);
+    let label = handoff_label(p, capsule, &title, false);
     let clock = duration.map(|duration| {
-        let meter = row().key("meter").h(REST_HEIGHT).center_y().child(
-            text(meeting::format_duration(duration))
-                .key("elapsed")
-                .font(timer_style())
-                .color(p.muted()),
-        );
-        if top {
-            meter.self_start()
-        } else {
-            meter.self_end()
-        }
+        row()
+            .key("meter")
+            .h(REST_HEIGHT)
+            .gap(6.)
+            .center_y()
+            .children((!right).then(|| el().w(waveform::WIDTH)))
+            .child(
+                text(meeting::format_duration(duration))
+                    .key("elapsed")
+                    .font(timer_style())
+                    .color(p.muted()),
+            )
     });
     let close = row()
         .key("close-slot")
@@ -341,16 +359,14 @@ fn result(
         .h(REST_HEIGHT)
         .center()
         .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
-    let close = if top {
-        close.self_start()
+    let meta = meter_band();
+    let space = el().key("space").grow(1.);
+    let meta = if right {
+        meta.child(space).child(close).children(clock)
     } else {
-        close.self_end()
+        meta.children(clock).child(space).child(close)
     };
-    let header = if right {
-        header.child(label).child(close).children(clock)
-    } else {
-        header.children(clock).child(close).child(label)
-    };
+    let header = bands(top, meta, Some(label));
     let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
         text(summary)
             .key("summary")
@@ -389,9 +405,7 @@ fn result(
     let body = panel_body(p, &title)
         .motion(RECORDING_OPEN)
         .child(contents)
-        .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside))
-        .cursor(Cursor::Grab)
-        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx));
+        .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside));
     in_corner(capsule, body)
 }
 
@@ -410,20 +424,38 @@ fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
     } else {
         label.wrap_anywhere().max_lines(TITLE_LINES).a11y_hidden()
     };
-    let slot = col()
+    col()
         .key("caption")
         .min_w(0.)
-        .my(TITLE_INSET)
+        .min_h(ROW_HEIGHT)
+        .py(TITLE_INSET)
+        .px(PANEL_PAD + ROW_PX)
+        .justify_center()
         .transition(if stopping {
             Transition::none()
         } else {
             replace(c)
         })
-        .child(label);
-    if c.corner.is_top() {
-        slot.self_start()
+        .child(label)
+}
+
+// Only the meter band owns the window drag, never an ancestor of an action row.
+fn meter_band() -> El {
+    row()
+        .key("meta")
+        .h(REST_HEIGHT)
+        .px(REST_PX)
+        .center_y()
+        .cursor(Cursor::Default)
+        .on_drag(|c: &mut Capsule, d, tx| c.drag(d, tx))
+}
+
+fn bands(top: bool, meta: El, action: Option<El>) -> El {
+    let header = col().key("header").w(PANEL_WIDTH);
+    if top {
+        header.child(meta).children(action)
     } else {
-        slot.self_end()
+        header.children(action).child(meta)
     }
 }
 
@@ -467,46 +499,26 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 .font(timer_style())
                 .color(p.muted()),
         );
-    let meter = if top {
-        meter.self_start()
-    } else {
-        meter.self_end()
-    };
-    let accessory = if capsule.stopping {
-        Some(
-            handoff_label(p, capsule, tr("Stopping…"), true)
-                .w(76.)
-                .shrink()
-                .mx(REST_PX - PANEL_PAD),
-        )
+    let accessory = notice.filter(|_| !open).map(notice_text);
+    let action = if capsule.stopping {
+        Some(handoff_label(p, capsule, tr("Stopping…"), true))
     } else if open {
         Some(
-            row()
-                .key("stop")
-                // The accepted command replaces this hit target in the same
-                // frame. A presence fade would draw Stop under Stopping….
-                .transition(Transition::none())
-                .h(STOP_TARGET)
-                .min_w(STOP_TARGET)
-                .px(ROW_PX + 4.)
-                .gap(6.0)
-                .center_y()
-                .radius(ROW_RADIUS)
-                .hover(p.k.c.hover)
-                .label(tr("Stop"))
-                .role("button")
-                .focusable(true)
-                .on_press(Capsule::request_stop)
-                .child(icon(&icons::STOP, 12.0).color(p.muted()))
-                .child(
-                    text(tr("Stop").to_owned())
-                        .font(p.k.ty.text_xsmall)
-                        .color(p.muted())
-                        .a11y_hidden(),
-                ),
+            panel_row(
+                p,
+                "stop",
+                &icons::STOP,
+                tr("Stop"),
+                None,
+                false,
+                true,
+                |c, _| c.request_stop(),
+            )
+            .mx(PANEL_PAD)
+            .transition(Transition::none()),
         )
     } else {
-        notice.map(notice_text)
+        None
     };
     let panel_height = OPEN_HEADER
         + 3.0 * ROW_HEIGHT
@@ -517,29 +529,21 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let height = if open { panel_height } else { REST_HEIGHT };
     // The full-size layout exists before the first hover. Its origin cancels
     // the moving clip's origin so neither the rows nor the meter ride its edge.
-    let header = row()
-        .key("header")
-        .absolute(0.0, if top { 0.0 } else { panel_height - OPEN_HEADER })
-        .w(PANEL_WIDTH)
-        .h(OPEN_HEADER)
-        .center_y()
-        .gap(8.0);
+    let header = meter_band();
     let spacer = el().key("space").grow(1.0);
     let header = if right {
-        header
-            .pl(if open { PANEL_PAD } else { REST_PX })
-            .pr(REST_PX)
-            .children(accessory)
-            .child(spacer)
-            .child(meter)
+        header.children(accessory).child(spacer).child(meter)
     } else {
-        header
-            .pl(REST_PX)
-            .pr(if open { PANEL_PAD } else { REST_PX })
-            .child(meter)
-            .child(spacer)
-            .children(accessory)
+        header.child(meter).child(spacer).children(accessory)
     };
+    let header = bands(top, header, action).absolute(
+        0.,
+        if top {
+            0.
+        } else {
+            panel_height - if open { OPEN_HEADER } else { REST_HEIGHT }
+        },
+    );
     let mut contents = col()
         .key("panel-contents")
         .size(PANEL_WIDTH, panel_height)
@@ -598,14 +602,12 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .size(width, height)
         .child(contents)
         .clip_rounded(radius)
-        .cursor(Cursor::Grab)
         .motion(if open {
             RECORDING_OPEN
         } else {
             RECORDING_CLOSE
         })
         .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside))
-        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
         // Only the drawn pill takes the pointer; the rest of the window,
         // as large as the open panel, lets clicks through. On Windows the
         // window is only as large as the pill it draws instead.

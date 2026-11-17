@@ -156,7 +156,8 @@ fn stop_handoff_frames() {
         }
         let dir = folder.join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        let size = (260., 282.);
+        let size = (RECORDING.0, RECORDING.1.ceil());
+        let (w, h) = ((size.0 * 2.) as u32, (size.1 * 2.) as u32);
         let (mut rt, commands, _) = runtime(live_recording("ready-snap"), false, false, size);
         rt.transparent = true;
         rt.update(|c, tx| {
@@ -166,7 +167,7 @@ fn stop_handoff_frames() {
         });
         rt.frame(0.);
         let mut renderer = offscreen::renderer(&gpu.device);
-        let target = offscreen::target(&gpu.device, 520, 564);
+        let target = offscreen::target(&gpu.device, w, h);
         let mut ink = waveform::Ink::default();
         let mut trace = String::from("frame,key,x,y,w,h\n");
         let start = Instant::now();
@@ -181,7 +182,7 @@ fn stop_handoff_frames() {
             }
             match frame {
                 12 => rt.pointer_move(225., 22.),
-                47 => {
+                32 | 47 => {
                     let (x, y) = rt.find("stop").unwrap();
                     rt.pointer_move(x, y);
                 }
@@ -244,18 +245,18 @@ fn stop_handoff_frames() {
                 }
             }
             let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
-            // A removed hit target can still paint during its exit. Sample
-            // the center of the old square, below the status text, against
-            // bare header ink on the same scanline (2× top-right fixture).
+            // A retired hit target can still paint. Compare its trailing
+            // hover fill against the bare panel gutter on that scanline.
             if frame == 47 || frame == 48 {
-                let pixel = |x: usize| rgba[4 * (62 * 520 + x)];
+                let scan = ((CAPSULE_INSET + REST_HEIGHT + ROW_HEIGHT / 2.) * 2.) as usize;
+                let pixel = |x: usize| rgba[4 * (scan * w as usize + x)];
                 assert_eq!(
-                    pixel(56) != pixel(190),
+                    pixel(460) != pixel(506),
                     frame == 47,
                     "Stop glyph at {frame}"
                 );
             }
-            rune::render::write_png(&dir.join(format!("{frame:03}.png")), 520, 564, &rgba).unwrap();
+            rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &rgba).unwrap();
         }
         std::fs::write(dir.join("trace.csv"), trace).unwrap();
         assert!(commands.try_recv().is_err(), "one Stop per handoff");
@@ -664,8 +665,10 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 rt.frame(1. / 60.);
             }
             assert_eq!(rt.find("elapsed"), Some(timer));
-            let [x, _, w, h] = rect(&rt, "stop");
-            assert!(w >= 44. && h >= 26. && (x + w <= sx || x >= tx + tw));
+            let [_, y, w, h] = rect(&rt, "stop");
+            let [_, my, _, mh] = rect(&rt, "meta");
+            assert_eq!((w, h), (PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT));
+            assert!(y + h <= my || y >= my + mh);
             tap(&mut rt, "stop");
             assert!(matches!(received.try_recv(), Ok(ControllerCommand::Stop)));
         }

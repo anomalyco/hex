@@ -864,11 +864,13 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
-     ├── Hover -> the pill reveals a panel: Stop opposite the meter and time
-     │   in its header, then Copy new, Copy all, Copy agent prompt; pointer
+     ├── Hover -> the pill reveals four full-width actions beside the header:
+     │   Stop nearest the meter, Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
-     ├── Stop -> the icon, label and padding are one button at least 44 pt tall.
+     ├── Stop -> the icon, label and whitespace use the same 242 × 44 pt row
+     │   and hover/focus bounds as the copies. The plain arrow stays put;
+     │   dragging the meter band repositions, dragging a row does not.
      │   A click queues one stop immediately. The pill stays open and says
      │   “Stopping…” with its waveform and elapsed time until capture ends.
      │   The worker closing its sources, not the click, switches the header to

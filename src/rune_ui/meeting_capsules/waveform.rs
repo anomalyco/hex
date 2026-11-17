@@ -8,7 +8,7 @@ use rune::compose::{Compositor, DeviceKey, Frame};
 use std::time::{Duration, Instant};
 
 const KEY: &str = "meeting-listening-field";
-const WIDTH: f32 = 78.0;
+pub(super) const WIDTH: f32 = 78.0;
 const ATTACK: Spec = Spec::new(0.16, 0.0);
 const RELEASE: Spec = Spec::new(0.55, 0.0);
 /// Dot scope's default -60 dBFS noise floor, in the capture meter's RMS units.
