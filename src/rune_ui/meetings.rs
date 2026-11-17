@@ -575,12 +575,14 @@ pub(super) fn poll_import(ui: &mut Ui) -> bool {
 }
 
 /// Labs › Ask meetings: takes the answer a question's worker sent, and gives
-/// up the shown question once the lab is off.
+/// up the shown question once the lab is off. The worker itself stays until
+/// its thread exits, so a later question never runs beside it.
 pub(crate) fn poll_ask(ui: &mut Ui) -> bool {
+    let answered = ui.meetings.ask.poll();
     if !crate::labs::ask_meetings() {
-        return ui.meetings.ask.reset();
+        return ui.meetings.ask.reset() || answered;
     }
-    ui.meetings.ask.poll()
+    answered
 }
 
 /// An audio file could not be imported; the Meetings pane says why.

@@ -1340,6 +1340,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Browse scenes and stories in a window", "Navegue por cenas e histórias em uma janela"),
     ("Split a meeting's text into chapters while it records", "Divide o texto de uma reunião em capítulos durante a gravação"),
     ("Ask about this meeting", "Perguntar sobre esta reunião"),
+    ("Question", "Pergunta"),
+    ("Wait for the last question to finish", "Aguarde a última pergunta terminar"),
     ("Thinking…", "Pensando…"),
     ("Answer", "Resposta"),
     ("Choose a writer in Meetings settings to ask about a meeting", "Escolha quem escreve nos ajustes de Reuniões para perguntar sobre uma reunião"),

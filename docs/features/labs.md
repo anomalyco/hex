@@ -66,8 +66,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Ask meetings    no    labs.ask_meetings                      a question field under a meeting's notes in the Meetings pane, with a short
 │                                        answer below it, even while it records; the writer is Meetings › Settings › Summaries
 │                                        // checks: meeting/ask.rs tests (the excerpt keeps the latest speech, a line carries its time and
-│                                        // speaker, a monologue is cut, an empty question is refused); rune_ui/meetings/ask.rs tests (no writer
-│                                        // says so and starts nothing, a question belongs to one meeting, giving it up clears the field);
+│                                        // speaker, a monologue is cut, an empty question is refused, a long question is cut to 500 chars);
+│                                        // rune_ui/meetings/ask.rs tests (a second question waits for the running one, another meeting is told
+│                                        // to wait and the old answer dropped, no writer says so, giving it up clears the field);
 │                                        // ask_meetings_shows_its_field_only_with_its_lab (rune_ui/tests/panes.rs); not observed with a
 │                                        // real writer, no Apple Intelligence Mac and no live OpenCode request
 ├── Vocabulary help no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)

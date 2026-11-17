@@ -1,8 +1,9 @@
 //! Labs › Ask meetings: one question about a meeting's transcript, answered
 //! by the writer Meetings › Summaries names (Apple Intelligence on this Mac,
-//! or OpenCode), from a bounded excerpt of what was said. Read-only: the
-//! answer is shown in the pane and never written to the manifest, the
-//! Markdown, or anywhere else.
+//! or OpenCode), from a bounded excerpt of what was said. The answer is never
+//! saved: it is shown in the pane only, not written to the manifest, the
+//! Markdown, or History. The transcript comes from the shared reader, which
+//! may finish an interrupted publication while it reads.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -18,6 +19,8 @@ use super::{TranscriptEntry, TranscriptReader, format_duration};
 const EXCERPT_CHARS: usize = 12_000;
 /// One excerpt line at most, so a monologue can't fill it.
 const LINE_CHARS: usize = 600;
+/// A question is a line of intent, not a document: more than this is cut.
+const MAX_QUESTION_CHARS: usize = 500;
 /// One question takes one call, bounded like a notes summary's.
 pub(super) const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -31,7 +34,7 @@ and don't guess.";
 /// one, or the rolling draft while it records. Blocks; call off the UI
 /// thread.
 pub(crate) fn answer(id: &str, question: &str, cancelled: &AtomicBool) -> Result<String> {
-    let question = question.trim();
+    let question = capped(question);
     if question.is_empty() {
         return Err(eyre!("Type a question first"));
     }
@@ -39,8 +42,11 @@ pub(crate) fn answer(id: &str, question: &str, cancelled: &AtomicBool) -> Result
     if entries.is_empty() {
         return Err(eyre!("This meeting has no transcript to ask about yet"));
     }
+    // Only an OpenCode request reads this; Apple Intelligence runs to its
+    // deadline. A question given up while it waited never reaches a card,
+    // because the pane drops answers for a meeting it no longer shows.
     if cancelled.load(Ordering::Acquire) {
-        return Err(eyre!("The question was given up"));
+        return Err(eyre!("The question was cancelled"));
     }
     let budget = super::notes::excerpt_budget(generator::context_tokens(), EXCERPT_CHARS);
     let excerpt = recent_excerpt(&entries, budget);
@@ -64,6 +70,16 @@ pub(crate) fn answer(id: &str, question: &str, cancelled: &AtomicBool) -> Result
         return Err(eyre!("The model answered with nothing"));
     }
     Ok(answer.to_owned())
+}
+
+/// The question as it is sent: trimmed, and cut to [`MAX_QUESTION_CHARS`]
+/// characters at a character boundary.
+fn capped(question: &str) -> &str {
+    let question = question.trim();
+    match question.char_indices().nth(MAX_QUESTION_CHARS) {
+        Some((end, _)) => question[..end].trim_end(),
+        None => question,
+    }
 }
 
 /// The newest lines that fit in `max_chars`, oldest first, so a question
@@ -168,5 +184,17 @@ mod tests {
         let cancelled = AtomicBool::new(false);
         let error = answer("no-such-meeting", "   ", &cancelled).unwrap_err();
         assert!(error.to_string().contains("Type a question"), "{error}");
+    }
+
+    #[test]
+    fn a_long_question_is_cut_to_five_hundred_characters() {
+        let long = "word ".repeat(200);
+        let cut = capped(&long);
+        assert!(cut.chars().count() <= MAX_QUESTION_CHARS, "{}", cut.len());
+        assert!(cut.starts_with("word word"), "{cut}");
+
+        let accented = "é".repeat(600);
+        assert_eq!(capped(&accented).chars().count(), MAX_QUESTION_CHARS);
+        assert_eq!(capped("  who owns it?  "), "who owns it?");
     }
 }

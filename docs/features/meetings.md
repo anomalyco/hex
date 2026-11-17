@@ -1633,12 +1633,17 @@ Detail (a raised card beside the list)
 ├── Summary: one paragraph, at most two sentences
 ├── Chapters (when present): start, name, line, and a Copy section icon
 ├── Ask (Labs › Ask meetings, off by default; a meeting with turns)
-│   ├── Field: "Ask about this meeting", single line, Enter asks
+│   ├── "Question" heading, then a field: "Ask about this meeting", single
+│   │   line, Enter asks (a question over 500 characters is cut)
 │   ├── "Thinking…" while one question runs
 │   ├── Answer below it: a short plain paragraph, in the body text colour
 │   ├── Errors there too: no writer chosen, OpenCode not running, a late or
 │   │   refused answer; nothing is saved or added to the Markdown
-│   └── Choosing another meeting or asking again drops the answer on screen
+│   └── One question at a time: Enter again waits for the running one, and
+│       another meeting says to wait. Choosing another meeting or turning
+│       the lab off drops the shown answer and asks OpenCode to stop; an
+│       Apple Intelligence call can't be interrupted, so it runs to its
+│       deadline and its answer is dropped
 └── Transcript: stacked turns, no bubbles; "You" in text colour, "Them"
     faint, each with its clock; merged turns; 30 s+ pause lines;
     "Listening…" while recording
@@ -1698,30 +1703,37 @@ still records.
 
 ```ts
 Meetings pane, selected meeting with transcript turns   // labs.ask_meetings
-├── Field "Ask about this meeting" -> Enter starts one question
-├── Worker: the hex-meeting-ask thread, one question at a time
+├── "Question" heading, field "Ask about this meeting" -> Enter starts one
+│   question, trimmed and cut to 500 characters
+├── One question at a time: a second Enter waits for the running one (another
+│   meeting says "Wait for the last question to finish"), so calls never stack
+├── Worker: the hex-meeting-ask thread
 │   ├── Reads the meeting's current transcript (meeting::TranscriptReader: the
-│   │   published one, else the rolling draft), so a recording is answerable
+│   │   published one, else the rolling draft), so a recording is answerable;
+│   │   the reader may finish an interrupted publication while it reads
 │   ├── Bounded excerpt: the notes writer's context budget
 │   │   (notes::excerpt_budget, 12,000 chars at most), keeping the most recent
 │   │   speech when it must trim; each line "[mm:ss] You|Them: …", cut at
 │   │   600 chars
 │   ├── Writer: Meetings › Settings › Summaries (Apple Intelligence on this Mac
 │   │   or OpenCode, no fallback), the saved summary model when one is named
-│   └── One call, 60 s deadline, cancellation checked between reads
+│   └── One call, 60 s deadline. Choosing another meeting or turning the lab
+│       off sets the cancellation OpenCode checks between reads; Apple
+│       Intelligence can't be interrupted, so it runs to its deadline, its
+│       answer is dropped, and no new question starts until that thread exits
 ├── "Thinking…" -> the answer below the field, or a short reason
 ├── Summaries Off -> "Choose a writer in Meetings settings…", nothing starts
-├── Choosing another meeting, asking again, or turning the lab off -> the
-│   request is cancelled and the shown answer dropped
 └── Off, or a meeting with no speech yet -> no field, no thread, no call
-Nothing is saved: no manifest field, no Markdown, no History, no event
+The answer is never saved: no manifest field, no Markdown, no History, no event
 ```
 
 Checks: `meeting/ask.rs` tests (the excerpt keeps the latest speech, a line
 carries its time and speaker, a monologue is cut inside its line, an empty
-question is refused before the store is read); `rune_ui/meetings/ask.rs` tests
-(no writer says so and starts nothing, an empty question asks nothing, a
-question belongs to one meeting and giving it up clears the field);
+question is refused before the store is read, a long question is cut to 500
+characters); `rune_ui/meetings/ask.rs` tests (a second question waits for the
+running one, another meeting is told to wait and the old answer is dropped, no
+writer says so and starts nothing, an empty question asks nothing, a question
+belongs to one meeting and giving it up clears the field);
 `ask_meetings_shows_its_field_only_with_its_lab` in
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs); and
 `every_feature_is_off_by_default_and_round_trips` in
