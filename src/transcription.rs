@@ -184,6 +184,13 @@ pub(crate) fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> u
     }
 }
 
+/// Whether a live stream of `model` must end its text with closing sentence
+/// punctuation before it is trusted: Unified English's chunked decode drops
+/// the mark its whole-clip run keeps (issue 1933).
+pub(crate) fn requires_closing_mark(model: Option<TranscriptionModelId>) -> bool {
+    model == Some(TranscriptionModelId::ParakeetUnifiedEnglish)
+}
+
 #[cfg(target_os = "macos")]
 impl WarmTranscriber {
     /// A warm transcriber already serving `model`, for opt-in harnesses.
@@ -214,6 +221,16 @@ impl WarmTranscriber {
         match &self.active {
             Some(Transcriber::Gguf(model)) => trailing_silence_samples(model.model_id()),
             _ => 0,
+        }
+    }
+
+    /// Whether a live stream of the warm model must end its text with closing
+    /// sentence punctuation before it is trusted, as Unified English's does
+    /// (issue 1933).
+    pub(crate) fn stream_requires_closing_mark(&self) -> bool {
+        match &self.active {
+            Some(Transcriber::Gguf(model)) => requires_closing_mark(model.model_id()),
+            _ => false,
         }
     }
 
