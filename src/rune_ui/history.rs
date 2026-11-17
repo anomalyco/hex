@@ -1302,14 +1302,15 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
             ("language", language_name(&pending.language)),
         ],
     );
+    let open = ui.open == Some(Menu::HistoryAgainLanguage);
+    let chosen = choices
+        .iter()
+        .position(|code| *code == pending.language)
+        .map(|index| format!("option{index}"));
     let languages = Select::new("again-language", &labels)
         .appearance(SelectAppearance::Inline)
         .current(Some(&current))
-        .open(ui.open == Some(Menu::HistoryAgainLanguage))
-        .on_toggle(|ui: &mut Ui| {
-            ui.open =
-                (ui.open != Some(Menu::HistoryAgainLanguage)).then_some(Menu::HistoryAgainLanguage);
-        })
+        .open(open)
         .on_close(|ui: &mut Ui| ui.open = None)
         .on_choose(move |ui: &mut Ui, choice: &str, _: &mut Tx| {
             ui.open = None;
@@ -1323,6 +1324,15 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
             }
         })
         .build(p.k, layer)
+        .on_press_tx(super::controls::revealing_press(
+            open,
+            "again-language-content".into(),
+            chosen,
+            |ui: &mut Ui| {
+                ui.open = (ui.open != Some(Menu::HistoryAgainLanguage))
+                    .then_some(Menu::HistoryAgainLanguage);
+            },
+        ))
         .label(tr("Language"))
         .a11y_value(current.clone());
     row()

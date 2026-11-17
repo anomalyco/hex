@@ -1286,12 +1286,12 @@ pub(super) fn quiet_select(
     let choices = labels.clone();
     let pick = std::rc::Rc::new(pick);
     let current = labels.get(selected).cloned().unwrap_or_default();
-    Select::new(key, &labels)
+    let open = ui.open == Some(menu);
+    Select::new(key.clone(), &labels)
         .appearance(SelectAppearance::Inline)
         .current(labels.get(selected).map(String::as_str))
-        .open(ui.open == Some(menu))
+        .open(open)
         .placement(Placement::BottomEnd)
-        .on_toggle(move |ui: &mut Ui| s::toggle_menu(ui, menu))
         .on_close(|ui: &mut Ui| ui.open = None)
         .on_choose(move |ui: &mut Ui, value: &str, _: &mut rune::Tx| {
             ui.open = None;
@@ -1300,6 +1300,12 @@ pub(super) fn quiet_select(
             }
         })
         .build(p.k, layer)
+        .on_press_tx(super::controls::revealing_press(
+            open,
+            format!("{key}-content"),
+            Some(format!("option{selected}")),
+            move |ui: &mut Ui| s::toggle_menu(ui, menu),
+        ))
         .label(name)
         .a11y_value(current)
         .mr(-8.0)

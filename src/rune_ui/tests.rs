@@ -2576,6 +2576,63 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     );
 }
 
+/// Whisper's language list is longer than its menu shows, so the check on
+/// the saved language would sit below the edge. The press that opens the
+/// menu reveals it.
+#[test]
+fn the_language_menu_opens_on_its_chosen_language() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    rt.state.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    rt.state.settings.transcription.language = "fr".into();
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "transcription-language-control-trigger");
+    assert_eq!(rt.state.open, Some(Menu::Pick("transcription-language")));
+    let french = crate::transcription::models::menu_order(
+        &crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+            .language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "fr")
+    .unwrap();
+    let row = element(&rt, &format!("option{french}")).rect;
+    let list = element(&rt, "listbox").rect;
+    assert!(
+        row[1] >= list[1] - 0.5 && row[1] + row[3] <= list[1] + list[3] + 0.5,
+        "row {row:?} outside list {list:?}"
+    );
+    let auto = element(&rt, "option0").rect;
+    assert!(
+        auto[1] < list[1],
+        "Auto {auto:?} still at the top of {list:?}: the menu never moved"
+    );
+}
+
+/// A mode's language menu is the same long list in the kit's `Menu`, so its
+/// press reveals the chosen row too.
+#[test]
+fn a_modes_language_menu_opens_on_its_chosen_language() {
+    let mut rt = runtime("modes-speech", true, PANE_SIZE);
+    tap(&mut rt, "mode-speech-language-0-trigger");
+    assert_eq!(
+        rt.state.open,
+        Some(Menu::ModeSpeechLanguage(modes::Selection::Custom(0)))
+    );
+    let spanish = crate::transcription::models::menu_order(
+        &crate::transcription::models::definition(TranscriptionModelId::ParakeetV3)
+            .language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "es")
+    .unwrap();
+    let row = element(&rt, &format!("mode-speech-language-0-item{spanish}")).rect;
+    let menu = element(&rt, "mode-speech-language-0-menu").rect;
+    assert!(
+        row[1] >= menu[1] - 0.5 && row[1] + row[3] <= menu[1] + menu[3] + 0.5,
+        "row {row:?} outside menu {menu:?}"
+    );
+}
+
 /// General's Vocabulary row opens the sheet, and Escape closes it.
 #[test]
 fn the_vocabulary_row_opens_its_sheet() {

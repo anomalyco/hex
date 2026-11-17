@@ -665,6 +665,7 @@ interaction, installed-app switching, and Linux runtime behavior were not exerci
 ```ts
 Labs > Switch model with keyboard language      // setup.input-source-model; macOS, Windows, Linux X11; off by default; General shows the mappings while on
 ├── Each enabled keyboard input source -> Don't switch, or a downloaded model and language
+│   (alphabetical by name, Auto first)
 │   ├── New mapping -> The source's own language when the model has it
 │   ├── One-language model -> Its language shown fixed
 │   └── New/unmapped source -> Don't switch; keep the current model
