@@ -1,6 +1,8 @@
 #[cfg(hex_capture)]
 pub(crate) mod capture;
 #[cfg(hex_capture)]
+pub(crate) mod gesture;
+#[cfg(hex_capture)]
 pub(crate) mod recent;
 pub(crate) mod return_to_app;
 

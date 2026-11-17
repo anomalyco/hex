@@ -9,15 +9,86 @@ use color_eyre::eyre::{Result, eyre};
 use objc2::rc::Retained;
 use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeString};
 use objc2_foundation::{NSData, NSString};
+use scrawl_capture::model::ScrawlBundle;
+use std::path::Path;
 use std::time::Duration;
 
 pub(crate) enum Part<'a> {
     Text(&'a str),
-    #[allow(
-        dead_code,
-        reason = "staged until the capture owner supplies the sheet"
-    )]
     Png(&'a [u8]),
+}
+
+enum Sheet {
+    Png(Vec<u8>),
+    Path(String),
+}
+
+pub(crate) struct Payload {
+    sheet: Option<Sheet>,
+    summary: String,
+}
+
+impl Payload {
+    /// Annotate's Paste uses the rich summary with the sheet, independent of
+    /// the *copy* preference. Do not generate a zip, reactivate an app, or
+    /// consult the send queue. Prepare every part before taking the board.
+    pub(crate) fn prepare(
+        directory: &Path,
+        bundle: &ScrawlBundle,
+        terminal: bool,
+        agent_context: bool,
+    ) -> Result<Self> {
+        let sheet = if bundle.keyframes.is_empty() {
+            None
+        } else {
+            if bundle.contact_sheet != "contact-sheet.png" {
+                return Err(eyre!("unexpected capture sheet"));
+            }
+            let path = directory.join(&bundle.contact_sheet);
+            let bytes = crate::capture_host::paste_source::read_regular(&path, 32 << 20)
+                .ok_or_else(|| eyre!("capture sheet unavailable"))?;
+            if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err(eyre!("invalid capture sheet"));
+            }
+            Some(if terminal {
+                Sheet::Path(path.display().to_string())
+            } else {
+                Sheet::Png(bytes)
+            })
+        };
+        Ok(Self {
+            sheet,
+            summary: scrawl_capture::sketch::summary_markdown_with(
+                bundle,
+                directory,
+                agent_context,
+            ),
+        })
+    }
+
+    fn first(&self) -> Option<Part<'_>> {
+        self.sheet.as_ref().map(|sheet| match sheet {
+            Sheet::Png(bytes) => Part::Png(bytes),
+            Sheet::Path(path) => Part::Text(path),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn paste_to_fixture(
+        &self,
+        board: &NSPasteboard,
+        paste: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        insert(
+            board,
+            &mut ClipboardRestore::default(),
+            self.first(),
+            &self.summary,
+            || true,
+            paste,
+            |_| {},
+        )
+    }
 }
 
 impl Part<'_> {
@@ -47,12 +118,7 @@ impl Paster {
     /// The capture owner supplies the sheet (PNG or terminal path), summary,
     /// and the target PID from the gesture. No arbitrary text/command mode.
     #[allow(dead_code, reason = "staged until the mixed picker is connected")]
-    pub(crate) fn paste_capture(
-        &mut self,
-        sheet: Option<Part<'_>>,
-        summary: &str,
-        target: i32,
-    ) -> Result<()> {
+    pub(crate) fn paste_capture(&mut self, capture: &Payload, target: i32) -> Result<()> {
         let revision = self.activity.revision();
         self.continuation = None;
         self.prepared_clipboard = None;
@@ -62,8 +128,8 @@ impl Paster {
                 .clipboard_restore
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()),
-            sheet,
-            summary,
+            capture.first(),
+            &capture.summary,
             || {
                 self.activity.revision() == revision
                     && crate::dictation::context::frontmost_pid() == Some(target)

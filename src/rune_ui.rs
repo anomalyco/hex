@@ -53,6 +53,8 @@ mod onboarding;
 mod onboarding_kit;
 mod output;
 mod paste_access;
+#[cfg(all(hex_capture, target_os = "macos"))]
+mod paste_picker;
 mod picker;
 mod platform;
 mod platform_settings;

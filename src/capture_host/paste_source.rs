@@ -45,7 +45,7 @@ pub(crate) fn mark_ready(dir: &Path, ready_at: u64) -> io::Result<()> {
         .write_all(&stamp)
 }
 
-fn read_regular(path: &Path, max: u64) -> Option<Vec<u8>> {
+pub(crate) fn read_regular(path: &Path, max: u64) -> Option<Vec<u8>> {
     // Refuse links and devices. O_NONBLOCK also refuses to hang on a FIFO
     // substituted between discovery and open.
     let file = fs::OpenOptions::new()
