@@ -170,6 +170,8 @@ fn stop_handoff_frames() {
         let target = offscreen::target(&gpu.device, w, h);
         let mut ink = waveform::Ink::default();
         let mut trace = String::from("frame,key,x,y,w,h\n");
+        let mut pointer_trace = String::from("frame,x,y,cursor\n");
+        let mut point = None;
         let start = Instant::now();
         rt.state.waveform = Some(Box::new(waveform::Listening::new(start)));
         for frame in 0..180 {
@@ -181,18 +183,26 @@ fn stop_handoff_frames() {
                 );
             }
             match frame {
-                12 => rt.pointer_move(225., 22.),
+                12 => {
+                    point = Some((225., 22.));
+                    rt.pointer_move(225., 22.);
+                }
                 32 | 47 => {
                     let (x, y) = rt.find("stop").unwrap();
+                    point = Some((x, y));
                     rt.pointer_move(x, y);
                 }
                 48 => {
                     let (x, y) = rt.find("stop").unwrap();
+                    point = Some((x, y));
                     rt.pointer_down(x, y);
                     rt.pointer_up(x, y);
                 }
                 52 => rt.update(|c, _| c.mark_stopping()),
-                62 => rt.pointer_leave(),
+                62 => {
+                    point = None;
+                    rt.pointer_leave();
+                }
                 f if f == stopped => rt.update(|c, _| c.capture_stopped()),
                 f if f == published && failed => rt.update(|c, tx| {
                     c.kind = None;
@@ -225,6 +235,9 @@ fn stop_handoff_frames() {
                 _ => (),
             }
             rt.frame(1. / 60.);
+            if let Some((x, y)) = point {
+                writeln!(pointer_trace, "{frame},{x},{y},{:?}", rt.cursor()).unwrap();
+            }
             if frame == 48 {
                 assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
             }
@@ -259,6 +272,7 @@ fn stop_handoff_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &rgba).unwrap();
         }
         std::fs::write(dir.join("trace.csv"), trace).unwrap();
+        std::fs::write(dir.join("pointer.csv"), pointer_trace).unwrap();
         assert!(commands.try_recv().is_err(), "one Stop per handoff");
     }
 }
@@ -467,6 +481,180 @@ fn stop_is_one_named_action_for_keyboard_and_accessibility() {
 }
 
 #[test]
+fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
+    use crate::desktop::i18n;
+    use MeetingIndicatorCorner::*;
+    for &(code, _) in i18n::LANGUAGE_CHOICES.iter().filter(|(c, _)| c.is_some()) {
+        i18n::apply(code); // thread-local in tests, never a settings write
+        for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
+            let (mut rt, _, _) = runtime(live_recording("rows"), false, true, RECORDING);
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                c.live.entries = call();
+                c.copy_new = Some(Arc::new(|_| {}));
+                tx.instant()
+            });
+            rt.frame(0.);
+            let ([_, _, w, h], _) = rt.presented("pill").unwrap();
+            assert_eq!((w, h), (148., 36.));
+            assert!(rt.find("stop").is_none());
+            open_recording(&mut rt);
+            for (key, name) in [
+                ("stop", "Stop"),
+                ("copy-new", "Copy new"),
+                ("copy-all", "Copy all"),
+                ("copy-prompt", "Copy agent prompt"),
+            ] {
+                let nodes = rt.elements();
+                let (idx, row) = nodes
+                    .iter()
+                    .enumerate()
+                    .find(|(_, e)| e.key.as_deref() == Some(key))
+                    .unwrap();
+                let [x, y, w, h] = row.rect;
+                assert_eq!(
+                    (x, w, h),
+                    (CAPSULE_INSET + PANEL_PAD, 242., 44.),
+                    "{code:?} {corner:?} {key}"
+                );
+                let child = |key| {
+                    nodes
+                        .iter()
+                        .find(|e| e.parent == Some(idx) && e.key.as_deref() == Some(key))
+                        .unwrap()
+                };
+                let [gx, gy, gw, gh] = child("glyph").rect;
+                assert_eq!((gx - x, gw, gh), (9., 16., 16.));
+                assert_eq!(gy + gh / 2., y + h / 2.);
+                let label = child("label");
+                assert_eq!(label.text.as_deref(), Some(tr(name)));
+                assert_eq!(label.rect[0] - x, 33.);
+                for px in [gx + gw / 2., label.rect[0] + 1., x + w - 1.] {
+                    rt.pointer_move(px, y + h / 2.);
+                    rt.frame(1. / 60.);
+                    assert_eq!(
+                        rt.cursor(),
+                        Cursor::Default,
+                        "{code:?} {corner:?} {key} {px}"
+                    );
+                    assert!(
+                        rt.elements()
+                            .iter()
+                            .any(|e| e.key.as_deref() == Some(key) && e.hover > 0.)
+                    );
+                }
+            }
+        }
+    }
+    i18n::apply(Some("en"));
+}
+
+#[test]
+fn row_swipes_do_not_move_the_panel_or_fire_actions_but_small_clicks_work() {
+    let (mut rt, commands, _) = runtime(live_recording("ready-snap"), false, true, RECORDING);
+    let (send, shifts) = mpsc::channel();
+    rt.update(move |c, _| {
+        c.live.entries = call();
+        c.copy_new = Some(Arc::new(|_| {}));
+        c.shift = Some(Arc::new(move |_, dx, dy| send.send((dx, dy)).unwrap()));
+    });
+    rt.frame(0.);
+    open_recording(&mut rt);
+    for phase in 0..4 {
+        rt.update(|c, tx| {
+            match phase {
+                1 => c.capture_stopped(),
+                2 => {
+                    let Kind::Ready(m) = ready_transcript() else {
+                        unreachable!()
+                    };
+                    c.published(m)
+                }
+                3 => {
+                    let Kind::Ready(m) = ready_summarized() else {
+                        unreachable!()
+                    };
+                    c.refresh_ready(m)
+                }
+                _ => (),
+            };
+            tx.instant()
+        });
+        rt.frame(0.);
+        for key in ["stop", "copy-new", "copy-all", "copy-prompt"] {
+            let Some(([x, y, w, h], _)) = rt.presented(key) else {
+                continue;
+            };
+            for px in [x + 16., x + 35., x + w - 20.] {
+                let py = y + h / 2.;
+                rt.pointer_move(px, py);
+                rt.frame(0.);
+                assert_eq!(rt.cursor(), Cursor::Default);
+                rt.pointer_down(px, py);
+                rt.pointer_move(px + 10., py);
+                rt.frame(0.);
+                rt.pointer_up(px + 1., py);
+                rt.frame(0.);
+                assert!(
+                    shifts.try_recv().is_err() && commands.try_recv().is_err(),
+                    "{key} {phase}"
+                );
+                assert!(
+                    rt.state.live.copied.is_none() && !rt.state.live.copying,
+                    "{key} {phase}"
+                );
+            }
+        }
+        if phase == 0 {
+            for key in ["copy-prompt", "stop"] {
+                let (x, y) = rt.find(key).unwrap();
+                rt.pointer_down(x, y);
+                rt.pointer_move(x + 2., y + 1.);
+                rt.frame(0.);
+                rt.pointer_up(x + 2., y + 1.);
+                rt.frame(0.);
+                if key == "stop" {
+                    assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
+                    assert!(commands.try_recv().is_err());
+                } else {
+                    assert!(rt.state.live.copied(LiveCopy::Prompt));
+                    rt.state.live.copied = None;
+                }
+                assert!(shifts.try_recv().is_err());
+            }
+        }
+    }
+    tap(&mut rt, "dismiss");
+    assert!(rt.state.kind.is_none() && commands.try_recv().is_err());
+}
+
+#[test]
+fn tab_focus_tracks_the_whole_action_row_without_changing_its_bounds() {
+    let (mut rt, commands, _) = runtime(live_recording("tab-rows"), false, true, RECORDING);
+    rt.update(|c, _| {
+        c.live.entries = call();
+        c.copy_new = Some(Arc::new(|_| {}));
+    });
+    rt.frame(0.);
+    open_recording(&mut rt);
+    for key in ["stop", "copy-new", "copy-all", "copy-prompt"] {
+        rt.key(rune::KeyEvent {
+            key: rune::Key::Tab,
+            mods: Default::default(),
+        });
+        rt.frame(0.);
+        let focused = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.focus_visible && e.focused)
+            .unwrap();
+        assert_eq!(focused.key.as_deref(), Some(key));
+        assert_eq!(focused.rect[2..], [242., 44.]);
+    }
+    assert!(commands.try_recv().is_err());
+}
+
+#[test]
 fn capture_end_and_publication_retarget_one_anchored_surface() {
     use MeetingIndicatorCorner::*;
     for (delay, reduced) in [(0, false), (90, false), (0, true), (90, true)] {
@@ -555,7 +743,6 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
             let at = rows.map(|k| rect(&rt, k));
             let mut height = rect(&rt, "pill")[3];
             let mut title_width = None;
-            let mut last_clock_x = clock[0];
             rt.update(|c, _| c.mark_stopping());
             for frame in 0..delay + 100 {
                 if frame == 1 {
@@ -589,12 +776,7 @@ fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
                     (t[1] - clock[1]).abs() < 0.02 && t[2..] == clock[2..],
                     "{corner:?} f{frame} timer {t:?} / {clock:?}"
                 );
-                if corner.is_right() {
-                    assert!((t[0] - clock[0]).abs() < 0.02);
-                } else {
-                    assert!(t[0] <= last_clock_x + 0.02, "timer reversed at {frame}");
-                }
-                last_clock_x = t[0];
+                assert!((t[0] - clock[0]).abs() < 0.02, "timer moved at {frame}");
                 if frame > delay {
                     let w = rect(&rt, "title")[2];
                     assert!(
