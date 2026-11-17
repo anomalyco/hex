@@ -47,7 +47,6 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
-            | Self::HistoryMultiSelect
             | Self::RecentDictations
             | Self::SkipPauses
             | Self::OutputFixes
@@ -147,10 +146,7 @@ impl Feature {
             | Self::ReturnToApp
             | Self::SpeakersOnly
             | Self::MoreDictationShortcuts => 20261109,
-            Self::AppModelSwitching
-            | Self::ApiTimestamps
-            | Self::PauseMenu
-            | Self::HistoryMultiSelect => 20261110,
+            Self::AppModelSwitching | Self::ApiTimestamps | Self::PauseMenu => 20261110,
             Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
             Self::ScreenVocabulary
             | Self::VoicePrompt
@@ -296,7 +292,6 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
-            | Self::HistoryMultiSelect
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
@@ -356,7 +351,6 @@ impl Feature {
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
-            Self::HistoryMultiSelect => "history-multi-select",
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
             Self::OutputFixes => "output-fixes",
@@ -438,7 +432,6 @@ impl Feature {
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
-            Self::HistoryMultiSelect => "labs.history_multi_select",
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
             Self::OutputFixes => "labs.output_fixes",

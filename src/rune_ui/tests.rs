@@ -1388,11 +1388,9 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.find("history-stats-open").is_none());
 }
 
-/// History with Labs › Select multiple dictations on.
+/// History, settled.
 fn history_multi() -> Runtime<Ui> {
     let mut rt = runtime("history", true, PANE_SIZE);
-    rt.state.settings.labs.history_multi_select = true;
-    rt.invalidate();
     settle(&mut rt);
     rt
 }
@@ -1642,30 +1640,13 @@ fn history_selection_deletes_in_two_steps() {
 }
 
 #[test]
-fn history_shift_click_selects_one_without_the_lab() {
-    let mut rt = runtime("history", true, PANE_SIZE);
-    assert!(!rt.state.settings.labs.history_multi_select);
-    tap(&mut rt, "history-entry2");
-    hold(&mut rt, shift());
-    tap(&mut rt, "history-entry1");
-    hold(&mut rt, Mods::default());
-    assert_eq!(rt.state.history.selected, Some(1));
-    assert_eq!(rt.state.history.selection.len(), 0);
-    assert!(rt.find("history-selection-copy").is_none());
-}
-
-#[test]
-fn history_command_click_keeps_the_row_selected_before_the_lab() {
-    let mut rt = runtime("history", true, PANE_SIZE);
-    assert!(!rt.state.settings.labs.history_multi_select);
+fn history_command_click_keeps_the_selected_row() {
+    let mut rt = history_multi();
     tap(&mut rt, "history-entry2");
     assert_eq!(rt.state.history.selected, Some(2));
 
-    // A row selected before the lab was turned on joins the set first, so
-    // Command-clicking another row keeps it instead of dropping it.
-    rt.state.settings.labs.history_multi_select = true;
-    rt.invalidate();
-    settle(&mut rt);
+    // The one selected row joins the set first, so Command-clicking another
+    // row keeps it instead of dropping it.
     hold(&mut rt, command());
     tap(&mut rt, "history-entry3");
     hold(&mut rt, Mods::default());
@@ -1678,39 +1659,18 @@ fn history_command_click_keeps_the_row_selected_before_the_lab() {
 
 #[test]
 fn history_command_click_deselects_the_only_selected_row() {
-    let mut rt = runtime("history", true, PANE_SIZE);
+    let mut rt = history_multi();
     tap(&mut rt, "history-entry2");
     assert_eq!(rt.state.history.selected, Some(2));
 
-    // A row selected before the lab was turned on is the whole set: Command
-    // deselects it, leaving nothing selected.
-    rt.state.settings.labs.history_multi_select = true;
-    rt.invalidate();
-    settle(&mut rt);
+    // The one selected row is the whole set: Command deselects it, leaving
+    // nothing selected.
     hold(&mut rt, command());
     tap(&mut rt, "history-entry2");
     hold(&mut rt, Mods::default());
     assert_eq!(rt.state.history.selection.len(), 0);
     assert_eq!(rt.state.history.selected, None);
     assert!(!rt.state.history.is_selected(2));
-}
-
-#[test]
-fn history_multi_select_turns_off_to_one_entry() {
-    let mut rt = history_multi();
-    tap(&mut rt, "history-entry3");
-    hold(&mut rt, shift());
-    tap(&mut rt, "history-entry2");
-    hold(&mut rt, Mods::default());
-    assert_eq!(rt.state.history.selection.len(), 2);
-
-    rt.state.settings.labs.history_multi_select = false;
-    rt.invalidate();
-    settle(&mut rt);
-    assert_eq!(rt.state.history.selection.len(), 0);
-    assert_eq!(rt.state.history.selected, Some(2));
-    assert!(rt.state.history.is_selected(2));
-    assert!(!rt.state.history.is_selected(3));
 }
 
 #[test]

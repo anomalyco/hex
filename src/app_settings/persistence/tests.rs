@@ -701,6 +701,16 @@ fn bad_list_entries_do_not_discard_good_entries() {
 }
 
 #[test]
+fn obsolete_history_selection_lab_loads_without_repair() {
+    for old in [false, true] {
+        let json = format!(r#"{{"labs":{{"history_multi_select":{old},"keep_recordings":true}}}}"#);
+        let (settings, repaired) = decode(json.as_bytes());
+        assert!(!repaired);
+        assert!(settings.labs.keep_recordings);
+    }
+}
+
+#[test]
 fn unknown_keys_are_ignored_without_repair() {
     let (settings, repaired) =
         decode(br#"{"future":{"flag":true},"meetings":{"future":42,"enabled":true}}"#);

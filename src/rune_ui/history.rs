@@ -53,8 +53,8 @@ pub(super) struct HistoryPane {
     pub(super) stats: Option<HistoryStats>,
     /// The stats dialog is open.
     pub(super) stats_open: bool,
-    /// Labs › Select multiple dictations: every selected entry, and the
-    /// Delete confirmation while the card shows one.
+    /// Every selected entry, when several are, and the Delete confirmation
+    /// while the card shows one.
     pub(super) selection: selection::Selection,
     /// Labs › Keep recordings: the installed models Transcribe again
     /// offers, read when its menu opens.
@@ -188,18 +188,13 @@ impl HistoryPane {
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
     /// once when the dialog closes because the stats emptied.
-    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool, multi: bool) -> bool {
+    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool) -> bool {
         let answered = self.poll_again();
         // Playback's answer returns the card to Play; it is not a reason to
         // read the stats again.
         let played = self.poll_playback();
         let copied = self.poll_audio();
         let mut changed = false;
-        // Labs › Select multiple dictations off, History keeps one selected
-        // entry: the others fall away.
-        if !multi && selection::collapse(self) {
-            changed = true;
-        }
         // A playback belongs to the card that shows its Stop: leaving the
         // entry or History, turning the lab off, or hiding the window
         // quietly ends it.
@@ -267,8 +262,7 @@ impl HistoryPane {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
-    /// Whether row `id` draws as selected: the one entry, or any of the
-    /// several Labs › Select multiple dictations holds.
+    /// Whether row `id` draws as selected: the one entry, or any of several.
     pub(super) fn is_selected(&self, id: u64) -> bool {
         self.selected == Some(id) || self.selection.contains(id)
     }
@@ -337,8 +331,7 @@ impl HistoryPane {
         Self::default()
     }
 
-    /// Labs › Select multiple dictations: two entries selected, for the
-    /// preview's card.
+    /// Two entries selected, for the preview's card.
     pub(super) fn fixture_selection() -> Self {
         let mut pane = Self::fixture();
         pane.selected = Some(2);
@@ -598,12 +591,6 @@ fn delete(ui: &mut Ui, id: u64) {
         ui.history.selected = None;
         ui.history.selection.clear();
     }
-}
-
-/// Labs › Select multiple dictations, as the pane reads it while drawing,
-/// polling, and taking a press.
-pub(super) fn multi(ui: &Ui) -> bool {
-    selection::on(ui)
 }
 
 /// The header's retention menu and the list + detail body.
@@ -985,7 +972,7 @@ fn empty(ui: &Ui, p: Paint) -> Option<El> {
 
 fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let pane = &ui.history;
-    if multi(ui) && pane.selection.len() >= 2 {
+    if pane.selection.len() >= 2 {
         return selection::card(ui, p);
     }
     let Some(entry) = pane.selected.and_then(|id| pane.entry(id)) else {

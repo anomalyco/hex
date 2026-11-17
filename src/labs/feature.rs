@@ -40,7 +40,6 @@ pub enum Feature {
     ParakeetUltra,
     StandaloneSpecialKeys,
     HistoryStats,
-    HistoryMultiSelect,
     RecentDictations,
     SkipPauses,
     OutputFixes,
@@ -84,7 +83,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 76] = [
+    pub const ALL: [Self; 75] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -120,7 +119,6 @@ impl Feature {
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
-        Self::HistoryMultiSelect,
         Self::RecentDictations,
         Self::SkipPauses,
         Self::OutputFixes,

@@ -104,7 +104,6 @@ impl Feature {
             | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
-            | Self::HistoryMultiSelect
             | Self::RecentDictations
             | Self::CopyDictationAudio => Group::History,
             Self::Meetings
