@@ -68,6 +68,9 @@ pub struct LabsSettings {
     /// preedit, with the final text committed there (Linux Wayland).
     pub live_typing: bool,
     pub live_chapters: bool,
+    /// A question about a meeting's transcript, answered below its field
+    /// (Meetings pane).
+    pub ask_meetings: bool,
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
     pub vocabulary_biasing: bool,
@@ -333,6 +336,7 @@ impl Default for LabsSettings {
             failure_notices: false,
             live_typing: false,
             live_chapters: false,
+            ask_meetings: false,
             playground: false,
             vocabulary_biasing: false,
             screen_vocabulary: false,

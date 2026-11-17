@@ -63,6 +63,15 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
+├── Ask meetings    no    labs.ask_meetings                      a question field under a meeting's notes in the Meetings pane, with a short
+│                                        answer below it, even while it records; the writer is Meetings › Settings › Summaries
+│                                        // checks: meeting/ask.rs tests (the excerpt keeps the latest speech, a line carries its time and
+│                                        // speaker, a monologue is cut, an empty question is refused, a long question is cut to 500 chars);
+│                                        // rune_ui/meetings/ask.rs tests (a second question waits for the running one, another meeting is told
+│                                        // to wait and the old answer dropped, leaving and returning never shows an abandoned question as
+│                                        // running, no writer says so, giving it up clears the field);
+│                                        // ask_meetings_shows_its_field_only_with_its_lab (rune_ui/tests/panes.rs); not observed with a
+│                                        // real writer, no Apple Intelligence Mac and no live OpenCode request
 ├── Vocabulary help no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Words on screen no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped

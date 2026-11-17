@@ -839,6 +839,19 @@
       ],
       "summary": "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish",
       "title": "Hold through other keys"
+    },
+    {
+      "added": "2026-11-17",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "ask-meetings",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Ask about what was said in a meeting and see a short answer, even while it records",
+      "title": "Ask meetings"
     }
   ]
 }
