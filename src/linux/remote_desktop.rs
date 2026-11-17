@@ -7,12 +7,12 @@
 //! Application Support, restores later sessions without a dialog, so the
 //! paster can close an idle session and reopen it at the next paste.
 //!
-//! A chord goes out as evdev keycodes when the desktop's keymap puts each
-//! letter on one key in every layout group — a keysym has to be looked up in
-//! the active group, and KWin's lookup for a Latin `v` on a Russian layout can
-//! lose the held Ctrl — and otherwise as keysyms, which the desktop does
-//! resolve. [`keymap`] reads and resolves the keymap; a chord never mixes the
-//! two.
+//! A chord goes out as evdev keycodes when the desktop's keymap confirms every
+//! key of it — each letter on one key in every layout group, and Ctrl, Shift,
+//! and Enter where their keymap options leave them — and otherwise as keysyms,
+//! which the desktop resolves in the active group; KWin's lookup for a Latin
+//! `v` on a Russian layout can lose the held Ctrl. [`keymap`] reads and
+//! resolves the keymap; a chord never mixes the two.
 
 mod keymap;
 
@@ -33,14 +33,15 @@ pub(crate) const INTERFACE: &str = "org.freedesktop.portal.RemoteDesktop";
 const KEYBOARD: u32 = 1;
 /// Persist the grant until the user revokes it.
 const PERSIST_UNTIL_REVOKED: u32 = 2;
-/// Keysyms, for a chord the keymap can't name one evdev code for. Return never
-/// needs them: every layout has it on the same key.
+/// Keysyms, for a chord the keymap can't confirm keycode by keycode.
 const XK_CONTROL_L: i32 = 0xffe3;
 const XK_SHIFT_L: i32 = 0xffe1;
 const XK_A: i32 = 0x61;
 const XK_C: i32 = 0x63;
 const XK_V: i32 = 0x76;
-/// Evdev codes of the keys every layout has in the same place.
+const XK_RETURN: i32 = 0xff0d;
+/// Evdev codes of the keys a chord holds; the keymap says whether they still
+/// carry what they are named for.
 const EVDEV_KEY_LEFTCTRL: i32 = 29;
 const EVDEV_KEY_LEFTSHIFT: i32 = 42;
 const EVDEV_KEY_ENTER: i32 = 28;
@@ -277,18 +278,23 @@ impl Drop for RemoteDesktop {
 }
 
 /// Presses and releases a chord's keys in order: as evdev keycodes when the
-/// keymap puts each letter on one key in every group, and as keysyms otherwise.
+/// keymap confirms every key of the chord, and as keysyms otherwise.
 fn chord_keys(
     chord: Chord,
     with_shift: bool,
     keymap: Option<&keymap::Groups>,
 ) -> (Encoding, Vec<(i32, u32)>) {
-    // Return sits on the same key in every layout.
     if chord == Chord::Return {
-        return (
-            Encoding::Keycode,
-            vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)],
-        );
+        return match keymap.filter(|groups| types(groups, EVDEV_KEY_ENTER, XK_RETURN)) {
+            Some(_) => (
+                Encoding::Keycode,
+                vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)],
+            ),
+            None => (
+                Encoding::Keysym,
+                vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)],
+            ),
+        };
     }
     let (letter, shift) = match chord {
         Chord::SelectAll => (XK_A, false),
@@ -296,7 +302,17 @@ fn chord_keys(
         Chord::Paste => (XK_V, with_shift),
         Chord::Return => unreachable!("returned above"),
     };
-    let keycode = keymap.and_then(|groups| keymap::resolve(groups, u32::try_from(letter).ok()?));
+    let keycode = keymap.and_then(|groups| {
+        // Options such as `ctrl:swapcaps` put Control_L on another key, so the
+        // fixed code is only used when the keymap still types it there.
+        if !types(groups, EVDEV_KEY_LEFTCTRL, XK_CONTROL_L) {
+            return None;
+        }
+        if shift && !types(groups, EVDEV_KEY_LEFTSHIFT, XK_SHIFT_L) {
+            return None;
+        }
+        keymap::resolve(groups, u32::try_from(letter).ok()?)
+    });
     match keycode {
         Some(code) => (
             Encoding::Keycode,
@@ -312,6 +328,14 @@ fn chord_keys(
             presses(XK_CONTROL_L, XK_SHIFT_L, letter, shift),
         ),
     }
+}
+
+/// Whether the keymap types `keysym` on the fixed key `code` in every group.
+fn types(groups: &keymap::Groups, code: i32, keysym: i32) -> bool {
+    let (Ok(code), Ok(keysym)) = (u16::try_from(code), u32::try_from(keysym)) else {
+        return false;
+    };
+    keymap::every_group(groups, code, keysym)
 }
 
 /// Ctrl, [Shift], key, key, [Shift], Ctrl.
@@ -362,11 +386,27 @@ fn save_restore_token(token: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// A `us` keymap: `a`, `c`, and `v` on their QWERTY keys.
+    /// A `us` keymap: `a`, `c`, and `v` on their QWERTY keys, and the
+    /// modifiers and Return where a plain layout leaves them.
     fn qwerty() -> keymap::Groups {
         vec![vec![
+            (29, u32::try_from(XK_CONTROL_L).unwrap()),
+            (42, u32::try_from(XK_SHIFT_L).unwrap()),
+            (28, u32::try_from(XK_RETURN).unwrap()),
             (30, u32::try_from(XK_A).unwrap()),
             (46, u32::try_from(XK_C).unwrap()),
+            (47, u32::try_from(XK_V).unwrap()),
+        ]]
+    }
+
+    /// `ctrl:swapcaps`: Caps_Lock on 29 and Control_L on 58, with `v` still on
+    /// its QWERTY key.
+    fn swapcaps() -> keymap::Groups {
+        vec![vec![
+            (29, 0xffe5),
+            (58, u32::try_from(XK_CONTROL_L).unwrap()),
+            (42, u32::try_from(XK_SHIFT_L).unwrap()),
+            (28, u32::try_from(XK_RETURN).unwrap()),
             (47, u32::try_from(XK_V).unwrap()),
         ]]
     }
@@ -470,19 +510,96 @@ mod tests {
         }
     }
 
-    /// Return is on the same key in every layout, so it never waits on a
-    /// keymap.
+    /// Return goes out as a keycode only where the keymap still types Return
+    /// on it; without a keymap it stays a keysym, as it always was.
     #[test]
-    fn return_is_always_the_same_keycode() {
-        for keymap in ways() {
-            assert_eq!(
-                chord_keys(Chord::Return, false, keymap.as_ref()),
-                (
-                    Encoding::Keycode,
-                    vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)]
-                )
-            );
-        }
+    fn return_follows_the_keymap() {
+        assert_eq!(
+            chord_keys(Chord::Return, false, None),
+            (
+                Encoding::Keysym,
+                vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)]
+            )
+        );
+        let keymap = qwerty();
+        assert_eq!(
+            chord_keys(Chord::Return, false, Some(&keymap)),
+            (
+                Encoding::Keycode,
+                vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)]
+            )
+        );
+        // A layout that moved Return off 28 keeps the keysym.
+        let moved = vec![vec![(29, 0xffe3), (47, 0x76), (24, 0xff0d)]];
+        assert_eq!(
+            chord_keys(Chord::Return, false, Some(&moved)),
+            (
+                Encoding::Keysym,
+                vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)]
+            )
+        );
+    }
+
+    /// `ctrl:swapcaps` moves Control_L off 29, where a keycode chord would
+    /// hold Caps_Lock instead, so the whole chord falls back to keysyms.
+    #[test]
+    fn moved_modifiers_fall_back_to_keysyms() {
+        let keymap = swapcaps();
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&keymap)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
+        );
+        assert_eq!(
+            chord_keys(Chord::Paste, true, Some(&keymap)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_SHIFT_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_SHIFT_L, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
+        );
+
+        // A moved Shift only matters to the chords that hold it.
+        let moved_shift = vec![vec![(29, 0xffe3), (42, 0xffe5), (47, 0x76)]];
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&moved_shift)),
+            (
+                Encoding::Keycode,
+                vec![
+                    (EVDEV_KEY_LEFTCTRL, PRESSED),
+                    (47, PRESSED),
+                    (47, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
+        );
+        assert_eq!(
+            chord_keys(Chord::Paste, true, Some(&moved_shift)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_SHIFT_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_SHIFT_L, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
+        );
     }
 
     #[test]
