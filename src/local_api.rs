@@ -14,6 +14,7 @@ use serde::Serialize;
 use crate::app_settings::AppSettings;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
+mod connect;
 mod dictation;
 mod discovery;
 mod http;
@@ -22,6 +23,8 @@ pub(crate) mod processing;
 mod streams;
 pub(crate) mod timestamps;
 mod transcriptions;
+
+pub(crate) use connect::{Answer, Connect, ConsentGate, Prompt};
 
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
@@ -107,6 +110,9 @@ struct HttpContext {
     meeting_events: meeting_events::Source,
     processing: processing::Processing,
     timestamps: timestamps::Timestamps,
+    /// Browser connect (Labs › Browser access to the local API): a web page's
+    /// one-transcription ask. Absent without a window to ask.
+    connect: Option<connect::Connect>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -131,6 +137,8 @@ struct CapabilitiesResponse {
     output_processing: bool,
     developer_control: bool,
     control: bool,
+    /// The browser connect routes, with a window that can ask.
+    connect: bool,
 }
 
 /// Optional control channels the running app exposes through its local API.
@@ -153,6 +161,10 @@ pub struct LocalApiOptions {
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
+    /// Browser connect (Labs › Browser access to the local API): the window's
+    /// consent gate and one-use grants. `None` leaves the routes answering
+    /// `403 connect-unavailable`.
+    pub(crate) connect: Option<Connect>,
 }
 
 impl LocalApi {
@@ -285,6 +297,7 @@ impl LocalApi {
             meeting_events,
             processing: options.processing,
             timestamps: options.timestamps,
+            connect: options.connect,
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -669,11 +682,35 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             RequestAction::MeetingEvents(subscription) => {
                 meeting_events::stream(&mut stream, subscription, &context);
             }
+            RequestAction::Connect(call) => {
+                let response = match context.connect.as_ref() {
+                    Some(connect) => connect.respond(call, &mut stream, &context.shutdown),
+                    None => HttpResponse::code(403, "connect-unavailable"),
+                };
+                if let Err(error) = write_response(&mut stream, response, cors) {
+                    tracing::debug!(%error, "connect client disconnected");
+                }
+            }
         }
     }
 }
 
 fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction {
+    // Browser connect comes before the bearer token (`connect::intercept`).
+    let request = match connect::intercept(request, context.connect.as_ref()) {
+        connect::Intercept::Refuse(response) => return RequestAction::Respond(response),
+        connect::Intercept::Connect(call) => return RequestAction::Connect(call),
+        connect::Intercept::Upload(request) => {
+            return transcription_action(
+                request,
+                &context.transcription,
+                &context.processing,
+                &context.timestamps,
+                true,
+            );
+        }
+        connect::Intercept::Pass(request) => request,
+    };
     let path = request.path.split('?').next().unwrap_or("/");
     if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
         context
@@ -687,6 +724,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             &context.transcription,
             &context.processing,
             &context.timestamps,
+            false,
         );
     }
     if request.method == "POST" && path == "/dev/control" {
@@ -754,6 +792,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 output_processing: context.processing.available(),
                 developer_control: context.developer_control.is_some(),
                 control: context.control.is_some(),
+                connect: context.connect.is_some(),
             },
         ),
         ("GET", "/profile/vitals") => match procwatch::snapshot() {
@@ -802,21 +841,37 @@ fn transcription_action(
     transcription: &crate::transcription::service::TranscriptionServiceHandle,
     processing: &processing::Processing,
     timestamps: &timestamps::Timestamps,
+    connect_grant: bool,
 ) -> RequestAction {
-    let guard = match processing::wanted(&request.path) {
-        Ok(wanted) => match processing::gate(wanted, processing) {
-            Ok(guard) => guard,
-            Err(response) => return RequestAction::Respond(response),
-        },
-        Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
-    };
-    let requested = match timestamps::requested(&request.path) {
-        Ok(requested) => requested,
-        Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
-    };
-    if let Err(response) = timestamps::gate(requested, timestamps) {
+    // A browser connect grant is one plain transcription: no output
+    // processing, no timings, nothing beyond the upload and the model.
+    if connect_grant && let Some(response) = connect::connect_scope_refusal(&request.path) {
         return RequestAction::Respond(response);
     }
+    let guard = if connect_grant {
+        None
+    } else {
+        match processing::wanted(&request.path) {
+            Ok(wanted) => match processing::gate(wanted, processing) {
+                Ok(guard) => guard,
+                Err(response) => return RequestAction::Respond(response),
+            },
+            Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
+        }
+    };
+    let requested = if connect_grant {
+        crate::transcription::transcript::TimestampLevel::None
+    } else {
+        let requested = match timestamps::requested(&request.path) {
+            Ok(requested) => requested,
+            Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
+        };
+        if let Err(response) = timestamps::gate(requested, timestamps) {
+            return RequestAction::Respond(response);
+        }
+        requested
+    };
+
     if !request.has_content_type("audio/wav") {
         return RequestAction::Respond(HttpResponse::code(415, "unsupported-audio"));
     }
@@ -1347,6 +1402,8 @@ enum RequestAction {
     },
     Stream(streams::StreamAction),
     MeetingEvents(crate::meeting::finished_events::Subscription),
+    /// A browser page's connect request, answered after its body arrives.
+    Connect(connect::Call),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2068,6 +2125,7 @@ mod tests {
                 authorization: None,
                 dictation_token: None,
                 stream_token: None,
+                connect_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
                 body_prefix: Vec::new(),
@@ -2075,6 +2133,7 @@ mod tests {
             &transcription,
             &Processing::default(),
             &Timestamps::default(),
+            false,
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsupported audio must be rejected before upload");
@@ -2088,6 +2147,7 @@ mod tests {
                 authorization: None,
                 dictation_token: None,
                 stream_token: None,
+                connect_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
                 body_prefix: Vec::new(),
@@ -2095,6 +2155,7 @@ mod tests {
             &transcription,
             &Processing::default(),
             &Timestamps::default(),
+            false,
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsafe body size must be rejected before upload");
@@ -2126,6 +2187,7 @@ mod tests {
             meeting_events: meeting_events::Source::default(),
             processing: Processing::default(),
             timestamps: Timestamps::default(),
+            connect: None,
         };
         let action = handle_request(
             HttpRequest {
@@ -2134,6 +2196,7 @@ mod tests {
                 authorization: Some("Bearer test-token".into()),
                 dictation_token: None,
                 stream_token: None,
+                connect_token: None,
                 content_type: None,
                 content_length: None,
                 body_prefix: Vec::new(),
@@ -2279,6 +2342,435 @@ mod tests {
         LocalApi::start_bound(None, Arc::new(test_health), events, options, None)
     }
 
+    }
+
+    fn two_origins() -> Vec<String> {
+        vec![
+            "https://app.example".to_owned(),
+            "https://other.example".to_owned(),
+        ]
+    }
+
+    /// A consent gate with a fixed answer, remembering every ask.
+    struct ScriptedGate {
+        answer: connect::Answer,
+        asked: Mutex<Vec<Prompt>>,
+    }
+
+    impl ScriptedGate {
+        fn new(answer: connect::Answer) -> Arc<Self> {
+            Arc::new(Self {
+                answer,
+                asked: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn asks(&self) -> usize {
+            self.asked.lock().unwrap().len()
+        }
+
+        fn last_prompt(&self) -> Option<Prompt> {
+            self.asked.lock().unwrap().last().cloned()
+        }
+    }
+
+    impl ConsentGate for ScriptedGate {
+        fn ask(&self, prompt: &Prompt, _wait: Duration) -> connect::Answer {
+            self.asked.lock().unwrap().push(Prompt {
+                id: prompt.id,
+                origin: prompt.origin.clone(),
+                client_name: prompt.client_name.clone(),
+            });
+            self.answer
+        }
+    }
+
+    fn start_connect(
+        origins: fn() -> Vec<String>,
+        gate: Arc<dyn ConsentGate>,
+        timings: Option<(Duration, Duration, Duration, Duration)>,
+    ) -> LocalApi {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let connect = match timings {
+            Some((code, token, wait, cooldown)) => {
+                connect::Connect::with_timings(origins, Some(gate), code, token, wait, cooldown)
+            }
+            None => connect::Connect::new(origins, Some(gate)),
+        };
+        start_unpublished(
+            events,
+            LocalApiOptions {
+                cors: Cors::gated(origins),
+                connect: Some(connect),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// The RFC 7636 S256 example: verifier, and the challenge it hashes to.
+    const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    /// A browser's JSON POST from `origin`, optionally with a connect token.
+    fn connect_post(port: u16, origin: &str, path: &str, body: &str) -> String {
+        connect_post_with(port, origin, path, None, "application/json", body)
+    }
+
+    fn connect_post_with(
+        port: u16,
+        origin: &str,
+        path: &str,
+        token: Option<&str>,
+        content_type: &str,
+        body: &str,
+    ) -> String {
+        let token = token.map_or_else(String::new, |token| {
+            format!("X-Hex-Connect-Token: {token}\r\n")
+        });
+        raw_request(
+            port,
+            &format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n{token}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+    }
+
+    /// One full consent, answered with `answer`, returning (port, code).
+    fn authorize(port: u16, origin: &str) -> String {
+        let response = connect_post(
+            port,
+            origin,
+            connect::AUTHORIZE_PATH,
+            &format!(
+                r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","state":"s1","clientName":"Field Notes"}}"#
+            ),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn exchange(port: u16, origin: &str, code: &str) -> String {
+        connect_post(
+            port,
+            origin,
+            connect::TOKEN_PATH,
+            &format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#),
+        )
+    }
+
+    fn upload_token(response: &str) -> String {
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str::<serde_json::Value>(response_body(response)).unwrap()["uploadToken"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn body_code(response: &str) -> String {
+        serde_json::from_str::<serde_json::Value>(response_body(response))
+            .unwrap()
+            .get("code")
+            .and_then(|code| code.as_str())
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn an_allowed_page_trades_one_code_for_one_upload() {
+        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+
+        let response = connect_post(
+            port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            &format!(
+                r#"{{"codeChallenge":"{CHALLENGE}","state":"s1","clientName":"Field Notes"}}"#
+            ),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(
+            response.contains("Access-Control-Allow-Origin: https://app.example\r\n"),
+            "{response}"
+        );
+        let answered: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
+        assert_eq!(answered["origin"], "https://app.example");
+        assert_eq!(answered["scope"], "transcription:upload");
+        assert_eq!(answered["state"], "s1");
+        let code = answered["code"].as_str().unwrap().to_owned();
+        // The dialog named the page and its verified origin.
+        let prompt = gate.last_prompt().unwrap();
+        assert_eq!(prompt.origin, "https://app.example");
+        assert_eq!(prompt.client_name.as_deref(), Some("Field Notes"));
+
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+        // The code was spent by its exchange.
+        let reused = exchange(port, "https://app.example", &code);
+        assert!(reused.starts_with("HTTP/1.1 403"), "{reused}");
+        assert_eq!(body_code(&reused), "invalid-grant");
+
+        // The token reaches the transcription route (a non-WAV body is the
+        // route's own refusal, after auth), and only once.
+        let upload = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(upload.starts_with("HTTP/1.1 415"), "{upload}");
+        assert_eq!(body_code(&upload), "unsupported-audio");
+        let again = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(again.starts_with("HTTP/1.1 401"), "{again}");
+    }
+
+    #[test]
+    fn a_denied_page_gets_no_code_and_a_short_cooldown() {
+        let gate = ScriptedGate::new(connect::Answer::Deny);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let denied = connect_post(port, "https://app.example", connect::AUTHORIZE_PATH, &body);
+        assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+        assert_eq!(body_code(&denied), "consent-denied");
+        assert!(!denied.contains("hexc_"));
+
+        // The page may not reopen the dialog at once, and the gate was not
+        // asked a second time.
+        let cooled = connect_post(port, "https://app.example", connect::AUTHORIZE_PATH, &body);
+        assert!(cooled.starts_with("HTTP/1.1 429"), "{cooled}");
+        assert_eq!(body_code(&cooled), "consent-cooldown");
+        assert_eq!(gate.asks(), 1);
+    }
+
+    #[test]
+    fn an_unlisted_page_never_reaches_the_dialog() {
+        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let other = connect_post(
+            port,
+            "https://other.example",
+            connect::AUTHORIZE_PATH,
+            &body,
+        );
+        assert!(other.starts_with("HTTP/1.1 403"), "{other}");
+        assert_eq!(body_code(&other), "origin-not-allowed");
+        assert!(!other.contains("Access-Control-Allow-Origin"));
+
+        // No Origin at all is not a browser page Hex knows.
+        let missing = raw_request(
+            port,
+            &format!(
+                "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                connect::AUTHORIZE_PATH,
+                body.len()
+            ),
+        );
+        assert!(missing.starts_with("HTTP/1.1 403"), "{missing}");
+        assert_eq!(body_code(&missing), "origin-not-allowed");
+        assert_eq!(gate.asks(), 0);
+    }
+
+    #[test]
+    fn only_a_browser_json_post_can_prompt() {
+        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let api = start_connect(app_origin, gate.clone(), None);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        // A plain text body would skip the browser's preflight, so it is not
+        // a request this flow accepts.
+        let simple = connect_post_with(
+            port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            None,
+            "text/plain",
+            &body,
+        );
+        assert!(simple.starts_with("HTTP/1.1 415"), "{simple}");
+        // A GET is not the exchange.
+        let get = raw_request(
+            port,
+            &format!(
+                "GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://app.example\r\nConnection: close\r\n\r\n",
+                connect::AUTHORIZE_PATH
+            ),
+        );
+        assert!(get.starts_with("HTTP/1.1 401"), "{get}");
+        // A challenge that is not a SHA-256 digest is refused before the
+        // dialog.
+        let bad = connect_post(
+            port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            r#"{"codeChallenge":"not-a-digest"}"#,
+        );
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+        assert_eq!(gate.asks(), 0);
+    }
+
+    #[test]
+    fn a_code_is_bound_to_its_origin_and_its_verifier() {
+        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let api = start_connect(two_origins, gate, None);
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let stolen = exchange(port, "https://other.example", &code);
+        assert!(stolen.starts_with("HTTP/1.1 403"), "{stolen}");
+        assert_eq!(body_code(&stolen), "invalid-grant");
+        // The failed exchange spent the code, so the real page cannot use it.
+        let spent = exchange(port, "https://app.example", &code);
+        assert_eq!(body_code(&spent), "invalid-grant");
+
+        let code = authorize(port, "https://app.example");
+        let wrong = connect_post(
+            port,
+            "https://app.example",
+            connect::TOKEN_PATH,
+            &format!(r#"{{"code":"{code}","codeVerifier":"{}"}}"#, "a".repeat(43)),
+        );
+        assert!(wrong.starts_with("HTTP/1.1 403"), "{wrong}");
+        assert_eq!(body_code(&wrong), "invalid-grant");
+    }
+
+    #[test]
+    fn expired_grants_are_refused() {
+        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let api = start_connect(
+            app_origin,
+            gate.clone(),
+            Some((
+                Duration::ZERO,
+                Duration::from_secs(60),
+                Duration::from_secs(1),
+                Duration::ZERO,
+            )),
+        );
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let expired = exchange(port, "https://app.example", &code);
+        assert!(expired.starts_with("HTTP/1.1 403"), "{expired}");
+        assert_eq!(body_code(&expired), "invalid-grant");
+
+        // A token that expires at once cannot upload.
+        let api = start_connect(
+            app_origin,
+            gate,
+            Some((
+                Duration::from_secs(60),
+                Duration::ZERO,
+                Duration::from_secs(1),
+                Duration::ZERO,
+            )),
+        );
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+        let upload = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(upload.starts_with("HTTP/1.1 401"), "{upload}");
+    }
+
+    #[test]
+    fn an_upload_token_reaches_no_other_route_and_no_other_scope() {
+        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let api = start_connect(app_origin, gate, None);
+        let port = api.document.port;
+        let code = authorize(port, "https://app.example");
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+
+        for (method, path) in [
+            ("GET", "/health"),
+            ("GET", "/capabilities"),
+            ("POST", "/control"),
+            ("POST", "/dev/control"),
+            ("POST", "/dictations"),
+            ("POST", "/streams"),
+        ] {
+            let response = raw_request(
+                port,
+                &format!(
+                    "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://app.example\r\nX-Hex-Connect-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                ),
+            );
+            assert!(
+                response.starts_with("HTTP/1.1 401"),
+                "{method} {path}: {response}"
+            );
+        }
+
+        // Even the upload route refuses processing and timings: the grant is
+        // one plain transcript.
+        let scoped = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions?process=global",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(scoped.starts_with("HTTP/1.1 403"), "{scoped}");
+        assert_eq!(body_code(&scoped), "connect-scope");
+
+        // A token tried from another origin is refused, and spent.
+        let code = authorize(port, "https://app.example");
+        let token = upload_token(&exchange(port, "https://app.example", &code));
+        let wrong_origin = connect_post_with(
+            port,
+            "https://other.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(wrong_origin.starts_with("HTTP/1.1 401"), "{wrong_origin}");
+        let spent = connect_post_with(
+            port,
+            "https://app.example",
+            "/transcriptions",
+            Some(&token),
+            "audio/webm",
+            "not a wav",
+        );
+        assert!(spent.starts_with("HTTP/1.1 401"), "{spent}");
+    }
+
+    #[test]
+    fn a_timed_out_ask_answers_without_a_code() {
+        let gate = ScriptedGate::new(connect::Answer::Timeout);
+        let api = start_connect(app_origin, gate, None);
+        let response = connect_post(
+            api.document.port,
+            "https://app.example",
+            connect::AUTHORIZE_PATH,
+            &format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#),
+        );
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert_eq!(body_code(&response), "consent-timeout");
     fn test_health() -> HealthResponse {
         HealthResponse {
             version: "test",

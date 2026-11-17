@@ -13,6 +13,8 @@ pub(super) struct HttpRequest {
     pub(super) authorization: Option<String>,
     pub(super) dictation_token: Option<String>,
     pub(super) stream_token: Option<String>,
+    /// `X-Hex-Connect-Token`: a browser page's one-use upload grant.
+    pub(super) connect_token: Option<String>,
     pub(super) content_type: Option<String>,
     pub(super) content_length: Option<usize>,
     pub(super) body_prefix: Vec<u8>,
@@ -256,6 +258,7 @@ pub(super) fn read_request_until(
     let mut authorization = None;
     let mut dictation_token = None;
     let mut stream_token = None;
+    let mut connect_token = None;
     let mut content_type = None;
     let mut content_length = None;
     for (index, line) in lines.enumerate() {
@@ -275,6 +278,11 @@ pub(super) fn read_request_until(
                 return Err(RequestReadError::Invalid);
             }
             stream_token = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("x-hex-connect-token") {
+            if connect_token.is_some() {
+                return Err(RequestReadError::Invalid);
+            }
+            connect_token = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-type") {
             content_type = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-length") {
@@ -301,6 +309,7 @@ pub(super) fn read_request_until(
         authorization,
         dictation_token,
         stream_token,
+        connect_token,
         content_type,
         content_length,
         body_prefix,

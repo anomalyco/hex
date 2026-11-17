@@ -57,6 +57,7 @@ use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
 
 mod activation;
+mod consent;
 mod control;
 mod launch;
 mod main_menu;
@@ -101,6 +102,8 @@ pub(crate) struct Published {
     pub(crate) update_notes: Option<crate::desktop::host::UpdateNotes>,
     pub(crate) settings: AppSettings,
     preparation: crate::transcription::preparation::PreparationStatus,
+    /// A web page's one-transcription ask, while its dialog waits.
+    pub(crate) consent: Option<crate::local_api::Prompt>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -114,6 +117,8 @@ struct Shared {
     /// When this run began, in the event log's wall-clock ms, captured before
     /// the listener thread starts.
     started_at: u64,
+    /// The window's side of a web page's one-transcription ask.
+    consent: Option<Arc<consent::Desk>>,
 }
 
 impl Shared {
@@ -347,6 +352,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let (control_sender, control_receiver) = mpsc::sync_channel(8);
     let (recognition_controls, recognition_control_receiver) = mpsc::sync_channel(8);
+    // A web page's ask is answered in this process's window, so the local API
+    // can wait on it without ever handing the page the API token.
+    let consent = Arc::new(consent::Desk::default());
     let mut local_api = crate::local_api::LocalApi::start(
         event_log.clone(),
         crate::local_api::LocalApiOptions {
@@ -354,6 +362,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             dictation_control: Some(recognition_controls.clone()),
             control: Some(control_sender),
             processing: crate::local_api::processing::profiles_processing(transformations.clone()),
+            connect: Some(crate::local_api::Connect::new(
+                crate::labs::api_browser_origins,
+                Some(consent.clone()),
+            )),
             ..Default::default()
         },
     )?;
@@ -435,6 +447,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let shared = Arc::new(Shared {
         event_path: event_path.clone(),
         started_at,
+        consent: Some(consent.clone()),
         ..Shared::default()
     });
     let handle = RuntimeHandle {

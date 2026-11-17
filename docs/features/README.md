@@ -2874,6 +2874,10 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
 ├── A web page's fetch -> Never allowed: no CORS, OPTIONS is 401
+│   ├── POST /connect/authorize -> Hex's window asks; Allow once -> code + PKCE
+│   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
+│   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
+│   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No capture silence gate           // model output, unlike hotkey dictation;
 │   │   └── its whole-clip run still drops a Whisper clip's silent edges,
@@ -2940,6 +2944,18 @@ response unchanged; off, a timed request is `403 timestamps-disabled`, and a
 model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
+
+Browser connect ([contract](../connect.md)) is the narrower ask beside that
+token-bearing access: a listed page calls `POST /connect/authorize` without the
+token, Hex's window names its verified origin and offers Deny / Allow once, and
+an allowed PKCE exchange mints one upload token that spends itself on one plain
+`POST /transcriptions` from the same origin. Codes and tokens expire in two
+minutes, a Deny starts a 30 s cooldown, and the dialog is answered (Escape and
+the scrim deny) rather than dismissed. `local_api` tests cover the whole
+exchange, origin binding, one-use codes and tokens, expiry, the scope
+refusals, and deny/timeout. The dialog's only rendering proof is the
+`--scene browser-connect` snapshot; no real browser page, click, or model
+transcription was run, and its copy is English only.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

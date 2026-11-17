@@ -33,6 +33,8 @@ override shipped behavior.
   command contract and remaining lifecycle work.
 - [`plans/quickjs.md`](plans/quickjs.md): why and how configs run in embedded
   QuickJS instead of Bun, with size and latency measurements.
+- [`connect.md`](connect.md): browser connect's one-upload consent exchange
+  (PKCE code, one-use token, origin scope) and its limits.
 - [`specs/local-transcription-service.md`](specs/local-transcription-service.md):
   implemented macOS local-service protocol and lifecycle guarantees.
 - [`specs/hex-words.md`](specs/hex-words.md): the Hex words file (`.hexwords`)
@@ -68,6 +70,8 @@ When a plan disagrees with `AGENTS.md` about shipped behavior, update the plan.
   historical benchmark method and measurements.
 - [`../prototypes/app-shell/README.md`](../prototypes/app-shell/README.md):
   archived app-shell comparison prototype.
+- [`../prototypes/browser-connect/README.md`](../prototypes/browser-connect/README.md):
+  a static page that drives browser connect for manual checks.
 
 ## Releases
 

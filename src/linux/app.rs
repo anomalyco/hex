@@ -295,6 +295,7 @@ impl HostHandle {
                     }
                     Ok(())
                 }
+                HostRequest::AnswerConsent { .. } => Ok(()),
             }
         };
         self.wake();

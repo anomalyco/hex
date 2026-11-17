@@ -348,7 +348,8 @@ impl WindowsDesktopHost {
             Request::ReloadSettings => self.reload_settings(),
             Request::CaptureShortcutFor(_)
             | Request::CancelShortcut
-            | Request::SetShortcut { .. } => {}
+            | Request::SetShortcut { .. }
+            | Request::AnswerConsent { .. } => {}
         }
         false
     }

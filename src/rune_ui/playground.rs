@@ -305,6 +305,7 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Labs transcribe audio",
     ),
     ("mac-production", "Window/General/Production build"),
+    ("browser-connect", "Window/General/Browser connect"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
     (

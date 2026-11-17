@@ -35,6 +35,11 @@ pub(crate) enum Request {
     /// Snapshot from the main-thread TIS observer, not a shortcut event.
     InputSourceChanged(Option<String>),
     CancelModel,
+    /// The window answered a web page's one-transcription ask.
+    AnswerConsent {
+        id: u64,
+        allow: bool,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
 }
