@@ -198,6 +198,13 @@ fn scan(
     found
 }
 
+/// The legacy Captures view's bounded annotation source, read by the mixed
+/// History reader off the window thread. Presence here never authorizes paste.
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) fn in_folder(folder: &Path, now: u64) -> Vec<Annotation> {
+    scan(folder, now, &mut HashMap::new())
+}
+
 #[derive(Default)]
 struct Shared {
     listed: Vec<Annotation>,

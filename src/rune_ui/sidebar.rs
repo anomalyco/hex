@@ -114,6 +114,8 @@ impl Pane {
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
             // The Lab turns on only on macOS.
+            #[cfg(all(target_os = "macos", hex_capture))]
+            Pane::Captures if ui.history.unified.enabled => false,
             #[cfg(hex_capture)]
             Pane::Captures => ui.settings.labs.screenshots,
             _ => true,

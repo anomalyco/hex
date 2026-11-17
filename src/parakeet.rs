@@ -395,6 +395,14 @@ impl DictationWorker {
         state.started_by_shortcut = by_shortcut;
     }
 
+    #[cfg(hex_capture)]
+    pub(crate) fn started_by_shortcut(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .started_by_shortcut
+    }
+
     /// Hands the clip to the engine at once, so its live stream finishes
     /// before any later capture begins one; the job then waits in order.
     pub fn transcribe(

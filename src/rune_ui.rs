@@ -463,6 +463,12 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     }
 }
 
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) fn show_all_history(ui: &mut Ui, tx: &mut Tx) {
+    history::unified::show_all(ui);
+    show(ui, Destination::History, tx);
+}
+
 /// What this OS's Hex can do, by capability name, for `hex status` and the
 /// settings `hex settings` can change here.
 pub(crate) fn capabilities() -> std::collections::BTreeMap<String, bool> {
@@ -1218,6 +1224,8 @@ impl Ui {
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
+        #[cfg(all(target_os = "macos", hex_capture))]
+        let pane = history::unified::destination(self, pane);
         let labs = std::mem::take(&mut self.labs_open);
         if self.pane == pane && !labs {
             return;
@@ -1399,6 +1407,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     );
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
+    #[cfg(all(target_os = "macos", hex_capture))]
+    {
+        changed |= history::unified::poll(ui);
+    }
     if ui.pane == Pane::Output && !ui.labs_open {
         changed |= output::poll(ui, clock, tx);
     }

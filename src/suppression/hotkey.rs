@@ -196,7 +196,7 @@ impl DictationHotkey {
         )
     }
 
-    fn with_binding(
+    pub(crate) fn with_binding(
         trigger_down: bool,
         now: CaptureInstant,
         double_tap_enabled: bool,

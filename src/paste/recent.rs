@@ -1,59 +1,14 @@
 //! One selection rule for an immediate paste and the open picker. Only the
 //! stable ID crosses the selection boundary, never a payload or a row index.
 
-use crate::capture_host::paste_source::{self as captures, Scope};
-use crate::history::{History, paste_source as dictations};
+#[cfg(test)]
+use crate::capture_host::paste_source as captures;
+use crate::capture_host::paste_source::Scope;
+use crate::history::History;
 use scrawl_capture::model::ScrawlBundle;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) enum Id {
-    Capture(captures::Id),
-    Dictation(dictations::Id),
-}
-
-#[derive(Clone)]
-pub(crate) struct Row {
-    pub id: Id,
-    pub ready_at: u64,
-    pub preview: String,
-}
-
-pub(crate) fn snapshot(
-    history: &History,
-    captures: Option<&Scope<'_>>,
-    limit: usize,
-    now: u64,
-) -> Vec<Row> {
-    let mut rows: Vec<_> = history
-        .paste_rows(limit, now)
-        .into_iter()
-        .map(|r| Row {
-            id: Id::Dictation(r.id),
-            ready_at: r.ready_at,
-            preview: r.preview,
-        })
-        .collect();
-    if let Some(scope) = captures {
-        rows.extend(
-            scope
-                .rows(limit, now)
-                .into_iter()
-                .map(|(id, ready_at, preview)| Row {
-                    id: Id::Capture(id),
-                    ready_at,
-                    preview,
-                }),
-        );
-    }
-    rows.sort_unstable_by(|a, b| b.ready_at.cmp(&a.ready_at).then_with(|| b.id.cmp(&a.id)));
-    rows.truncate(limit);
-    rows
-}
-
-pub(crate) fn latest(history: &History, captures: Option<&Scope<'_>>, now: u64) -> Option<Id> {
-    snapshot(history, captures, 1, now).pop().map(|r| r.id)
-}
+pub(crate) use crate::history::timeline::{PasteId as Id, Row, latest, snapshot};
 
 pub(crate) enum Output {
     Text(String),

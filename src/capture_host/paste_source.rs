@@ -27,6 +27,12 @@ pub(crate) struct Id {
     stamp: Stamp,
 }
 
+impl Id {
+    pub(crate) fn bundle(&self) -> &Path {
+        &self.dir
+    }
+}
+
 /// A receipt belongs to the bundle (so deletion needs no index cleanup).
 /// It contains identity and time only. Never rewrite an existing receipt.
 pub(crate) fn mark_ready(dir: &Path, ready_at: u64) -> io::Result<()> {

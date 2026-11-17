@@ -28,6 +28,8 @@ pub mod playback;
 pub mod recordings;
 pub mod stats;
 pub mod usage;
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) mod timeline;
 pub mod versions;
 
 pub use recordings::Recording;
@@ -117,6 +119,9 @@ pub type HistoryProcessing = crate::desktop::events::DictationProcessing;
 /// One retained successful result.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HistoryEntry {
+    /// The local transcript of a deliberate cancel. Never inserted automatically.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
     pub id: u64,
     pub timestamp_ms: u64,
     pub kind: HistoryKind,
@@ -275,6 +280,8 @@ pub fn read_snapshot(path: &std::path::Path) -> io::Result<Vec<HistoryEntry>> {
 
 /// Owner-only bounded history store. Entries are held oldest-first.
 pub struct HistoryStore {
+    #[cfg(all(target_os = "macos", hex_capture))]
+    cancel_generation: u64,
     #[cfg(target_os = "macos")]
     recovery: Option<paste_source::Recovery>,
     path: PathBuf,
@@ -309,6 +316,8 @@ impl HistoryStore {
     /// being silently destroyed.
     pub fn open(path: PathBuf, retention: HistoryRetention, now_ms: u64) -> Self {
         let mut store = Self {
+            #[cfg(all(target_os = "macos", hex_capture))]
+            cancel_generation: 0,
             #[cfg(target_os = "macos")]
             recovery: None,
             recordings: recordings::directory(&path),
@@ -408,6 +417,15 @@ impl HistoryStore {
     /// Record one successful result. Returns the stable entry ID, or `None`
     /// while retention is off.
     pub fn record(&mut self, draft: HistoryDraft, now_ms: u64) -> io::Result<Option<u64>> {
+        self.record_result(draft, now_ms, false)
+    }
+
+     fn record_result(
+        &mut self,
+        draft: HistoryDraft,
+        now_ms: u64,
+        cancelled: bool,
+    ) -> io::Result<Option<u64>> {
         if self.retention.is_off() {
             return Ok(None);
         }
@@ -427,6 +445,7 @@ impl HistoryStore {
             })
         });
         self.entries.push(HistoryEntry {
+            cancelled,
             id,
             timestamp_ms: now_ms,
             kind: draft.kind,
@@ -466,7 +485,7 @@ impl HistoryStore {
         if self
             .entries
             .last()
-            .is_some_and(|e| e.id == id && self.pasteable(e, now_ms))
+            .is_some_and(|e| e.id == id && !e.cancelled && self.pasteable(e, now_ms))
         {
             self.recovery = None;
         }
@@ -619,6 +638,10 @@ impl HistoryStore {
     /// Delete every entry, and the Labs › Dictation stats rollup with them. A
     /// failed save keeps the entries, so the clear can be retried.
     pub fn clear(&mut self) -> io::Result<()> {
+        #[cfg(all(target_os = "macos", hex_capture))]
+        {
+            self.cancel_generation += 1;
+        }
         #[cfg(target_os = "macos")]
         {
             self.recovery = None;
@@ -642,6 +665,10 @@ impl HistoryStore {
             return Ok(());
         }
         self.retention = retention;
+        #[cfg(all(target_os = "macos", hex_capture))]
+        {
+            self.cancel_generation += 1;
+        }
         #[cfg(target_os = "macos")]
         if retention.is_off() {
             self.recovery = None;
@@ -712,7 +739,7 @@ impl HistoryStore {
         let cutoff = self.retention.cutoff(now_ms);
         self.entries()
             .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
-            .filter(|entry| entry.kind != HistoryKind::Printed)
+            .filter(|entry| !entry.cancelled && entry.kind != HistoryKind::Printed)
             .filter(|entry| !entry.final_text.trim().is_empty())
             .take(count)
             .collect()

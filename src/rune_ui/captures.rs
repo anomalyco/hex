@@ -49,14 +49,14 @@ pub(super) enum Listed {
 }
 
 impl Listed {
-    fn id(&self) -> u64 {
+    pub(super) fn id(&self) -> u64 {
         match self {
             Self::Saved(entry) => entry.id,
             Self::Annotated(annotation) => annotation.id,
         }
     }
 
-    fn at_ms(&self) -> u64 {
+    pub(super) fn at_ms(&self) -> u64 {
         match self {
             Self::Saved(entry) => entry.at_ms,
             Self::Annotated(annotation) => annotation.at_ms,
@@ -87,7 +87,7 @@ impl Listed {
 
     /// What a drag carries out and Show in Finder points at: the saved
     /// file, or an annotation's movie, else its picture, else its bundle.
-    fn file(&self) -> &Path {
+    pub(super) fn file(&self) -> &Path {
         match self {
             Self::Saved(entry) => &entry.file,
             Self::Annotated(annotation) => annotation
@@ -101,6 +101,8 @@ impl Listed {
 
 #[derive(Default)]
 pub(super) struct CapturesPane {
+    #[cfg(target_os = "macos")]
+    pub(super) confirm_trash: Option<(u64, PathBuf)>,
     pub(super) entries: Vec<Listed>,
     search: TextEdit,
     /// The query the entries were read for.
@@ -114,7 +116,7 @@ pub(super) struct CapturesPane {
     /// The entry whose Copy was pressed last.
     copied: Option<u64>,
     /// A fixture: its entries and thumbnails are set, never read.
-    fixture: bool,
+    pub(super) fixture: bool,
 }
 
 impl CapturesPane {
@@ -441,6 +443,21 @@ fn trash(ui: &mut Ui, id: u64) {
     else {
         return;
     };
+    #[cfg(target_os = "macos")]
+    if ui.history.unified.enabled {
+        let entry = &ui.captures.entries[at];
+        let target = (
+            id,
+            match entry {
+                Listed::Annotated(a) => a.bundle.clone(),
+                Listed::Saved(e) => e.file.clone(),
+            },
+        );
+        if ui.captures.confirm_trash.take().as_ref() != Some(&target) {
+            ui.captures.confirm_trash = Some(target);
+            return;
+        }
+    }
     let path = match ui.captures.entries.remove(at) {
         Listed::Saved(entry) => entry.file,
         Listed::Annotated(annotation) => annotation.bundle,
@@ -501,11 +518,17 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
 /// One capture: its thumbnail, its words (or file name) over its kind and
 /// length, and its time, which Copy, Show in Finder, and Move to Trash take
 /// the place of on hover.
-fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
+pub(super) fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
     let c = &p.k.c;
     let id = entry.id();
     let title = entry.title();
     let meta = meta(entry);
+    #[cfg(all(target_os = "macos", hex_capture))]
+    let meta = if ui.history.unified.enabled && matches!(entry, Listed::Annotated(_)) {
+        meta.replacen(tr("Annotation"), tr("Scrawl"), 1)
+    } else {
+        meta
+    };
     let time = event_age(entry.at_ms());
     let mut thumb = el()
         .key("thumb")
@@ -551,6 +574,33 @@ fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
             move |ui: &mut Ui, _| trash(ui, id),
         ),
     ];
+    #[cfg(target_os = "macos")]
+    let actions = if ui.history.unified.enabled
+        && ui
+            .captures
+            .confirm_trash
+            .as_ref()
+            .is_some_and(|(armed, _)| *armed == id)
+    {
+        vec![
+            ld::row_action(
+                p,
+                "trash-cancel",
+                p.k.glyph.close,
+                tr("Cancel"),
+                |ui: &mut Ui, _| ui.captures.confirm_trash = None,
+            ),
+            ld::row_action(
+                p,
+                "trash-confirm",
+                p.k.glyph.check_small,
+                tr("Confirm delete"),
+                move |ui: &mut Ui, _| trash(ui, id),
+            ),
+        ]
+    } else {
+        actions
+    };
     let end = el()
         .key("end")
         .child(

@@ -146,6 +146,11 @@ enum Command {
     Cancel {
         reply: SyncSender<()>,
     },
+    #[cfg(hex_capture)]
+    CancelSpoken {
+        at: CaptureInstant,
+        reply: SyncSender<Vec<f32>>,
+    },
     SelectMicrophone {
         revision: u64,
         device: Option<String>,
@@ -393,6 +398,11 @@ impl DictationAudio {
 
     pub fn cancel(&self) -> Result<()> {
         self.call(|reply| Command::Cancel { reply })
+    }
+
+    #[cfg(hex_capture)]
+    pub fn cancel_spoken(&self, at: CaptureInstant) -> Result<Vec<f32>> {
+        self.call(|reply| Command::CancelSpoken { at, reply })
     }
 
     #[cfg(hex_capture)]
@@ -767,6 +777,23 @@ impl Owner {
                 if let Some(event) = deferred {
                     self.handle_input(event);
                 }
+            }
+            #[cfg(hex_capture)]
+            Command::CancelSpoken { at, reply } => {
+                self.state.recording.store(false, Ordering::Release);
+                let samples = if self.pending_capture.take().is_some() {
+                    if !self.input.is_open() && !self.capture_sink_open() {
+                        self.input.cancel_open();
+                    }
+                    self.capture.cancel();
+                    Vec::new()
+                } else {
+                    match self.capture.finish_with_tail(at, Duration::ZERO) {
+                        Finish::Transcribe(clip) => clip.into_cancel_samples(),
+                        Finish::Discard => Vec::new(),
+                    }
+                };
+                let _ = reply.send(samples);
             }
             Command::Cancel { reply } => {
                 self.pending_capture = None;
@@ -1381,7 +1408,7 @@ impl OwnerForTest {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::dictation::POST_RELEASE_TAIL;
 
@@ -1867,6 +1894,70 @@ mod tests {
 
     fn finish_after(owner: &mut Owner, at: CaptureInstant, tail: Duration) -> Finish {
         control(owner, |reply| Command::Finish { at, tail, reply })
+    }
+
+    /// Drives synthetic device chunks through the real microphone timeline
+    /// and the Hold shortcut's own Escape decision, without installing a tap.
+    #[cfg(hex_capture)]
+    pub(crate) fn cancel_fixture(pcm: &[f32], writer: crate::recognition::cancelled_words::Writer) {
+        use crate::{
+            app_settings::{HotkeyModifiers, RuntimeHotkey},
+            suppression::{DictationHotkey, HotkeyAction, InputEvent},
+        };
+        let (mut owner, input, _feed) = owner_for_test(true);
+        let at = capture_time();
+        owner.handle_input(RecoveringAudioInputEvent::Chunk {
+            samples: vec![0.; 480],
+            captured_through: at,
+        });
+        let flags = 1 << 19;
+        let mut key = DictationHotkey::with_binding(
+            false,
+            at,
+            false,
+            RuntimeHotkey {
+                modifiers: HotkeyModifiers::option(),
+                key_code: None,
+            },
+        );
+        assert_eq!(
+            key.process(InputEvent::Flags(flags), at),
+            Some(HotkeyAction::Start)
+        );
+        start(&mut owner, at);
+        let mut count = 0;
+        for chunk in pcm.chunks(480) {
+            count += chunk.len();
+            owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                samples: chunk.to_vec(),
+                captured_through: at + Duration::from_secs_f64(count as f64 / 48_000.),
+            });
+        }
+        let boundary = at + Duration::from_secs_f64(count as f64 / 48_000.);
+        assert_eq!(
+            key.process(
+                InputEvent::Key {
+                    code: 53,
+                    down: true,
+                    flags
+                },
+                boundary
+            ),
+            Some(HotkeyAction::CancelShortcut)
+        );
+        // A delayed key delivery cannot pick up the next 100 ms of audio.
+        owner.handle_input(RecoveringAudioInputEvent::Chunk {
+            samples: vec![0.75; 4800],
+            captured_through: boundary + Duration::from_millis(100),
+        });
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                writer.cancel(&input, boundary).unwrap();
+                assert!(!input.is_recording());
+                writer.drain();
+            });
+            OwnerForTest(owner).serve(1);
+        });
     }
 
     #[test]

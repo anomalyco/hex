@@ -745,12 +745,35 @@ Stable builds and managed DisableLabs don't opt in. Without the experiment,
 Paste Last still pastes a dictation. Windows and Linux are unchanged.
 
 ```ts
-Tap, Paste Last menu, or hex paste-last → newest eligible dictation or Annotate capture
-Hold 300 ms on the Mac event tap → show the same list without taking focus
+Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked Scrawl
+Hold 300 ms on the Mac event tap → up to eight recent items, without taking focus
+├── Initially select what tap would paste; with only Cancelled rows select nothing
+├── Show all History → open the searchable archive, not a paste
 ├── Click a row → recheck that item and paste it once into the original field
 ├── Arrow keys → move selection; Enter or release the chord modifiers → choose
 └── Escape or changed focus → close without touching the clipboard
 ```
+
+The same Mac preview puts dictations, Scrawls, screenshots and screen
+recordings in **History**. All types is the default. Search works inside the
+selected type and beyond the eight picker rows. Capture files keep their
+editor, copy, reveal, drag and Trash actions. Clear dictation history affects
+the dictation owner only. A shared-library bundle can be visible without
+being eligible for global paste; that needs the Hex writer's ready receipt.
+
+```ts
+Physical cancel of an intentional shortcut dictation → stop at the key timestamp, no tail
+├── Already-spoken samples → installed local detector + local model → nonempty words only
+│   └── Retention permits it → Dictation · Cancelled (no recording or output)
+└── Off, no speech, missing detector/model, or Clear during inference → no saved result
+CLI cancel, discard, system cancel, quit → no recovery
+```
+
+[Isolated Mac proof](../../tests/fixtures/paste-picker/one-history.sh): synthesize a
+phrase to a file, send the hold and Escape decisions and device chunks through
+the audio owner, run Silero and Parakeet, then press the type menu and search
+in the real Rune window rendered offscreen. It uses neither a microphone nor
+a pasteboard. This is not a native event-tap or receiving-app replay.
 
 Rows are ordered by completion time for this experiment; a paste does not
 promote its item. Secure Input and invocations without usable release or

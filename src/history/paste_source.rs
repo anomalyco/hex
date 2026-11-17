@@ -12,6 +12,7 @@ pub(crate) enum Id {
 }
 
 pub(crate) struct Row {
+    pub cancelled: bool,
     pub id: Id,
     pub ready_at: u64,
     pub preview: String,
@@ -52,7 +53,14 @@ impl HistoryStore {
         let mut rows: Vec<_> = self
             .entries()
             .filter(|e| self.pasteable(e, now))
-            .map(|e| (e.timestamp_ms, Id::Retained(e.id), e.final_text.as_str()))
+            .map(|e| {
+                (
+                    e.timestamp_ms,
+                    Id::Retained(e.id),
+                    e.final_text.as_str(),
+                    e.cancelled,
+                )
+            })
             .collect();
         if let Some(r) = &self.recovery
             && self
@@ -60,12 +68,13 @@ impl HistoryStore {
                 .cutoff(now)
                 .is_none_or(|cut| r.ready_at >= cut)
         {
-            rows.push((r.ready_at, r.id, &r.text));
+            rows.push((r.ready_at, r.id, &r.text, false));
         }
-        rows.sort_unstable_by_key(|(at, id, _)| std::cmp::Reverse((*at, *id)));
+        rows.sort_unstable_by_key(|(at, id, ..)| std::cmp::Reverse((*at, *id)));
         rows.into_iter()
             .take(count)
-            .map(|(ready_at, id, text)| Row {
+            .map(|(ready_at, id, text, cancelled)| Row {
+                cancelled,
                 ready_at,
                 id,
                 preview: text.chars().take(100).collect(),
@@ -95,6 +104,46 @@ impl HistoryStore {
 }
 
 impl super::History {
+    /// A clear (including an empty clear) or retention change invalidates
+    /// a local inference result that has not yet reached the store.
+    #[cfg(hex_capture)]
+    pub(crate) fn cancel_generation(&self) -> Option<u64> {
+        let store = self.synced();
+        (!store.retention.is_off()).then_some(store.cancel_generation)
+    }
+
+    #[cfg(hex_capture)]
+    pub(crate) fn keep_cancelled_words(
+        &self,
+        generation: u64,
+        text: String,
+        audio_ms: u64,
+    ) -> std::io::Result<Option<u64>> {
+        let text = text.trim();
+        let mut store = self.synced();
+        if text.is_empty()
+            || generation != store.cancel_generation
+            || crate::desktop::process_exit::quitting()
+        {
+            return Ok(None);
+        }
+        store.record_result(
+            super::HistoryDraft {
+                kind: HistoryKind::Dictation,
+                raw_text: text.into(),
+                final_text: text.into(),
+                application: None,
+                processing: None,
+                audio_ms,
+                inference_ms: 0,
+                total_ms: 0,
+                recording: None,
+                model: None,
+            },
+            super::now_ms(),
+            true,
+        )
+    }
     pub(crate) fn paste_rows(&self, count: usize, now: u64) -> Vec<Row> {
         self.synced().paste_rows(count, now)
     }

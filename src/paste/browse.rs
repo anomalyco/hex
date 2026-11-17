@@ -44,7 +44,12 @@ impl State {
     fn show(&mut self, epoch: u64, rows: Vec<Row>) {
         if self.armed && self.view.epoch == epoch && self.outcome.is_none() {
             self.view.rows = rows.into();
-            self.view.cursor = 0;
+            self.view.cursor = self
+                .view
+                .rows
+                .iter()
+                .position(|r| !r.cancelled)
+                .unwrap_or(self.view.rows.len());
             self.view.open = true;
         }
     }
@@ -78,7 +83,13 @@ impl State {
         match nav {
             Nav::Cancel => unreachable!(),
             Nav::Previous if n > 0 => self.view.cursor = (self.view.cursor + n - 1) % n,
-            Nav::Next if n > 0 => self.view.cursor = (self.view.cursor + 1) % n,
+            Nav::Next if n > 0 => {
+                self.view.cursor = if self.view.cursor >= n {
+                    0
+                } else {
+                    (self.view.cursor + 1) % n
+                }
+            }
             Nav::Commit => {
                 let choice = self
                     .view
@@ -146,6 +157,11 @@ pub(crate) fn nav(key: Nav) -> bool {
 pub(crate) fn click(epoch: u64, id: Id) {
     update(|s| s.pick(epoch, id));
 }
+/// Opening History is navigation, never a paste. Consume this invocation
+/// before activating the window so a late modifier-up cannot commit a row.
+pub(crate) fn close_for_history(epoch: u64) -> bool {
+    update(|s| s.view.epoch == epoch && s.view.open && s.navigate(Nav::Cancel))
+}
 pub(crate) fn take(epoch: u64) -> Option<Choice> {
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     (s.view.epoch == epoch).then(|| s.outcome.take()).flatten()
@@ -157,6 +173,7 @@ mod tests {
     use crate::history::paste_source;
     fn row(id: u64) -> Row {
         Row {
+            cancelled: false,
             id: Id::Dictation(paste_source::Id::Retained(id)),
             preview: format!("note {id}"),
             ready_at: id,
@@ -173,6 +190,27 @@ mod tests {
         assert!(state.tap(next));
         assert!(!state.navigate(Nav::Cancel));
         assert!(!state.tap(next));
+    }
+
+    #[test]
+    fn cancelled_needs_an_explicit_selection_even_when_it_is_the_only_row() {
+        let mut state = State::default();
+        let mut cancelled = row(3);
+        cancelled.cancelled = true;
+        let epoch = state.begin();
+        state.show(epoch, vec![cancelled.clone(), row(2)]);
+        assert_eq!(state.view.cursor, 1);
+        state.navigate(Nav::Commit);
+        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==row(2).id));
+        let epoch = state.begin();
+        state.show(epoch, vec![cancelled.clone()]);
+        state.navigate(Nav::Commit);
+        assert!(matches!(state.outcome.take(), Some(Choice::Cancel)));
+        let epoch = state.begin();
+        state.show(epoch, vec![cancelled.clone()]);
+        state.navigate(Nav::Next);
+        state.navigate(Nav::Commit);
+        assert!(matches!(state.outcome.take(),Some(Choice::Item(id)) if id==cancelled.id));
     }
     #[test]
     fn escape_and_delayed_click_never_commit_to_another_invocation() {

@@ -26,13 +26,36 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
         view: |v: &View, cx: &mut rune::Cx<View>| {
             let p = Paint::new(cx.system_dark(), cx.env().scale);
             let epoch = v.epoch;
-            col().padding(16.).child(card(
-                &v.rows,
-                v.cursor,
-                crate::history::now_ms(),
-                p,
-                move |_: &mut View, id| browse::click(epoch, id),
-            ))
+            col().padding(16.).child(
+                card(
+                    &v.rows,
+                    v.cursor,
+                    crate::history::now_ms(),
+                    p,
+                    move |_: &mut View, id| browse::click(epoch, id),
+                )
+                .child(el().w_full().h(p.hair).fill(p.k.c.border_weak))
+                .child(
+                    row()
+                        .key("paste-show-history")
+                        .hit()
+                        .role("button")
+                        .label(tr("Show all History"))
+                        .px(16.)
+                        .py(9.)
+                        .hover(p.k.c.hover)
+                        .child(
+                            text(tr("Show all History"))
+                                .font(p.k.ty.small_medium)
+                                .color(p.text()),
+                        )
+                        .on_press(move |_: &mut View| {
+                            if browse::close_for_history(epoch) {
+                                crate::macos_rune::open_paste_history();
+                            }
+                        }),
+                ),
+            )
         },
     }
     .options(OverlayOptions {
@@ -75,7 +98,12 @@ pub(super) fn card<S: 'static>(
     for (i, item) in rows.iter().enumerate() {
         let kind = match &item.id {
             Id::Dictation(_) => tr("Dictation"),
-            Id::Capture(_) => tr("Annotate"),
+            Id::Capture(_) => tr("Scrawl"),
+        };
+        let kind = if item.cancelled {
+            format!("{kind} · {}", tr("Cancelled"))
+        } else {
+            kind.to_owned()
         };
         let id = item.id.clone();
         let mut r = col()
@@ -85,7 +113,7 @@ pub(super) fn card<S: 'static>(
             .label(format!("{kind}: {}", item.preview))
             .focusable(false)
             .px(12.)
-            .py(9.)
+            .py(6.)
             .gap(3.)
             .radius(p.k.radius.md)
             .hover(c.hover)
@@ -106,7 +134,7 @@ pub(super) fn card<S: 'static>(
                     .font(p.k.ty.ui)
                     .color(p.text())
                     .wrap()
-                    .max_lines(2),
+                    .max_lines(1),
             )
             .on_press(move |s: &mut S| pick(s, id.clone()));
         if i == cursor {
