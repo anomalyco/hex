@@ -1,10 +1,10 @@
-# Local consent: one upload or one recording
+# Local consent: one upload, or a recording grant
 
 Two narrow asks share one handshake: **one transcription upload** from a web
-page, and **one microphone recording** from a web page, an Electron main
-process, or any native/Rune process. Neither caller ever receives Hex's local
-API bearer token. Hex asks the person in its own window, and a code plus PKCE
-produces a one-use token scoped to the caller's verified identity:
+page, and a **revocable grant to start recordings** for a web page, an
+Electron main process, or any native/Rune process. Neither caller ever
+receives Hex's local API bearer token. Hex asks the person in its own window,
+and a code plus PKCE produces a token scoped to the caller's verified identity:
 
 - a web page is bound to the `Origin` its browser sent, on the loopback HTTP
   API (a Labs › Browser access origin);
@@ -15,7 +15,7 @@ produces a one-use token scoped to the caller's verified identity:
 This is a prototype contract. It exists to prove the consent boundary, not to
 be a general local API. `api-browser-access` (the Lab) stays off by default.
 
-The recording section is [below](#one-microphone-recording); the existing
+The recording section is [below](#recording-by-a-paired-client); the existing
 upload flow keeps its own paths and scope.
 
 ```ts
@@ -166,36 +166,55 @@ the same trust the CORS gate already places in it; a malicious local process
 that can reach loopback without a browser can open the dialog only by claiming
 a listed origin, and the person still has to allow it.
 
-## One microphone recording
+## Recording by a paired client
 
-A client asks Hex to record **once** with its normal dictation microphone, then
-receives only the transcript. Raw audio, levels, partials, History, paste,
-microphone selection, and desktop control are not exposed.
+A client **pairs with Hex once**. The person sees the caller's verified
+identity and allows it to *start recordings*; Hex keeps a revocable grant.
+Pairing itself starts nothing: every `POST /record/start` opens a separate,
+short-lived session that stops itself at the lease and ends with one
+transcript (`finish`) or nothing (`cancel`). A client can record again until
+the grant is revoked; the person is not asked before each recording.
+
+Raw audio, levels, partials, History, paste, microphone selection, and desktop
+control are not exposed.
 
 ```ts
 Native client (record.sock)        Web page (loopback + Origin)
         │                                   │
-        └──────── POST /record/authorize ───┘     // PKCE S256, no bearer
+        └──────── POST /record/pair ────────┘     // PKCE S256, no bearer
              ├── native peer identity unreadable -> 403 identity-unverified
-             ├── native/Web not the one already prompting -> 409 consent-busy
-             ├── Hex window: "Allow one microphone recording?"
-             │     recipient, team note, and the lease
-             │     [Deny] [Allow once]
-             │   ├── Deny / Escape / scrim / 60 s -> 403, no code; Deny cools down 30 s
-             │   └── Allow once -> 200 { code, expiresInMs, scope: "record:one" }
+             ├── already paired -> 409 already-paired (no dialog)
+             ├── another dialog is open -> 409 consent-busy
+             ├── Hex window: "Allow this app to start recordings?"
+             │     recipient, team note, and that pairing starts nothing
+             │     [Not now] [Allow]
+             │   ├── Not now / Escape / scrim / 60 s -> 403, no code
+             │   │     Not now also cools that recipient down for 30 s
+             │   └── Allow -> 200 { code, expiresInMs, scope: "record:pair", state }
              ├── POST /record/token { code, codeVerifier }
-             │   └── correct, same verified channel -> 200 { id, sessionToken,
-             │       expiresInMs (start window), maxRecordingMs }
-             ├── POST /record/start    X-Hex-Record-Token -> 201 recording
-             ├── GET  /record/status   -> waiting | recording | stopped | finished | cancelled | expired
+             │   └── correct, same verified channel -> 200 { grantId, grantToken,
+             │       scope: "record:any" }            // no recording yet
+             ├── POST /record/start    X-Hex-Record-Grant -> 201 { id, sessionToken,
+             │       state: "recording", maxRecordingMs }
+             ├── GET  /record/status   X-Hex-Record-Token
+             │       -> recording | stopped | finished | cancelled | expired
              ├── POST /record/finish   -> 200 { transcript, durationMs }   (once)
-             └── POST /record/cancel   -> 204, discards
+             ├── POST /record/cancel   -> 204, discards
+             └── POST /record/revoke   X-Hex-Record-Grant -> 204, ends the grant
 ```
 
-While the session is live, Hex's window shows a non-modal card naming the
-recipient, the time left on the lease, **Stop recording** (keeps the
-transcript for the client's `finish`) and **Cancel** (discards it). The client
-can stop or cancel through its token too; either side ends the one recording.
+Repeat `start` … `finish` for each distinct recording; each start mints a new
+session token. While a session is live, Hex's window shows a non-modal card
+naming the recipient, the time left on the lease, **Stop recording** (keeps
+the transcript for the client's `finish`) and **Cancel** (discards it). The
+client can stop or cancel through its session token too.
+
+A grant is withdrawn in Hex's window (Labs › Browser access lists each paired
+client with **Revoke**) or by the client's own `POST /record/revoke`. Revoking
+cancels any live session, drops pairing codes issued before the revoke, and
+makes further starts fail. The client may pair again, which asks the person
+again. Pairing while a grant already exists is `409 already-paired`; it does
+not open a second dialog.
 
 ### Native identity
 
@@ -204,8 +223,9 @@ On each connection Hex reads `LOCAL_PEERTOKEN` and asks
 `SecCodeCopyGuestWithAttributes`/`SecCodeCopySigningInformation` for the
 signing identifier and team. The consent dialog shows that; if the identity
 cannot be read, the request is refused (`403 identity-unverified`) rather than
-falling back to an app name or path. Grants and session tokens are bound to the
-peer's audit token, so another process cannot spend them.
+falling back to an app name or path. A grant and its sessions are bound to the
+peer's audit token, so another process cannot spend them even if it learns the
+token.
 
 Native clients need no `Origin`, no bearer token, and no discovery file. The
 loopback API is not their channel, and the Unix socket has no route for it.
@@ -214,40 +234,55 @@ loopback API is not their channel, and the Unix socket has no route for it.
 
 | Limit | Value |
 | --- | --- |
-| Code lifetime | 120 s, one use |
-| Start window after the token | 60 s, then `409 session-expired` |
+| Pairing code lifetime | 120 s, one use |
+| Grant | Until revoked or Hex quits |
 | One recording | 120 s maximum; it stops itself |
 | After the stop | 30 s for `finish`, then discarded (`409 session-expired`) |
-| Concurrent recordings | 1 (`409 session-busy` on the next token) |
-| Body | 8 KiB; session actions take no body |
+| Concurrent recordings | 1 (`409 session-busy` on the next start) |
+| Body | 8 KiB; start/status/finish/cancel/revoke take no body |
 
 `maxRecordingMs` and `remainingMs` are reported; the window's card counts down
 the same lease. A recording stopped by the lease is still finishable inside
 the grace window.
 
+### Revocation and persistence
+
+Grants live in Hex's process only. They are not written to disk, so quitting
+Hex revokes every pairing: the next run asks again. That is deliberate — this
+prototype has no secure store for a client's identity, and a name, path, or
+claimed bundle ID is not one — but it is a real limitation for a client that
+expects to stay paired across restarts. Persisting a grant would need a store
+protected by the OS (for example the Keychain) and a signing identity strong
+enough to re-verify on launch; team-less and ad-hoc signatures do not meet
+that bar and are shown as weak in the dialog.
+
 ### Errors
 
 | Status | Code | When |
 | --- | --- | --- |
-| 400 | `invalid-request` | Not the JSON above, not S256, a body on a session action |
+| 400 | `invalid-request` | Not the JSON above, not S256, a body on a token action |
+| 401 | `invalid-grant` | Unknown, revoked, or other-channel grant; a session token used as a grant |
 | 403 | `identity-unverified` | The native peer's signature could not be read |
 | 403 | `origin-not-allowed` | A browser request's Origin is missing or unlisted |
-| 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Deny, no answer, no window/gate |
-| 403 | `invalid-grant` | Wrong channel, verifier, spent, or expired code |
-| 404 | `record-not-found` | Unknown token or one bound to another channel |
-| 409 | `session-busy`, `session-expired`, `session-finished`, `session-cancelled`, `not-started`, `already-started`, `finish-in-progress` | Session state |
+| 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Not now, no answer, no window/gate |
+| 403 | `invalid-grant` | Wrong, spent, or expired pairing code |
+| 404 | `record-not-found` | Unknown session token or one bound to another channel |
+| 409 | `already-paired` | That recipient already has a grant |
+| 409 | `session-busy`, `session-expired`, `session-finished`, `session-cancelled`, `not-started`, `finish-in-progress` | Session state |
 | 429 | `consent-cooldown` | The recipient was denied less than 30 s ago |
 | 503 | `capture-unavailable` | No capture loop could start the recording |
 
 ### What is not exposed
 
-- No raw audio, no `/record/audio`; a `X-Hex-Record-Token` reaches only
-  `start`, `status`, `finish`, and `cancel`.
+- No raw audio, no `/record/audio`; a grant token reaches only `start` and
+  `revoke`, and a session token only `status`, `finish`, and `cancel` for its
+  own session.
 - No `/dictations`, `/streams`, `/transcriptions`, `/control`, `/models`,
-  History, clipboard, Accessibility, or settings. The record token is checked
-  before the bearer token and never becomes it.
-- Session tokens live only in Hex's process; they are 32 random bytes, one use
-  for `finish`, and bound to the Origin or audit token that consented.
+  History, clipboard, Accessibility, or settings. Both record headers are
+  checked before the bearer token and never become it.
+- Tokens live only in Hex's process; they are 32 random bytes, the `finish`
+  transcript is handed over once, and each is bound to the Origin or audit
+  token that paired.
 
 ### Clients
 
@@ -262,12 +297,14 @@ the browser upload flow (the recording routes are the same exchange with
 ### What is tested, and what is not
 
 `local_api` tests drive the whole exchange over loopback HTTP with a recording
-backend that never opens a microphone: allow and deny, one-use codes and
-sessions, overflow and expiry, lease stop and grace, the window's Stop and
-Cancel, and the token's inability to reach any other route or origin. On
-macOS, one test connects to the real `record.sock`, reads the peer's audit
-token, and records through the fake backend; it skips (with a printed note)
-when the test binary has no signing identity. The dialog and the live card are
-rendered by `hex app -- --snap` scenes (`record-consent`, `record-active`);
-nothing was recorded from a real microphone, no OS grant was approved, and no
-real browser page or Electron process was run.
+backend that never opens a microphone: allow and deny, one prompt for repeated
+recordings, distinct sessions, code use and expiry, lease stop and grace, the
+window's Stop and Cancel, revoke from the client (and that a revoked grant
+opens nothing), and neither token's ability to reach any other route or
+origin. On macOS, one test connects to the real `record.sock`, reads the
+peer's audit token, pairs, records twice through the fake backend, and revokes;
+it skips (with a printed note) when the test binary has no signing identity.
+The dialog, the live card, and the Labs › Browser access revoke rows are
+rendered by `hex app -- --snap` scenes (`record-consent`, `record-active`,
+`mac-labs-browser-access`); nothing was recorded from a real microphone, no
+OS grant was approved, and no real browser page or Electron process was run.

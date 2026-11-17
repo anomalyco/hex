@@ -145,15 +145,38 @@ fn route(
         };
         let channel = Channel::Native { peer, identity };
         return match record::Call::admit(endpoint, request, channel) {
-            Ok(call) => record::Request::Call(call),
+            Ok(call) => record::Request::Pair(call),
             Err(response) => record::Request::Refused(response),
+        };
+    }
+    let Some((peer, identity)) = identity else {
+        if request.record_grant.is_some() || request.record_token.is_some() {
+            return record::Request::Refused(HttpResponse::empty(401));
+        }
+        return record::Request::Refused(HttpResponse::empty(404));
+    };
+    let channel = Channel::Native { peer, identity };
+    if let Some(grant) = request.record_grant.clone() {
+        if !record::bodyless(&request) {
+            return record::Request::Refused(HttpResponse::code(400, "invalid-request"));
+        }
+        if request.method == "POST" && path == record::START_PATH {
+            return record::Request::Session {
+                action: record::Action::Start,
+                token: grant,
+                channel,
+            };
+        }
+        if request.method != "POST" || path != record::REVOKE_PATH {
+            return record::Request::Refused(HttpResponse::empty(401));
+        }
+        return record::Request::Revoke {
+            token: grant,
+            channel,
         };
     }
     let Some(token) = request.record_token.clone() else {
         return record::Request::Refused(HttpResponse::empty(404));
-    };
-    let Some((peer, identity)) = identity else {
-        return record::Request::Refused(HttpResponse::empty(401));
     };
     let Some(action) = record::action(&request.method, &path) else {
         return record::Request::Refused(HttpResponse::empty(401));
@@ -164,7 +187,7 @@ fn route(
     record::Request::Session {
         action,
         token,
-        channel: Channel::Native { peer, identity },
+        channel,
     }
 }
 

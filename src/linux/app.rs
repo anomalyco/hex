@@ -33,6 +33,8 @@ use crate::linux::service::{
 
 mod control;
 mod host;
+mod request;
+pub(crate) use request::HostRequest;
 
 /// The host's refresh while it starts, stops, or prepares something.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
@@ -181,27 +183,6 @@ pub(crate) struct HostSnapshot {
     pub(crate) editing: bool,
 }
 
-/// What the window asks of the host. Settings edits go through
-/// [`HostHandle::save_settings`].
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum HostRequest {
-    Desktop(DesktopAction),
-    ReloadSettings,
-    /// Stops listening while the window records a shortcut.
-    CaptureShortcutFor(ShortcutTarget),
-    CancelShortcut,
-    /// The chord the window recorded, for the host to register and save.
-    SetShortcut {
-        target: ShortcutTarget,
-        shortcut: DesktopShortcut,
-    },
-    ChooseModel {
-        model: crate::transcription::models::TranscriptionModelId,
-        language: String,
-    },
-    CancelModel,
-}
-
 struct Shared {
     host: Mutex<LinuxDesktopHost>,
     waker: Mutex<Option<Waker>>,
@@ -280,7 +261,9 @@ impl HostHandle {
                     host.cancel_transcription_preparation();
                     Ok(())
                 }
-                HostRequest::AnswerConsent { .. } | HostRequest::RecordControl { .. } => Ok(()),
+                HostRequest::AnswerConsent { .. }
+                | HostRequest::RecordControl { .. }
+                | HostRequest::RevokeRecordGrant { .. } => Ok(()),
             }
         };
         self.wake();
