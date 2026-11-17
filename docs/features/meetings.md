@@ -1640,10 +1640,10 @@ Detail (a raised card beside the list)
 │   ├── Errors there too: no writer chosen, OpenCode not running, a late or
 │   │   refused answer; nothing is saved or added to the Markdown
 │   └── One question at a time: Enter again waits for the running one, and
-│       another meeting says to wait. Choosing another meeting or turning
-│       the lab off drops the shown answer and asks OpenCode to stop; an
-│       Apple Intelligence call can't be interrupted, so it runs to its
-│       deadline and its answer is dropped
+│       another meeting says to wait (the line clears when that call exits).
+│       Choosing another meeting or turning the lab off drops the shown
+│       answer and asks OpenCode to stop; an Apple Intelligence call can't be
+│       interrupted, so it runs to its deadline and its answer is dropped
 └── Transcript: stacked turns, no bubbles; "You" in text colour, "Them"
     faint, each with its clock; merged turns; 30 s+ pause lines;
     "Listening…" while recording
@@ -1706,7 +1706,9 @@ Meetings pane, selected meeting with transcript turns   // labs.ask_meetings
 ├── "Question" heading, field "Ask about this meeting" -> Enter starts one
 │   question, trimmed and cut to 500 characters
 ├── One question at a time: a second Enter waits for the running one (another
-│   meeting says "Wait for the last question to finish"), so calls never stack
+│   meeting says "Wait for the last question to finish", and the line clears
+│   when that call exits), so calls never stack; leaving a meeting and coming
+│   back never shows its given-up question as running
 ├── Worker: the hex-meeting-ask thread
 │   ├── Reads the meeting's current transcript (meeting::TranscriptReader: the
 │   │   published one, else the rolling draft), so a recording is answerable;
@@ -1731,9 +1733,10 @@ Checks: `meeting/ask.rs` tests (the excerpt keeps the latest speech, a line
 carries its time and speaker, a monologue is cut inside its line, an empty
 question is refused before the store is read, a long question is cut to 500
 characters); `rune_ui/meetings/ask.rs` tests (a second question waits for the
-running one, another meeting is told to wait and the old answer is dropped, no
-writer says so and starts nothing, an empty question asks nothing, a question
-belongs to one meeting and giving it up clears the field);
+running one, another meeting is told to wait and the old answer is dropped,
+leaving and returning never shows an abandoned question as running, no writer
+says so and starts nothing, an empty question asks nothing, a question belongs
+to one meeting and giving it up clears the field);
 `ask_meetings_shows_its_field_only_with_its_lab` in
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs); and
 `every_feature_is_off_by_default_and_round_trips` in

@@ -20,11 +20,15 @@ use super::Meeting;
 use crate::app_settings::MeetingSummaries;
 use crate::desktop::i18n::tr;
 
-/// One question's worker: the thread answering it and the meeting it was
-/// asked about, so an answer that arrives after the meeting changed is
-/// dropped rather than shown for another meeting.
+/// One question's worker: the thread answering it, the meeting it was asked
+/// about, and whether the card gave it up. An answer that arrives after the
+/// meeting changed, or after the question was given up, is dropped rather
+/// than shown for another question.
 struct Worker {
     meeting: String,
+    /// The card no longer shows this question: its answer is dropped, and its
+    /// exit only clears the "wait" line.
+    given_up: bool,
     receiver: Receiver<Result<String, String>>,
     thread: JoinHandle<()>,
 }
@@ -37,10 +41,13 @@ pub(super) struct Ask {
     target: Option<String>,
     answer: Option<String>,
     error: Option<String>,
+    /// A question is still finishing, so this card says to wait instead of
+    /// starting another. Cleared when that worker exits or the card moves on.
+    waiting: bool,
     worker: Option<Worker>,
     /// Set when the shown question is given up, so OpenCode stops. Apple
     /// Intelligence ignores it and runs to its deadline; its answer is then
-    /// dropped because the meeting no longer matches.
+    /// dropped because the question was given up.
     cancelled: Option<Arc<AtomicBool>>,
 }
 
@@ -51,6 +58,7 @@ impl Default for Ask {
             target: None,
             answer: None,
             error: None,
+            waiting: false,
             worker: None,
             cancelled: None,
         }
@@ -88,23 +96,23 @@ impl Ask {
         if self.running() {
             // One call at a time: Apple Intelligence cannot be cancelled, so a
             // second question would run beside the first for up to a minute.
-            // Asking about another meeting says why; asking again about this
-            // one keeps what shows, "Thinking…" included.
-            if self
-                .worker
-                .as_ref()
-                .is_some_and(|worker| worker.meeting != meeting)
-            {
-                self.target = Some(meeting.to_owned());
-                self.answer = None;
-                self.error = Some(tr("Wait for the last question to finish").to_owned());
+            // Only the question this card still waits on keeps "Thinking…";
+            // another meeting, or one given up by leaving and coming back,
+            // says to wait instead of ignoring the question.
+            if self.running_for(meeting) {
+                return;
             }
+            self.target = Some(meeting.to_owned());
+            self.answer = None;
+            self.error = None;
+            self.waiting = true;
             return;
         }
         self.stop();
         self.target = Some(meeting.to_owned());
         self.answer = None;
         self.error = None;
+        self.waiting = false;
         let question = question.trim();
         if question.is_empty() {
             return;
@@ -134,6 +142,7 @@ impl Ask {
             Ok(thread) => {
                 self.worker = Some(Worker {
                     meeting: meeting.to_owned(),
+                    given_up: false,
                     receiver,
                     thread,
                 });
@@ -158,7 +167,8 @@ impl Ask {
                     return false;
                 };
                 self.cancelled = None;
-                if self.target.as_deref() == Some(worker.meeting.as_str()) {
+                self.waiting = false;
+                if !worker.given_up && self.target.as_deref() == Some(worker.meeting.as_str()) {
                     match result {
                         Ok(answer) => self.answer = Some(answer),
                         Err(error) => self.error = Some(error),
@@ -172,7 +182,8 @@ impl Ask {
                     return false;
                 };
                 self.cancelled = None;
-                if self.target.as_deref() == Some(worker.meeting.as_str()) {
+                self.waiting = false;
+                if !worker.given_up && self.target.as_deref() == Some(worker.meeting.as_str()) {
                     self.error = Some(tr("The question could not be answered.").to_owned());
                 }
                 true
@@ -188,9 +199,13 @@ impl Ask {
         if let Some(cancelled) = self.cancelled.take() {
             cancelled.store(true, Ordering::Release);
         }
+        if let Some(worker) = &mut self.worker {
+            worker.given_up = true;
+        }
         self.target = None;
         self.answer = None;
         self.error = None;
+        self.waiting = false;
         if self.question.text.is_empty() {
             return shown;
         }
@@ -198,8 +213,10 @@ impl Ask {
         true
     }
 
-    /// Cancels the request and forgets its worker. Only called when no thread
-    /// is alive, so anything it drops has already finished.
+    /// Cancels the request and forgets its worker. Called to start a question
+    /// when no thread is alive, and by `Drop` when the window closes, where a
+    /// still-running thread is left to finish on its own and its answer is
+    /// dropped.
     fn stop(&mut self) {
         if let Some(cancelled) = self.cancelled.take() {
             cancelled.store(true, Ordering::Release);
@@ -217,13 +234,21 @@ impl Ask {
         self.error.as_deref()
     }
 
-    /// Whether this meeting's question is still being answered.
+    /// Whether this meeting's question is still being answered: the card
+    /// shows that question, its worker is alive, and it was not given up.
     fn running_for(&self, meeting: &str) -> bool {
         self.running()
+            && self.target.as_deref() == Some(meeting)
             && self
                 .worker
                 .as_ref()
-                .is_some_and(|worker| worker.meeting == meeting)
+                .is_some_and(|worker| !worker.given_up && worker.meeting == meeting)
+    }
+
+    /// Whether this meeting's card says to wait for a question that is still
+    /// finishing.
+    fn waiting_for(&self, meeting: &str) -> bool {
+        self.waiting && self.target.as_deref() == Some(meeting)
     }
 }
 
@@ -249,7 +274,15 @@ pub(super) fn body(ui: &Ui, p: Paint, meeting: &Meeting) -> Option<El> {
                 .build(p.k)
                 .key("ask-field"),
         );
-    if let Some(error) = ask.error_for(&meeting.id) {
+    if ask.waiting_for(&meeting.id) {
+        block = block.child(
+            text(tr("Wait for the last question to finish"))
+                .key("ask-waiting")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        );
+    } else if let Some(error) = ask.error_for(&meeting.id) {
         block = block.child(
             text(error.to_owned())
                 .key("ask-error")
@@ -307,6 +340,7 @@ mod tests {
         (
             Worker {
                 meeting: meeting.into(),
+                given_up: false,
                 receiver,
                 thread,
             },
@@ -336,6 +370,7 @@ mod tests {
 
         ask.submit("m", "and the contract?", MeetingSummaries::OpenCode, None);
         assert!(ask.running(), "the first question still runs");
+        assert!(!ask.waiting, "the same question keeps Thinking…");
         assert_eq!(
             ask.worker.as_ref().map(|worker| worker.meeting.as_str()),
             Some("m"),
@@ -356,7 +391,7 @@ mod tests {
         ask.worker = Some(worker);
 
         ask.submit("b", "who owns it?", MeetingSummaries::OpenCode, None);
-        assert!(ask.error_for("b").is_some(), "it says to wait");
+        assert!(ask.waiting_for("b"), "it says to wait");
         assert_eq!(
             ask.worker.as_ref().map(|worker| worker.meeting.as_str()),
             Some("a"),
@@ -367,7 +402,41 @@ mod tests {
         wait_for(&ask);
         assert!(ask.poll(), "the late answer is taken");
         assert_eq!(ask.answer_for("b"), None, "it was not about b");
-        assert!(ask.error_for("b").is_some(), "the wait line stays");
+        assert!(!ask.waiting, "b can ask again once the call exits");
+    }
+
+    #[test]
+    fn leaving_and_returning_does_not_show_an_abandoned_question_as_running() {
+        let mut ask = Ask::default();
+        ask.target = Some("a".into());
+        let (worker, gate) = blocked_worker("a");
+        ask.worker = Some(worker);
+
+        // Leave a: the card is cleared but the call keeps running.
+        assert!(ask.reset());
+        assert!(!ask.running_for("a"), "a given-up question is not shown");
+
+        // Come back to a and ask again: told to wait, not ignored.
+        ask.submit("a", "and the contract?", MeetingSummaries::OpenCode, None);
+        assert!(
+            ask.waiting_for("a"),
+            "the new question is not dropped silently"
+        );
+        assert_eq!(
+            ask.worker.as_ref().map(|worker| worker.meeting.as_str()),
+            Some("a"),
+            "no second call starts"
+        );
+
+        // The abandoned answer never fills the card, and the wait line clears.
+        drop(gate);
+        wait_for(&ask);
+        assert!(ask.poll());
+        assert_eq!(ask.answer_for("a"), None, "the abandoned answer is dropped");
+        assert!(!ask.waiting, "the card is ready to ask again");
+
+        ask.submit("a", "who signs?", MeetingSummaries::Off, None);
+        assert!(ask.error_for("a").is_some(), "a new question starts");
     }
 
     #[test]
