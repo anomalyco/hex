@@ -1344,5 +1344,5 @@ A successful Annotate finish marks its own bundle with `.hex-annotate-v1`
 and Screenshots recordings do not publish this mark. Existing ambiguous
 bundles, including captures made by standalone Scrawl, are not backfilled
 from a folder name. They remain available through their existing actions.
-The [staged mixed picker](dictation.md#paste-last-after-a-failed-paste-every-os)
+The [Mac development picker](dictation.md#paste-last-after-a-failed-paste-every-os)
 reads the mark; failure to write it does not fail the capture or affect its send.

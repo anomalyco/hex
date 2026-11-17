@@ -841,6 +841,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Language and on-device speech model", ["Język i model mowy na urządzeniu", "语言与本地语音模型", "言語とオンデバイス音声モデル", "Sprache und lokales Sprachmodell", "Idioma y modelo de voz local", "Мова й модель розпізнавання мовлення на пристрої"]),
     ("Microphone", ["Mikrofon", "麦克风", "マイク", "Mikrofon", "Micrófono", "Мікрофон"]),
     ("Dictation shortcut", ["Skrót dyktowania", "听写快捷键", "音声入力ショートカット", "Diktat-Tastenkürzel", "Atajo de dictado", "Комбінація клавіш для диктування"]),
+    ("Paste last", ["Wklej ostatni element", "粘贴最近一项", "最新の項目を貼り付け", "Letztes Element einfügen", "Pegar último elemento", "Вставити останній елемент"]),
     ("Paste last dictation", ["Wklej ostatnie dyktowanie", "粘贴上次听写", "前回の音声入力を貼り付け", "Letztes Diktat einfügen", "Pegar último dictado", "Вставити останнє диктування"]),
     ("Capture", ["Nagrywanie", "采集", "キャプチャ", "Aufnahme", "Captura", "Запис"]),
     ("Processing", ["Przetwarzanie", "处理", "処理", "Verarbeitung", "Procesamiento", "Обробка"]),

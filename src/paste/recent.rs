@@ -143,7 +143,7 @@ impl Request {
         }
         match output {
             Output::Text(text) => {
-                paster.paste(&text, super::PasteMode::Continue)?;
+                paster.insert_recent_text(&text, &self.target)?;
                 Ok(text)
             }
             Output::Capture(dir, bundle) => {

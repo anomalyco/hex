@@ -48,7 +48,9 @@ impl Picker {
             return Ok(());
         }
         let target = Target::capture().ok_or("could not confirm the paste target")?;
-        let can_hold = !crate::suppression::secure_input::enabled() && binding.key_code.is_some();
+        let can_hold = browse::available()
+            && !crate::suppression::secure_input::enabled()
+            && binding.key_code.is_some();
         if !can_hold {
             return worker.paste_recent(Request { id: None, target });
         }
@@ -127,9 +129,7 @@ impl Picker {
             }
             Effect::PasteLatest => {
                 let inv = self.active.take().unwrap();
-                let cancelled = matches!(browse::take(inv.epoch), Some(Choice::Cancel));
-                browse::nav(Nav::Cancel);
-                if cancelled {
+                if !browse::tap(inv.epoch) {
                     return Ok(());
                 }
                 worker.paste_recent(Request {

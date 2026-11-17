@@ -502,6 +502,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Language and on-device speech model", "Язык и модель речи на устройстве"),
     ("Microphone", "Микрофон"),
     ("Dictation shortcut", "Сочетание для диктовки"),
+    ("Paste last", "Вставить последний элемент"),
     ("Paste last dictation", "Вставить последнюю диктовку"),
     ("Capture", "Захват"),
     ("Processing", "Обработка"),

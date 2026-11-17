@@ -1,6 +1,5 @@
 //! Paste Last on the Mac session tap. No work on the initial press; the
 //! edge timestamps, not listener scheduling latency, decide tap versus hold.
-#![allow(dead_code, reason = "staged until the native overlay is connected")]
 
 use crate::app_settings::RuntimeHotkey;
 use crate::audio::CaptureInstant;

@@ -1,9 +1,5 @@
 //! The focus-free, single-selection surface. A row returns its frozen owner
 //! identity; the output worker, not the view, resolves what will be inserted.
-#![allow(
-    dead_code,
-    reason = "staged until the non-activating overlay is installed"
-)]
 
 use super::controls::Paint;
 use crate::desktop::i18n::{event_age_at, tr};
@@ -29,12 +25,13 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
         interactive: true,
         view: |v: &View, cx: &mut rune::Cx<View>| {
             let p = Paint::new(cx.system_dark(), cx.env().scale);
+            let epoch = v.epoch;
             col().padding(16.).child(card(
                 &v.rows,
                 v.cursor,
                 crate::history::now_ms(),
                 p,
-                |s: &mut View, id| browse::click(s.epoch, id),
+                move |_: &mut View, id| browse::click(epoch, id),
             ))
         },
     }
@@ -71,7 +68,7 @@ pub(super) fn card<S: 'static>(
     cursor: usize,
     now: u64,
     p: Paint,
-    pick: fn(&mut S, Id),
+    pick: impl Fn(&mut S, Id) + Copy + 'static,
 ) -> El {
     let c = &p.k.c;
     let mut list = col().key("paste-rows").padding(4.).gap(2.);

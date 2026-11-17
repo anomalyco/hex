@@ -559,7 +559,6 @@ impl DictationWorker {
     }
 
     #[cfg(hex_capture)]
-    #[allow(dead_code, reason = "staged until the native picker is installed")]
     pub(crate) fn paste_recent(
         &self,
         request: crate::paste::recent::Request,

@@ -56,6 +56,13 @@ impl State {
             self.view.rows = Arc::default();
         }
     }
+    fn tap(&mut self, epoch: u64) -> bool {
+        if !self.armed || self.view.epoch != epoch || self.view.open {
+            return false;
+        }
+        self.armed = false;
+        true
+    }
     fn navigate(&mut self, nav: Nav) -> bool {
         if !self.armed {
             return false;
@@ -118,6 +125,12 @@ fn update<R>(f: impl FnOnce(&mut State) -> R) -> R {
 pub(crate) fn begin() -> u64 {
     update(State::begin)
 }
+pub(crate) fn available() -> bool {
+    WATCH.get().is_some()
+}
+pub(crate) fn tap(epoch: u64) -> bool {
+    update(|s| s.tap(epoch))
+}
 pub(crate) fn show(epoch: u64, rows: Vec<Row>) {
     update(|s| s.show(epoch, rows));
 }
@@ -148,6 +161,18 @@ mod tests {
             preview: format!("note {id}"),
             ready_at: id,
         }
+    }
+    #[test]
+    fn tap_and_cancel_claim_the_invocation_only_once() {
+        let mut state = State::default();
+        let old = state.begin();
+        state.navigate(Nav::Cancel);
+        assert!(!state.tap(old));
+        let next = state.begin();
+        assert!(!state.tap(old));
+        assert!(state.tap(next));
+        assert!(!state.navigate(Nav::Cancel));
+        assert!(!state.tap(next));
     }
     #[test]
     fn escape_and_delayed_click_never_commit_to_another_invocation() {

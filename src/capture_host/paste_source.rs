@@ -1,6 +1,5 @@
 //! Only an Annotate writer can publish a ready result. Never adopt old
 //! folders from the shared Scrawl library by name, transcript source or age.
-#![allow(dead_code, reason = "staged until the mixed shortcut is enabled")]
 
 use std::fs;
 use std::io::{self, Read, Write};

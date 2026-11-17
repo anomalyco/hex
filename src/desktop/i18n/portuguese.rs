@@ -508,6 +508,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Language and on-device speech model", "Idioma e modelo de voz no dispositivo"),
     ("Microphone", "Microfone"),
     ("Dictation shortcut", "Atalho de ditado"),
+    ("Paste last", "Colar último item"),
     ("Paste last dictation", "Colar último ditado"),
     ("Capture", "Captura"),
     ("Processing", "Processamento"),

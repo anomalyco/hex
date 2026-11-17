@@ -738,13 +738,28 @@ real Wayland grant or X11 grab run, and no Windows hook run.
 
 ### Paste Last After A Failed Paste (every OS)
 
-The macOS [capture insertion tests](../../src/paste/capture.rs) exercise a
-sheet followed by a summary on a private pasteboard. An intervening copy or
-change of target stops the second paste. This adapter is staged: neither the
-shortcut nor Annotate's explicit Paste uses it yet. A posted paste key is not
-an acknowledgement from the target app.
+On macOS development builds, launching the **app** with
+`HEX_EXPERIMENTAL_PASTE_LAST=1` opts its existing rebindable shortcut, menu
+and `hex paste-last` into mixed output. No new binding or preference row.
+Stable builds and managed DisableLabs don't opt in. Without the experiment,
+Paste Last still pastes a dictation. Windows and Linux are unchanged.
 
-The staged [mixed selection check](../../src/paste/recent.rs) opens a temporary
+```ts
+Tap, Paste Last menu, or hex paste-last → newest eligible dictation or Annotate capture
+Hold 300 ms on the Mac event tap → show the same list without taking focus
+├── Click a row → recheck that item and paste it once into the original field
+├── Arrow keys → move selection; Enter or release the chord modifiers → choose
+└── Escape or changed focus → close without touching the clipboard
+```
+
+Rows are ordered by completion time for this experiment; a paste does not
+promote its item. Secure Input and invocations without usable release or
+overlay support take the immediate path. If Hex can't identify the original
+external field, it refuses. Multiline text in a target requiring simulated
+typing is refused rather than sending a Return. Global paste does not invoke
+Annotate's explicit Paste, Send or Undo.
+
+The [mixed selection check](../../src/paste/recent.rs) opens a temporary
 History file and a shared capture folder. The first row and the tap select the
 same ready item; a newer incomplete folder does not hide it. An unmarked
 bundle is never taken as Hex output. Removing a selected bundle makes its ID
@@ -754,13 +769,16 @@ written to the file. The Mac output worker now uses this slot for unretained
 output when it has a History owner. With no History owner, the existing
 listener-local fallback still works. These checks don't drive a global key.
 
-The [Mac interaction fixture](../../src/rune_ui/paste_picker/proof.rs) feeds a
-300 ms hold to the gesture tracker, clicks an older row through a Rune window
-runtime, then resolves the latest capture. Its private pasteboard receives a
-PNG and the capture's summary, and afterward still has the URL copied after
-capture completion. The fixture renders in light and dark; the receiver is
-simulated. The mixed picker is **not installed in the native listener**.
-Windows and Linux still use their existing dictation-only Paste Last paths.
+The [ownership tests](../../src/paste/capture/tests.rs) run the capture
+transaction without WindowServer. The [private-board Rune test](../../src/rune_ui/paste_picker/proof.rs)
+requires a GUI login and an explicit `--ignored` run. A separate disposable
+macOS GUI run used virtual hardware input, the actual listener and a second
+[AppKit receiver](../../tests/fixtures/paste-picker/Receiver.m). It received
+the newest capture as PNG then summary, the clicked older dictation, and the
+original URL on ordinary ⌘V. Escape left the pasteboard change count alone.
+Changing fields or copying after the PNG stopped the summary. TextEdit's
+RTF conversion sheet can legitimately cause such a partial paste; no retry.
+This does not establish delivery in arbitrary apps or native Secure Input.
 
 A paste that fails (another app changed the clipboard while Hex saved it, or a
 format couldn't be read) still makes that dictation Paste Last's, unless its
