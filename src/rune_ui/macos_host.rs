@@ -155,6 +155,7 @@ impl Backend {
                 update_blocked: None,
                 editing: false,
                 consent: published.consent.clone(),
+                record: published.record.clone(),
             },
             settings: published.settings.clone(),
         })

@@ -16,6 +16,8 @@ pub(super) struct HttpRequest {
     pub(super) stream_token: Option<String>,
     /// `X-Hex-Connect-Token`: a browser page's one-use upload grant.
     pub(super) connect_token: Option<String>,
+    /// `X-Hex-Record-Token`: a client's one-recording session token.
+    pub(super) record_token: Option<String>,
     pub(super) content_type: Option<String>,
     pub(super) content_length: Option<usize>,
     /// The browser page that made the request, when it sent one.
@@ -56,7 +58,7 @@ pub(super) enum BodyReadError {
 }
 
 pub(super) fn read_body_bounded(
-    stream: &mut TcpStream,
+    stream: &mut impl Read,
     content_length: usize,
     body: &mut Vec<u8>,
     shutdown: &AtomicBool,
@@ -128,7 +130,7 @@ pub(super) fn write_stream_headers(
 
 /// The lines every response for an allowed browser origin carries: that
 /// origin, never `*`, and `Vary: Origin` so a cache keeps them apart.
-fn write_cors_headers(stream: &mut TcpStream, cors: Option<&CorsOrigin>) -> std::io::Result<()> {
+fn write_cors_headers(stream: &mut impl Write, cors: Option<&CorsOrigin>) -> std::io::Result<()> {
     if let Some(cors) = cors {
         write!(
             stream,
@@ -166,7 +168,7 @@ impl HttpResponse {
             ("Access-Control-Allow-Methods", "GET, POST"),
             (
                 "Access-Control-Allow-Headers",
-                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token, X-Hex-Connect-Token",
+                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token, X-Hex-Connect-Token, X-Hex-Record-Token",
             ),
             ("Access-Control-Max-Age", "600"),
         ];
@@ -246,14 +248,14 @@ pub(super) enum RequestReadError {
 }
 
 pub(super) fn read_request(
-    stream: &mut TcpStream,
+    stream: &mut impl Read,
     shutdown: &AtomicBool,
 ) -> std::result::Result<HttpRequest, RequestReadError> {
     read_request_until(stream, shutdown, Instant::now() + HEADER_DEADLINE)
 }
 
 pub(super) fn read_request_until(
-    stream: &mut TcpStream,
+    stream: &mut impl Read,
     shutdown: &AtomicBool,
     deadline: Instant,
 ) -> std::result::Result<HttpRequest, RequestReadError> {
@@ -312,6 +314,7 @@ pub(super) fn read_request_until(
     let mut dictation_token = None;
     let mut stream_token = None;
     let mut connect_token = None;
+    let mut record_token = None;
     let mut content_type = None;
     let mut content_length = None;
     let mut origin = None;
@@ -339,6 +342,11 @@ pub(super) fn read_request_until(
                 return Err(RequestReadError::Invalid);
             }
             connect_token = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("x-hex-record-token") {
+            if record_token.is_some() {
+                return Err(RequestReadError::Invalid);
+            }
+            record_token = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("origin") {
             // Two Origin headers name no one origin, so the request earns no
             // CORS permission; it is still routed as it was before the lab
@@ -378,6 +386,7 @@ pub(super) fn read_request_until(
         dictation_token,
         stream_token,
         connect_token,
+        record_token,
         content_type,
         content_length,
         origin,
@@ -387,7 +396,7 @@ pub(super) fn read_request_until(
 }
 
 pub(super) fn write_response(
-    stream: &mut TcpStream,
+    stream: &mut impl Write,
     response: HttpResponse,
     cors: Option<&CorsOrigin>,
 ) -> std::io::Result<()> {

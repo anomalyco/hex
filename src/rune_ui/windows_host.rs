@@ -120,6 +120,7 @@ impl Backend {
                 update_blocked: published.update_blocked,
                 editing: false,
                 consent: None,
+                record: None,
             },
             settings: published.settings.clone(),
         })

@@ -330,7 +330,8 @@ impl WindowsDesktopHost {
             Request::CaptureShortcutFor(_)
             | Request::CancelShortcut
             | Request::SetShortcut { .. }
-            | Request::AnswerConsent { .. } => {}
+            | Request::AnswerConsent { .. }
+            | Request::RecordControl { .. } => {}
         }
         false
     }

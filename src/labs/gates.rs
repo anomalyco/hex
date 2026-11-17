@@ -425,14 +425,20 @@ pub fn api_timestamps() -> bool {
     on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
 }
 
+/// Whether Labs › Browser access to the local API is on: the one switch
+/// behind browser CORS, browser connect, and native recording consent.
+pub fn api_browser_access() -> bool {
+    // A process that never applied its settings still loads its saved
+    // switches on the first read, as `screen_vocabulary` does.
+    let _ = state();
+    API_BROWSER_ACCESS.load(Ordering::Acquire) && Feature::ApiBrowserAccess.on_this_os()
+}
+
 /// The browser origins the local API answers with CORS, while Labs › Browser
 /// access to the local API is on (read as each request's `Origin` is
 /// checked). Empty turns every response back to what it was, without CORS.
 pub fn api_browser_origins() -> Vec<String> {
-    // A process that never applied its settings still loads its saved
-    // switches on the first read, as `screen_vocabulary` does.
-    let _ = state();
-    if !API_BROWSER_ACCESS.load(Ordering::Acquire) || !Feature::ApiBrowserAccess.on_this_os() {
+    if !api_browser_access() {
         return Vec::new();
     }
     API_BROWSER_ORIGINS
