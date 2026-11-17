@@ -211,6 +211,9 @@ impl Feature {
             Self::StopPhrase => {
                 "Say a phrase at the end of a hands-free dictation to finish it; the phrase never reaches the pasted text"
             }
+            Self::AskMeetings => {
+                "The Meetings pane gains a question field under a meeting's notes, with its answer below it. Hex sends a bounded excerpt of the transcript, the most recent speech kept when it must trim, to the writer Meetings › Settings › Summaries names, so an answer about a recording follows what was just said. The answer is shown, never saved, written to the Markdown, or added to History; a meeting with no speech yet has nothing to ask"
+            }
             Self::HoldThroughKeys if cfg!(target_os = "windows") => {
                 "If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish. Before that first second a chord still ends it, and a shortcut with a key is unchanged"
             }

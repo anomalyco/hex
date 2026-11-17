@@ -108,6 +108,7 @@ impl Feature {
             | Self::CopyDictationAudio => Group::History,
             Self::Meetings
             | Self::LiveChapters
+            | Self::AskMeetings
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
             | Self::CalendarMenu => Group::Meetings,

@@ -86,6 +86,7 @@ impl Feature {
             | Self::MoreDictationShortcuts
             | Self::CopyDictationAudio
             | Self::StopPhrase
+            | Self::AskMeetings
             | Self::HoldThroughKeys => Audience::Everyone,
         }
     }
@@ -160,6 +161,7 @@ impl Feature {
             Self::CalendarMenu => 20261114,
             Self::CopyDictationAudio | Self::MicrophoneKeyAlone => 20261115,
             Self::StopPhrase | Self::HoldThroughKeys => 20261116,
+            Self::AskMeetings => 20261117,
         }
     }
 
@@ -309,7 +311,8 @@ impl Feature {
             | Self::ShellCompletions
             | Self::YoloMode
             | Self::CopyDictationAudio
-            | Self::StopPhrase => EVERY,
+            | Self::StopPhrase
+            | Self::AskMeetings => EVERY,
         }
     }
 
@@ -391,6 +394,7 @@ impl Feature {
             Self::CopyDictationAudio => "copy-dictation-audio",
             Self::StopPhrase => "stop-phrase",
             Self::HoldThroughKeys => "hold-through-keys",
+            Self::AskMeetings => "ask-meetings",
         }
     }
 
@@ -472,6 +476,7 @@ impl Feature {
             Self::CopyDictationAudio => "labs.copy_dictation_audio",
             Self::StopPhrase => "labs.stop_phrase",
             Self::HoldThroughKeys => "labs.hold_through_keys",
+            Self::AskMeetings => "labs.ask_meetings",
         }
     }
 

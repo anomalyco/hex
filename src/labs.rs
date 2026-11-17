@@ -192,6 +192,7 @@ impl Feature {
             Self::CursorContext => settings.labs.cursor_context,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
+            Self::AskMeetings => settings.labs.ask_meetings,
         }
     }
 
@@ -275,6 +276,7 @@ impl Feature {
             &mut labs.cursor_context,
             &mut labs.more_dictation_shortcuts,
             &mut labs.copy_dictation_audio,
+            &mut labs.ask_meetings,
         ]
     }
 
@@ -364,6 +366,7 @@ impl Feature {
             Self::CursorContext => settings.labs.cursor_context = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
+            Self::AskMeetings => settings.labs.ask_meetings = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -404,7 +407,9 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-// 1 << 20 is free (Stop when the call ends moved to Meetings › Settings).
+/// Labs › Ask meetings' switch (bit 20, free since Stop when the call ends
+/// moved to Meetings › Settings).
+const ASK_MEETINGS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 // 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps
@@ -802,6 +807,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         ),
         (Feature::LiveTyping, settings.live_typing, LIVE_TYPING),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
+        (Feature::AskMeetings, settings.ask_meetings, ASK_MEETINGS),
         (Feature::Playground, settings.playground, PLAYGROUND),
         (
             Feature::VocabularyBiasing,

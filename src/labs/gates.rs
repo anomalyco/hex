@@ -28,6 +28,13 @@ pub fn live_chapters() -> bool {
     on(LIVE_CHAPTERS)
 }
 
+/// Labs › Ask meetings: a question about a meeting's transcript, answered
+/// from a bounded excerpt by the writer Meetings › Summaries names (read
+/// where the Meetings pane draws the field and where its worker starts).
+pub fn ask_meetings() -> bool {
+    on(ASK_MEETINGS) && Feature::AskMeetings.on_this_os()
+}
+
 /// The playground in the window.
 pub fn playground() -> bool {
     on(PLAYGROUND)

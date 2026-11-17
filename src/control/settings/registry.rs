@@ -303,6 +303,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: chapter meeting transcripts while recording",
     ),
     key(
+        "labs.ask_meetings",
+        Kind::Bool,
+        "Labs: ask a question about a meeting's transcript and see a short answer, even while it records",
+    ),
+    key(
         "labs.playground",
         Kind::Bool,
         "Labs: the scene and story browser in the window",
@@ -929,6 +934,7 @@ pub(super) const NEEDS: &[(&str, &str)] = &[
     ("meetings.calendar.", "calendar"),
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
+    ("labs.ask_meetings", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),

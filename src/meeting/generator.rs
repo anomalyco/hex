@@ -248,6 +248,35 @@ pub(crate) fn generate_chapter_lines(
     }
 }
 
+/// One free-form answer over `prompt`, from the writer this meeting's notes
+/// use: Apple Intelligence on this Mac, or OpenCode, never a fallback.
+/// Blocks the calling thread for at most `timeout`; `cancelled` stops an
+/// OpenCode request between reads.
+pub(crate) fn answer_question(
+    instructions: &str,
+    prompt: &str,
+    timeout: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String, GenerationError> {
+    match writer().map_err(GenerationError::Failed)? {
+        #[cfg(target_os = "macos")]
+        Writer::AppleIntelligence => {
+            crate::apple_intelligence::generate_text(instructions, prompt, timeout)
+        }
+        Writer::OpenCode => {
+            let request = format!("{instructions}\n\n{prompt}");
+            let generated = summary_generation(&request, timeout, cancelled)?;
+            let text = generated.text.trim();
+            if text.is_empty() {
+                return Err(GenerationError::Failed(
+                    "the model answered with nothing".into(),
+                ));
+            }
+            Ok(text.to_owned())
+        }
+    }
+}
+
 /// One OpenCode generation answered as JSON of `shape`.
 fn opencode<T: DeserializeOwned>(
     instructions: &str,
@@ -256,6 +285,26 @@ fn opencode<T: DeserializeOwned>(
     timeout: Duration,
 ) -> Result<T, GenerationError> {
     opencode_reporting(instructions, prompt, shape, timeout).map(|(answer, _)| answer)
+}
+
+/// One request through the running OpenCode service: exactly the saved
+/// summary model when Hex names one, whose failure is the answer; otherwise
+/// OpenCode's own default model, and never the ranked models.
+fn summary_generation(
+    request: &str,
+    timeout: Duration,
+    cancelled: &AtomicBool,
+) -> Result<crate::dictation::processor::Generated, GenerationError> {
+    match summary_model() {
+        Some(model) => {
+            crate::dictation::processor::generate_text_with(request, &model, timeout, cancelled)
+                .map_err(|error| {
+                    GenerationError::Failed(format!("{}/{}: {error:#}", model.provider, model.id))
+                })
+        }
+        None => crate::dictation::processor::generate_text(request, timeout, cancelled)
+            .map_err(|error| GenerationError::Failed(format!("{error:#}"))),
+    }
 }
 
 /// [`opencode`], with the model that answered when Hex named one.
@@ -269,19 +318,8 @@ fn opencode_reporting<T: DeserializeOwned>(
         "{instructions}\n\n{prompt}\n\nAnswer with only a JSON object shaped like {shape}, \
          without code fences or any other text."
     );
-    let cancelled = AtomicBool::new(false);
-    // Exactly the chosen model, whose failure is the meeting's notes error;
-    // otherwise OpenCode's own default model, and never the ranked models.
-    let generated = match summary_model() {
-        Some(model) => {
-            crate::dictation::processor::generate_text_with(&request, &model, timeout, &cancelled)
-                .map_err(|error| {
-                GenerationError::Failed(format!("{}/{}: {error:#}", model.provider, model.id))
-            })?
-        }
-        None => crate::dictation::processor::generate_text(&request, timeout, &cancelled)
-            .map_err(|error| GenerationError::Failed(format!("{error:#}")))?,
-    };
+    // Notes generation is not cancellable: one call, bounded by its deadline.
+    let generated = summary_generation(&request, timeout, &AtomicBool::new(false))?;
     Ok((parse_json(&generated.text)?, generated.model))
 }
 

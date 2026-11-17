@@ -24,6 +24,7 @@ use super::{Menu, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
+mod ask;
 mod fixture;
 
 pub(super) static MORE_ICON: rune::Icon = rune::Icon {
@@ -199,6 +200,9 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
+    /// Labs › Ask meetings: the question about the selected meeting and its
+    /// answer.
+    ask: ask::Ask,
     /// Where Linux and Windows perform meeting requests.
     #[cfg(not(target_os = "macos"))]
     pub(super) local: super::meetings_host::LocalMeetings,
@@ -293,6 +297,7 @@ impl MeetingsPane {
             && !meetings.iter().any(|meeting| &meeting.id == selected)
         {
             self.selected = None;
+            self.ask.reset();
         }
         self.meetings = meetings;
         self.error = None;
@@ -303,6 +308,8 @@ impl MeetingsPane {
             self.renaming = None;
             self.delete_armed = None;
             self.action_error = None;
+            // Nothing shown for the last meeting may answer for this one.
+            self.ask.reset();
         }
         self.selected = Some(id);
     }
@@ -565,6 +572,15 @@ pub(super) fn poll_import(ui: &mut Ui) -> bool {
         Err(error) => ui.meetings.action_error = Some(error),
     }
     true
+}
+
+/// Labs › Ask meetings: takes the answer a question's worker sent, and gives
+/// up the shown question once the lab is off.
+pub(crate) fn poll_ask(ui: &mut Ui) -> bool {
+    if !crate::labs::ask_meetings() {
+        return ui.meetings.ask.reset();
+    }
+    ui.meetings.ask.poll()
 }
 
 /// An audio file could not be imported; the Meetings pane says why.
@@ -930,6 +946,9 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     }
     if !meeting.chapters.is_empty() {
         body = body.child(chapters(p, meeting, &copied));
+    }
+    if let Some(ask) = ask::body(ui, p, meeting) {
+        body = body.child(ask);
     }
     let transcript_label = match meeting.status {
         Status::Starting | Status::Recording if !pane.stop_pending => tr("Live transcript"),

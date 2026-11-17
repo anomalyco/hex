@@ -82,6 +82,7 @@ impl Feature {
             Self::YoloMode => "YOLO mode",
             Self::CopyDictationAudio => "Copy dictation audio",
             Self::StopPhrase => "Stop phrase",
+            Self::AskMeetings => "Ask meetings",
             Self::HoldThroughKeys => "Hold through other keys",
         }
     }
@@ -293,6 +294,9 @@ impl Feature {
             }
             Self::StopPhrase => {
                 "Say a phrase to finish a hands-free dictation; the phrase isn't added to the text"
+            }
+            Self::AskMeetings => {
+                "Ask about what was said in a meeting and see a short answer, even while it records"
             }
             Self::HoldThroughKeys if cfg!(target_os = "windows") => {
                 "If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"

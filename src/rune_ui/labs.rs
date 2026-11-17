@@ -563,6 +563,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::ReleaseNotesLink, None));
     if caps.meetings {
         rows.push(row(Feature::LiveChapters, None));
+        rows.push(row(Feature::AskMeetings, None));
         // macOS's status item lists them, from the meeting controller's own
         // calendar read.
         if cfg!(target_os = "macos") {
@@ -845,6 +846,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FailureNotices => "lab-failure-notices",
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
+        Feature::AskMeetings => "lab-ask-meetings",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
         Feature::ScreenVocabulary => "lab-screen-vocabulary",
         Feature::TerminalPaste => "lab-terminal-paste",

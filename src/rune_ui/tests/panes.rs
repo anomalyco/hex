@@ -1491,6 +1491,24 @@ fn meetings_select_search_and_copy_a_transcript() {
 }
 
 #[test]
+fn ask_meetings_shows_its_field_only_with_its_lab() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    tap(&mut rt, "meeting-preview-design");
+    assert!(!rt.state.settings.labs.ask_meetings);
+    assert!(rt.find("ask-field").is_none(), "off, no field");
+
+    rt.state.settings.labs.ask_meetings = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    refresh(&mut rt);
+    assert!(rt.find("ask-field").is_some(), "on, the field shows");
+
+    rt.state.settings.labs.ask_meetings = false;
+    crate::labs::apply(&rt.state.settings.labs);
+    refresh(&mut rt);
+    assert!(rt.find("ask-field").is_none(), "off again, the field goes");
+}
+
+#[test]
 fn recording_starts_and_stops_from_the_header() {
     let mut rt = runtime("meetings", true, PANE_SIZE);
     tap(&mut rt, "stop-meeting");
@@ -2178,6 +2196,7 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-playground", settings.labs.playground),
         ("lab-live-text", settings.labs.live_text),
         ("lab-live-chapters", settings.labs.live_chapters),
+        ("lab-ask-meetings", settings.labs.ask_meetings),
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
         ("lab-screen-vocabulary", settings.labs.screen_vocabulary),
         ("lab-cursor-context", settings.labs.cursor_context),
