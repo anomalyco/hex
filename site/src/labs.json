@@ -534,19 +534,6 @@
       "title": "Keep recordings"
     },
     {
-      "added": "2026-11-06",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "settings-search",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Find any setting in General with a search field",
-      "title": "Settings search"
-    },
-    {
       "added": "2026-11-09",
       "group": "dictation",
       "groupTitle": "Dictation",
