@@ -17,7 +17,8 @@
   </style>
   <h1>Hex browser connect</h1>
   <p class="hint">
-    This page asks Hex's window to transcribe one recording. Hex must have
+    This page asks Hex's window to transcribe one recording, or to record
+    from your microphone for as long as the page keeps checking in. Hex must have
     Labs › Browser access to the local API on, with this page's origin
     (<code id="origin"></code>) in its list. The API port comes from Hex's
     discovery file; this page never reads the token.
@@ -30,6 +31,16 @@
   <input id="file" type="file" accept="audio/wav" />
 
   <p><button id="ask">Ask Hex for one transcription</button></p>
+
+  <p>
+    <button id="record">Record with Hex</button>
+    <button id="stop" disabled>Stop and get the transcript</button>
+  </p>
+  <p class="hint">
+    A recording runs until you stop it here or in Hex. The page checks in
+    every few seconds; close the tab and Hex stops the microphone within a
+    lease (10 s).
+  </p>
   <pre id="log">Nothing asked yet.</pre>
 
   <script type="module">
@@ -69,6 +80,78 @@
       if (!response.ok) throw new Error(`${response.status} ${text}`);
       return text ? JSON.parse(text) : null;
     }
+
+    // Recording: pair once (kept in memory), then each recording is a
+    // session the page keeps alive with check-ins until it finishes.
+    let recordGrant = null;
+    let recording = null;
+
+    async function call(url, header, value) {
+      const response = await fetch(url, { method: "POST", headers: { [header]: value } });
+      const text = await response.text();
+      return { status: response.status, json: text ? JSON.parse(text) : null, text };
+    }
+
+    document.querySelector("#record").addEventListener("click", async () => {
+      const port = document.querySelector("#port").value.trim();
+      if (!port) return log("Enter Hex's local API port first.");
+      const api = `http://127.0.0.1:${port}`;
+      try {
+        if (!recordGrant) {
+          const { verifier, challenge } = await pkce();
+          const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+          log("Asking Hex's window to record…");
+          const paired = await post(
+            `${api}/record/pair`,
+            JSON.stringify({
+              codeChallenge: challenge,
+              codeChallengeMethod: "S256",
+              clientName: "Hex browser connect demo",
+              permissionProof: localStorage.getItem("hex.record.proof"),
+              state,
+            }),
+          );
+          if (paired.state !== state) throw new Error("Hex answered another request.");
+          if (paired.permissionProof) localStorage.setItem("hex.record.proof", paired.permissionProof);
+          const { grantToken } = await post(
+            `${api}/record/token`,
+            JSON.stringify({ code: paired.code, codeVerifier: verifier }),
+          );
+          recordGrant = grantToken;
+        }
+        const started = await call(`${api}/record/start`, "X-Hex-Record-Grant", recordGrant);
+        if (started.status !== 201) {
+          recordGrant = started.status === 401 ? null : recordGrant; // spent or revoked
+          return log(`Could not start: ${started.status} ${started.text}`);
+        }
+        const { sessionToken, leaseMs } = started.json;
+        // Check in well inside the lease; a refused check-in means the
+        // recording already ended (stopped, cancelled, or revoked in Hex).
+        const beat = setInterval(async () => {
+          const answer = await call(`${api}/record/heartbeat`, "X-Hex-Record-Token", sessionToken)
+            .catch((error) => ({ status: 0, text: String(error) }));
+          if (answer.status !== 204) {
+            clearInterval(beat);
+            log(`Recording ended in Hex: ${answer.status} ${answer.text}`);
+          }
+        }, leaseMs / 3);
+        recording = { api, sessionToken, beat };
+        document.querySelector("#stop").disabled = false;
+        log("Recording…");
+      } catch (error) {
+        log(String(error));
+      }
+    });
+
+    document.querySelector("#stop").addEventListener("click", async () => {
+      if (!recording) return;
+      const { api, sessionToken, beat } = recording;
+      recording = null;
+      document.querySelector("#stop").disabled = true;
+      clearInterval(beat);
+      const finished = await call(`${api}/record/finish`, "X-Hex-Record-Token", sessionToken);
+      log(finished.status === 200 ? `Transcript: ${finished.json.transcript}` : `${finished.status} ${finished.text}`);
+    });
 
     document.querySelector("#ask").addEventListener("click", async () => {
       const port = document.querySelector("#port").value.trim();

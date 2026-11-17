@@ -54,9 +54,7 @@ use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
 
 /// The recording slice's app-facing names.
-pub(crate) use record::{
-    app_sessions as record_sessions, max_recording as record_max_recording, native_socket_path,
-};
+pub(crate) use record::{app_sessions as record_sessions, native_socket_path};
 
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
@@ -2851,6 +2849,9 @@ mod tests {
         starts: AtomicU64,
         finishes: AtomicU64,
         cancels: AtomicU64,
+        renews: AtomicU64,
+        /// The capture loop lost the recording (microphone gone).
+        lost: AtomicBool,
         text: Mutex<String>,
     }
 
@@ -2873,6 +2874,10 @@ mod tests {
         fn cancels(&self) -> u64 {
             self.cancels.load(Ordering::Acquire)
         }
+
+        fn renews(&self) -> u64 {
+            self.renews.load(Ordering::Acquire)
+        }
     }
 
     impl record::Recording for FakeRecording {
@@ -2882,6 +2887,16 @@ mod tests {
                 id: 42,
                 owner: "owner".into(),
             })
+        }
+
+        fn renew(&self, started: &record::Started) -> Result<(), String> {
+            assert_eq!(started.id, 42);
+            self.renews.fetch_add(1, Ordering::AcqRel);
+            if self.lost.load(Ordering::Acquire) {
+                Err("dictation-not-active".into())
+            } else {
+                Ok(())
+            }
         }
 
         fn finish(&self, started: &record::Started) -> Result<record::Transcript, String> {
@@ -2906,7 +2921,7 @@ mod tests {
     fn record_timings() -> record::Timings {
         record::Timings {
             code: Duration::from_secs(60),
-            recording: Duration::from_secs(60),
+            lease: Duration::from_secs(60),
             grace: Duration::from_secs(60),
             prompt: Duration::from_secs(1),
             cooldown: Duration::ZERO,
@@ -3524,11 +3539,11 @@ mod tests {
     }
 
     #[test]
-    fn the_recording_lease_stops_and_expires_without_the_client() {
+    fn a_recording_stops_when_its_client_never_checks_in() {
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("lease words");
         let mut timings = record_timings();
-        timings.recording = Duration::from_millis(60);
+        timings.lease = Duration::from_millis(60);
         timings.grace = Duration::from_millis(60);
         let (api, sessions) = start_record_api(gate, recording.clone(), timings);
         let port = api.document.port;
@@ -3558,6 +3573,282 @@ mod tests {
         );
         assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
         assert_eq!(recording.cancels(), 0);
+    }
+
+    /// `POST /record/heartbeat` with a session token.
+    fn record_heartbeat(port: u16, origin: &str, token: &str) -> String {
+        record_request(
+            port,
+            "POST",
+            record::HEARTBEAT_PATH,
+            origin,
+            None,
+            Some(token),
+            None,
+        )
+    }
+
+    fn wait_for(mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + TEST_WAIT;
+        while !done() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(done(), "timed out");
+    }
+
+    fn lease_timings(lease_ms: u64) -> record::Timings {
+        let mut timings = record_timings();
+        timings.lease = Duration::from_millis(lease_ms);
+        timings
+    }
+
+    /// A recording has no length of its own: one that keeps checking in runs
+    /// for many leases (accelerated here; the real lease is 10 s, so this is
+    /// the old two-minute cap many times over in lease terms), and Hex keeps
+    /// the capture loop's own lease alive the whole time.
+    #[test]
+    fn a_recording_runs_for_as_long_as_its_client_checks_in() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("a long talk");
+        let lease = 80;
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(lease));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, id, _) = record_start(port, origin, &grant);
+        let began = Instant::now();
+        while began.elapsed() < Duration::from_millis(lease * 25) {
+            let beat = record_heartbeat(port, origin, &session);
+            assert!(beat.starts_with("HTTP/1.1 204"), "{beat}");
+            thread::sleep(Duration::from_millis(lease / 4));
+        }
+        let view = sessions.view().unwrap();
+        assert_eq!((view.id, view.phase), (id, record::Phase::Recording));
+        assert!(view.elapsed_ms >= lease * 25, "{}", view.elapsed_ms);
+        assert!(recording.renews() >= 25, "{}", recording.renews());
+        assert_eq!(recording.finishes() + recording.cancels(), 0);
+        let status = record_request(
+            port,
+            "GET",
+            record::STATUS_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        let status: serde_json::Value = serde_json::from_str(response_body(&status)).unwrap();
+        assert_eq!(status["state"], "recording");
+        assert_eq!(status["leaseMs"], lease);
+        assert!(status.get("maxRecordingMs").is_none());
+
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        assert!(finished.contains("a long talk"));
+    }
+
+    /// The real lease, past the old two-minute cap, in real time. Slow, so
+    /// it runs by name, outside nextest's hang guard:
+    /// `cargo test --bin hex -- --ignored --exact local_api::tests::a_checked_in_recording_runs_past_two_minutes`.
+    #[test]
+    #[ignore = "runs for two minutes"]
+    fn a_checked_in_recording_runs_past_two_minutes() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("still going");
+        let mut timings = record_timings();
+        timings.lease = record::LEASE;
+        let (api, sessions) = start_record_api(gate, recording.clone(), timings);
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        let began = Instant::now();
+        while began.elapsed() < Duration::from_secs(125) {
+            let beat = record_heartbeat(port, origin, &session);
+            assert!(beat.starts_with("HTTP/1.1 204"), "{beat}");
+            thread::sleep(Duration::from_secs(3));
+        }
+        assert_eq!(sessions.view().unwrap().phase, record::Phase::Recording);
+        assert_eq!(recording.finishes() + recording.cancels(), 0);
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.contains("still going"), "{finished}");
+    }
+
+    /// A check-in after the lease lapsed is refused: the recording stayed
+    /// stopped, and its transcript is still the client's within the grace.
+    #[test]
+    fn a_late_check_in_never_revives_a_recording() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("cut short");
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(60));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        thread::sleep(Duration::from_millis(150));
+        let late = record_heartbeat(port, origin, &session);
+        assert!(late.starts_with("HTTP/1.1 409"), "{late}");
+        assert_eq!(body_code(&late), "stopped");
+        wait_for(|| recording.finishes() == 1);
+        assert_eq!(sessions.view().unwrap().phase, record::Phase::Stopped);
+        let renews = recording.renews();
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            recording.renews(),
+            renews,
+            "nothing renews a stopped recording"
+        );
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            origin,
+            None,
+            Some(&session),
+            None,
+        );
+        assert!(finished.contains("cut short"), "{finished}");
+        let after = record_heartbeat(port, origin, &session);
+        assert_eq!(body_code(&after), "session-finished");
+        assert_eq!(recording.starts(), 1);
+    }
+
+    /// Only the session's own token, from its own origin, renews it; a
+    /// stream of anything else lets the lease lapse.
+    #[test]
+    fn only_the_sessions_own_check_in_renews_it() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("x");
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(150));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        let began = Instant::now();
+        while recording.finishes() == 0 && began.elapsed() < TEST_WAIT {
+            // Another origin with the right token.
+            let stolen = record_heartbeat(port, "https://other.example", &session);
+            assert!(stolen.starts_with("HTTP/1.1 401"), "{stolen}");
+            // The grant token where a session token belongs.
+            let grant_as_session = record_heartbeat(port, origin, &grant);
+            assert_eq!(body_code(&grant_as_session), "record-not-found");
+            // The grant header on the heartbeat route.
+            let wrong_header = record_request(
+                port,
+                "POST",
+                record::HEARTBEAT_PATH,
+                origin,
+                Some(&grant),
+                None,
+                None,
+            );
+            assert!(wrong_header.starts_with("HTTP/1.1 401"), "{wrong_header}");
+            // A made-up token, and the right one carrying a body.
+            let guessed = record_heartbeat(port, origin, "hexs_guess");
+            assert_eq!(body_code(&guessed), "record-not-found");
+            let with_body = record_request(
+                port,
+                "POST",
+                record::HEARTBEAT_PATH,
+                origin,
+                None,
+                Some(&session),
+                Some("{}"),
+            );
+            assert!(with_body.starts_with("HTTP/1.1 400"), "{with_body}");
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(recording.finishes(), 1);
+        assert!(began.elapsed() >= Duration::from_millis(150));
+        assert_eq!(sessions.view().unwrap().phase, record::Phase::Stopped);
+    }
+
+    /// Stop, Cancel, and Revoke still end a recording that is checking in,
+    /// and its check-ins are refused after.
+    #[test]
+    fn stop_cancel_and_revoke_end_a_checked_in_recording() {
+        let origin = "https://app.example";
+        for end in ["stop", "cancel", "revoke-window", "revoke-client"] {
+            let gate = ScriptedGate::new(Answer::Always);
+            let recording = FakeRecording::with_text("ended");
+            let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(100));
+            let port = api.document.port;
+            let (grant, grant_id) = record_grant(port, origin, &record_pair(port, origin));
+            let (session, id, _) = record_start(port, origin, &grant);
+            let beat = record_heartbeat(port, origin, &session);
+            assert!(beat.starts_with("HTTP/1.1 204"), "{end}: {beat}");
+            let expected = match end {
+                "stop" => {
+                    assert!(sessions.stop(id));
+                    "stopped"
+                }
+                "cancel" => {
+                    sessions.cancel(id);
+                    "session-cancelled"
+                }
+                "revoke-window" => {
+                    assert!(sessions.revoke(grant_id));
+                    "session-cancelled"
+                }
+                _ => {
+                    let revoked = record_request(
+                        port,
+                        "POST",
+                        record::REVOKE_PATH,
+                        origin,
+                        Some(&grant),
+                        None,
+                        None,
+                    );
+                    assert!(revoked.starts_with("HTTP/1.1 204"), "{end}: {revoked}");
+                    "session-cancelled"
+                }
+            };
+            let refused = record_heartbeat(port, origin, &session);
+            assert!(refused.starts_with("HTTP/1.1 409"), "{end}: {refused}");
+            assert_eq!(body_code(&refused), expected, "{end}");
+            let renews = recording.renews();
+            thread::sleep(Duration::from_millis(80));
+            assert_eq!(recording.renews(), renews, "{end}: still renewing");
+            if end == "stop" {
+                assert_eq!(recording.finishes(), 1);
+            } else {
+                assert_eq!(recording.cancels(), 1, "{end}");
+            }
+        }
+    }
+
+    /// When the capture loop loses the recording (the microphone went
+    /// away), the session ends instead of waiting for check-ins.
+    #[test]
+    fn a_recording_the_capture_loop_lost_is_cancelled() {
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("x");
+        let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(60));
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
+        let (session, _, _) = record_start(port, origin, &grant);
+        recording.lost.store(true, Ordering::Release);
+        wait_for(|| sessions.view().is_none());
+        let refused = record_heartbeat(port, origin, &session);
+        assert_eq!(body_code(&refused), "session-cancelled");
+        assert_eq!(recording.finishes(), 0);
     }
 
     #[test]
@@ -3659,7 +3950,19 @@ mod tests {
                 .unwrap()
                 .to_owned();
         assert_eq!(sessions.start(&grant, &other).status, 401);
-        assert_eq!(sessions.start(&grant, &channel).status, 201);
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let session: String =
+            serde_json::from_slice::<serde_json::Value>(&started.body).unwrap()["sessionToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        assert_eq!(sessions.heartbeat(&session, &other).status, 404);
+        assert_eq!(sessions.heartbeat(&session, &channel).status, 204);
+        assert_eq!(
+            record::action("POST", record::HEARTBEAT_PATH),
+            Some(record::Action::Heartbeat)
+        );
         assert_eq!(sessions.revoke_token(&grant, &other).status, 401);
     }
 

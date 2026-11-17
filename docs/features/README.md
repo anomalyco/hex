@@ -2882,7 +2882,7 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   │   ├── Web: listed Origin; native: owner-only record.sock + verified signature
 │   │   ├── Allow Once / Always Allow -> code, PKCE grant; Deny -> 403 + 30 s cooldown
 │   │   ├── One start (Once) or repeated starts (Always), each its own session
-│   │   ├── Window card: Stop recording / Cancel, lease countdown; 120 s max
+│   │   ├── Runs while the client checks in (10 s lease, no length cap); card: elapsed, Stop recording / Cancel
 │   │   ├── Grant bound to Origin or peer audit token; one session at a time
 │   │   ├── Revoke in Labs › Browser access or POST /record/revoke ends it
 │   │   └── Transcript only: no raw audio, levels, partials, or other route
@@ -2977,7 +2977,9 @@ CORS channel; native clients (Electron main, Rune, Rust) use the owner-only
 `record.sock`, whose peer audit token `Security.framework` resolves to a
 signing identifier and team. Consent names that verified identity, the grant
 and its sessions are bound to it, and Hex's window shows a non-modal card with
-Stop recording and Cancel while the 120 s lease runs. Grant tokens are
+Stop recording and Cancel while it records. A recording has no length cap:
+it runs while the client checks in (`POST /record/heartbeat`, the 10 s
+dictation lease) and stops itself once the check-ins stop. Grant tokens are
 memory-only. Always Allow saves the capability and either a signed binary
 identity or an origin plus a digest of the page's permission proof.
 Revoking in Labs › Browser access removes the permission across restarts.

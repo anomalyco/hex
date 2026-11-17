@@ -278,8 +278,9 @@ pub(super) const SCENES: &[Scene] = &[
                     team: Some("K7Z4Q2M8A1".into()),
                 },
                 phase: crate::local_api::RecordPhase::Recording,
-                remaining_ms: 102_000,
-                max_recording_ms: 120_000,
+                // Past the two minutes recordings used to be capped at.
+                elapsed_ms: 754_000,
+                remaining_ms: 0,
             });
         }
     }),

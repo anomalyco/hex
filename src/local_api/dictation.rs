@@ -230,6 +230,33 @@ impl super::record::Recording for DictationRecording {
         })
     }
 
+    fn renew(&self, started: &super::record::Started) -> Result<(), String> {
+        match call_recognition(
+            &self.control,
+            DEVELOPER_CONTROL_TIMEOUT,
+            HttpResponse::code(503, "capture-unavailable"),
+            |reply| DictationControl::Heartbeat {
+                id: started.id,
+                owner_token: started.owner.clone(),
+                reply,
+            },
+        ) {
+            Ok(()) => Ok(()),
+            // The loop no longer has this recording.
+            Err(response) if response.status == 409 => {
+                Err(format!("capture loop refused: {}", response.status))
+            }
+            // A busy or slow loop: the next renewal comes well inside its lease.
+            Err(response) => {
+                tracing::debug!(
+                    status = response.status,
+                    "could not renew a consented recording yet"
+                );
+                Ok(())
+            }
+        }
+    }
+
     fn finish(
         &self,
         started: &super::record::Started,

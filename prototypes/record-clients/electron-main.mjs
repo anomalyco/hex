@@ -10,7 +10,9 @@
 // Requires Node 18+ and Hex running with Labs › Browser access to the local
 // API on (the same gate lists the recording socket's consent). No token from
 // Hex's discovery file is used or needed. Pairing asks once and starts
-// nothing; each recording is its own short session under the grant. Grants
+// nothing; each recording is its own session under the grant, and it runs for
+// as long as this process checks in (`POST /record/heartbeat`). If the process
+// quits or hangs, Hex stops the microphone within one lease (10 s). Grants
 // live in Hex's process, so a restart of Hex means pairing again.
 
 import { createHash, randomBytes } from "node:crypto";
@@ -21,6 +23,8 @@ import { join } from "node:path";
 const socketPath =
   process.argv[2] ??
   join(homedir(), "Library", "Application Support", "hex", "record.sock");
+// How long each demo recording runs; your app stops whenever its UI says so.
+const recordForMs = Number(process.env.HEX_RECORD_MS ?? 5000);
 
 const base64url = (buffer) =>
   buffer.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -87,17 +91,32 @@ if (exchanged.status !== 200) {
 const { grantToken, grantId } = exchanged.json;
 console.log(`Paired (grant ${grantId}). Pairing started no recording.`);
 
-/** One recording under the grant: start, then finish for its transcript. */
+/** One recording under the grant: start, check in while it runs, then finish. */
 async function recordOnce() {
   const started = await call("/record/start", "POST", { grant: grantToken });
   if (started.status !== 201) {
     console.error("Hex could not start recording:", started.status, started.text);
     return null;
   }
-  const { sessionToken, maxRecordingMs } = started.json;
-  console.log(`Recording for at most ${maxRecordingMs} ms…`);
+  const { sessionToken, leaseMs } = started.json;
+  console.log(`Recording for ${recordForMs} ms (checking in every ${leaseMs / 3} ms)…`);
 
-  // Stop whenever your UI says so. `POST /record/cancel` discards instead.
+  // Check in well inside the lease. A refused check-in means the recording
+  // already ended: stopped or cancelled in Hex, or the grant was revoked.
+  let ended = null;
+  const beat = setInterval(async () => {
+    const answer = await call("/record/heartbeat", "POST", { session: sessionToken });
+    if (answer.status !== 204) {
+      ended = answer;
+      clearInterval(beat);
+    }
+  }, leaseMs / 3);
+  await new Promise((resolve) => setTimeout(resolve, recordForMs));
+  clearInterval(beat);
+  if (ended) console.log("Recording ended in Hex:", ended.status, ended.text);
+
+  // Finish keeps the transcript (also after a stop in Hex); `POST
+  // /record/cancel` discards instead.
   const finished = await call("/record/finish", "POST", { session: sessionToken });
   if (finished.status !== 200) {
     console.error("No transcript:", finished.status, finished.text);

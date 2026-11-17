@@ -4,8 +4,10 @@
 //! identity and chooses Deny, Allow Once, or Always Allow for *starting
 //! recordings*; an allowed ask issues a revocable grant token. The grant
 //! never starts a recording by itself: each `POST /record/start` opens a
-//! separate short-lived session that stops itself at the lease and ends with
-//! one transcript (`finish`) or nothing (`cancel`).
+//! separate session that records for as long as the client keeps checking
+//! in (`POST /record/heartbeat`, the same 10 s lease `/dictations` and
+//! `/streams` use), stops itself when the check-ins stop, and ends with one
+//! transcript (`finish`) or nothing (`cancel`).
 //!
 //! Allow Once mints a grant for exactly one recording session; the grant is
 //! retired when that session finishes, is cancelled, or expires. Always Allow
@@ -50,6 +52,8 @@ use super::http::HttpResponse;
 use super::permissions::Permissions;
 use super::read_body_bounded;
 
+mod lease;
+
 pub(super) const PAIR_PATH: &str = "/record/pair";
 pub(super) const TOKEN_PATH: &str = "/record/token";
 pub(super) const START_PATH: &str = "/record/start";
@@ -57,9 +61,12 @@ pub(super) const STATUS_PATH: &str = "/record/status";
 pub(super) const FINISH_PATH: &str = "/record/finish";
 pub(super) const CANCEL_PATH: &str = "/record/cancel";
 pub(super) const REVOKE_PATH: &str = "/record/revoke";
+pub(super) const HEARTBEAT_PATH: &str = "/record/heartbeat";
 
-/// One recording can last this long and no longer; it stops itself.
-pub(crate) const MAX_RECORDING: Duration = Duration::from_secs(120);
+/// How long a recording runs past its client's last check-in; it then stops
+/// itself. The same lease as Hex's other programmatic dictations. There is
+/// no limit on how long a recording that keeps checking in may run.
+pub(crate) const LEASE: Duration = crate::dictation::service::LEASE;
 /// A stopped recording waits this long for the client's `finish`.
 pub(super) const FINISH_GRACE: Duration = Duration::from_secs(30);
 /// How long an allowed pairing's code lives.
@@ -115,6 +122,9 @@ pub(crate) struct Transcript {
 /// opens a microphone.
 pub(crate) trait Recording: Send + Sync {
     fn start(&self) -> Result<Started, String>;
+    /// Keeps the capture loop's own owner lease alive while Hex holds the
+    /// recording. An error means the recording is gone (microphone lost).
+    fn renew(&self, started: &Started) -> Result<(), String>;
     /// Stops the recording and returns its transcript.
     fn finish(&self, started: &Started) -> Result<Transcript, String>;
     fn cancel(&self, started: &Started);
@@ -123,7 +133,7 @@ pub(crate) trait Recording: Send + Sync {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Phase {
     Recording,
-    /// Stopped (by the client, Hex's window, or the lease); the transcript
+    /// Stopped (by the client, Hex's window, or a lapsed lease); the transcript
     /// waits for `finish`.
     Stopped,
     Finished,
@@ -148,15 +158,17 @@ impl Phase {
 }
 
 /// What Hex's window shows while a client's recording is live: who it is
-/// for, how long the lease has left, and that it can be stopped or
-/// cancelled.
+/// for, how long it has recorded, and that it can be stopped or cancelled.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct View {
     pub(crate) id: u64,
     pub(crate) recipient: Recipient,
     pub(crate) phase: Phase,
+    /// How long the recording has run (it keeps running while the client
+    /// checks in).
+    pub(crate) elapsed_ms: u64,
+    /// While stopped, how long the client has left to collect the transcript.
     pub(crate) remaining_ms: u64,
-    pub(crate) max_recording_ms: u64,
 }
 
 /// One paired client, as Hex's window lists it for revocation.
@@ -192,8 +204,11 @@ struct Session {
     transcript: Option<Transcript>,
     /// A stop/finish is transcribing outside the lock; a second one waits.
     finishing: bool,
-    /// When the current phase's lease runs out.
+    /// When the current phase runs out: the check-in lease while
+    /// recording, the finish grace once stopped.
     deadline: Instant,
+    /// When the recording started.
+    began: Instant,
 }
 
 #[derive(Default)]
@@ -217,7 +232,8 @@ struct State {
 #[derive(Clone, Copy)]
 pub(crate) struct Timings {
     pub(super) code: Duration,
-    pub(super) recording: Duration,
+    /// How long a recording runs past its last check-in.
+    pub(super) lease: Duration,
     pub(super) grace: Duration,
     pub(super) prompt: Duration,
     pub(super) cooldown: Duration,
@@ -227,7 +243,7 @@ impl Default for Timings {
     fn default() -> Self {
         Self {
             code: CODE_LIFETIME,
-            recording: MAX_RECORDING,
+            lease: LEASE,
             grace: FINISH_GRACE,
             prompt: PROMPT_WAIT,
             cooldown: DENY_COOLDOWN,
@@ -319,8 +335,11 @@ impl Sessions {
             id: session.id,
             recipient,
             phase: session.phase,
-            remaining_ms: remaining(session.deadline),
-            max_recording_ms: self.timings.recording.as_millis() as u64,
+            elapsed_ms: session.began.elapsed().as_millis() as u64,
+            remaining_ms: match session.phase {
+                Phase::Stopped => remaining(session.deadline),
+                _ => 0,
+            },
         })
     }
 
@@ -495,8 +514,8 @@ impl Sessions {
         retire_once_grant(&mut state, grant);
     }
 
-    /// The recording's lease passed: stop it, then discard it if the client
-    /// never collected the transcript.
+    /// The client stopped checking in: stop the recording, then discard it
+    /// if the client never collects the transcript.
     fn lease_expired(self: &Arc<Self>, id: u64) {
         if self
             .view()
@@ -819,31 +838,21 @@ impl Sessions {
                 started: Some(started),
                 transcript: None,
                 finishing: false,
-                deadline: now + self.timings.recording,
+                deadline: now + self.timings.lease,
+                began: now,
             },
         );
         state.active = Some(session_token.clone());
-        let lease = self.timings.recording;
+        let lease = self.timings.lease;
         drop(state);
-        // The lease stops the recording on its own, whether or not the
-        // client comes back.
-        let weak: Weak<Self> = Arc::downgrade(self);
-        thread::Builder::new()
-            .name("record-lease".into())
-            .spawn(move || {
-                thread::sleep(lease);
-                if let Some(sessions) = weak.upgrade() {
-                    sessions.lease_expired(id);
-                }
-            })
-            .ok();
+        self.watch(id);
         HttpResponse::json(
             201,
             &serde_json::json!({
                 "id": id,
                 "sessionToken": session_token,
                 "state": Phase::Recording.name(),
-                "maxRecordingMs": lease.as_millis(),
+                "leaseMs": lease.as_millis(),
             }),
         )
     }
@@ -859,18 +868,27 @@ impl Sessions {
             return HttpResponse::code(404, "record-not-found");
         }
         if session.phase.live() && session.deadline <= now {
-            let id = session.id;
+            // A lapsed lease stops the recording; a passed grace discards it.
+            let (id, recording) = (session.id, session.phase == Phase::Recording);
             drop(state);
-            self.lease_expired(id);
-            return self.status(token, channel);
+            if recording {
+                self.lease_expired(id);
+            } else {
+                self.expire(id);
+            }
+            state = lock(&self.state);
         }
+        let Some(session) = state.sessions.get(token) else {
+            return HttpResponse::code(404, "record-not-found");
+        };
         HttpResponse::json(
             200,
             &serde_json::json!({
                 "id": session.id,
                 "state": session.phase.name(),
+                "elapsedMs": session.began.elapsed().as_millis() as u64,
                 "remainingMs": remaining(session.deadline),
-                "maxRecordingMs": self.timings.recording.as_millis(),
+                "leaseMs": self.timings.lease.as_millis(),
             }),
         )
     }
@@ -1095,11 +1113,6 @@ pub(crate) fn native_socket_path() -> Option<std::path::PathBuf> {
     }
 }
 
-/// The longest a consented recording can run, for the window's copy.
-pub(crate) fn max_recording() -> Duration {
-    MAX_RECORDING
-}
-
 /// The app's sessions: its capture loop, the window's gate, saved Always
 /// Allow permissions, and the Labs switch that turns both recording and
 /// browser access on.
@@ -1318,6 +1331,7 @@ pub(super) fn action(method: &str, path: &str) -> Option<Action> {
         ("GET", STATUS_PATH) => Some(Action::Status),
         ("POST", FINISH_PATH) => Some(Action::Finish),
         ("POST", CANCEL_PATH) => Some(Action::Cancel),
+        ("POST", HEARTBEAT_PATH) => Some(Action::Heartbeat),
         _ => None,
     }
 }
@@ -1328,6 +1342,7 @@ pub(super) enum Action {
     Status,
     Finish,
     Cancel,
+    Heartbeat,
 }
 
 impl Action {
@@ -1342,6 +1357,7 @@ impl Action {
             Self::Status => sessions.status(token, channel),
             Self::Finish => sessions.finish(token, channel),
             Self::Cancel => sessions.cancel_token(token, channel),
+            Self::Heartbeat => sessions.heartbeat(token, channel),
         }
     }
 }
