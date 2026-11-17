@@ -617,6 +617,7 @@ struct ServiceView {
     record: Option<crate::local_api::RecordView>,
     /// Clients paired to start recordings, which the window can revoke
     /// (macOS).
+    permissions: Vec<crate::local_api::PermissionView>,
     grants: Vec<crate::local_api::RecordGrant>,
 }
 
@@ -1323,7 +1324,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         true
     } else if ui.consent.is_some() {
         // Escape on a page's ask is Deny, never a silent close.
-        browser_connect::answer(ui, false);
+        browser_connect::answer(ui, crate::local_api::Answer::Deny);
         true
     } else if ui.sound_sets.open {
         sound_sets::close(ui);

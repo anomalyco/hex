@@ -1,6 +1,6 @@
 //! What Hex's window asks about, and what the person answers.
 //!
-//! Both consents (one transcription upload, a pairing to start recordings)
+//! Both consents (transcribing audio, and starting a microphone recording)
 //! name the recipient the grant is scored to. A browser page is named by the
 //! `Origin` its browser sent; a native process is named by the code signing
 //! identity resolved from its Unix-socket peer audit token, never by an app
@@ -11,9 +11,9 @@ use std::time::Duration;
 /// What the person is being asked to allow.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intent {
-    /// One transcription upload from a web page.
-    Upload,
-    /// One microphone recording session.
+    /// Transcribe audio on this Mac and return one transcript.
+    Transcribe,
+    /// Start one microphone recording and return its transcript.
     Record,
 }
 
@@ -30,6 +30,7 @@ pub(crate) enum Recipient {
     /// identifier and team `Security.framework` reported for its audit token.
     Native {
         identifier: String,
+        cdhash: String,
         team: Option<String>,
     },
 }
@@ -71,8 +72,12 @@ pub(crate) struct Prompt {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Answer {
-    Allow,
+    /// The person refused: nothing is granted.
     Deny,
+    /// Exactly one operation, with no saved permission.
+    Once,
+    /// A saved permission, reused across restarts until revoked.
+    Always,
     /// Nobody answered within the wait.
     Timeout,
     /// No window can ask (headless service, or the window is gone).

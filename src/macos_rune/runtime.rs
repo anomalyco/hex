@@ -171,9 +171,9 @@ impl Runtime {
                 self.manual_choice();
                 self.preparation.cancel();
             }
-            Request::AnswerConsent { id, allow } => {
+            Request::AnswerConsent { id, answer } => {
                 if let Some(desk) = &self.consent {
-                    desk.answer(id, allow);
+                    desk.answer(id, answer);
                 }
             }
             Request::RecordControl { id, stop } => {
@@ -183,6 +183,11 @@ impl Runtime {
                     } else {
                         record.cancel(id);
                     }
+                }
+            }
+            Request::RevokePermission { id } => {
+                if let Some(record) = &self.record {
+                    record.revoke_permission(id);
                 }
             }
             Request::RevokeRecordGrant { id } => {
@@ -386,6 +391,11 @@ impl Runtime {
             preparation,
             consent: self.consent.as_ref().and_then(|desk| desk.prompt()),
             record: self.record.as_ref().and_then(|record| record.view()),
+            permissions: self
+                .record
+                .as_ref()
+                .map(|r| r.permissions())
+                .unwrap_or_default(),
             grants: self
                 .record
                 .as_ref()

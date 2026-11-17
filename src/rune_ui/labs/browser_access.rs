@@ -38,9 +38,10 @@ pub(super) fn body(ui: &Ui, p: Paint) -> El {
         .as_ref()
         .map(|view| view.grants.as_slice())
         .unwrap_or_default();
+    let grants: Vec<_> = grants.iter().filter(|g| !g.durable).collect();
     if !grants.is_empty() {
         card = card.child(
-            text(tr("Paired to start recordings"))
+            text(tr("Allowed one recording"))
                 .key("api-paired-label")
                 .font(DESCRIPTION)
                 .color(p.muted()),
@@ -78,6 +79,36 @@ pub(super) fn body(ui: &Ui, p: Paint) -> El {
             .color(p.muted())
             .wrap(),
         );
+    }
+    if let Some(view) = &ui.view {
+        for perm in &view.permissions {
+            let id = perm.id;
+            card = card.child(
+                row()
+                    .key(format!("permission-{id}"))
+                    .gap(8.0)
+                    .center_y()
+                    .child(
+                        text(format!(
+                            "{} · {}",
+                            perm.recipient.label(),
+                            perm.capability.label()
+                        ))
+                        .font(DESCRIPTION)
+                        .color(p.text())
+                        .wrap(),
+                    )
+                    .child(button(
+                        p,
+                        &format!("permission-revoke-{id}"),
+                        tr("Revoke"),
+                        ButtonKind::Secondary,
+                        move |ui: &mut Ui, _| {
+                            ui.send(super::super::Request::RevokePermission { id })
+                        },
+                    )),
+            );
+        }
     }
     card
 }

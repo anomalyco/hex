@@ -1,12 +1,19 @@
-//! Consented recording for local clients: one pairing, then repeated
-//! one-off recordings.
+//! Consented recording for local clients: one consent, then recordings.
 //!
-//! A client pairs with Hex's window once. The person sees the caller's
-//! verified identity and allows it to *start recordings*; the pairing issues
-//! a revocable grant token. The grant never starts a recording by itself:
-//! each `POST /record/start` opens a separate short-lived session that stops
-//! itself at the lease and ends with one transcript (`finish`) or nothing
-//! (`cancel`).
+//! A client asks Hex's window once. The person sees the caller's verified
+//! identity and chooses Deny, Allow Once, or Always Allow for *starting
+//! recordings*; an allowed ask issues a revocable grant token. The grant
+//! never starts a recording by itself: each `POST /record/start` opens a
+//! separate short-lived session that stops itself at the lease and ends with
+//! one transcript (`finish`) or nothing (`cancel`).
+//!
+//! Allow Once mints a grant for exactly one recording session; the grant is
+//! retired when that session finishes, is cancelled, or expires. Always Allow
+//! saves the capability for the verified recipient in [`Permissions`] and
+//! mints a grant that may open repeated sessions. The saved permission
+//! survives a restart, so after Hex restarts the client pairs again and Hex
+//! answers from the saved permission without a dialog. Grant tokens
+//! themselves never survive a restart.
 //!
 //! The recording itself is Hex's existing programmatic dictation (the same
 //! path `/dictations` drives), so the microphone, pre-roll, and model choice
@@ -26,9 +33,9 @@
 //!   `Security.framework` resolves from the peer, never by a name or path the
 //!   process claims.
 //!
-//! Pairings live in this process only. They are revocable from Hex's window
-//! and end when Hex quits; nothing about a client's identity is written to
-//! disk (see `docs/connect.md`).
+//! Pairings live in this process only and are revocable from Hex's window or
+//! by the client. Only Always Allow's verified capability and scope are
+//! written to disk (see `docs/connect.md`).
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -40,6 +47,7 @@ use serde::Deserialize;
 
 use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 use super::http::HttpResponse;
+use super::permissions::Permissions;
 use super::read_body_bounded;
 
 pub(super) const PAIR_PATH: &str = "/record/pair";
@@ -72,6 +80,8 @@ pub(crate) struct PeerId(pub(crate) [u32; 8]);
 pub(crate) struct Identity {
     /// The signing identifier (`com.example.app` for a signed bundle).
     pub(crate) identifier: String,
+    /// Verified code-directory hash, including for ad-hoc signatures.
+    pub(crate) cdhash: String,
     /// The Team ID, when the signature has one.
     pub(crate) team: Option<String>,
 }
@@ -154,12 +164,15 @@ pub(crate) struct View {
 pub(crate) struct GrantView {
     pub(crate) id: u64,
     pub(crate) recipient: Recipient,
+    /// True for Always Allow, false for the one session Allow Once gave.
+    pub(crate) durable: bool,
 }
 
 struct Code {
     challenge: [u8; 32],
     channel: Channel,
     recipient: Recipient,
+    durable: bool,
     expires: Instant,
 }
 
@@ -167,6 +180,7 @@ struct Grant {
     id: u64,
     channel: Channel,
     recipient: Recipient,
+    durable: bool,
 }
 
 struct Session {
@@ -227,6 +241,7 @@ pub(crate) struct Sessions {
     enabled: fn() -> bool,
     gate: Option<Arc<dyn ConsentGate>>,
     recording: Arc<dyn Recording>,
+    permissions: Arc<Permissions>,
     timings: Timings,
     state: Mutex<State>,
 }
@@ -237,12 +252,14 @@ impl Sessions {
         enabled: fn() -> bool,
         gate: Option<Arc<dyn ConsentGate>>,
         recording: Arc<dyn Recording>,
+        permissions: Arc<Permissions>,
     ) -> Self {
         Self {
             origins,
             enabled,
             gate,
             recording,
+            permissions,
             timings: Timings::default(),
             state: Mutex::default(),
         }
@@ -254,6 +271,7 @@ impl Sessions {
         enabled: fn() -> bool,
         gate: Option<Arc<dyn ConsentGate>>,
         recording: Arc<dyn Recording>,
+        permissions: Arc<Permissions>,
         timings: Timings,
     ) -> Self {
         Self {
@@ -261,6 +279,7 @@ impl Sessions {
             enabled,
             gate,
             recording,
+            permissions,
             timings,
             state: Mutex::default(),
         }
@@ -314,6 +333,7 @@ impl Sessions {
             .map(|grant| GrantView {
                 id: grant.id,
                 recipient: grant.recipient.clone(),
+                durable: grant.durable,
             })
             .collect();
         grants.sort_by_key(|grant| grant.id);
@@ -321,19 +341,51 @@ impl Sessions {
     }
 
     /// Revokes pairing `id` (the window's Revoke). A recording it is running
-    /// stops and is discarded. False when no pairing has that id.
+    /// stops and is discarded, and every saved Always Allow permission for
+    /// the same verified recipient is removed too. False when no pairing has
+    /// that id.
     pub(crate) fn revoke(&self, id: u64) -> bool {
         let mut state = lock(&self.state);
-        let Some(token) = state
-            .grants
-            .iter()
-            .find(|(_, grant)| grant.id == id)
-            .map(|(token, _)| token.clone())
-        else {
+        let Some((token, grant)) = state.grants.iter().find(|(_, grant)| grant.id == id) else {
             return false;
         };
-        self.revoke_locked(&mut state, &token);
+        let token = token.clone();
+        if !self.forget_record_permission(&grant.recipient) {
+            return false;
+        }
+        self.revoke_locked(&mut state, &token)
+    }
+
+    pub(crate) fn permissions(&self) -> Vec<super::PermissionView> {
+        self.permissions.list()
+    }
+
+    pub(crate) fn revoke_permission(&self, id: u64) -> bool {
+        let mut state = lock(&self.state);
+        let Some(removed) = self.permissions.revoke(id) else {
+            return false;
+        };
+        if removed.capability == super::PermissionCapability::MicrophoneRecording {
+            let key = recipient_key(&removed.recipient);
+            state
+                .codes
+                .retain(|_, code| recipient_key(&code.recipient) != key);
+            let token = state
+                .grants
+                .iter()
+                .find(|(_, grant)| recipient_key(&grant.recipient) == key)
+                .map(|(token, _)| token.clone());
+            if let Some(token) = token {
+                self.revoke_locked(&mut state, &token);
+            }
+        }
         true
+    }
+
+    fn forget_record_permission(&self, recipient: &Recipient) -> bool {
+        self.permissions
+            .permission(Intent::Record, recipient)
+            .is_none_or(|id| self.permissions.revoke(id).is_some())
     }
 
     /// Forgets `token` and everything it authorized. The caller holds the
@@ -410,8 +462,10 @@ impl Sessions {
             }
             Err(error) => {
                 tracing::warn!(%error, "could not stop a consented recording");
+                let grant = session.grant;
                 session.phase = Phase::Cancelled;
                 state.active = None;
+                retire_once_grant(&mut state, grant);
                 false
             }
         }
@@ -423,18 +477,22 @@ impl Sessions {
         let Some(token) = state.active.clone() else {
             return;
         };
-        let Some(session) = state.sessions.get_mut(&token) else {
-            return;
+        let grant = {
+            let Some(session) = state.sessions.get_mut(&token) else {
+                return;
+            };
+            if session.id != id || !session.phase.live() {
+                return;
+            }
+            if let Some(started) = &session.started {
+                self.recording.cancel(started);
+            }
+            session.phase = Phase::Cancelled;
+            session.transcript = None;
+            session.grant
         };
-        if session.id != id || !session.phase.live() {
-            return;
-        }
-        if let Some(started) = &session.started {
-            self.recording.cancel(started);
-        }
-        session.phase = Phase::Cancelled;
-        session.transcript = None;
         state.active = None;
+        retire_once_grant(&mut state, grant);
     }
 
     /// The recording's lease passed: stop it, then discard it if the client
@@ -464,23 +522,28 @@ impl Sessions {
         let Some(token) = state.active.clone() else {
             return;
         };
-        let Some(session) = state.sessions.get_mut(&token) else {
-            return;
+        let grant = {
+            let Some(session) = state.sessions.get_mut(&token) else {
+                return;
+            };
+            if session.id != id || !matches!(session.phase, Phase::Stopped | Phase::Recording) {
+                return;
+            }
+            if session.phase == Phase::Recording
+                && let Some(started) = &session.started
+            {
+                self.recording.cancel(started);
+            }
+            session.phase = Phase::Expired;
+            session.grant
         };
-        if session.id != id || !matches!(session.phase, Phase::Stopped | Phase::Recording) {
-            return;
-        }
-        if session.phase == Phase::Recording
-            && let Some(started) = &session.started
-        {
-            self.recording.cancel(started);
-        }
-        session.phase = Phase::Expired;
         state.active = None;
+        retire_once_grant(&mut state, grant);
     }
 
     /// `POST /record/pair`: the window asks once whether this caller may
-    /// start recordings. Pairing starts nothing.
+    /// start recordings. Pairing starts nothing. An Always Allow permission
+    /// answers from disk without a dialog.
     pub(super) fn pair(&self, channel: Channel, body: &[u8]) -> HttpResponse {
         let Ok(request) = serde_json::from_slice::<PairRequest>(body) else {
             return HttpResponse::code(400, "invalid-request");
@@ -513,6 +576,27 @@ impl Sessions {
         {
             return HttpResponse::code(409, "already-paired");
         }
+        // Always Allow from an earlier run is the person's answer; it neither
+        // needs a dialog nor depends on this run's grant map.
+        let saved = match self.permissions.authorize_saved(
+            Intent::Record,
+            &recipient,
+            request.permission_proof.as_deref(),
+        ) {
+            Ok(saved) => saved,
+            Err(()) => return HttpResponse::code(403, "permission-proof-required"),
+        };
+        if saved.is_some() {
+            return self.issue_pairing(
+                &mut state,
+                challenge,
+                channel,
+                recipient,
+                true,
+                None,
+                request.state,
+            );
+        }
         if state
             .denied
             .get(&key)
@@ -537,31 +621,33 @@ impl Sessions {
         let mut state = lock(&self.state);
         state.prompting = false;
         match answer {
-            Answer::Allow => {
-                let code = match random_token("hexp_") {
-                    Ok(code) => code,
+            Answer::Once => self.issue_pairing(
+                &mut state,
+                challenge,
+                channel,
+                recipient,
+                false,
+                None,
+                request.state,
+            ),
+            Answer::Always => {
+                // Always Allow is only real if it is written down; an
+                // unwritable permission must not quietly act like Once.
+                let (_, proof) = match self.permissions.remember(Intent::Record, &recipient) {
+                    Ok(saved) => saved,
                     Err(error) => {
-                        tracing::error!(%error, "could not generate a pairing code");
-                        return HttpResponse::code(500, "token-generation-failed");
+                        tracing::warn!(%error, "could not save an Always Allow permission");
+                        return HttpResponse::code(500, "permission-not-saved");
                     }
                 };
-                state.codes.insert(
-                    code.clone(),
-                    Code {
-                        challenge: challenge.try_into().expect("32 bytes were checked"),
-                        channel,
-                        recipient,
-                        expires: Instant::now() + self.timings.code,
-                    },
-                );
-                HttpResponse::json(
-                    200,
-                    &serde_json::json!({
-                        "code": code,
-                        "expiresInMs": self.timings.code.as_millis(),
-                        "scope": "record:pair",
-                        "state": request.state,
-                    }),
+                self.issue_pairing(
+                    &mut state,
+                    challenge,
+                    channel,
+                    recipient,
+                    true,
+                    proof,
+                    request.state,
                 )
             }
             Answer::Deny => {
@@ -571,6 +657,48 @@ impl Sessions {
             Answer::Timeout => HttpResponse::code(403, "consent-timeout"),
             Answer::Unavailable => HttpResponse::code(403, "record-unavailable"),
         }
+    }
+
+    /// One allowed ask's pairing code, carrying whether its grant should last
+    /// past one recording session.
+    fn issue_pairing(
+        &self,
+        state: &mut State,
+        challenge: Vec<u8>,
+        channel: Channel,
+        recipient: Recipient,
+        durable: bool,
+        proof: Option<String>,
+        client_state: Option<String>,
+    ) -> HttpResponse {
+        let code = match random_token("hexp_") {
+            Ok(code) => code,
+            Err(error) => {
+                tracing::error!(%error, "could not generate a pairing code");
+                return HttpResponse::code(500, "token-generation-failed");
+            }
+        };
+        state.codes.insert(
+            code.clone(),
+            Code {
+                challenge: challenge.try_into().expect("32 bytes were checked"),
+                channel,
+                recipient,
+                durable,
+                expires: Instant::now() + self.timings.code,
+            },
+        );
+        HttpResponse::json(
+            200,
+            &serde_json::json!({
+                "code": code,
+                "expiresInMs": self.timings.code.as_millis(),
+                "permissionProof": proof,
+                "scope": "record:pair",
+                "duration": if durable { "always" } else { "once" },
+                "state": client_state,
+            }),
+        )
     }
 
     /// `POST /record/token`: spends the pairing code and mints one revocable
@@ -614,6 +742,7 @@ impl Sessions {
                 id,
                 channel: code.channel,
                 recipient: code.recipient,
+                durable: code.durable,
             },
         );
         HttpResponse::json(
@@ -622,6 +751,7 @@ impl Sessions {
                 "grantId": id,
                 "grantToken": token,
                 "scope": "record:any",
+                "duration": if code.durable { "always" } else { "once" },
             }),
         )
     }
@@ -809,20 +939,23 @@ impl Sessions {
     /// Hands over a stopped recording's transcript, once.
     fn take_transcript(&self, token: &str) -> HttpResponse {
         let mut state = lock(&self.state);
-        let Some(session) = state.sessions.get_mut(token) else {
-            return HttpResponse::code(404, "record-not-found");
+        let (id, grant, transcript) = {
+            let Some(session) = state.sessions.get_mut(token) else {
+                return HttpResponse::code(404, "record-not-found");
+            };
+            if session.phase != Phase::Stopped {
+                return phase_response(session.phase);
+            }
+            let Some(transcript) = session.transcript.take() else {
+                return HttpResponse::code(500, "transcription-failed");
+            };
+            session.phase = Phase::Finished;
+            (session.id, session.grant, transcript)
         };
-        if session.phase != Phase::Stopped {
-            return phase_response(session.phase);
-        }
-        let Some(transcript) = session.transcript.take() else {
-            return HttpResponse::code(500, "transcription-failed");
-        };
-        session.phase = Phase::Finished;
-        let id = session.id;
         if state.active.as_deref() == Some(token) {
             state.active = None;
         }
+        retire_once_grant(&mut state, grant);
         HttpResponse::json(
             200,
             &serde_json::json!({
@@ -836,32 +969,40 @@ impl Sessions {
     /// `POST /record/cancel`: stops and discards whatever this session owns.
     pub(super) fn cancel_token(&self, token: &str, channel: &Channel) -> HttpResponse {
         let mut state = lock(&self.state);
-        let Some(session) = state.sessions.get_mut(token) else {
-            return HttpResponse::code(404, "record-not-found");
+        let grant = {
+            let Some(session) = state.sessions.get_mut(token) else {
+                return HttpResponse::code(404, "record-not-found");
+            };
+            if session.channel != *channel {
+                return HttpResponse::code(404, "record-not-found");
+            }
+            if !session.phase.live() {
+                return phase_response(session.phase);
+            }
+            if let Some(started) = &session.started {
+                self.recording.cancel(started);
+            }
+            session.phase = Phase::Cancelled;
+            session.transcript = None;
+            session.grant
         };
-        if session.channel != *channel {
-            return HttpResponse::code(404, "record-not-found");
-        }
-        if !session.phase.live() {
-            return phase_response(session.phase);
-        }
-        if let Some(started) = &session.started {
-            self.recording.cancel(started);
-        }
-        session.phase = Phase::Cancelled;
-        session.transcript = None;
         if state.active.as_deref() == Some(token) {
             state.active = None;
         }
+        retire_once_grant(&mut state, grant);
         HttpResponse::empty(204)
     }
 
-    /// `POST /record/revoke`: the paired client gives its grant back.
+    /// `POST /record/revoke`: the paired client gives its grant back. The
+    /// saved Always Allow permission for its verified recipient goes too.
     pub(super) fn revoke_token(&self, token: &str, channel: &Channel) -> HttpResponse {
         let mut state = lock(&self.state);
-        match state.grants.get(token) {
-            Some(grant) if grant.channel == *channel => {}
+        let recipient = match state.grants.get(token) {
+            Some(grant) if grant.channel == *channel => grant.recipient.clone(),
             _ => return HttpResponse::empty(401),
+        };
+        if !self.forget_record_permission(&recipient) {
+            return HttpResponse::code(500, "revocation-not-saved");
         }
         self.revoke_locked(&mut state, token);
         HttpResponse::empty(204)
@@ -877,6 +1018,7 @@ impl Sessions {
             }),
             Channel::Native { identity, .. } => Some(Recipient::Native {
                 identifier: identity.identifier.clone(),
+                cdhash: identity.cdhash.clone(),
                 team: identity.team.clone(),
             }),
         }
@@ -891,6 +1033,19 @@ fn prune(state: &mut State, now: Instant) {
     state
         .denied
         .retain(|_, denied| *denied + DENY_COOLDOWN > now);
+}
+
+/// Allow Once is exactly one recording session: when that session ends, its
+/// grant goes, so the next recording asks again. Always Allow's grant stays.
+fn retire_once_grant(state: &mut State, grant_id: u64) {
+    let token = state
+        .grants
+        .iter()
+        .find(|(_, grant)| grant.id == grant_id && !grant.durable)
+        .map(|(token, _)| token.clone());
+    if let Some(token) = token {
+        state.grants.remove(&token);
+    }
 }
 
 fn phase_response(phase: Phase) -> HttpResponse {
@@ -915,9 +1070,13 @@ fn remaining(deadline: Instant) -> u64 {
 fn recipient_key(recipient: &Recipient) -> String {
     match recipient {
         Recipient::Web { origin, .. } => format!("web:{origin}"),
-        Recipient::Native { identifier, team } => {
+        Recipient::Native {
+            identifier,
+            team,
+            cdhash,
+        } => {
             format!(
-                "native:{identifier}:{}",
+                "native:{identifier}:{cdhash}:{}",
                 team.as_deref().unwrap_or_default()
             )
         }
@@ -941,17 +1100,20 @@ pub(crate) fn max_recording() -> Duration {
     MAX_RECORDING
 }
 
-/// The app's sessions: its capture loop, the window's gate, and the Labs
-/// switch that turns both recording and browser access on.
+/// The app's sessions: its capture loop, the window's gate, saved Always
+/// Allow permissions, and the Labs switch that turns both recording and
+/// browser access on.
 pub(crate) fn app_sessions(
     gate: Arc<dyn ConsentGate>,
     control: super::dictation::Control,
+    permissions: Arc<Permissions>,
 ) -> Arc<Sessions> {
     Arc::new(Sessions::new(
         crate::labs::api_browser_origins,
         crate::labs::api_browser_access,
         Some(gate),
         Arc::new(super::dictation::DictationRecording::new(control)),
+        permissions,
     ))
 }
 
@@ -1193,6 +1355,7 @@ pub(super) fn bodyless(request: &super::HttpRequest) -> bool {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PairRequest {
+    permission_proof: Option<String>,
     code_challenge: String,
     #[serde(default)]
     code_challenge_method: Option<String>,
@@ -1232,7 +1395,7 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(bytes).into()
 }
 
-fn random_token(prefix: &str) -> Result<String, getrandom::Error> {
+pub(super) fn random_token(prefix: &str) -> Result<String, getrandom::Error> {
     use std::fmt::Write as _;
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random)?;

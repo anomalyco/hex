@@ -35,7 +35,7 @@ pub(crate) enum Request {
     /// The window answered a web page's one-transcription ask.
     AnswerConsent {
         id: u64,
-        allow: bool,
+        answer: crate::local_api::Answer,
     },
     /// The window stopped (`stop`) or cancelled a consented recording.
     RecordControl {
@@ -43,6 +43,9 @@ pub(crate) enum Request {
         stop: bool,
     },
     /// The window withdrew a paired client's grant to start recordings.
+    RevokePermission {
+        id: u64,
+    },
     RevokeRecordGrant {
         id: u64,
     },

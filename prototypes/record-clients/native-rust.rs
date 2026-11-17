@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 
 /// Pairs once: asks Hex's window for a revocable grant and exchanges the
 /// PKCE code for it. No recording starts here.
-pub fn pair(socket: &Path) -> Result<String, String> {
+pub fn pair(socket: &Path) -> Result<(String, bool), String> {
     let verifier = random_verifier()?;
     let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
 
@@ -62,7 +62,7 @@ pub fn pair(socket: &Path) -> Result<String, String> {
     exchanged
         .get("grantToken")
         .and_then(|token| token.as_str())
-        .map(str::to_owned)
+        .map(|token| (token.to_owned(), exchanged["duration"] == "always"))
         .ok_or_else(|| "Hex refused the grant".to_owned())
 }
 
@@ -164,8 +164,7 @@ fn random_verifier() -> Result<String, String> {
 }
 
 fn base64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b = [
@@ -193,9 +192,12 @@ fn main() {
             PathBuf::from(std::env::var("HOME").expect("HOME"))
                 .join("Library/Application Support/hex/record.sock")
         });
-    let result = pair(&socket).and_then(|grant| {
+    let result = pair(&socket).and_then(|(grant, reusable)| {
         let first = record_once(&socket, &grant)?;
         println!("{first}");
+        if !reusable {
+            return Ok(());
+        }
         let second = record_once(&socket, &grant)?;
         println!("{second}");
         revoke(&socket, &grant)

@@ -21,8 +21,10 @@ or token.
    ```
 
 4. Choose a WAV file and press **Ask Hex for one transcription**. Hex opens its
-   window with the Allow once / Deny dialog; Allow answers the page, the page
-   mints its one-use token, and uploads the file once.
+   window with **Deny**, **Allow Once**, and **Always Allow**, unless this
+   page already has permission. Either approval lets the page transcribe the
+   selected file. Always Allow saves a proof in this origin's local storage;
+   if you clear site data, revoke the permission in Labs before pairing again.
 
 A Deny (or Escape, or the scrim) cancels: the page gets `403 consent-denied`,
 and the origin waits 30 seconds before it may prompt again.

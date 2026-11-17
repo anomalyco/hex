@@ -85,12 +85,14 @@
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
             clientName: "Hex browser connect demo",
+            permissionProof: localStorage.getItem("hex.transcribe.proof"),
             state,
           }),
         );
         if (grant.state !== state) throw new Error("Hex answered another request.");
+        if (grant.permissionProof) localStorage.setItem("hex.transcribe.proof", grant.permissionProof);
         log(`Allowed. Code expires in ${grant.expiresInMs} ms.`);
-        const { uploadToken } = await post(
+        const { audioToken } = await post(
           `${api}/connect/token`,
           JSON.stringify({ code: grant.code, codeVerifier: verifier }),
         );
@@ -98,11 +100,11 @@
           log("No recording chosen; the one-use token is left unused.");
           return;
         }
-        log("Uploading once…");
+        log("Transcribing audio…");
         const response = await fetch(`${api}/transcriptions`, {
           method: "POST",
           headers: {
-            "X-Hex-Connect-Token": uploadToken,
+            "X-Hex-Connect-Token": audioToken,
             "Content-Type": "audio/wav",
           },
           body: await file.arrayBuffer(),

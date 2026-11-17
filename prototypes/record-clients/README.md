@@ -15,7 +15,7 @@ trusted or read.
   run it; it uses `HEX_RECORD_SOCKET` or the default path and does the same
   pair → record twice → revoke sequence.
 
-Both wait for the person to press **Allow** in Hex. **Not now**, Escape, the
+Both record once for **Allow Once**, or twice then revoke for **Always Allow**. **Deny**, Escape, the
 scrim, or letting the dialog time out fails the pairing without recording.
 Pairing starts nothing; each `POST /record/start` under the grant opens a
 fresh session that stops itself at the lease, and Hex's window shows the live
@@ -23,9 +23,8 @@ card with **Stop recording** and **Cancel**. **Revoke** in Hex's window
 (Labs › Browser access) or `POST /record/revoke` ends the grant, cancelling a
 live session and making further starts fail.
 
-Grants are kept in Hex's process, not on disk: quitting Hex revokes every
-pairing, and the client must pair again next launch. That is deliberate until
-there is a secure store for a client's identity.
+Grant tokens expire when Hex quits. Always Allow persists until revoked; the
+same signed binary can pair on the next launch without another dialog.
 
 Web pages use the loopback HTTP API instead (`POST /record/pair` with an
 `Origin` listed in Labs › Browser access to the local API); they cannot open

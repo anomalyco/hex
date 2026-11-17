@@ -1,4 +1,4 @@
-//! Browser connect: a web page asks Hex for one transcription, and Hex's own
+//! Browser connect: a web page asks Hex to transcribe audio, and Hex's own
 //! window asks the person.
 //!
 //! The page never sees the local API's bearer token. It starts a small
@@ -6,19 +6,24 @@
 //!
 //! 1. `POST /connect/authorize` with a PKCE `codeChallenge` (S256) and the
 //!    page's `Origin`. Hex shows a native dialog naming that origin; Allow
-//!    answers with a one-use `code`, Deny answers `403 consent-denied`.
+//!    Once answers with a one-use `code`, Deny answers `403 consent-denied`.
 //! 2. `POST /connect/token` with the `code` and the `codeVerifier` mints a
-//!    one-use `uploadToken`, valid only for plain `POST /transcriptions` from
+//!    one-use `audioToken`, valid only for plain `POST /transcriptions` from
 //!    the same origin.
 //! 3. `POST /transcriptions` with `X-Hex-Connect-Token` spends the token,
-//!    whatever the upload turns out to be.
+//!    whatever the audio turns out to be.
 //!
 //! Codes and tokens expire (two minutes each), and one code, one token, and
-//! one upload are all the grant is worth. The token reaches nothing else:
-//! not `/control`, `/dictations`, `/streams`, model preparation, or the
+//! one transcription are all the grant is worth. The token reaches nothing
+//! else: not `/control`, `/dictations`, `/streams`, model preparation, or the
 //! developer control. A page that is not on the Labs origins list is refused
 //! before the dialog, and a Deny starts a short cooldown so a page cannot
 //! reopen the dialog in a loop.
+//!
+//! Always Allow saves the capability for this exact `Origin` in
+//! [`Permissions`]. A later ask from the same origin skips the dialog and
+//! mints a fresh one-operation code; the saved permission survives a restart
+//! until the person revokes it in Labs › Browser access.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -26,13 +31,14 @@ use std::time::{Duration, Instant};
 
 use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 use super::http::HttpResponse;
+use super::permissions::Permissions;
 use super::{HttpRequest, read_body_bounded};
 
 pub(super) const AUTHORIZE_PATH: &str = "/connect/authorize";
 pub(super) const TOKEN_PATH: &str = "/connect/token";
 /// How long the person has to answer the dialog.
 pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(60);
-/// How long an allowed grant's code lives, and then its upload token.
+/// How long an allowed grant's code lives, and then its audio token.
 pub(super) const GRANT_LIFETIME: Duration = Duration::from_secs(120);
 /// How long an origin that was denied waits before it may prompt again.
 pub(super) const DENY_COOLDOWN: Duration = Duration::from_secs(30);
@@ -41,12 +47,14 @@ pub(super) const MAX_BODY_BYTES: usize = 8 * 1024;
 const BODY_DEADLINE: Duration = Duration::from_secs(5);
 
 struct Grant {
+    permission: Option<u64>,
     challenge: [u8; 32],
     origin: String,
     expires: Instant,
 }
 
-struct Upload {
+struct Audio {
+    permission: Option<u64>,
     origin: String,
     expires: Instant,
 }
@@ -55,8 +63,8 @@ struct Upload {
 struct State {
     /// Codes from allowed prompts, by code.
     grants: HashMap<String, Grant>,
-    /// Minted upload tokens, by token.
-    uploads: HashMap<String, Upload>,
+    /// Minted audio tokens, by token.
+    audio: HashMap<String, Audio>,
     /// When each origin was last denied.
     denied: HashMap<String, Instant>,
     next_prompt: u64,
@@ -65,10 +73,12 @@ struct State {
 }
 
 /// The running app's browser-connect gate: the Labs browser origins, the
-/// window's consent gate, and the one-use grants between them.
+/// window's consent gate, saved Always Allow permissions, and the one-use
+/// grants between them.
 pub(crate) struct Connect {
     origins: fn() -> Vec<String>,
     gate: Option<Arc<dyn ConsentGate>>,
+    permissions: Arc<Permissions>,
     code_lifetime: Duration,
     token_lifetime: Duration,
     prompt_wait: Duration,
@@ -77,10 +87,15 @@ pub(crate) struct Connect {
 }
 
 impl Connect {
-    pub(crate) fn new(origins: fn() -> Vec<String>, gate: Option<Arc<dyn ConsentGate>>) -> Self {
+    pub(crate) fn new(
+        origins: fn() -> Vec<String>,
+        gate: Option<Arc<dyn ConsentGate>>,
+        permissions: Arc<Permissions>,
+    ) -> Self {
         Self {
             origins,
             gate,
+            permissions,
             code_lifetime: GRANT_LIFETIME,
             token_lifetime: GRANT_LIFETIME,
             prompt_wait: PROMPT_WAIT,
@@ -95,6 +110,7 @@ impl Connect {
     pub(crate) fn with_timings(
         origins: fn() -> Vec<String>,
         gate: Option<Arc<dyn ConsentGate>>,
+        permissions: Arc<Permissions>,
         code_lifetime: Duration,
         token_lifetime: Duration,
         prompt_wait: Duration,
@@ -103,6 +119,7 @@ impl Connect {
         Self {
             origins,
             gate,
+            permissions,
             code_lifetime,
             token_lifetime,
             prompt_wait,
@@ -120,15 +137,20 @@ impl Connect {
             && (self.origins)().iter().any(|allowed| allowed == origin)
     }
 
-    /// Spends `token` for one upload from `origin`. The token is gone
+    /// Spends `token` for one transcription from `origin`. The token is gone
     /// whatever the answer, so a page gets exactly one try.
-    pub(super) fn take_upload(&self, token: &str, origin: Option<&str>) -> bool {
+    pub(super) fn take_audio(&self, token: &str, origin: Option<&str>) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let Some(upload) = state.uploads.remove(token) else {
+        let Some(audio) = state.audio.remove(token) else {
             return false;
         };
         let now = Instant::now();
-        upload.expires > now && origin == Some(upload.origin.as_str())
+        audio
+            .permission
+            .is_none_or(|id| self.permissions.current(id))
+            && audio.expires > now
+            && origin == Some(audio.origin.as_str())
+            && self.origin_allowed(&audio.origin)
     }
 
     /// Reads one connect request's body and answers it.
@@ -171,52 +193,72 @@ impl Connect {
         let Some(gate) = self.gate.clone() else {
             return HttpResponse::code(403, "connect-unavailable");
         };
-        let now = Instant::now();
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(denied) = state.denied.get(origin)
-            && *denied + self.cooldown > now
-        {
-            return HttpResponse::code(429, "consent-cooldown");
-        }
-        if state.prompting {
-            return HttpResponse::code(409, "consent-busy");
-        }
-        state.next_prompt += 1;
-        let prompt = Prompt {
-            id: state.next_prompt,
-            intent: Intent::Upload,
-            recipient: Recipient::Web {
-                origin: origin.to_owned(),
-                client_name,
-            },
+        let recipient = Recipient::Web {
+            origin: origin.to_owned(),
+            client_name,
         };
-        state.prompting = true;
-        drop(state);
+        // Always Allow is the person's earlier answer for this exact origin,
+        // so this ask needs no dialog. A saved permission never carries the
+        // page's claimed name, only the `Origin` Hex verified.
+        let saved = match self.permissions.authorize_saved(
+            Intent::Transcribe,
+            &recipient,
+            request.permission_proof.as_deref(),
+        ) {
+            Ok(saved) => saved,
+            Err(()) => return HttpResponse::code(403, "permission-proof-required"),
+        };
+        let answer = if saved.is_some() {
+            Answer::Once
+        } else {
+            let now = Instant::now();
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(denied) = state.denied.get(origin)
+                && *denied + self.cooldown > now
+            {
+                return HttpResponse::code(429, "consent-cooldown");
+            }
+            if state.prompting {
+                return HttpResponse::code(409, "consent-busy");
+            }
+            state.next_prompt += 1;
+            let prompt = Prompt {
+                id: state.next_prompt,
+                intent: Intent::Transcribe,
+                recipient: recipient.clone(),
+            };
+            state.prompting = true;
+            drop(state);
 
-        let answer = gate.ask(&prompt, self.prompt_wait);
+            let answer = gate.ask(&prompt, self.prompt_wait);
+
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.prompting = false;
+            answer
+        };
 
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.prompting = false;
         match answer {
-            Answer::Allow => {
-                let code = random_token("hexc_");
-                state.grants.insert(
-                    code.clone(),
-                    Grant {
-                        challenge: challenge.try_into().expect("32 bytes were checked"),
-                        origin: origin.to_owned(),
-                        expires: Instant::now() + self.code_lifetime,
-                    },
-                );
-                HttpResponse::json(
-                    200,
-                    &serde_json::json!({
-                        "code": code,
-                        "expiresInMs": self.code_lifetime.as_millis(),
-                        "origin": origin,
-                        "scope": "transcription:upload",
-                        "state": request.state,
-                    }),
+            Answer::Once => {
+                self.issue_code(&mut state, challenge, origin, request.state, saved, None)
+            }
+            Answer::Always => {
+                // Save before issuing anything: a permission Hex cannot write
+                // must never behave like Once.
+                let (id, proof) = match self.permissions.remember(Intent::Transcribe, &recipient) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        tracing::warn!(%error, "could not save an Always Allow permission");
+                        return HttpResponse::code(500, "permission-not-saved");
+                    }
+                };
+                self.issue_code(
+                    &mut state,
+                    challenge,
+                    origin,
+                    request.state,
+                    Some(id),
+                    proof,
                 )
             }
             Answer::Deny => {
@@ -226,6 +268,42 @@ impl Connect {
             Answer::Timeout => HttpResponse::code(403, "consent-timeout"),
             Answer::Unavailable => HttpResponse::code(403, "connect-unavailable"),
         }
+    }
+
+    /// One allowed ask's code: one exchange, then one transcription.
+    fn issue_code(
+        &self,
+        state: &mut State,
+        challenge: Vec<u8>,
+        origin: &str,
+        client_state: Option<String>,
+        permission: Option<u64>,
+        proof: Option<String>,
+    ) -> HttpResponse {
+        state
+            .grants
+            .retain(|_, grant| grant.expires > Instant::now());
+        let code = random_token("hexc_");
+        state.grants.insert(
+            code.clone(),
+            Grant {
+                permission,
+                challenge: challenge.try_into().expect("32 bytes were checked"),
+                origin: origin.to_owned(),
+                expires: Instant::now() + self.code_lifetime,
+            },
+        );
+        HttpResponse::json(
+            200,
+            &serde_json::json!({
+                "code": code,
+                "permissionProof": proof,
+                "expiresInMs": self.code_lifetime.as_millis(),
+                "origin": origin,
+                "scope": "transcription:transcribe",
+                "state": client_state,
+            }),
+        )
     }
 
     fn exchange(&self, origin: &str, body: &[u8]) -> HttpResponse {
@@ -243,14 +321,21 @@ impl Connect {
         let Some(grant) = state.grants.remove(&request.code) else {
             return HttpResponse::code(403, "invalid-grant");
         };
-        if grant.expires <= now || grant.origin != origin || !equal(&grant.challenge, &challenge) {
+        if grant
+            .permission
+            .is_some_and(|id| !self.permissions.current(id))
+            || grant.expires <= now
+            || grant.origin != origin
+            || !equal(&grant.challenge, &challenge)
+        {
             return HttpResponse::code(403, "invalid-grant");
         }
-        state.uploads.retain(|_, upload| upload.expires > now);
-        let token = random_token("hexu_");
-        state.uploads.insert(
+        state.audio.retain(|_, audio| audio.expires > now);
+        let token = random_token("hexa_");
+        state.audio.insert(
             token.clone(),
-            Upload {
+            Audio {
+                permission: grant.permission,
                 origin: origin.to_owned(),
                 expires: now + self.token_lifetime,
             },
@@ -258,10 +343,10 @@ impl Connect {
         HttpResponse::json(
             200,
             &serde_json::json!({
-                "uploadToken": token,
+                "audioToken": token,
                 "expiresInMs": self.token_lifetime.as_millis(),
                 "origin": origin,
-                "scope": "transcription:upload",
+                "scope": "transcription:transcribe",
             }),
         )
     }
@@ -273,7 +358,7 @@ pub(super) enum Intercept {
     Connect(Call),
     /// A minted token spends itself here, and the router continues with the
     /// request as a scoped transcription.
-    Upload(HttpRequest),
+    Audio(HttpRequest),
     /// Answer without routing further (no window, a bad token, a wrong
     /// origin, or a wrong content type).
     Refuse(HttpResponse),
@@ -304,15 +389,15 @@ pub(super) fn intercept(request: HttpRequest, connect: Option<&Connect>) -> Inte
     // token does.
     let scoped = request.method == "POST"
         && path == "/transcriptions"
-        && connect.is_some_and(|connect| connect.take_upload(&token, request.origin.as_deref()));
+        && connect.is_some_and(|connect| connect.take_audio(&token, request.origin.as_deref()));
     if scoped {
-        Intercept::Upload(request)
+        Intercept::Audio(request)
     } else {
         Intercept::Refuse(HttpResponse::empty(401))
     }
 }
 
-/// Refuses a connect upload that asks for more than a plain transcript:
+/// Refuses a connect transcription that asks for more than a plain transcript:
 /// `process=global` and `timestamps=…` are the bearer-token API's options,
 /// not this grant's scope.
 pub(super) fn connect_scope_refusal(path: &str) -> Option<HttpResponse> {
@@ -389,6 +474,7 @@ impl Call {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AuthorizeRequest {
+    permission_proof: Option<String>,
     code_challenge: String,
     #[serde(default)]
     code_challenge_method: Option<String>,

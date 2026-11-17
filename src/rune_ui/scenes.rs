@@ -156,6 +156,7 @@ pub(super) const SCENES: &[Scene] = &[
             intent: crate::local_api::Intent::Record,
             recipient: crate::local_api::Recipient::Native {
                 identifier: "com.example.fieldnotes".into(),
+                cdhash: "fixture-digest".into(),
                 team: Some("K7Z4Q2M8A1".into()),
             },
         };
@@ -172,6 +173,7 @@ pub(super) const SCENES: &[Scene] = &[
                 id: 3,
                 recipient: crate::local_api::Recipient::Native {
                     identifier: "com.example.fieldnotes".into(),
+                    cdhash: "fixture-digest".into(),
                     team: Some("K7Z4Q2M8A1".into()),
                 },
                 phase: crate::local_api::RecordPhase::Recording,
@@ -187,7 +189,7 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         let prompt = crate::local_api::Prompt {
             id: 7,
-            intent: crate::local_api::Intent::Upload,
+            intent: crate::local_api::Intent::Transcribe,
             recipient: crate::local_api::Recipient::Web {
                 origin: "https://notes.example".into(),
                 client_name: Some("Field Notes".into()),
@@ -823,10 +825,20 @@ pub(super) const SCENES: &[Scene] = &[
         ui.lab_store.search = rune::TextEdit::new("Browser access".to_owned());
         ui.lab_store.group = Some(crate::labs::Feature::ApiBrowserAccess.group());
         if let Some(view) = &mut ui.view {
+            view.permissions = vec![crate::local_api::PermissionView {
+                id: 2,
+                capability: crate::local_api::PermissionCapability::TranscribeAudio,
+                recipient: crate::local_api::Recipient::Web {
+                    origin: "https://notes.example".into(),
+                    client_name: None,
+                },
+            }];
             view.grants = vec![crate::local_api::RecordGrant {
+                durable: false,
                 id: 1,
                 recipient: crate::local_api::Recipient::Native {
                     identifier: "com.example.fieldnotes".into(),
+                    cdhash: "fixture-digest".into(),
                     team: Some("K7Z4Q2M8A1".into()),
                 },
             }];
@@ -1103,6 +1115,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         editing: false,
         consent: None,
         record: None,
+        permissions: Vec::new(),
         grants: Vec::new(),
     });
     ui
