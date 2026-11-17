@@ -44,14 +44,6 @@ impl Recipient {
         }
     }
 
-    /// "Signed by team …", for a native process whose team is known.
-    pub(crate) fn signing_note(&self) -> Option<String> {
-        match self {
-            Self::Web { .. } => None,
-            Self::Native { team, .. } => team.as_ref().map(|team| format!("Signed by team {team}")),
-        }
-    }
-
     /// The page's own name, which is only a claim.
     pub(crate) fn claimed_name(&self) -> Option<&str> {
         match self {
