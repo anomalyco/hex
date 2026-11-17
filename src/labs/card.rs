@@ -54,7 +54,6 @@ impl Feature {
             Self::SectionKeyAlone => "Section key alone",
             Self::MicrophoneKeyAlone => "Microphone key alone",
             Self::KeepRecordings => "Keep recordings",
-            Self::SettingsSearch => "Settings search",
             Self::Appearance => "Appearance",
             Self::ReleaseNotesLink => "Release notes link",
             Self::HideMenuBarIcon => "Hide menu bar icon",
@@ -214,7 +213,6 @@ impl Feature {
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
-            Self::SettingsSearch => "Find any setting in General with a search field",
             Self::Appearance => "Use light or dark for the main window instead of the system's",
             Self::ReleaseNotesLink => {
                 "Show a link to this build's release notes in the sidebar footer"

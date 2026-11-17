@@ -16,6 +16,7 @@ mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
 mod explainer;
+mod find_popover;
 mod found;
 mod found_choice;
 mod fun;
@@ -376,6 +377,7 @@ fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> run
 /// Closing the window saves pending text edits and stops a shortcut
 /// recording, as leaving a pane does. Hex keeps running.
 fn on_close(ui: &mut Ui, tx: &mut Tx) {
+    find_popover::close(ui);
     ui.flush_drafts();
     settings::cancel_capture(ui);
     // A hidden window only polls when woken, so poll's visibility check
@@ -670,7 +672,7 @@ pub(crate) struct Ui {
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     mic_level: general::MicLevel,
     /// General's search, while Labs › Settings search is on.
-    general_search: TextEdit,
+    find: find_popover::Find,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
@@ -806,7 +808,7 @@ impl Ui {
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
             mic_level: general::MicLevel::default(),
-            general_search: TextEdit::default(),
+            find: Default::default(),
             advanced: Vec::new(),
             labs_open: false,
             lab_store: labs::Store::default(),
@@ -1190,6 +1192,7 @@ impl Ui {
 
     /// Closes the dialogs and sheets a pane switch or window close ends.
     fn close_dialogs(&mut self) {
+        find_popover::close(self);
         picker::close(self);
         explainer::close(self);
         sound_sets::close(self);
@@ -1208,7 +1211,6 @@ impl Ui {
         self.flush_drafts();
         settings::cancel_capture(self);
         self.open = None;
-        self.general_search.clear();
         models::close(self);
         self.close_dialogs();
         self.output.prompt_copied = false;
@@ -1235,6 +1237,13 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if settings::on_key(ui, event, tx) {
         return true;
     }
+    if ui.find.open {
+        // The popover's field and modal scope own this key, not pane shortcuts.
+        return false;
+    }
+    if find_popover::open_key(ui, event, tx) {
+        return true;
+    }
     // Labs › Playground: ⇧⌘D (Ctrl+Shift+D off macOS) opens the playground.
     if event.key == rune::Key::Command('d') && event.mods.shift && playground::enabled() {
         tx.toggle_playground();
@@ -1248,7 +1257,8 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     // ⌘F (Ctrl+F off macOS) searches Labs or General.
-    if general::focus_search_key(ui, event) {
+    if ui.labs_open && ui.find.local_find_allowed(event) {
+        labs::focus_search(ui);
         return true;
     }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
@@ -1566,6 +1576,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
     }
+    find_popover::layer(ui, p, &mut layer);
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
 

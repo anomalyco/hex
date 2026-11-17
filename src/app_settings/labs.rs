@@ -157,8 +157,6 @@ pub struct LabsSettings {
     /// A kept recording may be copied from History and the menu bar or tray
     /// as a file on the clipboard; it stores no audio itself.
     pub copy_dictation_audio: bool,
-    /// General's pane starts with a search field that filters its rows.
-    pub settings_search: bool,
     /// The sidebar footer links this build's release notes.
     pub release_notes_link: bool,
     pub hide_menu_bar_icon: bool,
@@ -378,7 +376,6 @@ impl Default for LabsSettings {
             microphone_key: false,
             keep_recordings: false,
             copy_dictation_audio: false,
-            settings_search: false,
             release_notes_link: false,
             hide_menu_bar_icon: false,
             quit_closes_window: false,
