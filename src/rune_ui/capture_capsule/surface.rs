@@ -37,12 +37,16 @@ const PROCESSING_TRAIL: f32 = 8.5;
 /// The check's ink spans 12…20, as the dot's does; its label starts where
 /// the timer does.
 pub(crate) const DONE_TEXT_X: f32 = LEAD_TEXT_X;
-/// The capture's first frame in the check's place: a 28 × 20 card whose
-/// left edge is where the check's ink starts, 16 pt in from the wall and
-/// over the list's names, its label 8 pt after it.
-pub(crate) const THUMB_X: f32 = 12.0;
+/// The capture's first frame in the check's place: a 28 × 20 card nested
+/// in the capsule's left corners, its label 8 pt after it. Centred in the
+/// row it clears the top and bottom walls by the shell's radius less its
+/// own (10 pt), so it sits as far from the left wall and its corners turn
+/// about the shell's centres. The list's 16 pt margin is for words, not
+/// for this.
 pub(crate) const THUMB_W: f32 = 28.0;
 pub(crate) const THUMB_H: f32 = 20.0;
+pub(crate) const THUMB_RADIUS: f32 = SHELL_RADIUS - ISLAND_INSET - (CHIP_H - THUMB_H) * 0.5;
+pub(crate) const THUMB_X: f32 = SHELL_RADIUS - THUMB_RADIUS - ISLAND_INSET;
 
 /// Where the finished capsule's label starts after its lead.
 pub(crate) fn done_text_x(lead: Lead) -> f32 {

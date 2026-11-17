@@ -673,7 +673,6 @@ pub(super) fn button_box(p: Paint, w: f32) -> El {
         .hover(p.k.c.hover)
         .press(p.k.c.pressed)
 }
-pub(super) const THUMB_RADIUS: f32 = 4.0;
 
 /// The capture's first frame, cropped to fill a small rounded card, with a
 /// hairline over its edge so a white page still reads on the capsule.
@@ -685,7 +684,8 @@ pub(super) fn thumbnail(p: Paint, pixels: &rune::Pixels) -> El {
         .fill(p.k.c.layer_02)
         .pixels_fit(pixels, rune::SurfaceFit::Fill)
         .child(
-            el().absolute(0.0, 0.0)
+            el().key("thumb-edge")
+                .absolute(0.0, 0.0)
                 .size(THUMB_W, THUMB_H)
                 .radius(THUMB_RADIUS)
                 .border(p.hair, p.k.alpha(p.k.c.text_base, 0.14)),

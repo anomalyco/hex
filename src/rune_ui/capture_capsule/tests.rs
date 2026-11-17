@@ -563,10 +563,11 @@ fn the_annotation_toolbar_names_the_local_action_and_the_search_binding() {
     }
 }
 
-/// The ready line and the list under it are one layout: the preview's left
-/// edge is the header's and the names', 16 pt in from the wall; Paste,
-/// Search and ✕ are one row of 28 pt boxes 6 pt apart and 6 pt in from the
-/// walls; and Paste's target stays the whole chip around its fill.
+/// The ready line and the list under it are one layout: the list's header,
+/// its names and its reasons keep their 16 pt margins under the capsule's
+/// walls; Paste, Search and ✕ are one row of 28 pt boxes 6 pt apart and
+/// 6 pt in from the walls; and Paste's target stays the whole chip around
+/// its fill.
 #[test]
 fn the_ready_line_and_its_list_share_their_edges() {
     use super::surface::{CHIP_H, ISLAND_H};
@@ -601,12 +602,12 @@ fn the_ready_line_and_its_list_share_their_edges() {
     let (shell, list) = (keyed("shell"), keyed("list"));
     assert!(near(shell[0], list[0]) && near(shell[2], list[2]));
 
-    let spine = keyed("thumb")[0];
-    assert!(near(spine - shell[0], 16.0), "the preview at {spine}");
+    // The margin is for words: the preview nests in the corner instead
+    // (`the_preview_nests_in_the_capsules_left_corners`).
     for text in ["Send to", "SEER", "RUNE"] {
         assert!(
-            near(worded(text)[0], spine),
-            "{text} off the preview's edge"
+            near(worded(text)[0] - shell[0], 16.0),
+            "{text} off the list's margin"
         );
     }
     let right = shell[0] + shell[2];
@@ -645,7 +646,7 @@ fn the_ready_line_and_its_list_share_their_edges() {
         rt.hit_regions()
     );
 
-    // Folded, the words, Paste and ✕ keep the same 16 pt.
+    // Folded, the words, Paste and ✕ keep 16 pt between them.
     let rt = still("saved");
     let elements = rt.elements();
     let mut found = [[0.0; 4]; 4];
@@ -660,13 +661,101 @@ fn the_ready_line_and_its_list_share_their_edges() {
         found[slot] = e.rect;
     }
     let [shell, thumb, words, fill] = found;
-    assert!(near(thumb[0] - shell[0], 16.0), "{found:?}");
+    assert!(near(words[0] - (thumb[0] + thumb[2]), 8.0), "{found:?}");
     assert!(near(fill[0] - (words[0] + words[2]), 16.0), "{found:?}");
     let right = shell[0] + shell[2];
     assert!(
         near(right - (fill[0] + fill[2]), 6.0 + 28.0 + 6.0),
         "{found:?}"
     );
+}
+
+/// The preview nests in the capsule's left corners: the 28 × 20 card clears
+/// the left, top and bottom walls by the same 10 pt, so its 4 pt corners
+/// turn about the centres the shell's 14 pt corners do. Its hairline, and
+/// the chip that lights under it when it opens the capture, turn about them
+/// too. Read from the drawn elements, with suggestions and folded, in both
+/// appearances.
+#[test]
+fn the_preview_nests_in_the_capsules_left_corners() {
+    use super::surface::{
+        CHIP_RADIUS, DONE_TEXT_X, ISLAND_INSET, SHELL_RADIUS, THUMB_H, THUMB_RADIUS, THUMB_W,
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+    // A rounded rect's top-left and bottom-left corner centres.
+    let centres = |[x, y, _, h]: [f32; 4], r: f32| [[x + r, y + r], [x + r, y + h - r]];
+    for (name, dark) in [
+        ("guess", true),
+        ("guess", false),
+        ("saved", true),
+        ("saved", false),
+    ] {
+        let pres = stills().into_iter().find(|(n, _)| *n == name).unwrap().1;
+        let rt = runtime(pres, dark);
+        let elements = rt.elements();
+        let drawn = |key: &str| {
+            let e = elements
+                .iter()
+                .find(|e| e.key.as_deref().and_then(|k| k.split('#').next()) == Some(key))
+                .unwrap_or_else(|| panic!("{name}: no {key}"));
+            (e.rect, e.radius)
+        };
+        let (shell, shell_r) = drawn("shell");
+        let (thumb, thumb_r) = drawn("thumb");
+        let (edge, edge_r) = drawn("thumb-edge");
+        assert!(near(shell_r, SHELL_RADIUS) && near(thumb_r, THUMB_RADIUS));
+        assert!(near(thumb[2], THUMB_W) && near(thumb[3], THUMB_H) && near(thumb_r, 4.0));
+        assert!(
+            near(edge_r, thumb_r) && edge.iter().zip(thumb).all(|(a, b)| near(*a, b)),
+            "{name}: the hairline at {edge:?}, the preview at {thumb:?}"
+        );
+
+        let left = thumb[0] - shell[0];
+        let top = thumb[1] - shell[1];
+        let bottom = shell[1] + shell[3] - (thumb[1] + thumb[3]);
+        assert!(
+            near(left, top) && near(top, bottom) && near(left, SHELL_RADIUS - THUMB_RADIUS),
+            "{name}: the preview clears the walls by {left}, {top}, {bottom}"
+        );
+        let (outer, inner) = (centres(shell, shell_r), centres(thumb, thumb_r));
+        for (outer, inner) in outer.iter().zip(inner) {
+            assert!(
+                near(outer[0], inner[0]) && near(outer[1], inner[1]),
+                "{name}: the shell turns about {outer:?}, the preview about {inner:?}"
+            );
+        }
+        // Folded, the preview opens the capture: its chip is concentric too,
+        // and still starts at the row's inset, so its target is whole.
+        if name == "saved" {
+            let (chip, chip_r) = drawn("done");
+            assert!(near(chip_r, CHIP_RADIUS) && near(chip[0] - shell[0], ISLAND_INSET));
+            for (outer, inner) in outer.iter().zip(centres(chip, chip_r)) {
+                assert!(
+                    near(outer[0], inner[0]) && near(outer[1], inner[1]),
+                    "{name}: the shell turns about {outer:?}, the chip about {inner:?}"
+                );
+            }
+            assert!(
+                rt.hit_regions()
+                    .iter()
+                    .any(|r| near(r[0], chip[0]) && near(r[2], chip[0] + chip[2])),
+                "{name}: the preview's chip isn't a hit region"
+            );
+        }
+    }
+
+    // Without a frame there is no card: the check and its label stay put.
+    let pres = stills().into_iter().find(|(n, _)| *n == "audio-only");
+    let rt = runtime(pres.unwrap().1, true);
+    let elements = rt.elements();
+    assert!(!elements.iter().any(|e| e.key.as_deref() == Some("thumb")));
+    let shell = elements.iter().find(|e| e.key.as_deref() == Some("shell"));
+    // The lead reads its label too; the words themselves are drawn last.
+    let words = elements
+        .iter()
+        .rfind(|e| e.text.as_deref() == Some("Annotation"));
+    let (shell, words) = (shell.unwrap().rect, words.unwrap().rect);
+    assert!(near(words[0] - shell[0], ISLAND_INSET + DONE_TEXT_X));
 }
 
 /// Keycaps, as Settings draws a shortcut, are for Search's chip and the

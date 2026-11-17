@@ -579,9 +579,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   widens with it. The capsule is a rounded rect with the list's 14 pt
 │   │   corners (`SHELL_RADIUS`), not a pill, and its chips and icon buttons
 │   │   round concentrically inside it. The line and its list are one layout:
-│   │   the preview's left edge, the list's header and its names share one
-│   │   edge 16 pt in from the wall, and the reasons end 16 pt in from the
-│   │   other, under ✕. Paste, Search, Inspect and ✕ are one row of 28 pt
+│   │   the list's header and its names start 16 pt in from the wall, and
+│   │   the reasons end 16 pt in from the other, under ✕. The preview is not
+│   │   on that margin: it nests in the capsule's left corners, 10 pt from the
+│   │   left, top and bottom walls, so its 4 pt corners turn about the same
+│   │   centres as the shell's 14 pt ones
+│   │   (`the_preview_nests_in_the_capsules_left_corners`). Paste, Search,
+│   │   Inspect and ✕ are one row of 28 pt
 │   │   boxes 6 pt apart and 6 pt in from the walls; Paste's is filled, and
 │   │   its 32 pt chip is still what takes the click
 │   │   (`the_ready_line_and_its_list_share_their_edges`). Two looks while Kit picks (tuning `top_line`):
