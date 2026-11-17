@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU8, Ordering};
 
+mod clock;
 mod failures;
 mod french;
 mod labs;
@@ -19,6 +20,8 @@ mod portuguese;
 mod russian;
 mod text_language;
 mod traditional_chinese;
+
+pub(crate) use clock::{clock_time, twelve_hour_clock};
 
 /// A persisted interface-language code (`None` follows the system) and its
 /// native name.
@@ -1612,6 +1615,24 @@ mod tests {
         assert_eq!(super::tr_fill("Remove {}?", "x"), "Remover x?");
         super::set_current(super::ENGLISH);
         assert_eq!(super::tr("Don't switch"), "Don't switch");
+    }
+
+    #[test]
+    fn clock_times_are_twelve_hour_in_english_and_twenty_four_hour_elsewhere() {
+        super::apply(Some("en"));
+        assert_eq!(super::clock_time(13, 5), "1:05 PM");
+        assert_eq!(super::clock_time(1, 5), "1:05 AM");
+        assert_eq!(super::clock_time(0, 5), "12:05 AM");
+        assert_eq!(super::clock_time(12, 0), "12:00 PM");
+        assert_eq!(super::twelve_hour_clock(14, 30), "2:30 PM");
+        super::apply(Some("de"));
+        assert_eq!(super::clock_time(13, 5), "13:05");
+        assert_eq!(super::clock_time(1, 5), "01:05");
+        assert_eq!(super::clock_time(0, 5), "00:05");
+        assert_eq!(super::clock_time(12, 0), "12:00");
+        // Reading a title written in English works in any language.
+        assert_eq!(super::twelve_hour_clock(14, 30), "2:30 PM");
+        super::apply(Some("en"));
     }
 
     #[test]
