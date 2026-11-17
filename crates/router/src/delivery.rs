@@ -227,6 +227,32 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
 
 /// [`retry_due`] on `machine`, skipping markers another Mac wrote.
 fn retry_due_on(captures: &Path, now: u64, forward: Forward, machine: Option<&str>) -> Report {
+    retry_matching(captures, now, forward, machine, |p| {
+        p.extension().is_some_and(|ext| ext == "scrawl") || p.join(PROMPT).is_file()
+    })
+}
+
+/// The Hex host must not adopt pending deliveries from a legacy library.
+pub fn retry_annotations(captures: &Path, now: u64, forward: Forward) -> Report {
+    retry_matching(
+        captures,
+        now,
+        forward,
+        crate::util::machine_id().as_deref(),
+        |p| {
+            crate::bundle::manifest_name(p) == Some(crate::bundle::MANIFEST)
+                && crate::bundle::read_manifest(p).is_ok()
+        },
+    )
+}
+
+fn retry_matching(
+    captures: &Path,
+    now: u64,
+    forward: Forward,
+    machine: Option<&str>,
+    accepts: impl Fn(&Path) -> bool,
+) -> Report {
     let mut report = Report::default();
     let Ok(entries) = std::fs::read_dir(captures) else {
         return report;
@@ -234,8 +260,10 @@ fn retry_due_on(captures: &Path, now: u64, forward: Forward, machine: Option<&st
     let mut bundles: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
-            (p.extension().is_some_and(|ext| ext == "scrawl") || p.join(PROMPT).is_file())
-                && p.join(PENDING).is_file()
+            p.join(PENDING)
+                .symlink_metadata()
+                .is_ok_and(|m| m.is_file())
+                && accepts(p)
         })
         .collect();
     bundles.sort();

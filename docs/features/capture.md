@@ -11,7 +11,7 @@ mirror) and narration from Hex's microphone, takes ink and clicks (Shift on
 macOS and Windows, or the Annotate key held or the pen), transcribes the
 narration with word timestamps on Hex's loaded model (a model that gives
 none, GigaAM v3 say, has its text spread over the recording as estimated
-times), writes a Scrawl bundle into Scrawl's captures folder, copies it to
+times), writes a [Hex Annotation](../hex-annotation.md) under Hex's application data (or the chosen folder), copies it to
 the clipboard, and sends it to an OpenCode session with Scrawl's router
 (`crates/router`), run in Hex's process. Settings › Annotate (under Labs in
 the sidebar) holds its settings. Scrawl's capsule (switch chips, the
@@ -265,7 +265,7 @@ Settings › Annotate                      // capture.pane
 ├── Show in screen recordings (capture.show_overlays_in_recordings, default
 │   off) -> see capture.own-windows; applies at once, to open windows and a recording capture
 ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
-├── Captures folder (capture.folder, default Scrawl's) -> Reveal | choose another
+├── Captures folder (capture.folder, default `<Hex support>/annotations`) -> Reveal | choose another
 ├── Keep (capture.media_days / bundle_days) -> Scrawl's presets, or imported days
 ├── Scrawl.app running -> "Scrawl is running" card + Use Hex for captures
 │   └── Click -> asks Scrawl to quit (nothing else quits it); Hex takes the
@@ -747,7 +747,7 @@ While a capture records                  // capture.input
     at the start -> the first Shift drag inks
 
 hex capture start                        // capture.start; needs a listening Hex
-├── Creates <captures folder>/<unix ms>.scrawl (owner-only) -> reply: recording + bundle path
+├── Creates <captures folder>/<id>.hexannotation (owner-only) -> reply: recording + bundle path
 ├── Two stopped captures still writing -> refused `busy`
 ├── Copies the dictation timeline from now into a bounded sink (no second stream)
 ├── In the background: Scrawl's engine starts on the active display
@@ -911,8 +911,8 @@ What a send carries                      // capture.send (router opencode::send_
 Where it goes                            // capture.route; capture.routing's autoSend on
 ├── Once recording starts -> a capture-look thread reads the tab,
 │   terminal, and sessions in front (Scrawl's router, in Hex's process, with
-│   Scrawl's own router folders, so `scrawl router undo` and its evals see Hex's
-│   sends as Scrawl's). The whole look has 15 s: steps not begun by then are
+│   Hex's own annotation-router folder, not the standalone app's undo or outbox).
+│   The whole look has 15 s: steps not begun by then are
 │   skipped, and routing waits 1 s more for the one under way, then goes on
 │   without it. The newest-session list starts beside local sensing; exact
 │   folders are read in the other lane as soon as the clues name them (at most
@@ -1037,9 +1037,9 @@ transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
 │   └── Display plug/unplug (`CGDisplayRegisterReconfigurationCallback`) or a
 │       stopped stream -> reopens on the active display with bounded backoff
 ├── `hex capture replay` (`hex annotate replay`) -> exports up to 15 s (`> 15 s`
-│   is rejected by ScreenCaptureKit `-3812`) into `<captures>/<unix ms>.scrawl`
+│   is rejected by ScreenCaptureKit `-3812`) into `<captures>/<id>.hexannotation`
 │   without stopping the buffer, probes and decodes keyframes with `scrawl-helper`,
-│   writes `capture.json` and `scrawl.json` (`missing: "no_audio"`), copies to
+│   writes `capture.json` and `annotation.json` (`missing: "no_audio"`), copies to
 │   the clipboard, and feeds `capture.route`
 └── `capture.replay_hotkey` (unbound by default; recordable in
     Settings › Annotate while the lab is on, or `hex settings set capture.replay_hotkey`)
@@ -1050,7 +1050,7 @@ transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
         transcribed with word timestamps, and anchored onto the final keyframe
 ```
 
-`scrawl.json` is Scrawl's bundle manifest. Its `transcript.words` are
+`annotation.json` wraps the same capture payload that old `scrawl.json` files carry. Its `transcript.words` are
 `{t0, t1, text}` in milliseconds from the capture's start (`t0_boot_ns`, the
 boot-time clock audio and shortcuts share), and `audio.wav` starts at that
 start too, padded with silence when the microphone began late or dropped

@@ -273,6 +273,10 @@ fn created_ms(dir: &Path, manifest: &Manifest) -> Option<u64> {
 
 /// What one cleanup pass would do to the bundles in `captures`, given `now`.
 pub fn plan(captures: &Path, policy: &Policy, now: SystemTime) -> Vec<Action> {
+    plan_packages(captures, policy, now, false)
+}
+
+fn plan_packages(captures: &Path, policy: &Policy, now: SystemTime, hex: bool) -> Vec<Action> {
     let now_ms = now
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -282,7 +286,15 @@ pub fn plan(captures: &Path, policy: &Policy, now: SystemTime) -> Vec<Action> {
     };
     let mut bundles: Vec<PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|ext| ext == "scrawl") && p.is_dir())
+        .filter(|p| {
+            p.extension().is_some_and(|ext| {
+                ext == if hex {
+                    crate::bundle::EXTENSION
+                } else {
+                    "scrawl"
+                }
+            }) && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
+        })
         .collect();
     bundles.sort();
     let mut actions = Vec::new();
@@ -290,16 +302,27 @@ pub fn plan(captures: &Path, policy: &Policy, now: SystemTime) -> Vec<Action> {
         if dir.join(PINNED).exists()
             || dir.join(crate::delivery::PENDING).exists()
             || is_claimed(&dir)
-            || crate::recover::owed(&dir)
+            || (!hex && crate::recover::owed(&dir))
             || live_marker(&dir, crate::handoff::MEDIA_PENDING, now)
             || live_marker(&dir, MEDIA_SENDING, now)
         {
             continue;
         }
-        let manifest: Manifest = std::fs::read(dir.join("scrawl.json"))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let manifest: Manifest = if hex {
+            // Neither the directory's age nor a partial/future manifest gives Hex ownership.
+            let Ok(b) = crate::bundle::read_manifest(&dir) else {
+                continue;
+            };
+            Manifest {
+                created_at_ms: Some(b.created_at_ms),
+                ..Default::default()
+            }
+        } else {
+            std::fs::read(dir.join("scrawl.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default()
+        };
         let Some(created) = created_ms(&dir, &manifest).or_else(|| {
             let ago = modified_ago(&dir, now)?;
             Some(now_ms.saturating_sub(ago.as_millis() as u64))
@@ -443,10 +466,13 @@ fn trash_media(bundle: &Path, items: &[PathBuf], days: u32, trasher: Trasher) ->
         .file_stem()
         .context("Bundle has no name")?
         .to_string_lossy();
-    let staging_root = bundle
-        .parent()
-        .context("Bundle has no parent")?
-        .join(STAGING);
+    let staging_root = bundle.parent().context("Bundle has no parent")?.join(
+        if crate::bundle::manifest_name(bundle) == Some(crate::bundle::MANIFEST) {
+            ".hex-annotation-staging"
+        } else {
+            STAGING
+        },
+    );
     let staging = staging_root.join(format!("{name} media"));
     // A folder left by an earlier attempt (an interrupted pass, or a trasher that failed) holds
     // media that must not be deleted: stage beside it and put everything back if this fails.
@@ -528,13 +554,24 @@ fn restore_staged(staging: &Path, bundle: &Path) -> usize {
 /// interrupted cleanup never strands the bundle's video outside it and a stale
 /// `.media-cleaned` never claims it is gone. Staging whose bundle is gone goes to the Trash.
 fn recover_staged_media(captures: &Path, trasher: Trasher, now: SystemTime) -> usize {
-    let root = captures.join(STAGING);
+    recover_staging(captures, trasher, now, false)
+}
+
+fn recover_staging(captures: &Path, trasher: Trasher, now: SystemTime, hex: bool) -> usize {
+    let root = captures.join(if hex {
+        ".hex-annotation-staging"
+    } else {
+        STAGING
+    });
+    if !std::fs::symlink_metadata(&root).is_ok_and(|m| m.is_dir()) {
+        return 0;
+    }
     let Ok(entries) = std::fs::read_dir(&root) else {
         return 0;
     };
     let mut staged: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.is_dir())
+        .filter(|path| std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()))
         .collect();
     staged.sort();
     let mut restored = 0;
@@ -542,7 +579,15 @@ fn recover_staged_media(captures: &Path, trasher: Trasher, now: SystemTime) -> u
         let Some(stem) = staged_stem(&staging) else {
             continue;
         };
-        let bundle = captures.join(format!("{stem}.scrawl"));
+        let ext = if hex {
+            crate::bundle::EXTENSION
+        } else {
+            "scrawl"
+        };
+        let bundle = captures.join(format!("{stem}.{ext}"));
+        if hex && bundle.exists() && crate::bundle::read_manifest(&bundle).is_err() {
+            continue;
+        }
         if bundle.is_dir() {
             let Some(_claim) = claim(&bundle) else {
                 continue;
@@ -748,6 +793,19 @@ pub fn run_pass(
         ));
     }
     (actions, report)
+}
+
+/// Hex never consumes the legacy staging area, loose files, or .scrawl
+/// bundles in a shared root. A full, supported manifest is required.
+pub fn clean_annotations(root: &Path, policy: &Policy, trash: Trasher) -> Report {
+    let now = SystemTime::now();
+    recover_staging(root, trash, now, true);
+    apply(
+        &plan_packages(root, policy, now, true),
+        policy,
+        trash,
+        false,
+    )
 }
 
 /// Why a bundle's video is gone, for errors that need it.
@@ -1016,6 +1074,38 @@ mod tests {
 
     fn planned(captures: &Path, policy: &Policy) -> Vec<Action> {
         plan(captures, policy, later())
+    }
+
+    #[test]
+    fn hex_annotation_retention_never_claims_a_legacy_partial_or_future_package() {
+        let tmp = TempDir::new("hex-owners");
+        let b: crate::model::ScrawlBundle = serde_json::from_slice(include_bytes!(
+            "../../../tests/fixtures/annotations/marked-v1.json"
+        ))
+        .unwrap();
+        let new = tmp.0.join("own.hexannotation");
+        let future = tmp.0.join("future.hexannotation");
+        let partial = tmp.0.join("partial.hexannotation");
+        let old = tmp.0.join("old.scrawl");
+        for dir in [&new, &future, &partial, &old] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        crate::bundle::publish(&new, &b).unwrap();
+        crate::bundle::publish(&old, &b).unwrap();
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(new.join("annotation.json")).unwrap()).unwrap();
+        manifest["formatVersion"] = 9.into();
+        std::fs::write(future.join("annotation.json"), manifest.to_string()).unwrap();
+        let actions = plan_packages(
+            &tmp.0,
+            &Policy {
+                bundle_days: Some(1),
+                media_days: Some(1),
+            },
+            SystemTime::now() + Duration::from_secs(365 * 86400),
+            true,
+        );
+        assert_eq!(actions, [Action::TrashBundle(new)]);
     }
 
     #[test]

@@ -1,0 +1,32 @@
+# Hex Annotation v1 (draft)
+
+A capture is a directory, not a ZIP and not an entry in a database. The writer allocates a fresh `<unix-ms>-<128 random bits>.hexannotation` under `<Hex application support>/annotations`, or the explicit `capture.folder`. It never renames an existing capture. On Unix the package is 0700 and its completed files are 0600; Windows uses inherited directory ACLs. Choose a private location, particularly on Windows: a shared volume may have different ACLs.
+
+```text
+chart-note.hexannotation/
+  annotation.json        published last, by a same-directory atomic rename
+  summary.md             human-readable handoff, not the source of truth
+  frames/                preview keyframes; frames-full/ when available
+  contact-sheet.png
+  recording.mp4          optional; retention can prune this and audio.wav
+  audio.wav
+  capture.json           recorder metadata, not the annotation manifest
+```
+
+`annotation.json` is `{"formatVersion":1,"annotation":{…}}`. The annotation payload is the full capture model, not a list projection: its `id`, `createdAtMs`, target and duration; transcript segments and word times; strokes, normalized mark geometry and keyframe associations; events and cursor; contact sheet and relative media paths; audio stop, video offset, and optional destination. [A synthetic v1 payload](../tests/fixtures/annotations/marked-v1.json) illustrates these fields. Times are milliseconds on the capture clock; subtract `videoOffsetMs` to seek in the movie. Readers must not invent a new completion time from file modification time, import time or a send. The folder name is a locator; moving a package keeps its manifest identity.
+
+## Opening old files doesn't claim them
+
+`hex annotate show <path>` reads this package or an existing `.scrawl/scrawl.json` in place. Captures and `hex annotate list` search the write root and, with no custom root, the old default folder if present. Redirecting Hex's data root or running a test build disables that implicit legacy search. Both formats can coexist in a custom folder. A duplicate ID is listed once (prefer Hex format, then a deterministic path); a full path still selects the particular copy. Missing, oversized (>64 MiB), invalid and future manifests are not completed annotations. Missing movies leave the words, marks and remaining stills; showing or editing a picture does not reconstruct a movie. Discovery runs no helper, renderer, delivery or migration. There is no bulk import. The old app does not read the new package.
+
+Hex's router writes its own decisions, log, undo state and prompt outbox under `<support>/annotation-router`. It does not drain the old router or retry old `.scrawl/.deliver.json` files. The capture retention worker considers only published Hex v1 packages, uses separate staging, and ignores partial, future and legacy packages. Legacy files are read-only to the CLI send command: recording a new destination would rewrite the original. A user's explicit Trash action in Captures is separate from discovery.
+
+## Before retiring the standalone app
+
+- **History / Paste Last:** [the separate History draft](https://github.com/anomalyco/hex/pull/1932) is not integrated here. Adapt its `Scope::identity` and `Scope::resolve` in `capture_host/paste_source.rs` to both formats through the checked reader. Keep its writer-issued `.hex-annotate-v1` generation and `ready_at`, original root/path binding, bounds and selected-file checks. No scan, import, copy or send may mint a receipt. Enumerate legacy roots for **display**; recognize an old receipt in its original root under the existing policy, not just because its annotation ID matches. Join one row by manifest identity without upgrading a duplicate display row to a pasteable owner. Test an unmarked recent legacy capture beside an older marked result and a moved/duplicated copy. Do not use `latest` from the CLI as a paste source.
+- **Helper:** Hex builds and signs the in-repo Swift `scrawl-helper` alongside its executable. Playback probing/filmstrips, movie export and iPhone mirroring use it; these are not helper-free. Audit `SCRAWL_HELPER`/`SCRAWL_UI_HELPER` overrides, the legacy helper bundle identifier, `build-app.sh` and `validate-app.sh` before renaming or removing anything. Linux has FFmpeg/portal dependencies; Windows has its native media adapter. A manifest round trip proves none of those paths.
+- **Shared state:** keep the read-only one-time settings import, original custom folder, old decisions/outbox, pending deliveries and unfinished media untouched. Decide explicitly who finishes or cancels outstanding old sends. A reply from the old ingest port and a running `dev.kitlangton.scrawl` still gate Hex retries; the app-running check also gates the shortcut and retention. Removing those gates requires a coexistence test, not just a path change. Hex does not launch the legacy recovery worker. Future packages and interrupted captures are left alone.
+- **Packaging:** macOS declares `anomaly.hex.annotation` as `com.apple.package`, not as a handler for `.scrawl`. No Finder double-click / Windows Explorer / Linux file-manager open association is claimed until a real document-open handler exists. CLI paths and in-app Captures are the entry points.
+- **Handoff:** the same manifest reader feeds clipboard and inline-image send; an explicit remote send can transfer media by existing policy. A slim ZIP is a separate light attachment, not a migration; it excludes video, audio, full frames, retries and the paste receipt. Exercise actual paste receivers, native editor playback, exports and pruned-video fallback with generated images and video in an isolated profile before enabling a cutover. Do not use an installed library as a test corpus.
+
+`bash scripts/test-annotation-files.sh` runs named fixture tests with a temporary HOME, isolated application data and nonexistent helper paths. No UI, hardware or live sends are needed. Keeping this a draft is the rollout gate: a revert leaves new packages on disk which an older Hex won't list. Ship a compatible reader before deploying a new writer.

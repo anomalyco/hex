@@ -162,21 +162,22 @@ pub enum RouteDelivery {
 // ---------------------------------------------------------------------------
 // The router.
 
-/// The router with Hex's `capture.routing` and Scrawl's folders under
-/// `~/Library/Application Support/scrawl`. Never reads
+/// The router with Hex's `capture.routing` and private annotation-router folder. Never reads
 /// `~/.config/scrawl`. Its own log lines name sites and sessions, so they
 /// go to tracing's debug level, except how sends went (`deliver: …`).
 pub fn router() -> Router {
     let settings = crate::app_settings::capture_settings();
     let config = settings.routing.config().clone();
-    let support = crate::app_paths::home_dir()
-        .unwrap_or_default()
-        .join("Library/Application Support/scrawl");
-    let dirs = RouterDirs::under(
-        &support.join("router"),
-        Some(support.join("routing-decisions.jsonl")),
-        Some(settings.captures_dir()),
-    );
+    let dirs = crate::app_paths::support_dir()
+        .map(|support| {
+            let router = support.join("annotation-router");
+            RouterDirs::under(
+                &router,
+                Some(router.join("routing-decisions.jsonl")),
+                Some(settings.captures_dir()),
+            )
+        })
+        .unwrap_or_default();
     let router = Router::new(config, dirs)
         .with_log(|line| {
             if line.starts_with("deliver:") || line.starts_with("routing time:") {
@@ -1046,7 +1047,7 @@ impl Worker {
         let router = router();
         let captures = crate::app_settings::capture_settings().captures_dir();
         let report = router.run(|| {
-            delivery::retry_due(
+            delivery::retry_annotations(
                 &captures,
                 now_ms(),
                 scrawl_capture::handoff::send_bundle_to_session,

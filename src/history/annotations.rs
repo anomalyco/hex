@@ -1,20 +1,19 @@
 //! Annotate's captures (annotations and replays) for the Captures pane: the
-//! `*.scrawl` bundles in the captures folder from the last 30 days, read
-//! from each bundle's `scrawl.json`. Nothing is copied or indexed; the
+//! Hex and legacy packages from the last 30 days, read in place.
+//! Nothing is copied or indexed; the
 //! bundles are the record. A scan runs on a thread of its own, at most every
 //! few seconds while the pane asks, and reads again only the bundles whose
-//! `scrawl.json` changed.
+//! manifest or movie availability changed.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::collections::HashMap;
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use serde::Deserialize;
+use scrawl_capture::bundle::{MANIFEST, manifest_name, read_manifest};
 
 use super::captures::{CaptureWord, WINDOW_MS};
 
@@ -62,67 +61,10 @@ impl Annotation {
     }
 }
 
-/// The parts of `scrawl.json` the list needs; the rest is skipped.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Manifest {
-    created_at_ms: u64,
-    #[serde(default)]
-    duration_ms: u64,
-    #[serde(default)]
-    target: Target,
-    #[serde(default)]
-    transcript: Transcript,
-    #[serde(default)]
-    keyframes: Vec<Keyframe>,
-    #[serde(default)]
-    contact_sheet: String,
-    #[serde(default)]
-    video: Option<String>,
-    #[serde(default)]
-    destination: Option<Destination>,
-}
-
-#[derive(Default, Deserialize)]
-struct Target {
-    #[serde(default)]
-    app: Option<String>,
-}
-
-#[derive(Default, Deserialize)]
-struct Transcript {
-    #[serde(default)]
-    text: String,
-    #[serde(default)]
-    words: Vec<CaptureWord>,
-}
-
-#[derive(Deserialize)]
-struct Keyframe {
-    file: String,
-}
-
-#[derive(Deserialize)]
-struct Destination {
-    #[serde(default)]
-    title: String,
-}
-
-/// The milliseconds a bundle's name starts with: `1792933491953.scrawl`
-/// (Hex) or `scrawl-1792933491953-10739-50.scrawl` (Scrawl).
-fn stamp(name: &str) -> Option<u64> {
-    let name = name.strip_suffix(".scrawl")?;
-    name.split(['-', '.'])
-        .find(|part| part.len() >= 12 && part.bytes().all(|b| b.is_ascii_digit()))?
-        .parse()
-        .ok()
-}
-
 /// Reads the bundle at `bundle`; `None` while it has no readable
 /// `scrawl.json` (still being written, or not a capture).
 pub fn read(bundle: &Path) -> Option<Annotation> {
-    let bytes = fs::read(bundle.join("scrawl.json")).ok()?;
-    let manifest: Manifest = serde_json::from_slice(&bytes).ok()?;
+    let manifest = read_manifest(bundle).ok()?;
     let movie = manifest.video.as_ref().map(|video| bundle.join(video));
     let present = movie.as_ref().filter(|movie| movie.exists()).cloned();
     let picture = manifest
@@ -135,16 +77,25 @@ pub fn read(bundle: &Path) -> Option<Annotation> {
                 .then(|| bundle.join(&manifest.contact_sheet))
                 .filter(|path| path.exists())
         });
-    let mut hasher = DefaultHasher::new();
-    bundle.hash(&mut hasher);
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(manifest.id.as_bytes());
     Some(Annotation {
-        id: hasher.finish() | 1 << 63,
+        id: u64::from_be_bytes(digest[..8].try_into().unwrap()) | 1 << 63,
         bundle: bundle.to_path_buf(),
         at_ms: manifest.created_at_ms,
         duration_ms: manifest.duration_ms,
         app: manifest.target.app,
         words: manifest.transcript.text.trim().to_owned(),
-        timed: manifest.transcript.words,
+        timed: manifest
+            .transcript
+            .words
+            .into_iter()
+            .map(|w| CaptureWord {
+                t0: w.t0,
+                t1: w.t1,
+                text: w.text,
+            })
+            .collect(),
         sent_to: manifest
             .destination
             .map(|destination| destination.title)
@@ -159,32 +110,34 @@ pub fn read(bundle: &Path) -> Option<Annotation> {
 /// reusing `cache`'s reads of unchanged `scrawl.json` files. `cache` keeps
 /// only what's still listed.
 fn scan(
-    folder: &Path,
+    folders: &[PathBuf],
     now_ms: u64,
     cache: &mut HashMap<PathBuf, (SystemTime, Option<Annotation>)>,
 ) -> Vec<Annotation> {
-    let Ok(entries) = fs::read_dir(folder) else {
-        cache.clear();
-        return Vec::new();
-    };
     let mut seen = HashMap::new();
-    for entry in entries.filter_map(Result::ok) {
+    for entry in folders
+        .iter()
+        .filter_map(|p| fs::read_dir(p).ok())
+        .flatten()
+        .flatten()
+    {
         let path = entry.path();
-        let Some(at) = path
-            .file_name()
-            .and_then(|name| stamp(&name.to_string_lossy()))
-        else {
+        let Some(name) = manifest_name(&path) else {
             continue;
         };
-        if now_ms.saturating_sub(at) >= WINDOW_MS {
-            continue;
-        }
-        let Ok(modified) = fs::metadata(path.join("scrawl.json")).and_then(|meta| meta.modified())
+        let Ok(modified) = fs::symlink_metadata(path.join(name)).and_then(|meta| meta.modified())
         else {
             continue;
         };
         let read = match cache.remove(&path) {
-            Some((at, read)) if at == modified => read,
+            Some((at, read))
+                if at == modified
+                    && !read.as_ref().is_some_and(|a| {
+                        a.movie.as_ref().is_some_and(|p| !p.is_file()) || a.expired
+                    }) =>
+            {
+                read
+            }
             _ => read(&path),
         };
         seen.insert(path, (modified, read));
@@ -193,7 +146,11 @@ fn scan(
     let mut found: Vec<Annotation> = cache
         .values()
         .filter_map(|(_, read)| read.clone())
+        .filter(|a| now_ms.saturating_sub(a.at_ms) < WINDOW_MS)
         .collect();
+    found.sort_by_key(|a| (manifest_name(&a.bundle) != Some(MANIFEST), a.bundle.clone()));
+    let mut ids = std::collections::HashSet::new();
+    found.retain(|a| ids.insert(a.id));
     found.sort_by(|a, b| b.at_ms.cmp(&a.at_ms).then_with(|| a.bundle.cmp(&b.bundle)));
     found
 }
@@ -233,12 +190,12 @@ pub fn refresh() {
     let spawned = std::thread::Builder::new()
         .name("hex-captures-scan".into())
         .spawn(|| {
-            let folder = crate::app_settings::capture_settings().captures_dir();
+            let folders = crate::app_settings::capture_settings().annotation_roots();
             let mut cache = shared()
                 .as_mut()
                 .map(|shared| std::mem::take(&mut shared.cache))
                 .unwrap_or_default();
-            let listed = scan(&folder, super::now_ms(), &mut cache);
+            let listed = scan(&folders, super::now_ms(), &mut cache);
             let mut shared = shared();
             let shared = shared.get_or_insert_with(Shared::default);
             shared.cache = cache;
@@ -309,7 +266,7 @@ mod tests {
         fs::write(
             bundle.join("scrawl.json"),
             format!(
-                r#"{{"version":1,"id":"a","createdAtMs":{at_ms},"durationMs":4000,
+                r#"{{"version":1,"id":"{at_ms}","createdAtMs":{at_ms},"durationMs":4000,
                 "target":{{"mode":"window","app":"Brave","displayId":1,
                   "frame":{{"x":0,"y":0,"width":1,"height":1,"scale":2}}}},
                 "transcript":{{"source":"parakeet","text":" make it blue ","segments":[],
@@ -321,18 +278,6 @@ mod tests {
         )
         .unwrap();
         bundle
-    }
-
-    #[test]
-    fn a_bundle_name_gives_its_time() {
-        assert_eq!(stamp("1792933491953.scrawl"), Some(1_792_933_491_953));
-        assert_eq!(stamp("1792933491953-2.scrawl"), Some(1_792_933_491_953));
-        assert_eq!(
-            stamp("scrawl-1793047331859-10739-54.scrawl"),
-            Some(1_793_047_331_859)
-        );
-        assert_eq!(stamp("notes.scrawl"), None);
-        assert_eq!(stamp("1792933491953.png"), None);
     }
 
     #[test]
@@ -352,7 +297,8 @@ mod tests {
         fs::create_dir_all(folder.join(format!("{}.scrawl", now - 5))).unwrap();
 
         let mut cache = HashMap::new();
-        let listed = scan(&folder, now, &mut cache);
+        let roots = std::slice::from_ref(&folder);
+        let listed = scan(roots, now, &mut cache);
         assert_eq!(
             listed.iter().map(|a| &a.bundle).collect::<Vec<_>>(),
             [&newer, &older],
@@ -377,10 +323,41 @@ mod tests {
         assert_ne!(listed[0].id, listed[1].id);
 
         assert_eq!(
-            scan(&folder, now, &mut cache),
+            scan(roots, now, &mut cache),
             listed,
             "a rescan reads the same"
         );
         let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn hex_annotation_mixed_roots_show_one_record_at_its_original_time() {
+        let tmp = folder("mixed");
+        let roots = [tmp.join("own"), tmp.join("legacy")];
+        let legacy = roots[1].join("original.scrawl");
+        let hex = roots[0].join("renamed.hexannotation");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(&hex).unwrap();
+        fs::write(
+            legacy.join("scrawl.json"),
+            include_bytes!("../../tests/fixtures/annotations/marked-v1.json"),
+        )
+        .unwrap();
+        let b = read_manifest(&legacy).unwrap();
+        scrawl_capture::bundle::publish(&hex, &b).unwrap();
+        let listed = scan(&roots, b.created_at_ms + 1, &mut HashMap::new());
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, read(&legacy).unwrap().id);
+        assert_eq!(listed[0].bundle, hex);
+        assert_eq!(listed[0].at_ms, b.created_at_ms);
+        assert!(listed[0].expired);
+        assert_eq!(listed[0].words, "Move this");
+        assert_eq!(listed[0].timed[1].t1, 1050);
+        assert_eq!(
+            fs::read_dir(legacy).unwrap().count(),
+            1,
+            "read-only discovery"
+        );
+        fs::remove_dir_all(tmp).unwrap();
     }
 }

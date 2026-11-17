@@ -184,6 +184,10 @@ pub(crate) fn recorded(bundle: &std::path::Path) -> anyhow::Result<(PathBuf, Vec
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("the recording has no movie"))?,
     );
+    anyhow::ensure!(
+        movie.is_file(),
+        "The annotation’s movie is no longer available"
+    );
     let offset = loaded.video_offset_ms;
     let words = loaded
         .transcript
@@ -199,7 +203,8 @@ pub(crate) fn recorded(bundle: &std::path::Path) -> anyhow::Result<(PathBuf, Vec
 }
 
 /// Reads the recording `movie`, with the `words` said over it: its length
-/// and filmstrip. Takes a second or so; off the main thread.
+/// and filmstrip. `recorded` above only resolves the package, without starting a helper.
+/// Takes a second or so; off the main thread.
 #[cfg(target_os = "macos")]
 pub(super) fn load(movie: PathBuf, words: Vec<Word>) -> anyhow::Result<Clip> {
     use scrawl_capture::helper::{self, FrameTimes};
