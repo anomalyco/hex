@@ -661,10 +661,10 @@ pub(super) fn select(
 }
 
 /// The press that opens a select's menu, telling Rune to reveal the chosen
-/// row: a menu shows about seven rows of a long list, so a choice further
-/// down would open below the edge with its check out of sight. `scope` is
-/// the key around that menu's rows, so rows keyed alike elsewhere never
-/// answer for it.
+/// row: a menu shows only six or seven rows of a long list, so a choice
+/// further down would open below the edge with its check out of sight.
+/// `scope` is the key around that menu's rows, so rows keyed alike
+/// elsewhere never answer for it.
 pub(super) fn revealing_press(
     open: bool,
     scope: String,
