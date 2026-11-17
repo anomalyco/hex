@@ -71,8 +71,8 @@ impl ConsentGate for Desk {
             state.pending = Some(Pending {
                 prompt: Prompt {
                     id,
-                    origin: prompt.origin.clone(),
-                    client_name: prompt.client_name.clone(),
+                    intent: prompt.intent,
+                    recipient: prompt.recipient.clone(),
                 },
                 answer,
             });
@@ -112,8 +112,11 @@ mod tests {
     fn prompt() -> Prompt {
         Prompt {
             id: 0,
-            origin: "https://notes.example".into(),
-            client_name: Some("Field Notes".into()),
+            intent: crate::local_api::Intent::Upload,
+            recipient: crate::local_api::Recipient::Web {
+                origin: "https://notes.example".into(),
+                client_name: Some("Field Notes".into()),
+            },
         }
     }
 
@@ -130,7 +133,7 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(5));
         };
-        assert_eq!(shown.origin, "https://notes.example");
+        assert_eq!(shown.recipient.label(), "https://notes.example");
         assert!(desk.answer(shown.id, true));
         assert_eq!(asking.join().unwrap(), Answer::Allow);
         assert!(desk.prompt().is_none());

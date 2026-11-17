@@ -246,6 +246,40 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         output::trust_fixture(ui);
     }),
+    // One microphone recording for a verified native client.
+    ("record-consent", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.api_browser_access = true;
+        crate::labs::apply(&ui.settings.labs);
+        let prompt = crate::local_api::Prompt {
+            id: 11,
+            intent: crate::local_api::Intent::Record,
+            recipient: crate::local_api::Recipient::Native {
+                identifier: "com.example.fieldnotes".into(),
+                team: Some("K7Z4Q2M8A1".into()),
+            },
+        };
+        ui.consent = Some(prompt.clone());
+        if let Some(view) = &mut ui.view {
+            view.consent = Some(prompt);
+        }
+    }),
+    // The live recording card over General.
+    ("record-active", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.record = Some(crate::local_api::RecordView {
+                id: 3,
+                recipient: crate::local_api::Recipient::Native {
+                    identifier: "com.example.fieldnotes".into(),
+                    team: Some("K7Z4Q2M8A1".into()),
+                },
+                phase: crate::local_api::RecordPhase::Recording,
+                remaining_ms: 102_000,
+                max_recording_ms: 120_000,
+            });
+        }
+    }),
     // A web page's one-transcription ask: the consent dialog over General.
     ("browser-connect", |ui| {
         *ui = mac_fixture();
@@ -253,8 +287,11 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         let prompt = crate::local_api::Prompt {
             id: 7,
-            origin: "https://notes.example".into(),
-            client_name: Some("Field Notes".into()),
+            intent: crate::local_api::Intent::Upload,
+            recipient: crate::local_api::Recipient::Web {
+                origin: "https://notes.example".into(),
+                client_name: Some("Field Notes".into()),
+            },
         };
         ui.consent = Some(prompt.clone());
         if let Some(view) = &mut ui.view {
@@ -1279,6 +1316,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         update_blocked: None,
         editing: false,
         consent: None,
+        record: None,
     });
     ui
 }

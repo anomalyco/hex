@@ -58,6 +58,7 @@ pub(super) fn run_runtime(
         last_completed_at,
         started_at: shared.started_at,
         consent: shared.consent.clone(),
+        record: shared.record.clone(),
     };
     let mut settings_checked = Instant::now();
     loop {
@@ -149,6 +150,8 @@ pub(super) struct Runtime {
     pub(super) started_at: u64,
     /// The window's side of a web page's one-transcription ask.
     pub(super) consent: Option<Arc<super::consent::Desk>>,
+    /// Consented recordings the window can stop or cancel.
+    pub(super) record: Option<Arc<crate::local_api::RecordSessions>>,
 }
 
 impl Runtime {
@@ -192,6 +195,15 @@ impl Runtime {
             Request::AnswerConsent { id, allow } => {
                 if let Some(desk) = &self.consent {
                     desk.answer(id, allow);
+                }
+            }
+            Request::RecordControl { id, stop } => {
+                if let Some(record) = &self.record {
+                    if stop {
+                        record.stop(id);
+                    } else {
+                        record.cancel(id);
+                    }
                 }
             }
             Request::ReloadSettings => self.reload_settings(),
@@ -500,6 +512,7 @@ impl Runtime {
             settings: self.settings.clone(),
             preparation,
             consent: self.consent.as_ref().and_then(|desk| desk.prompt()),
+            record: self.record.as_ref().and_then(|record| record.view()),
         }
     }
 }

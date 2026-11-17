@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 use super::http::HttpResponse;
 use super::{HttpRequest, read_body_bounded};
 
@@ -38,33 +39,6 @@ pub(super) const DENY_COOLDOWN: Duration = Duration::from_secs(30);
 /// The connect bodies are two short JSON objects.
 pub(super) const MAX_BODY_BYTES: usize = 8 * 1024;
 const BODY_DEADLINE: Duration = Duration::from_secs(5);
-
-/// One page's ask, as the window shows it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Prompt {
-    /// Assigned by the consent gate; the window answers with it.
-    pub(crate) id: u64,
-    /// The verified `Origin` the grant is scoped to.
-    pub(crate) origin: String,
-    /// The page's own name, when it sent a short plain one.
-    pub(crate) client_name: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Answer {
-    Allow,
-    Deny,
-    /// Nobody answered within the wait.
-    Timeout,
-    /// No window can ask (headless service, or the window is gone).
-    Unavailable,
-}
-
-/// The window's side of the ask. `ask` shows the prompt and blocks until the
-/// person answers or `wait` passes.
-pub(crate) trait ConsentGate: Send + Sync {
-    fn ask(&self, prompt: &Prompt, wait: Duration) -> Answer;
-}
 
 struct Grant {
     challenge: [u8; 32],
@@ -210,8 +184,11 @@ impl Connect {
         state.next_prompt += 1;
         let prompt = Prompt {
             id: state.next_prompt,
-            origin: origin.to_owned(),
-            client_name,
+            intent: Intent::Upload,
+            recipient: Recipient::Web {
+                origin: origin.to_owned(),
+                client_name,
+            },
         };
         state.prompting = true;
         drop(state);

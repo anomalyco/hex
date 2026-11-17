@@ -120,6 +120,7 @@ impl Fixture {
                 last_completed_at: None,
                 started_at: 0,
                 consent: None,
+                record: None,
             },
             started,
             release,

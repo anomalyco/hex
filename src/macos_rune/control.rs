@@ -1036,6 +1036,7 @@ mod tests {
             last_completed_at: None,
             started_at: 0,
             consent: None,
+            record: None,
         };
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,

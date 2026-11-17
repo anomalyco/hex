@@ -104,6 +104,8 @@ pub(crate) struct Published {
     preparation: crate::transcription::preparation::PreparationStatus,
     /// A web page's one-transcription ask, while its dialog waits.
     pub(crate) consent: Option<crate::local_api::Prompt>,
+    /// A consented recording Hex's window can stop or cancel.
+    pub(crate) record: Option<crate::local_api::RecordView>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -119,6 +121,8 @@ struct Shared {
     started_at: u64,
     /// The window's side of a web page's one-transcription ask.
     consent: Option<Arc<consent::Desk>>,
+    /// The consented-recording sessions the window can stop or cancel.
+    record: Option<Arc<crate::local_api::RecordSessions>>,
 }
 
 impl Shared {
@@ -355,6 +359,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // A web page's ask is answered in this process's window, so the local API
     // can wait on it without ever handing the page the API token.
     let consent = Arc::new(consent::Desk::default());
+    // One consented recording runs on the listener's own programmatic
+    // dictation; the window can stop or cancel it.
+    let record = crate::local_api::record_sessions(consent.clone(), recognition_controls.clone());
     let mut local_api = crate::local_api::LocalApi::start(
         event_log.clone(),
         crate::local_api::LocalApiOptions {
@@ -366,6 +373,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 crate::labs::api_browser_origins,
                 Some(consent.clone()),
             )),
+            record: Some(record.clone()),
+            native_socket: crate::local_api::native_socket_path(),
             ..Default::default()
         },
     )?;
@@ -448,6 +457,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         event_path: event_path.clone(),
         started_at,
         consent: Some(consent.clone()),
+        record: Some(record),
         ..Shared::default()
     });
     let handle = RuntimeHandle {

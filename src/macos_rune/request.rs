@@ -40,6 +40,11 @@ pub(crate) enum Request {
         id: u64,
         allow: bool,
     },
+    /// The window stopped (`stop`) or cancelled a consented recording.
+    RecordControl {
+        id: u64,
+        stop: bool,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
 }

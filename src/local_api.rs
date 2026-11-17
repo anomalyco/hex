@@ -15,16 +15,24 @@ use crate::app_settings::AppSettings;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 
 mod connect;
+mod consent;
+mod control;
 mod dictation;
 mod discovery;
 mod http;
 mod meeting_events;
+#[cfg(target_os = "macos")]
+mod native;
 pub(crate) mod processing;
+mod record;
 mod streams;
 pub(crate) mod timestamps;
 mod transcriptions;
 
-pub(crate) use connect::{Answer, Connect, ConsentGate, Prompt};
+pub(crate) use connect::Connect;
+pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
+pub(crate) use record::View as RecordView;
+pub(crate) use record::{Phase as RecordPhase, Sessions as RecordSessions};
 
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
@@ -39,6 +47,12 @@ pub use processing::Processing;
 pub use timestamps::Timestamps;
 use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
+
+/// The recording slice's app-facing names.
+pub(crate) use record::{
+    app_sessions as record_sessions, max_recording as record_max_recording, native_socket_path,
+};
+
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
 /// it at once ([`wake_acceptor`]); this only bounds a shutdown whose wake
@@ -75,6 +89,8 @@ pub struct LocalApi {
     events: EventLog,
     stop_observed: Arc<AtomicBool>,
     transcription_service: Option<crate::transcription::service::TranscriptionService>,
+    #[cfg(target_os = "macos")]
+    native: Option<native::Listener>,
     _instance: Option<crate::desktop::instance::InstanceLock>,
 }
 
@@ -113,6 +129,8 @@ struct HttpContext {
     /// Browser connect (Labs › Browser access to the local API): a web page's
     /// one-transcription ask. Absent without a window to ask.
     connect: Option<connect::Connect>,
+    /// Consented one-recording sessions; absent without a capture loop.
+    record: Option<Arc<record::Sessions>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -165,6 +183,11 @@ pub struct LocalApiOptions {
     /// consent gate and one-use grants. `None` leaves the routes answering
     /// `403 connect-unavailable`.
     pub(crate) connect: Option<Connect>,
+    /// Consented one-recording sessions, when the app can record and ask.
+    pub(crate) record: Option<Arc<record::Sessions>>,
+    /// Where native clients' owner-only socket binds; unset leaves them
+    /// without one (the app sets it; tests use a temporary path).
+    pub(crate) native_socket: Option<PathBuf>,
 }
 
 impl LocalApi {
@@ -279,6 +302,7 @@ impl LocalApi {
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
+        let native_socket = options.native_socket.clone();
         let http_context = HttpContext {
             token: token.into(),
             health,
@@ -298,12 +322,19 @@ impl LocalApi {
             processing: options.processing,
             timestamps: options.timestamps,
             connect: options.connect,
+            record: options.record,
         };
+        let http_context = Arc::new(http_context);
+        // Native recording clients get their own owner-only socket; it
+        // serves `/record/*` only and needs a capture loop to be useful.
+        #[cfg(target_os = "macos")]
+        let native =
+            native::start_if_configured(native_socket.as_deref(), &http_context, &shutdown);
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("local-api".into())
             .spawn(move || {
-                serve(listener, http_context, ready);
+                serve(listener, http_context.clone(), ready);
                 if !unexpected_shutdown.load(Ordering::Acquire) {
                     if let Some((path, document)) = worker_discovery {
                         remove_discovery_if_owned(&path, &document);
@@ -337,6 +368,8 @@ impl LocalApi {
             events,
             stop_observed,
             transcription_service: Some(transcription_service),
+            #[cfg(target_os = "macos")]
+            native,
             _instance: instance,
         })
     }
@@ -362,6 +395,10 @@ impl LocalApi {
         }
         self.shutdown.store(true, Ordering::Release);
         wake_acceptor(self.document.port);
+        #[cfg(target_os = "macos")]
+        if let Some(native) = self.native.take() {
+            native.shutdown();
+        }
         if worker.join().is_err() {
             tracing::error!("local API thread panicked during shutdown");
         }
@@ -462,11 +499,10 @@ fn observe_stopped(events: &EventLog, observed: &AtomicBool) {
     }
 }
 
-fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bool>) {
+fn serve(listener: TcpListener, context: Arc<HttpContext>, ready: mpsc::SyncSender<bool>) {
     let (connections, pending) = mpsc::sync_channel(CONNECTION_QUEUE_CAPACITY);
     let pending = Arc::new(Mutex::new(pending));
     let shutdown = context.shutdown.clone();
-    let context = Arc::new(context);
     let workers = (0..HTTP_WORKERS)
         .filter_map(|index| {
             let pending = pending.clone();
@@ -636,7 +672,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
             } => {
-                let response = developer_control(
+                let response = control::developer_control(
                     &mut stream,
                     content_length,
                     body_prefix,
@@ -651,7 +687,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
             } => {
-                let response = control(
+                let response = control::control(
                     &mut stream,
                     content_length,
                     body_prefix,
@@ -691,6 +727,12 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "connect client disconnected");
                 }
             }
+            RequestAction::Record(request) => {
+                let response = request.respond(&context, &mut stream, &context.shutdown);
+                if let Err(error) = write_response(&mut stream, response, cors) {
+                    tracing::debug!(%error, "record client disconnected");
+                }
+            }
         }
     }
 }
@@ -710,6 +752,12 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             );
         }
         connect::Intercept::Pass(request) => request,
+    };
+    // One consented recording: a listed page asks without the bearer token,
+    // and its session token reaches only the record action it names.
+    let request = match record::route(request, context) {
+        record::Routed::Record(request) => return RequestAction::Record(request),
+        record::Routed::Pass(request) => request,
     };
     let path = request.path.split('?').next().unwrap_or("/");
     if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
@@ -960,106 +1008,6 @@ fn dictation_path(path: &str) -> Option<(u64, &str)> {
     let id = parts.next()?.parse().ok()?;
     let action = parts.next()?;
     (parts.next().is_none()).then_some((id, action))
-}
-
-fn developer_control(
-    stream: &mut TcpStream,
-    content_length: usize,
-    mut body: Vec<u8>,
-    controls: Option<&SyncSender<crate::control::developer_control::DeveloperCall>>,
-    shutdown: &AtomicBool,
-) -> HttpResponse {
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        shutdown,
-        MAX_DEVELOPER_CONTROL_BYTES,
-        DEVELOPER_CONTROL_TIMEOUT,
-    ) {
-        return body_read_response(error);
-    }
-    let Ok(command) = serde_json::from_slice(&body) else {
-        return HttpResponse::code(400, "invalid-developer-command");
-    };
-    let Some(controls) = controls else {
-        return HttpResponse::code(404, "developer-control-unavailable");
-    };
-    let (reply, response) = mpsc::sync_channel(1);
-    match controls.try_send(crate::control::developer_control::DeveloperCall { command, reply }) {
-        Ok(()) => {}
-        Err(TrySendError::Full(_)) => {
-            return HttpResponse::code(503, "developer-control-busy");
-        }
-        Err(TrySendError::Disconnected(_)) => {
-            return HttpResponse::code(503, "developer-control-unavailable");
-        }
-    }
-    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
-        Ok(reply) => HttpResponse::json(200, &reply),
-        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "developer-ui-timeout"),
-        Err(RecvTimeoutError::Disconnected) => {
-            HttpResponse::code(503, "developer-control-unavailable")
-        }
-    }
-}
-
-/// Hands one `hex` control request to the app and waits for its reply.
-/// Refusals travel as a 200 `ControlReply::Error`; an HTTP error means the
-/// request never reached the app.
-fn control(
-    stream: &mut TcpStream,
-    content_length: usize,
-    mut body: Vec<u8>,
-    controls: Option<&SyncSender<crate::control::ControlCall>>,
-    shutdown: &AtomicBool,
-) -> HttpResponse {
-    use crate::control::{ControlCall, ControlReply, ControlRequest, ControlResponse};
-
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        shutdown,
-        MAX_CONTROL_BYTES,
-        DEVELOPER_CONTROL_TIMEOUT,
-    ) {
-        return body_read_response(error);
-    }
-    let request = match serde_json::from_slice::<ControlRequest>(&body) {
-        Ok(request) => request,
-        // A newer `hex` may name a command this app doesn't know.
-        Err(_) => match serde_json::from_slice::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|value| value.get("version")?.as_u64())
-        {
-            Some(version) if version != u64::from(crate::control::CONTROL_VERSION) => {
-                let error = crate::control::version_mismatch(version);
-                return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
-            }
-            _ => return HttpResponse::code(400, "invalid-control-command"),
-        },
-    };
-    if let Err(error) = crate::control::check_version(&request) {
-        return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
-    }
-    let Some(controls) = controls else {
-        return HttpResponse::code(404, "control-unavailable");
-    };
-    let deadline = request.command.deadline();
-    let (reply, response) = mpsc::sync_channel(1);
-    match controls.try_send(ControlCall { request, reply }) {
-        Ok(()) => {}
-        Err(TrySendError::Full(_)) => return HttpResponse::code(503, "control-busy"),
-        Err(TrySendError::Disconnected(_)) => {
-            return HttpResponse::code(503, "control-unavailable");
-        }
-    }
-    match response.recv_timeout(deadline) {
-        Ok(reply) => HttpResponse::json(200, &reply),
-        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "control-timeout"),
-        Err(RecvTimeoutError::Disconnected) => HttpResponse::code(503, "control-unavailable"),
-    }
 }
 
 fn transcription_selection(
@@ -1404,6 +1352,8 @@ enum RequestAction {
     MeetingEvents(crate::meeting::finished_events::Subscription),
     /// A browser page's connect request, answered after its body arrives.
     Connect(connect::Call),
+    /// A consented-recording request, answered after its body arrives.
+    Record(record::Request),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2126,6 +2076,7 @@ mod tests {
                 dictation_token: None,
                 stream_token: None,
                 connect_token: None,
+                record_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
                 body_prefix: Vec::new(),
@@ -2148,6 +2099,7 @@ mod tests {
                 dictation_token: None,
                 stream_token: None,
                 connect_token: None,
+                record_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
                 body_prefix: Vec::new(),
@@ -2188,6 +2140,7 @@ mod tests {
             processing: Processing::default(),
             timestamps: Timestamps::default(),
             connect: None,
+            record: None,
         };
         let action = handle_request(
             HttpRequest {
@@ -2197,6 +2150,7 @@ mod tests {
                 dictation_token: None,
                 stream_token: None,
                 connect_token: None,
+                record_token: None,
                 content_type: None,
                 content_length: None,
                 body_prefix: Vec::new(),
@@ -2353,12 +2307,12 @@ mod tests {
 
     /// A consent gate with a fixed answer, remembering every ask.
     struct ScriptedGate {
-        answer: connect::Answer,
+        answer: Answer,
         asked: Mutex<Vec<Prompt>>,
     }
 
     impl ScriptedGate {
-        fn new(answer: connect::Answer) -> Arc<Self> {
+        fn new(answer: Answer) -> Arc<Self> {
             Arc::new(Self {
                 answer,
                 asked: Mutex::new(Vec::new()),
@@ -2375,12 +2329,8 @@ mod tests {
     }
 
     impl ConsentGate for ScriptedGate {
-        fn ask(&self, prompt: &Prompt, _wait: Duration) -> connect::Answer {
-            self.asked.lock().unwrap().push(Prompt {
-                id: prompt.id,
-                origin: prompt.origin.clone(),
-                client_name: prompt.client_name.clone(),
-            });
+        fn ask(&self, prompt: &Prompt, _wait: Duration) -> Answer {
+            self.asked.lock().unwrap().push(prompt.clone());
             self.answer
         }
     }
@@ -2484,7 +2434,7 @@ mod tests {
 
     #[test]
     fn an_allowed_page_trades_one_code_for_one_upload() {
-        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Allow);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
 
@@ -2508,8 +2458,9 @@ mod tests {
         let code = answered["code"].as_str().unwrap().to_owned();
         // The dialog named the page and its verified origin.
         let prompt = gate.last_prompt().unwrap();
-        assert_eq!(prompt.origin, "https://app.example");
-        assert_eq!(prompt.client_name.as_deref(), Some("Field Notes"));
+        assert_eq!(prompt.recipient.label(), "https://app.example");
+        assert_eq!(prompt.recipient.claimed_name(), Some("Field Notes"));
+        assert_eq!(prompt.intent, Intent::Upload);
 
         let token = upload_token(&exchange(port, "https://app.example", &code));
         // The code was spent by its exchange.
@@ -2542,7 +2493,7 @@ mod tests {
 
     #[test]
     fn a_denied_page_gets_no_code_and_a_short_cooldown() {
-        let gate = ScriptedGate::new(connect::Answer::Deny);
+        let gate = ScriptedGate::new(Answer::Deny);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
@@ -2561,7 +2512,7 @@ mod tests {
 
     #[test]
     fn an_unlisted_page_never_reaches_the_dialog() {
-        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Allow);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
@@ -2591,7 +2542,7 @@ mod tests {
 
     #[test]
     fn only_a_browser_json_post_can_prompt() {
-        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Allow);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
@@ -2629,7 +2580,7 @@ mod tests {
 
     #[test]
     fn a_code_is_bound_to_its_origin_and_its_verifier() {
-        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Allow);
         let api = start_connect(two_origins, gate, None);
         let port = api.document.port;
         let code = authorize(port, "https://app.example");
@@ -2653,7 +2604,7 @@ mod tests {
 
     #[test]
     fn expired_grants_are_refused() {
-        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Allow);
         let api = start_connect(
             app_origin,
             gate.clone(),
@@ -2697,7 +2648,7 @@ mod tests {
 
     #[test]
     fn an_upload_token_reaches_no_other_route_and_no_other_scope() {
-        let gate = ScriptedGate::new(connect::Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Allow);
         let api = start_connect(app_origin, gate, None);
         let port = api.document.port;
         let code = authorize(port, "https://app.example");
@@ -2761,7 +2712,7 @@ mod tests {
 
     #[test]
     fn a_timed_out_ask_answers_without_a_code() {
-        let gate = ScriptedGate::new(connect::Answer::Timeout);
+        let gate = ScriptedGate::new(Answer::Timeout);
         let api = start_connect(app_origin, gate, None);
         let response = connect_post(
             api.document.port,
@@ -2871,6 +2822,662 @@ mod tests {
         ));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    // -----------------------------------------------------------------------
+    // Consented one-recording sessions
+
+    /// A recording backend that never touches a microphone.
+    #[derive(Default)]
+    struct FakeRecording {
+        starts: AtomicU64,
+        finishes: AtomicU64,
+        cancels: AtomicU64,
+        text: Mutex<String>,
+    }
+
+    impl FakeRecording {
+        fn with_text(text: &str) -> Arc<Self> {
+            Arc::new(Self {
+                text: Mutex::new(text.to_owned()),
+                ..Self::default()
+            })
+        }
+
+        fn starts(&self) -> u64 {
+            self.starts.load(Ordering::Acquire)
+        }
+
+        fn finishes(&self) -> u64 {
+            self.finishes.load(Ordering::Acquire)
+        }
+
+        fn cancels(&self) -> u64 {
+            self.cancels.load(Ordering::Acquire)
+        }
+    }
+
+    impl record::Recording for FakeRecording {
+        fn start(&self) -> Result<record::Started, String> {
+            self.starts.fetch_add(1, Ordering::AcqRel);
+            Ok(record::Started {
+                id: 42,
+                owner: "owner".into(),
+            })
+        }
+
+        fn finish(&self, started: &record::Started) -> Result<record::Transcript, String> {
+            assert_eq!(started.id, 42);
+            self.finishes.fetch_add(1, Ordering::AcqRel);
+            Ok(record::Transcript {
+                text: self.text.lock().unwrap().clone(),
+                duration_ms: 1234,
+            })
+        }
+
+        fn cancel(&self, started: &record::Started) {
+            assert_eq!(started.id, 42);
+            self.cancels.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn always_enabled() -> bool {
+        true
+    }
+
+    fn record_timings() -> record::Timings {
+        record::Timings {
+            code: Duration::from_secs(60),
+            waiting: Duration::from_secs(60),
+            recording: Duration::from_secs(60),
+            grace: Duration::from_secs(60),
+            prompt: Duration::from_secs(1),
+            cooldown: Duration::ZERO,
+        }
+    }
+
+    fn start_record_api(
+        gate: Arc<dyn ConsentGate>,
+        recording: Arc<dyn record::Recording>,
+        timings: record::Timings,
+    ) -> (LocalApi, Arc<record::Sessions>) {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let sessions = Arc::new(record::Sessions::with_timings(
+            app_origin,
+            always_enabled,
+            Some(gate),
+            recording,
+            timings,
+        ));
+        let api = start_unpublished(
+            events,
+            LocalApiOptions {
+                cors: Cors::gated(app_origin),
+                record: Some(sessions.clone()),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+        (api, sessions)
+    }
+
+    /// One `/record` request: a JSON body for authorize/token, a bare token
+    /// request for the session actions.
+    fn record_request(
+        port: u16,
+        method: &str,
+        path: &str,
+        origin: &str,
+        token: Option<&str>,
+        body: Option<&str>,
+    ) -> String {
+        let token = token.map_or_else(String::new, |token| {
+            format!("X-Hex-Record-Token: {token}\r\n")
+        });
+        let (headers, body) = match body {
+            Some(body) => (
+                format!(
+                    "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                    body.len()
+                ),
+                body,
+            ),
+            None => ("Content-Length: 0\r\n".to_owned(), ""),
+        };
+        raw_request(
+            port,
+            &format!(
+                "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: {origin}\r\n{token}{headers}Connection: close\r\n\r\n{body}"
+            ),
+        )
+    }
+
+    fn record_authorize(port: u16, origin: &str) -> String {
+        let body = format!(
+            r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","state":"r1"}}"#
+        );
+        let response = record_request(
+            port,
+            "POST",
+            record::AUTHORIZE_PATH,
+            origin,
+            None,
+            Some(&body),
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn record_token(port: u16, origin: &str, code: &str) -> (String, u64) {
+        let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let response = record_request(port, "POST", record::TOKEN_PATH, origin, None, Some(&body));
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let value: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
+        (
+            value["sessionToken"].as_str().unwrap().to_owned(),
+            value["id"].as_u64().unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_consented_recording_starts_and_returns_only_its_transcript() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("the consented words");
+        let (api, _sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let port = api.document.port;
+
+        let code = record_authorize(port, "https://app.example");
+        let prompt = gate.last_prompt().unwrap();
+        assert_eq!(prompt.intent, Intent::Record);
+        assert_eq!(prompt.recipient.label(), "https://app.example");
+        let (token, id) = record_token(port, "https://app.example", &code);
+        assert_eq!(id, 1);
+
+        let started = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(started.starts_with("HTTP/1.1 201"), "{started}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&started)).unwrap()["state"],
+            "recording"
+        );
+        assert_eq!(recording.starts(), 1);
+
+        let status = record_request(
+            port,
+            "GET",
+            record::STATUS_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&status)).unwrap()["state"],
+            "recording"
+        );
+
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        let body: serde_json::Value = serde_json::from_str(response_body(&finished)).unwrap();
+        assert_eq!(body["transcript"], "the consented words");
+        assert_eq!(body["durationMs"], 1234);
+        assert_eq!(recording.finishes(), 1);
+
+        // The transcript is handed over once, and the recording is over.
+        let again = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(again.starts_with("HTTP/1.1 409"), "{again}");
+        assert_eq!(body_code(&again), "session-finished");
+    }
+
+    #[test]
+    fn a_denied_recording_never_starts_and_cools_down() {
+        let gate = ScriptedGate::new(Answer::Deny);
+        let recording = FakeRecording::with_text("never");
+        let mut timings = record_timings();
+        timings.cooldown = Duration::from_secs(30);
+        let (api, _sessions) = start_record_api(gate.clone(), recording.clone(), timings);
+        let port = api.document.port;
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let denied = record_request(
+            port,
+            "POST",
+            record::AUTHORIZE_PATH,
+            "https://app.example",
+            None,
+            Some(&body),
+        );
+        assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+        assert_eq!(body_code(&denied), "consent-denied");
+        assert_eq!(recording.starts(), 0);
+
+        let cooled = record_request(
+            port,
+            "POST",
+            record::AUTHORIZE_PATH,
+            "https://app.example",
+            None,
+            Some(&body),
+        );
+        assert!(cooled.starts_with("HTTP/1.1 429"), "{cooled}");
+        assert_eq!(gate.asks(), 1);
+    }
+
+    #[test]
+    fn a_recording_token_reaches_no_other_route_and_no_other_origin() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("private words");
+        let (api, _sessions) = start_record_api(gate, recording, record_timings());
+        let port = api.document.port;
+        let code = record_authorize(port, "https://app.example");
+        let (token, _) = record_token(port, "https://app.example", &code);
+
+        for (method, path) in [
+            ("GET", "/health"),
+            ("GET", "/capabilities"),
+            ("POST", "/control"),
+            ("POST", "/dev/control"),
+            ("POST", "/dictations"),
+            ("POST", "/transcriptions"),
+            ("GET", "/record/audio"),
+            ("GET", "/record/levels"),
+        ] {
+            let response = record_request(
+                port,
+                method,
+                path,
+                "https://app.example",
+                Some(&token),
+                None,
+            );
+            assert!(
+                !response.starts_with("HTTP/1.1 200") && !response.starts_with("HTTP/1.1 201"),
+                "{method} {path}: {response}"
+            );
+        }
+
+        // The session is bound to the origin that consented to it.
+        let stolen = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            "https://other.example",
+            Some(&token),
+            None,
+        );
+        assert!(stolen.starts_with("HTTP/1.1 401"), "{stolen}");
+        let right = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(right.starts_with("HTTP/1.1 201"), "{right}");
+    }
+
+    #[test]
+    fn the_recording_lease_stops_and_expires_without_the_client() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("lease words");
+        let mut timings = record_timings();
+        timings.recording = Duration::from_millis(60);
+        timings.grace = Duration::from_millis(60);
+        let (api, sessions) = start_record_api(gate, recording.clone(), timings);
+        let port = api.document.port;
+        let code = record_authorize(port, "https://app.example");
+        let (token, id) = record_token(port, "https://app.example", &code);
+        let started = record_request(
+            port,
+            "POST",
+            record::START_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(started.starts_with("HTTP/1.1 201"), "{started}");
+        // The lease stops the recording on its own.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while recording.finishes() == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(recording.finishes(), 1);
+        assert_eq!(
+            sessions.view().map(|view| (view.id, view.phase)),
+            Some((id, record::Phase::Stopped))
+        );
+        // The client can still collect the transcript inside the grace.
+        let finished = record_request(
+            port,
+            "POST",
+            record::FINISH_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(finished.starts_with("HTTP/1.1 200"), "{finished}");
+        assert_eq!(recording.cancels(), 0);
+    }
+
+    #[test]
+    fn one_recording_session_at_a_time() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("first");
+        let (api, _sessions) = start_record_api(gate, recording, record_timings());
+        let port = api.document.port;
+        let code = record_authorize(port, "https://app.example");
+        let (token, _) = record_token(port, "https://app.example", &code);
+
+        let code = record_authorize(port, "https://app.example");
+        let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let busy = record_request(
+            port,
+            "POST",
+            record::TOKEN_PATH,
+            "https://app.example",
+            None,
+            Some(&body),
+        );
+        assert!(busy.starts_with("HTTP/1.1 409"), "{busy}");
+        assert_eq!(body_code(&busy), "session-busy");
+
+        let cancelled = record_request(
+            port,
+            "POST",
+            record::CANCEL_PATH,
+            "https://app.example",
+            Some(&token),
+            None,
+        );
+        assert!(cancelled.starts_with("HTTP/1.1 204"), "{cancelled}");
+        let code = record_authorize(port, "https://app.example");
+        let body = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let second = record_request(
+            port,
+            "POST",
+            record::TOKEN_PATH,
+            "https://app.example",
+            None,
+            Some(&body),
+        );
+        assert!(second.starts_with("HTTP/1.1 200"), "{second}");
+    }
+
+    #[test]
+    fn a_native_grant_is_bound_to_the_verified_peer() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("native words");
+        let timings = record_timings();
+        let sessions = Arc::new(record::Sessions::with_timings(
+            app_origin,
+            always_enabled,
+            Some(gate),
+            recording,
+            timings,
+        ));
+        let identity = record::Identity {
+            identifier: "com.example.recorder".into(),
+            team: Some("ABCDE12345".into()),
+        };
+        let peer = record::PeerId([1, 2, 3, 4, 5, 6, 7, 8]);
+        let channel = record::Channel::Native { peer, identity };
+        let body = format!(
+            r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","clientName":"ignored"}}"#
+        );
+        let response = sessions.authorize(channel.clone(), body.as_bytes());
+        assert_eq!(response.status, 200, "{:?}", response.body);
+        let code: String =
+            serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+
+        // Another process's peer cannot spend this code, even with the right
+        // verifier; the code is spent by that attempt.
+        let other = record::Channel::Native {
+            peer: record::PeerId([9, 9, 9, 9, 9, 9, 9, 9]),
+            identity: record::Identity {
+                identifier: "com.example.other".into(),
+                team: None,
+            },
+        };
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let stolen = sessions.exchange(other, exchange.as_bytes());
+        assert_eq!(stolen.status, 403);
+        let spent = sessions.exchange(channel, exchange.as_bytes());
+        assert_eq!(spent.status, 403);
+
+        // The client's own name is never the native identity.
+        let prompt = {
+            let gate = ScriptedGate::new(Answer::Allow);
+            let recording = FakeRecording::with_text("x");
+            let sessions = Arc::new(record::Sessions::with_timings(
+                app_origin,
+                always_enabled,
+                Some(gate.clone()),
+                recording,
+                record_timings(),
+            ));
+            let body =
+                format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
+            let response = sessions.authorize(
+                record::Channel::Native {
+                    peer: record::PeerId([3; 8]),
+                    identity: record::Identity {
+                        identifier: "com.example.recorder".into(),
+                        team: Some("ABCDE12345".into()),
+                    },
+                },
+                body.as_bytes(),
+            );
+            assert_eq!(response.status, 200);
+            gate.last_prompt().unwrap()
+        };
+        assert_eq!(prompt.recipient.label(), "com.example.recorder");
+        assert!(prompt.recipient.claimed_name().is_none());
+    }
+
+    /// One HTTP exchange over the native recording socket.
+    #[cfg(target_os = "macos")]
+    fn native_request(socket: &Path, request: &str) -> (u16, String) {
+        use std::os::unix::net::UnixStream;
+        let mut stream = UnixStream::connect(socket).unwrap();
+        stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        let status = response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|status| status.parse().ok())
+            .unwrap_or(0);
+        (status, response)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_native_socket_client_records_under_its_verified_identity() {
+        let directory = temp_directory();
+        let socket = directory.join("record.sock");
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("native words");
+        let sessions = Arc::new(record::Sessions::with_timings(
+            app_origin,
+            always_enabled,
+            Some(gate.clone()),
+            recording.clone(),
+            record_timings(),
+        ));
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let api = start_unpublished(
+            events,
+            LocalApiOptions {
+                cors: Cors::gated(app_origin),
+                record: Some(sessions),
+                native_socket: Some(socket.clone()),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
+        let authorize = format!(
+            "POST {} HTTP/1.1\r\nHost: hex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            record::AUTHORIZE_PATH,
+            body.len()
+        );
+        let (status, response) = native_request(&socket, &authorize);
+        if status == 403 && response.contains("identity-unverified") {
+            // An unsigned test binary has no identity to verify. The native
+            // refusal itself is the contract then; the browser tests cover
+            // the rest of the flow.
+            eprintln!("skipping native identity flow: this test binary has no signing identity");
+            return;
+        }
+        assert_eq!(status, 200, "{response}");
+        let code: String = serde_json::from_str::<serde_json::Value>(response_body(&response))
+            .unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let prompt = gate.last_prompt().unwrap();
+        assert!(matches!(prompt.recipient, Recipient::Native { .. }));
+        assert_eq!(prompt.intent, Intent::Record);
+        // The claimed name never becomes the identity.
+        assert!(prompt.recipient.claimed_name().is_none());
+
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let token_path = format!(
+            "POST {} HTTP/1.1\r\nHost: hex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{exchange}",
+            record::TOKEN_PATH,
+            exchange.len()
+        );
+        let (status, response) = native_request(&socket, &token_path);
+        assert_eq!(status, 200, "{response}");
+        let token: String = serde_json::from_str::<serde_json::Value>(response_body(&response))
+            .unwrap()["sessionToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let session = |path: &str, method: &str| {
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: hex\r\nX-Hex-Record-Token: {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        };
+        let (status, response) = native_request(&socket, &session(record::START_PATH, "POST"));
+        assert_eq!(status, 201, "{response}");
+        let (status, response) = native_request(&socket, &session(record::FINISH_PATH, "POST"));
+        assert_eq!(status, 200, "{response}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["transcript"],
+            "native words"
+        );
+
+        // The native socket is not the local API: no health, no bearer route.
+        let (status, _) = native_request(
+            &socket,
+            "GET /health HTTP/1.1\r\nHost: hex\r\nConnection: close\r\n\r\n",
+        );
+        assert_eq!(status, 404);
+        let (status, _) = native_request(
+            &socket,
+            &format!(
+                "GET /health HTTP/1.1\r\nHost: hex\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+                api.document.token
+            ),
+        );
+        assert_eq!(status, 404);
+    }
+
+    #[test]
+    fn the_window_stops_or_cancels_a_live_recording() {
+        let gate = ScriptedGate::new(Answer::Allow);
+        let recording = FakeRecording::with_text("window words");
+        let sessions = Arc::new(record::Sessions::with_timings(
+            app_origin,
+            always_enabled,
+            Some(gate),
+            recording.clone(),
+            record_timings(),
+        ));
+        let origin = "https://app.example";
+        let channel = record::Channel::Web(origin.into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let authorized = sessions.authorize(channel.clone(), body.as_bytes());
+        let code: String =
+            serde_json::from_slice::<serde_json::Value>(&authorized.body).unwrap()["code"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted = sessions.exchange(channel.clone(), exchange.as_bytes());
+        let minted: serde_json::Value = serde_json::from_slice(&minted.body).unwrap();
+        let token = minted["sessionToken"].as_str().unwrap().to_owned();
+        let id = minted["id"].as_u64().unwrap();
+        assert_eq!(sessions.start(&token, &channel).status, 201);
+        assert_eq!(
+            sessions.view().map(|view| view.phase),
+            Some(record::Phase::Recording)
+        );
+
+        // The window's Stop keeps the transcript for the client.
+        assert!(sessions.stop(id));
+        assert_eq!(recording.finishes(), 1);
+        assert_eq!(
+            sessions.view().map(|view| view.phase),
+            Some(record::Phase::Stopped)
+        );
+        let finished = sessions.finish(&token, &channel);
+        assert_eq!(finished.status, 200);
+
+        // A second recording cancelled from the window is discarded.
+        let code: String = serde_json::from_slice::<serde_json::Value>(
+            &sessions.authorize(channel.clone(), body.as_bytes()).body,
+        )
+        .unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        let token = minted["sessionToken"].as_str().unwrap().to_owned();
+        let id = minted["id"].as_u64().unwrap();
+        assert_eq!(sessions.start(&token, &channel).status, 201);
+        sessions.cancel(id);
+        assert_eq!(recording.cancels(), 1);
+        let cancelled = sessions.finish(&token, &channel);
+        assert_eq!(cancelled.status, 409);
+        let cancelled: serde_json::Value = serde_json::from_slice(&cancelled.body).unwrap();
+        assert_eq!(cancelled["code"], "session-cancelled");
+        assert!(sessions.view().is_none());
     }
 
     fn unused_port() -> u16 {

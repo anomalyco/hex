@@ -10,7 +10,7 @@ use rune::{El, col, el, row, text};
 
 use super::Ui;
 use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
-use crate::desktop::i18n::tr;
+use crate::desktop::i18n::{tr, tr_fill};
 
 /// The dialog's width and padding.
 const WIDTH: f32 = 440.0;
@@ -52,14 +52,20 @@ pub(super) fn answer(ui: &mut Ui, allow: bool) {
     });
 }
 
-/// The dialog's scrim and panel, while a page waits for an answer.
+/// The dialog's scrim and panel, while a caller waits for an answer.
 pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     let prompt = ui.consent.as_ref()?;
     let c = &p.k.c;
+    let record = prompt.intent == crate::local_api::Intent::Record;
+    let title = if record {
+        tr("Allow one microphone recording?")
+    } else {
+        tr("Allow one transcription?")
+    };
     let mut panel = col()
         .key("browser-connect-dialog")
         .role("dialog")
-        .label(tr("Allow one transcription?"))
+        .label(title)
         .w(WIDTH)
         .pt(PADDING)
         .px(PADDING)
@@ -71,32 +77,51 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         // Presses inside the panel stay inside.
         .on_press(|_: &mut Ui| {})
         .child(
-            text(tr("Allow one transcription?"))
+            text(title)
                 .key("title")
                 .font(p.k.ty.body_medium)
                 .color(p.text()),
         )
         .child(
             row()
-                .key("origin")
+                .key("recipient")
                 .gap(8.0)
                 .center_y()
                 .child(
-                    text(tr("From"))
-                        .key("from")
+                    text(tr("For"))
+                        .key("for")
                         .font(super::controls::DESCRIPTION)
                         .color(p.muted()),
                 )
                 .child(
-                    text(prompt.origin.as_str())
-                        .key("origin-value")
+                    text(prompt.recipient.label())
+                        .key("recipient-value")
                         .font(super::controls::DESCRIPTION)
                         .color(p.text()),
                 ),
         );
+    if let Some(note) = prompt.recipient.signing_note() {
+        panel = panel
+            .child(
+                text(note)
+                    .key("signing-note")
+                    .font(super::controls::DESCRIPTION)
+                    .color(p.muted())
+                    .wrap(),
+            )
+            .child(
+                text(tr(
+                    "Hex read this from the process's code signature, not its name.",
+                ))
+                .key("signing-verified")
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+            );
+    }
     // The page's own name, when it sent a short plain one, always framed as
     // its claim rather than Hex's description of it.
-    if let Some(name) = &prompt.client_name {
+    if let Some(name) = prompt.recipient.claimed_name() {
         panel = panel.child(
             text(format!("{}{name}", tr("The page calls itself: ")))
                 .key("client-name")
@@ -104,24 +129,43 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .color(p.muted()),
         );
     }
-    let mut panel = panel
-        .child(
-            text(tr(
+    let (body, limits) = if record {
+        let seconds = crate::local_api::record_max_recording().as_secs();
+        let seconds = seconds.to_string();
+        (
+            tr(
+                "Hex will record once through its dictation microphone and send only the transcript to this app. Raw audio stays in Hex.",
+            ),
+            tr_fill(
+                "Recording stops itself after {} seconds. Stop or cancel it in Hex's window at any time.",
+                &seconds,
+            ),
+        )
+    } else {
+        (
+            tr(
                 "This page wants Hex to transcribe one audio recording. If you allow once, Hex sends it one transcript of that upload, and the permission ends.",
-            ))
-            .key("body")
-            .font(super::controls::DESCRIPTION)
-            .color(p.muted())
-            .wrap(),
+            ),
+            tr(
+                "Hex's microphone stays off. This page gets no recording, no dictation, no paste, and no other Hex control.",
+            )
+            .to_owned(),
+        )
+    };
+    let panel = panel
+        .child(
+            text(body)
+                .key("body")
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
         )
         .child(
-            text(tr(
-                "Hex's microphone stays off. This page gets no recording, no dictation, no paste, and no other Hex control.",
-            ))
-            .key("limits")
-            .font(super::controls::DESCRIPTION)
-            .color(p.muted())
-            .wrap(),
+            text(limits)
+                .key("limits")
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
         )
         .child(
             row()
@@ -146,6 +190,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                     |ui: &mut Ui, _| answer(ui, true),
                 )),
         );
+    let mut panel = panel;
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
@@ -172,13 +217,28 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local_api::{Intent, Recipient};
     use crate::rune_ui::{Request, Service};
 
     fn ask() -> crate::local_api::Prompt {
         crate::local_api::Prompt {
             id: 7,
-            origin: "https://notes.example".into(),
-            client_name: Some("Field Notes".into()),
+            intent: Intent::Upload,
+            recipient: Recipient::Web {
+                origin: "https://notes.example".into(),
+                client_name: Some("Field Notes".into()),
+            },
+        }
+    }
+
+    fn record_ask() -> crate::local_api::Prompt {
+        crate::local_api::Prompt {
+            id: 9,
+            intent: Intent::Record,
+            recipient: Recipient::Native {
+                identifier: "com.example.recorder".into(),
+                team: Some("ABCDE12345".into()),
+            },
         }
     }
 
@@ -224,16 +284,23 @@ mod tests {
         assert_eq!(ui.consent_done, Some(7));
     }
 
-    /// The host an origin names, with its port when it has one.
-    fn origin_host(origin: &str) -> &str {
-        origin
-            .split_once("://")
-            .map_or(origin, |(_, authority)| authority)
-    }
-
     #[test]
-    fn an_origin_names_its_host_and_port() {
-        assert_eq!(origin_host("https://notes.example"), "notes.example");
-        assert_eq!(origin_host("http://localhost:5173"), "localhost:5173");
+    fn a_recording_ask_names_the_verified_native_identity() {
+        let mut ui = crate::rune_ui::scenes::mac_fixture();
+        ui.view.as_mut().unwrap().consent = Some(record_ask());
+        assert!(poll(&mut ui));
+        let prompt = ui.consent.as_ref().unwrap();
+        assert_eq!(prompt.intent, Intent::Record);
+        assert_eq!(prompt.recipient.label(), "com.example.recorder");
+        assert_eq!(
+            prompt.recipient.signing_note().as_deref(),
+            Some("Signed by team ABCDE12345")
+        );
+        assert!(prompt.recipient.claimed_name().is_none());
+        answer(&mut ui, true);
+        assert!(matches!(
+            sent(&ui),
+            [Request::AnswerConsent { id: 9, allow: true }]
+        ));
     }
 }

@@ -156,6 +156,7 @@ impl Backend {
                 update_blocked: None,
                 editing,
                 consent: None,
+                record: None,
             },
             settings,
         })

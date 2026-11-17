@@ -295,7 +295,7 @@ impl HostHandle {
                     }
                     Ok(())
                 }
-                HostRequest::AnswerConsent { .. } => Ok(()),
+                HostRequest::AnswerConsent { .. } | HostRequest::RecordControl { .. } => Ok(()),
             }
         };
         self.wake();

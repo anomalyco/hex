@@ -2878,6 +2878,13 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
 │   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
+│   ├── POST /record/authorize -> "Allow one microphone recording?"
+│   │   ├── Web: listed Origin; native: owner-only record.sock + verified signature
+│   │   ├── Allow once -> code, PKCE token -> one start/status/finish/cancel session
+│   │   ├── Window card: Stop recording / Cancel, lease countdown; 120 s max
+│   │   ├── Bind to Origin or peer audit token; one session at a time
+│   │   └── Transcript only: no raw audio, levels, partials, or other route
+│   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No capture silence gate           // model output, unlike hotkey dictation;
 │   │   └── its whole-clip run still drops a Whisper clip's silent edges,
@@ -2945,17 +2952,32 @@ model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
 
-Browser connect ([contract](../connect.md)) is the narrower ask beside that
-token-bearing access: a listed page calls `POST /connect/authorize` without the
-token, Hex's window names its verified origin and offers Deny / Allow once, and
-an allowed PKCE exchange mints one upload token that spends itself on one plain
-`POST /transcriptions` from the same origin. Codes and tokens expire in two
-minutes, a Deny starts a 30 s cooldown, and the dialog is answered (Escape and
-the scrim deny) rather than dismissed. `local_api` tests cover the whole
-exchange, origin binding, one-use codes and tokens, expiry, the scope
-refusals, and deny/timeout. The dialog's only rendering proof is the
-`--scene browser-connect` snapshot; no real browser page, click, or model
-transcription was run, and its copy is English only.
+Browser connect and recording ([contract](../connect.md)) are the narrower
+asks beside that token-bearing access: a listed page calls
+`POST /connect/authorize` without the token, Hex's window names its verified
+origin and offers Deny / Allow once, and an allowed PKCE exchange mints one
+upload token that spends itself on one plain `POST /transcriptions` from the
+same origin. Codes and tokens expire in two minutes, a Deny starts a 30 s
+cooldown, and the dialog is answered (Escape and the scrim deny) rather than
+dismissed. `local_api` tests cover the whole exchange, origin binding, one-use
+codes and tokens, expiry, the scope refusals, and deny/timeout. The dialog's
+only rendering proof is the `--scene browser-connect` snapshot; no real
+browser page, click, or model transcription was run, and its copy is English
+only.
+
+The recording slice adds `POST /record/authorize|token` and a one-session
+`start|status|finish|cancel` over a `X-Hex-Record-Token`. Web clients use the
+same listed-Origin CORS channel; native clients (Electron main, Rune, Rust)
+use the owner-only `record.sock`, whose peer audit token `Security.framework`
+resolves to a signing identifier and team. Consent names that verified
+identity, the grant and token are bound to it, and Hex's window shows a
+non-modal card with Stop recording and Cancel while the 120 s lease runs.
+`local_api` tests drive the whole exchange with a fake recording backend
+(never a microphone), including the lease, deny, one-session rule, and the
+token's inability to reach any other route; one macOS test goes through the
+real socket and peer audit token, skipping when the test binary has no signing
+identity. Dialog and card are snapshots only, no real recording or Electron
+process was run, and copy is English only.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

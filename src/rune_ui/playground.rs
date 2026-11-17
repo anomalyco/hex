@@ -306,6 +306,8 @@ const PATHS: &[(&str, &str)] = &[
     ),
     ("mac-production", "Window/General/Production build"),
     ("browser-connect", "Window/General/Browser connect"),
+    ("record-consent", "Window/General/Consent · recording"),
+    ("record-active", "Window/General/Recording · live"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
     (

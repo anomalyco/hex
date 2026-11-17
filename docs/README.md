@@ -72,6 +72,8 @@ When a plan disagrees with `AGENTS.md` about shipped behavior, update the plan.
   archived app-shell comparison prototype.
 - [`../prototypes/browser-connect/README.md`](../prototypes/browser-connect/README.md):
   a static page that drives browser connect for manual checks.
+- [`../prototypes/record-clients/README.md`](../prototypes/record-clients/README.md):
+  Electron main-process and native/Rune Rust recording clients.
 
 ## Releases
 

@@ -63,6 +63,7 @@ mod platform;
 mod platform_settings;
 pub(crate) mod playground;
 mod practice;
+mod record_panel;
 mod scenes;
 #[cfg(hex_capture)]
 mod scrawl;
@@ -588,6 +589,8 @@ struct ServiceView {
     editing: bool,
     /// A web page's one-transcription ask, while its dialog waits (macOS).
     consent: Option<crate::local_api::Prompt>,
+    /// A consented recording Hex's window can stop or cancel (macOS).
+    record: Option<crate::local_api::RecordView>,
 }
 
 /// The one modal sheet currently open over the window.
@@ -744,6 +747,8 @@ pub(crate) struct Ui {
     /// The ask already answered, so the host's next publication cannot show
     /// the same dialog again.
     consent_done: Option<u64>,
+    /// The recording session the window last brought itself forward for.
+    pub(super) record_seen: Option<u64>,
 }
 
 /// Which of the window's text editors hold unsaved typing.
@@ -876,6 +881,7 @@ impl Ui {
             update_asked: false,
             consent: None,
             consent_done: None,
+            record_seen: None,
             window: None,
             tick_at: 0.0,
         }
@@ -1500,6 +1506,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     // A web page asking for one transcription takes the window: its dialog
     // is answered, never timed out by a pane switch.
     changed |= browser_connect::poll(ui);
+    changed |= record_panel::poll(ui);
     let preparing = ui
         .view
         .as_ref()
@@ -1632,6 +1639,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     layer.extend(paste_picker::preview(&ui.paste_preview, p));
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
+    }
+    if let Some(panel) = record_panel::panel(ui, p) {
+        layer.push(panel);
     }
     // A page's ask is the topmost dialog: nothing Hex draws may hide it.
     if let Some(modal) = browser_connect::modal(ui, p) {

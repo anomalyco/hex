@@ -82,6 +82,13 @@ pub(crate) enum Request {
         #[allow(dead_code)]
         allow: bool,
     },
+    /// The window stopped or cancelled a consented recording; macOS only.
+    RecordControl {
+        #[allow(dead_code)]
+        id: u64,
+        #[allow(dead_code)]
+        stop: bool,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
