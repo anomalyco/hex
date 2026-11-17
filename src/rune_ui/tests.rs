@@ -1620,13 +1620,17 @@ fn history_rounds_only_the_exposed_ends_of_selected_rows() {
     for dark in [false, true] {
         for separated in [false, true] {
             let mut rt = runtime("history", dark, PANE_SIZE);
-            tap(&mut rt, "history-entry3");
+            // A search-result snapshot: adjacent entries need not have consecutive ids.
+            rt.state.history.entries[0].id = 17;
+            rt.invalidate();
+            settle(&mut rt);
+            tap(&mut rt, "history-entry17");
             hold(&mut rt, if separated { command() } else { shift() });
             tap(&mut rt, "history-entry1");
             hold(&mut rt, Mods::default());
             rt.pointer_move(0.0, 0.0);
             settle(&mut rt);
-            let rows = [3, 2, 1].map(|id| element(&rt, &format!("history-entry{id}")).rect);
+            let rows = [17, 2, 1].map(|id| element(&rt, &format!("history-entry{id}")).rect);
             let render = render_runtime(rt, PANE_SIZE);
             if let Some((w, _, pixels)) = &render {
                 let pixel = |x: f32, y: f32| {
