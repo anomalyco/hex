@@ -175,7 +175,7 @@ fn readiness_message(
 
 /// Runs hotkey dictation until `shutdown`. A prepared transcriber skips the
 /// model load; otherwise the supplied transcription selection is loaded here,
-/// or parked until the first dictation with Labs › Unload model when idle.
+/// or parked until the first dictation with Labs › Free memory when idle.
 /// `updates` change settings, the model, and shortcut registration in place.
 /// `dictations` records a local API client's dictation beside the shortcut:
 /// one capture at a time, and neither ends the other.
@@ -193,7 +193,7 @@ pub(crate) fn run(
     updates: mpsc::Receiver<ListenerUpdate>,
 ) -> Result<()> {
     let mut settings = settings.clone();
-    // Labs › Unload model when idle: a launch with no model Settings prepared
+    // Labs › Free memory when idle: a launch with no model Settings prepared
     // for this listener starts parked, as after an idle unload, until the
     // first dictation. A prepared model starts loaded; the idle timer unloads
     // it.

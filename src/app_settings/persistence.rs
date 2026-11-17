@@ -133,7 +133,7 @@ impl AppSettings {
     }
 
     /// Publishes the saved values the embedded transcription service reads:
-    /// the Labs switches transcription checks (Labs › Vocabulary biasing
+    /// the Labs switches transcription checks (Labs › Vocabulary help
     /// gates the list), the vocabulary and its boost, and, on Linux and
     /// Windows, the speech engine. `hex transcribe` and the TypeScript SDK's
     /// direct child start that service without the app's launch, so nothing

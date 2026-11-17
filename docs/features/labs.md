@@ -120,32 +120,32 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Left and right keys no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
-├── Double-tap a key on its own no labs.double_tap_modifiers (macOS) Double-tap shortcut mode takes a shortcut without a key (one or more modifiers), such as Option, Globe, or ⌃⌥; two complete taps start hands-free, one tap or a hold does nothing
+├── Double-tap Option, Command, or Globe no labs.double_tap_modifiers (macOS) Double-tap shortcut mode takes a shortcut without a key (one or more modifiers), such as Option, Globe, or ⌃⌥; two complete taps start hands-free, one tap or a hold does nothing
 ├── Hold through other keys no labs.hold_through_keys (macOS, Windows) macOS: a key a second or more into a held shortcut with no key no longer ends the dictation (clicks were already ignored after 300 ms); Windows: keys and clicks. They reach the app in front and the release still finishes; inside the first second a chord still discards it
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Model test details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
-├── Key left of 1 alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
+├── § key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
-├── Text for other apps no labs.api_processing       (every OS) apps using Hex's local API can add process=global to
+├── Process API transcripts no labs.api_processing       (every OS) apps using Hex's local API can add process=global to
 │                                        POST /transcriptions and POST /streams/{id}/finish to get the text after Global
 │                                        mode's replacements, corrections, rewrite, and transformations; off, responses
 │                                        stay raw transcripts as before
 │                                        // checks: local_api::processing route tests (409, 403, 400, 429, processed, absent);
 │                                        // not observed on macOS or Windows, and no /transcriptions success without a model
-├── Word times for other apps no labs.api_timestamps (every OS) apps using Hex's local API can add
+├── Timestamps in API transcripts no labs.api_timestamps (every OS) apps using Hex's local API can add
 │                                        timestamps=segment|word to POST /transcriptions for the speech model's own
 │                                        segment or word times (startMs, endMs); off, a timed request answers 403
 │                                        timestamps-disabled and responses stay as before
 │                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
 │                                        // clamping, empty arrays), transcription::service (the 422 decision), and
 │                                        // gguf_session (chunk offsets); no real-model transcript with times
-├── Web pages can ask Hex no labs.api_browser_access + labs.api_browser_origins (every OS)
+├── Browser access to the local API no labs.api_browser_access + labs.api_browser_origins (every OS)
 │                                        a web page served from one of the listed origins can call Hex's local API with
 │                                        fetch: its unauthenticated OPTIONS preflight for that exact origin answers 204
 │                                        with Access-Control-Allow-Origin, the methods and headers, and a 10-minute
@@ -342,7 +342,7 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   Screenshots: its shortcut, Record screen, Saves to (Reveal and the folder's own chooser, which a
 │   failed save or chooser answers under the row), and the macOS-takes-this-shortcut note with Open
 │   Keyboard Settings.
-│   Annotate last 15 seconds's shortcut lives in Annotate's pane
+│   The Annotate last 15 seconds shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
 │   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
 │   // appearance_shows_its_theme_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
@@ -471,8 +471,8 @@ answer, or follow it, uses it to resolve names, terms, references, and likely
 recognition errors, and to fit capitalization and punctuation to the
 insertion point. Any of the section's own tag names inside that text are made
 inert, so field text can't close or open a section. It is never saved, logged,
-put in History, events, or meetings. Typed-text transformations, the Voice
-prompt request, meetings, and the local API never see it. Off, no Accessibility
+put in History, events, or meetings. Typed-text transformations, the Rewrite
+by voice request, meetings, and the local API never see it. Off, no Accessibility
 call and no thread start, a capture finishing after the lab was turned off
 sends nothing, and the rewrite prompt is byte for byte what it was. A terminal
 exposes its scrollback through the same text field as any editor, so while the
@@ -1328,7 +1328,7 @@ activation mode, for a keyboard with more keys to spare. While on, General
 shows one numbered row per saved extra under the second dictation shortcut's:
 its recorder, a shortcut-mode select with the dictation shortcut's choices
 (Hold or double-tap, Hold, Tap, Double-tap; Double-tap is left out while the
-row's binding has no key, unless Labs › Double-tap a key on its own is on,
+row's binding has no key, unless Labs › Double-tap Option, Command, or Globe is on,
 exactly as it is for the main shortcut), and
 a Remove button that drops the row. An Add shortcut row appears while fewer
 than four rows exist, and a new row starts unbound. The rows persist as
@@ -1604,7 +1604,7 @@ and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 (X11 grab or Wayland portal) with the toggle on; the Linux Labs page goldens
 need regenerating with the new row.
 
-Double-tap a key on its own (`double-tap-modifiers`, macOS): Double-tap
+Double-tap Option, Command, or Globe (`double-tap-modifiers`, macOS): Double-tap
 shortcut mode works with any dictation shortcut that has no key: one or more
 modifiers, such as Option, Globe, or ⌃⌥. The gate is the shortcut machine
 (`DictationHotkey` in [suppression/hotkey.rs](../../src/suppression/hotkey.rs)),
@@ -1835,7 +1835,7 @@ Not yet observed: a real GNOME Wayland session granting Menu through the
 portal, or an X11 grab of it; the Labs page goldens need regenerating on Linux
 with the new row.
 
-Key left of 1 alone (`section-key`, issue 1050, Linux and macOS): for
+§ key alone (`section-key`, issue 1050, Linux and macOS): for
 push-to-talk on the ISO section key, left of 1 above Tab, without a
 modifier. Layouts label it § (U.S. ISO) or a dead key: on a German Mac the
 same key types `^`, and many layouts use `´` or `` ` ``.
@@ -1854,7 +1854,7 @@ Settings › General › Shortcut, press the section key alone  // labs.section-
 │   kUCKeyTranslateNoDeadKeysBit: key 10 is saved as {code: 10, label: "^"};
 │   the recorder takes it alone either way, and `settings::validate` refuses
 │   it while the toggle is off, as Linux's recorder does
-├── hex settings set dictation_hotkey §, off -> "section needs Labs › Section key
+├── hex settings set dictation_hotkey §, off -> "section needs Labs › § key
 │   alone: hex labs on section-key"
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
     it off -> a Linux or macOS shortcut on the section key alone goes back to
@@ -2934,7 +2934,7 @@ graduated: Meetings › Settings › After a meeting › Summaries picks Off, On
 this Mac, or OpenCode, with OpenCode's Model nested under it
 ([meetings.md](meetings.md)). Its bit (1 << 24) stays unused.
 
-Text for other apps (`api-processing`; every OS; its row is Output's): for
+Process API transcripts (`api-processing`; every OS; its row is Output's): for
 a host app that wants what a person would paste, not just the raw transcript.
 While on, the authenticated local API's `POST /transcriptions` and
 `POST /streams/{id}/finish` accept `process=global` (`true` and `1` are
@@ -2987,8 +2987,8 @@ needs an installed model, so its `processed` field is covered through the
 shared seam and the `/streams` finish route rather than an end-to-end
 transcription; nothing ran on macOS or Windows.
 
-Word times for other apps (`api-timestamps`; every OS; its row is
-Output's, beside Text for other apps): for a host app that needs to know
+Timestamps in API transcripts (`api-timestamps`; every OS; its row is
+Output's, beside Process API transcripts): for a host app that needs to know
 when each phrase or word was said, for captions, search, or syncing. While on,
 the authenticated local API's `POST /transcriptions` accepts
 `timestamps=segment|word`; absent means `none`, the response as it was
@@ -3361,12 +3361,12 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Words on screen (macOS): each dictation may read the focused window's
   visible text through Accessibility as temporary vocabulary. Off by default
   (`labs.screen_vocabulary`). Parakeet reads the terms only with Vocabulary
-  biasing on and a boost other than Off; Whisper and Qwen3-ASR read them as a
+  help on and a boost other than Off; Whisper and Qwen3-ASR read them as a
   prompt; Apple Speech and models that take no vocabulary read nothing. A
   capture with terms for such a model uses its whole-clip run rather than a
   live stream's text, so the text arrives after release with a little more
-  latency. Its read bounds and extraction are above, under "Screen
-  vocabulary".
+  latency. Its read bounds and extraction are above, under "Words on
+  screen".
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
   apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
   shared `paste_with_shift`; Linux keeps it as a General › Advanced row.

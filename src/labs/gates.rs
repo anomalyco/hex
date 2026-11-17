@@ -459,7 +459,7 @@ pub fn yolo_mode_apps() -> Option<Vec<String>> {
 }
 
 /// How long the speech model may sit unused before the engine unloads it,
-/// while Labs › Unload model when idle is on.
+/// while Labs › Free memory when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)

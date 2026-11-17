@@ -378,7 +378,7 @@ pub(super) fn validate(
             tr("Unsupported key")
         });
     }
-    // The ISO section key alone needs Labs › Section key alone (Linux,
+    // The ISO section key alone needs Labs › § key alone (Linux,
     // macOS).
     if cfg!(any(target_os = "linux", target_os = "macos"))
         && binding.is_lone_section_key()
@@ -1326,7 +1326,7 @@ mod special_keys_tests {
     }
 }
 
-/// Issue 1050: the ISO section key alone needs Labs › Section key alone on
+/// Issue 1050: the ISO section key alone needs Labs › § key alone on
 /// Linux and macOS; with a modifier it records as before. Linux's recorder
 /// checks the lab itself; macOS's recorder records the chord and `validate`
 /// refuses it here, before saving.

@@ -269,7 +269,7 @@ pub struct LabsSettings {
     pub expire_meeting_audio: Option<bool>,
 }
 
-/// The idle times Labs › Unload model when idle offers, in minutes.
+/// The idle times Labs › Free memory when idle offers, in minutes.
 pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
 
 /// The times Labs › Keep mic open after dictating offers, in seconds:

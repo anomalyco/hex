@@ -131,7 +131,7 @@ the returned catalog. Transcription requires `Content-Length`; chunked transfer
 encoding is not supported.
 
 `POST /transcriptions` accepts an optional `process=global` query parameter on
-the running desktop app's authenticated API (Labs › Text for other apps,
+the running desktop app's authenticated API (Labs › Process API transcripts,
 off by default; `true` and `1` are aliases). When present, the response keeps
 `transcript` and `durationMs` and adds `processed`: the same text a paste with
 no matching app or website mode would use, after global replacements, Global
@@ -149,7 +149,7 @@ queue-full`; all three are decided before the audio body is read.
 processor is installed and the lab is on.
 
 `POST /transcriptions` also accepts an optional `timestamps` query parameter:
-`none`, `segment`, or `word` (Labs › Word times for other apps, off by
+`none`, `segment`, or `word` (Labs › Timestamps in API transcripts, off by
 default). The running desktop app reads the lab live, so its next request sees
 a toggle. A `hex service` process without the app reads the saved
 `labs.api_timestamps` once, at startup, and the embedded helper (the SDK's

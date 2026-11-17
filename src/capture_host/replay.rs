@@ -1,4 +1,4 @@
-//! Annotate 15 s rolling screen replay (`Labs › Annotate replay`, macOS 27+).
+//! Annotate last 15 seconds rolling screen replay (`Labs › Annotate last 15 seconds`, macOS 27+).
 //!
 //! While `labs.annotate_replay` and `capture.enabled` are both on (and
 //! `SCClipBufferingOutput` exists on the running macOS), a single background

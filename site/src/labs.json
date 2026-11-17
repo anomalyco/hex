@@ -21,7 +21,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Show your words next to the small recording indicator as you speak, before the text is pasted",
+      "summary": "Show your words next to the small recording indicator (Dictation HUD) as you speak, before the text is pasted",
       "title": "Live text"
     },
     {
@@ -34,7 +34,7 @@
         "windows",
         "linux"
       ],
-      "summary": "When a dictation fails, show the reason next to the small recording indicator",
+      "summary": "When a dictation fails, show the reason next to the small recording indicator (Dictation HUD)",
       "title": "Failure notices"
     },
     {
@@ -45,7 +45,7 @@
       "oses": [
         "linux"
       ],
-      "summary": "On Wayland, show your words in the text box as you speak, then type the text there",
+      "summary": "On Wayland, show your words in the text box as you speak, then Hex types the text there",
       "title": "Live typing"
     },
     {
@@ -344,8 +344,8 @@
       "oses": [
         "macos"
       ],
-      "summary": "Let Double-tap mode use a shortcut that is just keys like Option, Globe, or Control + Option: tap twice to dictate",
-      "title": "Double-tap a key on its own"
+      "summary": "In Double-tap mode, tap a shortcut made only of Option, Command, Shift, Control, or Globe, with no letter or number key, twice to dictate",
+      "title": "Double-tap Option, Command, or Globe"
     },
     {
       "added": "2026-10-31",
@@ -395,7 +395,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Add a Stats button to History that summarizes the dictations you kept. hex history stats prints it too",
+      "summary": "Add a Stats button to History that summarizes the dictations you kept. The hex history stats command prints it too",
       "title": "Dictation stats"
     },
     {
@@ -493,8 +493,8 @@
         "macos",
         "linux"
       ],
-      "summary": "Use the key left of 1, such as § or ^, as a shortcut by itself; while it's set, Hex takes that key from every app",
-      "title": "Key left of 1 alone"
+      "summary": "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound",
+      "title": "§ key alone"
     },
     {
       "added": "2026-11-15",
@@ -666,8 +666,8 @@
         "windows",
         "linux"
       ],
-      "summary": "Apps that use Hex's local API can ask for text with your Global mode's corrections and rewriting applied",
-      "title": "Text for other apps"
+      "summary": "Apps that use Hex's local API can ask for text with Global mode's replacements, corrections, rewriting, and transformations applied",
+      "title": "Process API transcripts"
     },
     {
       "added": "2026-11-10",
@@ -680,7 +680,7 @@
         "linux"
       ],
       "summary": "Apps that use Hex's local API can ask when each word or phrase starts and ends",
-      "title": "Word times for other apps"
+      "title": "Timestamps in API transcripts"
     },
     {
       "added": "2026-11-12",
@@ -693,7 +693,7 @@
         "linux"
       ],
       "summary": "Let web pages from the addresses you list use Hex's local API. They still need the API token",
-      "title": "Web pages can ask Hex"
+      "title": "Browser access to the local API"
     },
     {
       "added": "2026-11-09",
@@ -749,7 +749,7 @@
       "oses": [
         "macos"
       ],
-      "summary": "A command can start a dictation and get the text back when it ends, without pasting or copying it",
+      "summary": "A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it",
       "title": "Dictation for a command"
     },
     {
@@ -837,7 +837,7 @@
         "macos",
         "windows"
       ],
-      "summary": "If a shortcut is just keys like Option or Command, pressing another key or clicking a second or more in no longer ends the dictation; let go to finish",
+      "summary": "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish",
       "title": "Hold through other keys"
     }
   ]

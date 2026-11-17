@@ -2409,7 +2409,7 @@ fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
     );
     assert_eq!(
         rt.state.settings.labs.voice_prompt_phrase, voice_prompt,
-        "Voice prompt's phrase is its own"
+        "Rewrite by voice's phrase is its own"
     );
     refresh(&mut rt);
     assert!(rt.find("stop-phrase-text-error").is_some());

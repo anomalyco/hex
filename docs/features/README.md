@@ -849,7 +849,7 @@ Saved shortcut                           // dictation; Option by default; Window
 General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
   -> Modal: each choice with its keys and a looping key/recording timeline
   -> Double-tap needs a key binding; with a shortcut that has no key (one or
-     more modifiers) it says so, unless Labs > Double-tap a key on its own
+     more modifiers) it says so, unless Labs > Double-tap Option, Command, or Globe
      is on (macOS)
 
 Dictate without processing (Output pane; unbound)   // dictation.md
@@ -867,7 +867,7 @@ Labs > Second dictation shortcut (off)   // labs.md; issue 627
 
 Labs > More dictation shortcuts (macOS, off)   // labs.md
   -> General shows a numbered row per extra (recorder, shortcut mode, Remove) and Add shortcut under four
-  -> each row dictates like the shortcut in its own mode; Double-tap also takes a lone modifier while Labs > Double-tap a key on its own is on
+  -> each row dictates like the shortcut in its own mode; Double-tap also takes a lone modifier while Labs > Double-tap Option, Command, or Globe is on
   -> Escape cancels once it's locked, in Tap, or on a bare key or mouse button
   -> off, the saved rows stay and nothing matches; on, each needs its own keys
 
@@ -2678,10 +2678,10 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── Otherwise the service's own copy of the requested model
 │   ├── Whole-clip run -> A Whisper clip's silent edges dropped, and a window
 │   │   the detector hears no speech in skipped (see dictation)
-│   ├── ?process=global -> Global mode's output processing (Labs › Text for other apps)
+│   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 │   └── ?timestamps=segment|word -> The model's own segment or word times
-│       └── 422 unsupported-timestamps when it has no such level (Labs › Word times for other apps)
-├── A web page's fetch -> Labs › Web pages can ask Hex
+│       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
+├── A web page's fetch -> Labs › Browser access to the local API
 │   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
 │   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
@@ -2732,7 +2732,7 @@ dictation ends; it is provisional, and `/finish` returns the transcript.
 (start, partials subscription, finish, a silent room's empty transcript);
 not run on Linux.
 
-`process=global` (Labs › Text for other apps, off by default) lets a host
+`process=global` (Labs › Process API transcripts, off by default) lets a host
 ask the running app for the text after its Global mode's output processing, on
 `POST /transcriptions` and `POST /streams/{id}/finish`
 ([streams.md](../streams.md#post-streamsidfinish),
@@ -2742,7 +2742,7 @@ embedded helper installs no processor (`409 processing-unavailable`, even
 with the lab off). Processing runs one at a time (`429 queue-full`).
 `/capabilities` always includes `outputProcessing`.
 
-`timestamps=segment|word` (Labs › Word times for other apps, off by
+`timestamps=segment|word` (Labs › Timestamps in API transcripts, off by
 default) makes `POST /transcriptions` return the speech model's own
 `segments`, and for `word` its `words`, with `timestampGranularity`; times
 are milliseconds from the submitted audio's start. Absent and `none` keep the
@@ -2751,7 +2751,7 @@ model without that native level is `422 unsupported-timestamps`. Nothing
 estimates the times, and `/streams` and `/dictations` are unchanged
 ([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
 
-Browser access (Labs › Web pages can ask Hex, off by default) lets a
+Browser access (Labs › Browser access to the local API, off by default) lets a
 web page served from an origin listed in `labs.api_browser_origins` call this
 API with `fetch`. A browser sends its `OPTIONS` preflight without the bearer
 token, so Hex answers `204` for an allowed `Origin` before authentication, with

@@ -73,7 +73,7 @@ pub enum ControlCli {
     Dictation {
         #[arg(value_enum)]
         action: CaptureAction,
-        /// With `start` (Labs › Print-only CLI dictation, macOS) or `stop`:
+        /// With `start` (Labs › Dictation for a command, macOS) or `stop`:
         /// answer with the transcript instead of pasting it. A printing start
         /// waits for its recording to end. Exits 4, printing nothing, when no
         /// speech was heard.

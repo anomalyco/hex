@@ -474,7 +474,7 @@ impl Profiles {
     }
 
     /// [`Self::process_cancellable`] with the voice prompt phrase already
-    /// resolved: `None` is Labs › Voice prompt off, or locked.
+    /// resolved: `None` is Labs › Rewrite by voice off, or locked.
     fn process_cancellable_with(
         &self,
         transcript: &str,
@@ -495,7 +495,7 @@ impl Profiles {
             source,
             DictationLabs::current(),
         );
-        // Labs › Voice prompt: heard speech may carry a spoken instruction
+        // Labs › Rewrite by voice: heard speech may carry a spoken instruction
         // that replaces the mode's rewrite with one request of its own.
         if source == Source::Dictation
             && let Some(phrase) = voice_prompt
@@ -1890,7 +1890,7 @@ mod tests {
         let transcript = "We ship Friday. rewrite this make it formal";
         let cancelled = AtomicBool::new(false);
 
-        // Labs › Voice prompt off: no phrase is even resolved.
+        // Labs › Rewrite by voice off: no phrase is even resolved.
         let processed = profiles.process_cancellable_with(
             transcript,
             "en",

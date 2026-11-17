@@ -27,7 +27,7 @@ pub(super) struct ContextWatch {
     activity: InputActivity,
     /// The one refresh this capture owes, if any.
     capture: CaptureRefresh,
-    /// Labs › Screen vocabulary's one read, for this capture.
+    /// Labs › Words on screen's one read, for this capture.
     screen: ScreenVocabulary,
     /// Labs › Rewrite reads nearby text's one read, for this capture.
     caret: CaretTextRead,

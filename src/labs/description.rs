@@ -14,13 +14,13 @@ impl Feature {
             }
             Self::Playground => "Browse scenes and stories in a window",
             Self::LiveText => {
-                "Show your words next to the small recording indicator as you dictate, before the text is pasted"
+                "Show your words next to the small recording indicator (Dictation HUD) as you dictate, before the text is pasted"
             }
             Self::FailureNotices => {
-                "When a dictation fails, show the reason next to the small recording indicator"
+                "When a dictation fails, show the reason next to the small recording indicator (Dictation HUD)"
             }
             Self::LiveTyping => {
-                "On Wayland, show your words in the text box as you speak, then type the text there"
+                "On Wayland, show your words in the text box as you speak, then Hex types the text there"
             }
             Self::LiveChapters => "Split a meeting's text into chapters while it records",
             Self::VocabularyBiasing => {
@@ -84,7 +84,7 @@ impl Feature {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
             }
             Self::DoubleTapModifiers => {
-                "Double-tap mode also accepts a shortcut that is just keys like Option, Globe, or Control + Option: tap twice to dictate"
+                "Double-tap mode also accepts a shortcut made only of Option, Command, Shift, Control, or Globe, with no letter or number key: tap it twice to dictate"
             }
             Self::BenchmarkDetails => {
                 "Show each speech model's error rate, language, and how it was tested, in the speech model list"
@@ -99,7 +99,7 @@ impl Feature {
                 "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu"
             }
             Self::HistoryStats => {
-                "Add a Stats button to History that summarizes the dictations you kept; hex history stats prints it too"
+                "Add a Stats button to History that summarizes the dictations you kept; the hex history stats command prints it too"
             }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
@@ -121,7 +121,7 @@ impl Feature {
                 "Show only downloaded speech models in the list, with the space they take"
             }
             Self::SectionKeyAlone => {
-                "Use the key left of 1, such as § or ^, as a shortcut by itself; while it's set, Hex takes that key from every app"
+                "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
             }
             Self::MicrophoneKeyAlone => {
                 "Use the mic key in F5's spot on a Mac laptop keyboard as a shortcut; once set, Hex takes the key from other apps. If macOS's own Dictation still opens, change macOS's dictation shortcut in System Settings › Keyboard › Dictation."
@@ -155,7 +155,7 @@ impl Feature {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
             }
             Self::CopyCaptureZip => {
-                "A finished screen capture copies as one zip file, without the video or audio."
+                "A finished Annotate capture copies as one zip file, without the video or audio."
             }
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
@@ -173,7 +173,7 @@ impl Feature {
                 "Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker; looking for it can start WSL"
             }
             Self::ApiProcessing => {
-                "Let apps using Hex's local API ask for text with your Global mode's corrections and rewriting applied"
+                "Let apps using Hex's local API ask for text with Global mode's replacements, corrections, rewriting, and transformations applied"
             }
             Self::ApiTimestamps => {
                 "Let apps using Hex's local API ask when each word or phrase starts and ends, as the speech model heard them"
@@ -191,7 +191,7 @@ impl Feature {
                 "Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording (macOS, with Meetings on and a calendar connected)"
             }
             Self::PrintStart => {
-                "A command can start a dictation and get the text back when it ends, without pasting or copying it"
+                "Let hex dictation start --print hand the transcript to the command that started it, however the recording ends"
             }
             Self::VoicePrompt => {
                 "Say \"rewrite this\" and then what you want; Hex redoes the text with the mode's AI model"
@@ -212,7 +212,7 @@ impl Feature {
                 "Say a phrase at the end of a hands-free dictation to finish it; the phrase never reaches the pasted text"
             }
             Self::HoldThroughKeys => {
-                "If a shortcut is just keys like Option or Command, pressing another key or clicking a second or more in no longer ends the dictation; let go to finish. Before that first second a chord still ends it, and a shortcut with a key is unchanged"
+                "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish. Before that first second a chord still ends it, and a shortcut with a key is unchanged"
             }
         }
     }

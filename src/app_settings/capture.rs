@@ -12,7 +12,7 @@ pub struct CaptureSettings {
     /// Annotate's one key: tap to start and stop, hold while recording to
     /// draw.
     pub hotkey: HotkeyBinding,
-    /// Optional shortcut for Labs › Annotate 15 s replay (macOS 27+): press
+    /// Optional shortcut for Labs › Annotate last 15 seconds (macOS 27+): press
     /// to export the last 15 s, or hold to narrate over it.
     pub replay_hotkey: Option<HotkeyBinding>,
     pub transcriber: CaptureTranscriber,

@@ -107,7 +107,7 @@ recorder refuses them, and a saved shortcut on one goes back to its default
 when settings load or the toggle turns off. On, the window's recorder takes
 them too (#1187). Details and checks in [labs.md](labs.md).
 
-Linux and macOS with Labs › Key left of 1 alone on (`labs.section_key_alone`,
+Linux and macOS with Labs › § key alone on (`labs.section_key_alone`,
 off by default; issue 1050): the ISO section key, left of 1, may be a
 shortcut with no modifier. On Linux the window's recorder takes § pressed
 alone and shows §, and `hex settings set dictation_hotkey §` (or `section`)
@@ -1200,9 +1200,9 @@ General > Shortcut mode (under Shortcut)               // dictate.shortcut-mode
   Tap                          -> Toggle, below
   Double-tap                   -> Double-tap only; needs a key binding, or a
                                   shortcut without a key (one or more
-                                  modifiers) with Labs › Double-tap on a lone
-                                  modifier (labs.double_tap_modifiers, macOS,
-                                  off by default)
+                                  modifiers) with Labs › Double-tap Option,
+                                  Command, or Globe (labs.double_tap_modifiers,
+                                  macOS, off by default)
 Tap
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
@@ -1261,7 +1261,7 @@ General > Shortcut mode                               // dictate.shortcut-explai
   ├── The current choice has a focus-coloured border
   ├── Double-tap with a shortcut that has no key -> Dimmed, takes no focus
   │   or press, says "Needs a shortcut with a key, like ⌥Space", unless
-  │   Labs › Double-tap a key on its own is on (macOS)
+  │   Labs › Double-tap Option, Command, or Globe is on (macOS)
   ├── Long chord -> The panel widens (up to the window) so each option's
   │   lanes keep at least 64 pt beside the keycaps
   ├── Pick an option (click, Space) -> Saves the choice
@@ -1312,7 +1312,7 @@ Shortcut mode = Hold or double-tap or Double-tap     // dictate.lock
 
 Shortcut mode = Double-tap                           // dictate.double-tap-only
   Requires a key binding AND locking enabled, or a shortcut without a key
-  with Labs › Double-tap a key on its own on (macOS)
+  with Labs › Double-tap Option, Command, or Globe on (macOS)
   Single press/hold -> No capture                     // disables hold, not a toggle
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
 

@@ -122,7 +122,7 @@ static FOCUS: OnceLock<RwLock<Option<ContextSnapshot>>> = OnceLock::new();
 
 thread_local! {
     static DICTATING: Cell<bool> = const { Cell::new(false) };
-    /// Labs › Screen vocabulary's terms for the capture this thread is
+    /// Labs › Words on screen's terms for the capture this thread is
     /// transcribing, set by [`for_capture`]; empty for a job that has none.
     static SCREEN_TERMS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
@@ -150,7 +150,7 @@ pub(crate) fn for_dictation<R>(work: impl FnOnce() -> R) -> R {
     work()
 }
 
-/// Runs one dictation's inference with the terms Labs › Screen vocabulary
+/// Runs one dictation's inference with the terms Labs › Words on screen
 /// read from its window. The terms belong to that run alone: a nested run
 /// restores the outside value, and a job with none clears it, so a meeting or
 /// a local API request never hears another capture's screen.
@@ -198,7 +198,7 @@ fn transcription_entries() -> Vec<VocabularyEntry> {
     merged(&shared, &screen)
 }
 
-/// Labs › Screen vocabulary's terms as entries with no "sounds like"
+/// Labs › Words on screen's terms as entries with no "sounds like"
 /// spellings.
 fn screen_entries(terms: &[String]) -> Vec<VocabularyEntry> {
     terms
@@ -239,7 +239,7 @@ pub fn entries() -> Vec<VocabularyEntry> {
 }
 
 /// Whether the selected dictation model would read vocabulary terms at all:
-/// Parakeet biases only with Labs › Vocabulary biasing on and a boost other
+/// Parakeet biases only with Labs › Vocabulary help on and a boost other
 /// than Off; Whisper and Qwen3-ASR read them as a prompt; Apple Speech and
 /// other models ignore them. Read as a capture becomes real, before reading
 /// the screen, and again before giving up its live stream.
@@ -272,7 +272,7 @@ fn terms_used(
 /// next one. `None` while the list is empty or the boost is off.
 pub(crate) fn transcription_bias()
 -> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {
-    // Labs › Vocabulary biasing: transcription takes the list only while on.
+    // Labs › Vocabulary help: transcription takes the list only while on.
     if !crate::labs::vocabulary_biasing() {
         return None;
     }

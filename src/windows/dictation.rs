@@ -221,7 +221,7 @@ pub fn run(
     updates: mpsc::Receiver<Box<crate::app_settings::AppSettings>>,
     shutdown: &AtomicBool,
 ) -> Result<()> {
-    // Labs › Unload model when idle: a launch stays parked until the first
+    // Labs › Free memory when idle: a launch stays parked until the first
     // dictation, as after an idle unload.
     let transcriber = if crate::labs::unload_idle().is_some() {
         None

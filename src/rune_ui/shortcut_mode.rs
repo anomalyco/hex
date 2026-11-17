@@ -83,7 +83,7 @@ impl Trigger {
 
     /// Why this shortcut can't trigger this way, if it can't: a shortcut
     /// without a key can't tell a double-tap from a chord without
-    /// Labs › Double-tap on a lone modifier.
+    /// Labs › Double-tap Option, Command, or Globe.
     pub(super) fn unavailable(self, settings: &AppSettings) -> Option<String> {
         self.unavailable_for(
             Some(&settings.dictation_hotkey),

@@ -88,7 +88,7 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
     copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
 }
 
-/// How much of a focused window Labs › Screen vocabulary reads: elements
+/// How much of a focused window Labs › Words on screen reads: elements
 /// walked, depth below the window, bytes collected, characters per value,
 /// and wall-clock time.
 const MAX_TEXT_NODES: usize = 1_500;

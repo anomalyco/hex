@@ -128,7 +128,7 @@ Transcribes what's left and answers with the final, as the `final` event:
 { "text": "…", "segments": [{ "segment": 0, "startMs": 0, "endMs": 7420, "text": "…" }], "durationMs": 31250 }
 ```
 
-`?process=global` (Labs › Text for other apps) adds the text after Hex's
+`?process=global` (Labs › Process API transcripts) adds the text after Hex's
 Global-mode output processing, exactly as a paste with no matching app or
 website mode gets it: global replacements, Global mode corrections, the
 optional OpenCode rewrite, and Global's selected transformations. `true` and
@@ -222,7 +222,7 @@ has no body.
 | 400 | `unknown-model` | `model` isn't a Hex model id. |
 | 400 | `invalid-audio` | Partial sample or non-finite float. |
 | 401 | (no body) | Missing or wrong bearer token. |
-| 403 | `processing-disabled` | `process` was asked for with a processor installed but Labs › Text for other apps off. |
+| 403 | `processing-disabled` | `process` was asked for with a processor installed but Labs › Process API transcripts off. |
 | 404 | `stream-not-found` | Unknown id, replaced stream, or wrong stream token. |
 | 409 | `model-mismatch` | Requested model/language isn't the held one. |
 | 409 | `processing-unavailable` | `process` was asked for and no processor is installed (for example `hex service`). |
