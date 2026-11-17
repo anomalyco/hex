@@ -584,8 +584,8 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         Key::Enter if list => Input::Send {
             always: key.mods.shift,
         },
-        Key::Enter if cycle && !key.mods.shift => Input::Send { always: false },
-        Key::Tab if cycle => Input::Cycle(if key.mods.shift { -1 } else { 1 }),
+        Key::Enter if cycle && search && !key.mods.shift => Input::Send { always: false },
+        Key::Tab if cycle && search => Input::Cycle(if key.mods.shift { -1 } else { 1 }),
         Key::Backspace if list => Input::Backspace,
         Key::Text(t) if list => Input::Type(t.clone()),
         Key::Text(t)

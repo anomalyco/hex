@@ -3133,7 +3133,10 @@ fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
             CapsuleKey::Shortcut | CapsuleKey::Press | CapsuleKey::Shift(_),
         ) => true,
         (
-            CapsuleKeys::Suggest { cycle: true, .. },
+            CapsuleKeys::Suggest {
+                cycle: true,
+                search: true,
+            },
             CapsuleKey::Return { shift: false } | CapsuleKey::Tab { .. },
         ) => true,
         (CapsuleKeys::Suggest { search: true, .. }, CapsuleKey::Text(typed)) => opens_search(typed),
@@ -5394,16 +5397,21 @@ mod tests {
         ] {
             assert!(!capsule_key(key.clone()), "{key:?}");
         }
-        // The toast's one guess at a time: Return sends it, Tab moves on.
+        // A toast appearing over another app never takes its Return or Tab.
         second.set(CapsuleKeys::Suggest {
             cycle: true,
             search: false,
         });
         assert!(suggesting());
+        assert!(!capsule_key(CapsuleKey::Tab { shift: false }));
+        assert!(!capsule_key(CapsuleKey::Return { shift: false }));
+        second.set(CapsuleKeys::Suggest {
+            cycle: true,
+            search: true,
+        });
         assert!(capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(capsule_key(CapsuleKey::Return { shift: false }));
         assert!(!capsule_key(CapsuleKey::Return { shift: true }));
-        assert!(!capsule_key(CapsuleKey::Text("h".into())));
         second.set(CapsuleKeys::List);
         assert!(!suggesting());
         assert!(list_open() && !wants_escape());

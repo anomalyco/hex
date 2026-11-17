@@ -488,7 +488,13 @@ fn the_widest_states_fit_the_panel() {
     ];
     for pres in [
         after(&[processing(), In(Input::Routed(rule))]),
-        after(&[processing(), In(Input::Routed(ask))]),
+        after(&[
+            In(Input::Written {
+                bundle: "long.scrawl".into(),
+                routing: true,
+            }),
+            In(Input::Routed(ask)),
+        ]),
         after(&chips),
     ] {
         let (shell, items) = super::surface::layout(&pres, "10:00:00");
@@ -504,6 +510,18 @@ fn the_widest_states_fit_the_panel() {
                     .any(|item| matches!(item.id, Id::Paste | Id::Undo | Id::Ask)),
                 "no action for {pres:?}"
             );
+        }
+        if let Pres::Done(done) = &pres
+            && done.paste
+        {
+            assert!(
+                shell[2] <= super::surface::LIST_W + 0.1,
+                "long rows don't widen the header"
+            );
+            let paste = items.iter().find(|i| i.id == Id::Paste).unwrap();
+            let search = items.iter().find(|i| i.id == Id::Ask).unwrap();
+            assert!(paste.rect[0] + paste.rect[2] < search.rect[0]);
+            assert!(paste.rect[2] >= 44.0);
         }
     }
 }

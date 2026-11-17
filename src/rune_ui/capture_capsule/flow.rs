@@ -1041,11 +1041,6 @@ impl Flow {
         }
     }
 
-    /// The take-back for a send still waiting out its Undo.
-    fn undoable(&self, now: f64) -> Option<Action> {
-        routes::undoable(&self.phase, self.clock(now))
-    }
-
     /// Runs what time decides: the chips closing, the Undo window ending,
     /// the finished capsule leaving. True when one was due.
     pub(crate) fn tick(&mut self, now: f64) -> bool {

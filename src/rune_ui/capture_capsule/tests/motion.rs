@@ -558,6 +558,24 @@ fn clicks_on_the_capsule_do_what_they_say() {
         always: None,
     };
     tuning::with_flow(CapsuleFlow::List, || {
+        let written = Input::Written {
+            bundle: "marked.scrawl".into(),
+            routing: true,
+        };
+        let (mut rt, actions) = live(vec![written.clone(), Input::Routed(guess())]);
+        click_on(&mut rt, "paste", 0);
+        assert_eq!(
+            *actions.lock().unwrap(),
+            [Action::Paste("marked.scrawl".into())]
+        );
+
+        // Return in the explicitly opened search confirms its selected row once.
+        let (mut rt, actions) = live(vec![written, Input::Routed(guess()), Input::OpenList]);
+        tap(&mut rt, Input::Move(1));
+        tap(&mut rt, Input::Send { always: false });
+        tap(&mut rt, Input::Send { always: false });
+        assert_eq!(*actions.lock().unwrap(), [send("HEX")]);
+
         // A suggestion in the list under the capsule.
         let (mut rt, actions) = live(routed(guess()));
         click_on(&mut rt, "row-HEX", 0);
