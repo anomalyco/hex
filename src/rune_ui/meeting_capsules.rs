@@ -338,7 +338,7 @@ impl Capsule {
     /// takes the pointer.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     fn fit_recording_window(&self) {
-        if self.presentation.from_offer() {
+        if self.presentation.inherits_offer_window() {
             return;
         }
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
@@ -506,7 +506,7 @@ impl Capsule {
 
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
-        if self.presentation.from_offer() {
+        if self.presentation.inherits_offer_window() {
             return self.presentation.window();
         }
         match &self.kind {
@@ -1700,7 +1700,7 @@ mod tests {
             commands.try_recv(),
             Ok(ControllerCommand::Record(candidate, Some(_))) if candidate.key == "meeting-slack"
         ));
-        assert!(rt.state.presentation.from_offer());
+        assert!(rt.state.presentation.inherits_offer_window());
     }
 
     #[test]

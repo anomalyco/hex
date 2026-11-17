@@ -104,7 +104,7 @@ pub(super) fn actions(
                 .build_push(p.k),
         };
         face.key(key).on_press(move |c: &mut Capsule| {
-            if !c.presentation.from_offer()
+            if !c.presentation.inherits_offer_window()
                 && c.more_open == choosing
                 && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
             {
@@ -156,7 +156,7 @@ pub(super) fn actions(
 
 impl Capsule {
     fn record_offer(&mut self) {
-        if self.presentation.from_offer() {
+        if self.presentation.inherits_offer_window() {
             return;
         }
         let Some(Kind::Offer(id, candidate)) = &self.kind else {
@@ -203,7 +203,7 @@ impl Capsule {
     }
 
     pub(super) fn expire_offer(&mut self) {
-        if self.presentation.from_offer() {
+        if self.presentation.inherits_offer_window() {
             return;
         }
         let Some(Kind::Offer(id, candidate)) = &self.kind else {

@@ -45,7 +45,7 @@ impl Reveal {
 }
 
 impl Presentation {
-    pub(super) fn from_offer(&self) -> bool {
+    pub(super) fn inherits_offer_window(&self) -> bool {
         self.travel.at.is_some() || self.departure.is_some()
     }
     pub(super) fn begin(&mut self, id: OfferId, candidate: MeetingCandidate) {
@@ -340,7 +340,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         )
         .child(row().key("actions").gap(8.0).children(actions))
         .opacity(alpha * (1. - t * 3.).max(0.));
-    let page = if a.from_offer() || rules != c.more_open || alpha < 0.2 {
+    let page = if a.inherits_offer_window() || rules != c.more_open || alpha < 0.2 {
         page.inert().a11y_hidden()
     } else {
         page
@@ -348,7 +348,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
     let radius = lerp(panel_radius(p), REST_HEIGHT * 0.5);
     let label = match &c.kind {
         Some(Kind::Recording(r)) => format!("{} · {}", tr("Recording"), r.title),
-        _ if a.from_offer() => tr("Starting…").to_owned(),
+        _ if a.inherits_offer_window() => tr("Starting…").to_owned(),
         _ => title,
     };
     let mut shell = row()
@@ -426,7 +426,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         .child(region(radius, h - 2. * radius, 0.))
         .children(bands)
         .on_pointer_move(|c: &mut Capsule, p| {
-            if !c.presentation.from_offer() {
+            if !c.presentation.inherits_offer_window() {
                 c.presentation.pointer = Some((p.x, p.y));
             }
         })

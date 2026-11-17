@@ -407,7 +407,7 @@ fn pending_offers_never_mask_a_failure_or_adopt_another_start() {
     let (mut rt, rx, _) = runtime(offer(slack_huddle()), false, false, PANEL);
     drop(rx); // A rejected send is still an offer, not a pending recording.
     tap(&mut rt, "record");
-    assert!(!rt.state.presentation.from_offer());
+    assert!(!rt.state.presentation.inherits_offer_window());
     assert!(rt.find("record").is_some() && rt.find("elapsed").is_none());
 }
 
