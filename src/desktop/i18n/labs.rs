@@ -108,7 +108,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Left and right keys", ["Lewe i prawe klawisze", "左右按键", "左右のキー", "Linke und rechte Tasten", "Teclas izquierdas y derechas", "Ліві й праві клавіші"]),
     ("Model test details", ["Szczegóły testów modeli", "模型测试详情", "モデルのテスト詳細", "Modell-Testdetails", "Detalles de las pruebas del modelo", "Подробиці тестування моделей"]),
     ("Call recording controls on GNOME", ["Elementy nagrywania rozmów w GNOME", "GNOME 上的通话录制控件", "GNOME の通話録音コントロール", "Anrufaufnahme-Steuerung unter GNOME", "Controles de grabación de llamadas en GNOME", "Елементи запису дзвінків у GNOME"]),
-    ("Annotate last 15 seconds", ["Ostatnie 15 sekund w Annotate", "Annotate 最近 15 秒", "Annotate の直近 15 秒", "Letzte 15 Sekunden in Annotate", "Últimos 15 segundos en Annotate", "Останні 15 секунд в Annotate"]),
+    ("Annotate last 15 seconds", ["Ostatnie 15 sekund w Adnotacjach", "Annotate 最近 15 秒", "Annotate の直近 15 秒", "Letzte 15 Sekunden in Annotate", "Últimos 15 segundos en Annotate", "Останні 15 секунд в Annotate"]),
     ("Dictation for a command", ["Dyktowanie dla polecenia", "为命令听写", "コマンド向け音声入力", "Diktat für einen Befehl", "Dictado para un comando", "Диктування для команди"]),
     ("Rewrite by voice", ["Przepisuj głosem", "用语音改写", "音声で書き換え", "Per Stimme umschreiben", "Reescribir por voz", "Переписувати голосом"]),
     ("Copy a capture as one file", ["Kopiuj zrzut jako jeden plik", "将捕获内容复制为一个文件", "キャプチャを 1 ファイルでコピー", "Aufnahme als eine Datei kopieren", "Copiar una captura como un archivo", "Копіювати запис як один файл"]),
