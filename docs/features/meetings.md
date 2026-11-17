@@ -671,7 +671,8 @@ Meetings > Settings > Calendar                       // meetings.calendar (macOS
     ├── Remind me before meetings -> on by default
     ├── Remind me -> At start / 1 / 2 / 5 min
     ├── Calendars -> All calendars, or "2 of 3 calendars"; each switched in the menu
-    └── Next 3 meetings: title, "Today · 2:30 PM", provider icon when it has a call link
+    └── Next 3 meetings: title, "Today · 2:30 PM" ("Today · 14:30" outside
+        English), provider icon when it has a call link
 
 Meeting = not all-day, declined, free, or cancelled, AND has other attendees or a
           Zoom / Google Meet / Teams / Slack huddle / Webex link (URL, location, notes)
@@ -838,6 +839,7 @@ changes.
 ```ts
 Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
   -> Title: named meeting OR "<App> call — 2:30 PM" OR "Meeting — 2:30 PM"
+     (times are 12-hour in English and 24-hour, "14:30", elsewhere)
   -> system.wav + microphone.wav, owner-only, Application Support/meetings/<id>
   -> No idle sleep; no dictation mute or media pause // meetings.record
   -> Menu bar: record symbol + elapsed time
@@ -1838,9 +1840,11 @@ Finished meeting panel -> the shown title; "Writing a title and summary with
 ```
 
 Title rule: the shown title is the user's title unless it is still the default
-`<App> call — 2:30 PM` / `Meeting — 2:30 PM`; then the final notes title, else
-the provisional title, else the default. Named or renamed meetings keep their
-name. By default the exported file keeps its name when the title changes, so
+`<App> call — 2:30 PM` / `Meeting — 2:30 PM` (12-hour in English, 24-hour such
+as `14:30` elsewhere; an old 12-hour default still reads as one in any
+language); then the final notes title, else the provisional title, else the
+default. Named or renamed meetings keep their name. By default the exported
+file keeps its name when the title changes, so
 links, open editors, and Reveal keep working. With Export › Descriptive meeting
 file names on (off by default), applying notes, refining chapters that change
 the title, or renaming the meeting renames the file in place to
