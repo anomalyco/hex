@@ -1,4 +1,6 @@
 #[cfg(hex_capture)]
+pub(crate) mod browse;
+#[cfg(hex_capture)]
 pub(crate) mod capture;
 #[cfg(hex_capture)]
 pub(crate) mod gesture;

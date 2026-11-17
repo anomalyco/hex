@@ -10,6 +10,62 @@ use crate::desktop::i18n::{event_age_at, tr};
 use crate::paste::recent::{Id, Row};
 use rune::{Anim, El, col, el, row, text};
 
+pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
+    use crate::paste::browse::{self, View};
+    use rune::{
+        DisplayTarget, KeyPolicy, OverlayInput, OverlayLevel, OverlayOptions, OverlaySpec,
+        ScreenEdge,
+    };
+    if !crate::paste::recent::enabled() {
+        return;
+    }
+    let spec = OverlaySpec {
+        name: "Hex Paste Last",
+        size: (422., 544.),
+        edge: ScreenEdge::Top,
+        margin: 40.,
+        align: rune::Align::Center,
+        inset: 0.,
+        interactive: true,
+        view: |v: &View, cx: &mut rune::Cx<View>| {
+            let p = Paint::new(cx.system_dark(), cx.env().scale);
+            col().padding(16.).child(card(
+                &v.rows,
+                v.cursor,
+                crate::history::now_ms(),
+                p,
+                |s: &mut View, id| browse::click(s.epoch, id),
+            ))
+        },
+    }
+    .options(OverlayOptions {
+        input: OverlayInput::Regions,
+        keys: KeyPolicy::None,
+        display: DisplayTarget::UnderPointer,
+        level: OverlayLevel::AboveOverlays,
+        exclude_from_capture: true,
+        ..Default::default()
+    })
+    .release_gpu_when_hidden();
+    let panel = app.overlay(spec, View::default());
+    browse::install(Box::new(move |next| {
+        let handle = panel.clone();
+        panel.update(move |v, tx| {
+            if next.revision <= v.revision {
+                return;
+            }
+            let was = v.open;
+            *v = next;
+            tx.instant();
+            if v.open && !was {
+                handle.show();
+            } else if !v.open && was {
+                handle.hide();
+            }
+        });
+    }));
+}
+
 pub(super) fn card<S: 'static>(
     rows: &[Row],
     cursor: usize,
@@ -27,6 +83,7 @@ pub(super) fn card<S: 'static>(
         let id = item.id.clone();
         let mut r = col()
             .key(format!("paste-row-{i}"))
+            .hit()
             .role("button")
             .label(format!("{kind}: {}", item.preview))
             .focusable(false)

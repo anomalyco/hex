@@ -1,6 +1,5 @@
 //! One selection rule for an immediate paste and the open picker. Only the
 //! stable ID crosses the selection boundary, never a payload or a row index.
-#![allow(dead_code, reason = "staged until the mixed shortcut is enabled")]
 
 use crate::capture_host::paste_source::{self as captures, Scope};
 use crate::history::{History, paste_source as dictations};
@@ -13,6 +12,7 @@ pub(crate) enum Id {
     Dictation(dictations::Id),
 }
 
+#[derive(Clone)]
 pub(crate) struct Row {
     pub id: Id,
     pub ready_at: u64,
@@ -78,7 +78,46 @@ pub(crate) fn resolve(
 /// from the caller of a control request. Runs on the ordered output worker.
 pub(crate) struct Request {
     pub id: Option<Id>,
-    pub target: i32,
+    pub target: Target,
+}
+
+pub(crate) struct Target {
+    pid: i32,
+    focus: crate::accessibility::PasteFocus,
+}
+impl Target {
+    pub(crate) fn capture() -> Option<Self> {
+        let pid = crate::dictation::context::frontmost_pid()?;
+        Some(Self {
+            pid,
+            focus: crate::accessibility::PasteFocus::capture(pid)?,
+        })
+    }
+    pub(crate) fn in_front(&self) -> bool {
+        crate::dictation::context::frontmost_pid() == Some(self.pid)
+    }
+    pub(crate) fn unchanged(&self) -> bool {
+        self.in_front() && self.focus.unchanged()
+    }
+}
+
+/// Developer launch override, like HEX_EXPERIMENTAL_MIC. Never a new
+/// preference, global binding, stable-build feature or managed-Labs bypass.
+pub(crate) fn enabled() -> bool {
+    static ENABLED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+        crate::dev_build::is_dev_build()
+            && std::env::var_os("HEX_EXPERIMENTAL_PASTE_LAST").as_deref()
+                == Some(std::ffi::OsStr::new("1"))
+            && !crate::policy::Policy::current().locks(crate::policy::Lock::Labs)
+    });
+    *ENABLED
+}
+
+pub(crate) fn current_rows(history: &History) -> Vec<Row> {
+    let settings = crate::app_settings::capture_settings();
+    let root = settings.enabled.then(|| settings.captures_dir());
+    let scope = root.as_ref().map(|p| Scope::new(p, settings.bundle_days));
+    snapshot(history, scope.as_ref(), 8, crate::history::now_ms())
 }
 
 impl Request {
@@ -99,7 +138,7 @@ impl Request {
             .ok_or_else(|| eyre!("nothing to paste"))?;
         let output = resolve(history, scope.as_ref(), &id, crate::history::now_ms())
             .ok_or_else(|| eyre!("that item is no longer available"))?;
-        if crate::dictation::context::frontmost_pid() != Some(self.target) {
+        if !self.target.unchanged() {
             return Err(eyre!("paste target changed"));
         }
         match output {
@@ -114,7 +153,7 @@ impl Request {
                     scrawl_capture::capture::is_frontmost_terminal(),
                     scrawl_capture::handoff::experiment(scrawl_capture::handoff::AGENT_CONTEXT),
                 )?;
-                paster.paste_capture(&payload, self.target)?;
+                paster.paste_capture(&payload, &self.target)?;
                 Ok(String::new())
             }
         }

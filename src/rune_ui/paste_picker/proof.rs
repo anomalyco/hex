@@ -116,6 +116,7 @@ fn render(rt: &mut Runtime<Doc>, out: Option<&Path>, name: &str) {
 }
 
 #[test]
+#[ignore = "native Mac GUI proof: requires a login session's pasteboard service"]
 fn a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item() {
     let root = std::env::temp_dir().join(format!("hex-mixed-panel-{}", std::process::id()));
     fs::create_dir(&root).unwrap();

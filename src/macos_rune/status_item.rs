@@ -332,6 +332,10 @@ impl Row {
             Row::CopySection => label("Copy Section", tr("Copy section")),
             Row::RecordMeeting => label("Record Meeting", tr("Record meeting")),
             Row::PauseHex => pause_title(false),
+            #[cfg(hex_capture)]
+            Row::PasteLast if crate::paste::recent::enabled() => {
+                label("Paste Last", tr("Paste last"))
+            }
             Row::PasteLast => label("Paste Last Dictation", tr("Paste last dictation")),
             Row::CopyLastDictationAudio => {
                 label("Copy Last Dictation Audio", tr("Copy last dictation audio"))

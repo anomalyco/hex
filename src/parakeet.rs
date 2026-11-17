@@ -539,6 +539,14 @@ impl DictationWorker {
     }
 
     pub fn paste_last(&self) -> Result<(), &'static str> {
+        #[cfg(hex_capture)]
+        if crate::paste::recent::enabled() {
+            return self.paste_recent(crate::paste::recent::Request {
+                id: None,
+                target: crate::paste::recent::Target::capture()
+                    .ok_or("could not confirm the paste target")?,
+            });
+        }
         self.submit_paste(PasteKind::LastTranscript)
     }
 

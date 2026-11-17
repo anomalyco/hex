@@ -98,6 +98,12 @@ pub(crate) struct PasteFocus {
     field: CfObject,
 }
 
+// SAFETY: these three immutable Core Foundation references are owned by
+// one target token. Moving it transfers ownership to the output worker;
+// no AppKit object or thread-affine UI state is used, and it isn't Sync.
+#[cfg(hex_capture)]
+unsafe impl Send for PasteFocus {}
+
 #[cfg(hex_capture)]
 impl PasteFocus {
     pub(crate) fn capture(pid: i32) -> Option<Self> {

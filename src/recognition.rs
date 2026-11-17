@@ -28,6 +28,8 @@ mod events;
 mod guards;
 mod hotkeys;
 mod output;
+#[cfg(hex_capture)]
+mod paste_picker;
 mod stop_phrase;
 
 use context_watch::ContextWatch;
@@ -218,6 +220,9 @@ pub fn listen(
     #[cfg(hex_capture)]
     let capture_environment = recording_environment.clone();
     let (mut microphone_revision, microphone) = crate::app_settings::microphone_selection();
+    #[cfg(hex_capture)]
+    let mut paste_picker =
+        crate::paste::recent::enabled().then(|| paste_picker::Picker::new(history.clone()));
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
         transformations.clone(),
@@ -323,6 +328,11 @@ pub fn listen(
                         let capture_active = programmatic.is_some()
                             || hotkeys.suppresses_recognition()
                             || input.is_recording();
+                        #[cfg(hex_capture)]
+                        let capture_active = capture_active
+                            || paste_picker
+                                .as_ref()
+                                .is_some_and(paste_picker::Picker::busy);
                         let answer = match paste_last_refusal(capture_active) {
                             Some(refusal) => refusal,
                             None => {
@@ -801,6 +811,12 @@ pub fn listen(
             if hotkey_capture_suspended {
                 continue;
             }
+            #[cfg(hex_capture)]
+            if let Some(picker) = paste_picker.as_mut()
+                && let Err(error) = picker.edge(input_event, capture_at, &dictation_worker)
+            {
+                events.dictation(DictationPhase::Failed(error.into()), "")?;
+            }
             // Labs › YOLO mode: Escape after a release skips that
             // dictation's Return.
             if input_event.is_escape_down() {
@@ -852,6 +868,20 @@ pub fn listen(
                 continue;
             }
             for (shortcut, action) in hotkeys.process(input_event, capture_at) {
+                #[cfg(hex_capture)]
+                if action == HotkeyAction::PasteLast
+                    && let Some(picker) = paste_picker.as_mut()
+                    && let Some(binding) = crate::app_settings::runtime_hotkeys().paste_last
+                {
+                    context.cancel();
+                    feedback::retract_start();
+                    input.cancel()?;
+                    if let Err(error) = picker.press(binding, capture_at, &dictation_worker) {
+                        events.dictation(DictationPhase::Failed(error.into()), "")?;
+                    }
+                    emit_engine_state(&mut events, false, &dictation_worker, &input.device_name())?;
+                    continue;
+                }
                 if action == HotkeyAction::Start {
                     hotkeys.raw_capture = shortcut == Shortcut::Raw;
                 }
@@ -897,6 +927,18 @@ pub fn listen(
         // ends the press first.
         if !hotkey_capture_suspended && input_monitor.pending_events().oldest().is_none() {
             hotkeys.break_chords(CaptureInstant::now());
+        }
+        #[cfg(hex_capture)]
+        if let Some(picker) = paste_picker.as_mut()
+            && let Err(error) = picker.tick(
+                hotkey_capture_suspended
+                    || programmatic.is_some()
+                    || hotkeys.any_recording()
+                    || capture_was_recording,
+                &dictation_worker,
+            )
+        {
+            events.dictation(DictationPhase::Failed(error.into()), "")?;
         }
         let mut received_worker_event = false;
         while let Some(event) = dictation_worker.try_recv() {
@@ -1597,6 +1639,8 @@ fn paste_last(
     events: &mut EventLog,
 ) -> Result<ControlReply> {
     let reply = match worker.paste_last() {
+        #[cfg(hex_capture)]
+        Ok(()) if crate::paste::recent::enabled() => ControlReply::done("Pasting the latest item"),
         Ok(()) => ControlReply::done("Pasting the last dictation"),
         Err(error) => {
             feedback::play(Tone::Error);

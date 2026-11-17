@@ -117,11 +117,12 @@ impl Part<'_> {
 impl Paster {
     /// The capture owner supplies the sheet (PNG or terminal path), summary,
     /// and the target PID from the gesture. No arbitrary text/command mode.
-    #[allow(dead_code, reason = "staged until the mixed picker is connected")]
-    pub(crate) fn paste_capture(&mut self, capture: &Payload, target: i32) -> Result<()> {
+    pub(crate) fn paste_capture(
+        &mut self,
+        capture: &Payload,
+        target: &super::recent::Target,
+    ) -> Result<()> {
         let revision = self.activity.revision();
-        let focus = crate::accessibility::PasteFocus::capture(target)
-            .ok_or_else(|| eyre!("could not confirm the capture paste target"))?;
         self.continuation = None;
         self.prepared_clipboard = None;
         insert(
@@ -132,11 +133,7 @@ impl Paster {
                 .unwrap_or_else(|e| e.into_inner()),
             capture.first(),
             &capture.summary,
-            || {
-                self.activity.revision() == revision
-                    && crate::dictation::context::frontmost_pid() == Some(target)
-                    && focus.unchanged()
-            },
+            || self.activity.revision() == revision && target.unchanged(),
             || crate::keyboard::post_command('v'),
             std::thread::sleep,
         )
@@ -151,33 +148,73 @@ fn insert(
     sheet: Option<Part<'_>>,
     summary: &str,
     focused: impl Fn() -> bool,
-    mut paste: impl FnMut() -> Result<()>,
-    mut wait: impl FnMut(Duration),
+    paste: impl FnMut() -> Result<()>,
+    wait: impl FnMut(Duration),
 ) -> Result<()> {
     if summary.trim().is_empty() || !focused() {
         return Err(eyre!("no capture text or the paste target changed"));
     }
     let sheet = sheet.map(|s| s.item()).transpose()?;
     let summary = Part::Text(summary).item()?;
-    let initial = board.changeCount();
-    let snapshot = capture_clipboard(board)?;
+    transaction(board, pending, sheet, summary, focused, paste, wait)
+}
+
+trait Board {
+    type Item;
+    fn generation(&self) -> isize;
+    fn save(&self) -> Result<super::ClipboardSnapshot>;
+    fn claim(&self) -> isize;
+    fn write(&self, value: Self::Item) -> Result<()>;
+    fn restore(&self, original: &super::ClipboardSnapshot) -> Result<()>;
+}
+
+impl Board for NSPasteboard {
+    type Item = Retained<NSPasteboardItem>;
+    fn generation(&self) -> isize {
+        self.changeCount()
+    }
+    fn save(&self) -> Result<super::ClipboardSnapshot> {
+        capture_clipboard(self)
+    }
+    fn claim(&self) -> isize {
+        self.clearContents()
+    }
+    fn write(&self, item: Self::Item) -> Result<()> {
+        write_items(self, &[item])
+    }
+    fn restore(&self, original: &super::ClipboardSnapshot) -> Result<()> {
+        restore_clipboard(self, original)
+    }
+}
+
+fn transaction<B: Board>(
+    board: &B,
+    pending: &mut ClipboardRestore,
+    sheet: Option<B::Item>,
+    summary: B::Item,
+    focused: impl Fn() -> bool,
+    mut paste: impl FnMut() -> Result<()>,
+    mut wait: impl FnMut(Duration),
+) -> Result<()> {
+    let initial = board.generation();
+    let snapshot = board.save()?;
     let mut owned = None;
     let mut attempted = false;
     let outcome = (|| {
         for item in sheet.into_iter().chain([summary]) {
-            if !focused() || board.changeCount() != owned.unwrap_or(initial) {
+            if !focused() || board.generation() != owned.unwrap_or(initial) {
                 return Err(eyre!("paste target or clipboard changed"));
             }
             // clearContents returns *our* ownership count. Reading changeCount
             // after writeObjects could instead adopt an intervening copy.
-            let count = board.clearContents();
+            let count = board.claim();
             owned = Some(count);
-            if board.changeCount() != count {
+            if board.generation() != count {
                 return Err(eyre!("clipboard changed before writing the capture"));
             }
-            write_items(board, &[item])?;
+            board.write(item)?;
             wait(Duration::from_millis(20));
-            if !focused() || board.changeCount() != count {
+            if !focused() || board.generation() != count {
                 return Err(eyre!("paste target or clipboard changed"));
             }
             attempted = true;
@@ -194,11 +231,12 @@ fn insert(
             snapshot
         };
         pending.keep();
-        if attempted && board.changeCount() == count {
+        if attempted && board.generation() == count {
             wait(Duration::from_millis(500));
         }
-        if board.changeCount() == count {
-            restore_clipboard(board, &previous)
+        if board.generation() == count {
+            board
+                .restore(&previous)
                 .map_err(|e| eyre!("capture paste finished with a clipboard restore error: {e}"))?;
         }
     }
@@ -212,92 +250,4 @@ fn insert(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::paste::write_clipboard_text;
-    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-
-    fn text(board: &NSPasteboard) -> String {
-        board
-            .stringForType(unsafe { NSPasteboardTypeString })
-            .unwrap()
-            .to_string()
-    }
-
-    #[test]
-    fn target_switch_after_first_paste_restores_the_original_without_posting_again() {
-        let board = NSPasteboard::pasteboardWithUniqueName();
-        write_clipboard_text(&board, "original", false).unwrap();
-        let focused = std::cell::Cell::new(true);
-        let result = insert(
-            &board,
-            &mut ClipboardRestore::default(),
-            Some(Part::Text("sheet.png")),
-            "caption",
-            || focused.get(),
-            || {
-                assert!(focused.replace(false));
-                assert_eq!(text(&board), "sheet.png");
-                Ok(())
-            },
-            |_| {},
-        );
-        assert!(result.unwrap_err().to_string().contains("partially pasted"));
-        assert_eq!(text(&board), "original");
-    }
-
-    #[test]
-    fn a_capture_after_dictation_restores_the_pre_dictation_clipboard() {
-        let board = NSPasteboard::pasteboardWithUniqueName();
-        write_clipboard_text(&board, "original", false).unwrap();
-        let mut pending = ClipboardRestore::default();
-        let original_count = board.changeCount();
-        let original = capture_clipboard(&board).unwrap();
-        write_clipboard_text(&board, "dictation", true).unwrap();
-        pending.register(original, original_count, board.changeCount());
-        let mut posted = Vec::new();
-        insert(
-            &board,
-            &mut pending,
-            Some(Part::Text("sheet.png")),
-            "caption",
-            || true,
-            || {
-                posted.push(text(&board));
-                Ok(())
-            },
-            |_| {},
-        )
-        .unwrap();
-        assert_eq!(posted, ["sheet.png", "caption"]);
-        assert_eq!(text(&board), "original");
-    }
-
-    #[test]
-    fn an_external_copy_after_the_sheet_stops_the_summary_and_survives_restore() {
-        let board = NSPasteboard::pasteboardWithUniqueName();
-        write_clipboard_text(&board, "original", false).unwrap();
-        let mut posts = 0;
-        let result = insert(
-            &board,
-            &mut ClipboardRestore::default(),
-            Some(Part::Png(b"sample sheet")),
-            "Move the heading down.",
-            || true,
-            || {
-                posts += 1;
-                write_clipboard_text(&board, "external copy", false)
-            },
-            |_| {},
-        );
-        assert!(result.unwrap_err().to_string().contains("partially pasted"));
-        assert_eq!(posts, 1);
-        assert_eq!(
-            board
-                .stringForType(unsafe { NSPasteboardTypeString })
-                .unwrap()
-                .to_string(),
-            "external copy"
-        );
-    }
-}
+mod tests;
