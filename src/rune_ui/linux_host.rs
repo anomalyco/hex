@@ -155,6 +155,7 @@ impl Backend {
                 update_notes: desktop.update_notes,
                 update_blocked: None,
                 editing,
+                consent: None,
             },
             settings,
         })

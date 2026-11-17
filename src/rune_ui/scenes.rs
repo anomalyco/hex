@@ -145,6 +145,21 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         output::trust_fixture(ui);
     }),
+    // A web page's one-transcription ask: the consent dialog over General.
+    ("browser-connect", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.api_browser_access = true;
+        crate::labs::apply(&ui.settings.labs);
+        let prompt = crate::local_api::Prompt {
+            id: 7,
+            origin: "https://notes.example".into(),
+            client_name: Some("Field Notes".into()),
+        };
+        ui.consent = Some(prompt.clone());
+        if let Some(view) = &mut ui.view {
+            view.consent = Some(prompt);
+        }
+    }),
     ("output-empty", |ui| {
         *ui = portal_fixture();
         ui.pane = Pane::Output;
@@ -1031,6 +1046,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         update_notes: None,
         update_blocked: None,
         editing: false,
+        consent: None,
     });
     ui
 }

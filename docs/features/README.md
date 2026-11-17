@@ -2737,6 +2737,10 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
 ├── A web page's fetch -> Labs › Browser access to the local API
 │   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
+│   ├── POST /connect/authorize -> Hex's window asks; Allow once -> code + PKCE
+│   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
+│   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
+│   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
 │   └── Any other origin, or the lab off -> OPTIONS 401, no CORS headers
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No capture silence gate           // model output, unlike hotkey dictation;
@@ -2823,6 +2827,18 @@ a request's `Origin` is matched exactly. Errors answered before a request is
 read (`400`, `408`, `431`, and the queue-full `503`) carry no CORS headers.
 Route tests inject the gate (`cors::Cors::gated`); nothing was observed from a
 real browser page.
+
+Browser connect ([contract](../connect.md)) is the narrower ask beside that
+token-bearing access: a listed page calls `POST /connect/authorize` without the
+token, Hex's window names its verified origin and offers Deny / Allow once, and
+an allowed PKCE exchange mints one upload token that spends itself on one plain
+`POST /transcriptions` from the same origin. Codes and tokens expire in two
+minutes, a Deny starts a 30 s cooldown, and the dialog is answered (Escape and
+the scrim deny) rather than dismissed. `local_api` tests cover the whole
+exchange, origin binding, one-use codes and tokens, expiry, the scope
+refusals, and deny/timeout. The dialog's only rendering proof is the
+`--scene browser-connect` snapshot; no real browser page, click, or model
+transcription was run, and its copy is English only.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

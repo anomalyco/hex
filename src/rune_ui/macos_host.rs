@@ -154,6 +154,7 @@ impl Backend {
                 update_notes: published.update_notes.clone(),
                 update_blocked: None,
                 editing: false,
+                consent: published.consent.clone(),
             },
             settings: published.settings.clone(),
         })

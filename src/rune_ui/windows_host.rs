@@ -119,6 +119,7 @@ impl Backend {
                 update_notes: published.update_notes.clone(),
                 update_blocked: published.update_blocked,
                 editing: false,
+                consent: None,
             },
             settings: published.settings.clone(),
         })

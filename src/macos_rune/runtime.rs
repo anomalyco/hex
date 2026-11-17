@@ -53,6 +53,7 @@ pub(super) fn run_runtime(
         activity,
         last_completed_at,
         started_at: shared.started_at,
+        consent: shared.consent.clone(),
     };
     let mut settings_checked = Instant::now();
     loop {
@@ -130,6 +131,8 @@ pub(super) struct Runtime {
     /// When this runtime started, in the event log's wall-clock ms. Failures
     /// older than this belong to the previous session.
     pub(super) started_at: u64,
+    /// The window's side of a web page's one-transcription ask.
+    pub(super) consent: Option<Arc<super::consent::Desk>>,
 }
 
 impl Runtime {
@@ -164,6 +167,11 @@ impl Runtime {
             Request::CancelModel => {
                 self.manual_choice();
                 self.preparation.cancel();
+            }
+            Request::AnswerConsent { id, allow } => {
+                if let Some(desk) = &self.consent {
+                    desk.answer(id, allow);
+                }
             }
             Request::ReloadSettings => self.reload_settings(),
             Request::Desktop(_)
@@ -359,6 +367,7 @@ impl Runtime {
             update_notes: UPDATER.get().and_then(crate::updater::Updater::notes),
             settings: self.settings.clone(),
             preparation,
+            consent: self.consent.as_ref().and_then(|desk| desk.prompt()),
         }
     }
 }

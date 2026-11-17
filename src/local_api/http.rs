@@ -14,6 +14,8 @@ pub(super) struct HttpRequest {
     pub(super) authorization: Option<String>,
     pub(super) dictation_token: Option<String>,
     pub(super) stream_token: Option<String>,
+    /// `X-Hex-Connect-Token`: a browser page's one-use upload grant.
+    pub(super) connect_token: Option<String>,
     pub(super) content_type: Option<String>,
     pub(super) content_length: Option<usize>,
     /// The browser page that made the request, when it sent one.
@@ -164,7 +166,7 @@ impl HttpResponse {
             ("Access-Control-Allow-Methods", "GET, POST"),
             (
                 "Access-Control-Allow-Headers",
-                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token",
+                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token, X-Hex-Connect-Token",
             ),
             ("Access-Control-Max-Age", "600"),
         ];
@@ -309,6 +311,7 @@ pub(super) fn read_request_until(
     let mut authorization = None;
     let mut dictation_token = None;
     let mut stream_token = None;
+    let mut connect_token = None;
     let mut content_type = None;
     let mut content_length = None;
     let mut origin = None;
@@ -331,6 +334,11 @@ pub(super) fn read_request_until(
                 return Err(RequestReadError::Invalid);
             }
             stream_token = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("x-hex-connect-token") {
+            if connect_token.is_some() {
+                return Err(RequestReadError::Invalid);
+            }
+            connect_token = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("origin") {
             // Two Origin headers name no one origin, so the request earns no
             // CORS permission; it is still routed as it was before the lab
@@ -369,6 +377,7 @@ pub(super) fn read_request_until(
         authorization,
         dictation_token,
         stream_token,
+        connect_token,
         content_type,
         content_length,
         origin,

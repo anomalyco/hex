@@ -280,6 +280,7 @@ impl HostHandle {
                     host.cancel_transcription_preparation();
                     Ok(())
                 }
+                HostRequest::AnswerConsent { .. } => Ok(()),
             }
         };
         self.wake();

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Hex browser connect</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; }
+    body { max-width: 40rem; margin: 4rem auto; padding: 0 1.5rem; }
+    h1 { font-size: 1.3rem; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input, button { font: inherit; padding: 0.45rem 0.6rem; margin-top: 0.35rem; }
+    input[type="file"] { width: 100%; }
+    button { cursor: pointer; }
+    #log { white-space: pre-wrap; background: color-mix(in oklab, currentColor 8%, transparent);
+           padding: 1rem; border-radius: 0.5rem; margin-top: 1.5rem; }
+    .hint { opacity: 0.75; font-size: 0.9rem; }
+  </style>
+  <h1>Hex browser connect</h1>
+  <p class="hint">
+    This page asks Hex's window to transcribe one recording. Hex must have
+    Labs › Browser access to the local API on, with this page's origin
+    (<code id="origin"></code>) in its list. The API port comes from Hex's
+    discovery file; this page never reads the token.
+  </p>
+
+  <label for="port">Hex's local API port</label>
+  <input id="port" inputmode="numeric" placeholder="60529" />
+
+  <label for="file">One WAV recording</label>
+  <input id="file" type="file" accept="audio/wav" />
+
+  <p><button id="ask">Ask Hex for one transcription</button></p>
+  <pre id="log">Nothing asked yet.</pre>
+
+  <script type="module">
+    const origin = location.origin;
+    document.querySelector("#origin").textContent = origin;
+    const log = (line) => {
+      document.querySelector("#log").textContent += `\n${line}`;
+    };
+    document.querySelector("#log").textContent = "";
+
+    const base64url = (bytes) =>
+      btoa(String.fromCharCode(...bytes))
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replaceAll("=", "");
+
+    async function pkce() {
+      const random = crypto.getRandomValues(new Uint8Array(48));
+      const verifier = base64url(random);
+      const digest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(verifier),
+      );
+      return { verifier, challenge: base64url(new Uint8Array(digest)) };
+    }
+
+    async function post(url, body, token) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "X-Hex-Connect-Token": token } : {}),
+        },
+        body,
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`${response.status} ${text}`);
+      return text ? JSON.parse(text) : null;
+    }
+
+    document.querySelector("#ask").addEventListener("click", async () => {
+      const port = document.querySelector("#port").value.trim();
+      const file = document.querySelector("#file").files[0];
+      if (!port) return log("Enter Hex's local API port first.");
+      const api = `http://127.0.0.1:${port}`;
+      try {
+        const { verifier, challenge } = await pkce();
+        const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+        log("Asking Hex's window…");
+        const grant = await post(
+          `${api}/connect/authorize`,
+          JSON.stringify({
+            codeChallenge: challenge,
+            codeChallengeMethod: "S256",
+            clientName: "Hex browser connect demo",
+            state,
+          }),
+        );
+        if (grant.state !== state) throw new Error("Hex answered another request.");
+        log(`Allowed. Code expires in ${grant.expiresInMs} ms.`);
+        const { uploadToken } = await post(
+          `${api}/connect/token`,
+          JSON.stringify({ code: grant.code, codeVerifier: verifier }),
+        );
+        if (!file) {
+          log("No recording chosen; the one-use token is left unused.");
+          return;
+        }
+        log("Uploading once…");
+        const response = await fetch(`${api}/transcriptions`, {
+          method: "POST",
+          headers: {
+            "X-Hex-Connect-Token": uploadToken,
+            "Content-Type": "audio/wav",
+          },
+          body: await file.arrayBuffer(),
+        });
+        log(`${response.status}\n${await response.text()}`);
+      } catch (error) {
+        log(String(error));
+      }
+    });
+  </script>
+</html>

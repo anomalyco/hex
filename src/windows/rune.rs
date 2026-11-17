@@ -71,6 +71,14 @@ pub(crate) enum Request {
         language: String,
     },
     CancelModel,
+    /// The window answered a web page's one-transcription ask; macOS only,
+    /// where the local API has a window to ask.
+    AnswerConsent {
+        #[allow(dead_code)]
+        id: u64,
+        #[allow(dead_code)]
+        allow: bool,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
