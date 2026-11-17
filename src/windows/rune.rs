@@ -80,7 +80,7 @@ pub(crate) enum Request {
         #[allow(dead_code)]
         id: u64,
         #[allow(dead_code)]
-        allow: bool,
+        answer: crate::local_api::Answer,
     },
     /// The window stopped or cancelled a consented recording; macOS only.
     RecordControl {
@@ -90,6 +90,9 @@ pub(crate) enum Request {
         stop: bool,
     },
     /// The window withdrew a client's grant; macOS only.
+    RevokePermission {
+        id: u64,
+    },
     RevokeRecordGrant {
         #[allow(dead_code)]
         id: u64,

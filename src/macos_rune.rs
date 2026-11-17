@@ -107,6 +107,7 @@ pub(crate) struct Published {
     /// A consented recording Hex's window can stop or cancel.
     pub(crate) record: Option<crate::local_api::RecordView>,
     /// Clients paired to start recordings, which the window can revoke.
+    pub(crate) permissions: Vec<crate::local_api::PermissionView>,
     pub(crate) grants: Vec<crate::local_api::RecordGrant>,
 }
 
@@ -363,7 +364,12 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let consent = Arc::new(consent::Desk::default());
     // One consented recording runs on the listener's own programmatic
     // dictation; the window can stop or cancel it.
-    let record = crate::local_api::record_sessions(consent.clone(), recognition_controls.clone());
+    let permissions = crate::local_api::Permissions::app();
+    let record = crate::local_api::record_sessions(
+        consent.clone(),
+        recognition_controls.clone(),
+        permissions.clone(),
+    );
     let mut local_api = crate::local_api::LocalApi::start(
         event_log.clone(),
         crate::local_api::LocalApiOptions {
@@ -374,6 +380,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             connect: Some(crate::local_api::Connect::new(
                 crate::labs::api_browser_origins,
                 Some(consent.clone()),
+                permissions,
             )),
             record: Some(record.clone()),
             native_socket: crate::local_api::native_socket_path(),

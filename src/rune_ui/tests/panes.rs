@@ -2925,6 +2925,9 @@ fn browser_access_lists_a_paired_client_and_revokes_it() {
             .any(|text| text.contains("com.example.fieldnotes")),
         "the paired client is named"
     );
+    tap(&mut rt, "permission-revoke-2");
+    assert!(matches!(sent(&rt), [Request::RevokePermission { id: 2 }]));
+    let mut rt = runtime("mac-labs-browser-access", true, (980.0, 2000.0));
     tap(&mut rt, "api-revoke-1");
     assert!(matches!(sent(&rt), [Request::RevokeRecordGrant { id: 1 }]));
 }

@@ -2874,14 +2874,14 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   └── ?timestamps=segment|word -> The model's own segment or word times
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
 ├── A web page's fetch -> Never allowed: no CORS, OPTIONS is 401
-│   ├── POST /connect/authorize -> Hex's window asks; Allow once -> code + PKCE
+│   ├── POST /connect/authorize -> Hex's window asks; Allow Once or Always Allow -> code + PKCE
 │   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
 │   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
-│   ├── POST /record/pair -> "Allow this app to start recordings?"
+│   ├── POST /record/pair -> "Allow microphone recording?"
 │   │   ├── Web: listed Origin; native: owner-only record.sock + verified signature
-│   │   ├── Allow -> code, PKCE grant; Not now -> 403 + 30 s cooldown
-│   │   ├── Grant: repeated POST /record/start, each its own session
+│   │   ├── Allow Once / Always Allow -> code, PKCE grant; Deny -> 403 + 30 s cooldown
+│   │   ├── One start (Once) or repeated starts (Always), each its own session
 │   │   ├── Window card: Stop recording / Cancel, lease countdown; 120 s max
 │   │   ├── Grant bound to Origin or peer audit token; one session at a time
 │   │   ├── Revoke in Labs › Browser access or POST /record/revoke ends it
@@ -2957,7 +2957,7 @@ estimates the times, and `/streams` and `/dictations` are unchanged
 Browser connect and recording ([contract](../connect.md)) are the narrower
 asks beside that token-bearing access: a listed page calls
 `POST /connect/authorize` without the token, Hex's window names its verified
-origin and offers Deny / Allow once, and an allowed PKCE exchange mints one
+origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
 upload token that spends itself on one plain `POST /transcriptions` from the
 same origin. Codes and tokens expire in two minutes, a Deny starts a 30 s
 cooldown, and the dialog is answered (Escape and the scrim deny) rather than
@@ -2970,16 +2970,19 @@ only.
 The recording slice adds `POST /record/pair|token` plus a revocable
 `X-Hex-Record-Grant`, and per-recording `start` (grant) then
 `status|finish|cancel` (session token). Pairing asks once and starts nothing;
-each start mints a separate short-lived session, so a paired client records
+each start mints a separate short-lived session, so an Always Allow client records
 again without another prompt until the grant is revoked in Labs › Browser
 access or with `POST /record/revoke`. Web clients use the same listed-Origin
 CORS channel; native clients (Electron main, Rune, Rust) use the owner-only
 `record.sock`, whose peer audit token `Security.framework` resolves to a
 signing identifier and team. Consent names that verified identity, the grant
 and its sessions are bound to it, and Hex's window shows a non-modal card with
-Stop recording and Cancel while the 120 s lease runs. Grants are in memory
-only: quitting Hex revokes every pairing because there is no secure on-disk
-store for a client identity, and the contract report says so.
+Stop recording and Cancel while the 120 s lease runs. Grant tokens are
+memory-only. Always Allow saves the capability and either a signed binary
+identity or an origin plus a digest of the page's permission proof.
+Revoking in Labs › Browser access removes the permission across restarts.
+Allow Once records one session and saves nothing. See the contract for the
+loopback Origin trust boundary and why a changed native binary asks again.
 `local_api` tests drive the whole exchange with a fake recording backend
 (never a microphone), including one prompt for repeated recordings, distinct
 sessions, revoke, the lease, deny, the one-session rule, and neither token's

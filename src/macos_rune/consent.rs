@@ -16,7 +16,7 @@ use crate::local_api::{Answer, ConsentGate, Prompt};
 /// What the window shows, and where its answer goes.
 struct Pending {
     prompt: Prompt,
-    answer: Sender<bool>,
+    answer: Sender<Answer>,
 }
 
 #[derive(Default)]
@@ -43,7 +43,7 @@ impl Desk {
 
     /// Answers the ask `id`, if it is still the pending one. Escape and the
     /// scrim answer Deny the same way the buttons do.
-    pub(crate) fn answer(&self, id: u64, allow: bool) -> bool {
+    pub(crate) fn answer(&self, id: u64, answer: Answer) -> bool {
         let mut state = lock(&self.state);
         let Some(pending) = state.pending.as_ref() else {
             return false;
@@ -52,7 +52,7 @@ impl Desk {
             return false;
         }
         let pending = state.pending.take().expect("checked just above");
-        pending.answer.send(allow).is_ok()
+        pending.answer.send(answer).is_ok()
     }
 }
 
@@ -79,8 +79,7 @@ impl ConsentGate for Desk {
             id
         };
         let answer = match answered.recv_timeout(wait) {
-            Ok(true) => Answer::Allow,
-            Ok(false) => Answer::Deny,
+            Ok(answer) => answer,
             Err(_) => Answer::Timeout,
         };
         // A timeout leaves the dialog unanswerable, so it goes away; a button
@@ -112,7 +111,7 @@ mod tests {
     fn prompt() -> Prompt {
         Prompt {
             id: 0,
-            intent: crate::local_api::Intent::Upload,
+            intent: crate::local_api::Intent::Transcribe,
             recipient: crate::local_api::Recipient::Web {
                 origin: "https://notes.example".into(),
                 client_name: Some("Field Notes".into()),
@@ -134,8 +133,8 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         };
         assert_eq!(shown.recipient.label(), "https://notes.example");
-        assert!(desk.answer(shown.id, true));
-        assert_eq!(asking.join().unwrap(), Answer::Allow);
+        assert!(desk.answer(shown.id, Answer::Once));
+        assert_eq!(asking.join().unwrap(), Answer::Once);
         assert!(desk.prompt().is_none());
     }
 
@@ -152,8 +151,8 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(5));
         };
-        assert!(!desk.answer(shown.id + 1, true));
-        assert!(desk.answer(shown.id, false));
+        assert!(!desk.answer(shown.id + 1, Answer::Once));
+        assert!(desk.answer(shown.id, Answer::Deny));
         assert_eq!(asking.join().unwrap(), Answer::Deny);
     }
 

@@ -228,6 +228,8 @@ const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 #[link(name = "Security", kind = "framework")]
 unsafe extern "C" {
     static kSecGuestAttributeAudit: CFStringRef;
+    static kSecCodeInfoUnique: CFStringRef;
+    fn SecCodeCheckValidity(code: SecCodeRef, flags: u32, requirement: CFTypeRef) -> i32;
     static kSecCodeInfoIdentifier: CFStringRef;
     static kSecCodeInfoTeamIdentifier: CFStringRef;
     fn SecCodeCopyGuestWithAttributes(
@@ -248,6 +250,8 @@ unsafe extern "C" {
 unsafe extern "C" {
     static kCFTypeDictionaryKeyCallBacks: c_void;
     static kCFTypeDictionaryValueCallBacks: c_void;
+    fn CFDataGetBytePtr(data: CFDataRef) -> *const u8;
+    fn CFDataGetLength(data: CFDataRef) -> isize;
     fn CFDataCreate(alloc: CFTypeRef, bytes: *const u8, len: isize) -> CFDataRef;
     fn CFDictionaryCreate(
         alloc: CFTypeRef,
@@ -342,6 +346,9 @@ fn signing_identity(token: &[u8; 32]) -> Option<Identity> {
 
 unsafe fn signing_identity_of(code: SecCodeRef) -> Option<Identity> {
     unsafe {
+        if SecCodeCheckValidity(code, 0, std::ptr::null()) != 0 {
+            return None;
+        }
         let mut stat: SecStaticCodeRef = std::ptr::null();
         if SecCodeCopyStaticCode(code, 0, &mut stat) != 0 || stat.is_null() {
             return None;
@@ -349,9 +356,25 @@ unsafe fn signing_identity_of(code: SecCodeRef) -> Option<Identity> {
         let mut info: CFDictionaryRef = std::ptr::null();
         let status = SecCodeCopySigningInformation(stat, SEC_CS_SIGNING_INFORMATION, &mut info);
         let identity = if status == 0 && !info.is_null() {
-            let identifier = cf_string(CFDictionaryGetValue(info, kSecCodeInfoIdentifier))?;
+            let identifier = cf_string(CFDictionaryGetValue(info, kSecCodeInfoIdentifier));
             let team = cf_string(CFDictionaryGetValue(info, kSecCodeInfoTeamIdentifier));
-            Some(Identity { identifier, team })
+            let digest = CFDictionaryGetValue(info, kSecCodeInfoUnique);
+            identifier.and_then(|identifier| {
+                if digest.is_null() {
+                    return None;
+                }
+                let len = CFDataGetLength(digest);
+                if !(20..=64).contains(&len) {
+                    return None;
+                }
+                let bytes = std::slice::from_raw_parts(CFDataGetBytePtr(digest), len as usize);
+                let cdhash = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                Some(Identity {
+                    identifier,
+                    team,
+                    cdhash,
+                })
+            })
         } else {
             None
         };

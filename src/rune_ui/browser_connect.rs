@@ -1,17 +1,11 @@
-//! A local client's ask: a modal naming the caller's verified identity.
-//! An upload asks with Allow once and Deny; pairing a client to start
-//! recordings asks with Allow and Not now.
-//!
-//! Nothing happens on the client's say-so: the local API only asks while the
-//! dialog shows, and only a press answers it. Deny or Not now (or Escape, or
-//! the scrim) refuses; Allow issues one code the client may exchange for one
-//! upload, or for a revocable grant to start recordings.
+//! Consent for audio transcription or microphone recording, scoped to the named recipient.
 
 use rune::{El, col, el, row, text};
 
 use super::Ui;
 use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use crate::desktop::i18n::{tr, tr_fill};
+use crate::local_api::Answer;
 
 /// The dialog's width and padding.
 const WIDTH: f32 = 440.0;
@@ -42,14 +36,14 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
 
 /// Answers the ask with `allow`, and hides the dialog at once. A late or
 /// duplicate press sends nothing, so one dialog is one answer.
-pub(super) fn answer(ui: &mut Ui, allow: bool) {
+pub(super) fn answer(ui: &mut Ui, answer: Answer) {
     let Some(prompt) = ui.consent.take() else {
         return;
     };
     ui.consent_done = Some(prompt.id);
     ui.send(super::Request::AnswerConsent {
         id: prompt.id,
-        allow,
+        answer,
     });
 }
 
@@ -59,9 +53,9 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     let c = &p.k.c;
     let record = prompt.intent == crate::local_api::Intent::Record;
     let title = if record {
-        tr("Allow this app to start recordings?")
+        tr("Allow microphone recording?")
     } else {
-        tr("Allow one transcription?")
+        tr("Allow this page to transcribe audio?")
     };
     let mut panel = col()
         .key("browser-connect-dialog")
@@ -135,22 +129,20 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         let seconds = seconds.to_string();
         (
             tr(
-                "Pair this app once so it can ask Hex to record through Hex's dictation microphone. Each request starts one recording, and only its transcript goes back. Raw audio stays in Hex.",
+                "Allow Once lets this client start one microphone recording. Always Allow lets it start future recordings without asking. Only the transcript goes back.",
             ),
             tr_fill(
-                "Pairing starts nothing by itself. Each recording stops itself after {} seconds and can be stopped or cancelled in Hex's window. Revoke the app any time in Labs › Browser access.",
+                "Nothing records until the client asks. Recordings stop after {} seconds. Stop or cancel in Hex; revoke access in Labs › Browser access.",
                 &seconds,
             ),
         )
     } else {
         (
             tr(
-                "This page wants Hex to transcribe one audio recording. If you allow once, Hex sends it one transcript of that upload, and the permission ends.",
+                "Allow Once transcribes one audio file and returns its text to this page. Always Allow lets this page send more files without asking.",
             ),
-            tr(
-                "Hex's microphone stays off. This page gets no recording, no dictation, no paste, and no other Hex control.",
-            )
-            .to_owned(),
+            tr("Your microphone stays off. You can revoke access in Labs › Browser access.")
+                .to_owned(),
         )
     };
     let panel = panel
@@ -177,22 +169,25 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                     button(
                         p,
                         "browser-connect-deny",
-                        if record { tr("Not now") } else { tr("Deny") },
+                        tr("Deny"),
                         ButtonKind::Secondary,
-                        |ui: &mut Ui, _| answer(ui, false),
+                        |ui: &mut Ui, _| answer(ui, Answer::Deny),
                     )
                     .default_button(),
                 )
                 .child(button(
                     p,
                     "browser-connect-allow",
-                    if record {
-                        tr("Allow")
-                    } else {
-                        tr("Allow once")
-                    },
+                    tr("Allow Once"),
                     ButtonKind::Primary,
-                    |ui: &mut Ui, _| answer(ui, true),
+                    |ui: &mut Ui, _| answer(ui, Answer::Once),
+                ))
+                .child(button(
+                    p,
+                    "browser-connect-always",
+                    tr("Always Allow"),
+                    ButtonKind::Primary,
+                    |ui: &mut Ui, _| answer(ui, Answer::Always),
                 )),
         );
     let mut panel = panel;
@@ -209,13 +204,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     Some([
         layer("browser-connect-scrim")
             .fill(c.scrim)
-            .on_press(|ui: &mut Ui| answer(ui, false))
+            .on_press(|ui: &mut Ui| answer(ui, Answer::Deny))
             .transition(modal_scrim_transition(p)),
         layer("browser-connect-layer")
             .center()
             .transition(modal_transition(p))
             // Keys stay inside, Escape denies, and focus returns after.
-            .child(panel.modal(true, |ui: &mut Ui| answer(ui, false))),
+            .child(panel.modal(true, |ui: &mut Ui| answer(ui, Answer::Deny))),
     ])
 }
 
@@ -228,7 +223,7 @@ mod tests {
     fn ask() -> crate::local_api::Prompt {
         crate::local_api::Prompt {
             id: 7,
-            intent: Intent::Upload,
+            intent: Intent::Transcribe,
             recipient: Recipient::Web {
                 origin: "https://notes.example".into(),
                 client_name: Some("Field Notes".into()),
@@ -242,6 +237,7 @@ mod tests {
             intent: Intent::Record,
             recipient: Recipient::Native {
                 identifier: "com.example.recorder".into(),
+                cdhash: "fixture-digest".into(),
                 team: Some("ABCDE12345".into()),
             },
         }
@@ -261,29 +257,72 @@ mod tests {
         assert!(poll(&mut ui));
         assert_eq!(ui.consent.as_ref().map(|prompt| prompt.id), Some(7));
 
-        answer(&mut ui, true);
+        answer(&mut ui, Answer::Once);
         assert!(ui.consent.is_none());
         assert!(matches!(
             sent(&ui),
-            [Request::AnswerConsent { id: 7, allow: true }]
+            [Request::AnswerConsent {
+                id: 7,
+                answer: Answer::Once
+            }]
         ));
         // The host still publishes the same ask until the worker clears it;
         // it must not reopen the answered dialog.
         assert!(!poll(&mut ui));
-        answer(&mut ui, false);
+        answer(&mut ui, Answer::Deny);
         assert_eq!(sent(&ui).len(), 1);
+    }
+
+    #[test]
+    fn both_dialogs_send_the_duration_of_the_button_pressed() {
+        use crate::rune_ui::{offscreen, view};
+        for prompt in [ask(), record_ask()] {
+            for (key, label, expected) in [
+                ("browser-connect-deny", "Deny", Answer::Deny),
+                ("browser-connect-allow", "Allow Once", Answer::Once),
+                ("browser-connect-always", "Always Allow", Answer::Always),
+            ] {
+                let mut ui = crate::rune_ui::scenes::mac_fixture();
+                ui.consent = Some(prompt.clone());
+                let mut rt = offscreen::runtime(
+                    ui,
+                    view,
+                    (980.0, 760.0),
+                    rune::Env {
+                        system_dark: true,
+                        scale: 2.0,
+                    },
+                    rune::text::TextSystem::new(
+                        rune_theme_opencode::FONTS,
+                        rune_theme_opencode::FAMILIES,
+                    ),
+                );
+                rt.settle_all();
+                rt.frame(0.0);
+                let copy: Vec<_> = rt.elements().into_iter().filter_map(|e| e.text).collect();
+                assert!(copy.iter().any(|s| s == label));
+                assert!(!copy.iter().any(|s| s.to_lowercase().contains("upload")));
+                let (x, y) = rt.find(key).unwrap();
+                rt.pointer_down(x, y);
+                rt.pointer_up(x, y);
+                rt.frame(0.0);
+                assert!(
+                    matches!(sent(&rt.state), [Request::AnswerConsent {answer, ..}] if *answer == expected)
+                );
+            }
+        }
     }
 
     #[test]
     fn denying_sends_no_allow() {
         let mut ui = crate::rune_ui::scenes::mac_fixture();
         ui.consent = Some(ask());
-        answer(&mut ui, false);
+        answer(&mut ui, Answer::Deny);
         assert!(matches!(
             sent(&ui),
             [Request::AnswerConsent {
                 id: 7,
-                allow: false
+                answer: Answer::Deny
             }]
         ));
         assert_eq!(ui.consent_done, Some(7));
@@ -302,10 +341,13 @@ mod tests {
             Some("Signed by team ABCDE12345")
         );
         assert!(prompt.recipient.claimed_name().is_none());
-        answer(&mut ui, true);
+        answer(&mut ui, Answer::Once);
         assert!(matches!(
             sent(&ui),
-            [Request::AnswerConsent { id: 9, allow: true }]
+            [Request::AnswerConsent {
+                id: 9,
+                answer: Answer::Once
+            }]
         ));
     }
 }

@@ -23,13 +23,13 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 ├── Origin not listed, or missing -> 403 origin-not-allowed (no dialog)
 ├── No JSON body, or not S256 -> 400 invalid-request
 ├── A dialog is already open -> 409 consent-busy
-├── Listed origin -> Hex's window: "Allow one transcription?" [Deny] [Allow once]
+├── Listed origin -> Hex's window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
 │   ├── Deny, Escape, scrim, or 60 s with no answer -> 403, no code
 │   │   └── Deny also starts a 30 s cooldown for that origin (429 consent-cooldown)
-│   └── Allow once -> 200 { code, expiresInMs, origin, scope, state }
+│   └── Allow Once or Always Allow -> 200 { code, expiresInMs, origin, scope, state }
 ├── POST /connect/token { code, codeVerifier }
 │   ├── Wrong origin, wrong verifier, spent, or expired -> 403 invalid-grant
-│   └── Correct -> 200 { uploadToken, expiresInMs, origin, scope }
+│   └── Correct -> 200 { audioToken, expiresInMs, origin, scope }
 └── POST /transcriptions with X-Hex-Connect-Token
     ├── Any other route or method -> 401 (the token reaches nothing else)
     ├── Another origin, spent, or expired -> 401
@@ -68,14 +68,14 @@ Request (JSON, at most 8 KiB):
 `S256` is accepted. `clientName` is optional; Hex shows it as "The page calls itself: …"
 only when it is at most 40 plain characters (no controls, no bidi overrides). `state` is echoed back unchanged (at most the body limit).
 
-The response is sent only after the person answers:
+The response requires a fresh Allow Once / Always Allow answer or an existing Always Allow permission for transcription:
 
 ```json
 {
   "code": "hexc_…",
   "expiresInMs": 120000,
   "origin": "https://app.example",
-  "scope": "transcription:upload",
+  "scope": "transcription:transcribe",
   "state": "opaque-app-value"
 }
 ```
@@ -96,10 +96,10 @@ exchange, right or wrong, so a page gets one guess against one consent.
 
 ```json
 {
-  "uploadToken": "hexu_…",
+  "audioToken": "hexa_…",
   "expiresInMs": 120000,
   "origin": "https://app.example",
-  "scope": "transcription:upload"
+  "scope": "transcription:transcribe"
 }
 ```
 
@@ -110,7 +110,7 @@ The existing route, with the upload token instead of `Authorization`:
 ```http
 POST /transcriptions HTTP/1.1
 Origin: https://app.example
-X-Hex-Connect-Token: hexu_…
+X-Hex-Connect-Token: hexa_…
 Content-Type: audio/wav
 Content-Length: …
 ```
@@ -132,7 +132,7 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
 - The page never sees `local-api.json`, its `token`, or another origin's
   grant. Codes and tokens are 32 random bytes from `getrandom`, stored only in
   this process.
-- There is no auto-allow, no remembered origin, and no background prompting.
+- Only Always Allow remembers the origin and capability. Each token still authorizes just one file.
   One dialog at a time; a Deny starts a cooldown; an unanswered dialog ends
   after 60 s.
 - The browser offers no server-side proof that its request followed a click
@@ -163,8 +163,12 @@ The dialog is rendered by Hex's own offscreen snapshot tooling
 click, and a real model transcription from a page were not exercised. Copy is
 English only. The origin check trusts the browser's `Origin` header, which is
 the same trust the CORS gate already places in it; a malicious local process
-that can reach loopback without a browser can open the dialog only by claiming
-a listed origin, and the person still has to allow it.
+can claim a listed origin to *ask*, but not silently reuse its saved permission.
+On the first Always Allow response, a web client receives `permissionProof`.
+Store it in origin-scoped storage and send it in later authorize/pair JSON for
+that capability. Hex saves only its SHA-256 digest. A missing or incorrect proof
+returns `403 permission-proof-required`; revoke in Labs and pair again if the
+browser lost its copy. Native callers use socket peer identity instead.
 
 ## Recording by a paired client
 
@@ -172,8 +176,7 @@ A client **pairs with Hex once**. The person sees the caller's verified
 identity and allows it to *start recordings*; Hex keeps a revocable grant.
 Pairing itself starts nothing: every `POST /record/start` opens a separate,
 short-lived session that stops itself at the lease and ends with one
-transcript (`finish`) or nothing (`cancel`). A client can record again until
-the grant is revoked; the person is not asked before each recording.
+transcript (`finish`) or nothing (`cancel`). Allow Once gives one session. Always Allow permits repeated sessions until revoked.
 
 Raw audio, levels, partials, History, paste, microphone selection, and desktop
 control are not exposed.
@@ -185,15 +188,15 @@ Native client (record.sock)        Web page (loopback + Origin)
              ├── native peer identity unreadable -> 403 identity-unverified
              ├── already paired -> 409 already-paired (no dialog)
              ├── another dialog is open -> 409 consent-busy
-             ├── Hex window: "Allow this app to start recordings?"
+             ├── Hex window: "Allow microphone recording?"
              │     recipient, team note, and that pairing starts nothing
-             │     [Not now] [Allow]
-             │   ├── Not now / Escape / scrim / 60 s -> 403, no code
-             │   │     Not now also cools that recipient down for 30 s
+             │     [Deny] [Allow Once] [Always Allow]
+             │   ├── Deny / Escape / scrim / 60 s -> 403, no code
+             │   │     Deny also cools that recipient down for 30 s
              │   └── Allow -> 200 { code, expiresInMs, scope: "record:pair", state }
              ├── POST /record/token { code, codeVerifier }
              │   └── correct, same verified channel -> 200 { grantId, grantToken,
-             │       scope: "record:any" }            // no recording yet
+             │       scope: "record:any", duration: "once" | "always" }            // no recording yet
              ├── POST /record/start    X-Hex-Record-Grant -> 201 { id, sessionToken,
              │       state: "recording", maxRecordingMs }
              ├── GET  /record/status   X-Hex-Record-Token
@@ -203,7 +206,7 @@ Native client (record.sock)        Web page (loopback + Origin)
              └── POST /record/revoke   X-Hex-Record-Grant -> 204, ends the grant
 ```
 
-Repeat `start` … `finish` for each distinct recording; each start mints a new
+With Always Allow, repeat `start` … `finish` for each distinct recording; each start mints a new
 session token. While a session is live, Hex's window shows a non-modal card
 naming the recipient, the time left on the lease, **Stop recording** (keeps
 the transcript for the client's `finish`) and **Cancel** (discards it). The
@@ -227,6 +230,8 @@ falling back to an app name or path. A grant and its sessions are bound to the
 peer's audit token, so another process cannot spend them even if it learns the
 token.
 
+The native identity is the signed executable, not a document, script, or renderer. Allowing a shared interpreter such as Node therefore allows that interpreter, not just one script. Use Allow Once for shared hosts.
+
 Native clients need no `Origin`, no bearer token, and no discovery file. The
 loopback API is not their channel, and the Unix socket has no route for it.
 
@@ -235,7 +240,7 @@ loopback API is not their channel, and the Unix socket has no route for it.
 | Limit | Value |
 | --- | --- |
 | Pairing code lifetime | 120 s, one use |
-| Grant | Until revoked or Hex quits |
+| Grant token | Process-local; one session for Allow Once, reusable for Always Allow |
 | One recording | 120 s maximum; it stops itself |
 | After the stop | 30 s for `finish`, then discarded (`409 session-expired`) |
 | Concurrent recordings | 1 (`409 session-busy` on the next start) |
@@ -247,14 +252,17 @@ the grace window.
 
 ### Revocation and persistence
 
-Grants live in Hex's process only. They are not written to disk, so quitting
-Hex revokes every pairing: the next run asks again. That is deliberate — this
-prototype has no secure store for a client's identity, and a name, path, or
-claimed bundle ID is not one — but it is a real limitation for a client that
-expects to stay paired across restarts. Persisting a grant would need a store
-protected by the OS (for example the Keychain) and a signing identity strong
-enough to re-verify on launch; team-less and ad-hoc signatures do not meet
-that bar and are shown as weak in the dialog.
+Codes, grant tokens and sessions are never persisted. Only **Always Allow** saves a
+recipient and capability in `local-consent.json` (mode 0600). After restarting
+Hex the client pairs afresh, without a new dialog for that permission. Native
+matches require the validated signing identifier, team and code-directory hash;
+a changed binary must ask again. Listed web origins match independently of the
+page's claimed name. Transcription and microphone recording are separate choices.
+
+Labs › Browser access lists saved permissions even when the client is offline.
+Revoke deletes just that capability from disk. It invalidates its outstanding
+codes and tokens; for recording it also cancels an active session. A failed
+save never grants access, and a failed revoke does not disappear from the list.
 
 ### Errors
 
@@ -264,7 +272,7 @@ that bar and are shown as weak in the dialog.
 | 401 | `invalid-grant` | Unknown, revoked, or other-channel grant; a session token used as a grant |
 | 403 | `identity-unverified` | The native peer's signature could not be read |
 | 403 | `origin-not-allowed` | A browser request's Origin is missing or unlisted |
-| 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Not now, no answer, no window/gate |
+| 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Deny, no answer, no window/gate |
 | 403 | `invalid-grant` | Wrong, spent, or expired pairing code |
 | 404 | `record-not-found` | Unknown session token or one bound to another channel |
 | 409 | `already-paired` | That recipient already has a grant |

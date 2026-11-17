@@ -121,6 +121,7 @@ impl Backend {
                 editing: false,
                 consent: None,
                 record: None,
+                permissions: Vec::new(),
                 grants: Vec::new(),
             },
             settings: published.settings.clone(),

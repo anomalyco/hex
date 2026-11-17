@@ -72,7 +72,7 @@ const paired = await call("/record/pair", "POST", {
   body: { codeChallenge: challenge, codeChallengeMethod: "S256" },
 });
 if (paired.status !== 200) {
-  // 403 consent-denied means the person pressed Not now (or let it time out).
+  // 403 consent-denied means the person pressed Deny (or let it time out).
   console.error("Hex did not allow pairing:", paired.status, paired.text);
   process.exit(1);
 }
@@ -108,6 +108,7 @@ async function recordOnce() {
 
 const first = await recordOnce();
 if (first !== null) console.log("Transcript 1:", first);
+if (exchanged.json.duration !== "always") process.exit(0); // Once is spent.
 const second = await recordOnce();
 if (second !== null) console.log("Transcript 2:", second);
 

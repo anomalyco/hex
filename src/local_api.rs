@@ -23,6 +23,7 @@ mod http;
 mod meeting_events;
 #[cfg(target_os = "macos")]
 mod native;
+pub(crate) mod permissions;
 pub(crate) mod processing;
 mod record;
 mod streams;
@@ -31,6 +32,8 @@ mod transcriptions;
 
 pub(crate) use connect::Connect;
 pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
+pub(crate) use permissions::View as PermissionView;
+pub(crate) use permissions::{Capability as PermissionCapability, Permissions};
 pub(crate) use record::View as RecordView;
 pub(crate) use record::{
     GrantView as RecordGrant, Phase as RecordPhase, Sessions as RecordSessions,
@@ -744,7 +747,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
     let request = match connect::intercept(request, context.connect.as_ref()) {
         connect::Intercept::Refuse(response) => return RequestAction::Respond(response),
         connect::Intercept::Connect(call) => return RequestAction::Connect(call),
-        connect::Intercept::Upload(request) => {
+        connect::Intercept::Audio(request) => {
             return transcription_action(
                 request,
                 &context.transcription,
@@ -2348,10 +2351,20 @@ mod tests {
         let directory = temp_directory();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
         let connect = match timings {
-            Some((code, token, wait, cooldown)) => {
-                connect::Connect::with_timings(origins, Some(gate), code, token, wait, cooldown)
-            }
-            None => connect::Connect::new(origins, Some(gate)),
+            Some((code, token, wait, cooldown)) => connect::Connect::with_timings(
+                origins,
+                Some(gate),
+                Permissions::new(Some(directory.join("permissions.json"))),
+                code,
+                token,
+                wait,
+                cooldown,
+            ),
+            None => connect::Connect::new(
+                origins,
+                Some(gate),
+                Permissions::new(Some(directory.join("permissions.json"))),
+            ),
         };
         start_unpublished(
             events,
@@ -2422,7 +2435,7 @@ mod tests {
 
     fn upload_token(response: &str) -> String {
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-        serde_json::from_str::<serde_json::Value>(response_body(response)).unwrap()["uploadToken"]
+        serde_json::from_str::<serde_json::Value>(response_body(response)).unwrap()["audioToken"]
             .as_str()
             .unwrap()
             .to_owned()
@@ -2439,7 +2452,7 @@ mod tests {
 
     #[test]
     fn an_allowed_page_trades_one_code_for_one_upload() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Once);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
 
@@ -2458,14 +2471,14 @@ mod tests {
         );
         let answered: serde_json::Value = serde_json::from_str(response_body(&response)).unwrap();
         assert_eq!(answered["origin"], "https://app.example");
-        assert_eq!(answered["scope"], "transcription:upload");
+        assert_eq!(answered["scope"], "transcription:transcribe");
         assert_eq!(answered["state"], "s1");
         let code = answered["code"].as_str().unwrap().to_owned();
         // The dialog named the page and its verified origin.
         let prompt = gate.last_prompt().unwrap();
         assert_eq!(prompt.recipient.label(), "https://app.example");
         assert_eq!(prompt.recipient.claimed_name(), Some("Field Notes"));
-        assert_eq!(prompt.intent, Intent::Upload);
+        assert_eq!(prompt.intent, Intent::Transcribe);
 
         let token = upload_token(&exchange(port, "https://app.example", &code));
         // The code was spent by its exchange.
@@ -2517,7 +2530,7 @@ mod tests {
 
     #[test]
     fn an_unlisted_page_never_reaches_the_dialog() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Once);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
@@ -2547,7 +2560,7 @@ mod tests {
 
     #[test]
     fn only_a_browser_json_post_can_prompt() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Once);
         let api = start_connect(app_origin, gate.clone(), None);
         let port = api.document.port;
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
@@ -2585,7 +2598,7 @@ mod tests {
 
     #[test]
     fn a_code_is_bound_to_its_origin_and_its_verifier() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Once);
         let api = start_connect(two_origins, gate, None);
         let port = api.document.port;
         let code = authorize(port, "https://app.example");
@@ -2609,7 +2622,7 @@ mod tests {
 
     #[test]
     fn expired_grants_are_refused() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Once);
         let api = start_connect(
             app_origin,
             gate.clone(),
@@ -2653,7 +2666,7 @@ mod tests {
 
     #[test]
     fn an_upload_token_reaches_no_other_route_and_no_other_scope() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Once);
         let api = start_connect(app_origin, gate, None);
         let port = api.document.port;
         let code = authorize(port, "https://app.example");
@@ -2912,6 +2925,7 @@ mod tests {
             always_enabled,
             Some(gate),
             recording,
+            Permissions::new(Some(directory.join("permissions.json"))),
             timings,
         ));
         let api = start_unpublished(
@@ -2962,25 +2976,28 @@ mod tests {
         )
     }
 
-    /// `POST /record/pair`, answered by a gate that allows it.
-    fn record_pair(port: u16, origin: &str) -> String {
-        let body = format!(
-            r#"{{"codeChallenge":"{CHALLENGE}","codeChallengeMethod":"S256","state":"r1"}}"#
-        );
-        let response = record_request(
+    /// A browser keeps the secret from its first Always Allow response. The
+    /// secret is scoped to this capability; normal requests still use PKCE.
+    fn web_consent(port: u16, origin: &str, path: &str, proof: Option<&str>) -> String {
+        connect_post(
             port,
-            "POST",
-            record::PAIR_PATH,
             origin,
-            None,
-            None,
-            Some(&body),
-        );
+            path,
+            &serde_json::json!({"codeChallenge": CHALLENGE, "state":"r1", "permissionProof":proof})
+                .to_string(),
+        )
+    }
+
+    fn consent_json(response: &str) -> serde_json::Value {
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-        serde_json::from_str::<serde_json::Value>(response_body(&response)).unwrap()["code"]
+        serde_json::from_str(response_body(response)).unwrap()
+    }
+
+    fn record_pair(port: u16, origin: &str) -> String {
+        consent_json(&web_consent(port, origin, record::PAIR_PATH, None))["code"]
             .as_str()
             .unwrap()
-            .to_owned()
+            .into()
     }
 
     /// `POST /record/token`: the pairing code for a grant token.
@@ -3024,8 +3041,162 @@ mod tests {
     }
 
     #[test]
+    fn allow_once_recording_is_spent_and_never_saved() {
+        let gate = ScriptedGate::new(Answer::Once);
+        let recording = FakeRecording::with_text("only once");
+        let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
+        let port = api.document.port;
+        let origin = "https://app.example";
+        let grant = record_grant(port, origin, &record_pair(port, origin)).0;
+        let session = record_start(port, origin, &grant).0;
+        assert!(
+            record_request(
+                port,
+                "POST",
+                record::FINISH_PATH,
+                origin,
+                None,
+                Some(&session),
+                None
+            )
+            .starts_with("HTTP/1.1 200")
+        );
+        assert!(
+            record_request(
+                port,
+                "POST",
+                record::START_PATH,
+                origin,
+                Some(&grant),
+                None,
+                None
+            )
+            .starts_with("HTTP/1.1 401")
+        );
+        assert_eq!(recording.starts(), 1);
+        assert!(sessions.permissions().is_empty());
+        record_pair(port, origin);
+        assert_eq!(gate.asks(), 2);
+    }
+
+    #[test]
+    fn always_survives_restart_and_revoking_one_capability_preserves_the_other() {
+        let directory = temp_directory();
+        let path = directory.join("permissions.json");
+        let gate = ScriptedGate::new(Answer::Always);
+        let recording = FakeRecording::with_text("saved");
+        let start = || {
+            let store = Permissions::new(Some(path.clone()));
+            let sessions = Arc::new(record::Sessions::with_timings(
+                app_origin,
+                always_enabled,
+                Some(gate.clone()),
+                recording.clone(),
+                store.clone(),
+                record_timings(),
+            ));
+            let api = start_unpublished(
+                EventLog::create(&temp_directory().join("events.ndjson")).unwrap(),
+                LocalApiOptions {
+                    cors: Cors::gated(app_origin),
+                    connect: Some(Connect::new(app_origin, Some(gate.clone()), store)),
+                    record: Some(sessions.clone()),
+                    ..LocalApiOptions::default()
+                },
+            )
+            .unwrap();
+            (api, sessions)
+        };
+        let origin = "https://app.example";
+        let (audio_proof, mic_proof);
+        {
+            let (api, _) = start();
+            let proof = |path| {
+                consent_json(&web_consent(api.document.port, origin, path, None))["permissionProof"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            audio_proof = proof(connect::AUTHORIZE_PATH);
+            mic_proof = proof(record::PAIR_PATH);
+            assert_eq!(recording.starts(), 0);
+            assert_eq!(gate.asks(), 2);
+        }
+        {
+            let (api, sessions) = start();
+            let port = api.document.port;
+            for (path, wrong) in [
+                (record::PAIR_PATH, &audio_proof),
+                (connect::AUTHORIZE_PATH, &mic_proof),
+            ] {
+                for proof in [None, Some(wrong.as_str())] {
+                    assert_eq!(
+                        body_code(&web_consent(port, origin, path, proof)),
+                        "permission-proof-required"
+                    );
+                }
+            }
+            let code_for = |path, proof: &str| {
+                consent_json(&web_consent(port, origin, path, Some(proof)))["code"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            let code = code_for(connect::AUTHORIZE_PATH, &audio_proof);
+            let token = upload_token(&exchange(
+                port,
+                origin,
+                &code_for(connect::AUTHORIZE_PATH, &audio_proof),
+            ));
+            let grant = record_grant(port, origin, &code_for(record::PAIR_PATH, &mic_proof)).0;
+            record_start(port, origin, &grant);
+            assert_eq!(gate.asks(), 2);
+            for p in sessions.permissions() {
+                if p.capability == PermissionCapability::MicrophoneRecording {
+                    assert!(sessions.revoke_permission(p.id));
+                }
+            }
+            assert_eq!(recording.cancels(), 1);
+            assert!(
+                record_request(
+                    port,
+                    "POST",
+                    record::START_PATH,
+                    origin,
+                    Some(&grant),
+                    None,
+                    None
+                )
+                .starts_with("HTTP/1.1 401")
+            );
+            code_for(connect::AUTHORIZE_PATH, &audio_proof);
+            assert_eq!(gate.asks(), 2);
+            let perms = sessions.permissions();
+            assert_eq!(perms.len(), 1);
+            assert!(sessions.revoke_permission(perms[0].id));
+            assert!(exchange(port, origin, &code).starts_with("HTTP/1.1 403"));
+            assert!(
+                connect_post_with(
+                    port,
+                    origin,
+                    "/transcriptions",
+                    Some(&token),
+                    "audio/wav",
+                    "x"
+                )
+                .starts_with("HTTP/1.1 401")
+            );
+        }
+        let (api, sessions) = start();
+        assert!(sessions.permissions().is_empty());
+        authorize(api.document.port, origin);
+        record_pair(api.document.port, origin);
+        assert_eq!(gate.asks(), 4);
+    }
+
+    #[test]
     fn pairing_once_allows_repeated_distinct_recordings() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("the paired words");
         let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
         let port = api.document.port;
@@ -3129,7 +3300,7 @@ mod tests {
 
     #[test]
     fn revoking_a_grant_ends_its_session_and_further_starts() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("revoked words");
         let (api, sessions) = start_record_api(gate.clone(), recording.clone(), record_timings());
         let port = api.document.port;
@@ -3203,7 +3374,7 @@ mod tests {
 
     #[test]
     fn revoking_drops_pairing_codes_issued_before_it() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("codes");
         let (api, _sessions) = start_record_api(gate, recording, record_timings());
         let port = api.document.port;
@@ -3211,8 +3382,17 @@ mod tests {
 
         // Two allowed asks arrive before either is exchanged; the first
         // becomes the grant.
-        let first = record_pair(port, origin);
-        let second = record_pair(port, origin);
+        let paired = consent_json(&web_consent(port, origin, record::PAIR_PATH, None));
+        let first = paired["code"].as_str().unwrap().to_owned();
+        let second = consent_json(&web_consent(
+            port,
+            origin,
+            record::PAIR_PATH,
+            paired["permissionProof"].as_str(),
+        ))["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let (grant, _) = record_grant(port, origin, &first);
         let revoked = record_request(
             port,
@@ -3279,7 +3459,7 @@ mod tests {
 
     #[test]
     fn a_grant_and_session_reach_no_other_route_and_no_other_origin() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("private words");
         let (api, _sessions) = start_record_api(gate, recording, record_timings());
         let port = api.document.port;
@@ -3345,7 +3525,7 @@ mod tests {
 
     #[test]
     fn the_recording_lease_stops_and_expires_without_the_client() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("lease words");
         let mut timings = record_timings();
         timings.recording = Duration::from_millis(60);
@@ -3382,7 +3562,7 @@ mod tests {
 
     #[test]
     fn one_recording_session_at_a_time() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("first");
         let (api, _sessions) = start_record_api(gate, recording, record_timings());
         let port = api.document.port;
@@ -3419,17 +3599,19 @@ mod tests {
 
     #[test]
     fn a_native_grant_is_bound_to_the_verified_peer() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("native words");
         let sessions = Arc::new(record::Sessions::with_timings(
             app_origin,
             always_enabled,
             Some(gate),
             recording,
+            Permissions::new(Some(temp_directory().join("permissions.json"))),
             record_timings(),
         ));
         let identity = record::Identity {
             identifier: "com.example.recorder".into(),
+            cdhash: "fixture-digest".into(),
             team: Some("ABCDE12345".into()),
         };
         let peer = record::PeerId([1, 2, 3, 4, 5, 6, 7, 8]);
@@ -3451,6 +3633,7 @@ mod tests {
             peer: record::PeerId([9, 9, 9, 9, 9, 9, 9, 9]),
             identity: record::Identity {
                 identifier: "com.example.other".into(),
+                cdhash: "fixture-digest".into(),
                 team: None,
             },
         };
@@ -3482,12 +3665,13 @@ mod tests {
 
     #[test]
     fn a_native_client_name_never_becomes_its_identity() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let sessions = Arc::new(record::Sessions::with_timings(
             app_origin,
             always_enabled,
             Some(gate.clone()),
             FakeRecording::with_text("x"),
+            Permissions::new(Some(temp_directory().join("permissions.json"))),
             record_timings(),
         ));
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
@@ -3496,6 +3680,7 @@ mod tests {
                 peer: record::PeerId([3; 8]),
                 identity: record::Identity {
                     identifier: "com.example.recorder".into(),
+                    cdhash: "fixture-digest".into(),
                     team: Some("ABCDE12345".into()),
                 },
             },
@@ -3529,13 +3714,14 @@ mod tests {
     fn a_native_socket_client_pairs_then_records_twice_under_its_identity() {
         let directory = temp_directory();
         let socket = directory.join("record.sock");
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("native words");
         let sessions = Arc::new(record::Sessions::with_timings(
             app_origin,
             always_enabled,
             Some(gate.clone()),
             recording.clone(),
+            Permissions::new(Some(temp_directory().join("permissions.json"))),
             record_timings(),
         ));
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
@@ -3648,13 +3834,14 @@ mod tests {
 
     #[test]
     fn the_window_stops_or_cancels_a_live_recording() {
-        let gate = ScriptedGate::new(Answer::Allow);
+        let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("window words");
         let sessions = Arc::new(record::Sessions::with_timings(
             app_origin,
             always_enabled,
             Some(gate),
             recording.clone(),
+            Permissions::new(Some(temp_directory().join("permissions.json"))),
             record_timings(),
         ));
         let origin = "https://app.example";
