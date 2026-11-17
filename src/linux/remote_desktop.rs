@@ -6,6 +6,11 @@
 //! user approves it once: the portal's restore token, kept owner-only in
 //! Application Support, restores later sessions without a dialog, so the
 //! paster can close an idle session and reopen it at the next paste.
+//!
+//! Chords go out as evdev keycodes, not keysyms: a keysym has to be found in
+//! the desktop's active layout group, and KWin's fallback for a Latin `v` on a
+//! Russian layout loses the held Ctrl, so the app gets a bare `v` and Ctrl
+//! stays stuck. A keycode is the physical key and works in every layout.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -24,12 +29,15 @@ pub(crate) const INTERFACE: &str = "org.freedesktop.portal.RemoteDesktop";
 const KEYBOARD: u32 = 1;
 /// Persist the grant until the user revokes it.
 const PERSIST_UNTIL_REVOKED: u32 = 2;
-const XK_CONTROL_L: i32 = 0xffe3;
-const XK_SHIFT_L: i32 = 0xffe1;
-const XK_A: i32 = 0x61;
-const XK_C: i32 = 0x63;
-const XK_V: i32 = 0x76;
-const XK_RETURN: i32 = 0xff0d;
+/// Linux evdev keycodes, which `NotifyKeyboardKeycode` takes: not keysyms, and
+/// not X11 keycodes (evdev + 8). A keycode is the physical key, so no keyboard
+/// layout group can break the chord.
+const EVDEV_KEY_LEFTCTRL: i32 = 29;
+const EVDEV_KEY_LEFTSHIFT: i32 = 42;
+const EVDEV_KEY_A: i32 = 30;
+const EVDEV_KEY_C: i32 = 46;
+const EVDEV_KEY_V: i32 = 47;
+const EVDEV_KEY_ENTER: i32 = 28;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
 /// A restored grant starts in tens of milliseconds; a start that takes
@@ -154,15 +162,15 @@ impl RemoteDesktop {
     }
 
     /// Presses and releases a clipboard chord: Ctrl+A, Ctrl+C, or Ctrl+V
-    /// (Ctrl+Shift+V for terminals).
+    /// (Ctrl+Shift+V for terminals), as evdev keycodes.
     pub(crate) fn send(&self, chord: Chord, with_shift: bool) -> Result<()> {
-        send_keys(&chord_keys(chord, with_shift), |keysym, state| {
+        send_keys(&chord_keys(chord, with_shift), |keycode, state| {
             self.bus.call_portal(
-                "NotifyKeyboardKeysym",
+                "NotifyKeyboardKeycode",
                 &(
                     &self.session,
                     HashMap::<&str, Variant<'_>>::new(),
-                    keysym,
+                    keycode,
                     state,
                 ),
             )
@@ -174,34 +182,34 @@ impl RemoteDesktop {
 /// desktop, so every key still held is released before the error returns.
 fn send_keys(keys: &[(i32, u32)], mut notify: impl FnMut(i32, u32) -> Result<()>) -> Result<()> {
     let mut pressed = Vec::new();
-    for &(keysym, state) in keys {
+    for &(keycode, state) in keys {
         if state == PRESSED {
             // Recorded before the call: a timeout does not mean it never ran.
-            pressed.push(keysym);
+            pressed.push(keycode);
         }
-        if let Err(error) = notify(keysym, state) {
+        if let Err(error) = notify(keycode, state) {
             tracing::warn!(
-                keysym = format!("{keysym:#x}"),
+                keycode,
                 state,
                 error = format!("{error:#}"),
                 "could not send a paste key"
             );
-            for keysym in pressed.iter().rev() {
-                if let Err(error) = notify(*keysym, RELEASED) {
+            for keycode in pressed.iter().rev() {
+                if let Err(error) = notify(*keycode, RELEASED) {
                     tracing::warn!(
-                        keysym = format!("{keysym:#x}"),
+                        keycode,
                         error = format!("{error:#}"),
                         "could not release a paste key"
                     );
                 }
             }
             return Err(error)
-                .wrap_err_with(|| format!("could not send keysym {keysym:#x} in state {state}"));
+                .wrap_err_with(|| format!("could not send keycode {keycode} in state {state}"));
         }
         // A failed release stays recorded: the key may still be down, and
         // releasing one already up is harmless.
         if state == RELEASED
-            && let Some(index) = pressed.iter().rposition(|held| *held == keysym)
+            && let Some(index) = pressed.iter().rposition(|held| *held == keycode)
         {
             pressed.remove(index);
         }
@@ -221,20 +229,22 @@ impl Drop for RemoteDesktop {
 
 fn chord_keys(chord: Chord, with_shift: bool) -> Vec<(i32, u32)> {
     let (key, shift) = match chord {
-        Chord::SelectAll => (XK_A, false),
-        Chord::Copy => (XK_C, false),
-        Chord::Paste => (XK_V, with_shift),
-        Chord::Return => return vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)],
+        Chord::SelectAll => (EVDEV_KEY_A, false),
+        Chord::Copy => (EVDEV_KEY_C, false),
+        Chord::Paste => (EVDEV_KEY_V, with_shift),
+        Chord::Return => {
+            return vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)];
+        }
     };
-    let mut keys = vec![(XK_CONTROL_L, PRESSED)];
+    let mut keys = vec![(EVDEV_KEY_LEFTCTRL, PRESSED)];
     if shift {
-        keys.push((XK_SHIFT_L, PRESSED));
+        keys.push((EVDEV_KEY_LEFTSHIFT, PRESSED));
     }
     keys.extend([(key, PRESSED), (key, RELEASED)]);
     if shift {
-        keys.push((XK_SHIFT_L, RELEASED));
+        keys.push((EVDEV_KEY_LEFTSHIFT, RELEASED));
     }
-    keys.push((XK_CONTROL_L, RELEASED));
+    keys.push((EVDEV_KEY_LEFTCTRL, RELEASED));
     keys
 }
 
@@ -277,21 +287,21 @@ mod tests {
         assert_eq!(
             chord_keys(Chord::Paste, false),
             [
-                (XK_CONTROL_L, PRESSED),
-                (XK_V, PRESSED),
-                (XK_V, RELEASED),
-                (XK_CONTROL_L, RELEASED)
+                (EVDEV_KEY_LEFTCTRL, PRESSED),
+                (EVDEV_KEY_V, PRESSED),
+                (EVDEV_KEY_V, RELEASED),
+                (EVDEV_KEY_LEFTCTRL, RELEASED)
             ]
         );
         assert_eq!(
             chord_keys(Chord::Paste, true),
             [
-                (XK_CONTROL_L, PRESSED),
-                (XK_SHIFT_L, PRESSED),
-                (XK_V, PRESSED),
-                (XK_V, RELEASED),
-                (XK_SHIFT_L, RELEASED),
-                (XK_CONTROL_L, RELEASED)
+                (EVDEV_KEY_LEFTCTRL, PRESSED),
+                (EVDEV_KEY_LEFTSHIFT, PRESSED),
+                (EVDEV_KEY_V, PRESSED),
+                (EVDEV_KEY_V, RELEASED),
+                (EVDEV_KEY_LEFTSHIFT, RELEASED),
+                (EVDEV_KEY_LEFTCTRL, RELEASED)
             ]
         );
     }
@@ -302,19 +312,19 @@ mod tests {
         assert_eq!(
             chord_keys(Chord::SelectAll, true),
             [
-                (XK_CONTROL_L, PRESSED),
-                (XK_A, PRESSED),
-                (XK_A, RELEASED),
-                (XK_CONTROL_L, RELEASED)
+                (EVDEV_KEY_LEFTCTRL, PRESSED),
+                (EVDEV_KEY_A, PRESSED),
+                (EVDEV_KEY_A, RELEASED),
+                (EVDEV_KEY_LEFTCTRL, RELEASED)
             ]
         );
         assert_eq!(
             chord_keys(Chord::Copy, true),
             [
-                (XK_CONTROL_L, PRESSED),
-                (XK_C, PRESSED),
-                (XK_C, RELEASED),
-                (XK_CONTROL_L, RELEASED)
+                (EVDEV_KEY_LEFTCTRL, PRESSED),
+                (EVDEV_KEY_C, PRESSED),
+                (EVDEV_KEY_C, RELEASED),
+                (EVDEV_KEY_LEFTCTRL, RELEASED)
             ]
         );
     }
@@ -325,8 +335,8 @@ mod tests {
             for with_shift in [false, true] {
                 let keys = chord_keys(chord, with_shift);
                 let mut sent = Vec::new();
-                send_keys(&keys, |keysym, state| {
-                    sent.push((keysym, state));
+                send_keys(&keys, |keycode, state| {
+                    sent.push((keycode, state));
                     Ok(())
                 })
                 .unwrap();
@@ -342,8 +352,8 @@ mod tests {
                 let keys = chord_keys(chord, with_shift);
                 for fail_at in 0..keys.len() {
                     let mut sent = Vec::new();
-                    let result = send_keys(&keys, |keysym, state| {
-                        sent.push((keysym, state));
+                    let result = send_keys(&keys, |keycode, state| {
+                        sent.push((keycode, state));
                         if sent.len() == fail_at + 1 {
                             return Err(eyre!("injected failure"));
                         }
@@ -357,17 +367,19 @@ mod tests {
                     let mut held: Vec<_> = keys[..=fail_at]
                         .iter()
                         .filter(|(_, state)| *state == PRESSED)
-                        .map(|(keysym, _)| *keysym)
+                        .map(|(keycode, _)| *keycode)
                         .collect();
-                    for (keysym, state) in &keys[..fail_at] {
+                    for (keycode, state) in &keys[..fail_at] {
                         if *state == RELEASED
-                            && let Some(index) = held.iter().rposition(|held| held == keysym)
+                            && let Some(index) = held.iter().rposition(|held| held == keycode)
                         {
                             held.remove(index);
                         }
                     }
-                    let mut expected: Vec<_> =
-                        held.into_iter().map(|keysym| (keysym, RELEASED)).collect();
+                    let mut expected: Vec<_> = held
+                        .into_iter()
+                        .map(|keycode| (keycode, RELEASED))
+                        .collect();
                     expected.reverse();
                     assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
                 }
@@ -379,8 +391,8 @@ mod tests {
     fn a_failed_cleanup_release_keeps_the_original_error() {
         let keys = chord_keys(Chord::Paste, true);
         let mut sent = Vec::new();
-        let error = send_keys(&keys, |keysym, state| {
-            sent.push((keysym, state));
+        let error = send_keys(&keys, |keycode, state| {
+            sent.push((keycode, state));
             match sent.len() {
                 // The V press fails partway.
                 3 => Err(eyre!("the original failure")),
@@ -396,9 +408,9 @@ mod tests {
         assert_eq!(
             &sent[3..],
             [
-                (XK_V, RELEASED),
-                (XK_SHIFT_L, RELEASED),
-                (XK_CONTROL_L, RELEASED)
+                (EVDEV_KEY_V, RELEASED),
+                (EVDEV_KEY_LEFTSHIFT, RELEASED),
+                (EVDEV_KEY_LEFTCTRL, RELEASED)
             ]
         );
     }
