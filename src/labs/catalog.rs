@@ -188,7 +188,7 @@ impl Feature {
         if key == "labs.keep_microphone_open_seconds" {
             return Some(Self::KeepMicrophoneOpen);
         }
-        if key == "labs.yolo_mode_seconds" || key == "labs.yolo_mode_apps" {
+        if key == "labs.yolo_mode_apps" {
             return Some(Self::YoloMode);
         }
         if key == "labs.voice_prompt_phrase" {
