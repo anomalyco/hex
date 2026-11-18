@@ -58,12 +58,18 @@ inserted text split on whitespace), words per minute (words over recorded
 audio minutes, counting only entries with audio; unknown without any), how
 many entries Output changed (inserted text differs from the transcript, ignoring
 surrounding whitespace), the daily streak (consecutive local days with an entry,
-ending today or, with none yet today, yesterday), active days, and the five
-most used applications. With the toggle off it fails, naming the command that
-turns it on, before History is read. `--since` and `--until` narrow it with the
-same time syntax; the retention window always applies. It counts only what
-History still holds: nothing is kept after retention removes an entry, and
-which replacements fired is not tracked.
+ending today or, with none yet today, yesterday), and active days. The printed
+text names the five most used applications, and the JSON's `top_apps` carries
+the same five. `--json` also carries the last 30 local days' dictation counts
+(oldest first, empty days at zero) and each mode's Output time: its runs,
+median, and slowest processing time, rewrite plus any transformations. The
+daily series always ends today and ignores `--until`, and it is empty when
+nothing matches the filters; Output time leaves out runs that fell back and
+runs that only applied transformations. With the toggle off it fails, naming
+the command that turns it on, before History is read. `--since` and `--until`
+narrow it with the same time syntax; the retention window always applies. It
+counts only what History still holds: nothing is kept after retention removes
+an entry, and which replacements fired is not tracked.
 
 ## Meetings use the same queries as MCP
 
@@ -193,7 +199,9 @@ type HistoryStats = { // hex history stats --json
   changed_by_output: number
   streak_days: number
   active_days: number
+  daily: { day: number; dictations: number }[] // the last 30 local days, oldest first, zero on empty days, always ending today; empty when nothing matches; day is days since 1970-01-01, local time
   top_apps: { application: string; dictations: number }[] // at most 5, most first
+  output_time: { profile: string; runs: number; median_ms: number; slowest_ms: number }[] // the 4 most run modes; an even count's median is the mean of its two middle runs, rounded down; fallback and transformation-only runs are left out
 }
 
 type Meeting = {

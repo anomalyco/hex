@@ -16,6 +16,9 @@ use super::Ui;
 
 /// Row descriptions and secondary copy.
 pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
+/// The Dictation stats dialog's headline numbers, above the kit's steps.
+pub(super) const STATS_NUMBER: TextStyle =
+    TextStyle::new(18.0, 620.0).lh(22.0).features("'tnum' 1");
 const SELECT_WIDTH: f32 = 220.0;
 /// The microphone field, wide enough for "System default" and a faint
 /// "Studio Display Microphone".

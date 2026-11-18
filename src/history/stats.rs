@@ -10,12 +10,36 @@ use super::{History, HistoryEntry, HistoryStore};
 
 /// How many applications the summary names.
 pub const TOP_APPS: usize = 5;
+/// How many recent local days the daily series covers, today last.
+pub const DAILY_DAYS: i64 = 30;
+/// How many rewrite profiles the latency summary names.
+pub const TOP_PROFILES: usize = 4;
 
 /// One application and how many retained dictations went to it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AppCount {
     pub application: String,
     pub dictations: u64,
+}
+
+/// One local day and how many retained dictations it holds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct DayCount {
+    /// Days since 1970-01-01, local time (see [`local_day`]).
+    pub day: i64,
+    pub dictations: u64,
+}
+
+/// One mode's Output processing time, in milliseconds: its rewrite plus any
+/// transformations that ran after it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ProfileOutputTime {
+    pub profile: String,
+    pub runs: u64,
+    /// The middle run: with an even count, the mean of the two middle runs,
+    /// rounded down.
+    pub median_ms: u64,
+    pub slowest_ms: u64,
 }
 
 /// What the retained entries add up to.
@@ -37,8 +61,13 @@ pub struct HistoryStats {
     pub streak_days: u32,
     /// Local days with at least one dictation.
     pub active_days: u32,
+    /// The last [`DAILY_DAYS`] local days ending today, oldest first, with
+    /// zero on the days that had no dictation.
+    pub daily: Vec<DayCount>,
     /// The most dictated-into applications, most first, then by name.
     pub top_apps: Vec<AppCount>,
+    /// The most run modes' Output time, most runs first, then by name.
+    pub output_time: Vec<ProfileOutputTime>,
 }
 
 impl HistoryStats {
@@ -63,6 +92,8 @@ pub fn summarize<'a>(
     let mut timed_ms = 0_u64;
     let mut apps: HashMap<&str, u64> = HashMap::new();
     let mut days = std::collections::BTreeSet::new();
+    let mut per_day: HashMap<i64, u64> = HashMap::new();
+    let mut profiles: HashMap<&str, Vec<u64>> = HashMap::new();
     for entry in entries {
         stats.dictations += 1;
         let words = entry.final_text.split_whitespace().count() as u64;
@@ -80,7 +111,23 @@ pub fn summarize<'a>(
         {
             *apps.entry(application).or_default() += 1;
         }
-        days.insert(day_of(entry.timestamp_ms));
+        let day = day_of(entry.timestamp_ms);
+        days.insert(day);
+        *per_day.entry(day).or_default() += 1;
+        if let Some(processing) = &entry.processing
+            && processing.fallback.is_none()
+        {
+            // A fallback run is a failure or a deadline, not the time Output
+            // takes, and a transformation-only run is not a mode.
+            let profile = processing.profile.trim();
+            if !profile.is_empty() && profile != crate::dictation::processor::CUSTOM_TRANSFORMATIONS
+            {
+                profiles
+                    .entry(profile)
+                    .or_default()
+                    .push(processing.latency_ms);
+            }
+        }
     }
     stats.words_per_minute =
         (timed_ms > 0).then(|| ((timed_words as f64 * 60_000.0) / timed_ms as f64).round() as u32);
@@ -94,6 +141,14 @@ pub fn summarize<'a>(
         stats.streak_days += 1;
         day -= 1;
     }
+    if stats.dictations > 0 {
+        stats.daily = (today - DAILY_DAYS + 1..=today)
+            .map(|day| DayCount {
+                day,
+                dictations: per_day.get(&day).copied().unwrap_or(0),
+            })
+            .collect();
+    }
     let mut apps: Vec<_> = apps.into_iter().collect();
     apps.sort_by(|(a, a_count), (b, b_count)| b_count.cmp(a_count).then_with(|| a.cmp(b)));
     stats.top_apps = apps
@@ -104,7 +159,37 @@ pub fn summarize<'a>(
             dictations,
         })
         .collect();
+    stats.output_time = output_time(profiles);
     stats
+}
+
+/// The most run modes, most runs first, each with its median and slowest
+/// Output time. An even count's median is the mean of its two middle runs,
+/// rounded down.
+fn output_time(profiles: HashMap<&str, Vec<u64>>) -> Vec<ProfileOutputTime> {
+    let mut profiles: Vec<_> = profiles.into_iter().collect();
+    profiles
+        .sort_by(|(a, a_runs), (b, b_runs)| b_runs.len().cmp(&a_runs.len()).then_with(|| a.cmp(b)));
+    profiles
+        .into_iter()
+        .take(TOP_PROFILES)
+        .map(|(profile, mut latencies)| {
+            latencies.sort_unstable();
+            let middle = latencies.len() / 2;
+            let median_ms = if latencies.len() % 2 == 1 {
+                latencies[middle]
+            } else {
+                let (low, high) = (latencies[middle - 1], latencies[middle]);
+                low + (high - low) / 2
+            };
+            ProfileOutputTime {
+                profile: profile.to_owned(),
+                runs: latencies.len() as u64,
+                median_ms,
+                slowest_ms: latencies.last().copied().unwrap_or_default(),
+            }
+        })
+        .collect()
 }
 
 /// The local calendar day of a timestamp, as days since 1970-01-01.
@@ -184,6 +269,18 @@ mod tests {
         (timestamp_ms / DAY) as i64
     }
 
+    /// `entry` with a rewrite profile and its latency.
+    fn rewritten(day: u64, profile: &str, latency_ms: u64) -> HistoryEntry {
+        let mut entry = entry(day, "a", "a", None, 0);
+        entry.processing = Some(crate::desktop::events::DictationProcessing {
+            profile: profile.into(),
+            latency_ms,
+            model: None,
+            fallback: None,
+        });
+        entry
+    }
+
     #[test]
     fn words_speed_and_changes_add_up() {
         let entries = [
@@ -238,6 +335,153 @@ mod tests {
                 ("Slack", 1)
             ]
         );
+    }
+
+    #[test]
+    fn the_daily_series_is_the_last_thirty_days_ending_today_with_empty_days() {
+        let entries = [
+            entry(10, "a", "a", None, 0),
+            entry(10, "a", "a", None, 0),
+            entry(8, "a", "a", None, 0),
+        ];
+        let stats = summarize(&entries, 10, utc_day);
+        assert_eq!(stats.daily.len(), DAILY_DAYS as usize);
+        // Oldest first, today last, with the days in between at zero.
+        assert_eq!(
+            stats.daily.first(),
+            Some(&DayCount {
+                day: -19,
+                dictations: 0
+            })
+        );
+        assert_eq!(
+            stats.daily[27],
+            DayCount {
+                day: 8,
+                dictations: 1
+            }
+        );
+        assert_eq!(
+            stats.daily[28],
+            DayCount {
+                day: 9,
+                dictations: 0
+            }
+        );
+        assert_eq!(
+            stats.daily[29],
+            DayCount {
+                day: 10,
+                dictations: 2
+            }
+        );
+        assert!(stats.daily.last().is_some_and(|day| day.day == 10));
+        // Nothing retained is no series at all, so the dialog has no chart.
+        assert!(summarize(std::iter::empty(), 10, utc_day).daily.is_empty());
+        // Days outside the window do not add bars.
+        let old = summarize(&[entry(1, "a", "a", None, 0)], 60, utc_day);
+        assert_eq!(old.daily.len(), DAILY_DAYS as usize);
+        assert!(old.daily.iter().all(|day| day.dictations == 0));
+        assert_eq!(old.daily.last().map(|day| day.day), Some(60));
+    }
+
+    #[test]
+    fn output_time_groups_by_profile_with_median_and_slowest() {
+        let fallback = |profile: &str, latency_ms: u64| {
+            let mut entry = rewritten(1, profile, latency_ms);
+            entry.processing.as_mut().expect("processing").fallback =
+                Some("deadline exceeded".into());
+            entry
+        };
+        let entries = [
+            rewritten(1, "Chat", 900),
+            rewritten(1, "Chat", 300),
+            rewritten(1, "Chat", 3_200),
+            // A failed or timed-out run is not Output time, even when its
+            // profile runs otherwise.
+            fallback("Chat", 20),
+            // An even count: the median is the mean of 400 and 900.
+            rewritten(1, "Email", 900),
+            rewritten(1, "Email", 400),
+            rewritten(1, "Notes", 120),
+            // A transformation-only run is not a mode.
+            rewritten(1, crate::dictation::processor::CUSTOM_TRANSFORMATIONS, 400),
+            rewritten(1, "  ", 500),
+            entry(1, "a", "a", None, 0),
+        ];
+        let stats = summarize(&entries, 1, utc_day);
+        let times: Vec<_> = stats
+            .output_time
+            .iter()
+            .map(|profile| {
+                (
+                    profile.profile.as_str(),
+                    profile.runs,
+                    profile.median_ms,
+                    profile.slowest_ms,
+                )
+            })
+            .collect();
+        assert_eq!(
+            times,
+            [
+                ("Chat", 3, 900, 3_200),
+                ("Email", 2, 650, 900),
+                ("Notes", 1, 120, 120)
+            ]
+        );
+        // An entry without processing contributes no profile.
+        let plain = summarize(&[entry(1, "a", "a", None, 0)], 1, utc_day);
+        assert!(plain.output_time.is_empty());
+    }
+
+    #[test]
+    fn output_time_names_the_four_most_run_profiles_by_name_on_a_tie() {
+        let profiles = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+        let mut entries = Vec::new();
+        for profile in profiles {
+            for _ in 0..2 {
+                entries.push(rewritten(1, profile, 100));
+            }
+        }
+        // Alpha runs one more time than every other profile.
+        entries.push(rewritten(1, "Alpha", 1_000));
+        let stats = summarize(&entries, 1, utc_day);
+        let names: Vec<_> = stats
+            .output_time
+            .iter()
+            .map(|profile| profile.profile.as_str())
+            .collect();
+        assert_eq!(stats.output_time.len(), TOP_PROFILES);
+        assert_eq!(names, ["Alpha", "Bravo", "Charlie", "Delta"]);
+        assert_eq!(stats.output_time[0].runs, 3);
+        assert_eq!(stats.output_time[0].median_ms, 100);
+        assert_eq!(stats.output_time[0].slowest_ms, 1_000);
+    }
+
+    #[test]
+    fn the_json_names_every_daily_and_output_time_field() {
+        let entries = [rewritten(1, "Chat", 900), entry(1, "a", "a", None, 0)];
+        let stats = summarize(&entries, 1, utc_day);
+        let json = serde_json::to_value(&stats).unwrap();
+        let keys = |value: &serde_json::Value| {
+            let mut keys: Vec<String> = value
+                .as_object()
+                .expect("an object")
+                .keys()
+                .cloned()
+                .collect();
+            keys.sort_unstable();
+            keys
+        };
+        let day = &json["daily"][0];
+        assert_eq!(keys(day), ["day", "dictations"]);
+        assert_eq!(day["day"], -28);
+        assert_eq!(day["dictations"], 0);
+        let time = &json["output_time"][0];
+        assert_eq!(keys(time), ["median_ms", "profile", "runs", "slowest_ms"]);
+        assert_eq!(time["profile"], "Chat");
+        assert_eq!(time["runs"], 1);
     }
 
     #[test]

@@ -1430,6 +1430,24 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_some());
     assert!(texts(&rt).iter().any(|text| text == "Dictation stats"));
+    // Headline tiles, the daily chart, the app bars, Output's share, and
+    // Output time all show for the fixture, and the numbers group their
+    // thousands.
+    for key in [
+        "tile-dictations",
+        "tile-words",
+        "tile-wpm",
+        "tile-streak",
+        "history-stats-daily",
+        "history-stats-apps",
+        "history-stats-changed",
+        "history-stats-output-time",
+    ] {
+        assert!(rt.find(key).is_some(), "{key} shows");
+    }
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "128,402"), "{shown:?}");
+    assert!(shown.iter().any(|text| text == "1,284"), "{shown:?}");
     tap(&mut rt, "history-stats-close");
     assert!(!rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_none());
@@ -1497,6 +1515,82 @@ fn history_stats_button_opens_and_closes_the_dialog() {
         "turning the lab off closes the dialog"
     );
     assert!(rt.find("history-stats-open").is_none());
+}
+
+/// The dialog leaves out the sections a summary has nothing for, and keeps
+/// the tiles.
+#[test]
+fn history_stats_dialog_hides_sections_with_nothing_to_show() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.history.stats = Some(crate::history::stats::HistoryStats {
+        dictations: 3,
+        words: 12,
+        ..Default::default()
+    });
+    rt.state.settings.labs.history_stats = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.state.history.stats_open = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-stats-dialog").is_some());
+    assert!(rt.find("tile-dictations").is_some());
+    for key in [
+        "history-stats-daily",
+        "history-stats-apps",
+        "history-stats-output-time",
+    ] {
+        assert!(rt.find(key).is_none(), "{key} stays out");
+    }
+    // With no Output changes at all, its meter still reads zero.
+    assert!(rt.find("history-stats-changed").is_some());
+}
+
+/// The dialog's worst case in the window's least size: it stays inside the
+/// window, keeps its title and Close, and scrolls the sections between them.
+#[test]
+fn the_stats_dialog_fits_the_smallest_window_with_a_scrolling_body() {
+    let rt = runtime("history-stats", true, (860.0, 560.0));
+    let (dialog, _) = rt.presented("history-stats-dialog").expect("the dialog");
+    assert!(
+        dialog[1] >= 0.0 && dialog[1] + dialog[3] <= 560.0,
+        "the dialog fits the window: {dialog:?}"
+    );
+    let (close, _) = rt.presented("history-stats-close").expect("Close");
+    assert!(
+        close[1] + close[3] <= dialog[1] + dialog[3],
+        "Close stays inside the dialog: {close:?} in {dialog:?}"
+    );
+    let (body, _) = rt.presented("history-stats-body").expect("the body");
+    let (sections, _) = rt
+        .presented("history-stats-sections")
+        .expect("the sections");
+    assert!(
+        sections[3] > body[3],
+        "the body scrolls: {sections:?} in {body:?}"
+    );
+    assert!(
+        body[1] + body[3] <= close[1],
+        "the scrolling viewport ends before the footer: {body:?} in {close:?}"
+    );
+}
+
+/// At the default window the sections fit, so the dialog draws no scroll body
+/// at all and takes the sections' own height.
+#[test]
+fn the_stats_dialog_has_no_scroll_body_when_its_sections_fit() {
+    let rt = runtime("history-stats", true, PANE_SIZE);
+    assert!(
+        rt.find("history-stats-body-scroll-area").is_none(),
+        "no scroll body"
+    );
+    let (body, _) = rt.presented("history-stats-body").expect("the body");
+    let (sections, _) = rt
+        .presented("history-stats-sections")
+        .expect("the sections");
+    assert!(
+        sections[3] <= body[3],
+        "the sections fit the body: {sections:?} in {body:?}"
+    );
 }
 
 /// History, settled.

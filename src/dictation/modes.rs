@@ -370,7 +370,10 @@ mod tests {
 
         assert_eq!(processed.text, "keep opencode exact.");
         let observation = processed.observation.as_ref().expect("transformation ran");
-        assert_eq!(observation.profile, "Custom transformations");
+        assert_eq!(
+            observation.profile,
+            crate::dictation::processor::CUSTOM_TRANSFORMATIONS
+        );
         assert_eq!(observation.fallback, None);
     }
 

@@ -9,28 +9,26 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use rune::{El, TextEdit, Tx, col, el, row, text};
+use rune::{Cx, El, TextEdit, Tx, col, row, text};
 use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
+use super::controls::{ButtonKind, Paint, button};
 use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, error_panel, section_label, small_button};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::playback::Playback;
-use crate::history::stats::{AppCount, HistoryStats};
+use crate::history::stats::{AppCount, DayCount, HistoryStats, ProfileOutputTime};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
 mod audio;
 mod selection;
+mod stats;
 
 pub(super) use self::audio::AudioCopy;
 use self::audio::copy_audio;
-
-/// The stats dialog's width and padding.
-const STATS_WIDTH: f32 = 460.0;
-const PADDING: f32 = 18.0;
+pub(super) use self::stats::close_stats;
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
@@ -340,28 +338,77 @@ impl HistoryPane {
         pane
     }
 
-    /// A representative summary for the stats dialog's snapshots and tests.
+    /// The worst case for the stats dialog's snapshots and tests: five apps,
+    /// four modes, and numbers and names long enough to test truncation.
     pub(super) fn fixture_stats() -> HistoryStats {
+        let today = crate::history::stats::local_day(crate::history::now_ms());
+        // Busy and quiet days across the whole window, so the chart has
+        // both tall bars and empty days.
+        let pattern = [
+            4, 1, 0, 7, 2, 0, 0, 3, 6, 1, 2, 0, 5, 9, 3, 0, 1, 4, 2, 0, 3, 5, 1, 0, 2, 6, 8, 3, 1,
+            5,
+        ];
+        let daily = (0..crate::history::stats::DAILY_DAYS)
+            .map(|offset| DayCount {
+                day: today - crate::history::stats::DAILY_DAYS + 1 + offset,
+                dictations: pattern[offset as usize % pattern.len()] as u64,
+            })
+            .collect();
         HistoryStats {
-            dictations: 128,
-            words: 1_482,
+            dictations: 1_284,
+            words: 128_402,
             audio_ms: 720_000,
             words_per_minute: Some(123),
             changed_by_output: 34,
             streak_days: 9,
             active_days: 21,
+            daily,
             top_apps: vec![
                 AppCount {
                     application: "Slack".into(),
-                    dictations: 41,
+                    dictations: 412,
+                },
+                AppCount {
+                    application: "Visual Studio Code — Insiders".into(),
+                    dictations: 331,
                 },
                 AppCount {
                     application: "WezTerm".into(),
-                    dictations: 33,
+                    dictations: 278,
                 },
                 AppCount {
-                    application: "Firefox".into(),
-                    dictations: 27,
+                    application: "Firefox Developer Edition".into(),
+                    dictations: 190,
+                },
+                AppCount {
+                    application: "Notes".into(),
+                    dictations: 121,
+                },
+            ],
+            output_time: vec![
+                ProfileOutputTime {
+                    profile: "Chat".into(),
+                    runs: 12,
+                    median_ms: 910,
+                    slowest_ms: 3_200,
+                },
+                ProfileOutputTime {
+                    profile: "Email".into(),
+                    runs: 5,
+                    median_ms: 1_450,
+                    slowest_ms: 2_800,
+                },
+                ProfileOutputTime {
+                    profile: "Meeting notes and action items".into(),
+                    runs: 3,
+                    median_ms: 2_050,
+                    slowest_ms: 4_800,
+                },
+                ProfileOutputTime {
+                    profile: "Customer support replies".into(),
+                    runs: 2,
+                    median_ms: 620,
+                    slowest_ms: 1_100,
                 },
             ],
         }
@@ -595,7 +642,7 @@ fn delete(ui: &mut Ui, id: u64) {
 }
 
 /// The header's retention menu and the list + detail body.
-pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
+pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
     let mut notices = Vec::new();
@@ -668,7 +715,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
-    if let Some(modal) = stats_modal(ui, p) {
+    if let Some(modal) = stats::modal(ui, p, cx) {
         layer.extend(modal);
     }
     (
@@ -680,127 +727,6 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             .children((!notices.is_empty()).then(|| ld::notices(notices)))
             .child(body),
     )
-}
-
-/// Labs › Dictation stats: every retained dictation summed up, in the
-/// dialog the header's Stats button opens.
-fn stats_lines(p: Paint, stats: &HistoryStats) -> Vec<El> {
-    let wpm = stats
-        .words_per_minute
-        .map_or_else(|| "–".to_owned(), |wpm| wpm.to_string());
-    let mut lines = vec![
-        tr_named(
-            "Dictations: {count} · Words: {words} · Words per minute: {wpm}",
-            &[
-                ("count", &stats.dictations.to_string()),
-                ("words", &stats.words.to_string()),
-                ("wpm", &wpm),
-            ],
-        ),
-        tr_named(
-            "Changed by Output: {percent}% · Daily streak: {days}",
-            &[
-                (
-                    "percent",
-                    &stats.changed_percent().unwrap_or_default().to_string(),
-                ),
-                ("days", &stats.streak_days.to_string()),
-            ],
-        ),
-    ];
-    if !stats.top_apps.is_empty() {
-        let apps = stats
-            .top_apps
-            .iter()
-            .map(|app| format!("{} ({})", app.application, app.dictations))
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(tr_fill("Top apps: {}", &apps));
-    }
-    lines
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            text(line)
-                .key(format!("line{index}"))
-                .font(super::controls::DESCRIPTION)
-                .color(p.muted())
-                .wrap()
-        })
-        .collect()
-}
-
-/// The stats dialog's scrim and panel, while its button and stats show.
-fn stats_modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
-    if !ui.history.stats_open || !ui.settings.labs.history_stats {
-        return None;
-    }
-    let stats = ui
-        .history
-        .stats
-        .as_ref()
-        .filter(|stats| stats.dictations > 0)?;
-    let c = &p.k.c;
-    let mut panel = col()
-        .key("history-stats-dialog")
-        .role("dialog")
-        .label(tr("Dictation stats"))
-        .w(STATS_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(12.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(
-            text(tr("Dictation stats"))
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
-        .children(stats_lines(p, stats))
-        .child(
-            row().key("footer").justify_end().child(
-                button(
-                    p,
-                    "history-stats-close",
-                    tr("Close"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| close_stats(ui),
-                )
-                .default_button(),
-            ),
-        );
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("history-stats-scrim")
-            .fill(c.scrim)
-            .on_press(close_stats)
-            .transition(modal_scrim_transition(p)),
-        layer("history-stats-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the Stats button that opened it.
-            .child(panel.modal(true, close_stats)),
-    ])
-}
-
-/// Closes the stats dialog, from its button, Escape, or the scrim.
-pub(super) fn close_stats(ui: &mut Ui) {
-    ui.history.stats_open = false;
 }
 
 /// What the retention menu's trigger says: how long History keeps

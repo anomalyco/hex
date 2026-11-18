@@ -12,9 +12,11 @@ use std::sync::atomic::{AtomicU8, Ordering};
 mod clock;
 mod failures;
 mod french;
+mod history;
 mod labs;
 mod meetings;
 mod menu;
+pub(crate) mod numbers;
 mod onboarding;
 mod portuguese;
 mod russian;
@@ -360,7 +362,7 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 }
 
 /// Every translated string: the main, Meetings, Labs, failure, first-run,
-/// and menu bar rows.
+/// menu bar, and History rows.
 pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str, [&'static str; 6])>
 {
     TRANSLATIONS
@@ -370,6 +372,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(failures::TRANSLATIONS)
         .chain(onboarding::TRANSLATIONS)
         .chain(menu::TRANSLATIONS)
+        .chain(history::TRANSLATIONS)
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
@@ -539,9 +542,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Special keys alone", ["Klawisze specjalne bez modyfikatora", "单独使用特殊键", "特殊キーを単独で使う", "Sondertasten allein", "Teclas especiales solas", "Спеціальні клавіші окремо"]),
     ("Dictation stats", ["Statystyki dyktowania", "听写统计", "音声入力の統計", "Diktatstatistik", "Estadísticas de dictado", "Статистика диктування"]),
     ("Stats", ["Statystyki", "统计", "統計", "Statistik", "Estadísticas", "Статистика"]),
-    ("Dictations: {count} · Words: {words} · Words per minute: {wpm}", ["Dyktowania: {count} · Słowa: {words} · Słowa na minutę: {wpm}", "听写：{count} · 字词：{words} · 每分钟字词：{wpm}", "音声入力: {count} · 単語: {words} · 毎分の単語数: {wpm}", "Diktate: {count} · Wörter: {words} · Wörter pro Minute: {wpm}", "Dictados: {count} · Palabras: {words} · Palabras por minuto: {wpm}", "Диктувань: {count} · Слів: {words} · Слів за хвилину: {wpm}"]),
-    ("Changed by Output: {percent}% · Daily streak: {days}", ["Zmienione przez Wyjście: {percent}% · Seria dni: {days}", "被输出更改：{percent}% · 连续天数：{days}", "出力による変更: {percent}% · 連続日数: {days}", "Von der Ausgabe geändert: {percent} % · Tage in Folge: {days}", "Cambiados por Salida: {percent} % · Días seguidos: {days}", "Змінено Виведенням: {percent}% · Днів поспіль: {days}"]),
-    ("Top apps: {}", ["Najczęstsze aplikacje: {}", "常用应用：{}", "よく使うアプリ: {}", "Häufigste Apps: {}", "Apps principales: {}", "Найчастіші програми: {}"]),
     ("Details", ["Szczegóły", "详情", "詳細", "Details", "Detalles", "Подробиці"]),
     ("Hide details", ["Ukryj szczegóły", "隐藏详情", "詳細を隠す", "Details ausblenden", "Ocultar detalles", "Сховати подробиці"]),
     ("Peak memory: {memory} on {hardware}; not measured on other hardware", ["Szczytowe użycie pamięci: {memory} na {hardware}; na innym sprzęcie niezmierzone", "峰值内存：{memory}（{hardware}）；其他硬件未测量", "最大メモリ: {memory}（{hardware}）。ほかのハードウェアでは未測定", "Spitzenspeicher: {memory} auf {hardware}; auf anderer Hardware nicht gemessen", "Memoria máxima: {memory} en {hardware}; no medida en otro hardware", "Пікова пам'ять: {memory} на {hardware}; на іншому обладнанні не виміряно"]),
@@ -1691,6 +1691,7 @@ mod tests {
         include_str!("../rune_ui/find_popover.rs"),
         include_str!("../rune_ui/find_popover/catalog.rs"),
         include_str!("../rune_ui/history.rs"),
+        include_str!("../rune_ui/history/stats.rs"),
         include_str!("../rune_ui/history/selection.rs"),
         include_str!("../rune_ui/hud_lab.rs"),
         include_str!("../rune_ui/labs.rs"),

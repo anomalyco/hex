@@ -154,6 +154,23 @@ fn the_pane_title_is_its_heading() {
     assert_eq!(name(&title), "History");
 }
 
+/// The stats dialog's daily chart is one image, and its name carries today's
+/// count and the busiest day's.
+#[test]
+fn the_stats_chart_names_todays_and_the_busiest_days_counts() {
+    let rt = runtime("history-stats");
+    let tree = rt.accessibility_json();
+    let chart = nodes(&tree)
+        .into_iter()
+        .find(|(path, node)| path.ends_with("/bars") && node["role"] == "image")
+        .map(|(_, node)| node)
+        .expect("the daily chart");
+    assert_eq!(
+        name(chart),
+        "Dictations per day: 5 today, 9 on the busiest day"
+    );
+}
+
 /// The sidebar is a list whose shown pane is selected, and choosing
 /// another through accessibility switches to it, as a click does.
 #[test]

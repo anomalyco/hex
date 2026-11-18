@@ -545,6 +545,9 @@ pub(crate) fn render() {
 /// The window's logical size, which every pane and the picker fit.
 const WINDOW_SIZE: (f32, f32) = (980.0, 760.0);
 
+/// The window's least size: narrower windows crowd the sidebar and rows.
+const MIN_WINDOW_SIZE: (f32, f32) = (860.0, 560.0);
+
 /// One fixed size the user cannot change, which macOS tiling window managers
 /// (AeroSpace, yabai) float: the first-run tour opens centred this way. With
 /// the playground, it resizes, so the stage beside its columns has room.
@@ -565,8 +568,7 @@ fn spec() -> AppSpec<Ui> {
     AppSpec {
         title: "Hex",
         size: WINDOW_SIZE,
-        // Narrower windows crowd the sidebar and rows.
-        min_size: Some((860.0, 560.0)),
+        min_size: Some(MIN_WINDOW_SIZE),
         init: Ui::fixture_base,
         view,
         scenes: SCENES,
@@ -1524,7 +1526,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
-        Pane::History => history::pane(ui, p, &mut layer),
+        Pane::History => history::pane(ui, p, cx, &mut layer),
         #[cfg(hex_capture)]
         Pane::Captures => (Vec::new(), captures::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
