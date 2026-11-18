@@ -80,10 +80,11 @@ pub enum Feature {
     CopyDictationAudio,
     StopPhrase,
     HoldThroughKeys,
+    ModesEditor,
 }
 
 impl Feature {
-    pub const ALL: [Self; 75] = [
+    pub const ALL: [Self; 76] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -159,5 +160,6 @@ impl Feature {
         Self::CopyDictationAudio,
         Self::StopPhrase,
         Self::HoldThroughKeys,
+        Self::ModesEditor,
     ];
 }

@@ -1007,9 +1007,9 @@ recorder, onboarding or another modal keeps its keys. Labs keeps its own ⌘F.
 
 ```ts
 Sidebar                                  // settings.nav
-├── General, Output, History, then each feature that is on: Captures
-│   (Labs › Screenshots, macOS), Meetings and Voice Filter (Labs toggles),
-│   Annotate, Playground (Labs, an item)
+├── General, Output, Modes (Labs › Modes editor, while on), History, then each
+│   feature that is on: Captures (Labs › Screenshots, macOS), Meetings and
+│   Voice Filter (Labs toggles), Annotate, Playground (Labs, an item)
 ├── Labs -> a store of unfinished features, each off by default: search, categories, cards with their own settings inline; hex://labs/<feature> opens its group and scrolls to its card (labs.md)
 └── What’s new -> recent features and their controls; Down from Labs selects it
     // Version, update actions, and Quit (Linux and Windows) are outside the navigation list
@@ -1397,7 +1397,9 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
 │   unbound by default: copies the focused field, runs its Output steps, re-checks the
 │   selection, and replaces it (labs.md, dictation.md)
 └── In some apps -> Each mode's apps and its steps (Only: …), opens to list them
-    // the old Modes editor stays in the code for its scenes, unreachable
+    // Labs > Modes editor (off) shows the old Modes editor as its own sidebar pane,
+    // right after Output, with editable apps, corrections, rewriting, and
+    // transformations; the Modes destination opens it instead of Output (labs.md)
     // Its drafts and delete confirmation follow the unique saved mode name
     // across reloads; removing, renaming or duplicating it drops the draft.
     // A dirty field stays; untouched fields adopt the new values individually.

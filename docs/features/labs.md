@@ -53,6 +53,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Voice Filter (Dev) yes experimental.hex_microphone (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
+├── Modes editor    yes   labs.modes_editor                      Modes joins the sidebar right after Output, with every mode's
+│                                        applications, corrections, OpenCode rewrite, and transformations, as the old editor
+│                                        did before Output replaced it; off, `hex window show --pane modes` opens Output
+│                                        // checks: the_modes_editor_lab_brings_modes_back_to_the_sidebar (rune_ui/tests.rs)
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating; its card says when the selected speech model can't stream (Linux: or Speech engine is CPU), so no words would show
 ├── Stop phrase     no    labs.stop_phrase + labs.stop_phrase_text ("stop dictation", every OS)
 │                                        saying the phrase at the end of a hands-free dictation finishes it, as if the
@@ -350,7 +354,8 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one), scrolls to its card,
 │   and gives the card a focus border for 1.5 s (Store::flash). It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
-│   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
+│   (general, output, modes — only while Labs › Modes editor shows it — history,
+│   meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
 ├── Annotate is listed as a lab (Annotate group) wherever Hex has the Annotate pane; its switch flips capture.enabled
 └── Footer -> "Unfinished features. They may change or break.", Run setup again (replays the onboarding,

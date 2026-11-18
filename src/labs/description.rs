@@ -217,6 +217,9 @@ impl Feature {
             Self::HoldThroughKeys => {
                 "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish. Before that first second a chord still ends it, and a shortcut with a key is unchanged"
             }
+            Self::ModesEditor => {
+                "Edit each mode's apps and websites, corrections, OpenCode rewrite (on or off, and its model), and transformations in a Modes pane; Output stays the read-only view"
+            }
         }
     }
 }

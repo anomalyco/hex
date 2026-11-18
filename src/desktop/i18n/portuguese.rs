@@ -1380,6 +1380,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("A finished Annotate capture copies as one zip file, without the video or audio", "Uma captura do Annotate concluída é copiada como um único arquivo zip, sem o vídeo nem o áudio"),
     ("Add a Stats button to History that summarizes the dictations you kept. The hex history stats command prints it too", "Adiciona um botão Estatísticas ao Histórico, que resume os ditados que você manteve. O comando hex history stats também mostra isso"),
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Se um atalho é feito só de Ctrl, Alt, Shift ou da tecla Windows, sem tecla de letra ou número, pressionar outra tecla ou clicar depois do primeiro segundo não termina mais o ditado; solte para terminar"),
+    ("Modes editor", "Editor de modos"),
+    ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Edite os apps, as correções e a reescrita do OpenCode de cada modo em um painel Modos"),
 ];
 
 #[cfg(test)]

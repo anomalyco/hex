@@ -83,6 +83,7 @@ impl Feature {
             Self::CopyDictationAudio => "Copy dictation audio",
             Self::StopPhrase => "Stop phrase",
             Self::HoldThroughKeys => "Hold through other keys",
+            Self::ModesEditor => "Modes editor",
         }
     }
 
@@ -299,6 +300,9 @@ impl Feature {
             }
             Self::HoldThroughKeys => {
                 "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"
+            }
+            Self::ModesEditor => {
+                "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane"
             }
         }
     }

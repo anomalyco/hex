@@ -3,8 +3,8 @@
 //! every lab as a card under its group's collapsible header, and Turned on
 //! what's on. Each card shows its description and switch, and while on any
 //! settings the lab has of its own. A feature with its own pane (Meetings,
-//! Voice Filter, Playground) joins the main sidebar while on and is hidden
-//! while off.
+//! Voice Filter, Playground, Modes editor) joins the main sidebar while on
+//! and is hidden while off.
 
 mod browser_access;
 mod group;
@@ -33,11 +33,15 @@ pub(super) static LABS_ICON: Icon = Icon {
     body: r#"<path d="M6.25 2.5h3.5M6.75 2.5v4L3.2 12.3a.8.8 0 0 0 .7 1.2h8.2a.8.8 0 0 0 .7-1.2L9.25 6.5v-4M4.8 10h6.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>"#,
 };
 
-/// The main sidebar's panes, in order: General, Output, History, then the
-/// features turned on (Meetings and Voice Filter from Labs, Annotate in dev
-/// builds).
+/// The main sidebar's panes, in order: General, Output, the Modes editor
+/// while its lab is on, History, then the features turned on (Meetings and
+/// Voice Filter from Labs, Annotate in dev builds).
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
-    let mut panes = vec![Pane::General, Pane::Output, Pane::History];
+    let mut panes = vec![Pane::General, Pane::Output];
+    if Pane::Modes.shown(ui) {
+        panes.push(Pane::Modes);
+    }
+    panes.push(Pane::History);
     #[cfg(hex_capture)]
     let optional = [
         Pane::Captures,
@@ -691,6 +695,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::KeepRecordings, None));
     rows.push(row(Feature::CopyDictationAudio, None));
     rows.push(row(Feature::OutputFixes, Some(&BOOK)));
+    // The Modes editor's card carries its pane.
+    rows.push(row(Feature::ModesEditor, Some(Pane::Modes.icon())));
     rows.push(row(Feature::VoicePrompt, None));
     // macOS's Accessibility reads the text element's caret and nearby text.
     if caps.os == super::platform::Os::Macos {
@@ -913,6 +919,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CursorContext => "lab-cursor-context",
         Feature::StopPhrase => "lab-stop-phrase",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
+        Feature::ModesEditor => "lab-modes-editor",
     }
 }
 
