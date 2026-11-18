@@ -60,10 +60,12 @@ mod offer;
 #[path = "meeting_capsules/offer/surface.rs"]
 mod offer_surface;
 mod panel;
+mod screen;
 mod throw;
 mod waveform;
 
 use panel::{agent_prompt, hex_command, ready, ready_summary, recording};
+use screen::primary_screen_size;
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -619,21 +621,6 @@ fn corner_placement(
         (Align::Start, WINDOW_MARGIN + dx)
     };
     (edge, margin, align, inset)
-}
-
-/// The primary screen in points, where Rune places the capsules.
-#[cfg(target_os = "macos")]
-fn primary_screen_size() -> Option<(f32, f32)> {
-    let mtm = objc2::MainThreadMarker::new()?;
-    let screen = objc2_app_kit::NSScreen::screens(mtm).iter().next()?;
-    let size = screen.frame().size;
-    Some((size.width as f32, size.height as f32))
-}
-
-/// Linux and Windows leave a dragged capsule in its corner.
-#[cfg(not(target_os = "macos"))]
-fn primary_screen_size() -> Option<(f32, f32)> {
-    None
 }
 
 fn place_capsule(
@@ -2048,12 +2035,10 @@ mod tests {
         );
         rt.pointer_up(x - 20.0, y + 30.0);
         rt.frame(0.0);
-        // Off the main thread there is no screen to snap against, so it
-        // returns to its corner.
-        assert_eq!(
-            moves.lock().unwrap().last(),
-            Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
-        );
+        // A release this close stays in its corner, whether the host has a
+        // screen to snap against or not (CI, and a Wayland capsule, have none).
+        let last = moves.lock().unwrap().last().cloned().expect("a move");
+        assert_eq!(last.0, MeetingIndicatorCorner::TopRight);
         assert!(saved.lock().unwrap().is_empty());
     }
 
@@ -2189,8 +2174,8 @@ mod tests {
             "{moves:?}"
         );
         assert_eq!(
-            moves.last(),
-            Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
+            moves.last().map(|moved| moved.0),
+            Some(MeetingIndicatorCorner::TopRight)
         );
         // The drag pressed nothing.
         assert!(rt.state.kind.is_some());

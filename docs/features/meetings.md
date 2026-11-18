@@ -286,9 +286,13 @@ error showed. Check: `pane_requests_reach_the_window_s_own_meetings` in
 a real Windows PC has not been observed.
 
 Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
-Copy section from the tray, dragging the recording capsule to another corner,
-the `hex meetings` and `hex mcp` commands (shared-control), and website names
-for browser calls. Verified: Linux and Windows x64 build and lint
+Copy section from the tray, the `hex meetings` and `hex mcp` commands
+(shared-control), and website names for browser calls. Dragging a capsule to
+another corner works on Windows and on X11 desktops; a Wayland compositor
+tells an app nothing of its outputs, so there the capsule returns to the
+corner it started in (`primary_screen_size` in
+[rune_ui/meeting_capsules/screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)).
+Verified: Linux and Windows x64 build and lint
 (`cargo clippy`, `cargo xwin clippy`); the single default-output PipeWire
 monitor capture and the pw-dump parsing were checked by hand on Arch/niri
 before #1801. Not verified: the multi-sink capture #1801 added has not been
@@ -898,7 +902,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
-     │   its centre and saves recording_indicator_corner (window settings too)
+     │   its centre and saves recording_indicator_corner (window settings too;
+     │   macOS, Windows, and Linux X11, while a Wayland capsule returns to
+     │   the corner it started in)
      ├── Copy new -> copies the turns not yet copied or pasted, through
      │   the click (see meetings.copy-through-now)
      │   ├── Shares Option-Control-V's cursor: either one advances both
@@ -927,7 +933,7 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
          observed on a real Mac)
   -> No timeout; nothing stops automatically
 
-Panel capsules move like the recording capsule (macOS; #1093, graduated from Labs) // meetings.panel-drag
+Panel capsules move like the recording capsule (#1093, graduated from Labs) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
   Recording automatically
   -> Each opens in the saved recording_indicator_corner (read as it shows)
@@ -938,7 +944,8 @@ Panel capsules move like the recording capsule (macOS; #1093, graduated from Lab
      │   where it was let go into that corner on the GLIDE spring (0.32 s, no
      │   bounce), carrying the throw's speed, and the corner is saved, so the
      │   recording capsule moves there too. A press mid-glide catches it
-     │   where it is. Reduce Motion, or no screen size -> it jumps there
+     │   where it is. Reduce Motion, or no screen to measure (a Wayland
+     │   capsule) -> it jumps back to the corner it started in
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
   -> The finished meeting opens in the corner its recording ended in
