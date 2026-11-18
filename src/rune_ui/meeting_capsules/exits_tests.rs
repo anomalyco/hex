@@ -95,6 +95,61 @@ fn the_other_capsules_arrive_and_leave_the_same_way() {
     }
 }
 
+/// Only the top right corner is filmed. At every corner the surface shrinks
+/// toward the corner it is saved in: those two edges never move as it goes.
+#[test]
+fn a_capsule_leaves_toward_whichever_corner_it_is_saved_in() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopRight, TopLeft, BottomRight, BottomLeft] {
+        for (kind, size, button) in [
+            (offer(slack_huddle()), PANEL, "not-now"),
+            (ready_summarized(), ready_size(), "dismiss"),
+        ] {
+            let (mut rt, _, _) = runtime(kind, false, true, size);
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                tx.instant();
+            });
+            rt.frame(0.);
+            let edges = |rt: &Runtime<Capsule>| {
+                let ([x, y, w, h], opacity) = rt.presented("pill").unwrap();
+                let anchor = (
+                    if corner.is_right() { x + w } else { x },
+                    if corner.is_top() { y } else { y + h },
+                );
+                let free = (
+                    if corner.is_right() { x } else { x + w },
+                    if corner.is_top() { y + h } else { y },
+                );
+                (anchor, free, opacity)
+            };
+            let (rest, open, _) = edges(&rt);
+            tap(&mut rt, button);
+            let mut frames = 0;
+            while rt.state.surface.leaving() {
+                rt.frame(1. / 60.);
+                frames += 1;
+                let (anchor, free, opacity) = edges(&rt);
+                assert!(
+                    (anchor.0 - rest.0).abs() < 0.03 && (anchor.1 - rest.1).abs() < 0.03,
+                    "{corner:?} {button} f{frames}: {anchor:?} left {rest:?}"
+                );
+                // The free edges come in toward the corner, never out.
+                let inward = |free: f32, open: f32, rest: f32| (free - rest).abs() <= (open - rest).abs() + 0.03;
+                assert!(
+                    inward(free.0, open.0, rest.0) && inward(free.1, open.1, rest.1),
+                    "{corner:?} {button} f{frames}: {free:?} outside {open:?}"
+                );
+                if frames == 6 {
+                    assert!(opacity < 0.8 && (free.0 - open.0).abs() > 1.0, "{corner:?} {button}");
+                }
+                assert!(frames < 60, "{corner:?} {button} never left");
+            }
+            assert!(frames >= 8, "{corner:?} {button} left in {frames} frames");
+        }
+    }
+}
+
 #[test]
 fn a_refused_start_goes_where_it_is_without_saying_starting() {
     // Refused while the offer is still contracting: the outline carries on
