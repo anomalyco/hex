@@ -960,7 +960,11 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   `a_refused_start_goes_where_it_is_without_saying_starting`,
      │   `closing_before_the_notes_arrive_keeps_what_it_showed_until_it_has_gone`,
      │   `an_exit_interrupted_by_another_offer_turns_round_and_stays_shown`,
-     │   `what_is_leaving_takes_no_input`). Offscreen Rune; the deferred
+     │   `what_is_leaving_takes_no_input`,
+     │   `the_other_capsules_arrive_and_leave_the_same_way` for the
+     │   reminder, the call-ended notice and the automatic-start notice,
+     │   `a_capsule_leaves_toward_whichever_corner_it_is_saved_in` at all
+     │   four corners). Offscreen Rune; the deferred
      │   window hide, and click-through while a capsule leaves, are not
      │   verified in a native window. On Windows the window keeps the size
      │   it had while the capsule leaves.
