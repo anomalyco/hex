@@ -578,9 +578,13 @@ Automatic (the entry keeps the model's name); only with no ranked model listed
 do they say Default and Use OpenCode default, because then OpenCode's own
 default answers. The "dictation post-processing completed" and "…failed" log
 lines, and the processing observation in `live.ndjson` and History, name the
-model the request ran against, as `provider/id` or `opencode default`. Checks:
+model the request ran against: `provider/id` for the named model that answered,
+or on failure the one the request asked for; `opencode default` when OpenCode's
+own default answered; and `automatic` when Hex's automatic ranked choice failed
+before any model answered. Checks:
 `stale_ranked_models_fall_back_to_the_default_model`,
-`a_processing_observation_names_the_model_that_answered`, and
+`a_processing_observation_names_the_model_that_answered`,
+`a_processing_log_line_names_the_model_or_its_automatic_choice`, and
 `an_unset_model_on_a_ranked_catalog_is_automatic` in
 [dictation/processor.rs](../../src/dictation/processor.rs) and
 [desktop/opencode_catalog.rs](../../src/desktop/opencode_catalog.rs).

@@ -554,10 +554,7 @@ impl Profiles {
             &profile.name,
             Instant::now(),
         );
-        let model = observation
-            .model
-            .as_deref()
-            .unwrap_or(OPENCODE_DEFAULT_MODEL);
+        let model = model_label(&observation);
         match &observation.fallback {
             None => tracing::info!(
                 profile = profile.name,
@@ -626,10 +623,7 @@ fn voice_prompt_processed(
         &profile.name,
         Instant::now(),
     );
-    let model = observation
-        .model
-        .as_deref()
-        .unwrap_or(OPENCODE_DEFAULT_MODEL);
+    let model = model_label(&observation);
     match &observation.fallback {
         None => tracing::info!(
             profile = profile.name,
@@ -832,10 +826,6 @@ pub(crate) fn generate_text_with(
     generate_cancellable(prompt, Some(model), deadline, cancelled)
 }
 
-/// What a processing log line names when the request asked for no model:
-/// OpenCode picked its own default.
-const OPENCODE_DEFAULT_MODEL: &str = "opencode default";
-
 /// Runs one generation and reports it as a processing observation. The text is
 /// `None` whenever the caller must fall back, with the reason recorded in the
 /// observation.
@@ -885,6 +875,26 @@ fn observed(
     };
     (text, observation)
 }
+
+/// What a processing log line names for the model that ran: the named model
+/// that answered, or on failure the one the request asked for; OpenCode's own
+/// default when no model was named and it answered; and Hex's automatic
+/// choice when no named model answered at all.
+fn model_label(observation: &ProcessingObservation) -> &str {
+    match observation.model.as_deref() {
+        Some(model) => model,
+        None if observation.fallback.is_some() => AUTOMATIC_MODEL,
+        None => OPENCODE_DEFAULT_MODEL,
+    }
+}
+
+/// What a processing log line names when the request named no model and
+/// Hex's automatic ranked choice had no model answer.
+const AUTOMATIC_MODEL: &str = "automatic";
+
+/// What a processing log line names when the request asked for no model:
+/// OpenCode picked its own default.
+const OPENCODE_DEFAULT_MODEL: &str = "opencode default";
 
 #[derive(Clone, Debug)]
 pub struct ModelChoice {
@@ -2675,6 +2685,45 @@ mod tests {
             observation.fallback.as_deref(),
             Some("processor returned empty text")
         );
+    }
+
+    /// A failure with no named model leaves the observation without one, so
+    /// the log line must not claim OpenCode's default model ran.
+    #[test]
+    fn a_processing_log_line_names_the_model_or_its_automatic_choice() {
+        let model = Model {
+            provider: "anthropic".into(),
+            id: "claude-haiku-4-5".into(),
+            variant: None,
+        };
+        let answered = |model| {
+            observed(
+                Ok(Generated {
+                    text: "rewritten".into(),
+                    model,
+                }),
+                None,
+                "Chat",
+                Duration::ZERO,
+            )
+            .1
+        };
+
+        assert_eq!(
+            model_label(&answered(Some(model.clone()))),
+            "anthropic/claude-haiku-4-5"
+        );
+        let failed = observed(Err(eyre!("boom")), Some(&model), "Chat", Duration::ZERO).1;
+        assert_eq!(model_label(&failed), "anthropic/claude-haiku-4-5");
+        assert_eq!(model_label(&answered(None)), "opencode default");
+        let automatic = observed(
+            Err(eyre!("OpenCode isn't running")),
+            None,
+            "Chat",
+            Duration::ZERO,
+        )
+        .1;
+        assert_eq!(model_label(&automatic), "automatic");
     }
 
     /// A ranked list read while OpenCode was still loading can name models

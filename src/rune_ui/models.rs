@@ -307,7 +307,8 @@ fn status(models: &Models) -> String {
 pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
     let (model, variant) = selected(&ui.settings, target);
     let meeting = target == Target::MeetingSummary;
-    // Hex, not OpenCode's default, picks a meeting summary model left unset.
+    // An unset meeting summary uses OpenCode's own default model, so the field
+    // names that instead of a mode's automatic or default presentation.
     let presentation = if meeting && model.is_none() {
         None
     } else {
