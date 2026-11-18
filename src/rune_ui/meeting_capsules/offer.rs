@@ -103,12 +103,14 @@ pub(super) fn actions(
                 })
                 .build_push(p.k),
         };
-        face.key(key).on_press(move |c: &mut Capsule| {
+        face.key(key).on_press_tx(move |c: &mut Capsule, tx| {
             if !c.presentation.inherits_offer_window()
                 && c.more_open == choosing
                 && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
             {
                 press(c);
+                // The surface answers in the frame of the press.
+                c.stir(tx);
             }
         })
     };
@@ -179,10 +181,13 @@ impl Capsule {
         self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
         self.live = Live::default();
         self.hovered = false;
+        self.stopping = false;
         self.expired = false;
         self.throw.stop();
+        // Nothing here mounts with an entrance of its own: the surface
+        // carries the change.
         tx.instant();
-        tx.wake_after(Duration::ZERO);
+        self.stir(tx);
     }
     pub(super) fn set_offer_timer(&mut self, timer: Option<After>) {
         self.rearm_offer = timer;

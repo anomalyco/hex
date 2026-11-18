@@ -251,7 +251,8 @@ fn detected_offer_sheet() {
                     tx.instant()
                 });
                 rt.frame(0.);
-                rt.settle_all();
+                settle_stage(&mut rt);
+        rt.settle_all();
                 rt.frame(0.);
                 let w = (size.0 * 2.0) as u32;
                 let h = (size.1 * 2.0) as u32;

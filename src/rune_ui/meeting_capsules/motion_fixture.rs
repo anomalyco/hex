@@ -40,6 +40,7 @@ fn recording_motion_frames() {
                 span_ms: 64_000,
             };
         });
+        settle_stage(&mut rt);
         rt.settle_all();
         rt.frame(0.0);
         let mut renderer = offscreen::renderer(&gpu.device);
@@ -130,6 +131,151 @@ fn fixture_scope(capsule: &mut Capsule) {
         );
     }
     capsule.waveform = Some(Box::new(wave));
+}
+
+/// Replay a Stop with a controlled controller/worker delay. This drives Rune's
+/// actual press, layout, springs, text and recording compositor, not a movie of
+/// the desktop. No controller thread, capture, audio device or settings store.
+#[test]
+fn stop_handoff_frames() {
+    use crate::rune_ui::offscreen;
+    use std::fmt::Write;
+    let Some(folder) = std::env::var_os("HEX_STOP_FRAMES") else {
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
+    let selected = std::env::var("HEX_STOP_CASE").ok();
+    for (name, stopped, published, notes, long, failed) in [
+        ("short", 53, 55, 58, false, false),
+        ("delayed", 68, 108, 138, false, false),
+        ("localized", 60, 86, 118, true, false),
+        ("failure", 60, 100, 118, false, true),
+    ] {
+        if selected.as_deref().is_some_and(|s| s != name) {
+            continue;
+        }
+        let dir = folder.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let size = (RECORDING.0, RECORDING.1.ceil());
+        let (w, h) = ((size.0 * 2.) as u32, (size.1 * 2.) as u32);
+        let (mut rt, commands, _) = runtime(live_recording("ready-snap"), false, false, size);
+        rt.transparent = true;
+        rt.update(|c, tx| {
+            c.live.entries = call();
+            c.corner = MeetingIndicatorCorner::TopRight;
+            tx.instant();
+        });
+        rt.frame(0.);
+        let mut renderer = offscreen::renderer(&gpu.device);
+        let target = offscreen::target(&gpu.device, w, h);
+        let mut ink = waveform::Ink::default();
+        let mut trace = String::from("frame,key,x,y,w,h\n");
+        let mut pointer_trace = String::from("frame,x,y,cursor\n");
+        let mut point = None;
+        let start = Instant::now();
+        rt.state.waveform = Some(Box::new(waveform::Listening::new(start)));
+        for frame in 0..180 {
+            if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+                shown.started = Instant::now() - Duration::from_secs(258);
+                rt.state.waveform.as_mut().unwrap().sample(
+                    start + Duration::from_secs_f64(frame as f64 / 60.),
+                    fixture_levels(frame),
+                );
+            }
+            match frame {
+                12 => {
+                    point = Some((225., 22.));
+                    rt.pointer_move(225., 22.);
+                }
+                32 | 47 => {
+                    let (x, y) = rt.find("stop").unwrap();
+                    point = Some((x, y));
+                    rt.pointer_move(x, y);
+                }
+                48 => {
+                    let (x, y) = rt.find("stop").unwrap();
+                    point = Some((x, y));
+                    rt.pointer_down(x, y);
+                    rt.pointer_up(x, y);
+                }
+                52 => rt.update(|c, _| c.mark_stopping()),
+                62 => {
+                    point = None;
+                    rt.pointer_leave();
+                }
+                f if f == stopped => rt.update(|c, _| c.capture_stopped()),
+                f if f == published && failed => rt.update(|c, tx| {
+                    c.kind = None;
+                    tx.instant();
+                }), // host opens Meetings with the failure
+                f if f == published => rt.update(|c, _| {
+                    let Kind::Ready(mut m) = ready_transcript() else {
+                        unreachable!()
+                    };
+                    m.duration_ms = Some(258_000);
+                    if long {
+                        m.title =
+                            "Planification trimestrielle — lancement et préparation des équipes"
+                                .into();
+                    }
+                    c.published(m);
+                }),
+                f if f == notes && !failed => rt.update(|c, _| {
+                    let Kind::Ready(mut m) = ready_summarized() else {
+                        unreachable!()
+                    };
+                    m.duration_ms = Some(258_000);
+                    if long {
+                        m.notes.as_mut().unwrap().title =
+                            "Planification trimestrielle — lancement et préparation des équipes"
+                                .into();
+                    }
+                    c.refresh_ready(m);
+                }),
+                _ => (),
+            }
+            rt.frame(1. / 60.);
+            if let Some((x, y)) = point {
+                writeln!(pointer_trace, "{frame},{x},{y},{:?}", rt.cursor()).unwrap();
+            }
+            if frame == 48 {
+                assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
+            }
+            for key in [
+                "pill",
+                "elapsed",
+                "stop",
+                "header",
+                "meeting-listening-field",
+                "title",
+                "summary",
+                "copy-new",
+                "copy-all",
+                "copy-prompt",
+            ] {
+                if let Some(([x, y, w, h], _)) = rt.presented(key) {
+                    writeln!(trace, "{frame},{key},{x},{y},{w},{h}").unwrap();
+                }
+            }
+            let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
+            // A retired hit target can still paint. Compare its trailing
+            // hover fill against the bare panel gutter on that scanline.
+            if frame == 47 || frame == 48 {
+                let scan = ((CAPSULE_INSET + REST_HEIGHT + ROW_HEIGHT / 2.) * 2.) as usize;
+                let pixel = |x: usize| rgba[4 * (scan * w as usize + x)];
+                assert_eq!(
+                    pixel(460) != pixel(506),
+                    frame == 47,
+                    "Stop glyph at {frame}"
+                );
+            }
+            rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &rgba).unwrap();
+        }
+        std::fs::write(dir.join("trace.csv"), trace).unwrap();
+        std::fs::write(dir.join("pointer.csv"), pointer_trace).unwrap();
+        assert!(commands.try_recv().is_err(), "one Stop per handoff");
+    }
 }
 
 #[test]
@@ -254,6 +400,414 @@ fn paint_recording(
 }
 
 #[test]
+fn stop_hits_its_center_edges_and_corners_but_not_its_neighbors() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
+        let (mut rt, commands, _) = runtime(live_recording("hit"), false, true, RECORDING);
+        rt.update(move |c, tx| {
+            c.corner = corner;
+            tx.instant();
+        });
+        rt.frame(0.);
+        open_recording(&mut rt);
+        let ([x, y, w, h], _) = rt.presented("stop").unwrap();
+        assert!(w >= 44. && h >= 44., "{corner:?}: {w}×{h}");
+        let ([_, cy, _, ch], _) = rt.presented("copy-new").unwrap();
+        assert!(y + h <= cy || y >= cy + ch);
+        let click = |rt: &mut Runtime<Capsule>, px, py| {
+            rt.pointer_down(px, py);
+            rt.pointer_up(px, py);
+            rt.frame(1. / 60.);
+        };
+        for (px, py) in [
+            (x - 0.5, y + h / 2.),
+            (x + w + 0.5, y + h / 2.),
+            (x + w / 2., y - 0.5),
+            (x + w / 2., y + h + 0.5),
+        ] {
+            click(&mut rt, px, py);
+            assert!(commands.try_recv().is_err());
+        }
+        for px in [x + 0.25, x + w / 2., x + w - 0.25] {
+            for py in [y + 0.25, y + h / 2., y + h - 0.25] {
+                click(&mut rt, px, py);
+                assert!(
+                    matches!(commands.try_recv(), Ok(ControllerCommand::Stop)),
+                    "{corner:?} {px},{py} in {x},{y} {w}×{h}"
+                );
+                click(&mut rt, px, py);
+                assert!(commands.try_recv().is_err());
+                assert!(rt.find("elapsed").is_some());
+                rt.update(|c, tx| {
+                    c.stopping = false;
+                    c.hovered = true;
+                    tx.instant();
+                });
+                rt.frame(0.);
+            }
+        }
+        rt.pointer_leave();
+        rt.frame(0.);
+        settle_stage(&mut rt);
+        rt.settle_all();
+        rt.frame(0.);
+        click(&mut rt, x + w / 2., y + h / 2.);
+        assert!(rt.find("stop").is_none() && commands.try_recv().is_err());
+    }
+}
+
+#[test]
+fn stop_is_one_named_action_for_keyboard_and_accessibility() {
+    use rune::accesskit::Action;
+    for keyboard in [true, false] {
+        let (mut rt, commands, _) = runtime(live_recording("keys"), false, true, RECORDING);
+        assert!(!rt.accessibility_action("stop", Action::Click, None));
+        open_recording(&mut rt);
+        if keyboard {
+            assert!(rt.accessibility_action("stop", Action::Focus, None));
+            rt.frame(0.);
+            let space = rune::KeyEvent {
+                key: rune::Key::Text(" ".into()),
+                mods: Default::default(),
+            };
+            rt.key(space.clone());
+            rt.key_up(space);
+        } else {
+            assert!(rt.accessibility_action("stop", Action::Click, None));
+        }
+        rt.frame(0.);
+        assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
+        assert!(!rt.accessibility_action("stop", Action::Click, None));
+        assert!(commands.try_recv().is_err());
+    }
+}
+
+#[test]
+fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
+    use crate::desktop::i18n;
+    use MeetingIndicatorCorner::*;
+    for &(code, _) in i18n::LANGUAGE_CHOICES.iter().filter(|(c, _)| c.is_some()) {
+        i18n::apply(code); // thread-local in tests, never a settings write
+        for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
+            let (mut rt, _, _) = runtime(live_recording("rows"), false, true, RECORDING);
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                c.live.entries = call();
+                c.copy_new = Some(Arc::new(|_| {}));
+                tx.instant()
+            });
+            rt.frame(0.);
+            let ([_, _, w, h], _) = rt.presented("pill").unwrap();
+            assert_eq!((w, h), (148., 36.));
+            assert!(rt.find("stop").is_none());
+            open_recording(&mut rt);
+            for (key, name) in [
+                ("stop", "Stop"),
+                ("copy-new", "Copy new"),
+                ("copy-all", "Copy all"),
+                ("copy-prompt", "Copy agent prompt"),
+            ] {
+                let nodes = rt.elements();
+                let (idx, row) = nodes
+                    .iter()
+                    .enumerate()
+                    .find(|(_, e)| e.key.as_deref() == Some(key))
+                    .unwrap();
+                let [x, y, w, h] = row.rect;
+                assert_eq!(
+                    (x, w, h),
+                    (CAPSULE_INSET + PANEL_PAD, 242., 44.),
+                    "{code:?} {corner:?} {key}"
+                );
+                let child = |key| {
+                    nodes
+                        .iter()
+                        .find(|e| e.parent == Some(idx) && e.key.as_deref() == Some(key))
+                        .unwrap()
+                };
+                let [gx, gy, gw, gh] = child("glyph").rect;
+                assert_eq!((gx - x, gw, gh), (9., 16., 16.));
+                assert_eq!(gy + gh / 2., y + h / 2.);
+                let label = child("label");
+                assert_eq!(label.text.as_deref(), Some(tr(name)));
+                assert_eq!(label.rect[0] - x, 33.);
+                for px in [gx + gw / 2., label.rect[0] + 1., x + w - 1.] {
+                    rt.pointer_move(px, y + h / 2.);
+                    rt.frame(1. / 60.);
+                    assert_eq!(
+                        rt.cursor(),
+                        Cursor::Default,
+                        "{code:?} {corner:?} {key} {px}"
+                    );
+                    assert!(
+                        rt.elements()
+                            .iter()
+                            .any(|e| e.key.as_deref() == Some(key) && e.hover > 0.)
+                    );
+                }
+            }
+        }
+    }
+    i18n::apply(Some("en"));
+}
+
+#[test]
+fn row_swipes_do_not_move_the_panel_or_fire_actions_but_small_clicks_work() {
+    let (mut rt, commands, _) = runtime(live_recording("ready-snap"), false, true, RECORDING);
+    let (send, shifts) = mpsc::channel();
+    rt.update(move |c, _| {
+        c.live.entries = call();
+        c.copy_new = Some(Arc::new(|_| {}));
+        c.shift = Some(Arc::new(move |_, dx, dy| send.send((dx, dy)).unwrap()));
+    });
+    rt.frame(0.);
+    open_recording(&mut rt);
+    for phase in 0..4 {
+        rt.update(|c, tx| {
+            match phase {
+                1 => c.capture_stopped(),
+                2 => {
+                    let Kind::Ready(m) = ready_transcript() else {
+                        unreachable!()
+                    };
+                    c.published(m)
+                }
+                3 => {
+                    let Kind::Ready(m) = ready_summarized() else {
+                        unreachable!()
+                    };
+                    c.refresh_ready(m)
+                }
+                _ => (),
+            };
+            tx.instant()
+        });
+        rt.frame(0.);
+        for key in ["stop", "copy-new", "copy-all", "copy-prompt"] {
+            let Some(([x, y, w, h], _)) = rt.presented(key) else {
+                continue;
+            };
+            for px in [x + 16., x + 35., x + w - 20.] {
+                let py = y + h / 2.;
+                rt.pointer_move(px, py);
+                rt.frame(0.);
+                assert_eq!(rt.cursor(), Cursor::Default);
+                rt.pointer_down(px, py);
+                rt.pointer_move(px + 10., py);
+                rt.frame(0.);
+                rt.pointer_up(px + 1., py);
+                rt.frame(0.);
+                assert!(
+                    shifts.try_recv().is_err() && commands.try_recv().is_err(),
+                    "{key} {phase}"
+                );
+                assert!(
+                    rt.state.live.copied.is_none() && !rt.state.live.copying,
+                    "{key} {phase}"
+                );
+            }
+        }
+        if phase == 0 {
+            for key in ["copy-prompt", "stop"] {
+                let (x, y) = rt.find(key).unwrap();
+                rt.pointer_down(x, y);
+                rt.pointer_move(x + 2., y + 1.);
+                rt.frame(0.);
+                rt.pointer_up(x + 2., y + 1.);
+                rt.frame(0.);
+                if key == "stop" {
+                    assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
+                    assert!(commands.try_recv().is_err());
+                } else {
+                    assert!(rt.state.live.copied(LiveCopy::Prompt));
+                    rt.state.live.copied = None;
+                }
+                assert!(shifts.try_recv().is_err());
+            }
+        }
+    }
+    tap(&mut rt, "dismiss");
+    assert!(rt.state.kind.is_none() && commands.try_recv().is_err());
+}
+
+#[test]
+fn tab_focus_tracks_the_whole_action_row_without_changing_its_bounds() {
+    let (mut rt, commands, _) = runtime(live_recording("tab-rows"), false, true, RECORDING);
+    rt.update(|c, _| {
+        c.live.entries = call();
+        c.copy_new = Some(Arc::new(|_| {}));
+    });
+    rt.frame(0.);
+    open_recording(&mut rt);
+    for key in ["stop", "copy-new", "copy-all", "copy-prompt"] {
+        rt.key(rune::KeyEvent {
+            key: rune::Key::Tab,
+            mods: Default::default(),
+        });
+        rt.frame(0.);
+        let focused = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.focus_visible && e.focused)
+            .unwrap();
+        assert_eq!(focused.key.as_deref(), Some(key));
+        assert_eq!(focused.rect[2..], [242., 44.]);
+    }
+    assert!(commands.try_recv().is_err());
+}
+
+#[test]
+fn capture_end_and_publication_retarget_one_anchored_surface() {
+    use MeetingIndicatorCorner::*;
+    for (delay, reduced) in [(0, false), (90, false), (0, true), (90, true)] {
+        for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
+            let (mut rt, _, _) = runtime(live_recording("ready-snap"), false, true, RECORDING);
+            rt.reduced_motion = reduced;
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                tx.instant();
+            });
+            rt.frame(0.);
+            let anchor = |rt: &Runtime<Capsule>| {
+                let ([x, y, w, h], opacity) = rt.presented("pill").unwrap();
+                assert!(w >= REST_WIDTH && h >= REST_HEIGHT && opacity > 0.99);
+                (
+                    if corner.is_right() { x + w } else { x },
+                    if corner.is_top() { y } else { y + h },
+                )
+            };
+            let (x, y) = anchor(&rt);
+            let (px, py) = rt.find("elapsed").unwrap();
+            rt.pointer_move(px, py);
+            for frame in 0..90 + delay {
+                if frame == 5 {
+                    rt.update(|c, _| c.mark_stopping());
+                }
+                if frame == 7 {
+                    rt.pointer_leave();
+                }
+                if frame == 12 {
+                    rt.update(|c, _| c.capture_stopped());
+                }
+                if frame == 12 + delay {
+                    rt.update(|c, _| {
+                        let Kind::Ready(m) = ready_transcript() else {
+                            unreachable!()
+                        };
+                        c.published(m);
+                    });
+                }
+                if frame == 25 + delay {
+                    rt.update(|c, _| {
+                        let Kind::Ready(m) = ready_summarized() else {
+                            unreachable!()
+                        };
+                        c.refresh_ready(m);
+                    });
+                }
+                rt.frame(1. / 60.);
+                let (ax, ay) = anchor(&rt);
+                assert!(
+                    (x - ax).abs() < 0.02 && (y - ay).abs() < 0.02,
+                    "{corner:?} {frame}: {ax},{ay} vs {x},{y}"
+                );
+                assert_eq!(rt.find("meeting-listening-field").is_some(), frame < 12);
+                assert!(rt.find("elapsed").is_some());
+                assert_eq!(rt.find("dismiss").is_some(), frame >= 12 + delay);
+            }
+        }
+    }
+}
+
+/// Measure what Rune presented, not just Taffy's destination. In particular,
+/// a transient but perfectly anchored 18 pt dip used to pass the anchor test.
+#[test]
+fn notes_grow_past_the_copies_without_a_height_dip_or_a_clock_hop() {
+    use MeetingIndicatorCorner::*;
+    for corner in [TopRight, BottomLeft, BottomRight, TopLeft] {
+        for (delay, reduced, long) in [
+            (1, false, false),
+            (60, false, false),
+            (2, false, true),
+            (1, true, true),
+        ] {
+            let (mut rt, _, _) = runtime(live_recording("ready-snap"), false, true, RECORDING);
+            rt.reduced_motion = reduced;
+            rt.update(move |c, tx| {
+                c.corner = corner;
+                tx.instant();
+            });
+            rt.frame(0.);
+            open_recording(&mut rt);
+            let rect = |rt: &Runtime<Capsule>, k| rt.presented(k).unwrap().0;
+            let clock = rect(&rt, "elapsed");
+            let rows = ["copy-new", "copy-all", "copy-prompt"];
+            let at = rows.map(|k| rect(&rt, k));
+            let mut height = rect(&rt, "pill")[3];
+            let mut title_width = None;
+            rt.update(|c, _| c.mark_stopping());
+            for frame in 0..delay + 100 {
+                if frame == 1 {
+                    rt.update(|c, _| c.capture_stopped());
+                }
+                if frame == 1 + delay {
+                    rt.update(|c,_| {
+                        let Kind::Ready(mut m) = ready_transcript() else { unreachable!() };
+                        m.duration_ms = Some(258_000);
+                        if long { m.title = "Planification trimestrielle — lancement et préparation des équipes".into(); }
+                        c.published(m);
+                    });
+                }
+                if frame == 4 + delay {
+                    rt.update(|c,_| {
+                        let Kind::Ready(mut m) = ready_summarized() else { unreachable!() };
+                        m.duration_ms = Some(258_000);
+                        if long { m.notes.as_mut().unwrap().title = "Planification trimestrielle — lancement et préparation des équipes".into(); }
+                        c.refresh_ready(m);
+                    });
+                }
+                rt.frame(1. / 60.);
+                let now = rect(&rt, "pill")[3];
+                assert!(
+                    now >= height - 0.02,
+                    "{corner:?} f{frame}: {height} → {now}"
+                );
+                height = now;
+                let t = rect(&rt, "elapsed");
+                assert!(
+                    (t[1] - clock[1]).abs() < 0.02 && t[2..] == clock[2..],
+                    "{corner:?} f{frame} timer {t:?} / {clock:?}"
+                );
+                assert!((t[0] - clock[0]).abs() < 0.02, "timer moved at {frame}");
+                if frame > delay {
+                    let w = rect(&rt, "title")[2];
+                    assert!(
+                        (w - *title_width.get_or_insert(w)).abs() < 0.02,
+                        "title wrapped at a moving width"
+                    );
+                }
+                for (key, original) in rows.into_iter().zip(at) {
+                    let row = rect(&rt, key);
+                    assert_eq!(row[2..], original[2..]);
+                    if !long {
+                        assert!(
+                            (row[1] - original[1]).abs() < 0.02,
+                            "{corner:?} f{frame} {key}: {row:?} / {original:?}"
+                        );
+                    }
+                }
+            }
+            let header = rect(&rt, "header")[3];
+            assert!(if long {
+                header > OPEN_HEADER
+            } else {
+                (header - OPEN_HEADER).abs() < 0.02
+            });
+        }
+    }
+}
+
+#[test]
 fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
     use MeetingIndicatorCorner::*;
     for corner in [TopLeft, TopRight, BottomLeft, BottomRight] {
@@ -271,7 +825,8 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 }
                 tx.instant();
             });
-            rt.settle_all();
+            settle_stage(&mut rt);
+        rt.settle_all();
             rt.frame(0.);
             let rect = |rt: &Runtime<Capsule>, key| {
                 rt.elements()
@@ -295,8 +850,10 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 rt.frame(1. / 60.);
             }
             assert_eq!(rt.find("elapsed"), Some(timer));
-            let [x, _, w, h] = rect(&rt, "stop");
-            assert!(w >= 44. && h >= 26. && (x + w <= sx || x >= tx + tw));
+            let [_, y, w, h] = rect(&rt, "stop");
+            let [_, my, _, mh] = rect(&rt, "meta");
+            assert_eq!((w, h), (PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT));
+            assert!(y + h <= my || y >= my + mh);
             tap(&mut rt, "stop");
             assert!(matches!(received.try_recv(), Ok(ControllerCommand::Stop)));
         }
