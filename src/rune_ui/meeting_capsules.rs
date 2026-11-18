@@ -1541,8 +1541,8 @@ mod tests {
             shift: None,
             throw: throw::Throw::default(),
             reduced: Cell::new(false),
+            scale: Cell::new(1.0),
             // No screen: a release lands back in the corner it started in.
-            scale: Cell::new(2.0),
             screen: |_| None,
             save_corner: Arc::new(|_| {}),
             copy_new: None,
@@ -2048,8 +2048,8 @@ mod tests {
         );
         rt.pointer_up(x - 20.0, y + 30.0);
         rt.frame(0.0);
-        // Off the main thread there is no screen to snap against, so it
-        // returns to its corner.
+        // The test runtime has no screen to snap against, so it returns to
+        // its corner.
         assert_eq!(
             moves.lock().unwrap().last(),
             Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))

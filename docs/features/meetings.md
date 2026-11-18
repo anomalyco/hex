@@ -288,9 +288,10 @@ a real Windows PC has not been observed.
 Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
 Copy section from the tray, the `hex meetings` and `hex mcp` commands
 (shared-control), and website names for browser calls. Dragging a capsule to
-another corner works on Windows and on X11 desktops, though neither has been
-tried by hand on a real Windows PC or X11 desktop; not supported on Wayland
-yet, so a capsule there returns to the corner it started in
+another corner works on Windows, on X11 desktops, and on a capsule floated on
+XWayland (GNOME with Labs › Call recording controls on GNOME), though none of
+that has been tried by hand on a real Windows PC or X11 desktop; only a native
+Wayland capsule returns to the corner it started in
 (`primary_screen_size` in
 [rune_ui/meeting_capsules/screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)).
 Verified: Linux and Windows x64 build and lint
@@ -904,9 +905,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   corner opens upward, its header nearest the screen edge
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
      │   its centre and saves recording_indicator_corner (window settings too;
-     │   macOS, Windows and Linux X11, not yet observed on a real Windows PC
-     │   or X11 desktop; not supported on Wayland yet, where a capsule
-     │   returns to the corner it started in)
+     │   macOS, Windows, Linux X11, and XWayland when GNOME floats it there,
+     │   though Windows and X11 have not been tried on a real machine; only a
+     │   native Wayland capsule returns to the corner it started in)
      ├── Copy new -> copies the turns not yet copied or pasted, through
      │   the click (see meetings.copy-through-now)
      │   ├── Shares Option-Control-V's cursor: either one advances both
@@ -935,7 +936,7 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
          observed on a real Mac)
   -> No timeout; nothing stops automatically
 
-Panel capsules move like the recording capsule (#1093, graduated from Labs; not supported on Wayland yet) // meetings.panel-drag
+Panel capsules move like the recording capsule (#1093, graduated from Labs; only a native Wayland capsule still returns to its corner) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
   Recording automatically
   -> Each opens in the saved recording_indicator_corner (read as it shows)
@@ -947,8 +948,8 @@ Panel capsules move like the recording capsule (#1093, graduated from Labs; not 
      │   bounce), carrying the throw's speed, and the corner is saved, so the
      │   recording capsule moves there too. A press mid-glide catches it
      │   where it is. Reduce Motion -> it jumps into the new corner; with no
-     │   screen to measure (a Wayland capsule) -> it returns to the corner it
-     │   started in
+     │   screen to measure (a native Wayland capsule) -> it returns to the
+     │   corner it started in
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
   -> The finished meeting opens in the corner its recording ended in
