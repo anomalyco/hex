@@ -36,8 +36,10 @@ const WSL_LOOKUP_CAP: Duration = Duration::from_secs(3);
 /// wait over and over.
 const WSL_SKIP_AFTER_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The home last resolved, with the default distribution and uid it came
-/// from; a changed default rebuilds it from `/etc/passwd`.
+/// The home last resolved, with the default distribution and the registry
+/// `DefaultUid` it was resolved under; a changed default rebuilds it from
+/// `/etc/passwd` and `/etc/wsl.conf`, whose `[user]` is not re-read while a
+/// home is cached.
 static CACHED_HOME: Mutex<Option<CachedHome>> = Mutex::new(None);
 /// No new lookup starts before this instant after one timed out.
 static SKIP_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
@@ -242,36 +244,47 @@ impl Default for Automount {
     }
 }
 
-/// `/etc/wsl.conf`'s `[automount]`, read once with the home.
+/// `/etc/wsl.conf` as far as Hex reads it.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn automount_at(etc: &Path) -> Automount {
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct WslConf {
+    /// `[automount]`: drives are mounted under `root` unless `enabled` is false.
+    automount: Automount,
+    /// `[user]` `default`: the user WSL starts as, which outranks the
+    /// registry's `DefaultUid`.
+    default_user: Option<String>,
+}
+
+/// `/etc/wsl.conf`, read once with the home.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wsl_conf_at(etc: &Path) -> WslConf {
     let conf = read_bounded(&etc.join("wsl.conf"));
-    automount(conf.as_deref().unwrap_or_default())
+    wsl_conf(conf.as_deref().unwrap_or_default())
 }
 
-/// The automount settings of `distribution`, read through `prefix` on the
-/// same lookup that reads `/etc/passwd`.
+/// The settings of `distribution`'s `/etc/wsl.conf`, read through `prefix` on
+/// the same lookup that reads `/etc/passwd`.
 #[cfg(target_os = "windows")]
-fn read_automount(prefix: &str, distribution: &str) -> Automount {
-    etc_dir(prefix, distribution).map_or_else(Automount::default, |etc| automount_at(&etc))
+fn read_wsl_conf(prefix: &str, distribution: &str) -> WslConf {
+    etc_dir(prefix, distribution).map_or_else(WslConf::default, |etc| wsl_conf_at(&etc))
 }
 
-fn automount(conf: &str) -> Automount {
-    let mut automount = Automount::default();
-    let mut in_automount = false;
+/// One pass over `/etc/wsl.conf`: `[automount]` and `[user]` `default`. A value
+/// outside those sections is ignored, section and key names are
+/// case-insensitive, and the last value for a key wins.
+fn wsl_conf(conf: &str) -> WslConf {
+    let mut settings = WslConf::default();
+    let mut section = "";
     for line in conf.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with(['#', ';']) {
             continue;
         }
-        if let Some(section) = line
+        if let Some(name) = line
             .strip_prefix('[')
             .and_then(|line| line.strip_suffix(']'))
         {
-            in_automount = section.trim().eq_ignore_ascii_case("automount");
-            continue;
-        }
-        if !in_automount {
+            section = name.trim();
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -279,15 +292,23 @@ fn automount(conf: &str) -> Automount {
         };
         let key = key.trim();
         let value = ini_value(value);
-        if key.eq_ignore_ascii_case("enabled") {
-            automount.enabled = !value.eq_ignore_ascii_case("false");
-        } else if key.eq_ignore_ascii_case("root")
-            && let Some(root) = automount_root(value)
-        {
-            automount.root = root;
+        if section.eq_ignore_ascii_case("automount") {
+            if key.eq_ignore_ascii_case("enabled") {
+                settings.automount.enabled = !value.eq_ignore_ascii_case("false");
+            } else if key.eq_ignore_ascii_case("root")
+                && let Some(root) = automount_root(value)
+            {
+                settings.automount.root = root;
+            }
+        } else if section.eq_ignore_ascii_case("user") && key.eq_ignore_ascii_case("default") {
+            settings.default_user = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_owned())
+            };
         }
     }
-    automount
+    settings
 }
 
 /// An INI value with one matching pair of surrounding quotes dropped and an
@@ -358,27 +379,60 @@ fn linux_directory(automount: &Automount, host: &Path) -> Option<String> {
     ))
 }
 
-/// The home `/etc/passwd` gives `uid`, when Windows can reach it. A line is
+/// A `/etc/passwd` line's name, uid and home:
 /// `name:password:uid:gid:gecos:home:shell`.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn passwd_entry(line: &str) -> Option<(&str, u32, &str)> {
+    let mut fields = line.split(':');
+    let (Some(name), Some(_password), Some(uid), Some(_gid), Some(_gecos), Some(home)) = (
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+    ) else {
+        return None;
+    };
+    Some((name, uid.parse().ok()?, home))
+}
+
+/// The first `/etc/passwd` line whose name is `name`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn passwd_entry_for<'a>(passwd: &'a str, name: &str) -> Option<(&'a str, u32, &'a str)> {
+    passwd
+        .lines()
+        .filter_map(|line| passwd_entry(line))
+        .find(|(line_name, _, _)| *line_name == name)
+}
+
+/// The home `/etc/passwd` gives `uid`, when Windows can reach it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(super) fn home_for_uid(passwd: &str, uid: u32) -> Option<String> {
-    for line in passwd.lines() {
-        let mut fields = line.split(':');
-        let (Some(_name), Some(_password), Some(line_uid), Some(_gid), Some(_gecos), Some(home)) = (
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-        ) else {
-            continue;
-        };
-        if line_uid.parse::<u32>() == Ok(uid) {
-            return linux_path(home);
-        }
+    let (_, _, home) = passwd
+        .lines()
+        .filter_map(|line| passwd_entry(line))
+        .find(|(_, line_uid, _)| *line_uid == uid)?;
+    linux_path(home)
+}
+
+/// The home `/etc/passwd` gives `name`, when Windows can reach it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn home_for_name(passwd: &str, name: &str) -> Option<String> {
+    let (_, _, home) = passwd_entry_for(passwd, name)?;
+    linux_path(home)
+}
+
+/// The default user's home: `/etc/wsl.conf`'s `[user] default` when
+/// `/etc/passwd` names it, else the line whose uid is the registry's
+/// `DefaultUid`. A named user whose home Windows can't reach is no home at
+/// all, never the registry uid's, which can be a different user.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn default_home_for(passwd: &str, default_user: Option<&str>, uid: u32) -> Option<String> {
+    match default_user.and_then(|name| passwd_entry_for(passwd, name)) {
+        Some((_, _, home)) => linux_path(home),
+        None => home_for_uid(passwd, uid),
     }
-    None
 }
 
 /// The cached home only when it belongs to the current default distribution
@@ -584,7 +638,9 @@ fn default_identity() -> Option<(String, u32)> {
     Some((name, uid))
 }
 
-/// The default distribution's home, and whether it came from the cache.
+/// The default distribution's home, and whether it came from the cache. The
+/// cache keeps the warm lookup to the registry alone; `[user]` in
+/// `/etc/wsl.conf` is read together with `/etc/passwd` when a home is rebuilt.
 #[cfg(target_os = "windows")]
 fn default_home() -> Option<(WslHome, bool)> {
     let (distribution, uid) = default_identity()?;
@@ -592,9 +648,9 @@ fn default_home() -> Option<(WslHome, bool)> {
         return Some((home, true));
     }
     let (prefix, passwd) = read_passwd(&distribution)?;
-    let home = home_for_uid(&passwd, uid)?;
-    let automount = read_automount(prefix, &distribution);
-    let home = WslHome::home(prefix, &distribution, &home, automount)?;
+    let conf = read_wsl_conf(prefix, &distribution);
+    let home = default_home_for(&passwd, conf.default_user.as_deref(), uid)?;
+    let home = WslHome::home(prefix, &distribution, &home, conf.automount)?;
     remember_home(&distribution, uid, &home);
     Some((home, false))
 }
@@ -694,6 +750,113 @@ mod tests {
         *SKIP_UNTIL
             .lock()
             .unwrap_or_else(|poison| poison.into_inner()) = None;
+    }
+
+    /// Only the `[automount]` section of a conf, so those cases stay short.
+    fn automount(conf: &str) -> Automount {
+        wsl_conf(conf).automount
+    }
+
+    #[test]
+    fn the_user_section_names_the_default_user() {
+        let user = |conf: &str| wsl_conf(conf).default_user;
+        assert_eq!(user(""), None);
+        assert_eq!(user("[user]\ndefault=dax\n"), Some("dax".into()));
+        assert_eq!(user("[user]\ndefault = dax\n"), Some("dax".into()));
+        assert_eq!(
+            user("[USER]\nDEFAULT = dax\n"),
+            Some("dax".into()),
+            "section and key names are case-insensitive"
+        );
+        for quoted in ["[user]\ndefault = \"dax\"\n", "[user]\ndefault = 'dax'\n"] {
+            assert_eq!(user(quoted), Some("dax".into()), "{quoted:?}");
+        }
+        assert_eq!(
+            user("[user]\ndefault = dax # the default user\n"),
+            Some("dax".into()),
+            "an inline comment is dropped"
+        );
+        assert_eq!(
+            user("[user]\n# default = root\n; default = root\ndefault = dax\n"),
+            Some("dax".into()),
+            "comments are skipped"
+        );
+        assert_eq!(
+            user("[boot]\ndefault = root\n[automount]\nroot = /mnt/\n"),
+            None,
+            "a default outside [user] is ignored"
+        );
+        assert_eq!(
+            user("[user]\ndefault = root\ndefault = dax\n"),
+            Some("dax".into()),
+            "the last default wins"
+        );
+        for empty in [
+            "[user]\ndefault =\n",
+            "[user]\ndefault = \"\"\n",
+            "[user]\ndefault = dax\ndefault =\n",
+        ] {
+            assert_eq!(user(empty), None, "{empty:?}");
+        }
+        assert_eq!(
+            user("[user]\ndefault\n"),
+            None,
+            "a line without = is ignored"
+        );
+        assert_eq!(
+            wsl_conf("[user]\ndefault = dax\n[automount]\nroot = /windir/\n"),
+            WslConf {
+                automount: Automount {
+                    enabled: true,
+                    root: "/windir/".into(),
+                },
+                default_user: Some("dax".into()),
+            },
+            "one pass reads both sections"
+        );
+    }
+
+    #[test]
+    fn the_default_user_wins_over_the_registry_uid() {
+        let passwd = "root:x:0:0:root:/root:/bin/bash\ndax:x:1000:1000:Dax:/home/dax:/bin/zsh\n";
+        assert_eq!(home_for_name(passwd, "dax"), Some("/home/dax".into()));
+        assert_eq!(home_for_name(passwd, "root"), Some("/root".into()));
+        assert_eq!(home_for_name(passwd, "nobody"), None);
+        assert_eq!(
+            default_home_for(passwd, Some("dax"), 0),
+            Some("/home/dax".into()),
+            "[user] default names the user the registry calls root"
+        );
+        assert_eq!(
+            default_home_for(passwd, Some("ghost"), 0),
+            Some("/root".into()),
+            "a name /etc/passwd doesn't have falls back to DefaultUid"
+        );
+        assert_eq!(
+            default_home_for(passwd, Some("ghost"), 1000),
+            Some("/home/dax".into())
+        );
+        assert_eq!(
+            default_home_for(passwd, None, 1000),
+            Some("/home/dax".into())
+        );
+        assert_eq!(default_home_for(passwd, None, 0), Some("/root".into()));
+        for unusable in [
+            "dax:x:1000:1000:Dax:relative:/bin/zsh\n",
+            "dax:x:1000:1000:Dax:/home/../root:/bin/zsh\n",
+            "dax:x:1000:1000:Dax:/home//dax:/bin/zsh\n",
+        ] {
+            assert_eq!(
+                default_home_for(unusable, Some("dax"), 0),
+                None,
+                "{unusable:?}: a named user's unusable home is never root's"
+            );
+        }
+        assert_eq!(
+            default_home_for("", Some("dax"), 0),
+            None,
+            "neither source names a line"
+        );
     }
 
     #[test]
@@ -1152,10 +1315,16 @@ mod tests {
         let etc = root.join("etc");
         fs::create_dir_all(&etc).unwrap();
         let conf = etc.join("wsl.conf");
-        fs::write(&conf, "[automount]\nroot = \"/windir/\" # a comment\n").unwrap();
+        fs::write(
+            &conf,
+            "[user]\ndefault = dax\n[automount]\nroot = \"/windir/\" # a comment\n",
+        )
+        .unwrap();
 
-        let home =
-            WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax", automount_at(&etc)).unwrap();
+        // One read of the file gives both the default user and the automount.
+        let read = wsl_conf_at(&etc);
+        assert_eq!(read.default_user.as_deref(), Some("dax"));
+        let home = WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax", read.automount).unwrap();
         assert_eq!(
             home.directory(Path::new(r"C:\Users\dax\a.scrawl"))
                 .as_deref(),
@@ -1172,8 +1341,13 @@ mod tests {
             "the cached automount is used"
         );
         fs::remove_file(&conf).unwrap();
-        let default =
-            WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax", automount_at(&etc)).unwrap();
+        let default = WslHome::home(
+            WSL_PREFIXES[0],
+            "Ubuntu",
+            "/home/dax",
+            wsl_conf_at(&etc).automount,
+        )
+        .unwrap();
         assert_eq!(
             default
                 .directory(Path::new(r"C:\Users\dax\a.scrawl"))
