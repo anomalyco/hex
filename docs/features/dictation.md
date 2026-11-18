@@ -1406,11 +1406,18 @@ Release when idle -> Press shortcut                   // dictate.cold-microphone
 Person away, warm microphone                          // dictate.warm-away; macOS
   -> Display asleep, session locked, or Mac going to sleep releases it like
      Release when idle; back on wake or unlock
+  -> Launch reads the current display and lock state, so Hex starts released
+     when it launches asleep or locked
+  -> Ignores Labs › Keep mic open after dictating's window (up to 30 min): the
+     idle microphone closes at once
+  -> Back, or the setting switched off by hand -> a plain open; a press while
+     it opens becomes a pending capture
   -> A press before the stream is back stays cold: wall-clock edge, no
      pre-roll, tone once it opens, so it never anchors to a closed
      timeline's zero instant
   -> Checks: `a_press_stays_cold_until_the_warm_microphone_is_back`,
-     `a_warm_microphone_releases_while_away_and_keeps_a_press_during_its_reopen`
+     `a_warm_microphone_releases_while_away_and_keeps_a_press_during_its_reopen`,
+     `an_away_release_bypasses_the_labs_linger_window`
 ```
 
 Source: `DictationCapture` in [dictation.rs](../../src/dictation.rs); checks:
@@ -1446,11 +1453,14 @@ and ownership transitions, not physical device startup latency. It also has
 `a_warm_microphone_releases_while_away_and_keeps_a_press_during_its_reopen`:
 with the setting off, macOS releases the warm microphone while the display
 sleeps, the session is locked, or the Mac sleeps
-([audio/system_idle.rs](../../src/audio/system_idle.rs), NSWorkspace and the
-distributed screen-lock notifications, no IOKit power code or timers), and a
-press during the reopen is kept as a pending capture instead of being refused
-as a failed stream. The setting and `hex status` keep reporting the persisted
-value. Tail checks there
+([audio/system_idle.rs](../../src/audio/system_idle.rs), NSWorkspace, the
+distributed screen-lock notifications, and the display and lock state read at
+launch), and a press during the reopen is kept as a pending capture instead of
+being refused as a failed stream. The away release bypasses Labs › Keep mic
+open after dictating's window (`an_away_release_bypasses_the_labs_linger_window`),
+and switching the setting off by hand also opens with a plain request, so a
+press during that reopen becomes a pending capture too. The setting and
+`hex status` keep reporting the persisted value. Tail checks there
 drive the owner with a fake stream: `release_waits_for_its_tail_and_keeps_no_later_audio`,
 `a_press_inside_the_tail_starts_its_own_capture_after_the_old_one_finishes`,
 `a_stalled_or_failed_stream_bounds_the_tail_wait`, and

@@ -151,6 +151,11 @@ enum Command {
         device: Option<String>,
     },
     SetReleaseWhileIdle(bool),
+    /// The person demonstrably cannot dictate (the display asleep, the
+    /// session locked, or the Mac asleep): a warm microphone released for
+    /// that reason closes at once instead of waiting out Labs › Keep mic
+    /// open after dictating's window.
+    SetAway(bool),
     Shutdown,
     #[cfg(test)]
     InvalidateRecognition {
@@ -172,6 +177,10 @@ enum Command {
 struct Owner {
     input: RecoveringAudioInput,
     release_while_idle: bool,
+    /// Whether the person is demonstrably away (the display asleep, the
+    /// session locked, or the Mac asleep). Away releases the warm microphone
+    /// without the lab's linger window.
+    away: bool,
     /// Labs › Keep mic open after dictating: how long a finished or
     /// cancelled capture's microphone keeps open before it is released.
     linger: MicrophoneLinger,
@@ -323,6 +332,13 @@ impl DictationAudio {
 
     pub fn set_release_while_idle(&self, release: bool) {
         let _ = self.commands.send(Command::SetReleaseWhileIdle(release));
+    }
+
+    /// Tells the owner whether the person is away (the display asleep, the
+    /// session locked, or the Mac asleep): away closes the released warm
+    /// microphone at once rather than after the lab's linger window.
+    pub fn set_away(&self, away: bool) {
+        let _ = self.commands.send(Command::SetAway(away));
     }
 
     pub fn recognition_generation(&self) -> u64 {
@@ -597,6 +613,7 @@ impl Owner {
         let owner = Self {
             input,
             release_while_idle,
+            away: false,
             linger: MicrophoneLinger::default(),
             pending_capture: None,
             capture,
@@ -772,6 +789,11 @@ impl Owner {
                 if turning_warm && !self.capture_sink_open() {
                     self.input.request_open();
                 }
+            }
+            Command::SetAway(away) => {
+                self.away = away;
+                // The lab's window never outlives the person's absence.
+                self.linger.clear();
             }
             #[cfg(test)]
             Command::InvalidateRecognition { reply } => {
@@ -1079,13 +1101,6 @@ impl Owner {
                 let _ = self.events.send(DictationAudioEvent::Reopened);
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
-                // A plain open can fail too: back off like any failed stream
-                // instead of asking again on the next pass. An open still in
-                // flight keeps its own attempt.
-                if !self.input.is_opening() {
-                    self.input.request_recovery();
-                    self.state.recovering.store(true, Ordering::Release);
-                }
                 let was_recording = self.pending_capture.take().is_some();
                 self.state.recording.store(false, Ordering::Release);
                 self.reconcile_input();
@@ -1166,9 +1181,14 @@ impl Owner {
         if self.release_while_idle && !self.capture_sink_open() {
             // Labs › Keep mic open after dictating: a capture's end keeps the
             // microphone open for the lab's window, and closing waits for it.
-            // Off, this is the plain idle close.
-            if self.input.is_active() && self.linger.may_close(Instant::now(), !self.capture_idle())
+            // Off, this is the plain idle close. Away skips the window: it can
+            // be up to 30 minutes, and the person cannot dictate until they
+            // return anyway. Either way a capture keeps its microphone (#1953).
+            let busy = !self.capture_idle();
+            if self.input.is_active()
+                && ((self.away && !busy) || self.linger.may_close(Instant::now(), busy))
             {
+                self.linger.clear();
                 self.close_input();
             }
         } else {
@@ -2189,16 +2209,11 @@ mod tests {
         // Back opens through the plain request, not a failure's recovery: a
         // press during that open becomes a pending capture.
         let (streams, opened) = mpsc::channel();
-        let opener = move |_request: &crate::audio::OpenRequest| {
+        owner.input = RecoveringAudioInput::with_stream_opener_for_test(None, move || {
             let (stream, samples) = crate::audio::AudioInput::channel_for_test();
             let _ = streams.send(samples);
             Ok(crate::audio::Opened::Input(Box::new(stream)))
-        };
-        owner.input = RecoveringAudioInput::with_opener_for_test(
-            None,
-            crate::audio::input_route_generation,
-            opener,
-        );
+        });
         assert!(owner.handle(Command::SetReleaseWhileIdle(false)));
         assert!(owner.input.is_opening());
         assert!(!owner.input.is_recovering());
@@ -2221,6 +2236,38 @@ mod tests {
             .unwrap();
         owner.reconcile_input();
         assert!(owner.input.is_open(), "a warm microphone stays open");
+    }
+
+    /// Away closes the released warm microphone at once, even while Labs ›
+    /// Keep mic open after dictating's window runs: that window can be half
+    /// an hour, and nobody can dictate until they come back (#1953).
+    #[test]
+    fn an_away_release_bypasses_the_labs_linger_window() {
+        let (mut owner, input, _samples) = owner_for_test(true);
+        owner.release_while_idle = true;
+        owner.linger.keep_open_for_test(Duration::from_secs(1_800));
+        assert!(input.is_open());
+
+        // The lab's window holds an ordinary idle pass open.
+        owner.reconcile_input();
+        owner.reconcile_input();
+        assert!(owner.input.is_open(), "the lab's window keeps it open");
+
+        // Away never closes a capture's microphone, whatever the window says.
+        start(&mut owner, capture_time());
+        assert!(owner.handle(Command::SetAway(true)));
+        owner.reconcile_input();
+        assert!(owner.input.is_open(), "a capture keeps its microphone");
+
+        // Its end closes at once, not after the lab's window.
+        control(&mut owner, |reply| Command::Cancel { reply });
+        owner.reconcile_input();
+        assert!(!owner.input.is_open());
+        assert!(!input.is_open(), "the listener sees the closed timeline");
+
+        // And a later idle pass does not bring it back.
+        owner.reconcile_input();
+        assert!(!owner.input.is_open());
     }
 
     #[test]

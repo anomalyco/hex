@@ -33,8 +33,8 @@ mod stop_phrase;
 use context_watch::ContextWatch;
 use events::handle_dictation_event;
 use guards::{
-    caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
-    reconcile_release,
+    Release, WarmRelease, caps_lock_can_press, capture_boundary, capture_refusal, claims_escape,
+    paste_last_refusal,
 };
 use hotkeys::{Hotkeys, Shortcut};
 use output::{finish_dictation, finish_dictation_with, interrupted_dictation};
@@ -128,6 +128,9 @@ struct ProgrammaticDictation {
     source: String,
     levels: SyncSender<DictationLevel>,
     audio: Option<SyncSender<DictationAudioChunk>>,
+    /// Whether this capture was pressed while the warm microphone was
+    /// released, so its finish uses wall-clock time instead of the stream's.
+    pressed_cold: bool,
     last_level: Instant,
     lease_deadline: Instant,
 }
@@ -185,10 +188,10 @@ pub fn listen(
         tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
     }
     // A warm microphone is released while the setting asks or the person
-    // demonstrably cannot dictate; the owner is told as that changes.
-    let mut microphone_release = crate::app_settings::microphone_policy().release_while_idle
-        || crate::audio::system_idle::released();
-    let mut release_while_idle = microphone_release;
+    // demonstrably cannot dictate; the owner is told as that changes. A
+    // capture keeps what its own press saw: the latch clears once the stream
+    // is back, but that capture still owes its start tone.
+    let (mut warm_release, mut release) = WarmRelease::start();
     let mut events = events;
     let input_monitor = InputMonitor::start()?;
     let mut context = ContextWatch::start(input_monitor.activity.clone());
@@ -226,7 +229,7 @@ pub fn listen(
         microphone.as_deref(),
         recording_environment,
         input_monitor.pending_events(),
-        release_while_idle,
+        release.press,
         dictation_worker.engine(),
     )?;
     #[cfg(hex_capture)]
@@ -256,8 +259,9 @@ pub fn listen(
         hotkeys.suspend_all();
     }
     if hotkeys.dictation.is_recording() {
-        let accepted = input.start(capture_boundary(&input, release_while_idle))?;
+        let accepted = input.start(capture_boundary(&input, release.press))?;
         if accepted {
+            release.begin();
             events.dictation(DictationPhase::Started, "")?;
             indicator.send(DictationIndicatorEvent::Started);
         } else {
@@ -271,8 +275,7 @@ pub fn listen(
     let mut capture_was_recording = false;
 
     while !shutdown.load(Ordering::Relaxed) {
-        (microphone_release, release_while_idle) =
-            reconcile_release(&input, release_while_idle, microphone_release);
+        release = warm_release.reconcile(&input, release);
         #[cfg(hex_capture)]
         crate::capture_host::CaptureHost::reconcile(
             &mut capture_host,
@@ -310,7 +313,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                release_while_idle,
+                &mut release,
             )?;
         }
         if let Some(controls) = &controls {
@@ -385,7 +388,7 @@ pub fn listen(
                             &mut context,
                             &mut events,
                             indicator,
-                            release_while_idle,
+                            &mut release,
                         )?;
                         let _ = reply.send(outcome);
                     }
@@ -406,7 +409,7 @@ pub fn listen(
                         }
                         let id = next_programmatic_id;
                         next_programmatic_id = next_programmatic_id.wrapping_add(1).max(1);
-                        let boundary = capture_boundary(&input, release_while_idle);
+                        let boundary = capture_boundary(&input, release.press);
                         match input.start_programmatic(boundary) {
                             Ok(()) => {
                                 hotkeys.disarm_pending_gestures();
@@ -421,6 +424,7 @@ pub fn listen(
                                     source,
                                     levels,
                                     audio: None,
+                                    pressed_cold: release.press,
                                     last_level: Instant::now() - Duration::from_millis(30),
                                     lease_deadline: Instant::now() + LEASE,
                                 });
@@ -487,7 +491,7 @@ pub fn listen(
                             .is_some_and(|active| active.matches_owner(id, &owner_token))
                         {
                             let active = programmatic.take().expect("active dictation was checked");
-                            let boundary = capture_boundary(&input, release_while_idle);
+                            let boundary = capture_boundary(&input, active.pressed_cold);
                             // The microphone may have failed before this
                             // finish reached the audio owner, with its loss
                             // still queued.
@@ -712,7 +716,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                release_while_idle,
+                &mut release,
             )?;
         }
         let (next_microphone_revision, microphone) = crate::app_settings::microphone_selection();
@@ -737,7 +741,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                release_while_idle,
+                &mut release,
             )?;
         }
         // Caps Lock presses arrive from the tap, off the audio and input
@@ -772,7 +776,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                release_while_idle,
+                &mut release,
             )?;
             if !accepted {
                 hotkeys.suspend(Shortcut::CapsLock);
@@ -863,7 +867,7 @@ pub fn listen(
                     &input.device_name(),
                     &mut events,
                     indicator,
-                    release_while_idle,
+                    &mut release,
                 )?;
                 if !accepted {
                     hotkeys.suspend(shortcut);
@@ -877,13 +881,15 @@ pub fn listen(
             hotkeys.recover_stale_keys();
         }
         if hotkeys.any_recording()
-            && input.become_intentional(capture_boundary(&input, release_while_idle))?
+            && input.become_intentional(capture_boundary(&input, release.capture))?
         {
             // The press is a real capture now: read its page once, here
             // rather than on every provisional press. A tap this loop never
-            // sees that way asks when it finishes instead.
+            // sees that way asks when it finishes instead. A capture pressed
+            // while the microphone was released still owes its tone here,
+            // even if the stream has come back since.
             context.intend();
-            if release_while_idle {
+            if release.capture {
                 feedback::play(Tone::DictationStart);
             }
         }
@@ -1037,7 +1043,7 @@ pub fn listen(
                         &mut context,
                         &mut events,
                         indicator,
-                        release_while_idle,
+                        release.capture,
                     )?;
                 }
                 DictationAudioEvent::Interrupted {
@@ -1238,13 +1244,17 @@ fn handle_hotkey_action(
     device: &str,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
-    release_while_idle: bool,
+    release: &mut Release,
 ) -> Result<bool> {
     match action {
         HotkeyAction::Start => {
             if !dictation.start(action_at)? {
                 return Ok(false);
             }
+            // This capture remembers the press it started from. The latch
+            // clears once the stream is back, but this capture still owes
+            // the tone its cold press deferred.
+            release.begin();
             // Labs › Return to app: this paste goes back to the app in front
             // now, even if another one comes forward while the person talks.
             worker.remember_return_to_app();
@@ -1256,7 +1266,7 @@ fn handle_hotkey_action(
             context.begin();
             // The tone confirms the press at once; a chord or short tap
             // retracts it. A released microphone confirms only once it opens.
-            if release_while_idle {
+            if release.press {
                 feedback::prepare();
             } else {
                 feedback::play_provisional_start();
@@ -1280,7 +1290,7 @@ fn handle_hotkey_action(
                 device,
                 events,
                 indicator,
-                release_while_idle,
+                release.capture,
                 print,
                 raw,
                 None,
@@ -1337,12 +1347,12 @@ fn finish_hotkey_dictation(
     device: &str,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
-    release_while_idle: bool,
+    pressed_cold: bool,
     print: Option<PrintReply>,
     raw: bool,
     stop_phrase: Option<String>,
 ) -> Result<FinishResult> {
-    if dictation.become_intentional(action_at)? && release_while_idle {
+    if dictation.become_intentional(action_at)? && pressed_cold {
         feedback::play(Tone::DictationStart);
     }
     // A dictation over a screenshot lands its words there, never pasted; a
@@ -1443,7 +1453,7 @@ fn control_dictation(
     context: &mut ContextWatch,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
-    release_while_idle: bool,
+    release: &mut Release,
 ) -> Result<ControlReply> {
     let recording = hotkeys.any_recording();
     let device = input.device_name();
@@ -1465,7 +1475,7 @@ fn control_dictation(
                 &device,
                 events,
                 indicator,
-                release_while_idle,
+                release,
             )?;
             return Ok(ControlReply::done("Cancelled the recording"));
         }
@@ -1495,14 +1505,14 @@ fn control_dictation(
                 HotkeyAction::Start,
                 raw,
                 None,
-                capture_boundary(input, release_while_idle),
+                capture_boundary(input, release.press),
                 input,
                 worker,
                 context,
                 &device,
                 events,
                 indicator,
-                release_while_idle,
+                release,
             )?;
             if accepted {
                 // Labs › YOLO mode never sends a command's capture.
@@ -1511,7 +1521,7 @@ fn control_dictation(
                 // start has no hold threshold to wait for, so its capture is
                 // real now and reads its page at once.
                 context.intend();
-                make_control_capture_intentional(input, release_while_idle)?;
+                make_control_capture_intentional(input, release.press)?;
                 if let Some(print) = print {
                     // However this recording ends, its text comes back here.
                     hotkeys.keep_print(print);
@@ -1547,14 +1557,14 @@ fn control_dictation(
             // waits for that read if it is still in flight.
             let context = context.finish(events)?;
             let finished = finish_hotkey_dictation(
-                capture_boundary(input, release_while_idle),
+                capture_boundary(input, release.capture),
                 input,
                 worker,
                 &context,
                 &device,
                 events,
                 indicator,
-                release_while_idle,
+                release.capture,
                 print,
                 hotkeys.raw_capture,
                 None,
@@ -2188,6 +2198,7 @@ mod tests {
             source: "seer".into(),
             levels: levels.clone(),
             audio: None,
+            pressed_cold: false,
             last_level: Instant::now(),
             lease_deadline: Instant::now() + LEASE,
         };

@@ -98,7 +98,7 @@ mod macos {
         NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceScreensDidSleepNotification,
         NSWorkspaceScreensDidWakeNotification, NSWorkspaceWillSleepNotification,
     };
-    use objc2_core_foundation::CFString;
+    use objc2_core_foundation::{CFBoolean, CFDictionary, CFRetained, CFString, CFType};
     use objc2_foundation::{NSNotification, NSNotificationName};
 
     use super::{Reason, hold};
@@ -106,6 +106,8 @@ mod macos {
     /// Locked and unlocked, as the session posts them.
     const SCREEN_LOCKED: &str = "com.apple.screenIsLocked";
     const SCREEN_UNLOCKED: &str = "com.apple.screenIsUnlocked";
+    /// The session dictionary's lock state: a CFBoolean while locked.
+    const SESSION_LOCKED_KEY: &str = "CGSSessionScreenIsLocked";
     /// `DeliverImmediately`, including while Hex is in the background; what
     /// `keyboard_input_sources` uses for its distributed observer.
     const DELIVER_IMMEDIATELY: isize = 4;
@@ -126,6 +128,17 @@ mod macos {
         );
     }
 
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        /// The main display's ID, and whether it is asleep. The screens' sleep
+        /// notification only fires on change, so launch reads these.
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayIsAsleep(display: u32) -> u32;
+        /// A +1 dictionary of this GUI session's properties, or null when
+        /// there is none; `SESSION_LOCKED_KEY`'s value is a CFBoolean.
+        fn CGSessionCopyCurrentDictionary() -> *mut CFDictionary;
+    }
+
     /// Registers the workspace and session observers once, for the app's
     /// life; the app's main thread has the run loop that delivers them.
     pub(super) fn start() {
@@ -139,7 +152,36 @@ mod macos {
         STARTED.call_once(|| {
             observe_workspace();
             observe_session();
+            // The observers only report changes: a Mac already asleep or
+            // locked when Hex launched posted those before it listened.
+            seed();
         });
+    }
+
+    /// Reads the display and lock state a launch starts in.
+    fn seed() {
+        // SAFETY: a plain CoreGraphics read of the main display's state.
+        hold(Reason::DisplayAsleep, unsafe {
+            CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        });
+        // SAFETY: the session dictionary follows the Copy rule, so this
+        // reference owns it and releases it below; a null return means no GUI
+        // session to ask, and the lock value is a CFBoolean when present.
+        let locked =
+            NonNull::new(unsafe { CGSessionCopyCurrentDictionary() }).is_some_and(|session| {
+                let session = unsafe { CFRetained::from_raw(session) };
+                let key = CFString::from_static_str(SESSION_LOCKED_KEY);
+                // SAFETY: the dictionary lives while it is read here, and its
+                // lock value is a CFBoolean when present.
+                unsafe {
+                    let value = session.value((&*key as *const CFString).cast());
+                    (value as *const CFType)
+                        .as_ref()
+                        .and_then(CFType::downcast_ref::<CFBoolean>)
+                        .is_some_and(CFBoolean::value)
+                }
+            });
+        hold(Reason::SessionLocked, locked);
     }
 
     fn observe_workspace() {
