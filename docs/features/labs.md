@@ -3522,13 +3522,14 @@ next request retries `create_dir_all`.
 
 Limits: `XDG_STATE_HOME` set inside WSL is ignored (Hex always reads
 `<home>/.local/state/opencode`); a home that isn't in `/etc/passwd`, such as
-one from LDAP or SSSD, isn't found, and neither is a `[user] default` naming
-one; `[user]` and `[automount]` are read only when a home is rebuilt, so
-editing `wsl.conf` while a home is cached takes effect once the cache drops
-(lab off, a distribution or `DefaultUid` change, or an unreadable state
-directory); Annotate's recorded-at line maps only
-Windows drive paths, so a UNC or relative capture folder keeps its Windows
-text (the summary header always keeps it).
+one from LDAP or SSSD, isn't found, and a `[user] default` naming such a user
+falls back to the registry `DefaultUid`'s home, which may be another user's;
+`[user]` and `[automount]` are read only when a home is rebuilt, so editing
+`wsl.conf` while a home is cached takes effect once the cache drops (lab off,
+a distribution or `DefaultUid` change, or an unreadable state directory);
+Annotate's recorded-at line maps only Windows drive paths, so a UNC or
+relative capture folder keeps its Windows text (the summary header always
+keeps it).
 Checks: `the_passwd_line_for_the_uid_names_its_home`,
 `the_user_section_names_the_default_user`,
 `the_default_user_wins_over_the_registry_uid`,

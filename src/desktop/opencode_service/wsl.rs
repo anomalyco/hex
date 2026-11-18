@@ -402,7 +402,7 @@ fn passwd_entry(line: &str) -> Option<(&str, u32, &str)> {
 fn passwd_entry_for<'a>(passwd: &'a str, name: &str) -> Option<(&'a str, u32, &'a str)> {
     passwd
         .lines()
-        .filter_map(|line| passwd_entry(line))
+        .filter_map(passwd_entry)
         .find(|(line_name, _, _)| *line_name == name)
 }
 
@@ -411,15 +411,8 @@ fn passwd_entry_for<'a>(passwd: &'a str, name: &str) -> Option<(&'a str, u32, &'
 pub(super) fn home_for_uid(passwd: &str, uid: u32) -> Option<String> {
     let (_, _, home) = passwd
         .lines()
-        .filter_map(|line| passwd_entry(line))
+        .filter_map(passwd_entry)
         .find(|(_, line_uid, _)| *line_uid == uid)?;
-    linux_path(home)
-}
-
-/// The home `/etc/passwd` gives `name`, when Windows can reach it.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn home_for_name(passwd: &str, name: &str) -> Option<String> {
-    let (_, _, home) = passwd_entry_for(passwd, name)?;
     linux_path(home)
 }
 
@@ -819,9 +812,21 @@ mod tests {
     #[test]
     fn the_default_user_wins_over_the_registry_uid() {
         let passwd = "root:x:0:0:root:/root:/bin/bash\ndax:x:1000:1000:Dax:/home/dax:/bin/zsh\n";
-        assert_eq!(home_for_name(passwd, "dax"), Some("/home/dax".into()));
-        assert_eq!(home_for_name(passwd, "root"), Some("/root".into()));
-        assert_eq!(home_for_name(passwd, "nobody"), None);
+        assert_eq!(
+            passwd_entry_for(passwd, "dax").map(|(_, uid, _)| uid),
+            Some(1000),
+            "a name finds its own line"
+        );
+        assert_eq!(passwd_entry_for(passwd, "nobody"), None);
+        assert_eq!(
+            default_home_for(passwd, Some("dax"), 1001),
+            Some("/home/dax".into()),
+            "[user] default names the user, whatever the registry uid"
+        );
+        assert_eq!(
+            default_home_for(passwd, Some("root"), 1000),
+            Some("/root".into())
+        );
         assert_eq!(
             default_home_for(passwd, Some("dax"), 0),
             Some("/home/dax".into()),
@@ -831,6 +836,11 @@ mod tests {
             default_home_for(passwd, Some("ghost"), 0),
             Some("/root".into()),
             "a name /etc/passwd doesn't have falls back to DefaultUid"
+        );
+        assert_eq!(
+            default_home_for(passwd, Some("ghost"), 1001),
+            None,
+            "neither the name nor the registry uid names a line"
         );
         assert_eq!(
             default_home_for(passwd, Some("ghost"), 1000),
