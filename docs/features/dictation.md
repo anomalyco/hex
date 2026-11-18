@@ -306,12 +306,26 @@ Windows modifier-only shortcut                           // dictate.windows-lone
   └── Hex's own injected keys (paste, mask) -> Skipped by the hook (HEX_INJECTED)
 ```
 
-On layouts where Right Alt is AltGr, Windows adds a Left Ctrl press, so Right
-Alt alone never matches there; bind Right Ctrl instead. Checks:
+On layouts where Right Alt is AltGr, Windows sends a synthesized Left Ctrl
+(scan code 0x21D, not 0x1D), and `GetAsyncKeyState` reports it as a real Ctrl.
+The listener's hook and the recorder's own both leave it out, so Right Alt
+alone fires there and recording it stores `right-option`; it still reaches the
+app, so AltGr keeps typing. A modifier-only binding an AltGr-layout recording
+made before this (`control+option`) still fires on AltGr, while a real Left
+Ctrl with Right Alt is a chord and matches only a binding that names Ctrl. A
+chord with a key is unchanged: AltGr+Q is still Ctrl+Alt+Q, never Alt+Q. Any
+key joining the hold still discards it. Checks:
 `one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
+`altgr_left_ctrl_is_no_ctrl_for_a_right_alt_shortcut`,
+`an_altgr_recorded_control_option_still_fires`,
+`a_key_chord_on_altgr_is_not_alt_with_that_key`,
 `a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
-[windows/input.rs](../../src/windows/input.rs), cross-compiled only; the menu
-mask and AltGr behavior have not run on a Windows PC.
+[windows/input.rs](../../src/windows/input.rs),
+`left_control_bits_follow_the_hooks_and_heal_a_missed_release` in
+[windows/input/modifiers.rs](../../src/windows/input/modifiers.rs), and
+`altgr_records_right_alt_alone`, `altgr_with_a_key_records_the_ctrl_windows_added`
+in [windows/input/chord.rs](../../src/windows/input/chord.rs), cross-compiled
+only; the menu mask and AltGr behavior have not run on a Windows PC.
 
 **Fixed November 4, 2026 (issue 1254):** a Windows key chord holding Alt or
 Windows (Alt+0, say) swallows its key, so the app saw Alt pressed and released
