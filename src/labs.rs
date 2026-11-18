@@ -182,6 +182,7 @@ impl Feature {
             Self::ApiBrowserAccess => settings.labs.api_browser_access,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::CalendarMenu => settings.labs.calendar_menu,
+            Self::CalendarSelectAll => settings.labs.calendar_bulk_select,
             Self::PauseMenu => settings.labs.pause_menu,
             Self::PrintStart => settings.labs.print_start,
             Self::VoicePrompt => settings.labs.voice_prompt,
@@ -266,6 +267,7 @@ impl Feature {
             &mut labs.api_browser_access,
             &mut labs.speakers_only,
             &mut labs.calendar_menu,
+            &mut labs.calendar_bulk_select,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
             &mut labs.print_start,
@@ -358,6 +360,7 @@ impl Feature {
             Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::CalendarMenu => settings.labs.calendar_menu = on,
+            Self::CalendarSelectAll => settings.labs.calendar_bulk_select = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::PrintStart => settings.labs.print_start = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
@@ -1741,6 +1744,31 @@ mod tests {
         assert_eq!(Feature::CalendarMenu.group(), Group::Meetings);
         assert_eq!(Feature::CalendarMenu.settings_key(), "labs.calendar_menu");
         assert_eq!(Feature::CalendarMenu.name(), "calendar-menu");
+    }
+
+    #[test]
+    fn calendar_select_all_is_its_own_switch_and_macos_only() {
+        let mut settings = AppSettings::default();
+        assert!(!Feature::CalendarSelectAll.on(&settings));
+        settings.labs.calendar_bulk_select = true;
+        settings.labs.unload_idle_minutes = 24 * 60;
+        assert!(Feature::CalendarSelectAll.on(&settings));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&settings.labs, |_| true);
+        assert_eq!(state & PAUSE_MENU, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CalendarSelectAll.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::CalendarSelectAll.added(), 20261118);
+        assert_eq!(Feature::CalendarSelectAll.audience(), Audience::Everyone);
+        assert_eq!(Feature::CalendarSelectAll.group(), Group::Meetings);
+        assert_eq!(
+            Feature::CalendarSelectAll.settings_key(),
+            "labs.calendar_bulk_select"
+        );
+        assert_eq!(Feature::CalendarSelectAll.name(), "calendar-select-all");
     }
 
     #[test]

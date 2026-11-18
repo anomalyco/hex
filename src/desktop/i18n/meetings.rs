@@ -6,6 +6,8 @@
 #[rustfmt::skip]
 pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Today", ["Dzisiaj", "今天", "今日", "Heute", "Hoy", "Сьогодні"]),
+    ("Select all", ["Zaznacz wszystkie", "全选", "すべて選択", "Alle auswählen", "Seleccionar todo", "Вибрати всі"]),
+    ("Deselect all", ["Odznacz wszystkie", "取消全选", "すべて選択解除", "Alle abwählen", "Deseleccionar todo", "Зняти вибір з усіх"]),
     ("Yesterday", ["Wczoraj", "昨天", "昨日", "Gestern", "Ayer", "Учора"]),
     ("More", ["Więcej", "更多", "その他", "Mehr", "Más", "Більше"]),
     ("Them", ["Rozmówcy", "对方", "相手", "Andere", "Ellos", "Співрозмовники"]),

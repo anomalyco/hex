@@ -228,6 +228,10 @@ pub struct LabsSettings {
     /// end time and title; choosing one with a call link opens it (macOS,
     /// with Meetings on and a calendar connected).
     pub calendar_menu: bool,
+    /// Meetings › Settings › Calendar shows Select all or Deselect all beside
+    /// the Calendars row, so every calendar is included or left out at once
+    /// (macOS).
+    pub calendar_bulk_select: bool,
     /// The menu bar offers Pause Hex, which makes every capture shortcut
     /// inert until Resume (macOS).
     pub pause_menu: bool,
@@ -401,6 +405,7 @@ impl Default for LabsSettings {
             speakers_only: false,
             app_model_switching: false,
             calendar_menu: false,
+            calendar_bulk_select: false,
             pause_menu: false,
             print_start: false,
             voice_prompt: false,

@@ -75,6 +75,7 @@ impl Feature {
             Self::MoreDictationShortcuts => "More dictation shortcuts",
             Self::PauseMenu => "Pause from menu bar",
             Self::CalendarMenu => "Upcoming meetings in menu bar",
+            Self::CalendarSelectAll => "Select all calendars",
             Self::PrintStart => "Dictation for a command",
             Self::VoicePrompt => "Rewrite by voice",
             Self::CursorContext => "Rewrite reads nearby text",
@@ -274,6 +275,9 @@ impl Feature {
             }
             Self::CalendarMenu => {
                 "Show your next calendar meetings in the menu bar menu. Choosing one with a call link opens it; that click doesn't start a recording."
+            }
+            Self::CalendarSelectAll => {
+                "Adds a button to the Calendars row to include or leave out every calendar at once."
             }
             Self::PrintStart => {
                 "A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it"

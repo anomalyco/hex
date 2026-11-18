@@ -112,7 +112,8 @@ impl Feature {
             | Self::LiveChapters
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
-            | Self::CalendarMenu => Group::Meetings,
+            | Self::CalendarMenu
+            | Self::CalendarSelectAll => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate

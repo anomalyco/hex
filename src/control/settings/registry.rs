@@ -662,6 +662,13 @@ pub(super) const KEYS: &[Key] = &[
          recording (macOS, with Meetings on and a calendar connected)",
     ),
     key(
+        "labs.calendar_bulk_select",
+        Kind::Bool,
+        "Labs: Meetings settings shows Select all or Deselect all beside the Calendars row, so \
+         every calendar is included or left out at once; calendars added later stay included \
+         (macOS)",
+    ),
+    key(
         "labs.pause_menu",
         Kind::Bool,
         "Labs: the menu bar offers Pause Hex, which makes every capture shortcut inert until \

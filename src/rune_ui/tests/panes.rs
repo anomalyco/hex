@@ -1457,6 +1457,79 @@ fn a_connected_calendar_saves_reminders_and_lists_meetings() {
     assert_eq!(rt.state.open, Some(Menu::Calendars));
 }
 
+/// Labs › Select all calendars puts one bulk button beside the Calendars
+/// select; off by default, it adds nothing.
+#[test]
+fn the_select_all_calendars_lab_saves_every_calendar_at_once() {
+    let mut rt = runtime("meetings-calendar", true, (980.0, 2600.0));
+    assert!(
+        rt.find("calendar-select-all").is_none(),
+        "the lab is off by default"
+    );
+    assert!(
+        rt.find("calendar-calendars-controls").is_none(),
+        "off, the row is the select alone"
+    );
+    rt.update(|ui, _| ui.settings.labs.calendar_bulk_select = true);
+    refresh(&mut rt);
+    assert!(rt.find("calendar-select-all").is_some());
+    assert!(texts(&rt).iter().any(|text| text == "2 of 3 calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Select all"));
+
+    tap(&mut rt, "calendar-select-all");
+    assert_eq!(
+        rt.state.settings.meetings.calendar.excluded_calendars,
+        Vec::<String>::new()
+    );
+    assert!(texts(&rt).iter().any(|text| text == "All calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Deselect all"));
+
+    // A stale exclusion that names no current calendar leaves every current
+    // calendar included, so the button still offers Deselect all.
+    rt.update(|ui, _| {
+        ui.settings.meetings.calendar.excluded_calendars = vec!["gone".to_string()];
+    });
+    refresh(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "All calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Deselect all"));
+
+    tap(&mut rt, "calendar-select-all");
+    assert_eq!(
+        rt.state.settings.meetings.calendar.excluded_calendars,
+        vec![
+            "work".to_string(),
+            "home".to_string(),
+            "birthdays".to_string()
+        ],
+        "the stale id is replaced by the calendars shown now"
+    );
+    assert!(texts(&rt).iter().any(|text| text == "0 of 3 calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Select all"));
+
+    {
+        // An organization's Labs lock closes the Meetings pane itself
+        // (`meetings::available`), so the button goes with it; the saved
+        // setting stays as it was.
+        use crate::policy::{Lock, Policy};
+        let _locked = Policy::forced_for_test(Policy::default().with(Lock::Labs));
+        refresh(&mut rt);
+        assert!(
+            rt.find("meetings-enabled").is_some(),
+            "the lock takes effect"
+        );
+        assert!(
+            rt.find("calendar-select-all").is_none(),
+            "a locked lab hides the button"
+        );
+        assert!(rt.state.settings.labs.calendar_bulk_select);
+    }
+    refresh(&mut rt);
+    assert!(
+        rt.find("calendar-select-all").is_some(),
+        "unlocked, the button is back"
+    );
+}
+
 #[test]
 fn denied_calendar_access_links_to_privacy_settings() {
     let mut rt = runtime("meetings-calendar-denied", true, (980.0, 2400.0));

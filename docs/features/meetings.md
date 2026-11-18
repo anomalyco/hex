@@ -72,6 +72,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping
 │   │   capsule) and the System Audio Recording row once allowed
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
+│   │   ├── Labs › Select all calendars -> one Select all / Deselect all button
+│   │   │   beside the Calendars row // labs.calendar_bulk_select
 │   │   └── Labs › Upcoming meetings in menu bar -> the same meetings in the status menu // labs.calendar_menu
 │   └── Detected calls -> Stop when the call ends (macOS, off;
 │       │   meetings.stop_when_call_ends), then Ask / Always record / Never
@@ -671,6 +673,7 @@ Meetings > Settings > Calendar                       // meetings.calendar (macOS
     ├── Remind me before meetings -> on by default
     ├── Remind me -> At start / 1 / 2 / 5 min
     ├── Calendars -> All calendars, or "2 of 3 calendars"; each switched in the menu
+    │   └── Labs › Select all calendars: a Select all / Deselect all button beside it (off by default)
     └── Next 3 meetings: title, "Today · 2:30 PM" ("Today · 14:30" outside
         English), provider icon when it has a call link
 
@@ -700,6 +703,15 @@ files from older builds stay off. Every calendar is included unless excluded.
 Hex never asks for calendar access at launch: only Connect calendar calls
 `requestFullAccessToEvents` (`NSCalendarsFullAccessUsageDescription`). With
 Meetings off there is no Calendar card, no EventKit read, and no reminder.
+
+Labs › Select all calendars (`calendar-select-all`, macOS, off by default) adds
+one small secondary button beside the Calendars select. While any calendar is
+left out it reads "Select all" and clears `excluded_calendars`, so every
+calendar is included; while every calendar is included it reads "Deselect all"
+and sets `excluded_calendars` to the IDs shown now. Because the setting stores
+exclusions, a calendar added later is still included. The button hides while
+there are no calendars, and each calendar's own switch in the menu stays as it
+is. Off, the Calendars row is exactly as before.
 
 The controller thread reads EventKit (one bounded query, 48 hours ahead, at most
 200 events) when the store's change notification bumps its counter or once a
@@ -750,7 +762,8 @@ Checks: `meetings_need_other_people_or_a_call_link`,
 `an_always_record_reminder_says_so_and_never_offers_record`,
 `the_reminder_counts_down_to_the_start`); and the Linux pane tests
 `the_calendar_asks_for_access_only_when_connect_is_pressed`,
-`a_connected_calendar_saves_reminders_and_lists_meetings`, and
+`a_connected_calendar_saves_reminders_and_lists_meetings`,
+`the_select_all_calendars_lab_saves_every_calendar_at_once`, and
 `denied_calendar_access_links_to_privacy_settings`; the answer checks
 `a_grant_is_full_access_even_while_the_status_is_stale` and
 `a_refusal_is_a_denial_unless_the_request_failed` in
