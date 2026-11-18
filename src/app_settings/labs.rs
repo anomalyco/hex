@@ -203,8 +203,9 @@ pub struct LabsSettings {
     /// The apps Labs › YOLO mode sends in, by the names
     /// Modes match; empty means every app.
     pub yolo_mode_apps: Vec<String>,
-    /// A WAV or MP3 file dropped on the window is transcribed and saved as a
-    /// text file beside it.
+    /// A WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file
+    /// dropped on the window is transcribed and saved as a text file beside
+    /// it.
     pub drop_transcribe: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.

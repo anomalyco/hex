@@ -460,9 +460,10 @@ pub fn yolo_mode_apps() -> Option<Vec<String>> {
         .clone()
 }
 
-/// Labs › Transcribe dropped audio: a WAV or MP3 file dropped on the window
-/// is transcribed in this process and saved as a text file beside it (read as
-/// each drop starts, and by the window's drop target).
+/// Labs › Transcribe dropped audio: a file with one of this build's
+/// extensions, dropped on the window, is transcribed in this process and saved
+/// as a text file beside it (read as each drop starts, and by the window's
+/// drop target).
 pub fn drop_transcribe() -> bool {
     // The state word is full, so the switch has its own atomic, loaded here
     // first in a process that never applied its settings.

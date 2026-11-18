@@ -728,7 +728,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     // The card names this build's formats: the drop target reads exactly them.
     rows.push(Row {
         about: tr_fill(
-            "Drop a {} file on the Hex window to save its transcript as a text file next to it.",
+            "Drop a {} file on the Hex window to save its transcript as a text file next to it",
             super::drop_transcribe::formats(),
         )
         .into(),

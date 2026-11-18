@@ -75,7 +75,7 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
             return Err(eyre!("Hex is quitting; the audio was not imported"));
         }
         let decoded = directory.join("system.importing.wav");
-        decode_to_wav(source, &decoded)?;
+        decode(source, &decoded)?;
         set_owner_only(&decoded, false)?;
         sync_file(&decoded)?;
         create_empty_track(directory.join("microphone.wav"))?;
@@ -193,10 +193,7 @@ fn wav_samples(path: &Path) -> Result<u64> {
     Ok(u64::from(reader.duration()))
 }
 
-/// Decodes `input` to a 16 kHz mono float WAV at `output`, with the native
-/// bridge. Shared with Labs › Transcribe dropped audio's M4A, AIFF, and CAF
-/// reads.
-pub(crate) fn decode_to_wav(input: &Path, output: &Path) -> Result<()> {
+fn decode(input: &Path, output: &Path) -> Result<()> {
     let input = CString::new(input.as_os_str().as_bytes())?;
     let output = CString::new(output.as_os_str().as_bytes())?;
     let mut error = ptr::null_mut();
@@ -307,7 +304,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     fn assert_decoded(input: &Path, output: &Path) {
-        decode_to_wav(input, output).expect("decoding a stereo test WAV");
+        decode(input, output).expect("decoding a stereo test WAV");
         let mut reader = hound::WavReader::open(output).unwrap();
         let spec = reader.spec();
         assert_eq!(spec.channels, 1, "mono output");

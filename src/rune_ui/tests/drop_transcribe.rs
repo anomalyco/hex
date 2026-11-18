@@ -223,6 +223,110 @@ fn a_drop_after_cancel_waits_for_the_cancelled_worker() {
     assert!(rt.state.drop.waiting().is_empty(), "the drop started");
 }
 
+/// Turning the lab off cancels and forgets the running file and its queue, but
+/// its worker still winding down keeps its job: a drop while off starts
+/// nothing, and only the worker's answer lets it be forgotten.
+#[test]
+fn turning_the_lab_off_cancels_the_running_file_and_waits_for_it() {
+    let (mut rt, started) = window(true);
+    let at = landing(&rt);
+    let first = PathBuf::from("/recordings/first.wav");
+    let third = PathBuf::from("/recordings/third.wav");
+    rt.drop_files(
+        vec![first.clone(), PathBuf::from("/recordings/second.wav")],
+        at,
+    );
+    settle(&mut rt);
+
+    rt.update(|ui, _| ui.settings.labs.drop_transcribe = false);
+    settle(&mut rt);
+    assert_eq!(
+        rt.state.drop.running(),
+        Some(first.as_path()),
+        "its worker has not answered yet"
+    );
+    assert!(
+        rt.state.drop.cancelling(),
+        "turning it off cancels the file"
+    );
+    assert!(rt.state.drop.waiting().is_empty(), "the queue is forgotten");
+    assert!(
+        started
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .cancels[0]
+            .load(Ordering::Acquire),
+        "the worker is told to stop"
+    );
+    assert!(
+        rt.find("drop-transcribe-running").is_none(),
+        "the window shows nothing of the lab it left"
+    );
+
+    rt.drop_files(vec![third.clone()], at);
+    settle(&mut rt);
+    assert_eq!(
+        files_ran(&started),
+        vec![first.clone()],
+        "a drop while off starts nothing"
+    );
+
+    // The worker answers while off: only now is its job forgotten.
+    let reporter = started
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .reporters
+        .remove(0);
+    reporter.done(Err(
+        crate::transcription::file_transcript::FileTranscriptError::Cancelled,
+    ));
+    settle(&mut rt);
+    assert!(
+        rt.state.drop.running().is_none(),
+        "the cancelled job is forgotten"
+    );
+    assert_eq!(
+        files_ran(&started),
+        vec![first.clone()],
+        "still nothing new started"
+    );
+
+    // On again, a drop gets a fresh worker.
+    rt.update(|ui, _| ui.settings.labs.drop_transcribe = true);
+    settle(&mut rt);
+    rt.drop_files(vec![third.clone()], at);
+    settle(&mut rt);
+    assert_eq!(files_ran(&started), vec![first, third.clone()]);
+    assert_eq!(rt.state.drop.running(), Some(third.as_path()));
+}
+
+/// A cancel is checked before the transcript is saved, but one can land just
+/// after that check: the saved file exists, so its toast says Saved.
+#[test]
+fn a_cancel_after_the_last_check_still_says_saved() {
+    let (mut rt, started) = window(true);
+    let at = landing(&rt);
+    let saved = PathBuf::from("/recordings/talk.txt");
+    rt.drop_files(vec![PathBuf::from("/recordings/talk.wav")], at);
+    settle(&mut rt);
+    rt.update(|ui, _| super::super::drop_transcribe::cancel(ui));
+    settle(&mut rt);
+
+    let reporter = started
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .reporters
+        .remove(0);
+    reporter.done(Ok(saved));
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown.iter().any(|text| text == "Saved talk.txt"),
+        "the file was saved before the cancel landed: {shown:?}"
+    );
+    assert!(rt.state.drop.running().is_none());
+}
+
 /// An MP3 whose header says no duration has no percentage to show, so the
 /// toast says "Transcribing…" and a spinner instead of a stuck 0%.
 #[test]
@@ -256,13 +360,14 @@ fn a_file_of_unknown_length_says_transcribing_without_a_percentage() {
 fn a_file_hex_cannot_read_is_refused() {
     let (mut rt, started) = window(true);
     let at = landing(&rt);
-    let file = PathBuf::from("/recordings/talk.flac");
+    // Raw AAC has no reader here, so the drop target refuses it.
+    let file = PathBuf::from("/recordings/talk.aac");
     rt.drag_files(vec![file.clone()], at);
     settle(&mut rt);
     assert!(
-        texts(&rt)
-            .iter()
-            .any(|text| text == "Hex can transcribe WAV or MP3 files"),
+        texts(&rt).iter().any(|text| {
+            text == "Hex can transcribe WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV files"
+        }),
         "{:?}",
         texts(&rt)
     );

@@ -622,8 +622,9 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.drop_transcribe",
         Kind::Bool,
-        "Labs: a WAV or MP3 file dropped on the Hex window is transcribed with the selected dictation \
-         model and saved as a text file next to it",
+        "Labs: a WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file dropped on the \
+         Hex window is transcribed with the selected dictation model and saved as a text file next \
+         to it",
     ),
     key(
         "labs.api_processing",

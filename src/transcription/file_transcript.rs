@@ -1,14 +1,16 @@
-//! Labs › Transcribe dropped audio: a WAV or MP3 file dropped on the window
-//! (any OS), or an M4A, AIFF, or CAF file on macOS, is read in pieces of at
-//! most 30 s, transcribed with the selected model in this process, and saved
-//! as `<stem>.txt` beside it. Nothing is pasted, saved to History, or
-//! processed.
+//! Labs › Transcribe dropped audio: a file with one of this build's
+//! extensions ([`EXTENSIONS`], the formats the shared pieces reader decodes)
+//! is dropped on the window, read in pieces of at most 30 s, transcribed with
+//! the selected model in this process, and saved as `<stem>.txt` beside it.
+//! The same formats are offered on every OS. Nothing is pasted, saved to
+//! History, or processed.
 //!
 //! A file's own folder takes the transcript unless it is unwritable or the
 //! file sits in the OS temp folder, where a promised drop's copy lands: then
 //! the transcript goes to Downloads. A taken name gets " 2", " 3", and so on,
 //! and the write itself is atomic, so a transcript Hex cannot finish never
-//! takes the name.
+//! replaces another one; a crash between reserving a name and the rename can
+//! still leave an empty `<stem>.txt`.
 
 use std::fs::{self, OpenOptions};
 use std::io;
@@ -31,23 +33,16 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 /// How many taken names one transcript tries before giving up.
 const MAX_ATTEMPTS: usize = 1_000;
 
-#[cfg(target_os = "macos")]
-const FORMATS: &str = "WAV, MP3, M4A, AIFF, or CAF";
-#[cfg(not(target_os = "macos"))]
-const FORMATS: &str = "WAV or MP3";
+/// The file extensions this build reads, without the dot, on every OS: what
+/// the shared pieces reader decodes and what the window's drop target, its
+/// "Transcribe a file…" dialog, and their copy all offer.
+pub const EXTENSIONS: &[&str] = &[
+    "wav", "mp3", "m4a", "mp4", "aiff", "aif", "caf", "flac", "ogg", "oga", "opus", "webm", "mkv",
+];
 
-/// The file extensions this build reads, without the dot: the window's drop
-/// target, its "Transcribe a file…" dialog, and their copy all name exactly
-/// these, and [`extension_accepted`] accepts exactly these.
-#[cfg(target_os = "macos")]
-const EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "aiff", "aif", "caf"];
-#[cfg(not(target_os = "macos"))]
-const EXTENSIONS: &[&str] = &["wav", "mp3"];
-
-/// Every extension this build reads, without the dot.
-pub fn extensions() -> &'static [&'static str] {
-    EXTENSIONS
-}
+/// Those kinds as the copy names them, one name per kind (`aif` under AIFF,
+/// `oga` under OGG), for the drop hint, the refusal, and the Labs card.
+pub const FORMATS: &str = "WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV";
 
 /// Why a dropped file could not become a transcript.
 #[derive(Debug)]
@@ -58,6 +53,11 @@ pub enum FileTranscriptError {
     UnsupportedFormat { path: PathBuf },
     /// The file could not be opened, or its audio format is not supported.
     Unreadable { path: PathBuf },
+    /// The file's audio is in a codec this build cannot decode, named.
+    UnsupportedCodec { path: PathBuf, codec: String },
+    /// The file is a container with no audio track, such as a silent screen
+    /// recording.
+    NoAudioTrack { path: PathBuf },
     /// The file is truncated or changed while Hex read it.
     Corrupt { path: PathBuf },
     /// The file holds no speech at all.
@@ -85,6 +85,14 @@ impl std::fmt::Display for FileTranscriptError {
             ),
             Self::Unreadable { path } => {
                 write!(formatter, "{} could not be read", path.display())
+            }
+            Self::UnsupportedCodec { path, codec } => write!(
+                formatter,
+                "{} holds {codec} audio, which Hex cannot decode",
+                path.display()
+            ),
+            Self::NoAudioTrack { path } => {
+                write!(formatter, "{} has no audio track", path.display())
             }
             Self::Corrupt { path } => {
                 write!(formatter, "{} is truncated or corrupt", path.display())
@@ -301,13 +309,18 @@ fn file_error(path: &Path, error: PieceError) -> FileTranscriptError {
                 path: path.to_path_buf(),
             }
         }
-        PieceError::Io(_)
-        | PieceError::Audio(_)
-        | PieceError::NotMedia
-        | PieceError::NoAudioTrack
-        | PieceError::UnsupportedCodec(_) => FileTranscriptError::Unreadable {
+        PieceError::UnsupportedCodec(codec) => FileTranscriptError::UnsupportedCodec {
+            path: path.to_path_buf(),
+            codec,
+        },
+        PieceError::NoAudioTrack => FileTranscriptError::NoAudioTrack {
             path: path.to_path_buf(),
         },
+        PieceError::Io(_) | PieceError::Audio(_) | PieceError::NotMedia => {
+            FileTranscriptError::Unreadable {
+                path: path.to_path_buf(),
+            }
+        }
     }
 }
 
@@ -694,42 +707,151 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    /// Every extension this build offers, the name its copy uses for that
+    /// kind (`aif` is named AIFF, `oga` OGG), and the fixture the shared
+    /// pieces reader decodes for it.
+    const KINDS: &[(&str, &str, &str)] = &[
+        ("wav", "WAV", "generated.wav"),
+        ("mp3", "MP3", "sine.mp3"),
+        ("m4a", "M4A", "sine-aac.m4a"),
+        ("mp4", "MP4", "sine-video.mp4"),
+        ("aiff", "AIFF", "sine.aiff"),
+        ("aif", "AIFF", "sine.aiff"),
+        ("caf", "CAF", "sine-aac.caf"),
+        ("flac", "FLAC", "sine.flac"),
+        ("ogg", "OGG", "sine-vorbis.ogg"),
+        ("oga", "OGG", "sine-vorbis.ogg"),
+        ("opus", "Opus", "sine-opus.ogg"),
+        ("webm", "WebM", "sine-opus.webm"),
+        ("mkv", "MKV", "sine-opus.webm"),
+    ];
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/media")
+            .join(name)
+    }
+
     #[test]
     fn only_the_formats_this_build_reads_are_accepted() {
-        for extension in extensions() {
+        for extension in EXTENSIONS {
             let path = PathBuf::from(format!("talk.{extension}"));
             assert!(extension_accepted(&path), "{extension}");
             let upper = PathBuf::from(format!("talk.{}", extension.to_uppercase()));
             assert!(extension_accepted(&upper), "{extension}");
         }
-        for refused in ["talk.flac", "talk.ogg", "talk.txt", "talk", "talk.mp4"] {
+        // Raw AAC (ADTS) has no reader here, and nothing else off the list.
+        for refused in ["talk.aac", "talk.txt", "talk", "talk.mov", "talk.wav2"] {
             assert!(!extension_accepted(Path::new(refused)), "{refused}");
         }
     }
 
     /// The extensions the window's drop target and its dialog offer are the
-    /// ones this build decodes, and its copy names exactly those.
+    /// ones this build reads, and its copy names every one of them.
     #[test]
     fn the_extensions_on_offer_are_the_ones_this_build_reads() {
-        for extension in extensions() {
+        let offered: Vec<(&str, &str)> = KINDS
+            .iter()
+            .map(|(extension, name, _)| (*extension, *name))
+            .collect();
+        assert_eq!(
+            EXTENSIONS.len(),
+            offered.len(),
+            "every kind has one extension on offer"
+        );
+        for (extension, name) in offered {
             assert!(
-                FORMATS
-                    .to_ascii_uppercase()
-                    .contains(&extension.to_uppercase()),
-                "{extension} is readable but the copy ({FORMATS}) doesn't name it"
+                EXTENSIONS.contains(&extension),
+                "{extension} is named in the copy but not offered"
+            );
+            assert!(
+                FORMATS.contains(name),
+                "the copy ({FORMATS}) doesn't name {name}"
+            );
+            assert!(
+                extension_accepted(Path::new(&format!("talk.{extension}"))),
+                "{extension} is offered but not accepted"
             );
         }
-        for refused in ["flac", "ogg", "txt", "mp4", "wav2"] {
-            assert!(!extensions().contains(&refused), "{refused}");
+        for refused in ["aac", "mov", "txt", "wav2"] {
+            assert!(!EXTENSIONS.contains(&refused), "{refused}");
+        }
+    }
+
+    /// Every extension on offer is one the shared pieces reader actually
+    /// decodes, read from a fixture under that exact extension.
+    #[test]
+    fn every_extension_on_offer_reads_its_own_fixture() {
+        let directory = temp_directory("offered");
+        for (extension, _, source) in KINDS {
+            let path = directory.join(format!("sine.{extension}"));
+            if *source == "generated.wav" {
+                write_wav(&path, 8_000);
+            } else {
+                fs::copy(fixture(source), &path).unwrap();
+            }
+            let mut pieces =
+                Pieces::open(&path).unwrap_or_else(|error| panic!("{extension}: {error:?}"));
+            pieces
+                .validate()
+                .unwrap_or_else(|error| panic!("{extension}: {error:?}"));
+            let mut samples = 0;
+            while let Some(piece) = pieces
+                .next()
+                .unwrap_or_else(|error| panic!("{extension}: {error:?}"))
+            {
+                samples += piece.len();
+            }
+            assert!(
+                samples > 1_000,
+                "{extension} reads half a second of audio: {samples} samples"
+            );
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// The Labs card, its summary, and the CLI description all name the kinds
+    /// this build reads, so no copy contradicts the drop target.
+    #[test]
+    fn every_labs_line_names_the_formats_this_build_reads() {
+        use crate::labs::Feature;
+        for copy in [
+            Feature::DropTranscribe.summary(),
+            Feature::DropTranscribe.description(),
+        ] {
+            assert!(copy.contains(FORMATS), "{copy}");
         }
     }
 
     #[test]
     fn an_unsupported_file_is_refused_before_anything_loads() {
-        let error = check_extension(Path::new("/nonexistent/talk.flac")).unwrap_err();
+        let error = check_extension(Path::new("/nonexistent/talk.alac")).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("not a kind of audio file"), "{message}");
         assert!(message.contains(FORMATS), "{message}");
+    }
+
+    /// A container with no audio track says so, and a codec the reader can't
+    /// decode is named, rather than both reading as an unreadable file.
+    #[test]
+    fn a_missing_track_and_an_unknown_codec_say_what_is_wrong() {
+        let video = fixture("rgbw.mp4");
+        let error = Pieces::open(&video).unwrap_err();
+        let mapped = file_error(&video, error);
+        assert!(
+            mapped.to_string().ends_with("has no audio track"),
+            "{mapped}"
+        );
+        assert!(matches!(mapped, FileTranscriptError::NoAudioTrack { .. }));
+
+        let codec = file_error(
+            Path::new("/recordings/talk.mp4"),
+            PieceError::UnsupportedCodec("AC-3".into()),
+        );
+        assert!(codec.to_string().contains("holds AC-3 audio"), "{codec}");
+        assert!(
+            matches!(&codec, FileTranscriptError::UnsupportedCodec { codec, .. } if codec == "AC-3")
+        );
     }
 
     /// The bundled MP3 decodes through the shared reader at 16 kHz mono, as

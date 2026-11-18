@@ -25,7 +25,7 @@ use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Feature;
 use crate::transcription::file_transcript::{
-    FileTranscriptError, extensions, transcribe_audio_file,
+    EXTENSIONS, FORMATS, FileTranscriptError, transcribe_audio_file,
 };
 use crate::transcription::models::TranscriptionSelection;
 
@@ -288,7 +288,7 @@ pub(super) fn on(ui: &Ui) -> bool {
 /// while a drag is over it. The lab off sets none of these.
 pub(super) fn drop_target(root: El) -> El {
     root.on_drop_files(|ui: &mut Ui, files, tx| dropped(ui, files, tx))
-        .accepts_extensions(extensions())
+        .accepts_extensions(EXTENSIONS)
         .on_drop_hover(|ui: &mut Ui, over, tx| hover(ui, over, Drag::Accepted, tx))
         .on_drop_rejected_hover(|ui: &mut Ui, over, tx| hover(ui, over, Drag::Rejected, tx))
         .on_drop_rejected(|ui: &mut Ui, files, tx| rejected(ui, files, tx))
@@ -351,7 +351,7 @@ pub(super) fn choose(ui: &mut Ui) {
             title: tr("Transcribe a file").into(),
             target: Target::File(vec![Filter {
                 label: tr("Audio files").into(),
-                extensions: extensions(),
+                extensions: EXTENSIONS,
             }]),
             directory: crate::app_paths::audio_dir(),
         },
@@ -397,15 +397,17 @@ fn poll_job(ui: &mut Ui) -> bool {
             }
             Ok(Event::Done(result)) => {
                 let job = ui.drop.job.take().expect("the job just read");
-                if !job.cancelling {
-                    ui.drop.notice = Some(match result {
-                        Ok(path) => Notice::Saved(path),
-                        Err(error) => Notice::Failed {
-                            name: name_of(&job.path),
-                            error: error.to_string(),
-                        },
-                    });
-                }
+                // A cancel can land after the worker's last check, and the
+                // transcript it saved is there: say so anyway. A cancelled
+                // file with no saved transcript says nothing.
+                ui.drop.notice = match result {
+                    Ok(path) => Some(Notice::Saved(path)),
+                    Err(_) if job.cancelling => None,
+                    Err(error) => Some(Notice::Failed {
+                        name: name_of(&job.path),
+                        error: error.to_string(),
+                    }),
+                };
                 start(ui);
                 return true;
             }
@@ -640,11 +642,7 @@ fn name_of(path: &Path) -> String {
 /// The kinds of file this build reads, as a phrase for the hint, the
 /// refusal, and the Labs card's description.
 pub(super) fn formats() -> &'static str {
-    if cfg!(target_os = "macos") {
-        tr("WAV, MP3, M4A, AIFF, or CAF")
-    } else {
-        tr("WAV or MP3")
-    }
+    tr(FORMATS)
 }
 
 /// The real worker: transcribes `path` with `selection` on its own thread,

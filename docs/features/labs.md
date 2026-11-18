@@ -191,14 +191,15 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // the_cli_prints_completion_scripts (linux.rs, main.rs, windows.rs);
 │                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
 │                                        // a sourced script in a real shell
-├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV or MP3 file dropped anywhere on Hex's window
-│                                        (M4A, AIFF, and CAF too on macOS) queues behind any file already being
-│                                        transcribed, one at a time, each with the dictation model and language in use;
+├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, Ogg,
+│                                        Opus, WebM, or Matroska file dropped anywhere on Hex's window queues
+│                                        behind any file already being transcribed, one at a time, each with the
+│                                        dictation model and language in use;
 │                                        it is read in ≤30 s pieces in this process and saved as `<stem>.txt` beside
 │                                        it. A taken name gets " 2", " 3", and so on; a file in the OS temp folder,
 │                                        or one whose folder Hex can't write, has its transcript saved in Downloads
-│                                        instead. A drag with no file Hex reads says what it reads, listing the macOS
-│                                        extras there; Cancel stops the running file and clears the queue, and the
+│                                        instead. A drag with no file Hex reads says what it reads in one list on
+│                                        every OS; Cancel stops the running file and clears the queue, and the
 │                                        file's toast says Cancelling… until its worker answers, so nothing else
 │                                        starts meanwhile; the toast names the file and its progress, and says Saved
 │                                        <name> with the path and Show in folder. The lab's card offers Transcribe a
@@ -210,6 +211,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // dropped_files_queue_one_at_a_time,
 │                                        // cancel_stops_the_running_file_and_the_queue,
 │                                        // a_drop_after_cancel_waits_for_the_cancelled_worker,
+│                                        // turning_the_lab_off_cancels_the_running_file_and_waits_for_it,
+│                                        // a_cancel_after_the_last_check_still_says_saved,
 │                                        // a_file_of_unknown_length_says_transcribing_without_a_percentage,
 │                                        // a_file_hex_cannot_read_is_refused,
 │                                        // a_saved_transcript_says_where_it_is_and_dismisses,
@@ -225,11 +228,13 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_checked_wav_still_reads_from_its_first_sample,
 │                                        // only_the_formats_this_build_reads_are_accepted,
 │                                        // the_extensions_on_offer_are_the_ones_this_build_reads,
+│                                        // every_extension_on_offer_reads_its_own_fixture,
+│                                        // every_labs_line_names_the_formats_this_build_reads,
 │                                        // an_unsupported_file_is_refused_before_anything_loads,
+│                                        // a_missing_track_and_an_unknown_codec_say_what_is_wrong,
 │                                        // the_bundled_mp3_decodes_to_sixteen_kilohertz_mono (transcription/file_transcript.rs);
 │                                        // drop_transcribe_is_its_own_switch_and_everywhere (labs.rs); no model
-│                                        // transcribed a dropped file, nothing ran on Wayland (no file drags), and no
-│                                        // macOS M4A, AIFF, or CAF decode ran
+│                                        // transcribed a dropped file, and nothing ran on Wayland (no file drags)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Copy dictation audio no labs.copy_dictation_audio  History entries with a kept recording gain Copy audio, and the menu bar or tray gains Copy last dictation audio: one WAV file on the clipboard, ready to attach. Needs Keep recordings and stores no audio itself
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
@@ -3647,12 +3652,12 @@ file…", joins one queue the window runs one file at a time.
 The drop target is the window root
 ([rune_ui/drop_transcribe.rs](../../src/rune_ui/drop_transcribe.rs)):
 `on_drop_files` takes the files whose extension this build reads
-(`file_transcript::extensions()`), `on_drop_hover` shows the hint over the
-whole window while a file drag is on it, and a drag with nothing Hex reads
-says what it reads instead ("Hex can transcribe WAV or MP3 files", or the
-macOS extras) through `on_drop_rejected_hover`, and again as a toast if it is
-dropped. With the lab off the window sets no drop handler at all, so nothing
-of this draws or runs. A file's toast shows its name, a ring and percentage of
+(`file_transcript::EXTENSIONS`), `on_drop_hover` shows the hint over the whole
+window while a file drag is on it, and a drag with nothing Hex reads says what
+it reads instead ("Hex can transcribe WAV, MP3, M4A, MP4, AIFF, CAF, FLAC,
+OGG, Opus, WebM, or MKV files") through `on_drop_rejected_hover`, and again as
+a toast if it is dropped. With the lab off the window sets no drop handler at
+all, so nothing of this draws or runs. A file's toast shows its name, a ring and percentage of
 the audio decoded (the backend's progress callback; a spinner and
 "Transcribing…" when the file's length is unknown), how many files wait
 behind it, and Cancel, which stops the running file, empties the queue, and
@@ -3684,27 +3689,33 @@ the shared pieces reader
 ([transcription/pieces.rs](../../src/transcription/pieces.rs)): a WAV is read
 whole once before the model loads, as `hex transcribe` does, so a truncated or
 corrupt file is refused up front, and compressed audio decodes once, as it
-transcribes, with damage found later reported where it is. The drop target
-offers WAV and MP3 everywhere, and M4A, AIFF, and CAF too on macOS, though the
-reader takes any container it knows. Every format is downmixed to mono,
-resampled to 16 kHz, cut at most every 30 s, and each piece is sent to the
-service in order, which skips one the speech detector hears nothing in; the
-pieces' text joins with one space. A piece runs on the dictation engine's
+transcribes, with damage found later reported where it is. The drop target and
+the card's dialog offer the same extensions on every OS, one per container the
+shared reader takes: `wav`, `mp3`, `m4a`/`mp4`, `aiff`/`aif`, `caf`, `flac`,
+`ogg`/`oga`, `opus` (an Ogg file), `webm`, and `mkv`. Every format is
+downmixed to mono, resampled to 16 kHz, cut at most every 30 s, and each
+piece is sent to the service in order, which skips one the speech detector
+hears nothing in; the pieces' text joins with one space. A piece runs on the dictation engine's
 loaded copy when that copy is the model the file asks for and dictation stays
 idle for up to `SHARED_WAIT` (20 s,
 [service.rs](../../src/transcription/service.rs)); otherwise the service
 loads its own copy, so a file keeps moving while dictation is busy or the
-engine holds another model. The whole transcript is written as `<stem>.txt` in
-the source's folder, never replacing an existing file (`<stem> 2.txt`,
+engine holds another model. A piece that holds the engine can delay a
+dictation released while it runs, for at most that piece (30 s); a dictation
+that stays locked past `SHARED_WAIT` makes the service load its own copy of
+the model for the file instead. The whole transcript is written as
+`<stem>.txt` in the source's folder, never replacing an existing file
+(`<stem> 2.txt`,
 `<stem> 3.txt`, …), through a reserved name and an atomic rename. A file in the
 OS temp folder or in an unwritable folder has its transcript written to
 Downloads; a writable source folder needs no Downloads at all. Cancelling
 stops between pieces, every 100 ms while one waits for its transcript, and
-once more before the transcript is saved, so a cancelled file never writes
-one; progress is the fraction of the file decoded, and a compressed file whose
-header
-gives no duration reports no fraction, which the toast shows as
-"Transcribing…" with a spinner rather than 0%.
+once more before the transcript is saved, so a cancelled file writes nothing.
+The worker answers only after the piece already decoding or transcribing
+finishes, and after a cold load of the service's own model, so the next file
+starts only then. Progress is the fraction of the file decoded; a compressed
+file whose header gives no duration reports no fraction, which the toast shows
+as "Transcribing…" with a spinner rather than 0%.
 
 Entry points: a file drag on the window (macOS, Windows, and Linux X11), and
 Labs › Transcribe dropped audio's card button (every desktop, including
@@ -3716,6 +3727,8 @@ Checks: `a_dropped_file_does_nothing_with_the_lab_off`,
 `dropped_files_queue_one_at_a_time`,
 `cancel_stops_the_running_file_and_the_queue`,
 `a_drop_after_cancel_waits_for_the_cancelled_worker`,
+`turning_the_lab_off_cancels_the_running_file_and_waits_for_it`,
+`a_cancel_after_the_last_check_still_says_saved`,
 `a_file_of_unknown_length_says_transcribing_without_a_percentage`,
 `a_file_hex_cannot_read_is_refused`,
 `a_saved_transcript_says_where_it_is_and_dismisses`,
@@ -3735,7 +3748,10 @@ and `drop-running` in both appearances; `the_first_free_name_numbering_counts_up
 `a_checked_wav_still_reads_from_its_first_sample`,
 `only_the_formats_this_build_reads_are_accepted`,
 `the_extensions_on_offer_are_the_ones_this_build_reads`,
-`an_unsupported_file_is_refused_before_anything_loads`, and
+`every_extension_on_offer_reads_its_own_fixture`,
+`every_labs_line_names_the_formats_this_build_reads`,
+`an_unsupported_file_is_refused_before_anything_loads`,
+`a_missing_track_and_an_unknown_codec_say_what_is_wrong`, and
 `the_bundled_mp3_decodes_to_sixteen_kilohertz_mono` in
 [file_transcript.rs](../../src/transcription/file_transcript.rs);
 `drop_transcribe_is_its_own_switch_and_everywhere` in
@@ -3746,10 +3762,9 @@ Proof limits: the drop tests drive Rune's headless `drag_files`/`drop_files`,
 so a real Finder, Explorer, or file-manager drag is unobserved; Wayland
 reports no file drags, so there only the card's dialog works, and its native
 picker is unobserved here too; no model transcribed a dropped file, so no
-real WAV or MP3 was read end to end; the macOS M4A, AIFF, and CAF bridge is
-compiled on macOS CI only and never ran; and no transcript saved by the toast
-was opened by a person.
-
+dropped file ran through a model end to end (each offered extension's fixture
+was read by the shared reader only); and no transcript saved by the toast was
+opened by a person.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,
