@@ -61,12 +61,14 @@ with a timestamp and a speaker label: You is the person who recorded the meeting
 one or more other participants. A long meeting is excerpted, and […] marks skipped parts. Write \
 one short, specific title for the whole meeting and a summary of at most two short sentences \
 on the main topics and outcomes. Use only what the transcript says; never invent names, dates, \
-or numbers.";
+or numbers. You MUST write the title and summary in the language spoken in the transcript, even \
+though these instructions are in English; never translate them.";
 
 const TITLE_INSTRUCTIONS: &str = "You name meetings from the first part of their transcript. \
 Each line starts with a timestamp and a speaker label: You is the person who recorded the \
 meeting, and Them is one or more other participants. Write one short, specific title naming \
-the main topic. Use only what the transcript says.";
+the main topic. Use only what the transcript says. You MUST write the title in the language \
+spoken in the transcript, even though these instructions are in English; never translate it.";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MeetingNotes {
@@ -1167,6 +1169,24 @@ mod tests {
             "They reviewed the launch plan. Docs move to Friday."
         );
         assert_eq!(summary.excerpt_chars, summary.transcript_chars);
+    }
+
+    #[test]
+    fn prompts_keep_the_transcripts_language() {
+        assert!(NOTES_INSTRUCTIONS.contains(
+            "You MUST write the title and summary in the language spoken in the transcript"
+        ));
+        assert!(
+            TITLE_INSTRUCTIONS
+                .contains("You MUST write the title in the language spoken in the transcript")
+        );
+        for instructions in [NOTES_INSTRUCTIONS, TITLE_INSTRUCTIONS] {
+            assert!(
+                instructions.contains("even though these instructions are in English"),
+                "{instructions}"
+            );
+            assert!(instructions.contains("never translate"), "{instructions}");
+        }
     }
 
     #[test]

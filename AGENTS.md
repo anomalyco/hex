@@ -1191,10 +1191,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
   untouched. Notes rewrite only the heading Hex wrote and the
-  `<!-- hex:notes -->` block. With Meetings › Settings › Export › Descriptive
-  meeting file names on, notes or chapter refinement that change the title,
-  and user renames, also rename the exported Markdown to the new title,
-  keeping its date and time prefix and never overwriting.
+  `<!-- hex:notes -->` block. Titles and summaries are written in the language
+  spoken in the transcript, never in the instructions' English. With Meetings ›
+  Settings › Export › Descriptive meeting file names on, notes or chapter
+  refinement that change the title, and user renames, also rename the exported
+  Markdown to the new title, keeping its date and time prefix and never
+  overwriting.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
   every macOS, Linux, and Windows build and on by default in every build,
   stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
