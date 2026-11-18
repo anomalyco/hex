@@ -126,8 +126,10 @@ impl ChordCapture {
         let altgr = altgr_only();
         if let Some(key) = pressed_capture_key() {
             // A key chord is what the keys say, AltGr's Ctrl counted: AltGr+Q
-            // records as Ctrl+Alt+Q, never Alt+Q. Only the modifier-only
-            // path below drops it.
+            // records as Ctrl+Alt+Q, never Alt+Q. The listener refuses that
+            // chord on AltGr for a key that types a character (#1964), so it
+            // types `@` there and presses with a real Left Ctrl+Alt; only the
+            // modifier-only path below drops the Ctrl outright.
             return ChordPoll::Captured(key_chord(&read, key));
         }
         if unsupported_key_down() {
@@ -183,8 +185,9 @@ impl ChordCapture {
 }
 
 /// The chord a key press records: each modifier held with its side, and the
-/// key. `held` is the raw read (`ModifierState::raw`), so AltGr keeps the
-/// Ctrl Windows adds.
+/// key. `held` is the raw read (`ModifierState::read`), so AltGr keeps the
+/// Ctrl Windows adds: the recording names Ctrl, and the listener presses it
+/// only with a real Left Ctrl while AltGr types the key's character (#1964).
 fn key_chord(held: &ModifierState, key: String) -> WindowsHotkey {
     let any = |down: bool| down.then_some(ModifierSide::Either);
     WindowsHotkey {
@@ -313,7 +316,9 @@ mod tests {
     #[test]
     fn altgr_with_a_key_records_the_ctrl_windows_added() {
         // `poll` builds a key chord from the raw read: AltGr+Q records as
-        // Ctrl+Alt+Q, the chord the listener has always matched.
+        // Ctrl+Alt+Q. The listener refuses that chord on AltGr for a key that
+        // types a character (#1964), so the recording presses only with a
+        // real Left Ctrl+Alt and AltGr still types the character.
         let read = ModifierState {
             left_control: true,
             right_alt: true,

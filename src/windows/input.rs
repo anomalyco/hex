@@ -403,8 +403,9 @@ impl CaptureState {
 
 impl CallbackState {
     /// Whether the chord's modifiers are down: the masked view, and, while
-    /// AltGr's synthesized Left Ctrl is the only one down, the Ctrl an older
-    /// AltGr-layout recording made of it (`ModifierState::holds`).
+    /// AltGr's synthesized Left Ctrl is the only one down, the Ctrl a
+    /// modifier-only AltGr-layout recording made of it
+    /// (`ModifierState::holds`).
     fn holds(&self, binding: &WindowsHotkey) -> bool {
         self.modifiers.holds(binding, &self.raw_modifiers)
     }
@@ -1821,36 +1822,58 @@ mod tests {
 
     #[test]
     fn a_key_chord_on_altgr_is_not_alt_with_that_key() {
-        let alt_q = WindowsHotkey {
-            control: None,
-            windows: None,
-            alt: Some(ModifierSide::Either),
-            shift: None,
-            key: Some("q".into()),
-        };
-        let control_alt_q = WindowsHotkey {
-            control: Some(ModifierSide::Either),
-            alt: Some(ModifierSide::Either),
-            ..alt_q.clone()
-        };
-        let control_alt_right_q = WindowsHotkey {
-            control: Some(ModifierSide::Either),
-            alt: Some(ModifierSide::Right),
-            ..alt_q.clone()
-        };
+        let chord =
+            |control: Option<ModifierSide>, alt: Option<ModifierSide>, key: &str| WindowsHotkey {
+                control,
+                windows: None,
+                alt,
+                shift: None,
+                key: Some(key.into()),
+            };
+        let either = Some(ModifierSide::Either);
+        let alt_v = chord(None, either, "v");
+        let control_alt_v = chord(either, either, "v");
+        let control_alt_right_v = chord(either, Some(ModifierSide::Right), "v");
+        let control_alt_f9 = chord(either, either, "f9");
         let altgr = ModifierState {
             left_control: true,
             right_alt: true,
             ..ModifierState::default()
         };
         let masked = altgr.without_altgr(true);
-        // AltGr+Q is Ctrl+Alt+Q, as it has always been: it must not press an
-        // Alt+Q shortcut (and swallow `@`), and it still presses one that
-        // names Ctrl.
-        assert!(!masked.holds(&alt_q, &altgr));
-        assert!(masked.holds(&control_alt_q, &altgr));
-        assert!(masked.holds(&control_alt_right_q, &altgr));
-        assert!(masked.holds_any_required(&control_alt_q, &altgr));
+        // AltGr+V types `@` on AltGr layouts (#1964): it must press neither
+        // an Alt+V nor a Ctrl+Alt+V shortcut, so the key reaches the app.
+        assert!(!masked.holds(&alt_v, &altgr));
+        assert!(!masked.holds(&control_alt_v, &altgr));
+        assert!(!masked.holds(&control_alt_right_v, &altgr));
+        assert!(!masked.holds_any_required(&control_alt_v, &altgr));
+        // A key that types nothing keeps its chord: AltGr+F9 still presses
+        // Ctrl+Alt+F9, as a recording made of it always has.
+        assert!(masked.holds(&control_alt_f9, &altgr));
+        assert!(masked.holds_any_required(&control_alt_f9, &altgr));
+
+        // A real Left Ctrl with Right Alt is a Ctrl chord, and so is Left
+        // Ctrl with Left Alt: the recorded chord presses on either.
+        let real_ctrl_right_alt = altgr.without_altgr(false);
+        assert!(real_ctrl_right_alt.holds(&control_alt_v, &real_ctrl_right_alt));
+        let left_ctrl_left_alt = ModifierState {
+            left_control: true,
+            left_alt: true,
+            ..ModifierState::default()
+        };
+        assert!(left_ctrl_left_alt.holds(&control_alt_v, &left_ctrl_left_alt));
+        // A chord that names Right Alt needs it: Left Alt is not Right Alt.
+        assert!(!left_ctrl_left_alt.holds(&control_alt_right_v, &left_ctrl_left_alt));
+
+        // Right Alt alone still fires on AltGr (#1950).
+        let right_alt = WindowsHotkey {
+            control: None,
+            windows: None,
+            alt: Some(ModifierSide::Right),
+            shift: None,
+            key: None,
+        };
+        assert!(masked.holds(&right_alt, &altgr));
     }
 
     #[test]
