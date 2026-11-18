@@ -439,6 +439,12 @@ pub(super) const KEYS: &[Key] = &[
          release still finishes (macOS and Windows)",
     ),
     key(
+        "labs.modes_editor",
+        Kind::Bool,
+        "Labs: a Modes pane in the main sidebar edits each mode's apps, corrections, and \
+         OpenCode rewrite",
+    ),
+    key(
         "labs.benchmark_details",
         Kind::Bool,
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",

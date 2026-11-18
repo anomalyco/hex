@@ -101,7 +101,8 @@ impl Feature {
             | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
-            | Self::VoicePrompt => Group::Output,
+            | Self::VoicePrompt
+            | Self::ModesEditor => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::RecentDictations

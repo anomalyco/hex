@@ -839,6 +839,19 @@
       ],
       "summary": "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish",
       "title": "Hold through other keys"
+    },
+    {
+      "added": "2026-11-18",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "modes-editor",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane",
+      "title": "Modes editor"
     }
   ]
 }

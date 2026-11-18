@@ -60,7 +60,8 @@ pub(super) enum Pane {
     /// What Hex does to every dictation and in some apps, read-only: the
     /// person's agent edits it.
     Output,
-    /// The old per-app editor, kept for its scenes until it is removed.
+    /// The old per-app editor, in the sidebar while Labs › Modes editor is on
+    /// (the `--snap` scenes render it directly).
     Modes,
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
@@ -104,7 +105,9 @@ impl Pane {
     pub(super) fn shown(self, ui: &Ui) -> bool {
         let caps = ui.platform.caps;
         match self {
-            Pane::Modes | Pane::HudLab | Pane::Activity => false,
+            Pane::HudLab | Pane::Activity => false,
+            // Labs › Modes editor; scenes render the pane without the lab.
+            Pane::Modes => ui.settings.labs.modes_editor,
             Pane::Meetings => caps.meetings && meetings::available(ui),
             // On from Labs (dev builds), or while its driver is installed.
             Pane::VoiceFilter => caps.fun && fun::running(ui),

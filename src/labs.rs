@@ -2,8 +2,8 @@
 //! each behind its own switch, off by default. There is no master switch:
 //! Settings › Labs lists every feature as a card with a toggle, under its
 //! group's collapsible header (`Feature::group`). A feature
-//! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
-//! as a normal item while on and is hidden while off; a behaviour-only
+//! with its own pane (Meetings, Voice Filter, Playground, the Modes editor)
+//! joins the sidebar as a normal item while on and is hidden while off; a behaviour-only
 //! feature (Live text, Live chapters, Vocabulary help, Words on screen,
 //! the rewrite reading the text around the cursor (macOS),
 //! keyboard-language
@@ -192,6 +192,7 @@ impl Feature {
             Self::CursorContext => settings.labs.cursor_context,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
+            Self::ModesEditor => settings.labs.modes_editor,
         }
     }
 
@@ -275,6 +276,7 @@ impl Feature {
             &mut labs.cursor_context,
             &mut labs.more_dictation_shortcuts,
             &mut labs.copy_dictation_audio,
+            &mut labs.modes_editor,
         ]
     }
 
@@ -364,6 +366,7 @@ impl Feature {
             Self::CursorContext => settings.labs.cursor_context = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
+            Self::ModesEditor => settings.labs.modes_editor = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

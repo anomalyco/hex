@@ -830,6 +830,46 @@ fn the_sidebar_always_shows_output() {
     }
 }
 
+/// Labs › Modes editor brings the old editor back as a main pane, right after
+/// Output, and the Modes destination (the menu bar, `hex window show --pane
+/// modes`) opens it instead of Output. Off, nothing changes.
+#[test]
+fn the_modes_editor_lab_brings_modes_back_to_the_sidebar() {
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
+    unfold_labs(&mut rt);
+    assert!(rt.find("nav-modes").is_none(), "off, Output replaces Modes");
+    // Off, the Modes destination still lands on Output.
+    show(&mut rt.state, Destination::Modes, &mut rune::Tx::default());
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Output);
+    // Its card turns the editor on.
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-modes-editor");
+    assert!(rt.state.settings.labs.modes_editor);
+    // It joins the sidebar right after Output, and Command-3 opens it.
+    tap(&mut rt, "nav-output");
+    assert!(rt.find("nav-modes").is_some());
+    let order = labs::order(&rt.state);
+    let output = order
+        .iter()
+        .position(|pane| *pane == Pane::Output)
+        .expect("Output is a main pane");
+    assert_eq!(order.get(output + 1), Some(&Pane::Modes));
+    key(&mut rt, Key::Command('3'), Mods::default());
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Modes, "Command-3 is Modes now");
+    // The menu bar and `hex window show --pane modes` open the editor too.
+    show(&mut rt.state, Destination::Modes, &mut rune::Tx::default());
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Modes);
+    // Off, the pane hides again (the window's settings adoption then leaves
+    // it, as Meetings does when turned off).
+    crate::labs::Feature::ModesEditor.set(&mut rt.state.settings, false);
+    assert!(!Pane::Modes.shown(&rt.state));
+}
+
 #[test]
 fn the_sidebar_switches_panes_and_keeps_settings() {
     let mut rt = runtime("portal", true, PANE_SIZE);

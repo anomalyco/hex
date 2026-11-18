@@ -251,6 +251,9 @@ pub struct LabsSettings {
     /// after it went down reaches the app in front and leaves the dictation
     /// recording, which the release still finishes (macOS and Windows).
     pub hold_through_keys: bool,
+    /// The Modes editor joins the sidebar: every mode's apps, corrections,
+    /// OpenCode rewrite, and transformations.
+    pub modes_editor: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -401,6 +404,7 @@ impl Default for LabsSettings {
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
             hold_through_keys: false,
+            modes_editor: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,
