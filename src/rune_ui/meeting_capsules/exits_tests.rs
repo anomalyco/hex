@@ -7,9 +7,10 @@
 /// pop, the window hidden only once nothing shows.
 fn leaves(shots: &[Shot], from: usize) -> usize {
     assert_eq!(shots[from].phase, "leaving", "closed the frame it was asked");
+    // It answers in that frame, and is still nearly whole.
     assert!(
-        shots[from].surface > 0.7,
-        "f{from}: still drawn at {}",
+        shots[from].surface > 0.7 && shots[from].surface < 1.0,
+        "f{from}: drawn at {}",
         shots[from].surface
     );
     let gone = (from..shots.len())

@@ -217,16 +217,21 @@ impl Capsule {
             // earlier can't outlast what it shows now.
             show();
         }
-        let dt = s
-            .last
-            .map_or(1.0 / 60.0, |last| (now - last).clamp(0.0, 0.1) as f32);
+        let wanted = f32::from(shown);
+        let dt = match s.last {
+            // Already stepped at this instant, toward what it showed before
+            // a handler changed it: the turn takes its first step now.
+            Some(last) if now <= last && !s.track.heads_for(wanted) => 1.0 / 60.0,
+            Some(last) => (now - last).clamp(0.0, 0.1) as f32,
+            None => 1.0 / 60.0,
+        };
         let spring = match (reduced, shown) {
             (true, _) => REDUCED,
             (false, true) => ENTER,
             (false, false) => EXIT,
         };
         // Below one part in a hundred nothing shows: the window can go.
-        let mut moving = s.track.step(f32::from(shown), spring, dt, 0.01);
+        let mut moving = s.track.step(wanted, spring, dt, 0.01);
         moving |= s.title.step(title, reduced, dt);
         moving |= s.summary.step(summary, reduced, dt);
         if !shown && s.track == Track::at(0.0) {

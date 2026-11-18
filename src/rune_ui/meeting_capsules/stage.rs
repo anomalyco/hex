@@ -66,6 +66,11 @@ impl Track {
         }
     }
 
+    /// Whether it is already on its way to `to`, or resting there.
+    pub(super) fn heads_for(&self, to: f32) -> bool {
+        self.to == to
+    }
+
     /// Bends toward `to` from where it is; true while it still moves.
     /// `rest` is the distance that no longer shows.
     pub(super) fn step(&mut self, to: f32, spring: Spring, dt: f32, rest: f32) -> bool {
