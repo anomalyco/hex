@@ -196,7 +196,7 @@ const GRADUATED: [(&str, &str); 15] = [
     ),
     (
         "yearly-stats",
-        "yearly-stats graduated: the year heatmap and all-time totals are part of Dictation stats now, with hex labs on history-stats",
+        "yearly-stats moved: turn on Dictation stats in Settings › Labs, or hex labs on history-stats (it includes the year heatmap and all-time totals now)",
     ),
 ];
 

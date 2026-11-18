@@ -410,7 +410,7 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-// 1 << 20 is free (Yearly stats graduated into Dictation stats).
+// 1 << 20 is free (Yearly stats merged into Dictation stats).
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 // 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps

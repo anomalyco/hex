@@ -490,7 +490,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.history_stats",
         Kind::Bool,
-        "Labs: a summary of retained dictations at the top of History, with a year-long heatmap and all-time totals from a daily rollup without text or app names, and hex history stats",
+        "Labs: a summary of retained dictations at the top of History, with a year-long heatmap and all-time totals from a daily rollup in usage.json (counts only, no text or app names) kept beyond History's retention. While off, the rollup is never written or read; hex history stats prints it too",
     ),
     key(
         "labs.recent_dictations",

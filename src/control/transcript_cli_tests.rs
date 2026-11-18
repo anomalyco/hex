@@ -210,7 +210,7 @@ fn history_stats_json_includes_the_yearly_rollup_with_dictation_stats() {
         |ms| ((ms / 3_600_000) % 24) as usize,
     )
     .unwrap();
-    output.yearly = yearly_output(&history, true, NOW);
+    output.yearly = Some(yearly_output(&history, NOW));
     let json = serde_json::to_value(&output).unwrap();
     let yearly = &json["yearly"];
     assert_eq!(yearly["dictations"], 1);

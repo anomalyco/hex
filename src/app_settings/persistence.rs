@@ -405,6 +405,7 @@ impl AppSettings {
                         "meeting_descriptive_filenames",
                         "meeting_notes_file",
                         "expire_meeting_audio",
+                        "yearly_stats",
                     ][..],
                 ),
             ] {
@@ -430,6 +431,8 @@ impl AppSettings {
         let mut saved = saved.map_or_else(Self::default, |data| decode(data).0);
         // A file from before `meetings.summaries` keeps its choice under a lock.
         saved.migrate_meeting_summaries();
+        // A file from before Yearly stats merged keeps its choice too.
+        saved.migrate_yearly_stats_lab();
         let mut written = self.clone();
         policy.keep_saved(&mut written, &saved);
         Cow::Owned(written)

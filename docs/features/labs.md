@@ -2022,7 +2022,7 @@ so the title and Close stay put. The dialog is built in
 number as `controls::STATS_NUMBER`; `hex history stats [--since] [--until]
 [--json]` prints the same totals ([transcript-cli.md](../transcript-cli.md)),
 and its JSON adds the typing speed, time saved, hourly series and busiest
-hour, the daily series, per-mode Output time, and an optional `yearly` summary
+hour, the daily series, per-mode Output time, and a `yearly` summary
 of the rollup. It sums every entry within
 retention (`History::stats`, `history/stats.rs`), not the pane's 200-entry
 search, so it ends with what retention removes. The headline totals and hours
