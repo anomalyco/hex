@@ -91,6 +91,21 @@ fn base_aware_updates_keep_other_writers_and_nested_unknown_fields() {
     assert_eq!(saved["meetings"]["future"]["mode"], "keep");
 }
 
+/// The retired Yearly stats switch is an understood migration input, not an
+/// unknown setting: a load never copies it back into the file, and its choice
+/// lands on Dictation stats.
+#[test]
+fn a_retired_yearly_stats_key_never_returns_to_the_file() {
+    let file = SettingsFile::new(br#"{"labs":{"yearly_stats":true}}"#);
+    AppSettings::load_from(&file.path).unwrap();
+    let saved: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert!(
+        saved["labs"].get("yearly_stats").is_none(),
+        "the retired key is stripped: {saved}"
+    );
+    assert_eq!(saved["labs"]["history_stats"], json!(true));
+}
+
 #[test]
 fn simultaneous_updates_serialize_the_read_merge_and_write() {
     let file = SettingsFile::new(b"{}");
@@ -991,4 +1006,26 @@ fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
     let (unmanaged, _) = AppSettings::read_managed_from(&file.path, Policy::default()).unwrap();
     assert!(unmanaged.meetings.enabled);
     assert!(unmanaged.labs.live_text);
+}
+
+/// A file whose Yearly stats switch predates the merge keeps that choice
+/// under a managed Labs lock: the lock reads Dictation stats off in memory,
+/// but the save must not write the false back with the migration recorded.
+#[test]
+fn a_managed_lock_saves_a_retired_yearly_stats_choice_as_dictation_stats() {
+    use crate::policy::{Lock, Policy};
+    let file = SettingsFile::new(br#"{"labs":{"yearly_stats":true}}"#);
+    let policy = Policy::default().with(Lock::Labs);
+    let (mut settings, _) = AppSettings::read_managed_from(&file.path, policy).unwrap();
+    assert!(!settings.labs.history_stats, "the lock reads the lab off");
+
+    settings.sound_effects = false;
+    settings.write_managed_to(&file.path, policy).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert_eq!(
+        saved["labs"]["history_stats"],
+        json!(true),
+        "the file's own Yearly stats choice survives the lock"
+    );
+    assert!(saved["labs"].get("yearly_stats").is_none());
 }

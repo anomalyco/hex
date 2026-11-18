@@ -89,8 +89,8 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history.clear_armed = true;
         ui.pane = Pane::History;
     }),
-    // Labs › Dictation stats with Labs › Yearly stats: the Stats button with
-    // its dialog open, the year heatmap, and the hourly strip.
+    // Labs › Dictation stats: the Stats button with its dialog open, the
+    // year heatmap, and the hourly strip.
     ("history-stats", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture();
@@ -98,7 +98,6 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history.usage = Some(history::HistoryPane::fixture_usage());
         ui.history.stats_open = true;
         ui.settings.labs.history_stats = true;
-        ui.settings.labs.yearly_stats = true;
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),

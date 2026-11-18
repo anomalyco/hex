@@ -339,12 +339,14 @@ struct StatsOutput {
     retention: HistoryRetention,
     #[serde(flatten)]
     stats: HistoryStats,
-    /// Labs › Yearly stats' daily rollup, only while the lab is on.
+    /// Labs › Dictation stats' daily rollup, filled in by `hex history
+    /// stats` after the totals; the command refuses while the lab is off, so
+    /// successful output always has it.
     #[serde(skip_serializing_if = "Option::is_none")]
     yearly: Option<YearlyOutput>,
 }
 
-/// The Labs › Yearly stats rollup in `hex history stats --json`.
+/// The Labs › Dictation stats rollup in `hex history stats --json`.
 #[derive(Serialize)]
 struct YearlyOutput {
     dictations: u64,
@@ -409,16 +411,14 @@ fn require_history_stats(on: bool) -> Result<()> {
     }
 }
 
-/// Labs › Yearly stats' rollup for `hex history stats --json`, only while
-/// the lab is on. Off, the file is not read and the field stays out.
-fn yearly_output(history: &Path, on: bool, now: u64) -> Option<YearlyOutput> {
-    on.then(|| {
-        let usage = crate::history::usage::Usage::load(
-            &crate::history::usage::path(history),
-            crate::history::stats::local_day(now),
-        );
-        YearlyOutput::from(&usage)
-    })
+/// Labs › Dictation stats' rollup for `hex history stats --json`. `hex
+/// history stats` refuses while the lab is off, so the field is always there.
+fn yearly_output(history: &Path, now: u64) -> YearlyOutput {
+    let usage = crate::history::usage::Usage::load(
+        &crate::history::usage::path(history),
+        crate::history::stats::local_day(now),
+    );
+    YearlyOutput::from(&usage)
 }
 
 /// `hex history stats`.
@@ -438,7 +438,7 @@ fn history_stats(since: Option<&str>, until: Option<&str>, json: bool) -> Result
         crate::history::stats::local_day,
         crate::history::stats::local_hour,
     )?;
-    output.yearly = yearly_output(&history, crate::labs::yearly_stats(), now);
+    output.yearly = Some(yearly_output(&history, now));
     let mut out = io::stdout().lock();
     if json {
         return write_json(&mut out, &output);

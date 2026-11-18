@@ -50,8 +50,8 @@ pub(super) struct HistoryPane {
     error: Option<String>,
     /// Labs › Dictation stats: every retained entry summed up, while on.
     pub(super) stats: Option<HistoryStats>,
-    /// Labs › Yearly stats: the daily rollup that outlives retention, read
-    /// only while both it and Dictation stats are on.
+    /// Labs › Dictation stats' daily rollup that outlives retention, read
+    /// only while the lab is on.
     pub(super) usage: Option<crate::history::usage::Usage>,
     /// The stats dialog's typing speed while its slider is dragged, before
     /// the release saves it.
@@ -176,9 +176,8 @@ impl HistoryPane {
         self.delete_armed = Some(id);
     }
 
-    /// Sums up every retained entry, only while Labs › Dictation stats is
-    /// on; off, nothing is read for it. Labs › Yearly stats adds the daily
-    /// rollup, read only while it is on too.
+    /// Sums up every retained entry and reads the daily rollup, only while
+    /// Labs › Dictation stats is on; off, nothing is read for it.
     pub(super) fn reload_stats(&mut self) {
         let stats_on = crate::labs::history_stats();
         self.stats = match &self.store {
@@ -186,7 +185,7 @@ impl HistoryPane {
             _ => None,
         };
         self.usage = match &self.store {
-            Some(store) if stats_on && crate::labs::yearly_stats() => Some(store.usage()),
+            Some(store) if stats_on => Some(store.usage()),
             _ => None,
         };
         if !self.has_stats() {
@@ -195,7 +194,7 @@ impl HistoryPane {
     }
 
     /// Whether the dialog has anything to show: retained dictations, or the
-    /// Labs › Yearly stats rollup.
+    /// Labs › Dictation stats rollup.
     pub(super) fn has_stats(&self) -> bool {
         self.stats
             .as_ref()
@@ -258,7 +257,7 @@ impl HistoryPane {
         }
         if changed
             || self.stats.is_some() != crate::labs::history_stats()
-            || self.usage.is_some() != (crate::labs::history_stats() && crate::labs::yearly_stats())
+            || self.usage.is_some() != crate::labs::history_stats()
         {
             self.reload_stats();
             return true;
@@ -363,8 +362,8 @@ impl HistoryPane {
         Self::default()
     }
 
-    /// The Labs › Yearly stats rollup for the previews and tests: a year of
-    /// days with quiet spells, weekends, and one long streak.
+    /// The Labs › Dictation stats rollup for the previews and tests: a year
+    /// of days with quiet spells, weekends, and one long streak.
     pub(super) fn fixture_usage() -> crate::history::usage::Usage {
         use crate::history::usage::{Usage, UsageDay};
         let today = crate::history::stats::local_day(crate::history::now_ms());

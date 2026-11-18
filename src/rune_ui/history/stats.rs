@@ -63,7 +63,7 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         .as_ref()
         .filter(|usage| usage.dictations() > 0);
     // The headline tile and the hourly strip read the same hours: the
-    // rollup while Labs › Yearly stats has one, else retained entries.
+    // rollup while Labs › Dictation stats has one, else retained entries.
     let (hours, busiest_hour) = match usage {
         Some(usage) => (usage.hours(), usage.busiest_hour()),
         None => (stats.hours, stats.busiest_hour),
@@ -186,9 +186,9 @@ pub(crate) fn close_stats(ui: &mut Ui) {
 }
 
 /// The six headline numbers, each a large value over a muted label. With
-/// Labs › Yearly stats on, dictations, words, time saved, words per minute,
-/// the streak, and the busiest hour cover the rollup's whole span instead of
-/// only what History retains.
+/// Labs › Dictation stats on, dictations, words, time saved, words per
+/// minute, the streak, and the busiest hour cover the rollup's whole span
+/// instead of only what History retains.
 fn tiles(
     p: Paint,
     stats: &HistoryStats,

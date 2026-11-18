@@ -407,6 +407,7 @@ const MIGRATIONS: &[&str] = &[
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
     MEETING_LABS_SETTINGS_MIGRATION,
+    labs::YEARLY_STATS_MERGE_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[
@@ -415,6 +416,7 @@ const MIGRATIONS: &[&str] = &[
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
     MEETING_LABS_SETTINGS_MIGRATION,
+    labs::YEARLY_STATS_MERGE_MIGRATION,
 ];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -970,6 +972,7 @@ impl AppSettings {
         }
         self.migrate_meeting_summaries();
         self.migrate_meeting_labs();
+        self.migrate_yearly_stats_lab();
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
             self.capture.enabled = true;
@@ -1678,6 +1681,37 @@ mod tests {
             Some(MeetingRetention::Day)
         );
         assert!(AppSettings::default().has_migration(MEETING_LABS_SETTINGS_MIGRATION));
+    }
+
+    /// The retired Yearly stats lab is part of Dictation stats now: a saved
+    /// switch turns Dictation stats on once, and is never written back.
+    #[test]
+    fn retired_yearly_stats_becomes_dictation_stats_once() {
+        let migrated = |json: &str| {
+            let mut settings: AppSettings = serde_json::from_str(json).unwrap();
+            settings.apply_one_time_migrations_with(|_| true);
+            assert!(settings.has_migration(labs::YEARLY_STATS_MERGE_MIGRATION));
+            let written = serde_json::to_value(&settings).unwrap();
+            assert!(
+                written["labs"].get("yearly_stats").is_none(),
+                "the retired switch is never written"
+            );
+            assert!(settings.labs.yearly_stats.is_none());
+            settings.labs
+        };
+        assert!(migrated(r#"{"labs":{"yearly_stats":true}}"#).history_stats);
+        assert!(!migrated(r#"{"labs":{"yearly_stats":false}}"#).history_stats);
+        assert!(!migrated("{}").history_stats);
+
+        // A later choice sticks, even beside a stale retired switch.
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"labs":{"history_stats":false,"yearly_stats":true},"migrations":["yearly-stats-merge"]}"#,
+        )
+        .unwrap();
+        settings.apply_one_time_migrations_with(|_| true);
+        assert!(!settings.labs.history_stats);
+        assert!(settings.labs.yearly_stats.is_none());
+        assert!(AppSettings::default().has_migration(labs::YEARLY_STATS_MERGE_MIGRATION));
     }
 
     #[test]

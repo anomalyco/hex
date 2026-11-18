@@ -395,7 +395,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed and the hour you dictate most. The hex history stats command prints it too",
+      "summary": "Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed, the hour you dictate most, a year-long heatmap, and all-time totals kept beyond History's retention (counts only, no text). The hex history stats command prints it too",
       "title": "Dictation stats"
     },
     {
@@ -863,19 +863,6 @@
       ],
       "summary": "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane",
       "title": "Modes editor"
-    },
-    {
-      "added": "2026-11-18",
-      "group": "history",
-      "groupTitle": "History",
-      "id": "yearly-stats",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Add a year-long heatmap of your dictations to Dictation stats. Keeps a daily count that outlives History's retention, so the totals cover all time",
-      "title": "Yearly stats"
     }
   ]
 }

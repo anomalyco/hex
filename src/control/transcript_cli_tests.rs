@@ -168,7 +168,10 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
     assert_eq!(json["typing_wpm"], crate::app_settings::DEFAULT_TYPING_WPM);
     assert_eq!(json["time_saved_ms"], 0);
     assert_eq!(json["hours"].as_array().map(Vec::len), Some(24));
-    assert!(json.get("yearly").is_none(), "no rollup without the lab");
+    assert!(
+        json.get("yearly").is_none(),
+        "the rollup is filled in later"
+    );
     let today = stats_output(
         &entries,
         Some("today"),
@@ -184,8 +187,10 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
     assert!(require_history_stats(true).is_ok());
 }
 
+/// The rollup follows Dictation stats now: `hex history stats` refuses before
+/// reading anything while the lab is off, so the JSON always includes it.
 #[test]
-fn history_stats_json_includes_yearly_only_while_its_lab_is_on() {
+fn history_stats_json_includes_the_yearly_rollup_with_dictation_stats() {
     let root = temp();
     let history = root.join("history.json");
     let path = crate::history::usage::path(&history);
@@ -205,11 +210,7 @@ fn history_stats_json_includes_yearly_only_while_its_lab_is_on() {
         |ms| ((ms / 3_600_000) % 24) as usize,
     )
     .unwrap();
-    output.yearly = yearly_output(&history, false, NOW);
-    let json = serde_json::to_value(&output).unwrap();
-    assert!(json.get("yearly").is_none(), "off, no rollup is read");
-
-    output.yearly = yearly_output(&history, true, NOW);
+    output.yearly = Some(yearly_output(&history, NOW));
     let json = serde_json::to_value(&output).unwrap();
     let yearly = &json["yearly"];
     assert_eq!(yearly["dictations"], 1);

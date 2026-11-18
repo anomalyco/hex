@@ -99,10 +99,7 @@ impl Feature {
                 "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu"
             }
             Self::HistoryStats => {
-                "Add a Stats button to History that summarizes the dictations you kept, with time saved against a typing speed and the local hour you dictate most; the hex history stats command prints it too"
-            }
-            Self::YearlyStats => {
-                "Keep a daily count of your dictations, without text or app names, so Dictation stats can chart a year and show all-time totals that outlive History's retention (usage.json in the support folder)"
+                "Add a Stats button to History that summarizes the dictations you kept, with time saved against a typing speed, the local hour you dictate most, a year-long heatmap, and all-time totals from a daily rollup in usage.json (counts only, no text or app names) that outlives History's retention; off, the rollup is never written or read; the hex history stats command prints it too"
             }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"

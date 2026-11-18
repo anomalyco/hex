@@ -1,8 +1,8 @@
-//! Labs › Yearly stats and the hourly strip in the Dictation stats dialog:
-//! a 53-week heatmap of dictations per local day from the rollup that
-//! outlives History's retention, and 24 bars for the hours dictations land
-//! in. Both borrow the existing chart's look and give screen readers one
-//! labelled image.
+//! The hourly strip and the 53-week heatmap in the Dictation stats dialog:
+//! a year of dictations per local day from the rollup that outlives
+//! History's retention, and 24 bars for the hours dictations land in. Both
+//! borrow the existing chart's look and give screen readers one labelled
+//! image.
 
 use std::collections::HashMap;
 
@@ -116,7 +116,7 @@ fn cell(p: Paint, day: i64, count: u64, peak: u64, future: bool) -> El {
 
 /// A compact strip of the day's 24 hours, the busiest in the accent colour.
 /// `hours` and `busiest` come from the same source as the headline tile:
-/// the rollup while Labs › Yearly stats is on, else retained entries.
+/// the rollup while Labs › Dictation stats keeps one, else retained entries.
 pub(super) fn hours(p: Paint, hours: &[u64; 24], busiest: Option<u8>) -> Option<El> {
     let peak = hours.iter().copied().max().filter(|peak| *peak > 0)?;
     let busiest = busiest.or_else(|| busiest_hour(hours))?;

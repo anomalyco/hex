@@ -1491,9 +1491,9 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "128,402"), "{shown:?}");
     assert!(shown.iter().any(|text| text == "1,284"), "{shown:?}");
-    // Labs › Yearly stats adds the year heatmap from its rollup.
+    // Labs › Dictation stats adds the year heatmap from its rollup.
     rt.state.history.usage = Some(history::HistoryPane::fixture_usage());
-    rt.state.settings.labs.yearly_stats = true;
+    rt.state.settings.labs.history_stats = true;
     crate::labs::apply(&rt.state.settings.labs);
     rt.invalidate();
     settle(&mut rt);

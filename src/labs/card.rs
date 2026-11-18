@@ -43,7 +43,6 @@ impl Feature {
             Self::ParakeetUltra => "Parakeet Ultra",
             Self::StandaloneSpecialKeys => "Special keys alone",
             Self::HistoryStats => "Dictation stats",
-            Self::YearlyStats => "Yearly stats",
             Self::RecentDictations => "Copy recent dictations",
             Self::SkipPauses => "Skip long pauses",
             Self::OutputFixes => "Fix results in Output",
@@ -182,10 +181,7 @@ impl Feature {
                 "Use Menu, Pause, or Scroll Lock as a shortcut by itself, such as Caps Lock remapped to Menu"
             }
             Self::HistoryStats => {
-                "Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed and the hour you dictate most. The hex history stats command prints it too"
-            }
-            Self::YearlyStats => {
-                "Add a year-long heatmap of your dictations to Dictation stats. Keeps a daily count that outlives History's retention, so the totals cover all time"
+                "Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed, the hour you dictate most, a year-long heatmap, and all-time totals kept beyond History's retention (counts only, no text). The hex history stats command prints it too"
             }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"

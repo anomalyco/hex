@@ -490,12 +490,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.history_stats",
         Kind::Bool,
-        "Labs: a summary of retained dictations at the top of History, and hex history stats",
-    ),
-    key(
-        "labs.yearly_stats",
-        Kind::Bool,
-        "Labs: keep a daily rollup without text or app names, so Dictation stats can chart a year and all-time totals beyond History's retention; off, usage.json is never written or read",
+        "Labs: a summary of retained dictations at the top of History, with a year-long heatmap and all-time totals from a daily rollup in usage.json (counts only, no text or app names) kept beyond History's retention. While off, the rollup is never written or read; hex history stats prints it too",
     ),
     key(
         "labs.recent_dictations",
@@ -944,6 +939,7 @@ pub(super) const RETIRED: &[(&str, &str)] = &[
     ),
     ("labs.meeting_notes_file", "meetings.export.notes_file true"),
     ("labs.expire_meeting_audio", "meetings.audio_retention week"),
+    ("labs.yearly_stats", "labs.history_stats true"),
 ];
 
 /// Settings that act only where Hex has a capability (by its
