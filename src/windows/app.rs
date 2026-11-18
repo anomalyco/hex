@@ -165,6 +165,11 @@ impl AppInstance {
                 AllowSetForegroundWindow(ASFW_ANY);
                 SetEvent(event);
             }
+        } else {
+            // A hidden launch (`hex start`, `hex restart`, a login launch)
+            // only yields, so nothing else records that it came and went:
+            // say why here, or a lost relaunch leaves no trace at all.
+            tracing::info!("Hex is already running; this hidden launch exits");
         }
         // SAFETY: `event` is a valid handle owned by this function.
         unsafe { CloseHandle(event) };
