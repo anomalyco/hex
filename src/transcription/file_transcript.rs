@@ -10,21 +10,17 @@
 //! and the write itself is atomic, so a transcript Hex cannot finish never
 //! takes the name.
 
-use std::collections::VecDeque;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader};
+use std::fs::{self, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use rodio::Source;
-
 use super::models::{TranscriptionSelection, is_installed, validate};
-use super::pieces::{BLOCK_FRAMES, PieceBuffer, PieceError, PieceSource, Pieces, next_speechful};
+use super::pieces::{PieceError, Pieces};
 use super::service::{
-    AudioClip, AudioError, TranscriptionService, TranscriptionServiceError,
-    TranscriptionServiceHandle,
+    AudioClip, TranscriptionService, TranscriptionServiceError, TranscriptionServiceHandle,
 };
 use super::transcript::TimestampLevel;
 
@@ -42,7 +38,7 @@ const FORMATS: &str = "WAV or MP3";
 
 /// The file extensions this build reads, without the dot: the window's drop
 /// target, its "Transcribe a file…" dialog, and their copy all name exactly
-/// these, and [`format_of`] accepts exactly these.
+/// these, and [`extension_accepted`] accepts exactly these.
 #[cfg(target_os = "macos")]
 const EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "aiff", "aif", "caf"];
 #[cfg(not(target_os = "macos"))]
@@ -113,9 +109,9 @@ impl std::error::Error for FileTranscriptError {}
 /// returning the file it wrote. Blocks, model load included: call it on a
 /// worker thread. `progress` receives the fraction of the file decoded so
 /// far, from 0 to 1, on this thread, or `None` when the file's length is not
-/// known (an MP3 with no total duration). `cancel` stops between pieces,
-/// every [`CANCEL_POLL`] while a piece waits for its transcript, and once
-/// more before the transcript is saved.
+/// known (a compressed file whose header gives no duration). `cancel` stops
+/// between pieces, every [`CANCEL_POLL`] while a piece waits for its
+/// transcript, and once more before the transcript is saved.
 pub fn transcribe_audio_file(
     source: &Path,
     selection: TranscriptionSelection,
@@ -125,6 +121,7 @@ pub fn transcribe_audio_file(
     if !crate::labs::drop_transcribe() {
         return Err(FileTranscriptError::Disabled);
     }
+    check_extension(source)?;
     let model = validate(&selection).map_err(model_unavailable)?;
     if !is_installed(model, &selection.language) {
         return Err(model_unavailable(format!(
@@ -132,14 +129,21 @@ pub fn transcribe_audio_file(
             model.name
         )));
     }
-    let mut decoded = Decoded::open(source)?;
-    let total = decoded.total_samples().filter(|total| *total > 0);
+    let mut pieces = Pieces::open(source).map_err(|error| file_error(source, error))?;
+    // A saved file is read whole once before a model loads, as
+    // `hex transcribe` does, so a truncated WAV is refused rather than
+    // failing after minutes of transcription. Compressed audio decodes once,
+    // as it transcribes, and damage found later names where it is.
+    pieces
+        .validate()
+        .map_err(|error| file_error(source, error))?;
+    let total = pieces.duration_ms().filter(|total| *total > 0);
     let (mut service, handle) =
         TranscriptionService::start().map_err(|error| transcription_failed(&error))?;
     // The worker runs until every sender is gone; the handle holds one, so
     // keeping it would make the shutdown wait forever after the result.
     let result = transcribe_pieces(
-        &mut decoded,
+        &mut pieces,
         &handle,
         &selection,
         source,
@@ -156,6 +160,25 @@ pub fn transcribe_audio_file(
     Ok(path)
 }
 
+/// Whether this build's drop target offers `path`'s extension.
+fn extension_accepted(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .is_some_and(|extension| EXTENSIONS.contains(&extension.as_str()))
+}
+
+/// Refuses a file whose kind this build doesn't offer, before a model loads.
+fn check_extension(path: &Path) -> Result<(), FileTranscriptError> {
+    if extension_accepted(path) {
+        Ok(())
+    } else {
+        Err(FileTranscriptError::UnsupportedFormat {
+            path: path.to_path_buf(),
+        })
+    }
+}
+
 /// Whether a finished transcript may still be written: a cancel that lands
 /// while the last piece runs stops the file from being saved.
 fn still_wanted(cancel: &AtomicBool) -> Result<(), FileTranscriptError> {
@@ -165,14 +188,15 @@ fn still_wanted(cancel: &AtomicBool) -> Result<(), FileTranscriptError> {
     Ok(())
 }
 
-/// Decodes and transcribes every speechful piece in order, joining their
-/// text with one space.
+/// Decodes and transcribes every piece in order, joining their text with one
+/// space. A piece the speech detector hears nothing in comes back empty and
+/// adds nothing, as it does for `hex transcribe`.
 fn transcribe_pieces(
-    decoded: &mut Decoded,
+    pieces: &mut Pieces,
     handle: &TranscriptionServiceHandle,
     selection: &TranscriptionSelection,
     source: &Path,
-    total: Option<usize>,
+    total: Option<u64>,
     cancel: &AtomicBool,
     progress: &mut impl FnMut(Option<f32>),
 ) -> Result<String, FileTranscriptError> {
@@ -182,16 +206,15 @@ fn transcribe_pieces(
         if cancel.load(Ordering::Acquire) {
             return Err(FileTranscriptError::Cancelled);
         }
-        let Some(piece) = next_speechful(decoded).map_err(|error| decoded_error(source, error))?
-        else {
+        let Some(samples) = pieces.next().map_err(|error| file_error(source, error))? else {
             break;
         };
-        let text = transcribe_piece(handle, selection, piece, cancel)?;
+        let text = transcribe_piece(handle, selection, samples, cancel)?;
         if !text.is_empty() {
             texts.push(text);
         }
         let fraction =
-            total.map(|total| (decoded.position() as f32 / total as f32).clamp(0.0, 1.0));
+            total.map(|total| (pieces.position_ms() as f32 / total as f32).clamp(0.0, 1.0));
         progress(fraction);
     }
     let text = texts.join(" ");
@@ -268,251 +291,24 @@ fn transcription_failed(error: impl std::fmt::Display) -> FileTranscriptError {
     FileTranscriptError::TranscriptionFailed(error.to_string())
 }
 
-/// One dropped file's pieces, whatever format it is.
-enum Decoded {
-    Wav(Pieces),
-    Mp3(Mp3Pieces),
-    #[cfg(target_os = "macos")]
-    Bridged(Bridged),
-}
-
-impl Decoded {
-    fn open(path: &Path) -> Result<Self, FileTranscriptError> {
-        match format_of(path) {
-            Some(Format::Wav) => {
-                // Every sample is read once here, as `hex transcribe` does, so
-                // a truncated or corrupt file is refused before a model loads
-                // rather than after minutes of transcription. The check reads
-                // to the end, so it uses its own reader.
-                Pieces::open(path)
-                    .and_then(|mut check| check.validate())
-                    .map_err(|error| decoded_error(path, error))?;
-                Pieces::open(path)
-                    .map(Self::Wav)
-                    .map_err(|error| decoded_error(path, error))
-            }
-            Some(Format::Mp3) => Mp3Pieces::open(path)
-                .map(Self::Mp3)
-                .map_err(|error| decoded_error(path, error)),
-            #[cfg(target_os = "macos")]
-            Some(Format::Bridged) => Bridged::open(path).map(Self::Bridged),
-            None => Err(FileTranscriptError::UnsupportedFormat {
-                path: path.to_path_buf(),
-            }),
-        }
-    }
-
-    fn total_samples(&self) -> Option<usize> {
-        match self {
-            Self::Wav(pieces) => Some(pieces.total_samples()),
-            Self::Mp3(pieces) => pieces.total,
-            #[cfg(target_os = "macos")]
-            Self::Bridged(bridged) => Some(bridged.pieces.total_samples()),
-        }
-    }
-}
-
-impl PieceSource for Decoded {
-    fn next_piece(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
-        match self {
-            Self::Wav(pieces) => pieces.next_piece(),
-            Self::Mp3(pieces) => pieces.next_piece(),
-            #[cfg(target_os = "macos")]
-            Self::Bridged(bridged) => bridged.pieces.next_piece(),
-        }
-    }
-
-    fn position(&self) -> usize {
-        match self {
-            Self::Wav(pieces) => pieces.position(),
-            Self::Mp3(pieces) => pieces.position(),
-            #[cfg(target_os = "macos")]
-            Self::Bridged(bridged) => bridged.pieces.position(),
-        }
-    }
-}
-
-/// The formats this build reads.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Format {
-    Wav,
-    Mp3,
-    #[cfg(target_os = "macos")]
-    Bridged,
-}
-
-fn format_of(path: &Path) -> Option<Format> {
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    if !EXTENSIONS.contains(&extension.as_str()) {
-        return None;
-    }
-    #[cfg(target_os = "macos")]
-    match extension.as_str() {
-        "wav" => Some(Format::Wav),
-        "mp3" => Some(Format::Mp3),
-        _ => Some(Format::Bridged),
-    }
-    #[cfg(not(target_os = "macos"))]
-    match extension.as_str() {
-        "wav" => Some(Format::Wav),
-        "mp3" => Some(Format::Mp3),
-        _ => None,
-    }
-}
-
-fn decoded_error(path: &Path, error: PieceError) -> FileTranscriptError {
+fn file_error(path: &Path, error: PieceError) -> FileTranscriptError {
     match error {
         PieceError::Empty => FileTranscriptError::NoSpeech {
             path: path.to_path_buf(),
         },
-        PieceError::Incomplete | PieceError::Changed { .. } => FileTranscriptError::Corrupt {
-            path: path.to_path_buf(),
-        },
-        PieceError::Io(_) | PieceError::Audio(_) => FileTranscriptError::Unreadable {
-            path: path.to_path_buf(),
-        },
-    }
-}
-
-/// An MP3 read through rodio on every OS: streaming downmix to mono, 16 kHz
-/// resampling, and the same 30 s pieces a WAV takes.
-struct Mp3Pieces {
-    decoder: rodio::Decoder<BufReader<File>>,
-    channels: usize,
-    resampler: Option<crate::dictation::StreamingResampler>,
-    buffer: PieceBuffer,
-    ready: VecDeque<Vec<f32>>,
-    done: bool,
-    /// The file's length at 16 kHz, when its header says.
-    total: Option<usize>,
-}
-
-impl Mp3Pieces {
-    fn open(path: &Path) -> Result<Self, PieceError> {
-        let file = File::open(path).map_err(PieceError::Io)?;
-        let decoder = rodio::Decoder::new(BufReader::new(file))
-            .map_err(|_| PieceError::Audio(AudioError::Invalid))?;
-        let channels = usize::from(decoder.channels().get()).max(1);
-        let resampler = crate::dictation::StreamingResampler::new(decoder.sample_rate().get())
-            .map_err(|_| PieceError::Audio(AudioError::Unsupported))?;
-        let total = decoder
-            .total_duration()
-            .map(|duration| (duration.as_secs_f64() * 16_000.0) as usize)
-            .filter(|total| *total > 0);
-        Ok(Self {
-            decoder,
-            channels,
-            resampler: Some(resampler),
-            buffer: PieceBuffer::default(),
-            ready: VecDeque::new(),
-            done: false,
-            total,
-        })
-    }
-
-    /// Decodes one block and queues the pieces it completed. The end of the
-    /// file flushes the resampler's tail and then the last piece.
-    fn fill(&mut self) -> Result<(), PieceError> {
-        let wanted = BLOCK_FRAMES * self.channels;
-        let mut raw = Vec::with_capacity(wanted);
-        while raw.len() < wanted {
-            let Some(sample) = self.decoder.next() else {
-                break;
-            };
-            raw.push(sample);
-        }
-        if raw.is_empty() {
-            self.done = true;
-            let tail = self
-                .resampler
-                .take()
-                .map(crate::dictation::StreamingResampler::finish)
-                .unwrap_or_default();
-            self.ready.extend(self.buffer.push(&tail));
-            return Ok(());
-        }
-        let mut mono = Vec::with_capacity(raw.len() / self.channels);
-        for frame in raw.chunks_exact(self.channels) {
-            let sum: f32 = frame.iter().copied().sum();
-            let average = sum / self.channels as f32;
-            if !average.is_finite() {
-                return Err(PieceError::Audio(AudioError::Invalid));
-            }
-            mono.push(average);
-        }
-        let resampled = match self.resampler.as_mut() {
-            Some(resampler) => resampler.push(&mono),
-            None => mono,
-        };
-        self.ready.extend(self.buffer.push(&resampled));
-        Ok(())
-    }
-}
-
-impl PieceSource for Mp3Pieces {
-    fn next_piece(&mut self) -> Result<Option<Vec<f32>>, PieceError> {
-        loop {
-            if let Some(piece) = self.ready.pop_front() {
-                return Ok(Some(piece));
-            }
-            if self.done {
-                return Ok(self.buffer.take_rest());
-            }
-            self.fill()?;
-        }
-    }
-
-    fn position(&self) -> usize {
-        self.buffer.position()
-    }
-}
-
-/// An M4A, AIFF, or CAF file decoded to a temporary 16 kHz mono WAV by the
-/// meeting import bridge, then read like any WAV. The temporary file is
-/// removed with this.
-#[cfg(target_os = "macos")]
-struct Bridged {
-    pieces: Pieces,
-    wav: PathBuf,
-}
-
-#[cfg(target_os = "macos")]
-impl Bridged {
-    fn open(path: &Path) -> Result<Self, FileTranscriptError> {
-        let wav = temporary_wav_path();
-        if crate::meeting::import::decode_to_wav(path, &wav).is_err() {
-            let _ = fs::remove_file(&wav);
-            // The bridge refused the file itself: a format or sample layout
-            // Hex can't read, not a transcription that went wrong.
-            return Err(FileTranscriptError::Unreadable {
+        PieceError::Incomplete | PieceError::Changed { .. } | PieceError::Damaged { .. } => {
+            FileTranscriptError::Corrupt {
                 path: path.to_path_buf(),
-            });
-        }
-        match Pieces::open(&wav) {
-            Ok(pieces) => Ok(Self { pieces, wav }),
-            Err(error) => {
-                let _ = fs::remove_file(&wav);
-                Err(decoded_error(path, error))
             }
         }
+        PieceError::Io(_)
+        | PieceError::Audio(_)
+        | PieceError::NotMedia
+        | PieceError::NoAudioTrack
+        | PieceError::UnsupportedCodec(_) => FileTranscriptError::Unreadable {
+            path: path.to_path_buf(),
+        },
     }
-}
-
-#[cfg(target_os = "macos")]
-impl Drop for Bridged {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.wav);
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn temporary_wav_path() -> PathBuf {
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    std::env::temp_dir().join(format!(
-        "hex-transcribe-{}-{}.wav",
-        std::process::id(),
-        SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ))
 }
 
 /// Writes `text` beside `source`, or in Downloads when `source`'s own folder
@@ -685,6 +481,7 @@ fn write_failed(error: impl std::fmt::Display) -> FileTranscriptError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription::pieces::PIECE_SAMPLES;
 
     fn temp_directory(name: &str) -> PathBuf {
         let directory =
@@ -692,6 +489,21 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
         fs::create_dir_all(&directory).unwrap();
         directory
+    }
+
+    /// A 16 kHz mono 16-bit WAV of `samples` samples at `path`.
+    fn write_wav(path: &Path, samples: usize) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(path, spec).unwrap();
+        for sample in 0..samples {
+            writer.write_sample((sample % 200) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
     }
 
     #[test]
@@ -849,60 +661,36 @@ mod tests {
     #[test]
     fn a_truncated_wav_is_refused_before_anything_is_transcribed() {
         let path = temp_directory("truncated-wav").join("talk.wav");
-        {
-            let spec = hound::WavSpec {
-                channels: 1,
-                sample_rate: 16_000,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            };
-            let mut writer = hound::WavWriter::create(&path, spec).unwrap();
-            for sample in 0..16_000 {
-                writer.write_sample((sample % 200) as i16).unwrap();
-            }
-            writer.finalize().unwrap();
-        }
+        write_wav(&path, 16_000);
         let bytes = fs::read(&path).unwrap();
         fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
 
-        let error = match Decoded::open(&path) {
-            Err(error) => error,
-            Ok(_) => panic!("a truncated WAV must be refused"),
-        };
-        assert!(
-            matches!(error, FileTranscriptError::Corrupt { .. }),
-            "{error}"
-        );
+        let mut pieces = Pieces::open(&path).unwrap();
+        let error = pieces.validate().unwrap_err();
+        assert!(matches!(&error, PieceError::Incomplete), "{error:?}");
+        assert!(matches!(
+            file_error(&path, error),
+            FileTranscriptError::Corrupt { .. }
+        ));
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
-    /// The up-front check reads the file to its end on its own reader, so the
-    /// reader the transcription uses still starts at the first sample.
+    /// The up-front check rewinds the WAV, so the reader the transcription
+    /// uses still starts at the first sample.
     #[test]
     fn a_checked_wav_still_reads_from_its_first_sample() {
         let directory = temp_directory("checked-wav");
         let path = directory.join("talk.wav");
-        {
-            let spec = hound::WavSpec {
-                channels: 1,
-                sample_rate: 16_000,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            };
-            let mut writer = hound::WavWriter::create(&path, spec).unwrap();
-            for sample in 0..32_000 {
-                writer.write_sample((sample % 200) as i16).unwrap();
-            }
-            writer.finalize().unwrap();
-        }
+        write_wav(&path, 32_000);
 
-        let mut decoded = Decoded::open(&path).unwrap();
-        let first = decoded
-            .next_piece()
+        let mut pieces = Pieces::open(&path).unwrap();
+        pieces.validate().unwrap();
+        let first = pieces
+            .next()
             .unwrap()
             .expect("a checked file still has audio");
         assert!(!first.is_empty(), "the first piece holds its samples");
-        assert_eq!(decoded.position(), first.len());
+        assert_eq!(pieces.position_ms(), 2_000);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -910,15 +698,12 @@ mod tests {
     fn only_the_formats_this_build_reads_are_accepted() {
         for extension in extensions() {
             let path = PathBuf::from(format!("talk.{extension}"));
-            assert!(format_of(&path).is_some(), "{extension}");
+            assert!(extension_accepted(&path), "{extension}");
             let upper = PathBuf::from(format!("talk.{}", extension.to_uppercase()));
-            assert_eq!(format_of(&upper), format_of(&path), "{extension}");
+            assert!(extension_accepted(&upper), "{extension}");
         }
-        assert_eq!(format_of(Path::new("talk.wav")), Some(Format::Wav));
-        assert_eq!(format_of(Path::new("talk.WAV")), Some(Format::Wav));
-        assert_eq!(format_of(Path::new("talk.mp3")), Some(Format::Mp3));
         for refused in ["talk.flac", "talk.ogg", "talk.txt", "talk", "talk.mp4"] {
-            assert_eq!(format_of(Path::new(refused)), None, "{refused}");
+            assert!(!extension_accepted(Path::new(refused)), "{refused}");
         }
     }
 
@@ -941,26 +726,24 @@ mod tests {
 
     #[test]
     fn an_unsupported_file_is_refused_before_anything_loads() {
-        let error = match Decoded::open(Path::new("/nonexistent/talk.flac")) {
-            Err(error) => error,
-            Ok(_) => panic!("a FLAC file must be refused"),
-        };
+        let error = check_extension(Path::new("/nonexistent/talk.flac")).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("not a kind of audio file"), "{message}");
         assert!(message.contains(FORMATS), "{message}");
     }
 
+    /// The bundled MP3 decodes through the shared reader at 16 kHz mono, as
+    /// every other container does.
     #[test]
     fn the_bundled_mp3_decodes_to_sixteen_kilohertz_mono() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/audio/funDemo.mp3");
-        let mut pieces = Mp3Pieces::open(&path).unwrap();
-        let total = pieces.total.expect("the mp3 header says how long it is");
+        let mut pieces = Pieces::open(&path).unwrap();
+        let total = pieces
+            .duration_ms()
+            .expect("the mp3 header says how long it is");
         let mut decoded = Vec::new();
-        while let Some(piece) = pieces.next_piece().unwrap() {
-            assert!(
-                piece.len() <= super::super::pieces::PIECE_SAMPLES,
-                "a piece is at most 30 s"
-            );
+        while let Some(piece) = pieces.next().unwrap() {
+            assert!(piece.len() <= PIECE_SAMPLES, "a piece is at most 30 s");
             decoded.extend(piece);
         }
         assert!(!decoded.is_empty());
@@ -970,11 +753,11 @@ mod tests {
                 .all(|sample| sample.is_finite() && (-1.0..=1.0).contains(sample)),
             "every sample is mono float audio"
         );
-        assert_eq!(
-            decoded.len(),
-            total,
-            "the whole file is resampled to 16 kHz, not cut short"
+        let expected = total as usize * 16;
+        assert!(
+            decoded.len().abs_diff(expected) <= 16_000,
+            "the whole file is resampled to 16 kHz, not cut short: {} samples for {total} ms",
+            decoded.len()
         );
-        assert_eq!(pieces.position(), total);
     }
 }

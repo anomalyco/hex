@@ -749,7 +749,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     } else {
         Row {
             locked: true,
-            about: tr("On while it is the dictation model. Choose another model to turn it off.").into(),
+            about: tr("On while it is the dictation model. Choose another model to turn it off.")
+                .into(),
             ..ultra
         }
     });
@@ -937,6 +938,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::StopPhrase => "lab-stop-phrase",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
         Feature::ModesEditor => "lab-modes-editor",
+        Feature::DropTranscribe => "lab-drop-transcribe",
     }
 }
 

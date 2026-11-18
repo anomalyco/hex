@@ -470,13 +470,6 @@ pub fn drop_transcribe() -> bool {
     DROP_TRANSCRIBE.load(Ordering::Acquire) && Feature::DropTranscribe.on_this_os()
 }
 
-/// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
-/// (read by the meeting controller's expiry pass and the window's Settings
-/// row).
-pub fn expire_meeting_audio() -> bool {
-    on(EXPIRE_MEETING_AUDIO) && Feature::ExpireMeetingAudio.on_this_os()
-}
-
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Free memory when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {

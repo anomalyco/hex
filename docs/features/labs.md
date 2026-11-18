@@ -3678,14 +3678,17 @@ while the first still loads or runs. A file's own gate
 The backend
 ([transcription/file_transcript.rs](../../src/transcription/file_transcript.rs))
 starts its own `TranscriptionService` on the calling thread, so it must run on
-that worker, never the window thread. A WAV is read through the shared pieces
-reader ([transcription/pieces.rs](../../src/transcription/pieces.rs)) and
-checked whole once before the model loads, as `hex transcribe` does, so a
-truncated or corrupt file is refused up front; an MP3 goes through rodio on
-every OS, and M4A, AIFF, and CAF go through the meeting import bridge on macOS
-only (a file the bridge cannot decode is `Unreadable`, not a transcription
-failure). Every format is downmixed to mono, resampled to 16 kHz, cut at most
-every 30 s, and each speechful piece is sent to the service in order; the
+that worker, never the window thread. A file's kind is checked against this
+build's extensions before a model loads, and every container decodes through
+the shared pieces reader
+([transcription/pieces.rs](../../src/transcription/pieces.rs)): a WAV is read
+whole once before the model loads, as `hex transcribe` does, so a truncated or
+corrupt file is refused up front, and compressed audio decodes once, as it
+transcribes, with damage found later reported where it is. The drop target
+offers WAV and MP3 everywhere, and M4A, AIFF, and CAF too on macOS, though the
+reader takes any container it knows. Every format is downmixed to mono,
+resampled to 16 kHz, cut at most every 30 s, and each piece is sent to the
+service in order, which skips one the speech detector hears nothing in; the
 pieces' text joins with one space. A piece runs on the dictation engine's
 loaded copy when that copy is the model the file asks for and dictation stays
 idle for up to `SHARED_WAIT` (20 s,
@@ -3698,7 +3701,8 @@ OS temp folder or in an unwritable folder has its transcript written to
 Downloads; a writable source folder needs no Downloads at all. Cancelling
 stops between pieces, every 100 ms while one waits for its transcript, and
 once more before the transcript is saved, so a cancelled file never writes
-one; progress is the fraction of the file decoded, and an MP3 whose header
+one; progress is the fraction of the file decoded, and a compressed file whose
+header
 gives no duration reports no fraction, which the toast shows as
 "Transcribing…" with a spinner rather than 0%.
 
