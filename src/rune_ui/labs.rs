@@ -571,6 +571,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
         // calendar read.
         if cfg!(target_os = "macos") {
             rows.push(row(Feature::CalendarMenu, Some(&CLOCK)));
+            // macOS's Meetings settings draw the Calendars row's bulk button.
+            rows.push(row(Feature::CalendarSelectAll, Some(&CLOCK)));
         }
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
@@ -897,6 +899,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::PauseMenu => "lab-pause-menu",
         Feature::CalendarMenu => "lab-calendar-menu",
+        Feature::CalendarSelectAll => "lab-calendar-select-all",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",

@@ -78,6 +78,7 @@ impl Feature {
             | Self::SpeakersOnly
             | Self::PauseMenu
             | Self::CalendarMenu
+            | Self::CalendarSelectAll
             | Self::PrintStart
             | Self::VoicePrompt
             | Self::CopyCaptureZip
@@ -164,6 +165,7 @@ impl Feature {
             Self::StopPhrase | Self::HoldThroughKeys => 20261116,
             Self::ModesEditor => 20261118,
             Self::YearlyStats => 20261118,
+            Self::CalendarSelectAll => 20261118,
         }
     }
 
@@ -272,7 +274,8 @@ impl Feature {
             | Self::ScreenVocabulary
             | Self::CursorContext
             | Self::MoreDictationShortcuts
-            | Self::CalendarMenu => MACOS,
+            | Self::CalendarMenu
+            | Self::CalendarSelectAll => MACOS,
             Self::CleanUpWithAppleIntelligence => MACOS,
             Self::CopyOnly => MACOS_WINDOWS,
             Self::HoldThroughKeys => MACOS_WINDOWS,
@@ -394,6 +397,7 @@ impl Feature {
             Self::YoloMode => "yolo-mode",
             Self::CursorContext => "cursor-context",
             Self::CalendarMenu => "calendar-menu",
+            Self::CalendarSelectAll => "calendar-select-all",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
             Self::CopyDictationAudio => "copy-dictation-audio",
             Self::StopPhrase => "stop-phrase",
@@ -477,6 +481,7 @@ impl Feature {
             Self::YoloMode => "labs.yolo_mode",
             Self::CursorContext => "labs.cursor_context",
             Self::CalendarMenu => "labs.calendar_menu",
+            Self::CalendarSelectAll => "labs.calendar_bulk_select",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
             Self::CopyDictationAudio => "labs.copy_dictation_audio",
             Self::StopPhrase => "labs.stop_phrase",

@@ -216,6 +216,13 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // calendar_menu_is_its_own_switch_and_macos_only (labs.rs);
 │                                        // the_menu_reads_upcoming_then_meetings_then_actions_then_the_app (macos_rune/status_item.rs);
 │                                        // not observed on a real Mac, in a real menu, or opening a real call link
+├── Select all calendars no labs.calendar_bulk_select  (macOS, with Meetings on) Meetings › Settings › Calendar puts one
+│                                        Select all / Deselect all button beside the Calendars select: Select all clears
+│                                        meetings.calendar.excluded_calendars, and Deselect all sets it to the IDs shown now,
+│                                        so calendars added later are still included; hidden with no calendars, and each
+│                                        calendar's own switch in the menu is unchanged; off, the row is exactly as before
+│                                        // checks: calendar_select_all_is_its_own_switch_and_macos_only (labs.rs);
+│                                        // the_select_all_calendars_lab_saves_every_calendar_at_once (rune_ui/tests/panes.rs)
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
@@ -2433,6 +2440,27 @@ Checks: `an_in_progress_meeting_reads_now`,
 Not yet observed: the section in a real Mac's menu bar, a real EventKit read
 reaching it, a click opening Zoom or Meet, and the menu with calendar access
 denied. The rows render only in macOS builds, so no golden changes.
+
+Select all calendars (`calendar-select-all`, macOS, with Meetings on): off by
+default, and off the Calendars row is exactly as before. On, Meetings ›
+Settings › Calendar puts one small secondary button beside the Calendars
+select. While any calendar is left out it reads "Select all" and clears
+`meetings.calendar.excluded_calendars`, so every calendar is included; while
+every calendar is included it reads "Deselect all" and sets that list to the
+IDs in `ui.platform.calendar.calendars` as shown now. The setting stores
+exclusions, so a calendar added later is still included. The button hides
+while there are no calendars, and each calendar's own switch in the menu stays
+as it is. The lab is UI only: it has no runtime gate or state-word bit, and the
+row reads `Feature::CalendarSelectAll` with `shipped`, no organization lock,
+and `on`, as the picker's and History's labs read theirs. A save goes through
+`ui.update`, like the per-calendar toggle. Off, nothing is drawn.
+
+Checks: `calendar_select_all_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs) and
+`the_select_all_calendars_lab_saves_every_calendar_at_once` in
+[rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed:
+the button on a real Mac. The row renders only in macOS builds, and the lab is
+off by default, so no golden changes.
 
 Pause from menu bar (`pause-menu`, issue 82, macOS): for people whose game or
 another app collides with Hex's shortcuts and who don't want to quit. With the

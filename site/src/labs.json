@@ -720,6 +720,17 @@
       "title": "Upcoming meetings in menu bar"
     },
     {
+      "added": "2026-11-18",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "calendar-select-all",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Adds a button to the Calendars row to include or leave out every calendar at once.",
+      "title": "Select all calendars"
+    },
+    {
       "added": "2026-11-09",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",

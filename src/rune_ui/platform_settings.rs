@@ -11,7 +11,7 @@ use super::controls::{
     ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folder_label, folding, icon_row,
     icon_toggle_row, note, section, select, setting_row, toggle_row,
 };
-use super::lists::{PermissionControl, permission_control};
+use super::lists::{PermissionControl, permission_control, small_button};
 use super::paste_access::PasteAccess;
 use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, PlatformRequest};
 use super::settings::toggle_menu;
@@ -24,6 +24,7 @@ use crate::audio::hex_microphone::DriverActionState;
 use crate::calendar::{CalendarAccess, CallProvider};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
+use crate::labs::Feature;
 
 /// A permission's row key, its name as System Settings lists it, and what
 /// Hex cannot do without it.
@@ -932,12 +933,39 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             }
         })
         .collect();
+    let mut controls = row().key("calendar-calendars-controls").gap(8.0).center_y();
+    if bulk_select_on(ui) && !calendars.is_empty() {
+        let all_included = included == calendars.len();
+        let ids: Vec<String> = calendars.iter().map(|info| info.id.clone()).collect();
+        controls = controls.child(small_button(
+            p,
+            "calendar-select-all",
+            if all_included {
+                tr("Deselect all")
+            } else {
+                tr("Select all")
+            },
+            move |ui: &mut Ui, _| {
+                let ids = ids.clone();
+                ui.update(move |settings| {
+                    let excluded = &mut settings.meetings.calendar.excluded_calendars;
+                    if all_included {
+                        // Deselect all: the setting stores exclusions, so
+                        // calendars added later are still included.
+                        *excluded = ids;
+                    } else {
+                        excluded.clear();
+                    }
+                });
+            },
+        ));
+    }
     setting_row(
         p,
         "calendar-calendars",
         tr("Calendars"),
         None,
-        select(
+        controls.child(select(
             p,
             "calendar-calendars-control",
             tr("Calendars"),
@@ -946,8 +974,16 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             choices,
             |ui: &mut Ui| toggle_menu(ui, Menu::Calendars),
             layer,
-        ),
+        )),
     )
+}
+
+/// Whether Labs › Select all calendars adds the Calendars row's bulk button.
+/// The lab is UI only: its own toggle, in this build, with no organization
+/// lock, as the picker's and History's labs read theirs.
+fn bulk_select_on(ui: &Ui) -> bool {
+    let feature = Feature::CalendarSelectAll;
+    feature.shipped() && feature.managed().is_none() && feature.on(&ui.settings)
 }
 
 /// The caption of Detected calls' Stop when the call ends, naming
