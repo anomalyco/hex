@@ -20,6 +20,8 @@ pub(super) struct ModifierState {
     pub(super) right_alt: bool,
     pub(super) left_shift: bool,
     pub(super) right_shift: bool,
+    /// This view dropped AltGr's synthesized Left Ctrl (`without_altgr`).
+    pub(super) altgr: bool,
 }
 
 impl ModifierState {
@@ -33,6 +35,7 @@ impl ModifierState {
             right_alt: key_down(VK_RMENU),
             left_shift: key_down(VK_LSHIFT),
             right_shift: key_down(VK_RSHIFT),
+            altgr: false,
         }
     }
 
@@ -91,29 +94,64 @@ impl ModifierState {
         if altgr_only {
             self.left_control = false;
         }
+        self.altgr = altgr_only;
         self
+    }
+
+    /// Whether the chord names Ctrl but AltGr's synthesized Left Ctrl is the
+    /// only one down, and its key types a character: the layout types that
+    /// character instead of pressing the chord (#1964).
+    fn altgr_types_a_character(&self, binding: &super::WindowsHotkey) -> bool {
+        self.altgr
+            && !self.right_control
+            && binding.control.is_some()
+            && binding.key.as_deref().is_some_and(types_character)
     }
 
     /// Whether the chord's modifiers are down. `self` is the masked view
     /// (`read.without_altgr`); `raw` is the same read with AltGr's Ctrl still
-    /// counted, so a binding with a key sees what it always has (AltGr+Q is
-    /// Ctrl+Alt+Q, never Alt+Q) while a modifier-only chord also sees the
-    /// masked view, so `right-option` fires on AltGr beside the
-    /// `control+option` a recording made of AltGr before it was ignored.
+    /// counted, so a chord with an F-key or navigation key sees what it
+    /// always has (AltGr+F9 is Ctrl+Alt+F9, never Alt+F9) while a
+    /// modifier-only chord also sees the masked view, so `right-option` fires
+    /// on AltGr beside the `control+option` a recording made of AltGr before
+    /// it was ignored. A chord naming Ctrl with a key that types a character
+    /// never matches on AltGr: the layout types that character, and the key
+    /// must reach the app (#1964).
     pub(super) fn holds(&self, binding: &super::WindowsHotkey, raw: &Self) -> bool {
         if binding.key.is_some() {
+            if self.altgr_types_a_character(binding) {
+                return false;
+            }
             return raw.matches(binding);
         }
         self.matches(binding) || raw.matches(binding)
     }
 
     /// [`ModifierState::holds`] for "a modifier the chord requires is still
-    /// down": one that a discarded chord cannot re-press.
+    /// down": one that a discarded chord cannot re-press. AltGr's Ctrl is not
+    /// one for a chord it never presses (`altgr_types_a_character`), so a
+    /// discarded typing chord cannot stay dirty while AltGr is held.
     pub(super) fn holds_any_required(&self, binding: &super::WindowsHotkey, raw: &Self) -> bool {
         if binding.key.is_some() {
+            if self.altgr_types_a_character(binding) {
+                return false;
+            }
             return raw.any_required_down(binding);
         }
         self.any_required_down(binding) || raw.any_required_down(binding)
+    }
+}
+
+/// Whether a shortcut's key types a character on the active layout: a letter,
+/// a digit, or one of the punctuation keys the input layer names `oem …`.
+/// AltGr with one of these types its character instead of pressing a chord.
+fn types_character(key: &str) -> bool {
+    let name = key.trim();
+    let mut characters = name.chars();
+    match (characters.next(), characters.next()) {
+        // A key named by the character it types (`v`, `7`, `;`, `§`).
+        (Some(_), None) => true,
+        _ => name.to_ascii_lowercase().starts_with("oem "),
     }
 }
 
@@ -339,5 +377,27 @@ mod tests {
             next_left_control(REAL_DOWN, LeftControl::Other, true, true),
             REAL_DOWN
         );
+    }
+
+    #[test]
+    fn a_typing_key_is_a_letter_a_digit_or_punctuation() {
+        for name in [
+            "a",
+            "v",
+            "7",
+            ";",
+            "§",
+            "oem 1",
+            "oem plus",
+            "oem minus",
+            "oem 102",
+        ] {
+            assert!(types_character(name), "{name}");
+        }
+        for name in [
+            "space", "enter", "escape", "f9", "num 1", "mouse1", "pageup",
+        ] {
+            assert!(!types_character(name), "{name}");
+        }
     }
 }

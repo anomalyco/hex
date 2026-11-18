@@ -312,16 +312,21 @@ The listener's hook and the recorder's own both leave it out, so Right Alt
 alone fires there and recording it stores `right-option`; it still reaches the
 app, so AltGr keeps typing. A modifier-only binding an AltGr-layout recording
 made before this (`control+option`) still fires on AltGr, while a real Left
-Ctrl with Right Alt is a chord and matches only a binding that names Ctrl. A
-chord with a key is unchanged: AltGr+Q is still Ctrl+Alt+Q, never Alt+Q. Any
-key joining the hold still discards it. Checks:
+Ctrl with Right Alt is a chord and matches only a binding that names Ctrl. On
+AltGr layouts, AltGr plus a typing key (a letter, a digit, or a punctuation
+key) types its character instead of pressing a Ctrl+Alt shortcut, so the key
+reaches the app (#1964): use Left Ctrl+Alt for those shortcuts. A key that
+types nothing keeps its chord, so AltGr+F9 still presses Ctrl+Alt+F9, and
+AltGr never presses an Alt+<key> chord. Any key joining the hold still
+discards it. Checks:
 `one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
 `altgr_left_ctrl_is_no_ctrl_for_a_right_alt_shortcut`,
 `an_altgr_recorded_control_option_still_fires`,
 `a_key_chord_on_altgr_is_not_alt_with_that_key`,
 `a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
 [windows/input.rs](../../src/windows/input.rs),
-`left_control_bits_follow_the_hooks_and_heal_a_missed_release` in
+`left_control_bits_follow_the_hooks_and_heal_a_missed_release`,
+`a_typing_key_is_a_letter_a_digit_or_punctuation` in
 [windows/input/modifiers.rs](../../src/windows/input/modifiers.rs), and
 `altgr_records_right_alt_alone`, `altgr_with_a_key_records_the_ctrl_windows_added`
 in [windows/input/chord.rs](../../src/windows/input/chord.rs), cross-compiled
