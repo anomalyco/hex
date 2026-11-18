@@ -1088,6 +1088,8 @@ General                                  // settings
 │   ├── One switch, no confirmation; its line says what the state means (issue 61), on every OS
 │   ├── Off (default) -> "The mic stays ready so dictation starts instantly; your system shows it in use"
 │   │   Open while idle; pre-roll available
+│   │   └── macOS: released while the display sleeps, the session is locked, or the Mac
+│   │       sleeps, and back on wake or unlock   // dictate.warm-away
 │   └── On -> "The mic opens only while you dictate; the first moment can be clipped"
 │       Open on press; no pre-roll; startup delay
 ├── While dictating -> Mute / Pause media / Lower audio / Do nothing

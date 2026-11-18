@@ -111,6 +111,9 @@ struct State {
     device_name: Mutex<String>,
     recording: AtomicBool,
     recovering: AtomicBool,
+    /// Whether the microphone stream is open, for the listener: while it is
+    /// not, a press anchors its capture to wall-clock time.
+    open: AtomicBool,
     recognition_generation: AtomicU64,
     outstanding_recognition_frames: Arc<AtomicU64>,
     capture_generation: AtomicU64,
@@ -302,6 +305,13 @@ impl DictationAudio {
 
     pub fn is_recovering(&self) -> bool {
         self.state.recovering.load(Ordering::Acquire)
+    }
+
+    /// Whether the microphone stream is open now. A press makes its capture
+    /// start at wall-clock time until this is true again, because a closed
+    /// input has no timeline to anchor to.
+    pub fn is_open(&self) -> bool {
+        self.state.open.load(Ordering::Acquire)
     }
 
     pub fn request_selection(&self, revision: u64, device: Option<&str>) {
@@ -567,6 +577,7 @@ impl Owner {
             device_name: Mutex::new(device_name),
             recording: AtomicBool::new(false),
             recovering: AtomicBool::new(input.is_recovering()),
+            open: AtomicBool::new(input.is_open()),
             recognition_generation: AtomicU64::new(0),
             outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
             capture_generation: AtomicU64::new(0),
@@ -753,7 +764,14 @@ impl Owner {
                 self.input.request_selection(revision, device.as_deref());
             }
             Command::SetReleaseWhileIdle(release) => {
+                let turning_warm = self.release_while_idle && !release;
                 self.release_while_idle = release;
+                // A policy-driven reopen is a plain open, not a failed
+                // stream's recovery: a press during it becomes a pending
+                // capture and starts when the stream does (#1953).
+                if turning_warm && !self.capture_sink_open() {
+                    self.input.request_open();
+                }
             }
             #[cfg(test)]
             Command::InvalidateRecognition { reply } => {
@@ -867,6 +885,14 @@ impl Owner {
     /// no capture sink depends on it.
     fn input_idle(&self) -> bool {
         self.capture_idle() && !self.capture_sink_open()
+    }
+
+    /// Mirrors whether the stream is open for the listener, which decides
+    /// press boundaries on its own thread.
+    fn note_open(&mut self) {
+        self.state
+            .open
+            .store(self.input.is_open(), Ordering::Release);
     }
 
     fn capture_sink_open(&self) -> bool {
@@ -1053,6 +1079,13 @@ impl Owner {
                 let _ = self.events.send(DictationAudioEvent::Reopened);
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
+                // A plain open can fail too: back off like any failed stream
+                // instead of asking again on the next pass. An open still in
+                // flight keeps its own attempt.
+                if !self.input.is_opening() {
+                    self.input.request_recovery();
+                    self.state.recovering.store(true, Ordering::Release);
+                }
                 let was_recording = self.pending_capture.take().is_some();
                 self.state.recording.store(false, Ordering::Release);
                 self.reconcile_input();
@@ -1064,6 +1097,7 @@ impl Owner {
                 }
             }
         }
+        self.note_open();
     }
 
     fn forward_recognition(&mut self, samples: Vec<f32>) {
@@ -1150,6 +1184,7 @@ impl Owner {
                 self.state.recovering.store(true, Ordering::Release);
             }
         }
+        self.note_open();
     }
 
     fn start_capture_at(&mut self, kind: CaptureKind, at: CaptureInstant) {
@@ -1248,6 +1283,7 @@ impl Owner {
         self.next_recognition_generation();
         self.state.captured_through.store(0, Ordering::Release);
         self.state.recovering.store(false, Ordering::Release);
+        self.note_open();
     }
 }
 
@@ -1372,6 +1408,18 @@ mod tests {
             kind: CaptureKind::Hotkey,
             reply,
         }));
+    }
+
+    /// The next input event that isn't a timeout: a stream the test opens on
+    /// a worker arrives a moment later.
+    fn next_input_event(owner: &mut Owner) -> RecoveringAudioInputEvent {
+        for _ in 0..200 {
+            let event = owner.input.recv_timeout(Duration::from_millis(5), false);
+            if !matches!(event, RecoveringAudioInputEvent::Timeout) {
+                return event;
+            }
+        }
+        panic!("the microphone never opened");
     }
 
     #[test]
@@ -2116,6 +2164,63 @@ mod tests {
             assert!(input.is_recovering());
             acknowledge();
         }
+    }
+
+    /// The microphone is released while the person is away even with the
+    /// setting off, comes back when they return, and a press during that
+    /// reopen is kept instead of being refused as a failure (#1953).
+    #[test]
+    fn a_warm_microphone_releases_while_away_and_keeps_a_press_during_its_reopen() {
+        let (mut owner, input, _samples) = owner_for_test(true);
+        assert!(owner.input.is_open());
+        assert!(input.is_open());
+        let at = capture_time();
+        start(&mut owner, at);
+
+        // Away closes an idle microphone, never one a capture holds.
+        assert!(owner.handle(Command::SetReleaseWhileIdle(true)));
+        owner.reconcile_input();
+        assert!(owner.input.is_open(), "a capture keeps its microphone");
+        control(&mut owner, |reply| Command::Cancel { reply });
+        owner.reconcile_input();
+        assert!(!owner.input.is_open());
+        assert!(!input.is_open(), "the listener sees the closed timeline");
+
+        // Back opens through the plain request, not a failure's recovery: a
+        // press during that open becomes a pending capture.
+        let (streams, opened) = mpsc::channel();
+        let opener = move |_request: &crate::audio::OpenRequest| {
+            let (stream, samples) = crate::audio::AudioInput::channel_for_test();
+            let _ = streams.send(samples);
+            Ok(crate::audio::Opened::Input(Box::new(stream)))
+        };
+        owner.input = RecoveringAudioInput::with_opener_for_test(
+            None,
+            crate::audio::input_route_generation,
+            opener,
+        );
+        assert!(owner.handle(Command::SetReleaseWhileIdle(false)));
+        assert!(owner.input.is_opening());
+        assert!(!owner.input.is_recovering());
+        let pressed_at = at + Duration::from_millis(200);
+        start(&mut owner, pressed_at);
+        assert!(input.is_recording(), "the press is kept while it reopens");
+        assert!(!input.is_open());
+
+        let event = next_input_event(&mut owner);
+        assert!(matches!(event, RecoveringAudioInputEvent::Reopened));
+        owner.handle_input(event);
+        assert!(owner.input.is_open());
+        assert!(input.is_open());
+        assert!(input.is_recording());
+        let samples = opened
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the reopened stream feeds the pending capture");
+        samples
+            .send((vec![0.25; 4_800], pressed_at + Duration::from_millis(500)))
+            .unwrap();
+        owner.reconcile_input();
+        assert!(owner.input.is_open(), "a warm microphone stays open");
     }
 
     #[test]

@@ -19,6 +19,7 @@ mod overloads;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod recovery;
+pub(crate) mod system_idle;
 mod transport;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
@@ -286,7 +287,7 @@ type InputOpenResult = (u64, Result<Opened, String>);
 
 /// What an open resolves: `--device`, the saved microphone, and the open
 /// device's name, which is kept rather than reopened when it resolves again.
-struct OpenRequest {
+pub(crate) struct OpenRequest {
     device_override: Option<String>,
     selected_device: Option<String>,
     fallback: SelectedFallback,
@@ -656,7 +657,7 @@ impl RecoveringAudioInput {
 
     /// An input whose opens and route changes come from the test.
     #[cfg(test)]
-    fn with_opener_for_test(
+    pub(crate) fn with_opener_for_test(
         selected_device: Option<&str>,
         route_generation: fn() -> u64,
         opener: impl Fn(&OpenRequest) -> Result<Opened> + Send + Sync + 'static,

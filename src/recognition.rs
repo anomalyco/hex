@@ -34,6 +34,7 @@ use context_watch::ContextWatch;
 use events::handle_dictation_event;
 use guards::{
     caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
+    reconcile_release,
 };
 use hotkeys::{Hotkeys, Shortcut};
 use output::{finish_dictation, finish_dictation_with, interrupted_dictation};
@@ -183,7 +184,11 @@ pub fn listen(
     if let Err(error) = feedback::preload() {
         tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
     }
-    let mut microphone_policy = crate::app_settings::microphone_policy();
+    // A warm microphone is released while the setting asks or the person
+    // demonstrably cannot dictate; the owner is told as that changes.
+    let mut microphone_release = crate::app_settings::microphone_policy().release_while_idle
+        || crate::audio::system_idle::released();
+    let mut release_while_idle = microphone_release;
     let mut events = events;
     let input_monitor = InputMonitor::start()?;
     let mut context = ContextWatch::start(input_monitor.activity.clone());
@@ -221,7 +226,7 @@ pub fn listen(
         microphone.as_deref(),
         recording_environment,
         input_monitor.pending_events(),
-        microphone_policy.release_while_idle,
+        release_while_idle,
         dictation_worker.engine(),
     )?;
     #[cfg(hex_capture)]
@@ -251,10 +256,7 @@ pub fn listen(
         hotkeys.suspend_all();
     }
     if hotkeys.dictation.is_recording() {
-        let accepted = input.start(capture_boundary(
-            &input,
-            microphone_policy.release_while_idle,
-        ))?;
+        let accepted = input.start(capture_boundary(&input, release_while_idle))?;
         if accepted {
             events.dictation(DictationPhase::Started, "")?;
             indicator.send(DictationIndicatorEvent::Started);
@@ -269,6 +271,8 @@ pub fn listen(
     let mut capture_was_recording = false;
 
     while !shutdown.load(Ordering::Relaxed) {
+        (microphone_release, release_while_idle) =
+            reconcile_release(&input, release_while_idle, microphone_release);
         #[cfg(hex_capture)]
         crate::capture_host::CaptureHost::reconcile(
             &mut capture_host,
@@ -306,7 +310,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                microphone_policy.release_while_idle,
+                release_while_idle,
             )?;
         }
         if let Some(controls) = &controls {
@@ -366,7 +370,6 @@ pub fn listen(
                         raw,
                         reply,
                     } => {
-                        let release_while_idle = microphone_policy.release_while_idle;
                         let other_recording = programmatic.is_some();
                         let suspended =
                             crate::app_settings::hotkey_capture_active() || input.is_recovering();
@@ -403,8 +406,7 @@ pub fn listen(
                         }
                         let id = next_programmatic_id;
                         next_programmatic_id = next_programmatic_id.wrapping_add(1).max(1);
-                        let boundary =
-                            capture_boundary(&input, microphone_policy.release_while_idle);
+                        let boundary = capture_boundary(&input, release_while_idle);
                         match input.start_programmatic(boundary) {
                             Ok(()) => {
                                 hotkeys.disarm_pending_gestures();
@@ -485,8 +487,7 @@ pub fn listen(
                             .is_some_and(|active| active.matches_owner(id, &owner_token))
                         {
                             let active = programmatic.take().expect("active dictation was checked");
-                            let boundary =
-                                capture_boundary(&input, microphone_policy.release_while_idle);
+                            let boundary = capture_boundary(&input, release_while_idle);
                             // The microphone may have failed before this
                             // finish reached the audio owner, with its loss
                             // still queued.
@@ -685,11 +686,6 @@ pub fn listen(
             );
         }
         context.drain(&mut events)?;
-        let next_microphone_policy = crate::app_settings::microphone_policy();
-        if next_microphone_policy.release_while_idle != microphone_policy.release_while_idle {
-            input.set_release_while_idle(next_microphone_policy.release_while_idle);
-        }
-        microphone_policy = next_microphone_policy;
         if Instant::now() >= next_personal_host_check {
             next_personal_host_check = Instant::now() + Duration::from_millis(250);
             let next_personal_host_enabled = crate::personal_commands::host_needed(
@@ -716,7 +712,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                microphone_policy.release_while_idle,
+                release_while_idle,
             )?;
         }
         let (next_microphone_revision, microphone) = crate::app_settings::microphone_selection();
@@ -741,7 +737,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                microphone_policy.release_while_idle,
+                release_while_idle,
             )?;
         }
         // Caps Lock presses arrive from the tap, off the audio and input
@@ -776,7 +772,7 @@ pub fn listen(
                 &input.device_name(),
                 &mut events,
                 indicator,
-                microphone_policy.release_while_idle,
+                release_while_idle,
             )?;
             if !accepted {
                 hotkeys.suspend(Shortcut::CapsLock);
@@ -867,7 +863,7 @@ pub fn listen(
                     &input.device_name(),
                     &mut events,
                     indicator,
-                    microphone_policy.release_while_idle,
+                    release_while_idle,
                 )?;
                 if !accepted {
                     hotkeys.suspend(shortcut);
@@ -881,16 +877,13 @@ pub fn listen(
             hotkeys.recover_stale_keys();
         }
         if hotkeys.any_recording()
-            && input.become_intentional(capture_boundary(
-                &input,
-                microphone_policy.release_while_idle,
-            ))?
+            && input.become_intentional(capture_boundary(&input, release_while_idle))?
         {
             // The press is a real capture now: read its page once, here
             // rather than on every provisional press. A tap this loop never
             // sees that way asks when it finishes instead.
             context.intend();
-            if microphone_policy.release_while_idle {
+            if release_while_idle {
                 feedback::play(Tone::DictationStart);
             }
         }
@@ -1044,7 +1037,7 @@ pub fn listen(
                         &mut context,
                         &mut events,
                         indicator,
-                        microphone_policy.release_while_idle,
+                        release_while_idle,
                     )?;
                 }
                 DictationAudioEvent::Interrupted {
@@ -1692,6 +1685,7 @@ mod tests {
         CONTROL_KEY_MASK, ExtraDictationMode, HotkeyModifiers, MAX_EXTRA_DICTATION_SHORTCUTS,
         ModifierSide, OPTION_KEY_MASK, RuntimeHotkey, SHIFT_KEY_MASK,
     };
+    use crate::recognition::guards::release_for_press;
     use crate::suppression::InputEvent;
 
     /// Labs › Second dictation shortcut (issue 627): each shortcut follows
@@ -2053,6 +2047,21 @@ mod tests {
             caps_lock_can_press(true, true),
             "a Caps Lock capture still finishes while Annotate records"
         );
+    }
+
+    /// A released microphone's press takes wall-clock time; while it is being
+    /// opened again a press keeps that, so it never anchors to the closed
+    /// timeline's zero instant.
+    #[test]
+    fn a_press_stays_cold_until_the_warm_microphone_is_back() {
+        // Warm, and cold once released.
+        assert!(!release_for_press(false, false, true));
+        assert!(release_for_press(true, false, true));
+        // Off while the stream is still closed: still cold.
+        assert!(release_for_press(false, true, false));
+        // Back: the next press takes the stream's timeline again.
+        assert!(!release_for_press(false, true, true));
+        assert!(!release_for_press(false, false, false));
     }
 
     #[test]

@@ -63,3 +63,34 @@ pub(super) fn capture_boundary(input: &DictationAudio, release_while_idle: bool)
         input.captured_through()
     }
 }
+
+/// Whether a press sees a released microphone now. While the microphone is
+/// being opened again the previous state stands: the stream's timeline starts
+/// at its open, so a press must not anchor to the closed one's zero instant.
+pub(super) fn release_for_press(
+    release_microphone: bool,
+    previous: bool,
+    input_open: bool,
+) -> bool {
+    release_microphone || (previous && !input_open)
+}
+
+/// Brings the owner's release-while-idle up to date, and returns the flag it
+/// now holds with the one a press acts on. The warm microphone is released
+/// while the setting asks or the person demonstrably cannot dictate (the
+/// display asleep, the session locked, or the Mac asleep).
+pub(super) fn reconcile_release(
+    input: &DictationAudio,
+    previous: bool,
+    forwarded: bool,
+) -> (bool, bool) {
+    let release = crate::app_settings::microphone_policy().release_while_idle
+        || crate::audio::system_idle::released();
+    if release != forwarded {
+        input.set_release_while_idle(release);
+    }
+    (
+        release,
+        release_for_press(release, previous, input.is_open()),
+    )
+}

@@ -136,6 +136,11 @@ substitute for source inspection or a second roadmap.
   assertion on macOS, a logind `idle:sleep` inhibitor (only `idle` where
   polkit refuses a process outside the seat session) on Linux, and a
   system-required power request on Windows.
+- `audio/system_idle`: whether the person demonstrably cannot dictate (the
+  display asleep, the session locked, or the Mac asleep), from NSWorkspace and
+  the distributed screen-lock notifications, so the warm microphone is
+  released while away and does not hold coreaudiod's idle-sleep assertion.
+  macOS only; elsewhere every reason stays clear.
 - `dictation/processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
@@ -841,7 +846,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   hold threshold returns the press to pending and reopens; on macOS, a later
   failure keeps the audio already delivered as a copy-only dictation, or fails
   the capture when no audio after the start arrived or it is near-silent. Cold
-  opens retry the selected device briefly before falling back.
+  opens retry the selected device briefly before falling back. With it
+  disabled, macOS still releases the warm microphone while the display sleeps,
+  the session is locked, or the Mac goes to sleep, and reopens on wake or
+  unlock (`audio/system_idle.rs`; the setting and `hex status` keep the
+  persisted value). Until that reopen finishes, a press keeps cold-mic
+  behavior, and the reopen is a plain open, so a press during it becomes a
+  pending capture.
 - Model inference, optional post-processing, and paste must
   never block authoritative audio capture. Their queues remain bounded.
 - CoreAudio capture timestamps and annotated-session CGEvent shortcut timestamps
