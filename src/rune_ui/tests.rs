@@ -1151,7 +1151,7 @@ fn choosing_an_opencode_model_saves_it() {
             .post_processing
             .model,
         None,
-        "back to the OpenCode default"
+        "back to the automatic model"
     );
 }
 

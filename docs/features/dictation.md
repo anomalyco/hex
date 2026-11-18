@@ -576,12 +576,14 @@ was still loading no longer fails every request until a restart (#1123). While
 that list has a model, the mode's model row and the picker's unset entry say
 Automatic (the entry keeps the model's name); only with no ranked model listed
 do they say Default and Use OpenCode default, because then OpenCode's own
-default answers. The "dictation post-processing completed" and "…failed" log
-lines, and the processing observation in `live.ndjson` and History, name the
-model the request ran against: `provider/id` for the named model that answered,
-or on failure the one the request asked for; `opencode default` when OpenCode's
-own default answered; and `automatic` when Hex's automatic ranked choice failed
-before any model answered. Checks:
+default answers. `live.ndjson` and History's processing observation record the
+rewrite model as `provider/id` in a `model` field, omitted when no model was
+named (OpenCode's own default answered, Hex's automatic choice failed before any
+model answered, or the on-device Apple Intelligence cleanup ran). The "dictation
+post-processing" and "voice prompt" completed and failed log lines name it too:
+`provider/id` for the named model that answered, or on failure the one the
+request asked for; `opencode default` when no model was named and OpenCode's
+default answered; `automatic` when no model was named and none answered. Checks:
 `stale_ranked_models_fall_back_to_the_default_model`,
 `a_processing_observation_names_the_model_that_answered`,
 `a_processing_log_line_names_the_model_or_its_automatic_choice`, and
