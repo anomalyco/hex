@@ -407,6 +407,11 @@ impl HistoryStore {
         }
         let words = draft.final_text.split_whitespace().count() as u64;
         let audio_ms = draft.audio_ms;
+        // The rollup's first write seeds itself from what History still
+        // retains, so enabling Labs › Yearly stats doesn't make the dialog's
+        // totals drop. The new entry is added after, exactly once.
+        let yearly = crate::labs::yearly_stats();
+        let seed = (yearly && !self.usage.exists()).then(|| self.usage_seed(now_ms));
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
         let recording_bytes = draft.recording.as_ref().map_or(0, |recording| {
@@ -448,12 +453,43 @@ impl HistoryStore {
         // Labs › Yearly stats: a daily rollup that outlives retention. It
         // holds no text or applications, and never fails a record: capture
         // and paste never wait on this file.
-        if crate::labs::yearly_stats()
-            && let Err(error) = usage::count(&self.usage, now_ms, words, audio_ms)
-        {
-            tracing::warn!(%error, "could not record the usage rollup");
+        if yearly {
+            self.note_usage(seed, now_ms, words, audio_ms);
         }
         Ok(Some(id))
+    }
+
+    /// Every retained entry as a fresh rollup, for its first write.
+    fn usage_seed(&self, now_ms: u64) -> usage::Usage {
+        let cutoff = self.retention.cutoff(now_ms);
+        let mut seed = usage::Usage::default();
+        for entry in &self.entries {
+            if cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff) {
+                seed.add(
+                    stats::local_day(entry.timestamp_ms),
+                    stats::local_hour(entry.timestamp_ms),
+                    entry.final_text.split_whitespace().count() as u64,
+                    entry.audio_ms,
+                );
+            }
+        }
+        seed
+    }
+
+    /// Adds this entry to the rollup, seeded when the file was missing. A
+    /// failure is logged and ignored.
+    fn note_usage(&self, seed: Option<usage::Usage>, now_ms: u64, words: u64, audio_ms: u64) {
+        let today = stats::local_day(now_ms);
+        let result = match seed {
+            Some(mut usage) => {
+                usage.add(today, stats::local_hour(now_ms), words, audio_ms);
+                usage.save(&self.usage, today)
+            }
+            None => usage::count(&self.usage, now_ms, words, audio_ms),
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not record the usage rollup");
+        }
     }
 
     /// Delete one entry. Returns whether it existed.
@@ -603,6 +639,12 @@ impl HistoryStore {
     /// Where Labs › Yearly stats keeps its daily rollup.
     pub fn usage_path(&self) -> &std::path::Path {
         &self.usage
+    }
+
+    /// Whether a Labs › Yearly stats rollup file exists, even with no
+    /// retained entries: Clear all history must still be able to delete it.
+    pub fn has_usage(&self) -> bool {
+        self.usage.exists()
     }
 
     /// The daily rollup, bounded to its most recent days.
@@ -835,6 +877,12 @@ impl History {
     /// it on the lab).
     pub fn usage(&self) -> usage::Usage {
         self.synced().usage()
+    }
+
+    /// Whether a Labs › Yearly stats rollup file exists, even with no
+    /// retained entries.
+    pub fn has_usage(&self) -> bool {
+        self.synced().has_usage()
     }
 
     /// Entry `id`'s kept recording, when the file is still there
@@ -1614,6 +1662,10 @@ mod tests {
     /// Turns Labs › Yearly stats on for one test, and back off after.
     struct YearlyStats;
 
+    /// Serializes the tests that turn the global Labs gate on, so one can't
+    /// observe another's switch.
+    static YEARLY_LABS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     impl YearlyStats {
         fn on() -> Self {
             crate::labs::apply(&crate::app_settings::LabsSettings {
@@ -1632,6 +1684,9 @@ mod tests {
 
     #[test]
     fn yearly_stats_rolls_every_recorded_day_up_and_clear_removes_it() {
+        let _lock = YEARLY_LABS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let _labs = YearlyStats::on();
         assert!(crate::labs::yearly_stats(), "the gate is on for the test");
         let path = temp_path("usage-rollup");
@@ -1659,6 +1714,9 @@ mod tests {
 
     #[test]
     fn history_off_records_no_usage_rollup() {
+        let _lock = YEARLY_LABS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let _labs = YearlyStats::on();
         let path = temp_path("usage-off");
         let mut store = HistoryStore::open(path, HistoryRetention::Off, 0);
@@ -1667,6 +1725,42 @@ mod tests {
             !store.usage_path().exists(),
             "retention Off keeps nothing, rollup included"
         );
+    }
+
+    #[test]
+    fn the_first_rollup_write_seeds_itself_from_retained_history_once() {
+        let _lock = YEARLY_LABS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        let path = temp_path("usage-seed");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        // Two entries while the lab is off: History has them, the rollup
+        // does not exist yet.
+        store.record(draft("one two three"), 1_000).unwrap();
+        store.record(draft("four five"), day_ms / 2).unwrap();
+        assert!(!store.usage_path().exists());
+
+        // The lab turns on, and the next record seeds from both retained
+        // entries and adds itself once.
+        let _labs = YearlyStats::on();
+        store.record(draft("six seven"), day_ms + 1_000).unwrap();
+        let usage = store.usage_at(day_ms + 1_000);
+        assert_eq!(usage.dictations(), 3);
+        assert_eq!(usage.words(), 7);
+        assert_eq!(usage.audio_ms(), 2_700);
+        assert_eq!(usage.days().len(), 2);
+    }
+
+    #[test]
+    fn clear_removes_a_rollup_even_with_no_entries() {
+        let path = temp_path("usage-clear-empty");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        crate::history::usage::count(&crate::history::usage::path(&path), 1_000, 5, 1_000).unwrap();
+        assert!(store.has_usage());
+        store.clear().unwrap();
+        assert!(!store.has_usage());
     }
 
     #[test]

@@ -291,11 +291,11 @@ fn retention(root: &Path) -> Result<(HistoryRetention, u32)> {
     struct Settings {
         #[serde(default)]
         history_retention: HistoryRetention,
-        #[serde(default = "default_typing_wpm")]
+        #[serde(
+            default = "default_typing_wpm",
+            deserialize_with = "lenient_typing_wpm"
+        )]
         typing_wpm: u32,
-    }
-    fn default_typing_wpm() -> u32 {
-        crate::app_settings::DEFAULT_TYPING_WPM
     }
     let file = match std::fs::File::open(root.join("settings.json")) {
         Ok(file) => file,
@@ -311,10 +311,26 @@ fn retention(root: &Path) -> Result<(HistoryRetention, u32)> {
     }
     let settings: Settings = serde_json::from_slice(&bytes)
         .wrap_err("could not read history retention; settings.json is invalid")?;
-    Ok((
-        settings.history_retention,
-        crate::app_settings::clamp_typing_wpm(settings.typing_wpm),
-    ))
+    Ok((settings.history_retention, settings.typing_wpm))
+}
+
+fn default_typing_wpm() -> u32 {
+    crate::app_settings::DEFAULT_TYPING_WPM
+}
+
+/// A saved typing speed of any JSON shape: a number is clamped, and
+/// anything else (text, null, a negative number) reads as the default so one
+/// bad field never breaks `hex history`.
+fn lenient_typing_wpm<'de, D>(deserializer: D) -> std::result::Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_u64()
+        .and_then(|wpm| u32::try_from(wpm).ok())
+        .map(crate::app_settings::clamp_typing_wpm)
+        .unwrap_or(default_typing_wpm()))
 }
 
 #[derive(Serialize)]
@@ -393,30 +409,36 @@ fn require_history_stats(on: bool) -> Result<()> {
     }
 }
 
+/// Labs › Yearly stats' rollup for `hex history stats --json`, only while
+/// the lab is on. Off, the file is not read and the field stays out.
+fn yearly_output(history: &Path, on: bool, now: u64) -> Option<YearlyOutput> {
+    on.then(|| {
+        let usage = crate::history::usage::Usage::load(
+            &crate::history::usage::path(history),
+            crate::history::stats::local_day(now),
+        );
+        YearlyOutput::from(&usage)
+    })
+}
+
 /// `hex history stats`.
 fn history_stats(since: Option<&str>, until: Option<&str>, json: bool) -> Result<()> {
     require_history_stats(crate::labs::history_stats())?;
     let root = crate::app_paths::support_dir()?;
-    let entries = crate::history::read_snapshot(&root.join("history.json"))
-        .wrap_err("could not read history.json")?;
+    let history = root.join("history.json");
+    let entries =
+        crate::history::read_snapshot(&history).wrap_err("could not read history.json")?;
+    let now = crate::desktop::events::now_ms();
     let mut output = stats_output(
         &entries,
         since,
         until,
         retention(&root)?,
-        crate::desktop::events::now_ms(),
+        now,
         crate::history::stats::local_day,
         crate::history::stats::local_hour,
     )?;
-    // Labs › Yearly stats: the daily rollup that outlives retention. Off,
-    // the file is never read and the field stays out.
-    if crate::labs::yearly_stats() {
-        let usage = crate::history::usage::Usage::load(
-            &crate::history::usage::path(&root.join("history.json")),
-            crate::history::stats::local_day(crate::desktop::events::now_ms()),
-        );
-        output.yearly = Some(YearlyOutput::from(&usage));
-    }
+    output.yearly = yearly_output(&history, crate::labs::yearly_stats(), now);
     let mut out = io::stdout().lock();
     if json {
         return write_json(&mut out, &output);

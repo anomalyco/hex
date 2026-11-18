@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::stats::{local_day, local_hour, time_saved_ms, words_per_minute};
+use super::stats::{local_day, local_hour, words_per_minute};
 
 /// The rollup file's format version.
 const VERSION: u32 = 1;
@@ -131,11 +131,6 @@ impl Usage {
         words_per_minute(self.words(), self.audio_ms())
     }
 
-    /// What typing this rollup's words would have taken, less its audio.
-    pub fn time_saved_ms(&self, typing_wpm: u32) -> u64 {
-        time_saved_ms(self.words(), self.audio_ms(), typing_wpm)
-    }
-
     /// Consecutive local days with a dictation, ending today, or yesterday
     /// when there is none yet today.
     pub fn streak_days(&self, today: i64) -> u32 {
@@ -211,8 +206,8 @@ impl Usage {
 
     /// Reads the rollup at `path`, bounded to [`MAX_DAYS`] ending at
     /// `today`. A missing file is an empty rollup; an unreadable or invalid
-    /// one is logged and reads empty, and is left alone for the next write
-    /// to replace.
+    /// one is logged and reads empty, and the next write keeps it aside as
+    /// `usage.json.corrupt` ([`count`]).
     pub fn load(path: &Path, today: i64) -> Self {
         let mut usage = match read(path) {
             Ok(usage) => usage,
@@ -238,8 +233,7 @@ impl Usage {
             days: &self.days,
         };
         let json = serde_json::to_vec(&saved).map_err(io::Error::other)?;
-        crate::durable::write(path, &json)?;
-        restrict_to_owner(path)
+        crate::durable::write_private(path, &json)
     }
 }
 
@@ -263,13 +257,37 @@ fn read(path: &Path) -> io::Result<Usage> {
     Ok(usage)
 }
 
-/// Records one dictation in the rollup at `path`. A write failure is the
-/// caller's to log: capture and paste never wait on it.
+/// Records one dictation in the rollup at `path`. A malformed or unreadable
+/// file is moved aside as `usage.json.corrupt`, as History does, so a
+/// damaged year is never silently overwritten; only a missing file starts
+/// empty. A write failure is the caller's to log: capture and paste never
+/// wait on it.
 pub fn count(path: &Path, timestamp_ms: u64, words: u64, audio_ms: u64) -> io::Result<()> {
     let today = local_day(timestamp_ms);
-    let mut usage = Usage::load(path, today);
+    let mut usage = read_for_count(path)?;
     usage.add(today, local_hour(timestamp_ms), words, audio_ms);
     usage.save(path, today)
+}
+
+/// [`read`] for a write: only NotFound is an empty rollup. Any other failure
+/// preserves the file beside it before starting fresh, and a file that
+/// cannot be moved is an error rather than an overwrite.
+fn read_for_count(path: &Path) -> io::Result<Usage> {
+    match read(path) {
+        Ok(usage) => Ok(usage),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Usage::default()),
+        Err(error) => {
+            let backup = path.with_extension("json.corrupt");
+            fs::rename(path, &backup)?;
+            tracing::warn!(
+                %error,
+                path = %path.display(),
+                backup = %backup.display(),
+                "the usage rollup was damaged; kept it aside and started fresh"
+            );
+            Ok(Usage::default())
+        }
+    }
 }
 
 /// Deletes the rollup with Clear all history. A missing file is already
@@ -282,17 +300,6 @@ pub fn clear(path: &Path) {
             tracing::warn!(%error, path = %path.display(), "could not clear the usage rollup");
         }
     }
-}
-
-#[cfg(unix)]
-fn restrict_to_owner(path: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn restrict_to_owner(_path: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -364,19 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn time_saved_uses_the_typing_speed_and_floors_at_zero() {
-        let mut usage = Usage::default();
-        // 400 words at 40 wpm is ten minutes; 30 s of audio was recorded.
-        usage.add(1, 9, 400, 30_000);
-        assert_eq!(usage.time_saved_ms(40), 570_000);
-        // At 200 wpm the same words take two minutes: still saved, less.
-        assert_eq!(usage.time_saved_ms(200), 90_000);
-        // More audio than even a slow comparison: never below zero.
-        usage.add(1, 9, 0, 600_000);
-        assert_eq!(usage.time_saved_ms(40), 0);
-    }
-
-    #[test]
     fn a_streak_counts_back_from_today_or_yesterday() {
         let mut usage = Usage::default();
         for day in [5, 6, 7] {
@@ -424,6 +418,23 @@ mod tests {
         let usage = Usage::load(&path, 10);
         assert_eq!(usage, Usage::default());
         assert!(path.exists());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_count_keeps_a_damaged_rollup_aside_instead_of_overwriting_it() {
+        let directory = temp_dir("damaged-count");
+        let path = directory.join("usage.json");
+        let damaged = br#"{"version":1,"days":[{"day":1,"dictations":"many"}]}"#;
+        fs::write(&path, damaged).unwrap();
+        let timestamp = 1_700_000_000_000;
+        count(&path, timestamp, 7, 2_000).unwrap();
+
+        let backup = path.with_extension("json.corrupt");
+        assert_eq!(fs::read(&backup).unwrap(), damaged);
+        let usage = Usage::load(&path, local_day(timestamp));
+        assert_eq!(usage.dictations(), 1);
+        assert_eq!(usage.words(), 7);
         let _ = fs::remove_dir_all(&directory);
     }
 

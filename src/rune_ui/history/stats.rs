@@ -62,6 +62,12 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         .usage
         .as_ref()
         .filter(|usage| usage.dictations() > 0);
+    // The headline tile and the hourly strip read the same hours: the
+    // rollup while Labs › Yearly stats has one, else retained entries.
+    let (hours, busiest_hour) = match usage {
+        Some(usage) => (usage.hours(), usage.busiest_hour()),
+        None => (stats.hours, stats.busiest_hour),
+    };
     // The window is the layer the panel centers in; the title and footer are
     // measured so their real heights set the body's room.
     let window_height = cx
@@ -85,12 +91,12 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         // Keep the bar off the counts and timings.
         sections = sections.pr(SCROLL_BAR_INSET);
     }
-    let mut sections = sections.child(tiles(p, stats, usage, typing_wpm));
+    let mut sections = sections.child(tiles(p, stats, usage, typing_wpm, busiest_hour));
     sections = sections.child(typing_speed(p, typing_wpm));
     if let Some(daily) = daily(p, stats) {
         sections = sections.child(daily);
     }
-    if let Some(hours) = super::heatmap::hours(p, stats) {
+    if let Some(hours) = super::heatmap::hours(p, &hours, busiest_hour) {
         sections = sections.child(hours);
     }
     if let Some(yearly) = usage.and_then(|usage| super::heatmap::yearly(p, usage)) {
@@ -183,16 +189,22 @@ pub(crate) fn close_stats(ui: &mut Ui) {
 /// Labs › Yearly stats on, dictations, words, time saved, words per minute,
 /// the streak, and the busiest hour cover the rollup's whole span instead of
 /// only what History retains.
-fn tiles(p: Paint, stats: &HistoryStats, usage: Option<&Usage>, typing_wpm: u32) -> El {
+fn tiles(
+    p: Paint,
+    stats: &HistoryStats,
+    usage: Option<&Usage>,
+    typing_wpm: u32,
+    busiest_hour: Option<u8>,
+) -> El {
     let all = usage.filter(|usage| usage.dictations() > 0);
     let dictations = all.map_or(stats.dictations, Usage::dictations);
     let words = all.map_or(stats.words, Usage::words);
-    let time_saved = all.map_or(stats.time_saved_ms, |usage| usage.time_saved_ms(typing_wpm));
+    let audio_ms = all.map_or(stats.audio_ms, Usage::audio_ms);
+    let time_saved = crate::history::stats::time_saved_ms(words, audio_ms, typing_wpm);
     let words_per_minute = all.map_or(stats.words_per_minute, Usage::words_per_minute);
     let streak = all.map_or(stats.streak_days, |usage| {
         usage.streak_days(crate::history::stats::local_day(crate::history::now_ms()))
     });
-    let busiest_hour = all.and_then(Usage::busiest_hour).or(stats.busiest_hour);
     let wpm =
         words_per_minute.map_or_else(|| "–".to_owned(), |wpm| numbers::grouped(u64::from(wpm)));
     let busiest =

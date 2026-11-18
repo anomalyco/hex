@@ -1338,6 +1338,45 @@ fn history_selects_deletes_and_clears_in_two_steps() {
 }
 
 #[test]
+fn history_clear_removes_a_usage_rollup_with_no_entries() {
+    use crate::history::{History, HistoryRetention, HistoryStore};
+
+    let directory =
+        std::env::temp_dir().join(format!("hex-rune-history-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("history.json");
+    let history = History::new(HistoryStore::open(
+        path.clone(),
+        HistoryRetention::Week,
+        crate::history::now_ms(),
+    ));
+    crate::history::usage::count(
+        &crate::history::usage::path(&path),
+        crate::history::now_ms(),
+        5,
+        1_000,
+    )
+    .unwrap();
+    let check = history.clone();
+    let mut rt = runtime("history-empty", true, PANE_SIZE);
+    rt.state.history = history::HistoryPane::shared(Some(history));
+    rt.state.history.reload();
+    rt.state.pane = Pane::History;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(check.has_usage(), "the rollup exists with no entries");
+
+    tap(&mut rt, "history-retention-field-trigger");
+    let clear = menu_item(&rt, "history-retention", "Clear all history…");
+    tap(&mut rt, &clear);
+    assert!(rt.state.history.clear_armed);
+    tap(&mut rt, "history-confirm-clear");
+    assert!(!check.has_usage(), "Clear all deleted the rollup");
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
 fn history_delete_confirmation_stops_when_the_pane_moves_on() {
     use crate::history::{History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore};
     let directory =

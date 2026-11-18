@@ -4,13 +4,15 @@
 //! in. Both borrow the existing chart's look and give screen readers one
 //! labelled image.
 
+use std::collections::HashMap;
+
 use rune::{El, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::super::lists::section_label;
 use crate::desktop::i18n::numbers;
 use crate::desktop::i18n::{clock_time, tr, tr_named};
-use crate::history::stats::{HistoryStats, busiest_hour, local_day};
+use crate::history::stats::{busiest_hour, local_day};
 use crate::history::usage::Usage;
 
 /// The heatmap's cell size and gap: 53 weeks and 52 gaps fill the dialog's
@@ -54,14 +56,17 @@ fn level(count: u64, peak: u64) -> u8 {
 
 /// A 53-week × 7-day heatmap of dictations per local day from the rollup.
 pub(super) fn yearly(p: Paint, usage: &Usage) -> Option<El> {
-    let peak = usage
-        .days()
-        .iter()
-        .map(|day| day.dictations)
-        .max()
-        .filter(|peak| *peak > 0)?;
     let today = local_day(crate::history::now_ms());
     let start = grid_start(today);
+    // One lookup per cell, and the peak only over the weeks shown (the
+    // rollup can hold up to 400 days).
+    let counts: HashMap<i64, u64> = usage
+        .days()
+        .iter()
+        .filter(|day| day.day >= start && day.day <= today)
+        .map(|day| (day.day, day.dictations))
+        .collect();
+    let peak = counts.values().copied().max().filter(|peak| *peak > 0)?;
     let total = numbers::grouped(usage.dictations());
     let label = tr_named(
         "Dictations per day over the past year: {total} in total",
@@ -77,7 +82,8 @@ pub(super) fn yearly(p: Paint, usage: &Usage) -> Option<El> {
         let mut column = col().key(format!("week-{week}")).gap(CELL_GAP);
         for weekday in 0..WEEKDAYS {
             let day = start + week * WEEKDAYS + weekday;
-            column = column.child(cell(p, day, usage.dictations_on(day), peak, day > today));
+            let count = counts.get(&day).copied().unwrap_or(0);
+            column = column.child(cell(p, day, count, peak, day > today));
         }
         weeks = weeks.child(column);
     }
@@ -109,9 +115,11 @@ fn cell(p: Paint, day: i64, count: u64, peak: u64, future: bool) -> El {
 }
 
 /// A compact strip of the day's 24 hours, the busiest in the accent colour.
-pub(super) fn hours(p: Paint, stats: &HistoryStats) -> Option<El> {
-    let peak = stats.hours.iter().copied().max().filter(|peak| *peak > 0)?;
-    let busiest = stats.busiest_hour.or_else(|| busiest_hour(&stats.hours))?;
+/// `hours` and `busiest` come from the same source as the headline tile:
+/// the rollup while Labs › Yearly stats is on, else retained entries.
+pub(super) fn hours(p: Paint, hours: &[u64; 24], busiest: Option<u8>) -> Option<El> {
+    let peak = hours.iter().copied().max().filter(|peak| *peak > 0)?;
+    let busiest = busiest.or_else(|| busiest_hour(hours))?;
     let hour = clock_time(u32::from(busiest), 0);
     let label = tr_named("Dictations by hour: busiest at {hour}", &[("hour", &hour)]);
     let mut bars = row()
@@ -122,7 +130,7 @@ pub(super) fn hours(p: Paint, stats: &HistoryStats) -> Option<El> {
         .h(HOUR_HEIGHT)
         .gap(HOUR_GAP)
         .items_end();
-    for (index, count) in stats.hours.iter().copied().enumerate() {
+    for (index, count) in hours.iter().copied().enumerate() {
         bars = bars.child(hour_bar(
             p,
             index,

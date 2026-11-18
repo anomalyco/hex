@@ -493,12 +493,16 @@ fn clear_history(host: &dyn Host) -> Result<ControlReply, ControlError> {
         .history()
         .ok_or_else(|| ControlError::new("unavailable", "history couldn't be opened"))?;
     let count = history.search("").len();
-    if count == 0 {
+    let rollup = history.has_usage();
+    if count == 0 && !rollup {
         return Ok(ControlReply::unchanged("History is already empty"));
     }
     history
         .clear()
         .map_err(|error| ControlError::new("failed", format!("couldn't clear history: {error}")))?;
+    if count == 0 {
+        return Ok(ControlReply::done("Cleared history stats"));
+    }
     Ok(ControlReply::done(format!(
         "Cleared {count} dictation{}",
         if count == 1 { "" } else { "s" }
@@ -622,6 +626,7 @@ mod tests {
         unresponsive: bool,
         quits: Mutex<Vec<bool>>,
         dictations: Mutex<Vec<CaptureAction>>,
+        history: Option<crate::history::History>,
     }
 
     impl Host for FakeHost {
@@ -683,7 +688,7 @@ mod tests {
             Ok(())
         }
         fn history(&self) -> Option<crate::history::History> {
-            None
+            self.history.clone()
         }
         fn show_window(&self, _: Option<Pane>) -> Result<(), ControlError> {
             Ok(())
@@ -725,6 +730,38 @@ mod tests {
             ControlReply::Error { code, .. } => code,
             _ => "ok",
         }
+    }
+
+    #[test]
+    fn clearing_history_with_only_a_usage_rollup_still_deletes_it() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-control-clear-usage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("history.json");
+        let history = crate::history::History::new(crate::history::HistoryStore::open(
+            path.clone(),
+            crate::history::HistoryRetention::Week,
+            crate::history::now_ms(),
+        ));
+        crate::history::usage::count(
+            &crate::history::usage::path(&path),
+            crate::history::now_ms(),
+            4,
+            1_000,
+        )
+        .unwrap();
+        assert!(history.has_usage());
+
+        let host = FakeHost {
+            history: Some(history.clone()),
+            ..Default::default()
+        };
+        let reply = ask(&host, ControlCommand::HistoryClear);
+        assert!(matches!(reply, ControlReply::Done { changed: true, .. }));
+        assert!(!history.has_usage());
+        assert!(history.search("").is_empty());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

@@ -185,6 +185,43 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
 }
 
 #[test]
+fn history_stats_json_includes_yearly_only_while_its_lab_is_on() {
+    let root = temp();
+    let history = root.join("history.json");
+    let path = crate::history::usage::path(&history);
+    let timestamp = NOW - 86_400_000;
+    crate::history::usage::count(&path, timestamp, 9, 3_000).unwrap();
+
+    let mut output = stats_output(
+        &entries(),
+        None,
+        None,
+        (
+            HistoryRetention::Week,
+            crate::app_settings::DEFAULT_TYPING_WPM,
+        ),
+        NOW,
+        |ms| (ms / 86_400_000) as i64,
+        |ms| ((ms / 3_600_000) % 24) as usize,
+    )
+    .unwrap();
+    output.yearly = yearly_output(&history, false, NOW);
+    let json = serde_json::to_value(&output).unwrap();
+    assert!(json.get("yearly").is_none(), "off, no rollup is read");
+
+    output.yearly = yearly_output(&history, true, NOW);
+    let json = serde_json::to_value(&output).unwrap();
+    let yearly = &json["yearly"];
+    assert_eq!(yearly["dictations"], 1);
+    assert_eq!(yearly["words"], 9);
+    assert_eq!(
+        yearly["days"][0]["day"],
+        crate::history::stats::local_day(timestamp)
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn history_search_ranks_fuzzy_stemmed_matches_within_retention() {
     let mut entries = entries();
     entries.push(HistoryEntry {
@@ -395,6 +432,18 @@ fn retention_defaults_fails_closed_and_off_preserves_existing_entries() {
         retention(&root).unwrap(),
         (HistoryRetention::Day, crate::app_settings::MAX_TYPING_WPM)
     );
+    for bad in [r#""fast""#, "null", "-5", "1.5", "{}"] {
+        fs::write(
+            root.join("settings.json"),
+            format!(r#"{{"history_retention":"day","typing_wpm":{bad}}}"#),
+        )
+        .unwrap();
+        assert_eq!(
+            retention(&root).unwrap(),
+            (HistoryRetention::Day, 40),
+            "{bad}"
+        );
+    }
     let entries = entries();
     let output = history_output(
         &entries,

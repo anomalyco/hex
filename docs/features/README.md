@@ -939,10 +939,10 @@ Completed output                         // output
     │   -> the new text with Copy and Replace; Clear all and retention delete the audio (labs.md, #1032)
     │   -> Replace keeps the old text as one of 5 earlier versions: Copy, Use this version (#1177)
     ├── Labs > Copy dictation audio (off) -> copies a kept WAV as a file   // labs.copy-dictation-audio
-        -> the card's Copy audio beside Play, and the menu bar or tray's Copy last dictation audio
-        -> needs Keep recordings; it stores no audio itself (labs.md)
+    │   -> the card's Copy audio beside Play, and the menu bar or tray's Copy last dictation audio
+    │   -> needs Keep recordings; it stores no audio itself (labs.md)
     └── Labs > Dictation stats (off) -> History's Stats dialog and hex history stats   // labs.history-stats
-        -> headline tiles, a 30-day chart, the busiest hour, top apps, Output time
+        -> headline tiles, time saved with a typing-speed slider, the busiest hour, a 30-day chart, top apps
         -> Labs > Yearly stats (off) adds a 53-week heatmap and all-time totals   // labs.yearly-stats
         -> a daily rollup in usage.json with no text or app names; Clear all history deletes it (labs.md)
 Every entry since #1177 -> "Speech model" fact: the model that made its text (+ language when chosen)

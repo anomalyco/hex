@@ -206,6 +206,12 @@ impl HistoryPane {
                 .is_some_and(|usage| usage.dictations() > 0)
     }
 
+    /// Whether a rollup file exists, so Clear all history can still delete
+    /// it when no entry is retained.
+    pub(super) fn has_usage(&self) -> bool {
+        self.store.as_ref().is_some_and(History::has_usage)
+    }
+
     /// While the pane shows, picks up new dictations and search edits. It
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
@@ -885,7 +891,9 @@ fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
                 }),
         );
     }
-    let nothing = ui.history.entries.is_empty() && ui.history.searched.trim().is_empty();
+    let nothing = ui.history.entries.is_empty()
+        && ui.history.searched.trim().is_empty()
+        && !ui.history.has_usage();
     menu = menu.separator().item(
         MenuItem::new(tr("Clear all history…"))
             .danger(true)
