@@ -301,9 +301,8 @@ pub enum CaptureCommand {
     /// The pointer is on the capsule (`true`) or left it: a rule's send
     /// still waiting out its Undo window pauses while it is there.
     Hold(bool),
-    /// Pastes the newest written capture into the app in front, as
-    /// Scrawl's Paste chip does: its contact sheet, then its summary.
-    Paste,
+    /// Pastes the capsule's written capture, never a later completion.
+    Paste(PathBuf),
     /// Opens the newest written capture's contact sheet: Hex has no review
     /// window, and opening the bundle could launch Scrawl.app, which takes
     /// captures over.
@@ -1769,8 +1768,8 @@ impl CaptureHost {
             }
             CaptureCommand::Undo => Ok(self.route(routing::Job::Undo)),
             CaptureCommand::Hold(on) => Ok(self.route(routing::Job::Hold(on))),
-            CaptureCommand::Paste => self.hand_off(HandOff::Paste),
-            CaptureCommand::Inspect => self.hand_off(HandOff::Inspect),
+            CaptureCommand::Paste(bundle) => self.hand_off(HandOff::Paste, Some(bundle)),
+            CaptureCommand::Inspect => self.hand_off(HandOff::Inspect, None),
         };
         result.unwrap_or_else(|error| ControlReply::error("failed", format!("{error:#}")))
     }
@@ -2057,12 +2056,15 @@ impl CaptureHost {
 
     /// Pastes or opens the newest written capture on a thread of its own,
     /// one at a time: pasting waits on the pasteboard and the app in front.
-    fn hand_off(&self, how: HandOff) -> Result<ControlReply> {
-        let bundle = lock(&self.outcomes)
-            .last
-            .as_ref()
-            .filter(|last| last.stage == Stage::Done)
-            .map(|last| last.bundle.clone())
+    fn hand_off(&self, how: HandOff, shown: Option<PathBuf>) -> Result<ControlReply> {
+        let bundle = shown
+            .or_else(|| {
+                lock(&self.outcomes)
+                    .last
+                    .as_ref()
+                    .filter(|last| last.stage == Stage::Done)
+                    .map(|last| last.bundle.clone())
+            })
             .ok_or_else(|| eyre!("no written capture"))?;
         if !cfg!(test) {
             static HANDING_OFF: AtomicBool = AtomicBool::new(false);
@@ -3131,7 +3133,10 @@ fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
             CapsuleKey::Shortcut | CapsuleKey::Press | CapsuleKey::Shift(_),
         ) => true,
         (
-            CapsuleKeys::Suggest { cycle: true, .. },
+            CapsuleKeys::Suggest {
+                cycle: true,
+                search: true,
+            },
             CapsuleKey::Return { shift: false } | CapsuleKey::Tab { .. },
         ) => true,
         (CapsuleKeys::Suggest { search: true, .. }, CapsuleKey::Text(typed)) => opens_search(typed),
@@ -4172,12 +4177,10 @@ mod tests {
         let idle = report(host.control(ScrawlCaptureAction::Stop, &audio));
         assert!(!idle.changed && idle.bundle.is_none());
         // Paste and Inspect need a written capture.
-        for command in [CaptureCommand::Paste, CaptureCommand::Inspect] {
-            assert!(matches!(
-                host.command(command, &audio),
-                ControlReply::Error { .. }
-            ));
-        }
+        assert!(matches!(
+            host.command(CaptureCommand::Inspect, &audio),
+            ControlReply::Error { .. }
+        ));
         assert!(!report(host.control(ScrawlCaptureAction::Cancel, &audio)).changed);
 
         let started = report(host.control(ScrawlCaptureAction::Start, &audio));
@@ -4209,7 +4212,10 @@ mod tests {
         let snapshot = lock(&host.outcomes).snapshot();
         assert!(snapshot.recording.is_none() && snapshot.finishing.is_empty());
         assert_eq!(snapshot.last.unwrap().stage, Stage::Done);
-        for command in [CaptureCommand::Paste, CaptureCommand::Inspect] {
+        for command in [
+            CaptureCommand::Paste(bundle.clone()),
+            CaptureCommand::Inspect,
+        ] {
             assert!(report(host.command(command, &audio)).changed);
         }
         // The fake audio ends before the stop, so the tail may count as a gap.
@@ -5125,7 +5131,7 @@ mod tests {
         let settled = lock(&host.outcomes).snapshot().last.unwrap();
         assert_eq!(settled.error.as_deref(), Some("the window closed"));
         assert!(matches!(
-            host.command(CaptureCommand::Paste, &audio),
+            host.command(CaptureCommand::Inspect, &audio),
             ControlReply::Error { .. }
         ));
         host.shutdown(&audio);
@@ -5391,16 +5397,21 @@ mod tests {
         ] {
             assert!(!capsule_key(key.clone()), "{key:?}");
         }
-        // The toast's one guess at a time: Return sends it, Tab moves on.
+        // A toast appearing over another app never takes its Return or Tab.
         second.set(CapsuleKeys::Suggest {
             cycle: true,
             search: false,
         });
         assert!(suggesting());
+        assert!(!capsule_key(CapsuleKey::Tab { shift: false }));
+        assert!(!capsule_key(CapsuleKey::Return { shift: false }));
+        second.set(CapsuleKeys::Suggest {
+            cycle: true,
+            search: true,
+        });
         assert!(capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(capsule_key(CapsuleKey::Return { shift: false }));
         assert!(!capsule_key(CapsuleKey::Return { shift: true }));
-        assert!(!capsule_key(CapsuleKey::Text("h".into())));
         second.set(CapsuleKeys::List);
         assert!(!suggesting());
         assert!(list_open() && !wants_escape());

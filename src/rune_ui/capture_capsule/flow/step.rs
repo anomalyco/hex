@@ -59,7 +59,6 @@ impl Flow {
         if input == Input::Sending {
             if !self.undoing
                 && let Phase::Routed(routed) = &mut self.phase
-                && matches!(routed.route, Route::Rule { .. })
                 && !routed.taken_back
             {
                 routed.sending = true;
@@ -70,8 +69,8 @@ impl Flow {
             self.hold_floor = self.hold_floor.max(now + tuning::get().brief_hold_s);
             // A rule's send went: it sounds Sent, once.
             if let Phase::Routed(routed) = &mut self.phase
-                && matches!(routed.route, Route::Rule { .. })
                 && !std::mem::replace(&mut routed.delivered, true)
+                && matches!(routed.route, Route::Rule { .. })
             {
                 self.cues.push(Cue::Sent);
             }

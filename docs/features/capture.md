@@ -171,7 +171,7 @@ On Linux                                 // capture.linux
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
 │   pastes a terminal the sheet's path instead
-├── Finished capsule -> "Copied" with Paste (accent), Inspect, and Send to…;
+├── Finished capsule -> "Annotation" with Paste and, if there are destinations, Send to…;
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
@@ -467,15 +467,16 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       `capture_host::routing` `an_always_rule_from_a_terminal_keys_on_its_folder`.
 │   │       The process walk was measured once against a real Ghostty; no
 │   │       end-to-end capture of a TUI was run
-├── A finished capture with nowhere sent yet reads "Copied" from the start
+├── A finished capture reads "Annotation". While routing is pending it reads
+│   "Looking for sessions…" instead. Copy failure has its own warning
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
-│   │   keycaps (as Settings draws them) and ✕, the suggestions open under
+│   │   answer) -> macOS: "Annotation", Paste, a magnifier and ✕. The
+│   │   magnifier is named Search with the current binding. Suggestions open under
 │   │   it; nothing sends until Kit picks. Linux: closed,
-│   │   with Paste, Inspect, and Send to…, which opens them on a click
+│   │   with Paste and Send to…, which opens them on a click
 │   │   ├── "Send to" over up to five rows, suggested then the newest
 │   │   │   sessions, with no numbers and no footer; "⇧-click to always send
-│   │   │   [site] here" on the header's right when a pick can save a rule.
+│   │   │   [site] here" appears on hover when a pick can save a rule.
 │   │   │   The first carries its reason in the accent. A reason is a real one
 │   │   │   in plain words ("you were just in it", "same page", "mentioned",
 │   │   │   "recent") or nothing; never "guess". No row moves once shown: a
@@ -569,34 +570,42 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       is open, and still delivers them) closes the list and gives the
 │   │       keys back; hiding drops the grab
 │   ├── `offer` (a rule offer) -> not drawn; Scrawl's capsule doesn't draw it
-│   ├── The top line is calm: the label, its note, one action, and ✕. Undo
-│   │   while a send can be taken back, else Paste and Inspect as two quiet
-│   │   icons (tooltips "Paste the capture", "Open the capture") for a written
-│   │   capture, with the click-only Send to… chip beside them while there is
-│   │   somewhere to send it; over the suggestions, Search alone (the
-│   │   capture is already copied), right beside ✕. Paste and Inspect have no key on either OS.
+│   ├── The ready capsule shows a labeled Paste button, both folded and above
+│   │   the suggestions. A rule waiting to send shows Undo instead. Sending,
+│   │   sent and queued results do not offer Paste. The search field replaces
+│   │   the buttons while typing. Neither Paste nor Inspect binds a key.
 │   │   The list hangs
 │   │   under the capsule, which is never narrower than LIST_W; the capsule
 │   │   widens with it. The capsule is a rounded rect with the list's 14 pt
 │   │   corners (`SHELL_RADIUS`), not a pill, and its chips and icon buttons
-│   │   round concentrically inside it. Two looks while Kit picks (tuning `top_line`):
+│   │   round concentrically inside it. The line and its list are one layout:
+│   │   the list's header and its names start 16 pt in from the wall, and
+│   │   the reasons end 16 pt in from the other, under ✕. The preview is not
+│   │   on that margin: it nests in the capsule's left corners, 10 pt from the
+│   │   left, top and bottom walls, so its 4 pt corners turn about the same
+│   │   centres as the shell's 14 pt ones
+│   │   (`the_preview_nests_in_the_capsules_left_corners`). Paste, Search,
+│   │   Inspect and ✕ are one row of 28 pt
+│   │   boxes 6 pt apart and 6 pt in from the walls; Paste's is filled, and
+│   │   its 32 pt chip is still what takes the click
+│   │   (`the_ready_line_and_its_list_share_their_edges`). Two looks while Kit picks (tuning `top_line`):
 │   │   TopLine::Quiet (default) says the label in quiet MEDIUM ink;
-│   │   TopLine::Icons says it in STRONG. A capture that only copied has no
-│   │   label, the lead alone
+│   │   TopLine::Icons uses stronger ink. Both retain the annotation label
 │   ├── The lead is the capture's first frame (`frames/frame-01.png`, else the
 │   │   contact sheet), cropped to a small rounded card once the bundle is
 │   │   written and decoded off the UI thread; until then, or without one, a
 │   │   check. A warning keeps its glyph
 │   │   ├── Paste -> CaptureCommand::Paste: the contact sheet, then the summary,
-│   │   │   into the app in front; a send still in its Undo window is taken back
-│   │   └── Inspect -> CaptureCommand::Inspect: opens the contact sheet (Hex
+│   │   │   into the focused field, from the bundle shown, not the newest output.
+│   │   │   No Return, send, Undo or rule change
+│   │   └── Click the finished preview, when Inspect is available, or the
+│   │       Inspect button on other outcomes -> opens the contact sheet (Hex
 │   │       has no review window, and opening the bundle could launch
 │   │       Scrawl.app)
 │   ├── Undo is a click only, with no shortcut: Escape meant for another app
 │   │   was taking sends back
-│   ├── Shortcuts read as quiet text after what they do, never a keycap per
-│   │   key, except Search's capture shortcut, drawn as Settings' keycaps: a
-│   │   hint's keys sit in one small rounded rect, on a quiet fill. The
+│   ├── Search's tooltip and accessible name include the configured capture
+│   │   shortcut; no keycaps appear in the ordinary completed header. The
 │   │   search's footer reads "Send ⏎", "Remember ⇧⏎", "New capture ⌥⇧S"; the
 │   │   cursor's and the notch's cards end in "Search ⌥⇧S" under their guesses.
 │   │   The footer sits apart from the rows in one of
@@ -932,22 +941,20 @@ Where it goes                            // capture.route; capture.routing's aut
 │   NoAnswer | Unreachable. Background refinements preserve an open search and
 │   selected session; a pick or Undo cancels them
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   `routing.terminals`, a Shift pick's), or a page that names its session (a
-│   │   `<meta name="opencode-session">` tag or an `.opencode-session` file in
-│   │   its folder, found through symlinked folders too), which beats any rule
-│   │   and is sent to that exact session, a subagent's included ("page names
-│   │   it"): a three-second countdown begins at Written. A folder
+│   │   `routing.terminals`, a Shift pick's): a three-second countdown begins
+│   │   when the rule is shown. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
 │   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is
 │   │   on it and resumes it with what it had left (at least 1 s; a hold the
 │   │   capsule never ends lapses after 2 min, and the next capture resumes
 │   │   it). Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
-│   │   autoSend, smartRouting, or jevRouting say, a saved rule or signed page
-│   │   sends and nothing else sends on its own. smartRouting off decides with the port
+│   │   autoSend, smartRouting, or jevRouting say, no page or publisher can
+│   │   authorize a send or override a saved rule. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look
 │   ├── Guess -> everything else the router would send (Jev's pick, HOME when
-│   │   Jev couldn't tell, a dev server's port, a page's data-session or
+│   │   Jev couldn't tell, a dev server's port, a page's opencode-session tag,
+│   │   `.opencode-session` file, data-session or
 │   │   publisher, a name that was said, the captured app's checkout (the one
 │   │   open session folder named like the app, such as `…/hex` for Hex's own
 │   │   Settings; smartRouting only), the port ladder) is suggestion #1, its
@@ -1166,6 +1173,8 @@ Checks:
   [retention.rs](../../crates/capture/src/retention.rs).
 - Routing, in [routing.rs](../../src/capture_host/routing.rs):
   `only_a_saved_rule_sends_on_its_own`,
+  `page_metadata_is_only_a_suggestion_and_never_overrides_a_saved_rule`
+  (early and late page reads, a fake recipient, the send deadline advanced),
   `a_rule_sends_and_lists_the_rest`,
   `a_guess_sends_nothing_and_a_failure_still_lists_recent_sessions`, and
   its `looked` tests, which write a bundle and route it through `look` and
@@ -1194,9 +1203,10 @@ Checks:
   `a_pick_that_cannot_start_says_why`,
   `the_first_click_or_scroll_means_work_started`, and
   `the_newest_grab_takes_only_its_keys_until_it_drops`. Paste and Inspect
-  need a written capture
-  (`controls_are_idempotent_and_stop_writes_a_scrawl_bundle`); neither has
-  pasted into or opened anything in a test.
+  need a written capture. `paste_only_hands_off_the_shown_written_annotation_once`
+  and `clicks_on_the_capsule_do_what_they_say` distinguish local Paste from
+  picking a row by pointer or Enter in search. They record actions, not native
+  clipboard, focus or insertion in a receiving application.
 - Capsule, in rune_ui/capture_capsule (feature builds only): the flow tests
   (`chips_fold_once_seen_when_work_starts_but_never_under_the_pointer`,
   `the_shortcut_records_the_pickers_screen_and_a_chip_discards_the_recording`,
