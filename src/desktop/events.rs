@@ -138,8 +138,9 @@ pub struct DictationProcessing {
     pub profile: String,
     pub latency_ms: u64,
     /// The OpenCode rewrite model this processing ran against, as
-    /// `provider/id`; absent for OpenCode's own default model and for events
-    /// written before it was recorded.
+    /// `provider/id`. Absent whenever no named OpenCode model answered:
+    /// OpenCode's own default model, the on-device Apple Intelligence cleanup
+    /// pass, and events written before the model was recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
