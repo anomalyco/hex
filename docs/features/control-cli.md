@@ -13,8 +13,9 @@ Agent or terminal                                  // control.cli; every OS
 │   └── Hex not running -> exit 3, "Hex is not running; run `hex start`"
 ├── hex start -> Already running: nothing | else open Hex.app (Linux and
 │   Windows: a detached `hex app --hidden`), wait ≤ 20 s
-│   ├── A Linux `hex app` that forwards to the unit exits 0 -> the ordinary
-│   │   wait continues; any other launch that exits gets a 2 s grace
+│   ├── A launch that hands off exits 0 -> the ordinary wait continues: a
+│   │   Linux `hex app` forwards to the unit, a 2.3.1 install starts the
+│   │   managed copy. Any other launch that exits gets a 2 s grace
 │   ├── Still no answer after an exit -> failed, "run `hex start` again":
 │   │   another Hex is probably still shutting down and holds the instance
 │   └── The caller's HEX_* variables -> open --env (values never logged)

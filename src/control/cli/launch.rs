@@ -142,10 +142,11 @@ fn start_reply() -> ControlReply {
     let mut give_up_at = started + Duration::from_secs(20);
     // A `hex app` that exits is not proof that Hex failed: on Linux it
     // forwards to the systemd unit and exits once the forward is accepted,
-    // and every OS hands off to a 2.3.1 install that way. So keep watching
-    // for a Hex to answer after the exit; only a launch that can't become one
-    // gives up, and it gets a short grace first so the successor of a Hex
-    // still finishing its drain is seen if it does arrive.
+    // and on Windows a 2.3.1 install starts the managed copy and exits. So
+    // keep watching for a Hex to answer after the exit; only a launch that
+    // can't become one gives up, and it gets a short grace first so the
+    // successor of a Hex still finishing its drain is seen if it does arrive.
+    let legacy_handoff = crate::updater::legacy::will_take_over();
     loop {
         if running() {
             return ControlReply::done("Started Hex");
@@ -154,7 +155,7 @@ fn start_reply() -> ControlReply {
             && let Ok(Some(status)) = child.try_wait()
         {
             exited = Some(status);
-            if !forwarder(status) {
+            if !forwards_to_hex(status, legacy_handoff) {
                 // Keep watching for the short grace, but never past the
                 // ordinary wait.
                 give_up_at = (Instant::now() + START_GRACE).min(started + Duration::from_secs(20));
@@ -166,9 +167,11 @@ fn start_reply() -> ControlReply {
         std::thread::sleep(Duration::from_millis(200));
     }
     match exited {
-        // A forwarder's Hex may only be starting; answer as the ordinary
-        // wait does rather than calling the forward a failure.
-        Some(status) if forwarder(status) => ControlReply::done(STILL_STARTING),
+        // The Hex such a launch starts may only be starting; answer as the
+        // ordinary wait does rather than calling the handoff a failure.
+        Some(status) if forwards_to_hex(status, legacy_handoff) => {
+            ControlReply::done(STILL_STARTING)
+        }
         // A successful launch that yielded found another Hex holding the
         // instance; a failed one never became Hex at all.
         Some(status) if status.success() => ControlReply::error(
@@ -187,12 +190,13 @@ fn start_reply() -> ControlReply {
 }
 
 /// Whether a `hex app` that exited successfully can still become the Hex the
-/// caller waited for: on Linux it forwards to the systemd unit (or to the
-/// instance a 2.3.1 install handed off from) and exits once the forward is
-/// accepted.
+/// caller waited for: on Linux it forwards to the systemd unit (a 2.3.1
+/// install replaces that process instead, so it never returns), and on
+/// Windows a 2.3.1 install starts the managed copy in the background and
+/// exits.
 #[cfg(not(target_os = "macos"))]
-fn forwarder(status: std::process::ExitStatus) -> bool {
-    cfg!(target_os = "linux") && status.success()
+fn forwards_to_hex(status: std::process::ExitStatus, legacy_handoff: bool) -> bool {
+    status.success() && (cfg!(target_os = "linux") || legacy_handoff)
 }
 
 /// `open` arguments for `hex start`: the caller's `HEX_*` environment, then
