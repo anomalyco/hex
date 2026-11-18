@@ -513,11 +513,11 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
 
 /// A running Hex that `hex restart` waits on before it starts the successor.
 ///
-/// The instance Hex holds is gone only at, or just before, its process exit:
-/// Windows' named event is closed by the last handle when the process ends,
-/// and Linux's service lock is released when its server drops, a little
-/// before exit. Waiting for the process covers both. The local API stops
-/// answering earlier in the drain, which is why it isn't the signal.
+/// The local API removes its discovery file at the start of its shutdown and
+/// the process lives on after that. The instance Hex holds goes later:
+/// Windows' named event is closed when the process ends, and Linux's service
+/// lock is released even earlier, when its server drops. Waiting for the
+/// process covers both, which is why the local API isn't the signal.
 ///
 /// On Windows the handle is opened while that Hex still runs, so the wait can
 /// only be about that process: looking the pid up again after the wait could
@@ -535,6 +535,10 @@ impl ExitWatch {
     /// Watches `pid`, which must still be running: `None` once it has ended,
     /// or when its process can't be opened for waiting.
     fn new(pid: u32) -> Option<Self> {
+        // 0 is not a process: on Unix `kill(0, …)` means this process's group.
+        if pid == 0 {
+            return None;
+        }
         #[cfg(windows)]
         {
             use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
@@ -556,7 +560,9 @@ impl ExitWatch {
         {
             use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
             use windows_sys::Win32::System::Threading::WaitForSingleObject;
-            let millis = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
+            // INFINITE (u32::MAX) would never time out, so the longest wait is
+            // one millisecond short of it.
+            let millis = timeout.as_millis().min(u128::from(u32::MAX - 1)) as u32;
             // SAFETY: `self.handle` is the handle `new` opened and `Drop` closes.
             let waited = unsafe { WaitForSingleObject(self.handle, millis) };
             waited == WAIT_OBJECT_0
@@ -747,36 +753,90 @@ mod tests {
         assert_eq!(status, 409);
         assert_eq!(body, BODY);
     }
+}
 
-    /// `hex restart` waits on the old process, so the wait must end as soon
-    /// as it does and say so when it doesn't. Linux only: macOS restarts
-    /// itself and never takes a watch, and Windows waits on a process handle.
-    #[cfg(not(target_os = "macos"))]
+/// The process wait `hex restart` uses, on every OS that takes it. The child
+/// halves follow `desktop::process_exit`'s pattern: this same test binary,
+/// selected with `--exact`, switched into child mode by an environment
+/// variable.
+#[cfg(all(test, not(target_os = "macos")))]
+mod exit_watch_tests {
+    use std::process::{Child, Stdio};
+    use std::time::{Duration, Instant};
+
+    use super::ExitWatch;
+
+    const CHILD: &str = "HEX_EXIT_WATCH_CHILD";
+
+    /// The child half of `waiting_for_a_process_reports_whether_it_exited`:
+    /// lives a moment, so the watch is taken while it runs, then exits.
+    #[test]
+    fn exiting_child() {
+        if std::env::var_os(CHILD).is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
+    /// The child half: lives until the parent kills it.
+    #[test]
+    fn staying_child() {
+        if std::env::var_os(CHILD).is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    fn child(name: &str) -> Child {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("local_api::discovery::exit_watch_tests::{name}"),
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
+    /// `hex restart` takes the watch while the old Hex runs and needs it to
+    /// report that Hex's exit; a process still running must not read as gone.
     #[test]
     fn waiting_for_a_process_reports_whether_it_exited() {
-        let mut quick = std::process::Command::new("true").spawn().unwrap();
-        let watch = super::ExitWatch::new(quick.id()).expect("a running process can be watched");
-        quick.wait().unwrap();
-        let started = std::time::Instant::now();
-        assert!(watch.wait(Duration::from_secs(5)));
+        let exiting = child("exiting_child");
+        let watch = ExitWatch::new(exiting.id()).expect("a running process can be watched");
+        let output = exiting.wait_with_output().unwrap();
+        assert!(output.status.success(), "the child failed");
+        // The child reaps itself into a non-process, and the filter must have
+        // found its test rather than exiting with none.
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "the child didn't run its test: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let started = Instant::now();
+        assert!(
+            watch.wait(Duration::from_secs(10)),
+            "the watch missed the exit"
+        );
         assert!(
             started.elapsed() < Duration::from_secs(1),
-            "a process that already exited took {:?}",
+            "the watch took {:?} to see the exit",
             started.elapsed()
         );
 
-        let mut live = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let watch = super::ExitWatch::new(live.id()).expect("a running process can be watched");
-        let started = std::time::Instant::now();
+        let mut staying = child("staying_child");
+        let watch = ExitWatch::new(staying.id()).expect("a running process can be watched");
+        let started = Instant::now();
         assert!(
             !watch.wait(Duration::from_millis(300)),
             "a live process read as exited"
         );
         assert!(started.elapsed() >= Duration::from_millis(300));
-        let _ = live.kill();
-        let _ = live.wait();
+        let _ = staying.kill();
+        let _ = staying.wait();
     }
 }

@@ -24,8 +24,9 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
 │       Linux unit -> systemctl restart; else waits for that process to exit
-│       (its local API stops earlier in the drain, its service lock shortly
-│       before exit, its Windows event at exit), then start
+│       (its local API drops discovery first, at the start of its shutdown;
+│       Windows' event ends with the process, Linux's service lock sooner),
+│       then start
 ├── hex dictation start|stop|toggle|cancel
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   │   ├── Windows CLI/tray start -> hook adopts the accepted capture; first
@@ -196,8 +197,10 @@ its cap, even if the asking client is killed. Linux and Windows answer
 Sources: [control.rs](../../src/control.rs) (protocol, status, quit rules),
 [control/host.rs](../../src/control/host.rs) (the Linux and Windows host),
 [control/settings.rs](../../src/control/settings.rs) (settings registry),
-[control/cli.rs](../../src/control/cli.rs) and
-[control/cli/human.rs](../../src/control/cli/human.rs) (clap, output, exit codes, start,
+[control/cli.rs](../../src/control/cli.rs),
+[control/cli/launch.rs](../../src/control/cli/launch.rs) (`hex start` and
+restart's relaunch), and
+[control/cli/human.rs](../../src/control/cli/human.rs) (clap, output, exit codes,
 logs), [macos_rune/control.rs](../../src/macos_rune/control.rs) (the macOS host),
 the `/control` route in [local_api.rs](../../src/local_api.rs), and early
 dispatch in [main.rs](../../src/main.rs).
@@ -212,7 +215,7 @@ and `model_selection` (remembered hints, wildcard-language validation); `control
 `every_persisted_setting_has_a_cli_key`, value parsing, shortcut conflicts,
 and zero volume (`enabling_tones_restores_a_nonzero_level` covers enabling a
 saved zero); `control::cli::tests` pin
-exit codes, output, and `hex start`'s `open`
+exit codes and output; `control::cli::launch::tests` pin `hex start`'s `open`
 arguments; `control::cli::completions::tests` pin the Tab completion for hex gate
 and that every shell gets a script naming the command tree, and the
 `the_cli_prints_completion_scripts` tests in `linux.rs`, macOS's `main.rs`, and
@@ -259,11 +262,11 @@ pre-skip and end trim, a video with no audio track, and a cut-short file;
 `control::cli::prepare::tests` cover the prompt's answers and that `--json`
 never asks; `local_api::discovery::tests` cover choosing an endpoint (absent,
 stale, wrong version or token) and validating the embedded ready line, and
-`waiting_for_a_process_reports_whether_it_exited` pins the process wait restart
-uses (an exited process reads as gone at once, a live one only at the
-timeout). That test runs on Linux only: macOS restarts itself and never takes
-the watch, and the Windows wait goes through a process handle, so both are
-covered only by the CI compile.
+`local_api::discovery::exit_watch_tests::waiting_for_a_process_reports_whether_it_exited`
+pins the process wait restart uses on Linux and Windows (an exited process
+reads as gone at once, a live one only at the timeout); macOS restarts itself
+and never takes the watch, so it has no such test. Check Windows runs it under
+nextest, so the handle-based wait is exercised there too.
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -284,11 +287,10 @@ shortcut, by `stop`, and by `stop --print`) before trusting it. A CLI volume
 change does not preview a tone as the window does. Onboarding
 permission prompts, calendar connection, and meeting deletion or renaming have
 no command. `hex restart`'s relaunch has no end-to-end test on any OS: the
-process wait it uses is unit-tested on Linux only
-(`waiting_for_a_process_reports_whether_it_exited`; macOS never takes the
-watch, and Windows opens a process handle instead, compiled but untested), and
-the handoff from the old process's exit to the new one's instance claim has
-only been read, so
+process wait it uses is unit-tested on Linux and Windows
+(`local_api::discovery::exit_watch_tests::waiting_for_a_process_reports_whether_it_exited`;
+macOS never takes the watch), and the handoff from the old process's exit to
+the new one's instance claim has only been read, so
 verify a Windows restart and a login-launch restart by hand before trusting
 it. Linux and Windows dictation through the CLI has not run with a
 microphone, and meeting recording through the CLI has not run on Linux or

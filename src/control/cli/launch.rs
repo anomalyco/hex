@@ -131,6 +131,14 @@ fn start_reply() -> ControlReply {
         // Ctrl-C in this terminal doesn't reach it.
         command.creation_flags(0x0000_0008 | 0x0000_0200);
     }
+    // A Windows `hex app` from a 2.3.1 install's layout starts the managed
+    // copy and exits instead of becoming Hex, so its exit is a start in
+    // progress. Asked before the spawn, because that is the launch it
+    // describes.
+    #[cfg(target_os = "windows")]
+    let legacy_handoff = crate::updater::legacy::will_take_over();
+    #[cfg(not(target_os = "windows"))]
+    let legacy_handoff = false;
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -146,7 +154,6 @@ fn start_reply() -> ControlReply {
     // keep watching for a Hex to answer after the exit; only a launch that
     // can't become one gives up, and it gets a short grace first so the
     // successor of a Hex still finishing its drain is seen if it does arrive.
-    let legacy_handoff = crate::updater::legacy::will_take_over();
     loop {
         if running() {
             return ControlReply::done("Started Hex");

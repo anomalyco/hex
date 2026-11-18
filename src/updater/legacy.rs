@@ -38,9 +38,10 @@ pub fn take_over() -> bool {
 }
 
 /// Whether this executable runs from a 2.3.1 install's layout, where a
-/// launch moves itself into the managed one and hands off to that copy
-/// instead of becoming Hex ([`take_over`]). A move that fails runs in place.
-#[cfg(not(target_os = "macos"))]
+/// Windows launch moves itself into the managed one, starts that copy and
+/// exits instead of becoming Hex ([`take_over`]). A move that fails runs in
+/// place.
+#[cfg(target_os = "windows")]
 pub fn will_take_over() -> bool {
     legacy_install().is_some()
 }
