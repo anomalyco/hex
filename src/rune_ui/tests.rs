@@ -1131,6 +1131,49 @@ fn segments_and_switch_tracks_hover_at_once() {
     }
 }
 
+/// An unset model on a catalog with a ranked pick is Hex's own automatic
+/// choice, not OpenCode's default; with no ranked model it really is
+/// OpenCode's default.
+#[test]
+fn an_unset_model_says_automatic_only_while_hex_ranks_a_model() {
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.settings.dictation_processing.modes[0]
+        .post_processing
+        .model = None;
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Automatic"), "{shown:?}");
+    assert!(!shown.iter().any(|text| text == "Default"), "{shown:?}");
+
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        element(&rt, "model-picker-option-0").label.as_deref(),
+        Some("Automatic")
+    );
+
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.models = models::Models::fixture_unranked();
+    rt.state.settings.dictation_processing.modes[0]
+        .post_processing
+        .model = None;
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Default"), "{shown:?}");
+    assert!(!shown.iter().any(|text| text == "Automatic"), "{shown:?}");
+
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        element(&rt, "model-picker-option-0").label.as_deref(),
+        Some("Use OpenCode default")
+    );
+}
+
 #[test]
 fn choosing_an_opencode_model_saves_it() {
     let mut rt = runtime("modes", true, PANE_SIZE);
@@ -1154,7 +1197,7 @@ fn choosing_an_opencode_model_saves_it() {
             .post_processing
             .model,
         None,
-        "back to the OpenCode default"
+        "back to the automatic model"
     );
 }
 

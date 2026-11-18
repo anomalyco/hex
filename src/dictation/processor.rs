@@ -554,15 +554,18 @@ impl Profiles {
             &profile.name,
             Instant::now(),
         );
+        let model = model_label(&observation);
         match &observation.fallback {
             None => tracing::info!(
                 profile = profile.name,
                 latency_ms = observation.latency_ms,
+                model = %model,
                 "dictation post-processing completed"
             ),
             Some(reason) => tracing::warn!(
                 profile = profile.name,
                 latency_ms = observation.latency_ms,
+                model = %model,
                 %reason,
                 "dictation post-processing failed; pasting the corrected transcript"
             ),
@@ -620,15 +623,18 @@ fn voice_prompt_processed(
         &profile.name,
         Instant::now(),
     );
+    let model = model_label(&observation);
     match &observation.fallback {
         None => tracing::info!(
             profile = profile.name,
             latency_ms = observation.latency_ms,
+            model = %model,
             "voice prompt completed"
         ),
         Some(reason) => tracing::warn!(
             profile = profile.name,
             latency_ms = observation.latency_ms,
+            model = %model,
             %reason,
             "voice prompt failed; pasting what the speaker dictated"
         ),
@@ -831,19 +837,64 @@ fn generate_observed(
     profile_name: &str,
     started: Instant,
 ) -> (Option<String>, ProcessingObservation) {
-    let result = generate_cancellable(prompt, model, deadline, cancelled);
-    let (text, fallback) = match result.map(|generated| generated.text) {
-        Ok(text) if !text.trim().is_empty() => (Some(text.trim().into()), None),
-        Ok(_) => (None, Some("processor returned empty text".into())),
-        Err(error) => (None, Some(error.to_string())),
+    observed(
+        generate_cancellable(prompt, model, deadline, cancelled),
+        model,
+        profile_name,
+        started.elapsed(),
+    )
+}
+
+/// The text and observation for one generation. The observation names the
+/// model that answered, or the one the request asked for when nothing did, so
+/// logs and retained events say which model rewrote the text.
+fn observed(
+    result: Result<Generated>,
+    requested: Option<&Model>,
+    profile_name: &str,
+    elapsed: Duration,
+) -> (Option<String>, ProcessingObservation) {
+    let (text, model, fallback) = match result {
+        Ok(generated) => {
+            let trimmed = generated.text.trim();
+            let text = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+            let fallback = text
+                .is_none()
+                .then(|| "processor returned empty text".to_owned());
+            (text, generated.model, fallback)
+        }
+        Err(error) => (None, requested.cloned(), Some(error.to_string())),
     };
     let observation = ProcessingObservation {
         profile: profile_name.into(),
-        latency_ms: started.elapsed().as_millis() as u64,
+        latency_ms: elapsed.as_millis() as u64,
+        model: model
+            .as_ref()
+            .map(|model| format!("{}/{}", model.provider, model.id)),
         fallback,
     };
     (text, observation)
 }
+
+/// What a processing log line names for the model that ran: the named model
+/// that answered, or on failure the one the request asked for; OpenCode's own
+/// default when no model was named and it answered; and Hex's automatic
+/// choice when no named model answered at all.
+fn model_label(observation: &ProcessingObservation) -> &str {
+    match observation.model.as_deref() {
+        Some(model) => model,
+        None if observation.fallback.is_some() => AUTOMATIC_MODEL,
+        None => OPENCODE_DEFAULT_MODEL,
+    }
+}
+
+/// What a processing log line names when the request named no model and
+/// Hex's automatic ranked choice had no model answer.
+const AUTOMATIC_MODEL: &str = "automatic";
+
+/// What a processing log line names when the request asked for no model:
+/// OpenCode picked its own default.
+const OPENCODE_DEFAULT_MODEL: &str = "opencode default";
 
 #[derive(Clone, Debug)]
 pub struct ModelChoice {
@@ -862,6 +913,13 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
+    /// Whether an unset model key gets Hex's own ranked pick instead of
+    /// OpenCode's default model. [`build_model_catalog`] sets the default
+    /// from the ranked list exactly when this is true.
+    pub fn automatic_default(&self) -> bool {
+        !self.ranked_candidates(None).is_empty()
+    }
+
     pub fn recommended_variant_for(&self, key: &str) -> Option<&str> {
         let choice = self.models.iter().find(|choice| choice.key == key)?;
         recommended_variant_for_choice(choice)
@@ -1182,6 +1240,7 @@ impl Processed {
             .get_or_insert_with(|| ProcessingObservation {
                 profile: "Custom transformations".into(),
                 latency_ms: 0,
+                model: None,
                 fallback: None,
             });
         observation.latency_ms = observation
@@ -1500,6 +1559,7 @@ mod tests {
             catalog.default_key.as_deref(),
             Some("example/rewrite-careful")
         );
+        assert!(!catalog.automatic_default());
         for (choice, expected_id) in catalog
             .models
             .iter()
@@ -2452,6 +2512,7 @@ mod tests {
             catalog.default_name.as_deref(),
             Some("Gemini 3.1 Flash Lite")
         );
+        assert!(catalog.automatic_default());
         assert_eq!(catalog.default_variant.as_deref(), Some("minimal"));
         assert_eq!(
             catalog
@@ -2554,6 +2615,115 @@ mod tests {
                 "id": "claude-haiku-4-5"
             })
         );
+    }
+
+    /// A processing observation names the model that answered, so the log
+    /// line and the retained event say which one rewrote the text.
+    #[test]
+    fn a_processing_observation_names_the_model_that_answered() {
+        let model = Model {
+            provider: "anthropic".into(),
+            id: "claude-haiku-4-5".into(),
+            variant: None,
+        };
+
+        let (text, observation) = observed(
+            Ok(Generated {
+                text: "  rewritten  ".into(),
+                model: Some(model.clone()),
+            }),
+            None,
+            "Chat",
+            Duration::from_millis(120),
+        );
+        assert_eq!(text.as_deref(), Some("rewritten"));
+        assert_eq!(
+            observation.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(observation.fallback, None);
+        assert_eq!(observation.latency_ms, 120);
+
+        // OpenCode's own default answered: there is no model to name.
+        let (_, observation) = observed(
+            Ok(Generated {
+                text: "rewritten".into(),
+                model: None,
+            }),
+            None,
+            "Chat",
+            Duration::ZERO,
+        );
+        assert_eq!(observation.model, None);
+
+        // Nothing answered: the observation still names the model asked for.
+        let (text, observation) =
+            observed(Err(eyre!("boom")), Some(&model), "Chat", Duration::ZERO);
+        assert_eq!(text, None);
+        assert_eq!(
+            observation.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(observation.fallback.as_deref(), Some("boom"));
+
+        // An empty answer still names the model that made it.
+        let (text, observation) = observed(
+            Ok(Generated {
+                text: "   ".into(),
+                model: Some(model),
+            }),
+            None,
+            "Chat",
+            Duration::ZERO,
+        );
+        assert_eq!(text, None);
+        assert_eq!(
+            observation.model.as_deref(),
+            Some("anthropic/claude-haiku-4-5")
+        );
+        assert_eq!(
+            observation.fallback.as_deref(),
+            Some("processor returned empty text")
+        );
+    }
+
+    /// A failure with no named model leaves the observation without one, so
+    /// the log line must not claim OpenCode's default model ran.
+    #[test]
+    fn a_processing_log_line_names_the_model_or_its_automatic_choice() {
+        let model = Model {
+            provider: "anthropic".into(),
+            id: "claude-haiku-4-5".into(),
+            variant: None,
+        };
+        let answered = |model| {
+            observed(
+                Ok(Generated {
+                    text: "rewritten".into(),
+                    model,
+                }),
+                None,
+                "Chat",
+                Duration::ZERO,
+            )
+            .1
+        };
+
+        assert_eq!(
+            model_label(&answered(Some(model.clone()))),
+            "anthropic/claude-haiku-4-5"
+        );
+        let failed = observed(Err(eyre!("boom")), Some(&model), "Chat", Duration::ZERO).1;
+        assert_eq!(model_label(&failed), "anthropic/claude-haiku-4-5");
+        assert_eq!(model_label(&answered(None)), "opencode default");
+        let automatic = observed(
+            Err(eyre!("OpenCode isn't running")),
+            None,
+            "Chat",
+            Duration::ZERO,
+        )
+        .1;
+        assert_eq!(model_label(&automatic), "automatic");
     }
 
     /// A ranked list read while OpenCode was still loading can name models

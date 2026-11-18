@@ -1416,7 +1416,7 @@ Selected mode                            // replaces Global's rewrite and transf
   -> Global's corrections, then the mode's  // every OS
   -> Labs > Rewrite by voice's phrase          // Labs off, or no phrase, processes as before
      -> one spoken instruction replaces the rewrite, with the mode's model and deadline (labs.md)
-  -> OpenCode transformation             // optional provider-backed rewrite
+  -> OpenCode transformation             // optional provider-backed rewrite; an unset model is Hex's ranked pick, shown Automatic
   -> Transformations                     // ordered text chain
   -> Paste or Send
 

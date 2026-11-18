@@ -496,6 +496,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcut", "Raccourci"),
     ("OpenCode", "OpenCode"),
     ("Default", "Par défaut"),
+    ("Automatic", "Automatique"),
     ("Last dictation failed: {}", "La dernière dictée a échoué : {}"),
     ("Built-in mic is off with the lid closed. Open the lid or connect a mic.", "Le micro intégré est éteint quand l'écran est rabattu. Ouvrez l'écran ou branchez un micro."),
     ("No microphone is available. Connect a microphone.", "Aucun micro n'est disponible. Branchez un micro."),

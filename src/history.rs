@@ -419,6 +419,9 @@ impl HistoryStore {
             processing: draft.processing.map(|processing| HistoryProcessing {
                 profile: truncated(&processing.profile, MAX_LABEL_BYTES),
                 latency_ms: processing.latency_ms,
+                model: processing
+                    .model
+                    .map(|model| truncated(&model, MAX_LABEL_BYTES)),
                 fallback: processing
                     .fallback
                     .map(|fallback| truncated(&fallback, MAX_FALLBACK_BYTES)),
@@ -901,6 +904,7 @@ mod tests {
             processing: Some(HistoryProcessing {
                 profile: "Messages".into(),
                 latency_ms: 120,
+                model: Some("anthropic/claude-haiku-4-5".into()),
                 fallback: None,
             }),
             audio_ms: 900,

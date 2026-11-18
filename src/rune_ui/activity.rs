@@ -80,6 +80,7 @@ impl ActivityPane {
                 processing: Some(DictationProcessing {
                     profile: "Chat".into(),
                     latency_ms: 910,
+                    model: Some("anthropic/claude-haiku-4-5".into()),
                     fallback: None,
                 }),
                 reason: None,
