@@ -905,8 +905,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   ├── The width leads the height; the actions follow in order, each
      │   │   only as far as the outline has uncovered it, and leave together.
      │   │   A pointer that comes and goes mid-way turns the surface round
-     │   │   from where it is, at the speed it has. Stop takes a press only
-     │   │   once at least half of it shows
+     │   │   from where it is: its speed bends over a few frames, never
+     │   │   dropping in one. Stop takes a press only once at least half of
+     │   │   it shows
      │   └── Checks: stage.rs unit tests; the replays in replay_fixture.rs
      │       (`the_panel_opens_width_first_and_its_rows_follow_in_order`,
      │       `an_interrupted_panel_turns_round_without_a_stop_or_a_jump`,
@@ -931,10 +932,38 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   `stop_says_stopping_in_place_and_the_field_cools`, and
      │   `HEX_HUD_REPLAY=<dir> cargo test --bin hex hud_replay_frames` for
      │   every frame of the whole path (offscreen Rune).
-     │   Not done: a title that changes (“Transcribing…” to the meeting's
-     │   name, then the notes' title) is replaced in one frame, and Close, a
-     │   refused start, Not now and the offer's timeout hide the surface in
-     │   one frame.
+     │   ├── A title or summary whose words change lets the old words fade
+     │   │   out before the new ones fade in, in the same line. Titles that
+     │   │   arrive while the old words are still going are skipped: only
+     │   │   the last is drawn, never two at once. Check:
+     │   │   `several_titles_in_quick_succession_show_one_at_a_time`
+     │   ├── Once capture has ended the time holds and the field only cools,
+     │   │   whatever the meters read. Check:
+     │   │   `after_capture_ends_the_time_holds_and_the_field_only_cools`
+     │   └── Not done: the length can change by a second, in one frame, when
+     │       the finished meeting's own length replaces the recording's; a
+     │       summary line's first words wipe on but its removal is one frame.
+     ├── Closing any capsule (✕, Not now, the offer's timeout, a refused
+     │   start, a withdrawn reminder or call-ended notice, the indicator
+     │   turned off) -> it is closed at once: nothing in it takes input and
+     │   no command can come from it. What it showed fades, softens and
+     │   shrinks 4% toward its saved corner over about a quarter of a second,
+     │   and its window hides only then. A surface refused mid-contraction
+     │   carries on contracting as it goes and never says “Starting…” on
+     │   the way out. A capsule shown from hidden arrives the same way in
+     │   reverse; one shown while the last is still leaving carries on from
+     │   the strength the surface has, with the new contents (it is not a
+     │   crossfade of two surfaces). Notes that arrive for a closed meeting
+     │   change nothing. Reduce Motion fades without shrinking or softening.
+     │   Checks: exits_tests.rs
+     │   (`not_now_and_a_timeout_let_the_offer_go_over_several_frames`,
+     │   `a_refused_start_goes_where_it_is_without_saying_starting`,
+     │   `closing_before_the_notes_arrive_keeps_what_it_showed_until_it_has_gone`,
+     │   `an_exit_interrupted_by_another_offer_turns_round_and_stays_shown`,
+     │   `what_is_leaving_takes_no_input`). Offscreen Rune; the deferred
+     │   window hide, and click-through while a capsule leaves, are not
+     │   verified in a native window. On Windows the window keeps the size
+     │   it had while the capsule leaves.
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
      │   its centre and saves recording_indicator_corner (window settings too)
      ├── Copy new -> copies the turns not yet copied or pasted, through
