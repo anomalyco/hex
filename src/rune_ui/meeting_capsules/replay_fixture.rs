@@ -795,7 +795,8 @@ fn hud_replay_frames() {
         let target = offscreen::target(&gpu.device, w, h);
         let mut ink = waveform::Ink::default();
         let shots = play(replay, |frame, rt, _| {
-            let pixels = if rt.state.kind.is_some() {
+            // A closed capsule is painted until its window is asked to hide.
+            let pixels = if rt.state.drawn().is_some() {
                 paint_recording(&gpu, &mut renderer, &target, rt, &mut ink)
             } else {
                 vec![0; (w * h * 4) as usize]

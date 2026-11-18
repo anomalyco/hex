@@ -579,6 +579,57 @@ mod tests {
         assert!(stage.resting());
     }
 
+    /// The first candidate handed a reversed track straight to its spring:
+    /// an edge opening at 650 pt/s was closing a frame later. Its speed is
+    /// continuous now and so is its acceleration.
+    #[test]
+    fn a_retarget_in_flight_bends_the_speed_and_a_launch_is_unchanged() {
+        let spring = Spring::new(0.42, 0.0);
+        let dt = 1.0 / 60.0;
+        let mut track = Track::at(36.0);
+        // From rest the track is its spring, to the last bit.
+        track.step(219.0, spring, dt, 0.01);
+        let launch = track.v;
+        let (x, v) = spring.sample(36.0, 0.0, 219.0, dt);
+        assert!((track.x - x).abs() < 0.01 && (track.v - v).abs() < 0.5);
+        for _ in 0..7 {
+            track.step(219.0, spring, dt, 0.01);
+        }
+        let mut speeds = vec![track.v];
+        for _ in 0..40 {
+            track.step(36.0, spring, dt, 0.01);
+            speeds.push(track.v);
+        }
+        assert!(speeds[0] > 600.0, "{}", speeds[0]);
+        // The frame after the reversal it still travels outward.
+        assert!(speeds[1] > 0.0 && speeds[1] < speeds[0], "{speeds:?}");
+        // No frame changes its speed by more than a launch from rest does.
+        let steepest = speeds
+            .windows(2)
+            .map(|v| (v[1] - v[0]).abs())
+            .fold(0.0, f32::max);
+        assert!(steepest < launch, "{steepest} against a launch of {launch}");
+        // It turns once and closes.
+        let turn = speeds.iter().position(|v| *v < 0.0).unwrap();
+        assert!(speeds[turn..].iter().all(|v| *v <= 0.0));
+        for _ in 0..90 {
+            track.step(36.0, spring, dt, 0.01);
+        }
+        assert_eq!(track, Track::at(36.0));
+
+        // A track that has all but stopped has no momentum to bend: it
+        // leaves for a new target as it would from rest.
+        let mut slow = Track::at(36.0);
+        for _ in 0..20 {
+            slow.step(40.0, spring, dt, 0.0001);
+        }
+        assert!(slow.v.abs() < 5.0 && slow != Track::at(40.0), "{slow:?}");
+        let before = slow;
+        slow.step(219.0, spring, dt, 0.01);
+        let (x, _) = spring.sample(before.x, before.v, 219.0, dt);
+        assert!((slow.x - x).abs() < 0.05, "{} against {x}", slow.x);
+    }
+
     #[test]
     fn a_moving_edge_fades_what_it_crosses_and_a_resting_one_cuts_nothing() {
         let mut stage = Stage::default();

@@ -16,6 +16,8 @@ const SCALE: f32 = 0.96;
 const BLUR: f32 = 3.0;
 /// A line replaced in place softens this much.
 const LINE_BLUR: f32 = 2.0;
+/// Words this faint no longer show.
+const GONE: f32 = 0.02;
 
 #[derive(Default)]
 pub(super) struct Surface {
@@ -116,9 +118,12 @@ impl<T: PartialEq + Clone> Roll<T> {
             (false, true) => ENTER,
             (false, false) => EXIT,
         };
-        let moving = self.track.step(f32::from(same), spring, dt, 0.002);
-        if !same && self.track == Track::at(0.0) {
+        let moving = self.track.step(f32::from(same), spring, dt, 0.01);
+        // The old words no longer show: the new ones start from nothing,
+        // without waiting out the spring's tail over an empty line.
+        if !same && self.track.x < GONE {
             self.shown = Some(wanted);
+            self.track = Track::at(0.0);
             return true;
         }
         moving
