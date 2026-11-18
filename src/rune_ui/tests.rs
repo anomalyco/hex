@@ -1574,6 +1574,25 @@ fn the_stats_dialog_fits_the_smallest_window_with_a_scrolling_body() {
     );
 }
 
+/// At the default window the sections fit, so the dialog draws no scroll body
+/// at all and takes the sections' own height.
+#[test]
+fn the_stats_dialog_has_no_scroll_body_when_its_sections_fit() {
+    let rt = runtime("history-stats", true, PANE_SIZE);
+    assert!(
+        rt.find("history-stats-body-scroll-area").is_none(),
+        "no scroll body"
+    );
+    let (body, _) = rt.presented("history-stats-body").expect("the body");
+    let (sections, _) = rt
+        .presented("history-stats-sections")
+        .expect("the sections");
+    assert!(
+        sections[3] <= body[3],
+        "the sections fit the body: {sections:?} in {body:?}"
+    );
+}
+
 /// History, settled.
 fn history_multi() -> Runtime<Ui> {
     let mut rt = runtime("history", true, PANE_SIZE);

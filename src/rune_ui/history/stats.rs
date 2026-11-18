@@ -4,7 +4,7 @@
 //! and each mode's Output time. Sections with nothing to show are left out,
 //! and the body scrolls while the window is short.
 
-use rune::{Align, El, col, el, row, text};
+use rune::{Align, Cx, El, col, el, row, text};
 use rune_kit::Progress;
 
 use super::super::Ui;
@@ -12,6 +12,7 @@ use super::super::controls::{
     ButtonKind, Paint, STATS_NUMBER, button, modal_scrim_transition, modal_transition,
 };
 use super::super::lists::section_label;
+use crate::desktop::i18n::numbers;
 use crate::desktop::i18n::{tr, tr_named};
 use crate::history::stats::{DayCount, HistoryStats, ProfileOutputTime};
 
@@ -20,9 +21,10 @@ const STATS_WIDTH: f32 = 460.0;
 const PADDING: f32 = 18.0;
 /// The least clear space the dialog leaves above and below itself.
 const DIALOG_MARGIN: f32 = 24.0;
-/// Everything in the panel but its body: both paddings, the title's line, the
-/// gaps on either side of the body, and the footer's button.
-const PANEL_CHROME_HEIGHT: f32 = PADDING + 20.0 + 16.0 + 16.0 + 30.0 + 14.0;
+/// A window's first frame has no measured title or footer yet; these stand
+/// in until they are.
+const TITLE_HEIGHT: f32 = 20.0;
+const FOOTER_HEIGHT: f32 = 30.0;
 /// A scrolling body never shrinks below this, however short the window.
 const MIN_BODY_HEIGHT: f32 = 120.0;
 /// The daily chart's height and the gap between its day bars.
@@ -34,16 +36,11 @@ const COUNT_WIDTH: f32 = 34.0;
 /// Room beside the body's scroll bar.
 const SCROLL_BAR_INSET: f32 = 12.0;
 
-/// The stats dialog's scrim and panel, while its button and stats show.
-/// `window_height` is the window the panel centers in, which bounds its body
-/// so the title and Close stay put, and `content_height` is the body's own
-/// height from the last layout, so a short body doesn't leave blank space.
-pub(super) fn modal(
-    ui: &Ui,
-    p: Paint,
-    window_height: f32,
-    content_height: Option<f32>,
-) -> Option<[El; 2]> {
+/// The stats dialog's scrim and panel, while its button and stats show. Its
+/// body scrolls while the window is too short for the sections, and takes
+/// the sections' own height when they fit, so the title and Close stay put
+/// without a scroll bar or a gap.
+pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
     if !ui.history.stats_open || !ui.settings.labs.history_stats {
         return None;
     }
@@ -53,30 +50,54 @@ pub(super) fn modal(
         .as_ref()
         .filter(|stats| stats.dictations > 0)?;
     let c = &p.k.c;
-    let mut body = col()
-        .key("history-stats-sections")
-        .w_full()
-        .gap(16.0)
-        .pr(SCROLL_BAR_INSET)
-        .child(tiles(p, stats));
+    // The window is the layer the panel centers in; the title and footer are
+    // measured so their real heights set the body's room.
+    let window_height = cx
+        .layout_size("history-stats-layer")
+        .map_or(super::super::MIN_WINDOW_SIZE.1, |size| size[1]);
+    let title_height = cx
+        .layout_size("history-stats-title")
+        .map_or(TITLE_HEIGHT, |size| size[1]);
+    let footer_height = cx
+        .layout_size("history-stats-footer")
+        .map_or(FOOTER_HEIGHT, |size| size[1]);
+    let content_height = cx.layout_size("history-stats-sections").map(|size| size[1]);
+    let chrome = PADDING + title_height + 16.0 + 16.0 + footer_height + 14.0;
+    let room = (window_height - 2.0 * DIALOG_MARGIN - chrome).max(MIN_BODY_HEIGHT);
+    let (fade_top, fade_bottom) = super::super::SCROLL_FADE;
+    // The measured sections set the mode; the first frame, with no measure
+    // yet, draws them whole and settles into scrolling if they don't fit.
+    let scrolling = content_height.is_some_and(|height| height + fade_top + fade_bottom > room);
+    let mut sections = col().key("history-stats-sections").w_full().gap(16.0);
+    if scrolling {
+        // Keep the bar off the counts and timings.
+        sections = sections.pr(SCROLL_BAR_INSET);
+    }
+    let mut sections = sections.child(tiles(p, stats));
     if let Some(daily) = daily(p, stats) {
-        body = body.child(daily);
+        sections = sections.child(daily);
     }
     if let Some(apps) = top_apps(p, stats) {
-        body = body.child(apps);
+        sections = sections.child(apps);
     }
-    body = body.child(changed(p, stats));
+    sections = sections.child(changed(p, stats));
     if let Some(times) = output_time(p, stats) {
-        body = body.child(times);
+        sections = sections.child(times);
     }
-    let body = col()
-        .key("history-stats-body-frame")
-        .h(body_height(
-            window_height,
-            content_height,
-            super::super::SCROLL_FADE,
-        ))
-        .child(super::super::scroll_body(p.k, "history-stats-body", body));
+    let body = if scrolling {
+        col()
+            .key("history-stats-body-frame")
+            .h(room)
+            .child(super::super::scroll_body(
+                p.k,
+                "history-stats-body",
+                sections,
+            ))
+    } else {
+        // No viewport at all: no scroll bar, no fade padding, and the
+        // counts end on the Close button's edge.
+        col().key("history-stats-body").child(sections)
+    };
     let mut panel = col()
         .key("history-stats-dialog")
         .role("dialog")
@@ -93,13 +114,13 @@ pub(super) fn modal(
         .on_press(|_: &mut Ui| {})
         .child(
             text(tr("Dictation stats"))
-                .key("title")
+                .key("history-stats-title")
                 .font(p.k.ty.body_medium)
                 .color(p.text()),
         )
         .child(body)
         .child(
-            row().key("footer").justify_end().child(
+            row().key("history-stats-footer").justify_end().child(
                 button(
                     p,
                     "history-stats-close",
@@ -134,16 +155,6 @@ pub(super) fn modal(
     ])
 }
 
-/// How tall the scrolling body is in a window `window_height` tall: its
-/// measured content (plus the scroll body's edge fades), never past the
-/// window's own room, and never less than [`MIN_BODY_HEIGHT`].
-fn body_height(window_height: f32, content_height: Option<f32>, fades: (f32, f32)) -> f32 {
-    let room = (window_height - 2.0 * DIALOG_MARGIN - PANEL_CHROME_HEIGHT).max(MIN_BODY_HEIGHT);
-    content_height.map_or(room, |height| {
-        (height + fades.0 + fades.1).min(room).max(MIN_BODY_HEIGHT)
-    })
-}
-
 /// Closes the stats dialog, from its button, Escape, or the scrim.
 pub(crate) fn close_stats(ui: &mut Ui) {
     ui.history.stats_open = false;
@@ -153,14 +164,18 @@ pub(crate) fn close_stats(ui: &mut Ui) {
 fn tiles(p: Paint, stats: &HistoryStats) -> El {
     let wpm = stats
         .words_per_minute
-        .map_or_else(|| "–".to_owned(), |wpm| grouped(u64::from(wpm)));
+        .map_or_else(|| "–".to_owned(), |wpm| numbers::grouped(u64::from(wpm)));
     let values = [
-        ("dictations", grouped(stats.dictations), tr("Dictations")),
-        ("words", grouped(stats.words), tr("Words")),
+        (
+            "dictations",
+            numbers::grouped(stats.dictations),
+            tr("Dictations"),
+        ),
+        ("words", numbers::grouped(stats.words), tr("Words")),
         ("wpm", wpm, tr("Words per minute")),
         (
             "streak",
-            grouped(u64::from(stats.streak_days)),
+            numbers::grouped(u64::from(stats.streak_days)),
             tr("Daily streak"),
         ),
     ];
@@ -169,19 +184,6 @@ fn tiles(p: Paint, stats: &HistoryStats) -> El {
         .fold(row().key("tiles").w_full().gap(8.0), |tiles, value| {
             tiles.child(tile(p, value.0, &value.1, value.2))
         })
-}
-
-/// A count with thousands grouped by commas: `128402` is `128,402`.
-fn grouped(value: u64) -> String {
-    let digits = value.to_string();
-    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.char_indices() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            grouped.push(',');
-        }
-        grouped.push(digit);
-    }
-    grouped
 }
 
 /// One tile: the value over its label, on a raised surface.
@@ -222,8 +224,8 @@ fn daily(p: Paint, stats: &HistoryStats) -> Option<El> {
         .filter(|peak| *peak > 0)?;
     let today = stats.daily.last().map(|day| day.day);
     let today_count = stats.daily.last().map_or(0, |day| day.dictations);
-    let today_count = grouped(today_count);
-    let peak_count = grouped(peak);
+    let today_count = numbers::grouped(today_count);
+    let peak_count = numbers::grouped(peak);
     let label = tr_named(
         "Dictations per day: {today} today, {busiest} on the busiest day",
         &[("today", &today_count), ("busiest", &peak_count)],
@@ -330,7 +332,7 @@ fn top_apps(p: Paint, stats: &HistoryStats) -> Option<El> {
                             .a11y_hidden(),
                     )
                     .child(
-                        text(grouped(app.dictations))
+                        text(numbers::grouped(app.dictations))
                             .key("count")
                             .font(p.k.ty.small)
                             .color(p.muted())
@@ -428,7 +430,7 @@ fn timing(profile: &ProfileOutputTime) -> String {
 /// `0.9`, or `0,9` in the languages that write a decimal comma.
 fn seconds(milliseconds: u64) -> String {
     let seconds = format!("{:.1}", milliseconds as f64 / 1000.0);
-    if crate::desktop::i18n::decimal_comma() {
+    if crate::desktop::i18n::numbers::decimal_comma() {
         seconds.replace('.', ",")
     } else {
         seconds

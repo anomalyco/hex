@@ -16,7 +16,7 @@ mod history;
 mod labs;
 mod meetings;
 mod menu;
-mod numbers;
+pub(crate) mod numbers;
 mod onboarding;
 mod portuguese;
 mod russian;
@@ -321,10 +321,6 @@ pub(crate) fn tr(english: &str) -> &str {
 pub(crate) fn english() -> bool {
     current() == ENGLISH
 }
-
-/// Whether the active language writes a decimal fraction with a comma:
-/// French, German, Portuguese, Russian, and Ukrainian.
-pub(crate) use numbers::decimal_comma;
 
 /// Translate a `{}` template and substitute the dynamic value, keeping
 /// language-specific word order intact.
@@ -1529,24 +1525,6 @@ mod tests {
         );
         assert_eq!(column_for_code("ru"), super::RUSSIAN_COLUMN);
         assert!(LANGUAGE_CHOICES.contains(&(Some("ru"), "Русский")));
-    }
-
-    #[test]
-    fn decimal_comma_follows_the_interface_language() {
-        use super::{column_for_code, decimal_comma, set_current};
-        for (code, comma) in [
-            ("de", true),
-            ("fr", true),
-            ("pt", true),
-            ("ru", true),
-            ("uk", true),
-            ("en", false),
-            ("ja", false),
-            ("zh", false),
-        ] {
-            set_current(column_for_code(code));
-            assert_eq!(decimal_comma(), comma, "{code}");
-        }
     }
 
     #[test]

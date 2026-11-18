@@ -715,18 +715,8 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
-    if ui.history.stats_open {
-        // The dialog bounds its body by the window it centers in, which is
-        // the layer's height, and sizes it to the sections' own height so a
-        // short dialog leaves no blank space. The first frame has neither
-        // rect yet, so the window's least height and the full room stand in.
-        let window_height = cx
-            .layout_size("history-stats-layer")
-            .map_or(super::MIN_WINDOW_SIZE.1, |size| size[1]);
-        let content_height = cx.layout_size("history-stats-sections").map(|size| size[1]);
-        if let Some(modal) = stats::modal(ui, p, window_height, content_height) {
-            layer.extend(modal);
-        }
+    if let Some(modal) = stats::modal(ui, p, cx) {
+        layer.extend(modal);
     }
     (
         actions,
