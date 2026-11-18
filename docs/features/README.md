@@ -1646,7 +1646,7 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
 │   │   └── macOS: with Release when idle off, locking the screen or sleeping the
 │   │       display releases that microphone, so Hex Microphone pauses until wake or unlock
-│   │       (dictate.warm-away); it resumes with the next capture
+│   │       (dictate.warm-away)
 │   ├── Lock-free ring -> 48 kHz virtual sink (macOS IOProc; Linux 11 ms blocks into a one-page pipe) -> Raised-cosine fade on intentional hold
 │   │   └── Not dictating -> bit-exact pass-through; non-48 kHz inputs resample continuously
 │   └── Ring underflows/overflows -> process.log each minute while an app reads it, and on sink stop
