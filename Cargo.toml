@@ -133,7 +133,7 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 wayland-scanner = "0.31.11"
 x11-clipboard = "0.9.3"
-x11rb = { version = "0.14.0", features = ["xkb", "xtest"] }
+x11rb = { version = "0.14.0", features = ["xkb", "xtest", "randr"] }
 # Wayland paste reads the compositor's keymap to send the paste chord on the
 # key each layout puts the letter on (`linux/remote_desktop/keymap.rs`). Rune
 # already links libxkbcommon on Linux, so this adds no crate to Cargo.lock and
