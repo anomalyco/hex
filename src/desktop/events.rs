@@ -137,6 +137,11 @@ pub enum DictationPhase {
 pub struct DictationProcessing {
     pub profile: String,
     pub latency_ms: u64,
+    /// The OpenCode rewrite model this processing ran against, as
+    /// `provider/id`; absent for OpenCode's own default model and for events
+    /// written before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
 }
@@ -653,6 +658,7 @@ mod tests {
             processing: Some(DictationProcessing {
                 profile: "slack".into(),
                 latency_ms: 321,
+                model: Some("anthropic/claude-haiku-4-5".into()),
                 fallback: Some("deadline exceeded".into()),
             }),
             reason: None,
@@ -667,11 +673,29 @@ mod tests {
                 processing: Some(DictationProcessing {
                     profile,
                     latency_ms: 321,
+                    model: Some(model),
                     fallback: Some(fallback),
                 }),
                 ..
-            } if profile == "slack" && fallback == "deadline exceeded"
+            } if profile == "slack"
+                && model == "anthropic/claude-haiku-4-5"
+                && fallback == "deadline exceeded"
         ));
+    }
+
+    /// Events and History entries written before the model was recorded still
+    /// decode, and name no model.
+    #[test]
+    fn dictation_processing_without_a_model_still_decodes() {
+        let decoded: DictationProcessing =
+            serde_json::from_str(r#"{"profile":"slack","latency_ms":321}"#).unwrap();
+
+        assert_eq!(decoded.model, None);
+        assert_eq!(decoded.fallback, None);
+        assert_eq!(
+            serde_json::to_string(&decoded).unwrap(),
+            r#"{"profile":"slack","latency_ms":321}"#
+        );
     }
 
     #[test]

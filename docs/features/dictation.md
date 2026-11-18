@@ -572,9 +572,18 @@ A dictation's OpenCode rewrite or voice prompt with no chosen model walks Hex's
 ranked fast models: the list is cached per service, any one failing drops the
 cache (the next request reads OpenCode's catalog again), and when every ranked
 model fails OpenCode's own default model answers, so a list read while OpenCode
-was still loading no longer fails every request until a restart (#1123). Check:
-`stale_ranked_models_fall_back_to_the_default_model` in
-[dictation/processor.rs](../../src/dictation/processor.rs).
+was still loading no longer fails every request until a restart (#1123). While
+that list has a model, the mode's model row and the picker's unset entry say
+Automatic (the entry keeps the model's name); only with no ranked model listed
+do they say Default and Use OpenCode default, because then OpenCode's own
+default answers. The "dictation post-processing completed" and "…failed" log
+lines, and the processing observation in `live.ndjson` and History, name the
+model the request ran against, as `provider/id` or `opencode default`. Checks:
+`stale_ranked_models_fall_back_to_the_default_model`,
+`a_processing_observation_names_the_model_that_answered`, and
+`an_unset_model_on_a_ranked_catalog_is_automatic` in
+[dictation/processor.rs](../../src/dictation/processor.rs) and
+[desktop/opencode_catalog.rs](../../src/desktop/opencode_catalog.rs).
 
 ### Terminal Paste Shortcut (Labs, Windows and Linux)
 

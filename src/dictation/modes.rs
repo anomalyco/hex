@@ -138,6 +138,7 @@ pub fn history_draft(
             crate::history::HistoryProcessing {
                 profile: processing.profile.clone(),
                 latency_ms: processing.latency_ms,
+                model: processing.model.clone(),
                 fallback: processing.fallback.clone(),
             }
         }),

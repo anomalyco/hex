@@ -300,6 +300,7 @@ impl HistoryPane {
         rewritten.processing = Some(crate::desktop::events::DictationProcessing {
             profile: "Chat".into(),
             latency_ms: 910,
+            model: Some("anthropic/claude-haiku-4-5".into()),
             fallback: None,
         });
         Self {

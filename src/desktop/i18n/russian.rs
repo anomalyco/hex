@@ -493,6 +493,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcut", "Сочетание клавиш"),
     ("OpenCode", "OpenCode"),
     ("Default", "По умолчанию"),
+    ("Automatic", "Автоматически"),
     ("Last dictation failed: {}", "Последняя диктовка не удалась: {}"),
     ("Built-in mic is off with the lid closed. Open the lid or connect a mic.", "Встроенный микрофон выключен, пока крышка закрыта. Откройте крышку или подключите микрофон."),
     ("No microphone is available. Connect a microphone.", "Нет доступного микрофона. Подключите микрофон."),
