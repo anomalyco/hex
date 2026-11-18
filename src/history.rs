@@ -4,9 +4,11 @@
 //! History is a product record, deliberately separate from the diagnostic
 //! Activity event stream. Entries hold text and bounded metadata; audio is
 //! kept only while Labs › Keep recordings is on ([`recordings`]), as a file
-//! per entry that follows the entry's retention plus its own byte cap. Every
-//! retention choice remains subject to hard entry and byte caps, writes are
-//! atomic, and files are owner-only.
+//! per entry that follows the entry's retention plus its own byte cap. Labs ›
+//! Yearly stats keeps a separate daily rollup ([`usage`]) with counts but no
+//! text, so Dictation stats can outlive the retention window. Every retention
+//! choice remains subject to hard entry and byte caps, writes are atomic, and
+//! files are owner-only.
 
 use std::fs;
 use std::io::{self, Write};
@@ -23,6 +25,7 @@ pub mod captures;
 pub mod playback;
 pub mod recordings;
 pub mod stats;
+pub mod usage;
 pub mod versions;
 
 pub use recordings::Recording;
@@ -273,6 +276,8 @@ pub struct HistoryStore {
     path: PathBuf,
     /// Labs › Keep recordings' audio, one file per entry.
     recordings: PathBuf,
+    /// Labs › Yearly stats' daily rollup, beside the store.
+    usage: PathBuf,
     recording_cap: u64,
     entries: Vec<HistoryEntry>,
     next_id: u64,
@@ -301,6 +306,7 @@ impl HistoryStore {
     pub fn open(path: PathBuf, retention: HistoryRetention, now_ms: u64) -> Self {
         let mut store = Self {
             recordings: recordings::directory(&path),
+            usage: usage::path(&path),
             recording_cap: recordings::MAX_RECORDING_BYTES,
             path,
             entries: Vec::new(),
@@ -399,6 +405,8 @@ impl HistoryStore {
         if self.retention.is_off() {
             return Ok(None);
         }
+        let words = draft.final_text.split_whitespace().count() as u64;
+        let audio_ms = draft.audio_ms;
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
         let recording_bytes = draft.recording.as_ref().map_or(0, |recording| {
@@ -437,6 +445,14 @@ impl HistoryStore {
         });
         self.prune(now_ms);
         self.persist()?;
+        // Labs › Yearly stats: a daily rollup that outlives retention. It
+        // holds no text or applications, and never fails a record: capture
+        // and paste never wait on this file.
+        if crate::labs::yearly_stats()
+            && let Err(error) = usage::count(&self.usage, now_ms, words, audio_ms)
+        {
+            tracing::warn!(%error, "could not record the usage rollup");
+        }
         Ok(Some(id))
     }
 
@@ -550,17 +566,17 @@ impl HistoryStore {
             .find_map(|entry| recordings::saved(&self.recordings, entry))
     }
 
-    /// Delete every entry. A failed save keeps them, so the clear can be
-    /// retried.
+    /// Delete every entry, and the Labs › Yearly stats rollup with them. A
+    /// failed save keeps the entries, so the clear can be retried.
     pub fn clear(&mut self) -> io::Result<()> {
-        if self.entries.is_empty() && !self.prune_pending {
-            return Ok(());
+        if !self.entries.is_empty() || self.prune_pending {
+            let entries = std::mem::take(&mut self.entries);
+            if let Err(error) = self.persist() {
+                self.entries = entries;
+                return Err(error);
+            }
         }
-        let entries = std::mem::take(&mut self.entries);
-        if let Err(error) = self.persist() {
-            self.entries = entries;
-            return Err(error);
-        }
+        usage::clear(&self.usage);
         Ok(())
     }
 
@@ -582,6 +598,21 @@ impl HistoryStore {
     /// All entries, newest first.
     pub fn entries(&self) -> impl Iterator<Item = &HistoryEntry> {
         self.entries.iter().rev()
+    }
+
+    /// Where Labs › Yearly stats keeps its daily rollup.
+    pub fn usage_path(&self) -> &std::path::Path {
+        &self.usage
+    }
+
+    /// The daily rollup, bounded to its most recent days.
+    pub fn usage(&self) -> usage::Usage {
+        self.usage_at(now_ms())
+    }
+
+    /// [`Self::usage`] at an explicit time, whose local day bounds the days.
+    pub fn usage_at(&self, now_ms: u64) -> usage::Usage {
+        usage::Usage::load(self.usage_path(), stats::local_day(now_ms))
     }
 
     #[cfg(test)]
@@ -798,6 +829,12 @@ impl History {
 
     pub fn recording_path(&self, id: u64) -> Option<PathBuf> {
         self.synced().recording_path(id)
+    }
+
+    /// Labs › Yearly stats' daily rollup, read from disk (the caller gates
+    /// it on the lab).
+    pub fn usage(&self) -> usage::Usage {
+        self.synced().usage()
     }
 
     /// Entry `id`'s kept recording, when the file is still there
@@ -1572,6 +1609,64 @@ mod tests {
         assert_eq!(store.len(), 0);
         let reopened = HistoryStore::open(path, HistoryRetention::Week, 3_000);
         assert_eq!(reopened.len(), 0);
+    }
+
+    /// Turns Labs › Yearly stats on for one test, and back off after.
+    struct YearlyStats;
+
+    impl YearlyStats {
+        fn on() -> Self {
+            crate::labs::apply(&crate::app_settings::LabsSettings {
+                yearly_stats: true,
+                ..crate::app_settings::LabsSettings::default()
+            });
+            Self
+        }
+    }
+
+    impl Drop for YearlyStats {
+        fn drop(&mut self) {
+            crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        }
+    }
+
+    #[test]
+    fn yearly_stats_rolls_every_recorded_day_up_and_clear_removes_it() {
+        let _labs = YearlyStats::on();
+        assert!(crate::labs::yearly_stats(), "the gate is on for the test");
+        let path = temp_path("usage-rollup");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        store.record(draft("one two"), 1_000).unwrap();
+        // A day later the first entry is pruned from History, while the
+        // rollup still holds both days.
+        store.record(draft("three"), 1_000 + day_ms).unwrap();
+        assert!(
+            store.usage_path().exists(),
+            "the rollup exists at {}",
+            store.usage_path().display()
+        );
+        let usage = store.usage_at(1_000 + day_ms);
+        assert_eq!(usage.dictations(), 2);
+        assert_eq!(usage.words(), 3);
+        assert_eq!(usage.days().len(), 2);
+        assert_eq!(store.len(), 2);
+
+        store.clear().unwrap();
+        assert!(!store.usage_path().exists());
+        assert_eq!(store.usage().dictations(), 0);
+    }
+
+    #[test]
+    fn history_off_records_no_usage_rollup() {
+        let _labs = YearlyStats::on();
+        let path = temp_path("usage-off");
+        let mut store = HistoryStore::open(path, HistoryRetention::Off, 0);
+        assert_eq!(store.record(draft("one two"), 1_000).unwrap(), None);
+        assert!(
+            !store.usage_path().exists(),
+            "retention Off keeps nothing, rollup included"
+        );
     }
 
     #[test]

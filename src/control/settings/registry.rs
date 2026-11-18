@@ -278,6 +278,11 @@ pub(super) const KEYS: &[Key] = &[
         "How long dictation history is kept",
     ),
     key(
+        "typing_wpm",
+        Kind::Integer { min: 10, max: 200 },
+        "Words a minute you type, which Dictation stats compares against your dictations to show the time saved; 40 by default",
+    ),
+    key(
         "labs.live_text",
         Kind::Bool,
         "Labs: provisional words beside the HUD while dictating",
@@ -486,6 +491,11 @@ pub(super) const KEYS: &[Key] = &[
         "labs.history_stats",
         Kind::Bool,
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
+    ),
+    key(
+        "labs.yearly_stats",
+        Kind::Bool,
+        "Labs: keep a daily rollup without text or app names, so Dictation stats can chart a year and all-time totals beyond History's retention; off, usage.json is never written or read",
     ),
     key(
         "labs.recent_dictations",

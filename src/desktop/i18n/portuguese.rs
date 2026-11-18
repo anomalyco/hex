@@ -233,6 +233,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Output time", "Tempo de saída"),
     ("Dictations per day: {today} today, {busiest} on the busiest day", "Ditados por dia: hoje {today}, {busiest} no dia com mais"),
     ("median {median} s · slowest {slowest} s", "mediana {median} s · mais lento {slowest} s"),
+    ("Time saved", "Tempo economizado"),
+    ("Busiest hour", "Hora mais movimentada"),
+    ("Typing speed", "Velocidade de digitação"),
+    ("{} wpm", "{} palavras/min"),
+    ("Past year", "Último ano"),
+    ("Dictations by hour: busiest at {hour}", "Ditados por hora: mais às {hour}"),
+    ("Dictations per day over the past year: {total} in total", "Ditados por dia no último ano: {total} no total"),
     ("Details", "Detalhes"),
     ("Hide details", "Ocultar detalhes"),
     ("Peak memory: {memory} on {hardware}; not measured on other hardware", "Memória máxima: {memory} em {hardware}; não medida em outro hardware"),
@@ -1390,6 +1397,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Se um atalho é feito só de Ctrl, Alt, Shift ou da tecla Windows, sem tecla de letra ou número, pressionar outra tecla ou clicar depois do primeiro segundo não termina mais o ditado; solte para terminar"),
     ("Modes editor", "Editor de modos"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Edite os apps, as correções e a reescrita do OpenCode de cada modo em um painel Modos"),
+    ("Yearly stats", "Estatísticas anuais"),
+    ("Add a year-long heatmap of your dictations to Dictation stats, with all-time totals, time saved, and the hour you dictate most. Keeps a daily count that outlives History's retention", "Adiciona às estatísticas de ditado um mapa de calor de um ano de ditados, com totais de todo o período, tempo economizado e a hora em que você mais dita. Mantém uma contagem diária que dura mais que a retenção do histórico"),
 ];
 
 #[cfg(test)]

@@ -1387,6 +1387,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && !ui.labs_open
             && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible),
         ui.settings.labs.keep_recordings,
+        ui.settings.typing_wpm,
     );
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;

@@ -1691,6 +1691,7 @@ mod tests {
         include_str!("../rune_ui/find_popover.rs"),
         include_str!("../rune_ui/find_popover/catalog.rs"),
         include_str!("../rune_ui/history.rs"),
+        include_str!("../rune_ui/history/heatmap.rs"),
         include_str!("../rune_ui/history/stats.rs"),
         include_str!("../rune_ui/history/selection.rs"),
         include_str!("../rune_ui/hud_lab.rs"),

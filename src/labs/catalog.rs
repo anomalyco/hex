@@ -47,6 +47,7 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
+            | Self::YearlyStats
             | Self::RecentDictations
             | Self::SkipPauses
             | Self::OutputFixes
@@ -162,6 +163,7 @@ impl Feature {
             Self::CopyDictationAudio | Self::MicrophoneKeyAlone => 20261115,
             Self::StopPhrase | Self::HoldThroughKeys => 20261116,
             Self::ModesEditor => 20261118,
+            Self::YearlyStats => 20261118,
         }
     }
 
@@ -294,6 +296,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
+            | Self::YearlyStats
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
@@ -354,6 +357,7 @@ impl Feature {
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
+            Self::YearlyStats => "yearly-stats",
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
             Self::OutputFixes => "output-fixes",
@@ -436,6 +440,7 @@ impl Feature {
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
+            Self::YearlyStats => "labs.yearly_stats",
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
             Self::OutputFixes => "labs.output_fixes",

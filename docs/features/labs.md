@@ -133,6 +133,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── § key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations, with headline tiles, a daily chart, app and Output bars, and Output time; hex history stats prints it (#790)
+├── Yearly stats    no    labs.yearly_stats            while Dictation stats is on too: an owner-only daily rollup of dictations (no text or app names) outlives retention, so the dialog charts a 53-week heatmap, all-time totals, time saved against a typing speed, and the busiest hour; Clear all history deletes it
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
@@ -2032,6 +2033,40 @@ out, the JSON's field names, expired entries skipped past the search cap);
 in both themes, and its fixture is the worst case (five apps, four modes, long
 names, a six-digit word count). Not yet observed: the dialog in a real window,
 and the Labs page goldens need regenerating on Linux with the new row.
+
+Yearly stats (`yearly-stats`, every OS): while on, and while History retention is
+not Off, each recorded entry also adds its local day to `usage.json` beside
+`history.json` in the support folder: dictations, words, recorded milliseconds,
+and 24 hourly counts, with no text and no application names. The file is
+owner-only (0600) and atomic (`crate::durable::write` after
+`crate::app_paths::create_private_dir`), keeps at most 400 days, and a failed
+write is logged and ignored so capture and paste never wait on it. History
+retention Off records nothing, here or in History; Clear all history removes
+the rollup too; off, the lab writes and reads nothing. The recording site is
+`HistoryStore::record` (`history/usage.rs::count`). While Dictation stats is on
+too, the dialog's headline tiles use the rollup for all-time dictations,
+words, time saved, words per minute, streak, and the busiest hour; below them a
+Typing speed slider (10–200 words a minute, 40 by default, saved as
+`typing_wpm`) sets the time-saved comparison, and the dialog adds a 53-week ×
+7-day heatmap of dictations per day, four accent levels over faint empty days,
+plus a compact 24-bar hourly strip with the busiest hour in the accent colour.
+Time saved is `words / typing_wpm` minutes less recorded audio, floored at
+zero (`history/stats.rs::time_saved_ms`); the busiest hour is the earliest
+hour on a tie. `hex history stats --json` adds `typing_wpm`, `time_saved_ms`,
+`hours`, and `busiest_hour`, and, only while the lab is on, an optional
+`yearly` summary of the rollup ([transcript-cli.md](../transcript-cli.md)).
+Checks: rollup accumulation, bounding, damage, and owner-only round trips in
+[history/usage.rs](../../src/history/usage.rs); the record site and the
+retention-Off skip in [history.rs](../../src/history.rs); time saved, hours,
+and the busiest hour in [history/stats.rs](../../src/history/stats.rs); the
+settings default in [app_settings.rs](../../src/app_settings.rs); the JSON
+fields in [control/transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
+the grid's Monday start and accent levels in
+[rune_ui/history/heatmap.rs](../../src/rune_ui/history/heatmap.rs); and the
+dialog's tiles, heatmap, and typing slider in
+[rune_ui/tests.rs](../../src/rune_ui/tests.rs). The `history-stats` scene
+renders the heatmap and hourly strip in both themes. Not yet observed: a real
+window's heatmap and slider, and a real dictation written to `usage.json`.
 
 Copy recent dictations (`recent-dictations`, issue 877, macOS): while on,
 the menu-bar menu shows a Copy Recent Dictation submenu right under Paste

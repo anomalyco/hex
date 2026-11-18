@@ -852,6 +852,19 @@
       ],
       "summary": "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane",
       "title": "Modes editor"
+    },
+    {
+      "added": "2026-11-18",
+      "group": "history",
+      "groupTitle": "History",
+      "id": "yearly-stats",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Add a year-long heatmap of your dictations to Dictation stats, with all-time totals, time saved, and the hour you dictate most. Keeps a daily count that outlives History's retention",
+      "title": "Yearly stats"
     }
   ]
 }

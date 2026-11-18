@@ -152,6 +152,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
+            Self::YearlyStats => settings.labs.yearly_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::SkipPauses => settings.labs.skip_pauses,
             Self::OutputFixes => settings.labs.output_fixes,
@@ -235,6 +236,7 @@ impl Feature {
             &mut labs.parakeet_ultra,
             &mut labs.standalone_special_keys,
             &mut labs.history_stats,
+            &mut labs.yearly_stats,
             &mut labs.recent_dictations,
             &mut labs.skip_pauses,
             &mut labs.output_fixes,
@@ -328,6 +330,7 @@ impl Feature {
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
+            Self::YearlyStats => settings.labs.yearly_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
             Self::OutputFixes => settings.labs.output_fixes = on,
@@ -407,7 +410,8 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-// 1 << 20 is free (Stop when the call ends moved to Meetings › Settings).
+/// Labs › Yearly stats: a daily rollup that outlives History's retention.
+const YEARLY_STATS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 // 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps
@@ -853,6 +857,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             PARAKEET_ULTRA,
         ),
         (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
+        (Feature::YearlyStats, settings.yearly_stats, YEARLY_STATS),
         (
             Feature::RecentDictations,
             settings.recent_dictations,
@@ -1379,6 +1384,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HISTORY_STATS, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn yearly_stats_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & YEARLY_STATS, 0);
+        labs.yearly_stats = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & YEARLY_STATS, 0);
+        assert_eq!(state & HISTORY_STATS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

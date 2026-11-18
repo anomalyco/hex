@@ -1436,9 +1436,13 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     for key in [
         "tile-dictations",
         "tile-words",
+        "tile-time-saved",
         "tile-wpm",
         "tile-streak",
+        "tile-busiest-hour",
+        "history-stats-typing",
         "history-stats-daily",
+        "history-stats-hours",
         "history-stats-apps",
         "history-stats-changed",
         "history-stats-output-time",
@@ -1448,6 +1452,17 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "128,402"), "{shown:?}");
     assert!(shown.iter().any(|text| text == "1,284"), "{shown:?}");
+    // Labs › Yearly stats adds the year heatmap from its rollup.
+    rt.state.history.usage = Some(history::HistoryPane::fixture_usage());
+    rt.state.settings.labs.yearly_stats = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-stats-yearly").is_some(),
+        "the heatmap shows"
+    );
+    assert!(rt.find("history-stats-typing").is_some());
     tap(&mut rt, "history-stats-close");
     assert!(!rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_none());
@@ -1494,6 +1509,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
 
     tap(&mut rt, "history-stats-open");
     rt.state.history.stats = Some(Default::default());
+    rt.state.history.usage = None;
     rt.invalidate();
     settle(&mut rt);
     assert!(
@@ -1574,11 +1590,12 @@ fn the_stats_dialog_fits_the_smallest_window_with_a_scrolling_body() {
     );
 }
 
-/// At the default window the sections fit, so the dialog draws no scroll body
-/// at all and takes the sections' own height.
+/// At a tall window the sections fit, so the dialog draws no scroll body at
+/// all and takes the sections' own height. The year heatmap and hourly strip
+/// make a richer dialog than the default window's, so this uses a taller one.
 #[test]
 fn the_stats_dialog_has_no_scroll_body_when_its_sections_fit() {
-    let rt = runtime("history-stats", true, PANE_SIZE);
+    let rt = runtime("history-stats", true, (980.0, 1_080.0));
     assert!(
         rt.find("history-stats-body-scroll-area").is_none(),
         "no scroll body"

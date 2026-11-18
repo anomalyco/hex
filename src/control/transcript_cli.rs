@@ -286,16 +286,21 @@ fn rank_history<'a>(
 }
 
 /// Read only this setting, without loading AppSettings (which migrates and writes).
-fn retention(root: &Path) -> Result<HistoryRetention> {
+fn retention(root: &Path) -> Result<(HistoryRetention, u32)> {
     #[derive(Default, Deserialize)]
     struct Settings {
         #[serde(default)]
         history_retention: HistoryRetention,
+        #[serde(default = "default_typing_wpm")]
+        typing_wpm: u32,
+    }
+    fn default_typing_wpm() -> u32 {
+        crate::app_settings::DEFAULT_TYPING_WPM
     }
     let file = match std::fs::File::open(root.join("settings.json")) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(HistoryRetention::default());
+            return Ok((HistoryRetention::default(), default_typing_wpm()));
         }
         Err(error) => return Err(error).wrap_err("could not read history retention"),
     };
@@ -306,7 +311,10 @@ fn retention(root: &Path) -> Result<HistoryRetention> {
     }
     let settings: Settings = serde_json::from_slice(&bytes)
         .wrap_err("could not read history retention; settings.json is invalid")?;
-    Ok(settings.history_retention)
+    Ok((
+        settings.history_retention,
+        crate::app_settings::clamp_typing_wpm(settings.typing_wpm),
+    ))
 }
 
 #[derive(Serialize)]
@@ -315,6 +323,31 @@ struct StatsOutput {
     retention: HistoryRetention,
     #[serde(flatten)]
     stats: HistoryStats,
+    /// Labs › Yearly stats' daily rollup, only while the lab is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    yearly: Option<YearlyOutput>,
+}
+
+/// The Labs › Yearly stats rollup in `hex history stats --json`.
+#[derive(Serialize)]
+struct YearlyOutput {
+    dictations: u64,
+    words: u64,
+    audio_ms: u64,
+    hours: [u64; 24],
+    days: Vec<crate::history::usage::UsageDay>,
+}
+
+impl From<&crate::history::usage::Usage> for YearlyOutput {
+    fn from(usage: &crate::history::usage::Usage) -> Self {
+        Self {
+            dictations: usage.dictations(),
+            words: usage.words(),
+            audio_ms: usage.audio_ms(),
+            hours: usage.hours(),
+            days: usage.days().to_vec(),
+        }
+    }
 }
 
 /// The retained entries in the range, summed up.
@@ -322,10 +355,12 @@ fn stats_output(
     entries: &[HistoryEntry],
     since: Option<&str>,
     until: Option<&str>,
-    retention: HistoryRetention,
+    settings: (HistoryRetention, u32),
     now: u64,
     day_of: impl Fn(u64) -> i64,
+    hour_of: impl Fn(u64) -> usize,
 ) -> Result<StatsOutput> {
+    let (retention, typing_wpm) = settings;
     let range = TimeRange::parse(since, until, now)?;
     let cutoff = retention.cutoff(now);
     let stats = crate::history::stats::summarize(
@@ -335,11 +370,14 @@ fn stats_output(
             .filter(|entry| range.contains(entry.timestamp_ms)),
         day_of(now),
         day_of,
+        hour_of,
+        typing_wpm,
     );
     Ok(StatsOutput {
         version: 1,
         retention,
         stats,
+        yearly: None,
     })
 }
 
@@ -361,14 +399,24 @@ fn history_stats(since: Option<&str>, until: Option<&str>, json: bool) -> Result
     let root = crate::app_paths::support_dir()?;
     let entries = crate::history::read_snapshot(&root.join("history.json"))
         .wrap_err("could not read history.json")?;
-    let output = stats_output(
+    let mut output = stats_output(
         &entries,
         since,
         until,
         retention(&root)?,
         crate::desktop::events::now_ms(),
         crate::history::stats::local_day,
+        crate::history::stats::local_hour,
     )?;
+    // Labs › Yearly stats: the daily rollup that outlives retention. Off,
+    // the file is never read and the field stays out.
+    if crate::labs::yearly_stats() {
+        let usage = crate::history::usage::Usage::load(
+            &crate::history::usage::path(&root.join("history.json")),
+            crate::history::stats::local_day(crate::desktop::events::now_ms()),
+        );
+        output.yearly = Some(YearlyOutput::from(&usage));
+    }
     let mut out = io::stdout().lock();
     if json {
         return write_json(&mut out, &output);
@@ -385,6 +433,15 @@ fn stats_text(stats: &HistoryStats) -> String {
     match stats.words_per_minute {
         Some(wpm) => text.push_str(&format!("Words per minute: {wpm}\n")),
         None => text.push_str("Words per minute: unknown (no recorded audio)\n"),
+    }
+    text.push_str(&format!(
+        "Time saved: {} min (typing at {} words per minute)\n",
+        stats.time_saved_ms / 60_000,
+        stats.typing_wpm
+    ));
+    match stats.busiest_hour {
+        Some(hour) => text.push_str(&format!("Busiest hour: {hour:02}:00\n")),
+        None => text.push_str("Busiest hour: unknown\n"),
     }
     text.push_str(&format!(
         "Changed by Output: {} ({}%)\n",
@@ -429,7 +486,7 @@ pub fn history(args: &HistoryArgs) -> Result<()> {
     let output = history_output(
         &entries,
         args,
-        retention(&root)?,
+        retention(&root)?.0,
         crate::desktop::events::now_ms(),
         &crate::dictation::vocabulary::read_saved(&root),
         recordings.as_deref(),

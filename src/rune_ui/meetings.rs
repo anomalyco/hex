@@ -205,7 +205,7 @@ pub(super) struct MeetingsPane {
 }
 
 /// `42 min`, `1 h 05 min`, or `< 1 min`.
-fn length(milliseconds: u64) -> String {
+pub(super) fn length(milliseconds: u64) -> String {
     let minutes = milliseconds / 60_000;
     match minutes {
         0 => tr("< 1 min").into(),

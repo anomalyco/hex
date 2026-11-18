@@ -139,23 +139,44 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
         entry(3, 0, "ten words", "ten words"),
     ];
     let utc = |ms: u64| (ms / DAY) as i64;
-    let output = stats_output(&entries, None, None, HistoryRetention::Week, NOW, utc).unwrap();
+    let hour = |ms: u64| ((ms / 3_600_000) % 24) as usize;
+    let output = stats_output(
+        &entries,
+        None,
+        None,
+        (
+            HistoryRetention::Week,
+            crate::app_settings::DEFAULT_TYPING_WPM,
+        ),
+        NOW,
+        utc,
+        hour,
+    )
+    .unwrap();
     assert_eq!(output.stats.dictations, 2);
     assert_eq!(output.stats.words, 3);
     assert_eq!(output.stats.words_per_minute, Some(15));
     assert_eq!(output.stats.changed_by_output, 1);
     assert_eq!(output.stats.streak_days, 2);
     assert_eq!(output.stats.top_apps[0].dictations, 2);
+    // Three words at 40 wpm take 4.5 s; 12 s of audio was recorded, so
+    // nothing was saved.
+    assert_eq!(output.stats.time_saved_ms, 0);
     let json = serde_json::to_value(&output).unwrap();
     assert_eq!(json["version"], 1);
     assert_eq!(json["words"], 3);
+    assert_eq!(json["typing_wpm"], crate::app_settings::DEFAULT_TYPING_WPM);
+    assert_eq!(json["time_saved_ms"], 0);
+    assert_eq!(json["hours"].as_array().map(Vec::len), Some(24));
+    assert!(json.get("yearly").is_none(), "no rollup without the lab");
     let today = stats_output(
         &entries,
         Some("today"),
         None,
-        HistoryRetention::Week,
+        (HistoryRetention::Week, 65),
         NOW,
         utc,
+        hour,
     );
     assert!(today.unwrap().stats.dictations <= 1);
     assert!(stats_text(&HistoryStats::default()).starts_with("No retained"));
@@ -360,15 +381,25 @@ fn history_json_names_a_recording_only_where_one_is_kept() {
 #[test]
 fn retention_defaults_fails_closed_and_off_preserves_existing_entries() {
     let root = temp();
-    assert_eq!(retention(&root).unwrap(), HistoryRetention::Week);
+    assert_eq!(retention(&root).unwrap().0, HistoryRetention::Week);
     fs::write(root.join("settings.json"), "{}").unwrap();
-    assert_eq!(retention(&root).unwrap(), HistoryRetention::Week);
+    assert_eq!(retention(&root).unwrap().0, HistoryRetention::Week);
     fs::write(root.join("settings.json"), r#"{"history_retention":"day"}"#).unwrap();
+    assert_eq!(retention(&root).unwrap(), (HistoryRetention::Day, 40));
+    fs::write(
+        root.join("settings.json"),
+        r#"{"history_retention":"day","typing_wpm":900}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        retention(&root).unwrap(),
+        (HistoryRetention::Day, crate::app_settings::MAX_TYPING_WPM)
+    );
     let entries = entries();
     let output = history_output(
         &entries,
         &args(&[]),
-        retention(&root).unwrap(),
+        retention(&root).unwrap().0,
         NOW,
         &[],
         None,

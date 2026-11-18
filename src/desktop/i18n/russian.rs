@@ -230,6 +230,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Output time", "Время вывода"),
     ("Dictations per day: {today} today, {busiest} on the busiest day", "Диктовок в день: сегодня {today}, больше всего {busiest} за день"),
     ("median {median} s · slowest {slowest} s", "медиана {median} с · медленнее всего {slowest} с"),
+    ("Time saved", "Сэкономленное время"),
+    ("Busiest hour", "Самая активная година"),
+    ("Typing speed", "Скорость печати"),
+    ("{} wpm", "{} слов/мин"),
+    ("Past year", "Последний год"),
+    ("Dictations by hour: busiest at {hour}", "Диктовки по часам: больше всего в {hour}"),
+    ("Dictations per day over the past year: {total} in total", "Диктовок в день за последний год: всего {total}"),
     ("Details", "Подробности"),
     ("Hide details", "Скрыть подробности"),
     ("Peak memory: {memory} on {hardware}; not measured on other hardware", "Пиковая память: {memory} на {hardware}; на другом оборудовании не измерялась"),
@@ -1393,6 +1400,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Если сочетание состоит только из Ctrl, Alt, Shift или клавиши Windows, без буквенной или цифровой клавиши, нажатие другой клавиши или клик после первой секунды больше не завершает диктовку; отпустите, чтобы закончить"),
     ("Modes editor", "Редактор режимов"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Изменяйте приложения, исправления и переписывание OpenCode каждого режима на панели «Режимы»"),
+    ("Yearly stats", "Статистика за год"),
+    ("Add a year-long heatmap of your dictations to Dictation stats, with all-time totals, time saved, and the hour you dictate most. Keeps a daily count that outlives History's retention", "Добавляет в статистику диктовки тепловую карту за год, итоги за всё время, сэкономленное время и час, когда вы диктуете чаще всего. Ведёт ежедневный счёт, который живёт дольше срока хранения Истории"),
 ];
 
 #[cfg(test)]

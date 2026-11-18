@@ -31,6 +31,7 @@ mod screenshots;
 pub(crate) use persistence::LaunchLoad;
 pub(crate) use persistence::LaunchNote;
 mod shortcut_repair;
+mod typing_speed;
 
 pub use browser_origins::{normalize_browser_origins, parse_browser_origins};
 #[cfg(hex_capture)]
@@ -48,6 +49,9 @@ pub(crate) use microphone_key::{MicrophoneKey, MicrophoneKeyTap};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{
     ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey, screenshot_settings,
+};
+pub use typing_speed::{
+    DEFAULT_TYPING_WPM, MAX_TYPING_WPM, MIN_TYPING_WPM, clamp as clamp_typing_wpm,
 };
 
 const DEFAULT_RECORDING_DUCK_VOLUME: f32 = 0.2;
@@ -327,6 +331,13 @@ pub struct AppSettings {
     )]
     pub retired_voice_action: Option<serde_json::Value>,
     pub history_retention: crate::history::HistoryRetention,
+    /// Words a minute the person types, which Dictation stats' time saved
+    /// compares against what they dictated; clamped to 10–200.
+    #[serde(
+        default = "typing_speed::default_wpm",
+        deserialize_with = "typing_speed::deserialize"
+    )]
+    pub typing_wpm: u32,
     pub meetings: MeetingSettings,
     #[cfg(hex_capture)]
     pub capture: CaptureSettings,
@@ -467,6 +478,7 @@ impl Default for AppSettings {
             dictation_processing: DictationProcessingSettings::default(),
             retired_voice_action: None,
             history_retention: crate::history::HistoryRetention::default(),
+            typing_wpm: DEFAULT_TYPING_WPM,
             meetings: MeetingSettings::default(),
             #[cfg(hex_capture)]
             capture: CaptureSettings::default(),
@@ -2701,6 +2713,27 @@ mod tests {
         let serialized = serde_json::to_value(settings).unwrap();
 
         assert!(serialized.get("prevent_system_sleep").is_none());
+    }
+
+    #[test]
+    fn a_missing_typing_speed_loads_forty_and_a_saved_one_is_clamped() {
+        let missing: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.typing_wpm, crate::app_settings::DEFAULT_TYPING_WPM);
+
+        let slow: AppSettings = serde_json::from_str(r#"{"typing_wpm":5}"#).unwrap();
+        assert_eq!(slow.typing_wpm, crate::app_settings::MIN_TYPING_WPM);
+        let fast: AppSettings = serde_json::from_str(r#"{"typing_wpm":500}"#).unwrap();
+        assert_eq!(fast.typing_wpm, crate::app_settings::MAX_TYPING_WPM);
+        let saved: AppSettings = serde_json::from_str(r#"{"typing_wpm":65}"#).unwrap();
+        assert_eq!(saved.typing_wpm, 65);
+
+        let directory = TestSettingsDir::new("typing-wpm");
+        std::fs::write(&directory.path, br#"{"typing_wpm":900}"#).unwrap();
+        let loaded = AppSettings::load_from(&directory.path).unwrap();
+        assert_eq!(loaded.typing_wpm, crate::app_settings::MAX_TYPING_WPM);
+        let persisted: AppSettings =
+            serde_json::from_slice(&std::fs::read(&directory.path).unwrap()).unwrap();
+        assert_eq!(persisted.typing_wpm, crate::app_settings::MAX_TYPING_WPM);
     }
 
     #[test]

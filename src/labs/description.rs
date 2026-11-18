@@ -101,6 +101,9 @@ impl Feature {
             Self::HistoryStats => {
                 "Add a Stats button to History that summarizes the dictations you kept; the hex history stats command prints it too"
             }
+            Self::YearlyStats => {
+                "Keep a daily count of your dictations, without text or app names, so Dictation stats can chart a year, all-time totals, time saved, and the hour you dictate most (usage.json in the support folder)"
+            }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
             }
