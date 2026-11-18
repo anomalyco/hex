@@ -51,6 +51,15 @@ impl Listening {
         }
         (peak, (moment / mass.max(1e-9)).sqrt())
     }
+    /// The brightest dot as it is painted, its fade included.
+    #[cfg(test)]
+    pub(super) fn light(&self) -> f32 {
+        if self.drawn.is_some() {
+            self.probe().0 * self.fade
+        } else {
+            0.
+        }
+    }
     pub(super) fn new(now: Instant) -> Self {
         // Same optical size, pitch, voice response and shader as dictation;
         // just fewer columns to leave room for the timer.

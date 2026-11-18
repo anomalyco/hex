@@ -33,30 +33,68 @@ const VEIL_EASE: f32 = 0.05;
 const LAYER_SCALE: f32 = 0.96;
 const LAYER_BLUR: f32 = 3.0;
 
+/// How long a track in full flight takes to believe a new target. A retarget
+/// changes where the spring pulls, not how hard it pulls this frame, so the
+/// edge's speed bends round instead of dropping in one frame.
+const RETARGET: f32 = 0.05;
+/// A track carrying less than this share of the speed its spring would
+/// reach on the new move has no momentum worth bending: it just leaves.
+const MOMENTUM: f32 = 0.25;
+/// The pull moves within a frame, so a frame is stepped in this many parts.
+const SUBSTEPS: usize = 4;
+
 /// One sprung value.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Track {
     pub(super) x: f32,
     pub(super) v: f32,
+    /// Where the spring pulls now: the target, once the track believes it.
+    pull: f32,
+    to: f32,
+    /// How long the pull takes to reach `to`, set when the target changed.
+    ease: f32,
 }
 
 impl Track {
     pub(super) const fn at(x: f32) -> Self {
-        Self { x, v: 0.0 }
+        Self {
+            x,
+            v: 0.0,
+            pull: x,
+            to: x,
+            ease: 0.0,
+        }
     }
 
     /// Bends toward `to` from where it is; true while it still moves.
     /// `rest` is the distance that no longer shows.
-    fn step(&mut self, to: f32, spring: Spring, dt: f32, rest: f32) -> bool {
+    pub(super) fn step(&mut self, to: f32, spring: Spring, dt: f32, rest: f32) -> bool {
         if self.x == to && self.v == 0.0 {
+            *self = Self::at(to);
             return false;
         }
-        let (x, v) = spring.sample(self.x, self.v, to, dt);
-        *self = if (x - to).abs() < rest && v.abs() < rest * 20.0 {
-            Self::at(to)
-        } else {
-            Self { x, v }
-        };
+        if to != self.to {
+            // From rest a track leaves as its spring does. In flight the
+            // pull travels to the new target, as slowly as the track's
+            // momentum is large, so its acceleration has no step in it.
+            let reach = std::f32::consts::TAU / spring.duration * (to - self.x).abs();
+            let carried = (self.v.abs() / (MOMENTUM * reach).max(f32::EPSILON)).min(1.0);
+            self.to = to;
+            self.ease = RETARGET * carried;
+        }
+        let h = dt / SUBSTEPS as f32;
+        for _ in 0..SUBSTEPS {
+            self.pull = if self.ease < 1e-4 {
+                to
+            } else {
+                to + (self.pull - to) * (-h / self.ease).exp()
+            };
+            (self.x, self.v) = spring.sample(self.x, self.v, self.pull, h);
+        }
+        if (self.x - to).abs() < rest && self.v.abs() < rest * 20.0 && (self.pull - to).abs() < rest
+        {
+            *self = Self::at(to);
+        }
         true
     }
 }
@@ -367,9 +405,11 @@ impl Capsule {
             actions: None,
             stop: true,
         };
-        let target = match &self.kind {
+        // A surface that is leaving says nothing it hadn't already said.
+        let may_say = self.kind.is_some() || self.stage.presence(Layer::Pending).shows();
+        let target = match self.kind.as_ref().or(self.surface.ghost.as_ref()) {
             Some(Kind::Offer(..)) if self.presentation.departing() => Target {
-                pending: Some(self.presentation.begun(now) + PENDING_LABEL_AFTER),
+                pending: may_say.then(|| self.presentation.begun(now) + PENDING_LABEL_AFTER),
                 ..none
             },
             Some(Kind::Offer(..)) => {
@@ -413,13 +453,14 @@ impl Capsule {
     /// Steps the surface toward what the capsule shows; true while it moves.
     pub(super) fn step_stage(&mut self, now: f64, tx: &mut Tx) -> bool {
         let reduced = self.reduced.get();
-        let paging = matches!(self.kind, Some(Kind::Offer(..)))
+        let surface = self.step_surface(now, tx);
+        let paging = matches!(self.drawn(), Some(Kind::Offer(..)))
             && !self.presentation.departing()
             && self.presentation.step(self.more_open, reduced, now);
         let Some((target, follow)) = self.stage_target(now) else {
             self.stage = Stage::default();
             self.opened = None;
-            return false;
+            return surface;
         };
         let moving = if follow {
             self.stage.follow(&target, now);
@@ -436,7 +477,7 @@ impl Capsule {
         if moving {
             tx.wake_after(Duration::ZERO);
         }
-        moving && (follow || !self.stage.idling())
+        surface || (moving && (follow || !self.stage.idling()))
     }
 
     /// The surface as it rests for what the capsule shows now.
@@ -453,6 +494,7 @@ impl Capsule {
         if matches!(self.kind, Some(Kind::Recording(_))) {
             self.presentation.arrived(&self.stage);
         }
+        self.surface.settle(self.kind.is_some());
     }
 
     /// A handler changed what the capsule shows: the surface starts toward

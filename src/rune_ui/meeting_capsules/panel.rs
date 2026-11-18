@@ -352,7 +352,15 @@ fn result(
 ) -> El {
     let top = capsule.corner.is_top();
     let right = capsule.corner.is_right();
-    let label = handoff_label(p, capsule, &title, false);
+    // The words drawn follow the title a few frames behind: the old ones
+    // go before the new ones arrive.
+    let reduced = capsule.reduced.get();
+    let (words, strength, soft) = capsule.surface.title.line(title.clone(), reduced);
+    let label = handoff_label(p, capsule, &words, false)
+        .opacity(strength)
+        .opacity_motion(Anim::INSTANT)
+        .blur(soft)
+        .blur_motion(Anim::INSTANT);
     let clock = duration.map(|duration| {
         row()
             .key("meter")
@@ -418,9 +426,14 @@ fn result(
     });
     let label = stop_slot().child(label).children(ghost);
     let header = bands(top, meta, Some(label));
-    let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
+    let summary = manifest.and_then(ready_summary).map(|now| {
+        let ((summary, written), strength, soft) = capsule.surface.summary.line(now, reduced);
         text(summary)
             .key("summary")
+            .opacity(strength)
+            .opacity_motion(Anim::INSTANT)
+            .blur(soft)
+            .blur_motion(Anim::INSTANT)
             // The words wipe on behind the growing edge, soft at their front.
             .transition(if capsule.reduced.get() {
                 replace(capsule)
@@ -507,7 +520,7 @@ fn result(
                 .child(contents),
         )
         .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside));
-    in_corner(capsule, body)
+    in_corner(capsule, presence::anchored(capsule, body))
 }
 
 /// A fast worker can report every phase within a few frames. Keep one text
@@ -578,8 +591,13 @@ pub(super) fn rest_width(shown: &Recording) -> f32 {
 /// The recording: at rest only its levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
-pub(super) fn meter(p: Paint, shown: &Recording) -> El {
-    let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
+pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
+    // A recording that has left the surface stops counting as it goes.
+    let run = capsule
+        .surface
+        .clock()
+        .saturating_duration_since(shown.started);
+    let elapsed = meeting::format_duration(run.as_millis() as u64);
     row()
         .key("meter")
         .h(REST_HEIGHT)
@@ -645,7 +663,7 @@ impl Capsule {
     /// How much of action row `row` (Stop, then the three copies) shows.
     /// Whole wherever the surface isn't in motion.
     pub(super) fn action_presence(&self, row: usize) -> stage::Presence {
-        let (Some(o), Some(Kind::Recording(shown))) = (self.stage.outline(), &self.kind) else {
+        let (Some(o), Some(Kind::Recording(shown))) = (self.stage.outline(), self.drawn()) else {
             return stage::Presence {
                 opacity: 1.0,
                 scale: 1.0,
@@ -688,7 +706,7 @@ pub(super) fn arriving_header(
 ) -> El {
     let (right, top) = (capsule.corner.is_right(), capsule.corner.is_top());
     let panel_height = open_height(shown);
-    let meter = meter(p, shown).opacity(presence);
+    let meter = meter(p, capsule, shown).opacity(presence);
     let spacer = el().key("space").grow(1.0);
     let meta = row()
         .key("meta")
@@ -734,7 +752,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     } else {
         1.0
     };
-    let meter = meter(p, shown).opacity(live);
+    let meter = meter(p, capsule, shown).opacity(live);
     let accessory = notice.filter(|_| !open).map(notice_text);
     let stop = capsule.action_presence(0);
     let action = actions.then(|| {
@@ -880,7 +898,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     } else {
         body
     };
-    in_corner(capsule, body)
+    in_corner(capsule, presence::anchored(capsule, body))
 }
 
 /// `path` as one shell word.

@@ -16,6 +16,14 @@ enum Cue {
     Stopped,
     Published,
     Notes,
+    /// A press on the element with this key, where it is drawn.
+    Press(&'static str),
+    /// The offer's 20 s ran out.
+    Timeout,
+    /// The controller offers the call again, in the same window.
+    Offered,
+    /// The finished meeting's notes arrive, or arrive again, with this title.
+    Retitled(&'static str),
 }
 
 struct Replay {
@@ -24,6 +32,9 @@ struct Replay {
     frames: usize,
     /// Starts as a live recording rather than an offer.
     live: bool,
+    /// The surface is hidden before the first frame, as it is when the
+    /// controller first shows it.
+    enters: bool,
     cues: &'static [(usize, Cue)],
 }
 
@@ -34,6 +45,7 @@ const REPLAYS: &[Replay] = &[
         reduced: false,
         frames: 555,
         live: false,
+        enters: false,
         cues: &[
             (40, Cue::Over("record")),
             (44, Cue::Record),
@@ -57,6 +69,7 @@ const REPLAYS: &[Replay] = &[
         reduced: false,
         frames: 120,
         live: false,
+        enters: false,
         cues: &[
             (20, Cue::Over("record")),
             (24, Cue::Record),
@@ -68,6 +81,7 @@ const REPLAYS: &[Replay] = &[
         reduced: false,
         frames: 210,
         live: false,
+        enters: false,
         cues: &[
             (20, Cue::Over("record")),
             (24, Cue::Record),
@@ -81,6 +95,7 @@ const REPLAYS: &[Replay] = &[
         reduced: false,
         frames: 240,
         live: true,
+        enters: false,
         cues: &[
             (12, Cue::Move(432., 23.)),
             (20, Cue::Leave),
@@ -99,10 +114,116 @@ const REPLAYS: &[Replay] = &[
         reduced: false,
         frames: 110,
         live: false,
+        enters: false,
         cues: &[
             (20, Cue::Over("record")),
             (24, Cue::Record),
             (54, Cue::Refused),
+        ],
+    },
+    // The offer arrives; Not now turns it down.
+    Replay {
+        name: "not-now",
+        reduced: false,
+        frames: 90,
+        live: false,
+        enters: true,
+        cues: &[(36, Cue::Over("not-now")), (40, Cue::Press("not-now"))],
+    },
+    Replay {
+        name: "not-now-reduced",
+        reduced: true,
+        frames: 90,
+        live: false,
+        enters: true,
+        cues: &[(36, Cue::Over("not-now")), (40, Cue::Press("not-now"))],
+    },
+    // Nobody answers the offer.
+    Replay {
+        name: "timeout",
+        reduced: false,
+        frames: 70,
+        live: false,
+        enters: false,
+        cues: &[(24, Cue::Timeout)],
+    },
+    // Refused six frames after Record: the offer is still contracting and
+    // "Starting…" has not been said.
+    Replay {
+        name: "refused-early",
+        reduced: false,
+        frames: 80,
+        live: false,
+        enters: false,
+        cues: &[
+            (20, Cue::Over("record")),
+            (24, Cue::Record),
+            (30, Cue::Refused),
+        ],
+    },
+    // ✕ on the finished meeting before its notes arrive; they arrive four
+    // frames into its exit.
+    Replay {
+        name: "close",
+        reduced: false,
+        frames: 150,
+        live: true,
+        enters: false,
+        cues: &[
+            (10, Cue::Move(432., 23.)),
+            (30, Cue::PressStop),
+            (40, Cue::Stopped),
+            (60, Cue::Published),
+            (86, Cue::Over("dismiss")),
+            (90, Cue::Press("dismiss")),
+            (94, Cue::Notes),
+        ],
+    },
+    // A worker that reports every phase within frames, then a late retitle.
+    Replay {
+        name: "titles",
+        reduced: false,
+        frames: 190,
+        live: true,
+        enters: false,
+        cues: &[
+            (10, Cue::Move(432., 23.)),
+            (30, Cue::PressStop),
+            (40, Cue::Stopped),
+            (46, Cue::Published),
+            (50, Cue::Notes),
+            (54, Cue::Retitled("Lantern soak test and festival demo")),
+            (120, Cue::Retitled("Lantern design sync")),
+        ],
+    },
+    // Not now, and the call is offered again six frames into the exit.
+    Replay {
+        name: "not-now-then-offer",
+        reduced: false,
+        frames: 130,
+        live: false,
+        enters: false,
+        cues: &[
+            (20, Cue::Over("not-now")),
+            (24, Cue::Press("not-now")),
+            (30, Cue::Offered),
+            (70, Cue::Over("record")),
+            (74, Cue::Record),
+            (80, Cue::Started),
+        ],
+    },
+    // A refused start, and the call offered again four frames into its exit.
+    Replay {
+        name: "refused-then-offer",
+        reduced: false,
+        frames: 110,
+        live: false,
+        enters: false,
+        cues: &[
+            (20, Cue::Over("record")),
+            (24, Cue::Record),
+            (30, Cue::Refused),
+            (34, Cue::Offered),
         ],
     },
     Replay {
@@ -110,6 +231,7 @@ const REPLAYS: &[Replay] = &[
         reduced: true,
         frames: 330,
         live: false,
+        enters: false,
         cues: &[
             (20, Cue::Over("record")),
             (24, Cue::Record),
@@ -159,6 +281,14 @@ struct Shot {
     /// How strongly the time, the field and Stop were drawn, ancestors included.
     shown: (f32, f32, f32),
     pointer: Option<(f32, f32)>,
+    /// How strongly the whole surface and its title were drawn.
+    surface: f32,
+    title_shown: f32,
+    /// The time as it reads, and the field's brightest dot as it is painted.
+    clock: Option<String>,
+    light: f32,
+    /// How many times the capsule has asked for its window to hide.
+    hidden: u64,
 }
 
 /// Plays `replay`, handing every frame to `each` once it is laid out.
@@ -187,6 +317,14 @@ fn play(
         tx.instant();
     });
     rt.frame(0.);
+    if replay.enters {
+        rt.state.surface = Default::default();
+    }
+    let hides = Arc::new(AtomicU64::new(0));
+    let hidden = hides.clone();
+    rt.state.hide = Some(Arc::new(move || {
+        hidden.fetch_add(1, Ordering::SeqCst);
+    }));
     let clock = Instant::now();
     let at = |frame: usize| clock + Duration::from_secs_f64(frame as f64 / 60.);
     if replay.live {
@@ -242,8 +380,49 @@ fn play(
                         error: "Permission denied".into(),
                     };
                     assert_eq!(host.route(&event), offer::Route::Close);
-                    rt.update(|c, _| c.close());
+                    // As `close_panel` does.
+                    rt.update(|c, tx| c.dismiss(tx));
                 }
+                Cue::Press(key) => {
+                    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no {key} at {frame}"));
+                    pointer = Some((x, y));
+                    rt.pointer_move(x, y);
+                    rt.pointer_down(x, y);
+                    rt.pointer_up(x, y);
+                    pressed = Some(*cue);
+                }
+                Cue::Timeout => {
+                    // As the offer's timer delivers it.
+                    rt.update(|c, _| c.expire_offer());
+                    pressed = Some(*cue);
+                }
+                Cue::Offered => {
+                    let kind = offer(
+                        provider_cases()
+                            .into_iter()
+                            .find(|(s, _)| *s == "meet")
+                            .unwrap()
+                            .1,
+                    );
+                    if let Kind::Offer(id, _) = &kind {
+                        host = offer::Host::Offered(*id);
+                    }
+                    let presentation = offer_surface::Presentation::for_kind(&kind, false);
+                    // As `show_panel` does.
+                    rt.update(move |c, tx| {
+                        c.show(kind, presentation, MeetingIndicatorCorner::TopRight, None, tx)
+                    });
+                }
+                Cue::Retitled(title) => rt.update(move |c, _| {
+                    let Kind::Ready(mut m) = ready_with(serde_json::json!({
+                        "title": title,
+                        "summary": "March 26 depends on passing the soak test by March 5. Friday's playtest decides the festival demo.",
+                    })) else {
+                        unreachable!()
+                    };
+                    m.duration_ms = c.length();
+                    c.refresh_ready(m);
+                }),
                 Cue::PressStop => {
                     // Wherever the pointer is, Stop is pressed where it is drawn.
                     let (x, y) = rt.find("stop").unwrap_or_else(|| panic!("no Stop at {frame}"));
@@ -263,7 +442,11 @@ fn play(
                     let Kind::Ready(mut m) = ready_transcript() else {
                         unreachable!()
                     };
-                    m.duration_ms = Some(5_000);
+                    // The finished meeting is as long as its recording was.
+                    m.duration_ms = Some(match c.kind {
+                        Some(Kind::Finalizing { duration_ms }) => duration_ms,
+                        _ => 5_000,
+                    });
                     c.published(m);
                     c.stir(tx);
                 }),
@@ -271,7 +454,7 @@ fn play(
                     let Kind::Ready(mut m) = ready_summarized() else {
                         unreachable!()
                     };
-                    m.duration_ms = Some(5_000);
+                    m.duration_ms = c.length();
                     c.refresh_ready(m);
                 }),
             }
@@ -298,6 +481,21 @@ fn play(
                     offer::Route::Keep
                 );
             }
+            Some(Cue::Press("not-now")) => {
+                assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Dismiss)));
+                assert!(rt.state.kind.is_none(), "Not now is true the frame it is pressed");
+            }
+            Some(Cue::Press("dismiss")) => {
+                assert!(rt.state.kind.is_none(), "✕ is true the frame it is pressed");
+            }
+            Some(Cue::Timeout) => {
+                assert!(matches!(
+                    commands.try_recv(),
+                    Ok(ControllerCommand::OfferTimedOut(_))
+                ));
+                assert!(rt.state.kind.is_none());
+            }
+            Some(Cue::Press(_)) => (),
             Some(_) => {
                 assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
                 assert!(rt.state.stopping, "Stop is true the frame it is pressed");
@@ -309,6 +507,7 @@ fn play(
         let rect = |key: &str| rt.presented(key).map(|(rect, _)| rect);
         let shot = Shot {
             phase: match &c.kind {
+                None if c.surface.leaving() => "leaving",
                 None => "closed",
                 Some(Kind::Offer(..)) if c.presentation.departing() => "starting",
                 Some(Kind::Offer(..)) => "offer",
@@ -360,11 +559,30 @@ fn play(
                 rt.presented("stop").map_or(0., |(_, opacity)| opacity),
             ),
             pointer,
+            surface: rt.presented("pill").map_or(0., |(_, opacity)| opacity),
+            title_shown: rt.presented("title").map_or(0., |(_, opacity)| opacity),
+            clock: rt
+                .elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some("elapsed"))
+                .and_then(|e| e.text),
+            light: c.waveform.as_ref().map_or(0., |wave| wave.light()),
+            hidden: hides.load(Ordering::SeqCst),
         };
         each(frame, &mut rt, &shot);
         shots.push(shot);
     }
     shots
+}
+
+impl Capsule {
+    /// The shown finished meeting's length, for notes that arrive for it.
+    fn length(&self) -> Option<u64> {
+        match &self.kind {
+            Some(Kind::Ready(m)) => m.duration_ms,
+            _ => Some(5_000),
+        }
+    }
 }
 
 fn replay(name: &str) -> &'static Replay {
@@ -505,14 +723,25 @@ fn an_interrupted_panel_turns_round_without_a_stop_or_a_jump() {
         .map(|s| s.pill.map(|r| (r[2], r[3])).unwrap())
         .collect();
     // No frame moves the edge by more than a frame of its peak speed, and
-    // its speed never changes by more than the spring can turn it.
+    // no frame's travel differs from the one before by more than a launch
+    // from rest does (6.8 pt), reversals included.
     for (frame, w) in sizes.windows(3).enumerate() {
         let (a, b) = (w[1].1 - w[0].1, w[2].1 - w[1].1);
         assert!(b.abs() < 20.0, "f{frame}: a {b} pt step");
-        assert!((b - a).abs() < 15.0, "f{frame}: speed {a} → {b}");
+        assert!((b - a).abs() < 7.5, "f{frame}: speed {a} → {b}");
     }
-    // Leaving at 20 reverses an opening panel: it carries on a little first.
-    assert!(sizes[20].1 > sizes[19].1 && sizes[24].1 < sizes[21].1);
+    // The first candidate dropped from 651 to -57 pt/s in the frame the
+    // pointer left at 20. The speed now bends round: the frame after each
+    // reversal the edge still travels the way it was going, a little slower.
+    for at in [20, 27, 33] {
+        let (before, after) = (shots[at - 1].velocity.1, shots[at].velocity.1);
+        assert!(
+            before * after > 0.0 && (after - before).abs() < 350.0,
+            "f{at}: {before} → {after} pt/s"
+        );
+    }
+    assert!(sizes[21].1 > sizes[20].1 && sizes[20].1 > sizes[19].1);
+    assert!(sizes[26].1 < sizes[22].1);
     let last = shots.last().unwrap();
     assert_eq!(last.phase, "summary");
     assert_eq!((last.veil, last.velocity), ((0., 0.), (0., 0.)));
@@ -574,7 +803,7 @@ fn hud_replay_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &pixels).unwrap();
         });
         let mut trace = String::from(
-            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y\n",
+            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light\n",
         );
         for (frame, s) in shots.iter().enumerate() {
             let [x, y, pw, ph] = s.pill.unwrap_or_default();
@@ -582,7 +811,7 @@ fn hud_replay_frames() {
             let at = |r: Option<[f32; 4]>, i: usize| r.map_or(String::new(), |r| r[i].to_string());
             writeln!(
                 trace,
-                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 s.phase,
                 s.velocity.0,
                 s.velocity.1,
@@ -606,6 +835,10 @@ fn hud_replay_frames() {
                 s.shown.2,
                 s.pointer.map_or(String::new(), |p| p.0.to_string()),
                 s.pointer.map_or(String::new(), |p| p.1.to_string()),
+                s.surface,
+                s.title_shown,
+                s.clock.clone().unwrap_or_default(),
+                s.light,
             )
             .unwrap();
         }

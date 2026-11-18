@@ -54,8 +54,7 @@ impl MeetingCapsules {
         ) && self.finishing.take().is_some()
         {
             self.generation.fetch_add(1, Ordering::SeqCst);
-            self.pill.handle.update(|c, _| c.kind = None);
-            self.pill.handle.hide();
+            self.pill.handle.update(|c, tx| c.dismiss(tx));
         }
         if let Some(id) = self.pill.apply(event, inherit) {
             self.finishing = Some(id);

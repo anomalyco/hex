@@ -275,7 +275,7 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
 
 pub(super) fn transition(c: &Capsule, p: Paint, dark: Paint) -> Option<El> {
     let (id, candidate) = c.presentation.departure.as_ref()?;
-    if !matches!(c.kind, Some(Kind::Offer(..) | Kind::Recording(_))) {
+    if !matches!(c.drawn(), Some(Kind::Offer(..) | Kind::Recording(_))) {
         return None;
     }
     Some(draw(p, dark, c, *id, candidate))
@@ -372,7 +372,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
     } else {
         page
     };
-    let label = match &c.kind {
+    let label = match c.drawn() {
         Some(Kind::Recording(r)) => format!("{} · {}", tr("Recording"), r.title),
         _ if a.inherits_offer_window() => tr("Starting…").to_owned(),
         _ => title,
@@ -413,7 +413,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         );
     }
     if live.shows()
-        && let Some(Kind::Recording(r)) = &c.kind
+        && let Some(Kind::Recording(r)) = c.drawn()
     {
         // The recording's own header, on the path it will draw it at, so
         // the meter is one node from its first frame to the finished meeting.
@@ -433,6 +433,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         // The stage steps every frame; nothing here eases a second time.
         .motion(Spring::NONE)
         .child(veil);
+    let shell = presence::anchored(c, shell);
     let radius = o.radius;
     // Regions are rectangles. Inscribe bands in the rounded body rather
     // than claiming the clear window, including its transparent corners.
