@@ -982,6 +982,15 @@ fn recommended_variant_for_choice(choice: &ModelChoice) -> Option<&str> {
         .find(|preferred| choice.variants.iter().any(|v| v == *preferred))
 }
 
+/// Providers that wrap a model in a local agent harness instead of calling
+/// its API directly. Each request pays that harness's startup, so they stay
+/// selectable but are never picked automatically (#1954).
+const AGENT_HARNESS_PROVIDERS: &[&str] = &["claude-agent"];
+
+fn is_agent_harness_provider(provider: &str) -> bool {
+    AGENT_HARNESS_PROVIDERS.contains(&provider)
+}
+
 fn provider_priority(provider: &str) -> usize {
     match provider {
         "google" | "anthropic" | "openai" => 0,
@@ -998,6 +1007,7 @@ fn ranked_choice_indices(choices: &[ModelChoice]) -> Vec<usize> {
         if let Some((best_idx, _)) = choices
             .iter()
             .enumerate()
+            .filter(|(_, choice)| !is_agent_harness_provider(&choice.provider))
             .filter(|(_, choice)| matches_recommended_model_id(leaf_model_id(&choice.key), rec.id))
             .min_by_key(|(idx, choice)| (provider_priority(&choice.provider), *idx))
             && !ranked.contains(&best_idx)
@@ -2554,6 +2564,105 @@ mod tests {
         let catalog3 = build_model_catalog(only_nano, Some(heavy_default));
         assert_eq!(catalog3.default_key.as_deref(), Some("openai/gpt-5.4-nano"));
         assert_eq!(catalog3.default_variant.as_deref(), Some("none"));
+    }
+
+    fn model_choice(provider: &str, id: &str, name: &str, variants: &[&str]) -> ModelInfo {
+        ModelInfo {
+            id: id.into(),
+            provider_id: provider.into(),
+            name: name.into(),
+            enabled: true,
+            capabilities: ModelCapabilities {
+                output: vec!["text".into()],
+            },
+            variants: variants
+                .iter()
+                .map(|v| ModelVariant { id: (*v).into() })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn model_catalog_ranks_a_direct_provider_over_its_agent_harness() {
+        let models = vec![
+            model_choice(
+                "claude-agent",
+                "claude-haiku-4-5-20251001",
+                "Claude Haiku 4.5",
+                &[],
+            ),
+            model_choice(
+                "anthropic",
+                "claude-haiku-4-5-20251001",
+                "Claude Haiku 4.5",
+                &[],
+            ),
+        ];
+        let catalog = build_model_catalog(models, None);
+
+        assert_eq!(
+            catalog.default_key.as_deref(),
+            Some("anthropic/claude-haiku-4-5-20251001")
+        );
+        assert_eq!(
+            catalog
+                .ranked_candidates(None)
+                .iter()
+                .map(|model| (model.provider.as_str(), model.id.as_str()))
+                .collect::<Vec<_>>(),
+            [("anthropic", "claude-haiku-4-5-20251001")]
+        );
+        assert!(
+            catalog
+                .models
+                .iter()
+                .any(|choice| choice.key == "claude-agent/claude-haiku-4-5-20251001"),
+            "the agent harness stays explicitly selectable: {:?}",
+            catalog
+                .models
+                .iter()
+                .map(|choice| choice.key.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn agent_harness_models_never_rank_and_fall_back_to_the_default_model() {
+        let harness = model_choice(
+            "claude-agent",
+            "claude-haiku-4-5-20251001",
+            "Claude Haiku 4.5",
+            &[],
+        );
+        let direct = model_choice("openai", "gpt-5.4-nano", "GPT-5.4 Nano", &[]);
+        let opencode_default = model_choice("example", "default-model", "Default Model", &[]);
+
+        let catalog = build_model_catalog(
+            vec![harness.clone(), direct],
+            Some(opencode_default.clone()),
+        );
+        assert_eq!(catalog.default_key.as_deref(), Some("openai/gpt-5.4-nano"));
+        assert_eq!(
+            catalog
+                .ranked_candidates(None)
+                .iter()
+                .map(|model| model.provider.as_str())
+                .collect::<Vec<_>>(),
+            ["openai"]
+        );
+
+        let only_harness = build_model_catalog(vec![harness], Some(opencode_default));
+        assert!(only_harness.ranked_candidates(None).is_empty());
+        assert_eq!(
+            only_harness.default_key.as_deref(),
+            Some("example/default-model")
+        );
+        assert!(
+            only_harness
+                .models
+                .iter()
+                .any(|choice| choice.key == "claude-agent/claude-haiku-4-5-20251001")
+        );
     }
 
     #[test]
