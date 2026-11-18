@@ -9,7 +9,7 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use rune::{El, TextEdit, Tx, col, row, text};
+use rune::{Cx, El, TextEdit, Tx, col, row, text};
 use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
 use super::controls::{ButtonKind, Paint, button};
@@ -18,7 +18,7 @@ use super::lists::{Tone, error_panel, section_label, small_button};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::playback::Playback;
-use crate::history::stats::{AppCount, DayCount, HistoryStats, ProfileLatency};
+use crate::history::stats::{AppCount, DayCount, HistoryStats, ProfileOutputTime};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
@@ -338,8 +338,8 @@ impl HistoryPane {
         pane
     }
 
-    /// A representative summary for the stats dialog's snapshots and tests:
-    /// every section has something to show.
+    /// The worst case for the stats dialog's snapshots and tests: five apps,
+    /// four modes, and numbers and names long enough to test truncation.
     pub(super) fn fixture_stats() -> HistoryStats {
         let today = crate::history::stats::local_day(crate::history::now_ms());
         // Busy and quiet days across the whole window, so the chart has
@@ -355,8 +355,8 @@ impl HistoryPane {
             })
             .collect();
         HistoryStats {
-            dictations: 128,
-            words: 1_482,
+            dictations: 1_284,
+            words: 128_402,
             audio_ms: 720_000,
             words_per_minute: Some(123),
             changed_by_output: 34,
@@ -366,29 +366,49 @@ impl HistoryPane {
             top_apps: vec![
                 AppCount {
                     application: "Slack".into(),
-                    dictations: 41,
+                    dictations: 412,
+                },
+                AppCount {
+                    application: "Visual Studio Code — Insiders".into(),
+                    dictations: 331,
                 },
                 AppCount {
                     application: "WezTerm".into(),
-                    dictations: 33,
+                    dictations: 278,
                 },
                 AppCount {
-                    application: "Firefox".into(),
-                    dictations: 27,
+                    application: "Firefox Developer Edition".into(),
+                    dictations: 190,
+                },
+                AppCount {
+                    application: "Notes".into(),
+                    dictations: 121,
                 },
             ],
-            rewrite_latency: vec![
-                ProfileLatency {
+            output_time: vec![
+                ProfileOutputTime {
                     profile: "Chat".into(),
                     runs: 12,
                     median_ms: 910,
                     slowest_ms: 3_200,
                 },
-                ProfileLatency {
+                ProfileOutputTime {
                     profile: "Email".into(),
                     runs: 5,
                     median_ms: 1_450,
                     slowest_ms: 2_800,
+                },
+                ProfileOutputTime {
+                    profile: "Meeting notes and action items".into(),
+                    runs: 3,
+                    median_ms: 2_050,
+                    slowest_ms: 4_800,
+                },
+                ProfileOutputTime {
+                    profile: "Customer support replies".into(),
+                    runs: 2,
+                    median_ms: 620,
+                    slowest_ms: 1_100,
                 },
             ],
         }
@@ -622,7 +642,7 @@ fn delete(ui: &mut Ui, id: u64) {
 }
 
 /// The header's retention menu and the list + detail body.
-pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
+pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
     let mut notices = Vec::new();
@@ -695,8 +715,18 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
-    if let Some(modal) = stats::modal(ui, p) {
-        layer.extend(modal);
+    if ui.history.stats_open {
+        // The dialog bounds its body by the window it centers in, which is
+        // the layer's height, and sizes it to the sections' own height so a
+        // short dialog leaves no blank space. The first frame has neither
+        // rect yet, so the window's least height and the full room stand in.
+        let window_height = cx
+            .layout_size("history-stats-layer")
+            .map_or(super::MIN_WINDOW_SIZE.1, |size| size[1]);
+        let content_height = cx.layout_size("history-stats-sections").map(|size| size[1]);
+        if let Some(modal) = stats::modal(ui, p, window_height, content_height) {
+            layer.extend(modal);
+        }
     }
     (
         actions,

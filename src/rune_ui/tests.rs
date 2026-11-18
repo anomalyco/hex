@@ -1430,8 +1430,9 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_some());
     assert!(texts(&rt).iter().any(|text| text == "Dictation stats"));
-    // Headline tiles, the daily chart, the app bars, Output's share, and the
-    // rewrite latency all show for the fixture.
+    // Headline tiles, the daily chart, the app bars, Output's share, and
+    // Output time all show for the fixture, and the numbers group their
+    // thousands.
     for key in [
         "tile-dictations",
         "tile-words",
@@ -1440,10 +1441,13 @@ fn history_stats_button_opens_and_closes_the_dialog() {
         "history-stats-daily",
         "history-stats-apps",
         "history-stats-changed",
-        "history-stats-latency",
+        "history-stats-output-time",
     ] {
         assert!(rt.find(key).is_some(), "{key} shows");
     }
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "128,402"), "{shown:?}");
+    assert!(shown.iter().any(|text| text == "1,284"), "{shown:?}");
     tap(&mut rt, "history-stats-close");
     assert!(!rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_none());
@@ -1533,12 +1537,41 @@ fn history_stats_dialog_hides_sections_with_nothing_to_show() {
     for key in [
         "history-stats-daily",
         "history-stats-apps",
-        "history-stats-latency",
+        "history-stats-output-time",
     ] {
         assert!(rt.find(key).is_none(), "{key} stays out");
     }
     // With no Output changes at all, its meter still reads zero.
     assert!(rt.find("history-stats-changed").is_some());
+}
+
+/// The dialog's worst case in the window's least size: it stays inside the
+/// window, keeps its title and Close, and scrolls the sections between them.
+#[test]
+fn the_stats_dialog_fits_the_smallest_window_with_a_scrolling_body() {
+    let rt = runtime("history-stats", true, (860.0, 560.0));
+    let (dialog, _) = rt.presented("history-stats-dialog").expect("the dialog");
+    assert!(
+        dialog[1] >= 0.0 && dialog[1] + dialog[3] <= 560.0,
+        "the dialog fits the window: {dialog:?}"
+    );
+    let (close, _) = rt.presented("history-stats-close").expect("Close");
+    assert!(
+        close[1] + close[3] <= dialog[1] + dialog[3],
+        "Close stays inside the dialog: {close:?} in {dialog:?}"
+    );
+    let (body, _) = rt.presented("history-stats-body").expect("the body");
+    let (sections, _) = rt
+        .presented("history-stats-sections")
+        .expect("the sections");
+    assert!(
+        sections[3] > body[3],
+        "the body scrolls: {sections:?} in {body:?}"
+    );
+    assert!(
+        body[1] + body[3] <= close[1],
+        "the scrolling viewport ends before the footer: {body:?} in {close:?}"
+    );
 }
 
 /// History, settled.

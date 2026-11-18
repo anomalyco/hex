@@ -1,8 +1,8 @@
 //! Labs › Dictation stats: the dialog behind History's Stats button. It
 //! headlines the retained history's totals, then shows the recent daily
 //! activity, the apps dictations went to, how often Output changed the text,
-//! and each rewrite profile's latency. Sections with nothing to show are
-//! left out.
+//! and each mode's Output time. Sections with nothing to show are left out,
+//! and the body scrolls while the window is short.
 
 use rune::{Align, El, col, el, row, text};
 use rune_kit::Progress;
@@ -13,20 +13,37 @@ use super::super::controls::{
 };
 use super::super::lists::section_label;
 use crate::desktop::i18n::{tr, tr_named};
-use crate::history::stats::{DayCount, HistoryStats, ProfileLatency};
+use crate::history::stats::{DayCount, HistoryStats, ProfileOutputTime};
 
 /// The stats dialog's width and padding.
 const STATS_WIDTH: f32 = 460.0;
 const PADDING: f32 = 18.0;
+/// The least clear space the dialog leaves above and below itself.
+const DIALOG_MARGIN: f32 = 24.0;
+/// Everything in the panel but its body: both paddings, the title's line, the
+/// gaps on either side of the body, and the footer's button.
+const PANEL_CHROME_HEIGHT: f32 = PADDING + 20.0 + 16.0 + 16.0 + 30.0 + 14.0;
+/// A scrolling body never shrinks below this, however short the window.
+const MIN_BODY_HEIGHT: f32 = 120.0;
 /// The daily chart's height and the gap between its day bars.
 const CHART_HEIGHT: f32 = 44.0;
 const BAR_GAP: f32 = 3.0;
 /// A top app's name, and its count on the trailing edge.
 const APP_NAME_WIDTH: f32 = 120.0;
 const COUNT_WIDTH: f32 = 34.0;
+/// Room beside the body's scroll bar.
+const SCROLL_BAR_INSET: f32 = 12.0;
 
 /// The stats dialog's scrim and panel, while its button and stats show.
-pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
+/// `window_height` is the window the panel centers in, which bounds its body
+/// so the title and Close stay put, and `content_height` is the body's own
+/// height from the last layout, so a short body doesn't leave blank space.
+pub(super) fn modal(
+    ui: &Ui,
+    p: Paint,
+    window_height: f32,
+    content_height: Option<f32>,
+) -> Option<[El; 2]> {
     if !ui.history.stats_open || !ui.settings.labs.history_stats {
         return None;
     }
@@ -36,6 +53,30 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .as_ref()
         .filter(|stats| stats.dictations > 0)?;
     let c = &p.k.c;
+    let mut body = col()
+        .key("history-stats-sections")
+        .w_full()
+        .gap(16.0)
+        .pr(SCROLL_BAR_INSET)
+        .child(tiles(p, stats));
+    if let Some(daily) = daily(p, stats) {
+        body = body.child(daily);
+    }
+    if let Some(apps) = top_apps(p, stats) {
+        body = body.child(apps);
+    }
+    body = body.child(changed(p, stats));
+    if let Some(times) = output_time(p, stats) {
+        body = body.child(times);
+    }
+    let body = col()
+        .key("history-stats-body-frame")
+        .h(body_height(
+            window_height,
+            content_height,
+            super::super::SCROLL_FADE,
+        ))
+        .child(super::super::scroll_body(p.k, "history-stats-body", body));
     let mut panel = col()
         .key("history-stats-dialog")
         .role("dialog")
@@ -56,29 +97,19 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .font(p.k.ty.body_medium)
                 .color(p.text()),
         )
-        .child(tiles(p, stats));
-    if let Some(daily) = daily(p, stats) {
-        panel = panel.child(daily);
-    }
-    if let Some(apps) = top_apps(p, stats) {
-        panel = panel.child(apps);
-    }
-    panel = panel.child(changed(p, stats));
-    if let Some(latency) = rewrite_latency(p, stats) {
-        panel = panel.child(latency);
-    }
-    let mut panel = panel.child(
-        row().key("footer").justify_end().child(
-            button(
-                p,
-                "history-stats-close",
-                tr("Close"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| close_stats(ui),
-            )
-            .default_button(),
-        ),
-    );
+        .child(body)
+        .child(
+            row().key("footer").justify_end().child(
+                button(
+                    p,
+                    "history-stats-close",
+                    tr("Close"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| close_stats(ui),
+                )
+                .default_button(),
+            ),
+        );
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
@@ -103,6 +134,16 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     ])
 }
 
+/// How tall the scrolling body is in a window `window_height` tall: its
+/// measured content (plus the scroll body's edge fades), never past the
+/// window's own room, and never less than [`MIN_BODY_HEIGHT`].
+fn body_height(window_height: f32, content_height: Option<f32>, fades: (f32, f32)) -> f32 {
+    let room = (window_height - 2.0 * DIALOG_MARGIN - PANEL_CHROME_HEIGHT).max(MIN_BODY_HEIGHT);
+    content_height.map_or(room, |height| {
+        (height + fades.0 + fades.1).min(room).max(MIN_BODY_HEIGHT)
+    })
+}
+
 /// Closes the stats dialog, from its button, Escape, or the scrim.
 pub(crate) fn close_stats(ui: &mut Ui) {
     ui.history.stats_open = false;
@@ -112,18 +153,35 @@ pub(crate) fn close_stats(ui: &mut Ui) {
 fn tiles(p: Paint, stats: &HistoryStats) -> El {
     let wpm = stats
         .words_per_minute
-        .map_or_else(|| "–".to_owned(), |wpm| wpm.to_string());
+        .map_or_else(|| "–".to_owned(), |wpm| grouped(u64::from(wpm)));
     let values = [
-        ("dictations", stats.dictations.to_string(), tr("Dictations")),
-        ("words", stats.words.to_string(), tr("Words")),
+        ("dictations", grouped(stats.dictations), tr("Dictations")),
+        ("words", grouped(stats.words), tr("Words")),
         ("wpm", wpm, tr("Words per minute")),
-        ("streak", stats.streak_days.to_string(), tr("Daily streak")),
+        (
+            "streak",
+            grouped(u64::from(stats.streak_days)),
+            tr("Daily streak"),
+        ),
     ];
     values
         .into_iter()
         .fold(row().key("tiles").w_full().gap(8.0), |tiles, value| {
             tiles.child(tile(p, value.0, &value.1, value.2))
         })
+}
+
+/// A count with thousands grouped by commas: `128402` is `128,402`.
+fn grouped(value: u64) -> String {
+    let digits = value.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.char_indices() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
 }
 
 /// One tile: the value over its label, on a raised surface.
@@ -141,7 +199,8 @@ fn tile(p: Paint, key: &str, value: &str, label: &str) -> El {
             text(value.to_owned())
                 .key("value")
                 .font(STATS_NUMBER)
-                .color(p.text()),
+                .color(p.text())
+                .truncate(),
         )
         .child(
             text(label.to_owned())
@@ -162,10 +221,17 @@ fn daily(p: Paint, stats: &HistoryStats) -> Option<El> {
         .max()
         .filter(|peak| *peak > 0)?;
     let today = stats.daily.last().map(|day| day.day);
+    let today_count = stats.daily.last().map_or(0, |day| day.dictations);
+    let today_count = grouped(today_count);
+    let peak_count = grouped(peak);
+    let label = tr_named(
+        "Dictations per day: {today} today, {busiest} on the busiest day",
+        &[("today", &today_count), ("busiest", &peak_count)],
+    );
     let mut bars = row()
         .key("bars")
         .role("img")
-        .label(tr("Dictations per day"))
+        .label(label)
         .w_full()
         .h(CHART_HEIGHT)
         .gap(BAR_GAP)
@@ -264,7 +330,7 @@ fn top_apps(p: Paint, stats: &HistoryStats) -> Option<El> {
                             .a11y_hidden(),
                     )
                     .child(
-                        text(app.dictations.to_string())
+                        text(grouped(app.dictations))
                             .key("count")
                             .font(p.k.ty.small)
                             .color(p.muted())
@@ -308,48 +374,49 @@ fn changed(p: Paint, stats: &HistoryStats) -> El {
         )
 }
 
-/// Each rewrite profile's median and slowest latency, most run first.
-fn rewrite_latency(p: Paint, stats: &HistoryStats) -> Option<El> {
-    if stats.rewrite_latency.is_empty() {
+/// Each mode's median and slowest Output time, most run first.
+fn output_time(p: Paint, stats: &HistoryStats) -> Option<El> {
+    if stats.output_time.is_empty() {
         return None;
     }
-    let rows = stats.rewrite_latency.iter().fold(
-        col().key("profiles").w_full().gap(6.0),
-        |rows, profile| {
-            rows.child(
-                row()
-                    .key(format!("profile-{}", profile.profile))
-                    .w_full()
-                    .gap(12.0)
-                    .center_y()
-                    .child(
-                        text(profile.profile.clone())
-                            .key("name")
-                            .font(p.k.ty.ui)
-                            .color(p.text())
-                            .grow(1.0)
-                            .truncate(),
-                    )
-                    .child(
-                        text(latency(profile))
-                            .key("latency")
-                            .font(p.k.ty.small)
-                            .color(p.muted()),
-                    ),
-            )
-        },
-    );
+    let rows =
+        stats
+            .output_time
+            .iter()
+            .fold(col().key("profiles").w_full().gap(6.0), |rows, profile| {
+                rows.child(
+                    row()
+                        .key(format!("profile-{}", profile.profile))
+                        .w_full()
+                        .gap(12.0)
+                        .center_y()
+                        .child(
+                            text(profile.profile.clone())
+                                .key("name")
+                                .font(p.k.ty.small)
+                                .color(p.text())
+                                .grow(1.0)
+                                .truncate(),
+                        )
+                        .child(
+                            text(timing(profile))
+                                .key("time")
+                                .font(p.k.ty.small)
+                                .color(p.muted()),
+                        ),
+                )
+            });
     Some(
         col()
-            .key("history-stats-latency")
+            .key("history-stats-output-time")
             .gap(8.0)
-            .child(section_label(p, "label", tr("Rewrite latency")))
+            .child(section_label(p, "label", tr("Output time")))
             .child(rows),
     )
 }
 
 /// `median 0.9 s · slowest 3.2 s`.
-fn latency(profile: &ProfileLatency) -> String {
+fn timing(profile: &ProfileOutputTime) -> String {
     let median = seconds(profile.median_ms);
     let slowest = seconds(profile.slowest_ms);
     tr_named(
@@ -358,6 +425,12 @@ fn latency(profile: &ProfileLatency) -> String {
     )
 }
 
+/// `0.9`, or `0,9` in the languages that write a decimal comma.
 fn seconds(milliseconds: u64) -> String {
-    format!("{:.1}", milliseconds as f64 / 1000.0)
+    let seconds = format!("{:.1}", milliseconds as f64 / 1000.0);
+    if crate::desktop::i18n::decimal_comma() {
+        seconds.replace('.', ",")
+    } else {
+        seconds
+    }
 }

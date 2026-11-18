@@ -30,9 +30,10 @@ pub struct DayCount {
     pub dictations: u64,
 }
 
-/// One rewrite profile's runs and how long they took, in milliseconds.
+/// One mode's Output processing time, in milliseconds: its rewrite plus any
+/// transformations that ran after it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct ProfileLatency {
+pub struct ProfileOutputTime {
     pub profile: String,
     pub runs: u64,
     /// The middle run: with an even count, the mean of the two middle runs,
@@ -65,8 +66,8 @@ pub struct HistoryStats {
     pub daily: Vec<DayCount>,
     /// The most dictated-into applications, most first, then by name.
     pub top_apps: Vec<AppCount>,
-    /// The most run rewrite profiles, most runs first, then by name.
-    pub rewrite_latency: Vec<ProfileLatency>,
+    /// The most run modes' Output time, most runs first, then by name.
+    pub output_time: Vec<ProfileOutputTime>,
 }
 
 impl HistoryStats {
@@ -113,9 +114,14 @@ pub fn summarize<'a>(
         let day = day_of(entry.timestamp_ms);
         days.insert(day);
         *per_day.entry(day).or_default() += 1;
-        if let Some(processing) = &entry.processing {
+        if let Some(processing) = &entry.processing
+            && processing.fallback.is_none()
+        {
+            // A fallback run is a failure or a deadline, not the time Output
+            // takes, and a transformation-only run is not a mode.
             let profile = processing.profile.trim();
-            if !profile.is_empty() {
+            if !profile.is_empty() && profile != crate::dictation::processor::CUSTOM_TRANSFORMATIONS
+            {
                 profiles
                     .entry(profile)
                     .or_default()
@@ -153,14 +159,14 @@ pub fn summarize<'a>(
             dictations,
         })
         .collect();
-    stats.rewrite_latency = profile_latency(profiles);
+    stats.output_time = output_time(profiles);
     stats
 }
 
-/// The most run profiles, most runs first, each with its median and slowest
-/// latency. An even count's median is the mean of its two middle runs,
+/// The most run modes, most runs first, each with its median and slowest
+/// Output time. An even count's median is the mean of its two middle runs,
 /// rounded down.
-fn profile_latency(profiles: HashMap<&str, Vec<u64>>) -> Vec<ProfileLatency> {
+fn output_time(profiles: HashMap<&str, Vec<u64>>) -> Vec<ProfileOutputTime> {
     let mut profiles: Vec<_> = profiles.into_iter().collect();
     profiles
         .sort_by(|(a, a_runs), (b, b_runs)| b_runs.len().cmp(&a_runs.len()).then_with(|| a.cmp(b)));
@@ -176,7 +182,7 @@ fn profile_latency(profiles: HashMap<&str, Vec<u64>>) -> Vec<ProfileLatency> {
                 let (low, high) = (latencies[middle - 1], latencies[middle]);
                 low + (high - low) / 2
             };
-            ProfileLatency {
+            ProfileOutputTime {
                 profile: profile.to_owned(),
                 runs: latencies.len() as u64,
                 median_ms,
@@ -380,21 +386,32 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_latency_groups_by_profile_with_median_and_slowest() {
+    fn output_time_groups_by_profile_with_median_and_slowest() {
+        let fallback = |profile: &str, latency_ms: u64| {
+            let mut entry = rewritten(1, profile, latency_ms);
+            entry.processing.as_mut().expect("processing").fallback =
+                Some("deadline exceeded".into());
+            entry
+        };
         let entries = [
             rewritten(1, "Chat", 900),
             rewritten(1, "Chat", 300),
             rewritten(1, "Chat", 3_200),
+            // A failed or timed-out run is not Output time, even when its
+            // profile runs otherwise.
+            fallback("Chat", 20),
             // An even count: the median is the mean of 400 and 900.
             rewritten(1, "Email", 900),
             rewritten(1, "Email", 400),
             rewritten(1, "Notes", 120),
+            // A transformation-only run is not a mode.
+            rewritten(1, crate::dictation::processor::CUSTOM_TRANSFORMATIONS, 400),
             rewritten(1, "  ", 500),
             entry(1, "a", "a", None, 0),
         ];
         let stats = summarize(&entries, 1, utc_day);
-        let latencies: Vec<_> = stats
-            .rewrite_latency
+        let times: Vec<_> = stats
+            .output_time
             .iter()
             .map(|profile| {
                 (
@@ -406,7 +423,7 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            latencies,
+            times,
             [
                 ("Chat", 3, 900, 3_200),
                 ("Email", 2, 650, 900),
@@ -415,11 +432,11 @@ mod tests {
         );
         // An entry without processing contributes no profile.
         let plain = summarize(&[entry(1, "a", "a", None, 0)], 1, utc_day);
-        assert!(plain.rewrite_latency.is_empty());
+        assert!(plain.output_time.is_empty());
     }
 
     #[test]
-    fn rewrite_latency_names_the_four_most_run_profiles_by_name_on_a_tie() {
+    fn output_time_names_the_four_most_run_profiles_by_name_on_a_tie() {
         let profiles = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
         let mut entries = Vec::new();
         for profile in profiles {
@@ -431,15 +448,40 @@ mod tests {
         entries.push(rewritten(1, "Alpha", 1_000));
         let stats = summarize(&entries, 1, utc_day);
         let names: Vec<_> = stats
-            .rewrite_latency
+            .output_time
             .iter()
             .map(|profile| profile.profile.as_str())
             .collect();
-        assert_eq!(stats.rewrite_latency.len(), TOP_PROFILES);
+        assert_eq!(stats.output_time.len(), TOP_PROFILES);
         assert_eq!(names, ["Alpha", "Bravo", "Charlie", "Delta"]);
-        assert_eq!(stats.rewrite_latency[0].runs, 3);
-        assert_eq!(stats.rewrite_latency[0].median_ms, 100);
-        assert_eq!(stats.rewrite_latency[0].slowest_ms, 1_000);
+        assert_eq!(stats.output_time[0].runs, 3);
+        assert_eq!(stats.output_time[0].median_ms, 100);
+        assert_eq!(stats.output_time[0].slowest_ms, 1_000);
+    }
+
+    #[test]
+    fn the_json_names_every_daily_and_output_time_field() {
+        let entries = [rewritten(1, "Chat", 900), entry(1, "a", "a", None, 0)];
+        let stats = summarize(&entries, 1, utc_day);
+        let json = serde_json::to_value(&stats).unwrap();
+        let keys = |value: &serde_json::Value| {
+            let mut keys: Vec<String> = value
+                .as_object()
+                .expect("an object")
+                .keys()
+                .cloned()
+                .collect();
+            keys.sort_unstable();
+            keys
+        };
+        let day = &json["daily"][0];
+        assert_eq!(keys(day), ["day", "dictations"]);
+        assert_eq!(day["day"], -28);
+        assert_eq!(day["dictations"], 0);
+        let time = &json["output_time"][0];
+        assert_eq!(keys(time), ["median_ms", "profile", "runs", "slowest_ms"]);
+        assert_eq!(time["profile"], "Chat");
+        assert_eq!(time["runs"], 1);
     }
 
     #[test]

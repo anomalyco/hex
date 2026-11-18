@@ -21,6 +21,11 @@ const CATALOG_DEADLINE: Duration = Duration::from_secs(10);
 
 pub use crate::app_settings::DictationPostProcessing as PostProcessingSettings;
 
+/// The processing profile a run records when only the person's
+/// transformations ran, with no mode or voice-prompt rewrite. It is not a
+/// mode, so Output time leaves these runs out.
+pub const CUSTOM_TRANSFORMATIONS: &str = "Custom transformations";
+
 /// Where the text a mode processes came from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Source {
@@ -1238,7 +1243,7 @@ impl Processed {
         let observation = self
             .observation
             .get_or_insert_with(|| ProcessingObservation {
-                profile: "Custom transformations".into(),
+                profile: CUSTOM_TRANSFORMATIONS.into(),
                 latency_ms: 0,
                 model: None,
                 fallback: None,
