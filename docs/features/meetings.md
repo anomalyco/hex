@@ -1791,7 +1791,8 @@ While recording, setting on, model available           // meetings.title.provisi
      (rolling chunks, echo-filtered)
   -> ≥ 90 s of speech (or ≥ 600 words; ≥ 60 words either way)
      -> waits (≤30 s) while dictation is busy
-     -> ONE title-only call over the transcript so far (≤5,000 chars, 30 s timeout)
+     -> ONE title-only call over the transcript so far (≤5,000 chars, 30 s
+        timeout); asks for the title in the language spoken in the transcript
   -> Recorder stores provisional_title in the manifest
      -> menu bar "Recording · <title>", Meetings pane list and detail
   -> Refreshed once when speech reaches 10 minutes; a failure retries a minute
@@ -1803,6 +1804,9 @@ While recording, setting on, model available           // meetings.title.provisi
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
   -> ONE call over a bounded excerpt, no map-reduce
+     ├── Language -> the transcript's own; the instructions say "You MUST
+     │   write the title and summary in the language spoken in the transcript
+     │   … never translate them", and never name a language
      ├── Vocabulary (#1154; graduated from Labs) -> "Names and terms that
      │   may appear: …" (≤30 vocabulary terms, read at each generation,
      │   Regenerate included) ahead of the calendar context; its length comes
@@ -1852,6 +1856,16 @@ Finished meeting panel -> the shown title; "Writing a title and summary with
   Apple Intelligence…" under it, then the summary (at most three lines)
 ```
 
+Language rule: the final notes instructions (`NOTES_INSTRUCTIONS` in
+[meeting/notes.rs](../../src/meeting/notes.rs)) and the provisional-title
+instructions (`TITLE_INSTRUCTIONS`) require the title and summary in the
+language spoken in the transcript, and say those instructions are in English,
+so an English prompt never pulls another language's meeting into English. The
+live chapter instructions carry the same rule, and the boundary pass is told
+the transcript's language never changes which L numbers it lists
+(checks: `prompts_keep_the_transcripts_language` and
+`chapter_prompts_keep_the_transcripts_language`).
+
 Title rule: the shown title is the user's title unless it is still the default
 `<App> call — 2:30 PM` / `Meeting — 2:30 PM` (12-hour in English, 24-hour such
 as `14:30` elsewhere; an old 12-hour default still reads as one in any
@@ -1891,6 +1905,7 @@ FoundationModels bridge [apple_intelligence.swift](../../src/apple_intelligence.
 [build.rs](../../build.rs); the recorder loop in `record` in
 [meeting.rs](../../src/meeting.rs). Checks in `meeting::notes::tests` (fake
 model): `a_short_transcript_is_sent_whole_in_one_call`,
+`prompts_keep_the_transcripts_language`,
 `long_meetings_are_excerpted_from_the_opening_middle_and_ending`,
 `context_overflow_halves_the_excerpt_once_and_failures_stop`,
 `vocabulary_terms_lead_the_notes_prompt_and_share_its_budget`,
@@ -1899,9 +1914,10 @@ model): `a_short_transcript_is_sent_whole_in_one_call`,
 `generated_and_provisional_titles_replace_only_default_titles`,
 `older_notes_with_points_action_items_and_decisions_still_read`,
 `notes_are_inserted_above_the_transcript_and_regenerate_idempotently`, and
-`user_edits_outside_the_notes_block_are_preserved`; menu text in
-`meeting_menu_offers_one_action_per_state`. The recorder thread, manifest write,
-and menu/pane refresh during a real recording are unexercised.
+`user_edits_outside_the_notes_block_are_preserved`; chapter prompts in
+`meeting::chapters::tests`' `chapter_prompts_keep_the_transcripts_language`;
+menu text in `meeting_menu_offers_one_action_per_state`. The recorder thread,
+manifest write, and menu/pane refresh during a real recording are unexercised.
 
 Real model (debug CLI): `hex meeting summarize <file.md> [--excerpt-chars N]`
 times the provisional title at the point a recording would ask for it, then the
@@ -2196,6 +2212,11 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Titles and summaries have not run after a real recording in the app; the CLI
   path exercised the real model, and the provisional-title thread, its manifest
   write, and the menu/pane refresh are unexercised in a live recording.
+- The transcript-language rule in the notes and chapter prompts is prompt-level
+  only: it has not run on a real Mac against a non-English meeting, so whether
+  Apple Intelligence and a given OpenCode model honour it, and how they word a
+  title or summary whose script has no spaces or `.`/`!`/`?` sentence ends
+  (`clean_title`, `clean_summary`), are unmeasured.
 - Live chapters (Labs) have not run in a real recording: the worker,
   manifest writes, title updates, menu bar Copy Section, and the boundary pass
   after publication ran only in unit tests and the debug CLI over one synthetic
