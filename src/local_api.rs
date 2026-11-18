@@ -28,6 +28,8 @@ mod transcriptions;
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use discovery::call_developer;
+#[cfg(not(target_os = "macos"))]
+pub use discovery::wait_for_exit;
 use discovery::*;
 pub(crate) use discovery::{Discovered, Endpoint, discover, error_code};
 pub use discovery::{call_control, running_pid};

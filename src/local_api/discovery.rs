@@ -511,6 +511,51 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
     }
 }
 
+/// Waits up to `timeout` for `pid` to exit, reporting whether it has. A
+/// process that is already gone, or that cannot be opened at all, counts as
+/// exited.
+///
+/// `hex restart` waits on this rather than on the local API: the API stops
+/// answering earlier in the drain, while the instance a Hex holds (Windows'
+/// named event, Linux's lock) is released only when the process ends, so a
+/// successor started in between exits at once.
+#[cfg(unix)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
+    let started = std::time::Instant::now();
+    loop {
+        if !process_is_alive(pid) {
+            return true;
+        }
+        if started.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[cfg(windows)]
+pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    };
+    // The handle is taken while the old Hex still runs, so the wait can only
+    // be about that process: looking the pid up again afterwards would find
+    // whatever reused it (the updater's lesson, #513).
+    // SAFETY: the handle is checked before use and closed once.
+    unsafe {
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if process.is_null() {
+            return true;
+        }
+        let millis = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
+        let waited = WaitForSingleObject(process, millis);
+        CloseHandle(process);
+        waited == WAIT_OBJECT_0
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::io::{BufRead, BufReader, Write as _};
@@ -663,5 +708,34 @@ mod tests {
         server.join().unwrap();
         assert_eq!(status, 409);
         assert_eq!(body, BODY);
+    }
+
+    /// `hex restart` waits on the old process, so the wait must end as soon
+    /// as it does and say so when it doesn't.
+    #[test]
+    fn waiting_for_a_process_reports_whether_it_exited() {
+        let mut exited = std::process::Command::new("true").spawn().unwrap();
+        let pid = exited.id();
+        exited.wait().unwrap();
+        let started = std::time::Instant::now();
+        assert!(super::wait_for_exit(pid, Duration::from_secs(5)));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "a process that already exited took {:?}",
+            started.elapsed()
+        );
+
+        let mut live = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        assert!(
+            !super::wait_for_exit(live.id(), Duration::from_millis(300)),
+            "a live process read as exited"
+        );
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        let _ = live.kill();
+        let _ = live.wait();
     }
 }

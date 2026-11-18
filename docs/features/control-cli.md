@@ -13,12 +13,16 @@ Agent or terminal                                  // control.cli; every OS
 │   └── Hex not running -> exit 3, "Hex is not running; run `hex start`"
 ├── hex start -> Already running: nothing | else open Hex.app (Linux and
 │   Windows: a detached `hex app --hidden`), wait ≤ 20 s
+│   ├── The launch exits at once -> failed, "run `hex start` again": another
+│   │   Hex is probably still shutting down and holds the instance
 │   └── The caller's HEX_* variables -> open --env (values never logged)
 ├── hex quit | restart [--force]
 │   ├── Meeting or dictation in progress, no --force -> refused, exit 1
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
-│       Linux unit -> systemctl restart; else waits for the drain, then start
+│       Linux unit -> systemctl restart; else waits for that pid to exit
+│       (its local API stops earlier in the drain, its instance lock or event
+│       only at exit), then start
 ├── hex dictation start|stop|toggle|cancel
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   │   ├── Windows CLI/tray start -> hook adopts the accepted capture; first
@@ -251,7 +255,10 @@ video, Ogg and WebM Opus, Ogg Vorbis) decoding to its 16 kHz length, Opus
 pre-skip and end trim, a video with no audio track, and a cut-short file;
 `control::cli::prepare::tests` cover the prompt's answers and that `--json`
 never asks; `local_api::discovery::tests` cover choosing an endpoint (absent,
-stale, wrong version or token) and validating the embedded ready line.
+stale, wrong version or token) and validating the embedded ready line, and
+`waiting_for_a_process_reports_whether_it_exited` pins the pid wait restart
+uses (an exited process reads as gone at once, a live one only at the
+timeout).
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -271,7 +278,12 @@ recording, so expect to verify it by hand (a locked recording finished by the
 shortcut, by `stop`, and by `stop --print`) before trusting it. A CLI volume
 change does not preview a tone as the window does. Onboarding
 permission prompts, calendar connection, and meeting deletion or renaming have
-no command. Linux and Windows dictation through the CLI has not run with a
+no command. `hex restart`'s relaunch has no end-to-end test on any OS: the
+pid wait it uses is unit-tested
+(`waiting_for_a_process_reports_whether_it_exited`), but the handoff from the
+old process's exit to the new one's instance claim has only been read, so
+verify a Windows restart and a login-launch restart by hand before trusting
+it. Linux and Windows dictation through the CLI has not run with a
 microphone, and meeting recording through the CLI has not run on Linux or
 Windows. `hex transcribe` was observed on macOS (Nov 13, Apple Silicon): with
 the app running (no child) and stopped (an embedded child, on an empty data
