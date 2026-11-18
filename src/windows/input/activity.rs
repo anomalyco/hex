@@ -1,8 +1,7 @@
 //! What the low-level hooks count as the user's own input between
-//! dictations: a real key or click, never the shortcut's own chord, another
-//! tool's injection, or one of Hex's synthetic events.
+//! dictations: a real key or click, never the shortcut's own chord or one of
+//! Hex's synthetic events.
 
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_XBUTTON1, VK_XBUTTON2};
 use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 use super::{CALLBACK_STATE, HEX_INJECTED};
@@ -14,21 +13,13 @@ pub(crate) fn foreground_window() -> isize {
 }
 
 /// Whether an event is the user's own input between dictations, which ends
-/// a paste continuation: a real key or left, right, or middle click, never
-/// a modifier (the shortcuts' own chords include one), another tool's
-/// injection, or one of Hex's own synthetic events.
-pub(super) fn ends_continuation(
-    vk: u32,
-    is_down: bool,
-    modifier: bool,
-    injected: bool,
-    extra_info: usize,
-) -> bool {
-    is_down
-        && !modifier
-        && !injected
-        && extra_info != HEX_INJECTED
-        && !matches!(vk as u16, VK_XBUTTON1 | VK_XBUTTON2)
+/// a paste continuation: a press that is not a modifier (the shortcuts' own
+/// chords include one) and not one of Hex's own synthetic events. Input
+/// another program injects is the user's too: a remapper, keyboard sharing,
+/// or the touch keyboard typed what is in front of them, so it ends the
+/// continuation as macOS's tap does.
+pub(super) fn ends_continuation(is_down: bool, modifier: bool, extra_info: usize) -> bool {
+    is_down && !modifier && extra_info != HEX_INJECTED
 }
 
 /// The user typed or clicked: the next paste no longer continues the last
@@ -49,28 +40,21 @@ mod tests {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LCONTROL;
 
     #[test]
-    fn real_input_ends_a_paste_continuation_but_shortcuts_and_injections_do_not() {
-        // A typed key, and a left, right, or middle click.
-        for vk in [0x41, 0x01, 0x02, 0x04] {
-            assert!(ends_continuation(vk, true, false, false, 0), "{vk:#x}");
-        }
+    fn real_input_ends_a_paste_continuation_but_hexs_own_events_do_not() {
+        // A real press ends it, whatever key or mouse button sent it: macOS
+        // counts any mouse-down, auxiliary buttons included.
+        assert!(ends_continuation(true, false, 0));
         // A release inputs nothing, and a modifier is part of the shortcut's
         // own chord.
-        assert!(!ends_continuation(0x41, false, false, false, 0));
+        assert!(!ends_continuation(false, false, 0));
         let control = u32::from(VK_LCONTROL);
         assert!(!ends_continuation(
-            control,
             true,
             ModifierState::is_modifier(control),
-            false,
             0
         ));
-        // Another tool's injection, and Hex's own synthetic paste or chord.
-        assert!(!ends_continuation(0x41, true, false, true, 0));
-        assert!(!ends_continuation(0x41, true, false, false, HEX_INJECTED));
-        // The auxiliary mouse buttons leave the dictation alone.
-        for vk in [VK_XBUTTON1, VK_XBUTTON2] {
-            assert!(!ends_continuation(u32::from(vk), true, false, false, 0));
-        }
+        // Hex's own synthetic paste or chord. Another program's injected key
+        // carries no marker, so it ends the continuation above.
+        assert!(!ends_continuation(true, false, HEX_INJECTED));
     }
 }

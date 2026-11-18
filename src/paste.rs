@@ -256,15 +256,9 @@ impl Paster {
                     text.to_string()
                 }
             });
-        // A standalone paste ends the continuation even if its insertion
-        // fails, so the next dictation never joins a dictation it did not
-        // follow.
-        if !joinable {
-            self.continuation.clear();
-        }
         match typing_for_frontmost() {
-            Some(typing) => self.type_into_frontmost(&text, typing)?,
-            None => self.paste_through_clipboard(&text)?,
+            Some(typing) => self.type_into_frontmost(&text, joinable, typing)?,
+            None => self.paste_through_clipboard(&text, joinable)?,
         }
         self.continuation.record(revision, joinable, text);
         Ok(())
@@ -274,7 +268,12 @@ impl Paster {
     /// for the apps [`typing_for_frontmost`] names. Nothing is captured for a
     /// restore; Labs › Keep dictation on clipboard still leaves the text on
     /// the clipboard after typing.
-    fn type_into_frontmost(&mut self, text: &str, typing: Typing) -> Result<()> {
+    fn type_into_frontmost(&mut self, text: &str, joinable: bool, typing: Typing) -> Result<()> {
+        // Standalone text starts its own sentence, never a continuation of
+        // the dictation before it.
+        if !joinable {
+            self.continuation.clear();
+        }
         match typing {
             Typing::Burst => {
                 tracing::debug!("typing instead of pasting into Chromium 155 or 156");
@@ -320,7 +319,7 @@ impl Paster {
         write_clipboard_text(&self.clipboard, text, false)
     }
 
-    fn paste_through_clipboard(&mut self, text: &str) -> Result<()> {
+    fn paste_through_clipboard(&mut self, text: &str, joinable: bool) -> Result<()> {
         let generation = {
             let mut restore = self
                 .clipboard_restore
@@ -347,6 +346,12 @@ impl Paster {
             };
             if self.clipboard.changeCount() != previous_change_count {
                 return Err(eyre!("clipboard changed while Hex was preserving it"));
+            }
+            // Standalone text starts its own sentence, once the clipboard is
+            // safely preserved; a failure before this leaves the continuation
+            // alone, as it inserted nothing.
+            if !joinable {
+                self.continuation.clear();
             }
             // Read as the paste commits, so the toggle applies at once.
             let keep = crate::labs::keep_on_clipboard();
