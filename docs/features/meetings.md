@@ -340,7 +340,11 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
           │   known. Otherwise a neutral call icon, never the hosting browser's.
           │   The same 24 pt slot keeps the title aligned as a local icon loads.
           ├── Record -> request this call once, without waiting for the animation
-          │   ├── The same surface contracts in its corner; “Starting…” while opening
+          │   ├── The same surface contracts in its corner, the offer fading out
+          │   │   under its moving edge. “Starting…” shows at the pill's resting
+          │   │   place, and only once a start has taken 180 ms; a quicker start
+          │   │   goes straight to the timer. Reduce Motion lands the pill and
+          │   │   fades the arrival
           │   ├── Only once capture starts -> live field + timer, or hide if the indicator is off
           │   ├── A pointer left over Record doesn't expand the pill or press Stop
           │   └── Withdrawal before acceptance, replacement, or failure ends the pending view;
@@ -898,20 +902,39 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   Stop nearest the meter, Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
+     │   ├── The width leads the height; the actions follow in order, each
+     │   │   only as far as the outline has uncovered it, and leave together.
+     │   │   A pointer that comes and goes mid-way turns the surface round
+     │   │   from where it is, at the speed it has. Stop takes a press only
+     │   │   once at least half of it shows
+     │   └── Checks: stage.rs unit tests; the replays in replay_fixture.rs
+     │       (`the_panel_opens_width_first_and_its_rows_follow_in_order`,
+     │       `an_interrupted_panel_turns_round_without_a_stop_or_a_jump`,
+     │       `reduced_motion_lands_the_surface_and_only_fades`). Offscreen
+     │       Rune with a synthetic pointer; not seen in a native window
      ├── Stop -> the icon, label and whitespace use the same 242 × 44 pt row
      │   and hover/focus bounds as the copies. The plain arrow stays put;
      │   dragging the meter band repositions, dragging a row does not.
-     │   A click queues one stop immediately. The pill stays open and says
-     │   “Stopping…” with its waveform and elapsed time until capture ends.
-     │   The worker closing its sources, not the click, switches the header to
-     │   “Transcribing…”. Publication brings back the copies and Close on the
+     │   A click queues one stop immediately. The pill stays open and the
+     │   same row says “Stopping…” in place, its icon and first letters
+     │   unmoved, with the waveform and elapsed time until capture ends.
+     │   The worker closing its sources, not the click, replaces that row
+     │   with “Transcribing…” and lets the waveform release and fade.
+     │   Publication brings back the copies and Close on the
      │   same surface; it does not wait for notes or a minimum animation time.
      │   Short titles keep the open recording header's height. Longer ones
      │   wrap at their final width (up to three lines). The timer keeps its
      │   baseline. Notes grow from the outer edge, past the copy rows, without
      │   moving a copy button away from the pointer.
      │   A recorder failure yields to the Meetings error instead of showing a
-     │   finished transcript. Check: `stop_handoff_frames` (offscreen Rune).
+     │   finished transcript. Checks: `stop_handoff_frames`,
+     │   `stop_says_stopping_in_place_and_the_field_cools`, and
+     │   `HEX_HUD_REPLAY=<dir> cargo test --bin hex hud_replay_frames` for
+     │   every frame of the whole path (offscreen Rune).
+     │   Not done: a title that changes (“Transcribing…” to the meeting's
+     │   name, then the notes' title) is replaced in one frame, and Close, a
+     │   refused start, Not now and the offer's timeout hide the surface in
+     │   one frame.
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
      │   its centre and saves recording_indicator_corner (window settings too)
      ├── Copy new -> copies the turns not yet copied or pasted, through

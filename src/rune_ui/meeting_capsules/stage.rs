@@ -179,6 +179,7 @@ impl Stage {
         self.outline.map_or((0.0, 0.0), |[w, h, ..]| (w.v, h.v))
     }
 
+    #[cfg(test)]
     pub(super) fn resting(&self) -> bool {
         self.last.is_none()
     }
@@ -303,12 +304,6 @@ impl Stage {
         let mut waiting = false;
         for layer in Self::layers() {
             let wants = target.wants(layer, now);
-            let spring = match (reduced, wants) {
-                (true, _) => REDUCED,
-                (false, true) => ENTER,
-                (false, false) => EXIT,
-            };
-            moving |= self.layers[layer.index()].step(f32::from(wants), spring, dt, 0.002);
             // A layer whose turn hasn't come keeps the clock running.
             waiting |= !wants
                 && match layer {
@@ -316,6 +311,20 @@ impl Stage {
                     Layer::Action(row) => target.actions.is_some() && (row > 0 || target.stop),
                     _ => false,
                 };
+            let track = &mut self.layers[layer.index()];
+            let spring = match (reduced, wants) {
+                (true, true) => REDUCED,
+                // The outline has already landed: what leaves would only be
+                // cut by it, so it goes at once and the arrival fades.
+                (true, false) => {
+                    moving |= *track != Track::at(0.0);
+                    *track = Track::at(0.0);
+                    continue;
+                }
+                (false, true) => ENTER,
+                (false, false) => EXIT,
+            };
+            moving |= track.step(f32::from(wants), spring, dt, 0.002);
         }
         self.last = (moving || waiting).then_some(now);
         self.waiting = waiting && !moving;
@@ -493,5 +502,9 @@ mod tests {
             stage.step(&open, true, frame as f64 / 60.0);
         }
         assert_eq!(stage.presence(Layer::Action(ACTIONS - 1)).opacity, 1.0);
+        // Leaving, nothing lingers to be cut by an outline that has landed.
+        stage.step(&target(148.0, 36.0), true, 41.0 / 60.0);
+        assert!((0..ACTIONS).all(|row| !stage.presence(Layer::Action(row)).shows()));
+        assert_eq!(stage.outline().unwrap().w, 148.0);
     }
 }

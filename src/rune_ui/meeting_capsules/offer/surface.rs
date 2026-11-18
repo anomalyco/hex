@@ -383,6 +383,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         .key("veil")
         .absolute(0., 0.)
         .size(w, h)
+        .transition(Transition::none())
         .clip_fade_linear(
             if right { veil_x } else { 0. },
             if top_corner { 0. } else { veil_y },
@@ -414,18 +415,9 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
     if live.shows()
         && let Some(Kind::Recording(r)) = &c.kind
     {
-        // The recording's own header band, where it will draw it.
-        let (lx, ly) = from_corner(PANEL_WIDTH, REST_HEIGHT);
-        let band = row()
-            .key("live")
-            .absolute(lx, ly)
-            .size(PANEL_WIDTH, REST_HEIGHT)
-            .px(REST_PX)
-            .center_y()
-            .transition(Transition::none())
-            .opacity(live.opacity);
-        let band = if right { band.justify_end() } else { band };
-        veil = veil.child(band.child(panel::meter(dark, r)));
+        // The recording's own header, on the path it will draw it at, so
+        // the meter is one node from its first frame to the finished meeting.
+        veil = veil.child(panel::arriving_header(dark, c, r, w, h, live.opacity));
     }
     let shell = row()
         .key("pill")

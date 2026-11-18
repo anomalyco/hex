@@ -156,6 +156,9 @@ struct Shot {
     label: Option<([f32; 4], String)>,
     title: Option<String>,
     field: bool,
+    /// How strongly the time, the field and Stop were drawn, ancestors included.
+    shown: (f32, f32, f32),
+    pointer: Option<(f32, f32)>,
 }
 
 /// Plays `replay`, handing every frame to `each` once it is laid out.
@@ -196,16 +199,24 @@ fn play(
     };
     let mut live_since = replay.live.then_some(0usize);
     let mut pressed = None;
+    let mut pointer = None;
     let mut shots = Vec::new();
     for frame in 0..replay.frames {
         for (_, cue) in replay.cues.iter().filter(|(at, _)| *at == frame) {
             match *cue {
-                Cue::Move(x, y) => rt.pointer_move(x, y),
-                Cue::Over(key) => {
-                    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no {key} at {frame}"));
+                Cue::Move(x, y) => {
+                    pointer = Some((x, y));
                     rt.pointer_move(x, y);
                 }
-                Cue::Leave => rt.pointer_leave(),
+                Cue::Over(key) => {
+                    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no {key} at {frame}"));
+                    pointer = Some((x, y));
+                    rt.pointer_move(x, y);
+                }
+                Cue::Leave => {
+                    pointer = None;
+                    rt.pointer_leave();
+                }
                 Cue::Record => {
                     let (x, y) = rt.find("record").unwrap();
                     rt.pointer_down(x, y);
@@ -236,6 +247,7 @@ fn play(
                 Cue::PressStop => {
                     // Wherever the pointer is, Stop is pressed where it is drawn.
                     let (x, y) = rt.find("stop").unwrap_or_else(|| panic!("no Stop at {frame}"));
+                    pointer = Some((x, y));
                     rt.pointer_move(x, y);
                     rt.pointer_down(x, y);
                     rt.pointer_up(x, y);
@@ -341,6 +353,13 @@ fn play(
                 .find(|e| e.key.as_deref() == Some("title"))
                 .and_then(|e| e.text),
             field: rt.find("meeting-listening-field").is_some(),
+            shown: (
+                rt.presented("elapsed").map_or(0., |(_, opacity)| opacity),
+                rt.presented("meeting-listening-field")
+                    .map_or(0., |(_, opacity)| opacity),
+                rt.presented("stop").map_or(0., |(_, opacity)| opacity),
+            ),
+            pointer,
         };
         each(frame, &mut rt, &shot);
         shots.push(shot);
@@ -449,9 +468,21 @@ fn stop_says_stopping_in_place_and_the_field_cools() {
     assert_eq!(shots[425].phase, "transcribing");
     assert!(shots[425].field && shots[440].field);
     assert!(shots[460].phase == "transcribing" && !shots[460].field);
-    // Stop leaves over several frames while the title arrives.
+    // Stop leaves over several frames, drawn where it was pressed, while
+    // the title arrives.
+    assert!(shots[424].shown.2 > 0.999);
+    assert!(shots[426].shown.2 > 0.2 && shots[426].shown.2 < 1.0, "{}", shots[426].shown.2);
+    assert!(shots[427].shown.2 < shots[426].shown.2);
     assert!(shots[426].presence[3] > 0.2 && shots[426].presence[3] < 1.0);
     assert_eq!(shots[460].presence[3], 0.0);
+    // The meter is one thing from its first frame to the finished meeting:
+    // the drafts mounted it again at each change of state, and it dipped.
+    for (frame, shot) in shots.iter().enumerate().skip(130) {
+        assert!(shot.shown.0 > 0.999, "f{frame}: the time at {}", shot.shown.0);
+        if frame < 425 {
+            assert!(shot.shown.1 > 0.999, "f{frame}: the field at {}", shot.shown.1);
+        }
+    }
     // The time never moves through any of it.
     let clock = shots[400].elapsed.unwrap();
     for (frame, shot) in shots.iter().enumerate().skip(400) {
@@ -543,7 +574,7 @@ fn hud_replay_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &pixels).unwrap();
         });
         let mut trace = String::from(
-            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field\n",
+            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y\n",
         );
         for (frame, s) in shots.iter().enumerate() {
             let [x, y, pw, ph] = s.pill.unwrap_or_default();
@@ -551,7 +582,7 @@ fn hud_replay_frames() {
             let at = |r: Option<[f32; 4]>, i: usize| r.map_or(String::new(), |r| r[i].to_string());
             writeln!(
                 trace,
-                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 s.phase,
                 s.velocity.0,
                 s.velocity.1,
@@ -570,6 +601,11 @@ fn hud_replay_frames() {
                 s.label.as_ref().map_or(String::new(), |l| l.0[0].to_string()),
                 s.title.clone().unwrap_or_default().replace(',', " "),
                 u8::from(s.field),
+                s.shown.0,
+                s.shown.1,
+                s.shown.2,
+                s.pointer.map_or(String::new(), |p| p.0.to_string()),
+                s.pointer.map_or(String::new(), |p| p.1.to_string()),
             )
             .unwrap();
         }

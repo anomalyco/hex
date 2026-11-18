@@ -393,8 +393,8 @@ fn result(
     };
     // Stop leaves from where it was pressed while the title arrives.
     let stop = capsule.stage.presence(stage::Layer::Action(0));
-    let label = if stop.shows() {
-        let ghost = panel_row(
+    let ghost = stop.shows().then(|| {
+        panel_row(
             p,
             "stop",
             &icons::STOP,
@@ -407,17 +407,16 @@ fn result(
         )
         .absolute(PANEL_PAD, 0.)
         .w(PANEL_WIDTH - 2. * PANEL_PAD)
+        .opacity(stop.opacity)
         .blur(if capsule.reduced.get() {
             0.
         } else {
             2. * (1. - stop.opacity)
         })
         .inert()
-        .a11y_hidden();
-        col().key("caption-slot").w_full().child(label).child(ghost)
-    } else {
-        label
-    };
+        .a11y_hidden()
+    });
+    let label = stop_slot().child(label).children(ghost);
     let header = bands(top, meta, Some(label));
     let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
         text(summary)
@@ -453,12 +452,17 @@ fn result(
     } else {
         rows.pt(PANEL_PAD)
     };
+    // The copies dim and return on their own spring, wherever the surface is.
     let rows = if manifest.is_none() {
         rows.disabled(true).opacity(0.48)
     } else {
         rows
-    };
-    let contents = col().key("panel-contents").w(PANEL_WIDTH);
+    }
+    .motion(RECORDING_OPEN);
+    let contents = col()
+        .key("panel-contents")
+        .w(PANEL_WIDTH)
+        .transition(Transition::none());
     // New notes grow from the free edge, not between the pointer and its
     // copy row. A bottom corner mirrors the bands, not their reading order.
     let contents = if top {
@@ -495,8 +499,13 @@ fn result(
         }
         None => body.motion(RECORDING_OPEN),
     };
+    // The same nodes the recording drew, so nothing that stays is mounted twice.
     let body = body
-        .child(contents)
+        .child(
+            el().key("veil")
+                .transition(Transition::none())
+                .child(contents),
+        )
         .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside));
     in_corner(capsule, body)
 }
@@ -602,8 +611,18 @@ pub(super) fn open_height_without_notice() -> f32 {
     OPEN_HEADER + 3.0 * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD
 }
 
+/// Where Stop is while recording and where the title is afterwards: the same
+/// place, so Stop leaves from the row it was pressed in as the title arrives.
+fn stop_slot() -> El {
+    col()
+        .key("caption-slot")
+        .w_full()
+        .min_h(ROW_HEIGHT)
+        .transition(Transition::none())
+}
+
 /// How far short of the open panel's width its rows start to show.
-const UNCOVER: f32 = 48.0;
+const UNCOVER: f32 = 32.0;
 
 /// What a moving edge of the surface crosses fades under it: the sides away
 /// from the saved corner, by as much as the stage says they are moving.
@@ -613,6 +632,7 @@ fn veil(capsule: &Capsule, width: f32, height: f32) -> El {
     el().key("veil")
         .absolute(0.0, 0.0)
         .size(width, height)
+        .transition(Transition::none())
         .clip_fade_linear(
             if right { x } else { 0.0 },
             if top { 0.0 } else { y },
@@ -654,6 +674,44 @@ impl Capsule {
             smooth((o.w - (PANEL_WIDTH - UNCOVER)) / UNCOVER) * smooth((o.h - near) / ROW_HEIGHT);
         presence
     }
+}
+
+/// The resting recording's header inside a surface `width` by `height`
+/// that is still arriving from its offer: the nodes [`recording`] draws.
+pub(super) fn arriving_header(
+    p: Paint,
+    capsule: &Capsule,
+    shown: &Recording,
+    width: f32,
+    height: f32,
+    presence: f32,
+) -> El {
+    let (right, top) = (capsule.corner.is_right(), capsule.corner.is_top());
+    let panel_height = open_height(shown);
+    let meter = meter(p, shown).opacity(presence);
+    let spacer = el().key("space").grow(1.0);
+    let meta = row()
+        .key("meta")
+        .h(REST_HEIGHT)
+        .px(REST_PX)
+        .center_y()
+        .transition(Transition::none());
+    let meta = if right {
+        meta.child(spacer).child(meter)
+    } else {
+        meta.child(meter).child(spacer)
+    };
+    col()
+        .key("panel-contents")
+        .size(PANEL_WIDTH, panel_height)
+        .transition(Transition::none())
+        .absolute(
+            if right { width - PANEL_WIDTH } else { 0.0 },
+            if top { 0.0 } else { height - panel_height },
+        )
+        .child(
+            bands(top, meta, None).absolute(0., if top { 0. } else { panel_height - REST_HEIGHT }),
+        )
 }
 
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
@@ -701,12 +759,14 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 c.stir(tx);
             },
         )
-        .mx(PANEL_PAD);
-        if stopping || !open {
+        .absolute(PANEL_PAD, 0.)
+        .w(PANEL_WIDTH - 2. * PANEL_PAD);
+        let row = if stopping || !open {
             row.opacity(stop.opacity)
         } else {
             row
-        }
+        };
+        stop_slot().child(row)
     });
     let panel_height = open_height(shown);
     let (target_w, target_h, target_r) = if open {
@@ -742,6 +802,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let mut contents = col()
         .key("panel-contents")
         .size(PANEL_WIDTH, panel_height)
+        .transition(Transition::none())
         .absolute(
             if right { width - PANEL_WIDTH } else { 0.0 },
             if top { 0.0 } else { height - panel_height },

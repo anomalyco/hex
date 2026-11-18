@@ -259,17 +259,6 @@ fn stop_handoff_frames() {
                 }
             }
             let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
-            // A retired hit target can still paint. Compare its trailing
-            // hover fill against the bare panel gutter on that scanline.
-            if frame == 47 || frame == 48 {
-                let scan = ((CAPSULE_INSET + REST_HEIGHT + ROW_HEIGHT / 2.) * 2.) as usize;
-                let pixel = |x: usize| rgba[4 * (scan * w as usize + x)];
-                assert_eq!(
-                    pixel(460) != pixel(506),
-                    frame == 47,
-                    "Stop glyph at {frame}"
-                );
-            }
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &rgba).unwrap();
         }
         std::fs::write(dir.join("trace.csv"), trace).unwrap();
