@@ -1430,6 +1430,20 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_some());
     assert!(texts(&rt).iter().any(|text| text == "Dictation stats"));
+    // Headline tiles, the daily chart, the app bars, Output's share, and the
+    // rewrite latency all show for the fixture.
+    for key in [
+        "tile-dictations",
+        "tile-words",
+        "tile-wpm",
+        "tile-streak",
+        "history-stats-daily",
+        "history-stats-apps",
+        "history-stats-changed",
+        "history-stats-latency",
+    ] {
+        assert!(rt.find(key).is_some(), "{key} shows");
+    }
     tap(&mut rt, "history-stats-close");
     assert!(!rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_none());
@@ -1497,6 +1511,34 @@ fn history_stats_button_opens_and_closes_the_dialog() {
         "turning the lab off closes the dialog"
     );
     assert!(rt.find("history-stats-open").is_none());
+}
+
+/// The dialog leaves out the sections a summary has nothing for, and keeps
+/// the tiles.
+#[test]
+fn history_stats_dialog_hides_sections_with_nothing_to_show() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.history.stats = Some(crate::history::stats::HistoryStats {
+        dictations: 3,
+        words: 12,
+        ..Default::default()
+    });
+    rt.state.settings.labs.history_stats = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.state.history.stats_open = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-stats-dialog").is_some());
+    assert!(rt.find("tile-dictations").is_some());
+    for key in [
+        "history-stats-daily",
+        "history-stats-apps",
+        "history-stats-latency",
+    ] {
+        assert!(rt.find(key).is_none(), "{key} stays out");
+    }
+    // With no Output changes at all, its meter still reads zero.
+    assert!(rt.find("history-stats-changed").is_some());
 }
 
 /// History, settled.

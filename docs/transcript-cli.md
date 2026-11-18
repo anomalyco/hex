@@ -58,12 +58,14 @@ inserted text split on whitespace), words per minute (words over recorded
 audio minutes, counting only entries with audio; unknown without any), how
 many entries Output changed (inserted text differs from the transcript, ignoring
 surrounding whitespace), the daily streak (consecutive local days with an entry,
-ending today or, with none yet today, yesterday), active days, and the five
-most used applications. With the toggle off it fails, naming the command that
-turns it on, before History is read. `--since` and `--until` narrow it with the
-same time syntax; the retention window always applies. It counts only what
-History still holds: nothing is kept after retention removes an entry, and
-which replacements fired is not tracked.
+ending today or, with none yet today, yesterday), and active days. `--json`
+also carries the last 30 local days' dictation counts (empty days at zero,
+today last) and each rewrite profile's runs, median, and slowest latency. The
+text output names the five most used applications. With the toggle off it
+fails, naming the command that turns it on, before History is read. `--since`
+and `--until` narrow it with the same time syntax; the retention window always
+applies. It counts only what History still holds: nothing is kept after
+retention removes an entry, and which replacements fired is not tracked.
 
 ## Meetings use the same queries as MCP
 
@@ -193,7 +195,9 @@ type HistoryStats = { // hex history stats --json
   changed_by_output: number
   streak_days: number
   active_days: number
+  daily: { day: number; dictations: number }[] // the last 30 local days, oldest first, zero on empty days; day is days since 1970-01-01, local time
   top_apps: { application: string; dictations: number }[] // at most 5, most first
+  rewrite_latency: { profile: string; runs: number; median_ms: number; slowest_ms: number }[] // the 4 most run profiles; an even count's median is the mean of its two middle runs, rounded down
 }
 
 type Meeting = {

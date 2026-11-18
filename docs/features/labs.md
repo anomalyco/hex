@@ -132,7 +132,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── § key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
-├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations; hex history stats prints it (#790)
+├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations, with headline tiles, a daily chart, app and Output bars, and rewrite latency; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
@@ -1989,29 +1989,40 @@ macOS's Dictation shortcut is on for every macOS version.
 Dictation stats (`history-stats`, issue 790, every OS): while on, History's
 header shows a Secondary "Stats" button beside its retention select once
 anything is retained. It opens a centered "Dictation stats" dialog (Escape, a
-scrim press, or Close dismisses it, and focus returns to Stats) with dictations,
-words, words per minute, how often Output changed the text, the daily streak,
-and the top five apps; `hex history stats [--since] [--until] [--json]` prints
-the same ([transcript-cli.md](../transcript-cli.md)). It sums every entry within
-retention (`History::stats`, `history/stats.rs`), not the pane's 200-entry
-search, so it ends with what retention removes; the rollup that outlives
-retention, streak notifications, and per-replacement counts are not built. The
-gates are `labs::history_stats()`, read when the pane reloads (off, it reads
-nothing for stats, and sums again when the entries or the toggle change, or
-once when the dialog closes because the stats emptied) and where
-`hex history stats` starts (off, it fails naming `hex labs on
-history-stats` before History is read), and the window's own setting for the
-button and dialog. Closing the window, opening History again from the menu bar
-or `hex window show history`, turning the switch off, emptying retained
-history, or leaving History closes the dialog, and Command-1…9 pane shortcuts
-wait while it is open. Off, History is exactly as before. Checks:
-the tests in [history/stats.rs](../../src/history/stats.rs) (words, speed,
-changes, top apps, streak across a gap, expired entries skipped past the search
-cap); `history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
+scrim press, or Close dismisses it, and focus returns to Stats) with four
+headline tiles (dictations, words, words per minute, and the daily streak,
+each a large number over a muted label), a bar chart of dictations per local
+day over the last 30 days with empty days left at zero and today's bar in the
+accent colour, the top five apps as bars measured against the busiest one,
+Output's share of the text as a meter, and each rewrite profile's median and
+slowest latency (`median 0.9 s · slowest 3.2 s`, the four most run profiles).
+A section with nothing to show is left out; the meter still reads 0%. The
+dialog is built in [rune_ui/history/stats.rs](../../src/rune_ui/history/stats.rs)
+with the big number as `controls::STATS_NUMBER`; `hex history stats
+[--since] [--until] [--json]` prints the same totals
+([transcript-cli.md](../transcript-cli.md)), and its JSON adds the daily series
+and per-profile latency. It sums every entry within retention
+(`History::stats`, `history/stats.rs`), not the pane's 200-entry search, so it
+ends with what retention removes; the rollup that outlives retention, streak
+notifications, and per-replacement counts are not built. The gates are
+`labs::history_stats()`, read when the pane reloads (off, it reads nothing for
+stats, and sums again when the entries or the toggle change, or once when the
+dialog closes because the stats emptied) and where `hex history stats` starts
+(off, it fails naming `hex labs on history-stats` before History is read), and
+the window's own setting for the button and dialog. Closing the window,
+opening History again from the menu bar or `hex window show history`, turning
+the switch off, emptying retained history, or leaving History closes the
+dialog, and Command-1…9 pane shortcuts wait while it is open. Off, History is
+exactly as before. Checks: the tests in
+[history/stats.rs](../../src/history/stats.rs) (words, speed, changes, top
+apps, streak across a gap, the daily series' zero days and today, latency
+medians for odd and even counts, expired entries skipped past the search cap);
+`history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
 [control/transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
 `history_stats_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs); and
-`history_stats_button_opens_and_closes_the_dialog` in
+`history_stats_button_opens_and_closes_the_dialog` and
+`history_stats_dialog_hides_sections_with_nothing_to_show` in
 [rune_ui/tests.rs](../../src/rune_ui/tests.rs). `history-stats` in
 [rune_ui/scenes.rs](../../src/rune_ui/scenes.rs) renders the button and dialog
 in both themes. Not yet observed: the dialog in a real window, and the Labs
