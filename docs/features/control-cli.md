@@ -13,16 +13,18 @@ Agent or terminal                                  // control.cli; every OS
 │   └── Hex not running -> exit 3, "Hex is not running; run `hex start`"
 ├── hex start -> Already running: nothing | else open Hex.app (Linux and
 │   Windows: a detached `hex app --hidden`), wait ≤ 20 s
-│   ├── The launch exits at once -> failed, "run `hex start` again": another
-│   │   Hex is probably still shutting down and holds the instance
+│   ├── A Linux `hex app` that forwards to the unit exits 0 -> the ordinary
+│   │   wait continues; any other launch that exits gets a 2 s grace
+│   ├── Still no answer after an exit -> failed, "run `hex start` again":
+│   │   another Hex is probably still shutting down and holds the instance
 │   └── The caller's HEX_* variables -> open --env (values never logged)
 ├── hex quit | restart [--force]
 │   ├── Meeting or dictation in progress, no --force -> refused, exit 1
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
-│       Linux unit -> systemctl restart; else waits for that pid to exit
-│       (its local API stops earlier in the drain, its instance lock or event
-│       only at exit), then start
+│       Linux unit -> systemctl restart; else waits for that process to exit
+│       (its local API stops earlier in the drain, its service lock shortly
+│       before exit, its Windows event at exit), then start
 ├── hex dictation start|stop|toggle|cancel
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   │   ├── Windows CLI/tray start -> hook adopts the accepted capture; first
@@ -258,7 +260,9 @@ never asks; `local_api::discovery::tests` cover choosing an endpoint (absent,
 stale, wrong version or token) and validating the embedded ready line, and
 `waiting_for_a_process_reports_whether_it_exited` pins the pid wait restart
 uses (an exited process reads as gone at once, a live one only at the
-timeout).
+timeout). That test runs on Unix only (`cfg(all(test, unix))`); the Windows
+wait goes through a process handle and is covered only by the CI compile, not
+by a test.
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -279,9 +283,10 @@ shortcut, by `stop`, and by `stop --print`) before trusting it. A CLI volume
 change does not preview a tone as the window does. Onboarding
 permission prompts, calendar connection, and meeting deletion or renaming have
 no command. `hex restart`'s relaunch has no end-to-end test on any OS: the
-pid wait it uses is unit-tested
-(`waiting_for_a_process_reports_whether_it_exited`), but the handoff from the
-old process's exit to the new one's instance claim has only been read, so
+pid wait it uses is unit-tested on Unix only
+(`waiting_for_a_process_reports_whether_it_exited`; Windows opens a process
+handle instead, compiled but untested), and the handoff from the old process's
+exit to the new one's instance claim has only been read, so
 verify a Windows restart and a login-launch restart by hand before trusting
 it. Linux and Windows dictation through the CLI has not run with a
 microphone, and meeting recording through the CLI has not run on Linux or

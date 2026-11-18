@@ -5,6 +5,15 @@
 use super::running;
 use super::{ControlReply, Output, print};
 
+/// How long `hex start` keeps watching for a Hex to answer after a launch
+/// that can't become one has exited.
+#[cfg(not(target_os = "macos"))]
+const START_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// What `hex start` says when Hex runs but hasn't answered yet.
+#[cfg(not(target_os = "macos"))]
+const STILL_STARTING: &str = "Started Hex; it isn't answering yet (it may be loading its model)";
+
 /// `hex start` on macOS: `open`s the Hex.app this `hex` belongs to, then
 /// waits until it answers.
 #[cfg(target_os = "macos")]
@@ -61,19 +70,20 @@ pub(super) fn start(output: Output) -> u8 {
 /// After a restart's quit on Linux and Windows: waits for the old Hex to
 /// go, then starts the new one. A Linux unit restarts by itself.
 #[cfg(not(target_os = "macos"))]
-pub(super) fn reopen_after_restart(old: Option<u32>) -> ControlReply {
+pub(super) fn reopen_after_restart(old: Option<crate::local_api::ExitWatch>) -> ControlReply {
     use std::time::{Duration, Instant};
 
     #[cfg(target_os = "linux")]
     if crate::linux::service::supervised() {
         return ControlReply::done("Restarting Hex");
     }
-    // The old process's local API stops before its drain finishes, while the
-    // instance it holds (Windows' named event, Linux's lock) is released only
-    // when it exits: a successor started in that gap exited at once because
-    // another Hex still owned the instance.
+    // The watch was taken while the old Hex still ran, before it got the
+    // quit, so it can only be about that process. Its local API stops before
+    // its drain finishes, while its instance is gone only at or just before
+    // exit: a successor started in that gap exited at once because another
+    // Hex still owned the instance.
     let gone = match old {
-        Some(pid) => crate::local_api::wait_for_exit(pid, Duration::from_secs(30)),
+        Some(process) => process.wait(Duration::from_secs(30)),
         None => {
             let started = Instant::now();
             while running() && started.elapsed() <= Duration::from_secs(30) {
@@ -128,24 +138,61 @@ fn start_reply() -> ControlReply {
         }
     };
     let started = Instant::now();
-    while started.elapsed() < Duration::from_secs(20) {
+    let mut exited = None;
+    let mut give_up_at = started + Duration::from_secs(20);
+    // A `hex app` that exits is not proof that Hex failed: on Linux it
+    // forwards to the systemd unit and exits once the forward is accepted,
+    // and every OS hands off to a 2.3.1 install that way. So keep watching
+    // for a Hex to answer after the exit; only a launch that can't become one
+    // gives up, and it gets a short grace first so the successor of a Hex
+    // still finishing its drain is seen if it does arrive.
+    loop {
         if running() {
             return ControlReply::done("Started Hex");
         }
-        // A launch that exits at once found another Hex still holding the
-        // instance, which is what a predecessor that hadn't finished its
-        // drain looks like. Waiting the rest of the 20 s would report a Hex
-        // that isn't there as one that is still loading its model.
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return ControlReply::error(
-                "failed",
-                "Hex started and exited right away; another Hex is probably still shutting \
-                 down, so run `hex start` again",
-            );
+        if exited.is_none()
+            && let Ok(Some(status)) = child.try_wait()
+        {
+            exited = Some(status);
+            if !forwarder(status) {
+                // Keep watching for the short grace, but never past the
+                // ordinary wait.
+                give_up_at = (Instant::now() + START_GRACE).min(started + Duration::from_secs(20));
+            }
+        }
+        if Instant::now() >= give_up_at {
+            break;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
-    ControlReply::done("Started Hex; it isn't answering yet (it may be loading its model)")
+    match exited {
+        // A forwarder's Hex may only be starting; answer as the ordinary
+        // wait does rather than calling the forward a failure.
+        Some(status) if forwarder(status) => ControlReply::done(STILL_STARTING),
+        // A successful launch that yielded found another Hex holding the
+        // instance; a failed one never became Hex at all.
+        Some(status) if status.success() => ControlReply::error(
+            "failed",
+            "Hex started and exited right away; another Hex is probably still shutting \
+             down, so run `hex start` again",
+        ),
+        Some(status) => ControlReply::error(
+            "failed",
+            format!(
+                "Hex exited right away ({status}); see process.log, then run `hex start` again"
+            ),
+        ),
+        None => ControlReply::done(STILL_STARTING),
+    }
+}
+
+/// Whether a `hex app` that exited successfully can still become the Hex the
+/// caller waited for: on Linux it forwards to the systemd unit (or to the
+/// instance a 2.3.1 install handed off from) and exits once the forward is
+/// accepted.
+#[cfg(not(target_os = "macos"))]
+fn forwarder(status: std::process::ExitStatus) -> bool {
+    cfg!(target_os = "linux") && status.success()
 }
 
 /// `open` arguments for `hex start`: the caller's `HEX_*` environment, then

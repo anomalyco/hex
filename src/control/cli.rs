@@ -443,10 +443,10 @@ pub fn run(command: ControlCli, top_level: impl FnOnce() -> clap::Command) -> u8
                 }
                 return launch::start(output);
             }
-            // The instance Hex holds outlives its local API, so remember the
+            // Hex's instance outlives its local API, so take a handle on the
             // process to wait for before Hex gets the quit.
             #[cfg(not(target_os = "macos"))]
-            let restarting = crate::local_api::running_pid();
+            let restarting = crate::local_api::watch_running();
             #[cfg(target_os = "linux")]
             if let Err(error) = crate::linux::service::prepare_restart() {
                 return print(ControlReply::error("failed", format!("{error:#}")), output);

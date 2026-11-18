@@ -511,49 +511,87 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-/// Waits up to `timeout` for `pid` to exit, reporting whether it has. A
-/// process that is already gone, or that cannot be opened at all, counts as
-/// exited.
+/// A running Hex that `hex restart` waits on before it starts the successor.
 ///
-/// `hex restart` waits on this rather than on the local API: the API stops
-/// answering earlier in the drain, while the instance a Hex holds (Windows'
-/// named event, Linux's lock) is released only when the process ends, so a
-/// successor started in between exits at once.
-#[cfg(unix)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
-    let started = std::time::Instant::now();
-    loop {
-        if !process_is_alive(pid) {
-            return true;
+/// The instance Hex holds is gone only at, or just before, its process exit:
+/// Windows' named event is closed by the last handle when the process ends,
+/// and Linux's service lock is released when its server drops, a little
+/// before exit. Waiting for the process covers both. The local API stops
+/// answering earlier in the drain, which is why it isn't the signal.
+///
+/// On Windows the handle is opened while that Hex still runs, so the wait can
+/// only be about that process: looking the pid up again after the wait could
+/// find whatever reused it (the updater's lesson, #513).
+#[cfg(not(target_os = "macos"))]
+pub struct ExitWatch {
+    #[cfg(windows)]
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    #[cfg(unix)]
+    pid: u32,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl ExitWatch {
+    /// Watches `pid`, which must still be running: `None` once it has ended,
+    /// or when its process can't be opened for waiting.
+    fn new(pid: u32) -> Option<Self> {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+            // SAFETY: opens a handle to `pid`; it is null-checked here and
+            // closed once by `Drop`.
+            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+            (!handle.is_null()).then_some(Self { handle })
         }
-        if started.elapsed() >= timeout {
-            return false;
+        #[cfg(unix)]
+        {
+            process_is_alive(pid).then_some(Self { pid })
         }
-        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    /// Waits up to `timeout` for the watched process to exit, reporting
+    /// whether it has. One that ended before the wait began counts as exited.
+    pub fn wait(&self, timeout: Duration) -> bool {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+            use windows_sys::Win32::System::Threading::WaitForSingleObject;
+            let millis = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
+            // SAFETY: `self.handle` is the handle `new` opened and `Drop` closes.
+            let waited = unsafe { WaitForSingleObject(self.handle, millis) };
+            waited == WAIT_OBJECT_0
+        }
+        #[cfg(unix)]
+        {
+            let started = std::time::Instant::now();
+            loop {
+                if !process_is_alive(self.pid) {
+                    return true;
+                }
+                if started.elapsed() >= timeout {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
     }
 }
 
 #[cfg(windows)]
-pub fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
-    };
-    // The handle is taken while the old Hex still runs, so the wait can only
-    // be about that process: looking the pid up again afterwards would find
-    // whatever reused it (the updater's lesson, #513).
-    // SAFETY: the handle is checked before use and closed once.
-    unsafe {
-        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
-        if process.is_null() {
-            return true;
-        }
-        let millis = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
-        let waited = WaitForSingleObject(process, millis);
-        CloseHandle(process);
-        waited == WAIT_OBJECT_0
+impl Drop for ExitWatch {
+    fn drop(&mut self) {
+        // SAFETY: the handle `new` opened for this watch, closed once.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
     }
+}
+
+/// The running Hex, watched from now on, or `None` when none answers or its
+/// process can't be opened for waiting. The pid comes from the discovery
+/// file, which `running_pid` has just checked is alive and answering, so the
+/// watch is taken while that Hex still runs.
+#[cfg(not(target_os = "macos"))]
+pub fn watch_running() -> Option<ExitWatch> {
+    ExitWatch::new(running_pid()?)
 }
 
 #[cfg(all(test, unix))]
@@ -714,11 +752,11 @@ mod tests {
     /// as it does and say so when it doesn't.
     #[test]
     fn waiting_for_a_process_reports_whether_it_exited() {
-        let mut exited = std::process::Command::new("true").spawn().unwrap();
-        let pid = exited.id();
-        exited.wait().unwrap();
+        let mut quick = std::process::Command::new("true").spawn().unwrap();
+        let watch = super::ExitWatch::new(quick.id()).expect("a running process can be watched");
+        quick.wait().unwrap();
         let started = std::time::Instant::now();
-        assert!(super::wait_for_exit(pid, Duration::from_secs(5)));
+        assert!(watch.wait(Duration::from_secs(5)));
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "a process that already exited took {:?}",
@@ -729,9 +767,10 @@ mod tests {
             .arg("30")
             .spawn()
             .unwrap();
+        let watch = super::ExitWatch::new(live.id()).expect("a running process can be watched");
         let started = std::time::Instant::now();
         assert!(
-            !super::wait_for_exit(live.id(), Duration::from_millis(300)),
+            !watch.wait(Duration::from_millis(300)),
             "a live process read as exited"
         );
         assert!(started.elapsed() >= Duration::from_millis(300));
