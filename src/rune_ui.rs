@@ -1602,9 +1602,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     find_popover::layer(ui, p, &mut layer);
     // A file drag shows over everything else in the window, the first run
     // included.
-    if let Some(dropped) = drop_transcribe::overlay(ui, p) {
-        layer.push(dropped);
-    }
+    layer.extend(drop_transcribe::overlay(ui, p));
     let root = rune_kit::root(window, layer).on_window_focus(window_focused);
     // The lab off leaves the window with no drop target at all.
     if drop_transcribe::on(ui) {

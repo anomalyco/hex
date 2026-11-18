@@ -1402,13 +1402,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Modes editor", "Editor de modos"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Edite os apps, as correções e a reescrita do OpenCode de cada modo em um painel Modos"),
     ("Transcribe dropped audio", "Transcrever áudio arrastado"),
-    ("Audio files", "Arquivos de áudio"),
     ("Transcribe a file", "Transcrever um arquivo"),
     ("Transcribe a file…", "Transcrever um arquivo…"),
     ("Drop to save a transcript", "Solte para salvar uma transcrição"),
     ("WAV or MP3", "WAV ou MP3"),
     ("WAV, MP3, M4A, AIFF, or CAF", "WAV, MP3, M4A, AIFF ou CAF"),
     ("Drop a {} file on the Hex window to save its transcript as a text file next to it.", "Arraste um arquivo {} para a janela do Hex para salvar a transcrição como um arquivo de texto ao lado dele."),
+    ("Drop a WAV or MP3 file on the Hex window to save its transcript as a text file next to it", "Arraste um arquivo WAV ou MP3 para a janela do Hex para salvar a transcrição como um arquivo de texto ao lado dele"),
     ("Hex can transcribe {} files", "O Hex pode transcrever arquivos {}"),
     ("Transcribing… {}%", "Transcrevendo… {}%"),
     ("Cancelling…", "Cancelando…"),
@@ -1417,7 +1417,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show in folder", "Mostrar na pasta"),
     ("Could not transcribe {}", "Não foi possível transcrever {}"),
     ("A file could not be chosen.", "Não foi possível escolher um arquivo."),
-    ("Transcription stopped.", "A transcrição parou."),
 ];
 
 #[cfg(test)]
