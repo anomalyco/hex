@@ -9,7 +9,7 @@
 //! under it in proportion to the edge's speed, so nothing is cut hard in
 //! flight and nothing is dimmed at rest.
 
-use rune::Spring;
+use super::*;
 
 /// The outline: the body opens and closes on these, and the width leads.
 const OPEN: Spring = Spring::new(0.42, 0.0);
@@ -340,6 +340,127 @@ impl Stage {
         [Layer::Offer, Layer::Pending, Layer::Meter]
             .into_iter()
             .chain((0..ACTIONS).map(Layer::Action))
+    }
+}
+
+impl Capsule {
+    /// Where the surface is heading for what the capsule shows now, and
+    /// whether its outline only follows the offer's own pages.
+    pub(super) fn stage_target(&mut self, now: f64) -> Option<(Target, bool)> {
+        let pill = |w: f32| Outline {
+            w,
+            h: REST_HEIGHT,
+            radius: REST_HEIGHT / 2.0,
+            dark: 1.0,
+        };
+        let panel = |h: f32| Outline {
+            w: PANEL_WIDTH,
+            h,
+            radius: PANEL_RADIUS,
+            dark: 1.0,
+        };
+        let none = Target {
+            outline: pill(REST_WIDTH),
+            offer: false,
+            pending: None,
+            meter: false,
+            actions: None,
+            stop: true,
+        };
+        let target = match &self.kind {
+            Some(Kind::Offer(..)) if self.presentation.departing() => Target {
+                pending: Some(self.presentation.begun(now) + PENDING_LABEL_AFTER),
+                ..none
+            },
+            Some(Kind::Offer(..)) => {
+                let target = Target {
+                    outline: self.presentation.outline(self.reduced.get()),
+                    offer: true,
+                    ..none
+                };
+                return Some((target, true));
+            }
+            Some(Kind::Recording(shown)) => {
+                let open = self.hovered || self.stopping;
+                if !open {
+                    self.opened = None;
+                }
+                Target {
+                    outline: if open {
+                        panel(panel::open_height(shown))
+                    } else {
+                        pill(panel::rest_width(shown))
+                    },
+                    meter: true,
+                    actions: open.then(|| *self.opened.get_or_insert(now)),
+                    ..none
+                }
+            }
+            // Capture has ended: Stop leaves, and the surface finishes its
+            // way to the open panel the finished meeting's layout grows from.
+            Some(Kind::Finalizing { .. } | Kind::Ready(_)) => Target {
+                outline: panel(panel::open_height_without_notice()),
+                meter: true,
+                actions: Some(self.opened.unwrap_or(f64::MIN)),
+                stop: false,
+                ..none
+            },
+            _ => return None,
+        };
+        Some((target, false))
+    }
+
+    /// Steps the surface toward what the capsule shows; true while it moves.
+    pub(super) fn step_stage(&mut self, now: f64, tx: &mut Tx) -> bool {
+        let reduced = self.reduced.get();
+        let paging = matches!(self.kind, Some(Kind::Offer(..)))
+            && !self.presentation.departing()
+            && self.presentation.step(self.more_open, reduced, now);
+        let Some((target, follow)) = self.stage_target(now) else {
+            self.stage = Stage::default();
+            self.opened = None;
+            return false;
+        };
+        let moving = if follow {
+            self.stage.follow(&target, now);
+            if paging {
+                tx.instant();
+            }
+            paging
+        } else {
+            self.stage.step(&target, reduced, now)
+        };
+        if matches!(self.kind, Some(Kind::Recording(_))) {
+            self.presentation.arrived(&self.stage);
+        }
+        if moving {
+            tx.wake_after(Duration::ZERO);
+        }
+        moving && (follow || !self.stage.idling())
+    }
+
+    /// The surface as it rests for what the capsule shows now.
+    #[cfg(test)]
+    pub(super) fn settle_stage(&mut self, now: f64) {
+        if self.hovered || self.stopping {
+            self.opened = Some(now - 10.0);
+        }
+        self.presentation.backdate(now - 10.0);
+        match self.stage_target(now) {
+            Some((target, _)) => self.stage.land(&target, now),
+            None => self.stage = Stage::default(),
+        }
+        if matches!(self.kind, Some(Kind::Recording(_))) {
+            self.presentation.arrived(&self.stage);
+        }
+    }
+
+    /// A handler changed what the capsule shows: the surface starts toward
+    /// it in this frame, not at the next poll.
+    pub(super) fn stir(&mut self, tx: &mut Tx) {
+        let now = tx.clock();
+        self.step_stage(now, tx);
+        tx.wake_after(Duration::ZERO);
     }
 }
 
