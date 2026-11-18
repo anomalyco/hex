@@ -105,7 +105,6 @@ impl Feature {
             | Self::ModesEditor => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
-            | Self::YearlyStats
             | Self::RecentDictations
             | Self::CopyDictationAudio => Group::History,
             Self::Meetings

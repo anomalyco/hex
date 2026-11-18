@@ -5,8 +5,8 @@
 //! Activity event stream. Entries hold text and bounded metadata; audio is
 //! kept only while Labs › Keep recordings is on ([`recordings`]), as a file
 //! per entry that follows the entry's retention plus its own byte cap. Labs ›
-//! Yearly stats keeps a separate daily rollup ([`usage`]) with counts but no
-//! text, so Dictation stats can outlive the retention window. Every retention
+//! Dictation stats keeps a separate daily rollup ([`usage`]) with counts but
+//! no text, so it can outlive the retention window. Every retention
 //! choice remains subject to hard entry and byte caps, writes are atomic, and
 //! files are owner-only.
 
@@ -276,7 +276,7 @@ pub struct HistoryStore {
     path: PathBuf,
     /// Labs › Keep recordings' audio, one file per entry.
     recordings: PathBuf,
-    /// Labs › Yearly stats' daily rollup, beside the store.
+    /// Labs › Dictation stats' daily rollup, beside the store.
     usage: PathBuf,
     recording_cap: u64,
     entries: Vec<HistoryEntry>,
@@ -408,9 +408,9 @@ impl HistoryStore {
         let words = draft.final_text.split_whitespace().count() as u64;
         let audio_ms = draft.audio_ms;
         // The rollup's first write seeds itself from what History still
-        // retains, so enabling Labs › Yearly stats doesn't make the dialog's
-        // totals drop. The new entry is added after, exactly once.
-        let yearly = crate::labs::yearly_stats();
+        // retains, so enabling Labs › Dictation stats doesn't make the
+        // dialog's totals drop. The new entry is added after, exactly once.
+        let yearly = crate::labs::history_stats();
         let seed = (yearly && !self.usage.exists()).then(|| self.usage_seed(now_ms));
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -450,7 +450,7 @@ impl HistoryStore {
         });
         self.prune(now_ms);
         self.persist()?;
-        // Labs › Yearly stats: a daily rollup that outlives retention. It
+        // Labs › Dictation stats: a daily rollup that outlives retention. It
         // holds no text or applications, and never fails a record: capture
         // and paste never wait on this file.
         if yearly {
@@ -602,7 +602,7 @@ impl HistoryStore {
             .find_map(|entry| recordings::saved(&self.recordings, entry))
     }
 
-    /// Delete every entry, and the Labs › Yearly stats rollup with them. A
+    /// Delete every entry, and the Labs › Dictation stats rollup with them. A
     /// failed save keeps the entries, so the clear can be retried.
     pub fn clear(&mut self) -> io::Result<()> {
         if !self.entries.is_empty() || self.prune_pending {
@@ -636,12 +636,12 @@ impl HistoryStore {
         self.entries.iter().rev()
     }
 
-    /// Where Labs › Yearly stats keeps its daily rollup.
+    /// Where Labs › Dictation stats keeps its daily rollup.
     pub fn usage_path(&self) -> &std::path::Path {
         &self.usage
     }
 
-    /// Whether a Labs › Yearly stats rollup file exists, even with no
+    /// Whether a Labs › Dictation stats rollup file exists, even with no
     /// retained entries: Clear all history must still be able to delete it.
     pub fn has_usage(&self) -> bool {
         self.usage.exists()
@@ -873,13 +873,13 @@ impl History {
         self.synced().recording_path(id)
     }
 
-    /// Labs › Yearly stats' daily rollup, read from disk (the caller gates
-    /// it on the lab).
+    /// Labs › Dictation stats' daily rollup, read from disk (the caller
+    /// gates it on the lab).
     pub fn usage(&self) -> usage::Usage {
         self.synced().usage()
     }
 
-    /// Whether a Labs › Yearly stats rollup file exists, even with no
+    /// Whether a Labs › Dictation stats rollup file exists, even with no
     /// retained entries.
     pub fn has_usage(&self) -> bool {
         self.synced().has_usage()
@@ -1659,36 +1659,34 @@ mod tests {
         assert_eq!(reopened.len(), 0);
     }
 
-    /// Turns Labs › Yearly stats on for one test, and back off after.
-    struct YearlyStats;
+    /// Turns Labs › Dictation stats on for one test, and back off after.
+    struct DictationStats;
 
     /// Serializes the tests that turn the global Labs gate on, so one can't
     /// observe another's switch.
-    static YEARLY_LABS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static STATS_LABS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    impl YearlyStats {
+    impl DictationStats {
         fn on() -> Self {
             crate::labs::apply(&crate::app_settings::LabsSettings {
-                yearly_stats: true,
+                history_stats: true,
                 ..crate::app_settings::LabsSettings::default()
             });
             Self
         }
     }
 
-    impl Drop for YearlyStats {
+    impl Drop for DictationStats {
         fn drop(&mut self) {
             crate::labs::apply(&crate::app_settings::LabsSettings::default());
         }
     }
 
     #[test]
-    fn yearly_stats_rolls_every_recorded_day_up_and_clear_removes_it() {
-        let _lock = YEARLY_LABS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let _labs = YearlyStats::on();
-        assert!(crate::labs::yearly_stats(), "the gate is on for the test");
+    fn dictation_stats_rolls_every_recorded_day_up_and_clear_removes_it() {
+        let _lock = STATS_LABS.lock().unwrap_or_else(|error| error.into_inner());
+        let _labs = DictationStats::on();
+        assert!(crate::labs::history_stats(), "the gate is on for the test");
         let path = temp_path("usage-rollup");
         let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
         let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
@@ -1714,10 +1712,8 @@ mod tests {
 
     #[test]
     fn history_off_records_no_usage_rollup() {
-        let _lock = YEARLY_LABS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let _labs = YearlyStats::on();
+        let _lock = STATS_LABS.lock().unwrap_or_else(|error| error.into_inner());
+        let _labs = DictationStats::on();
         let path = temp_path("usage-off");
         let mut store = HistoryStore::open(path, HistoryRetention::Off, 0);
         assert_eq!(store.record(draft("one two"), 1_000).unwrap(), None);
@@ -1729,9 +1725,7 @@ mod tests {
 
     #[test]
     fn the_first_rollup_write_seeds_itself_from_retained_history_once() {
-        let _lock = YEARLY_LABS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _lock = STATS_LABS.lock().unwrap_or_else(|error| error.into_inner());
         crate::labs::apply(&crate::app_settings::LabsSettings::default());
         let path = temp_path("usage-seed");
         let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
@@ -1744,7 +1738,7 @@ mod tests {
 
         // The lab turns on, and the next record seeds from both retained
         // entries and adds itself once.
-        let _labs = YearlyStats::on();
+        let _labs = DictationStats::on();
         store.record(draft("six seven"), day_ms + 1_000).unwrap();
         let usage = store.usage_at(day_ms + 1_000);
         assert_eq!(usage.dictations(), 3);

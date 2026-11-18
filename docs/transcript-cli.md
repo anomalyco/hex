@@ -166,7 +166,7 @@ is omitted unless Labs › Keep recordings still holds the entry's audio file,
 `range`, which
 is omitted without `--from` or `--to`, `chapters`, which is omitted when a
 meeting has none, `chapter`, which is omitted without `--chapter`, and
-`yearly`, which is omitted while Labs › Yearly stats is off.
+`yearly`, which is omitted while Labs › Dictation stats is off.
 JSON goes to stdout; errors go to stderr with a nonzero exit status. Empty
 results are successful responses. `truncated` reports the query's output limit,
 not data already expired or evicted from the store.
@@ -207,7 +207,7 @@ type HistoryStats = { // hex history stats --json
   daily: { day: number; dictations: number }[] // the last 30 local days, oldest first, zero on empty days, always ending today; empty when nothing matches; day is days since 1970-01-01, local time
   top_apps: { application: string; dictations: number }[] // at most 5, most first
   output_time: { profile: string; runs: number; median_ms: number; slowest_ms: number }[] // the 4 most run modes; an even count's median is the mean of its two middle runs, rounded down; fallback and transformation-only runs are left out
-  yearly?: { // present only while Labs › Yearly stats is on
+  yearly?: { // present only while Labs › Dictation stats is on
     dictations: number // every kept day, not only what History still retains
     words: number
     audio_ms: number

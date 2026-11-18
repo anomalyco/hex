@@ -56,7 +56,7 @@ impl AppearanceTheme {
     }
 }
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`, `labs.restore_shortcut_default`, and the graduated meeting labs) are ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`, `labs.restore_shortcut_default`, `labs.yearly_stats`, and the graduated meeting labs) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -130,9 +130,6 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
-    /// History keeps a daily rollup without text or app names, so Dictation
-    /// stats can chart a year and all-time totals beyond retention.
-    pub yearly_stats: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
     /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
@@ -277,6 +274,11 @@ pub struct LabsSettings {
     pub meeting_notes_file: Option<bool>,
     #[serde(skip_serializing)]
     pub expire_meeting_audio: Option<bool>,
+    /// Retired: `labs.yearly_stats`, read into `history_stats` once by the
+    /// `yearly-stats-merge` migration, since the daily rollup and the year
+    /// heatmap are part of Dictation stats now. Never written.
+    #[serde(skip_serializing)]
+    pub yearly_stats: Option<bool>,
 }
 
 /// The idle times Labs › Free memory when idle offers, in minutes.
@@ -285,6 +287,23 @@ pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
 /// The times Labs › Keep mic open after dictating offers, in seconds:
 /// 30 s, 1, 3, 5, and 30 minutes.
 pub const KEEP_MICROPHONE_OPEN_SECONDS: [u32; 5] = [30, 60, 180, 300, 1_800];
+
+/// The retired Yearly stats lab merged into Dictation stats: its daily
+/// rollup and year heatmap are part of the one lab now.
+pub(super) const YEARLY_STATS_MERGE_MIGRATION: &str = "yearly-stats-merge";
+
+impl AppSettings {
+    /// A saved `labs.yearly_stats` reads into `labs.history_stats` once, so
+    /// someone who had Yearly stats on keeps their heatmap and all-time
+    /// totals without a second switch. A later choice sticks.
+    pub(super) fn migrate_yearly_stats_lab(&mut self) {
+        if !self.has_migration(YEARLY_STATS_MERGE_MIGRATION) {
+            self.labs.history_stats |= self.labs.yearly_stats == Some(true);
+            self.migrations.push(YEARLY_STATS_MERGE_MIGRATION.into());
+        }
+        self.labs.yearly_stats = None;
+    }
+}
 
 impl LabsSettings {
     /// The default [`KEEP_MICROPHONE_OPEN_SECONDS`] choice.
@@ -371,7 +390,6 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
-            yearly_stats: false,
             recent_dictations: false,
             skip_pauses: false,
             output_fixes: false,
@@ -424,6 +442,7 @@ impl Default for LabsSettings {
             meeting_descriptive_filenames: None,
             meeting_notes_file: None,
             expire_meeting_audio: None,
+            yearly_stats: None,
         }
     }
 }

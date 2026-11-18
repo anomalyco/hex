@@ -1,7 +1,7 @@
 //! Labs › Dictation stats (issue 790): a summary of the retained
-//! dictations, computed when asked. It adds nothing to History; with Labs ›
-//! Yearly stats on, the dialog also reads the separate daily rollup
-//! ([`super::usage`]) that outlives retention.
+//! dictations, computed when asked. It adds nothing to History; the dialog
+//! also reads the separate daily rollup ([`super::usage`]) that outlives
+//! retention.
 
 use std::collections::HashMap;
 

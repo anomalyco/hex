@@ -943,8 +943,8 @@ Completed output                         // output
     │   -> needs Keep recordings; it stores no audio itself (labs.md)
     └── Labs > Dictation stats (off) -> History's Stats dialog and hex history stats   // labs.history-stats
         -> headline tiles, time saved with a typing-speed slider, the busiest hour, a 30-day chart, top apps
-        -> Labs > Yearly stats (off) adds a 53-week heatmap and all-time totals   // labs.yearly-stats
-        -> a daily rollup in usage.json with no text or app names; Clear all history deletes it (labs.md)
+        -> a 53-week heatmap and all-time totals, from a daily rollup in usage.json with no text or app names
+        -> Clear all history deletes the rollup too (labs.md)
 Every entry since #1177 -> "Speech model" fact: the model that made its text (+ language when chosen)
 ```
 

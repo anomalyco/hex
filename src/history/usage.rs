@@ -1,4 +1,4 @@
-//! Labs › Yearly stats: an owner-only daily rollup of dictations that
+//! Labs › Dictation stats: an owner-only daily rollup of dictations that
 //! outlives History's retention window.
 //!
 //! While the lab is on, every entry History records also adds its day, word
