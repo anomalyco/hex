@@ -15,26 +15,28 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_RETURN, VK_RMENU, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, MSG,
-    MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
-    UnhookWindowsHookEx, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetForegroundWindow, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
+    LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW,
+    PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP,
+    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
 use crate::audio::CaptureInstant;
+use crate::continuation::InputActivity;
 use crate::dictation::DictationFlavour;
 use crate::dictation::ShortcutMode;
 
+mod activity;
 mod modifiers;
 mod rearm;
 
+pub(crate) use self::activity::foreground_window;
 use self::modifiers::{LeftControl, ModifierState, SideDownTimes, key_down};
 
 /// The focused application's executable stem (e.g. "chrome"), lowercased,
 /// for per-application dictation modes and history entries.
 pub fn foreground_process_stem() -> Option<String> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-
     let window = unsafe { GetForegroundWindow() };
     let path = window_process_path(window)?;
     Some(path.file_stem()?.to_string_lossy().to_lowercase())
@@ -249,6 +251,9 @@ impl HotkeyEvent {
 struct CallbackState {
     events: SyncSender<HotkeyEvent>,
     errors: mpsc::Sender<String>,
+    /// The user's own input since the listener started, which ends a paste
+    /// continuation.
+    activity: InputActivity,
     binding: WindowsHotkey,
     trigger_vk: Option<u32>,
     paste_last: Option<WindowsHotkey>,
@@ -553,6 +558,9 @@ pub(crate) fn app_is_foreground() -> bool {
 pub struct WindowsHotkeyMonitor {
     pub events: Receiver<HotkeyEvent>,
     pub errors: Receiver<String>,
+    /// The user's own input since the listener started; the hooks
+    /// invalidate it, and a paste reads its revision.
+    pub activity: InputActivity,
     thread_id: u32,
     worker: Option<JoinHandle<()>>,
 }
@@ -560,6 +568,7 @@ pub struct WindowsHotkeyMonitor {
 impl WindowsHotkeyMonitor {
     #[allow(clippy::too_many_arguments)]
     pub fn start(
+        activity: InputActivity,
         binding: WindowsHotkey,
         paste_last: Option<WindowsHotkey>,
         raw: Option<WindowsHotkey>,
@@ -592,6 +601,7 @@ impl WindowsHotkeyMonitor {
         let state = CallbackState {
             events: event_sender,
             errors: error_sender,
+            activity: activity.clone(),
             binding,
             trigger_vk,
             paste_last,
@@ -637,6 +647,7 @@ impl WindowsHotkeyMonitor {
         Ok(Self {
             events,
             errors,
+            activity,
             thread_id,
             worker: Some(worker),
         })
@@ -777,7 +788,19 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     } else {
         event.time
     };
-    match process_button(vk, left_control, is_down, time) {
+    let disposition = process_button(vk, left_control, is_down, time);
+    if disposition == Disposition::Pass
+        && activity::ends_continuation(
+            vk,
+            is_down,
+            ModifierState::is_modifier(vk),
+            event.flags & LLKHF_INJECTED != 0,
+            event.dwExtraInfo,
+        )
+    {
+        activity::invalidate();
+    }
+    match disposition {
         Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
         Disposition::Suppress => 1,
         Disposition::Mask if replay_masked_release(event) => 1,
@@ -862,7 +885,19 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             // A mouse event settles stale Left Ctrl bits too: a release can
             // land on another desktop and never reach the keyboard hook.
             modifiers::note_left_control(LeftControl::Other, down);
-            if process_button(vk, LeftControl::Other, down, event.time) != Disposition::Pass {
+            let disposition = process_button(vk, LeftControl::Other, down, event.time);
+            if disposition == Disposition::Pass
+                && activity::ends_continuation(
+                    vk,
+                    down,
+                    false,
+                    event.flags & LLMHF_INJECTED != 0,
+                    event.dwExtraInfo,
+                )
+            {
+                activity::invalidate();
+            }
+            if disposition != Disposition::Pass {
                 return 1;
             }
         }

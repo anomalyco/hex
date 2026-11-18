@@ -45,6 +45,24 @@ impl ModifierState {
         Self::read(key_down).without_altgr(altgr_only())
     }
 
+    /// Whether `key` is one of the modifier keys the hook tracks.
+    pub(super) fn is_modifier(key: u32) -> bool {
+        matches!(
+            key as u16,
+            VK_LCONTROL
+                | VK_RCONTROL
+                | VK_CONTROL
+                | VK_LWIN
+                | VK_RWIN
+                | VK_LMENU
+                | VK_RMENU
+                | VK_MENU
+                | VK_LSHIFT
+                | VK_RSHIFT
+                | VK_SHIFT
+        )
+    }
+
     pub(super) fn update(&mut self, key: u32, is_down: bool) -> bool {
         match key as u16 {
             VK_LCONTROL => self.left_control = is_down,

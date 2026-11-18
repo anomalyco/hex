@@ -781,8 +781,9 @@ restore (`ClipboardRestore::keep`), and ends the continuation, so the next
 dictation is not joined to it. On Windows, `windows::dictation` reads the same
 gate as each job's output commits and calls
 `windows::paste::WindowsPaster::copy_only`, which writes an ordinary entry,
-calls its `ClipboardRestore::keep`, and sends no keystroke, so the dictation
-appears in Windows clipboard history (Win+V). History and Paste last dictation
+calls its `ClipboardRestore::keep`, ends its continuation, and sends no
+keystroke, so the dictation appears in Windows clipboard history (Win+V).
+History and Paste last dictation
 update as for a paste, and Paste last dictation still pastes (meeting pastes
 on macOS too). Off, output is exactly as before. Checks:
 `a_copy_only_dictation_is_left_on_the_clipboard_with_nothing_to_restore` in
