@@ -1088,6 +1088,12 @@ General                                  // settings
 │   ├── One switch, no confirmation; its line says what the state means (issue 61), on every OS
 │   ├── Off (default) -> "The mic stays ready so dictation starts instantly; your system shows it in use"
 │   │   Open while idle; pre-roll available
+│   │   └── macOS: released while the display sleeps, the session is locked, or the Mac
+│   │       sleeps, and back on wake or unlock   // dictate.warm-away
+│   │       ├── Launch reads the current display and lock state, so it starts released
+│   │       ├── Ignores Labs › Keep mic open after dictating's window (up to 30 min)
+│   │       └── Turning the setting off reopens it with a plain open; a press
+│   │           during that reopen becomes a pending capture
 │   └── On -> "The mic opens only while you dictate; the first moment can be clipped"
 │       Open on press; no pre-roll; startup delay
 ├── While dictating -> Mute / Pause media / Lower audio / Do nothing
@@ -1638,6 +1644,9 @@ or the driver installed; off, the pane is hidden  // fun.hex-microphone; macOS, 
 │   │   └── Inline state -> Installing… / Uninstalling… / Cancelled / Failed with reason
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
 │   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
+│   │   └── macOS: with Release when idle off, locking the screen or sleeping the
+│   │       display releases that microphone, so Hex Microphone pauses until wake or unlock
+│   │       (dictate.warm-away)
 │   ├── Lock-free ring -> 48 kHz virtual sink (macOS IOProc; Linux 11 ms blocks into a one-page pipe) -> Raised-cosine fade on intentional hold
 │   │   └── Not dictating -> bit-exact pass-through; non-48 kHz inputs resample continuously
 │   └── Ring underflows/overflows -> process.log each minute while an app reads it, and on sink stop

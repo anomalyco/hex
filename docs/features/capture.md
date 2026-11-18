@@ -764,6 +764,7 @@ hex capture start                        // capture.start; needs a listening Hex
 │   └── Fails to start -> sink closed, bundle removed, last outcome `failed`;
 │       Esc and the next ⌥⇧S see nothing recording
 ├── Release microphone while idle -> the capture keeps the microphone open
+│   (even while the display sleeps or the session is locked)
 └── Already recording -> unchanged, same bundle
 
 While it records                         // capture.audio

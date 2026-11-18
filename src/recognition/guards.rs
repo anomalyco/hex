@@ -54,12 +54,126 @@ pub(super) fn paste_last_refusal(capture_active: bool) -> Option<ControlReply> {
     })
 }
 
-/// The instant a shortcut edge applies to. A released microphone has no
-/// authoritative timeline yet, so the edge uses wall-clock time instead.
-pub(super) fn capture_boundary(input: &DictationAudio, release_while_idle: bool) -> CaptureInstant {
-    if release_while_idle {
+/// The instant a shortcut edge applies to. A capture pressed while the
+/// microphone was released has no authoritative timeline yet, so its edge
+/// uses wall-clock time instead.
+pub(super) fn capture_boundary(input: &DictationAudio, pressed_cold: bool) -> CaptureInstant {
+    if pressed_cold {
         CaptureInstant::now()
     } else {
         input.captured_through()
+    }
+}
+
+/// Whether a press sees a released microphone now. While the microphone is
+/// being opened again the previous state stands: the stream's timeline starts
+/// at its open, so a press must not anchor to the closed one's zero instant.
+pub(super) fn release_for_press(
+    release_microphone: bool,
+    previous: bool,
+    input_open: bool,
+) -> bool {
+    release_microphone || (previous && !input_open)
+}
+
+/// What a press, and the capture it starts, meet of the warm microphone.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct Release {
+    /// Whether a press now meets a released microphone: the setting is on or
+    /// the person is away.
+    pub(super) press: bool,
+    /// Whether the capture recording now was pressed while released. The
+    /// latch clears once the stream is back, but a capture pressed cold keeps
+    /// its wall-clock edge and still owes its start tone.
+    pub(super) capture: bool,
+}
+
+impl Release {
+    /// The latches a listener starts with.
+    pub(super) fn new(released: bool) -> Self {
+        Self {
+            press: released,
+            capture: released,
+        }
+    }
+
+    /// Records the capture starting now: it is cold exactly when a press
+    /// meets a released microphone.
+    pub(super) fn begin(&mut self) {
+        self.capture = self.press;
+    }
+
+    /// This pass's press latch, keeping the recording capture's own record.
+    fn observed(self, released: bool, input_open: bool) -> Self {
+        Self {
+            press: release_for_press(released, self.press, input_open),
+            capture: self.capture,
+        }
+    }
+}
+
+/// The warm microphone's release, kept in step with the setting and with the
+/// person being away (the display asleep, the session locked, or the Mac
+/// asleep). The owner is told as either changes.
+pub(super) struct WarmRelease {
+    /// What the owner was last told to release.
+    forwarded: bool,
+    /// What the owner was last told about being away. It starts with neither,
+    /// so the first pass tells it.
+    forward_away: bool,
+}
+
+impl WarmRelease {
+    /// The policy a listener starts with and the latches it acts on.
+    pub(super) fn start() -> (Self, Release) {
+        let away = crate::audio::system_idle::released();
+        let released = crate::app_settings::microphone_policy().release_while_idle || away;
+        (
+            Self {
+                forwarded: released,
+                forward_away: false,
+            },
+            Release::new(released),
+        )
+    }
+
+    /// Brings the owner up to date and returns the latches this pass acts on.
+    pub(super) fn reconcile(&mut self, input: &DictationAudio, release: Release) -> Release {
+        let away = crate::audio::system_idle::released();
+        let released = crate::app_settings::microphone_policy().release_while_idle || away;
+        if released != self.forwarded {
+            input.set_release_while_idle(released);
+            self.forwarded = released;
+        }
+        if away != self.forward_away {
+            input.set_away(away);
+            self.forward_away = away;
+        }
+        release.observed(released, input.is_open())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A capture pressed while the microphone was released keeps that record
+    /// once the stream is back: its own tone and edge still depend on it,
+    /// while the next press takes the stream's timeline again.
+    #[test]
+    fn a_capture_keeps_the_cold_press_it_started_from() {
+        let mut release = Release::new(true);
+        release.begin();
+        assert!(release.press && release.capture);
+
+        // The stream is back: the next press is warm...
+        release = release.observed(false, true);
+        assert!(!release.press);
+        // ...but the capture started cold still owes its tone.
+        assert!(release.capture);
+
+        // A press started warm never owed one.
+        release.begin();
+        assert!(!release.press && !release.capture);
     }
 }
