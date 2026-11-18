@@ -968,6 +968,9 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Cohere's advertised encoder input capacity is not its recommended inference
   window. Both GGUF adapters cap Cohere chunks at the reference processor's
   35 seconds (or a stricter advertised bound); capture duration remains unlimited.
+- macOS `main` sets `GGML_METAL_TENSOR_DISABLE` first thing, because ggml's
+  Metal tensor-API kernels give wrong results on M5-class GPUs; the simdgroup
+  kernels every earlier Mac uses are correct.
 - The microphone is either System default (`microphone` unset) or one saved
   device. System default follows the OS default input live: macOS through
   CoreAudio listeners on the default input and the device list (their callbacks

@@ -2855,6 +2855,14 @@ TextEdit process were stopped afterward.
   (CPU-forced) evidence only. Real microphones, room noise, Bluetooth inputs,
   and a physical shortcut on a Mac or a Linux GPU have not been observed with a
   live stream.
+- **M5-class Metal:** macOS `main` sets `GGML_METAL_TENSOR_DISABLE` before any
+  backend or thread starts, because ggml's Metal tensor-API kernels (which it
+  enables by itself on M5/M6/A19/A20 GPUs) give wrong results there, so every
+  GGUF model transcribed to empty or garbage text (#1965). This build has not
+  been run on an M5 Mac; the evidence is the reporter's
+  `GGML_METAL_TENSOR_DISABLE=1 hex transcribe` run. Ignored model tests and
+  `scripts/dictation-corpus.sh` run under the test harness's own `main`, so set
+  the variable yourself when running them on an M5.
 - **Paste consumption:** current paste policy waits a fixed interval rather than
   acknowledging target consumption. Internal ordering does not establish
   correctness for an arbitrarily slow target application.
