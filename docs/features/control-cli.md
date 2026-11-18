@@ -24,9 +24,9 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
 │       Linux unit -> systemctl restart; else waits for that process to exit
-│       (its local API drops discovery first, at the start of its shutdown;
-│       Windows' event ends with the process, Linux's service lock sooner),
-│       then start
+│       (Windows: discovery goes at the start of the local API's shutdown,
+│       the tray next, and the instance event at exit; Linux: the service
+│       lock goes before the discovery file), then start
 ├── hex dictation start|stop|toggle|cancel
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   │   ├── Windows CLI/tray start -> hook adopts the accepted capture; first

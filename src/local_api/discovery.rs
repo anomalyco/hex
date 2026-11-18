@@ -514,10 +514,11 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
 /// A running Hex that `hex restart` waits on before it starts the successor.
 ///
 /// The local API removes its discovery file at the start of its shutdown and
-/// the process lives on after that. The instance Hex holds goes later:
-/// Windows' named event is closed when the process ends, and Linux's service
-/// lock is released even earlier, when its server drops. Waiting for the
-/// process covers both, which is why the local API isn't the signal.
+/// the process lives on after that. What that process holds goes at different
+/// points: on Windows the file goes first, then the tray, and the instance
+/// event last, at process exit; on Linux the service lock is released before
+/// the file, when the host's server drops. Waiting for the process covers
+/// both, which is why the local API isn't the signal.
 ///
 /// On Windows the handle is opened while that Hex still runs, so the wait can
 /// only be about that process: looking the pid up again after the wait could
@@ -810,8 +811,9 @@ mod exit_watch_tests {
         let watch = ExitWatch::new(exiting.id()).expect("a running process can be watched");
         let output = exiting.wait_with_output().unwrap();
         assert!(output.status.success(), "the child failed");
-        // The child reaps itself into a non-process, and the filter must have
-        // found its test rather than exiting with none.
+        // The parent reaps the child here, so the watch must then see the pid
+        // gone; the output proves the filter found the child's test instead
+        // of the child exiting with none.
         assert!(
             String::from_utf8_lossy(&output.stdout).contains("1 passed"),
             "the child didn't run its test: {}",

@@ -78,10 +78,11 @@ pub(super) fn reopen_after_restart(old: Option<crate::local_api::ExitWatch>) -> 
         return ControlReply::done("Restarting Hex");
     }
     // The watch was taken while the old Hex still ran, before it got the
-    // quit, so it can only be about that process. Its local API stops before
-    // its drain finishes, while its instance is gone only at or just before
-    // exit: a successor started in that gap exited at once because another
-    // Hex still owned the instance.
+    // quit, so it can only be about that process. The local API was the wrong
+    // signal: on Windows its discovery file goes first, then the tray, and
+    // the instance event last, at process exit; on Linux the service lock is
+    // released before that file. A successor launched into any of it exited
+    // at once because another Hex still held what it needed.
     let gone = match old {
         Some(process) => process.wait(Duration::from_secs(30)),
         None => {
