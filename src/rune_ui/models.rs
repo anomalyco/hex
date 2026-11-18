@@ -192,7 +192,7 @@ impl Models {
 
     /// [`Models::fixture`] listing only a model Hex doesn't recommend, so an
     /// unset key really gets OpenCode's own default.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn fixture_unranked() -> Self {
         let mut models = Self::fixture();
         if let ModelCatalogState::Loaded(catalog) = &mut models.state {
