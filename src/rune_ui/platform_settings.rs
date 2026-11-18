@@ -933,54 +933,66 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             }
         })
         .collect();
-    let mut controls = row().key("calendar-calendars-controls").gap(8.0).center_y();
-    if bulk_select_on(ui) && !calendars.is_empty() {
-        let all_included = included == calendars.len();
-        let ids: Vec<String> = calendars.iter().map(|info| info.id.clone()).collect();
-        controls = controls.child(small_button(
-            p,
-            "calendar-select-all",
-            if all_included {
-                tr("Deselect all")
-            } else {
-                tr("Select all")
-            },
-            move |ui: &mut Ui, _| {
-                let ids = ids.clone();
-                ui.update(move |settings| {
-                    let excluded = &mut settings.meetings.calendar.excluded_calendars;
-                    if all_included {
-                        // Deselect all: the setting stores exclusions, so
-                        // calendars added later are still included.
-                        *excluded = ids;
-                    } else {
-                        excluded.clear();
-                    }
-                });
-            },
-        ));
-    }
-    setting_row(
+    let select = select(
         p,
-        "calendar-calendars",
+        "calendar-calendars-control",
         tr("Calendars"),
-        None,
-        controls.child(select(
-            p,
-            "calendar-calendars-control",
-            tr("Calendars"),
-            &label,
-            ui.open == Some(Menu::Calendars),
-            choices,
-            |ui: &mut Ui| toggle_menu(ui, Menu::Calendars),
-            layer,
-        )),
-    )
+        &label,
+        ui.open == Some(Menu::Calendars),
+        choices,
+        |ui: &mut Ui| toggle_menu(ui, Menu::Calendars),
+        layer,
+    );
+    // Labs › Select all calendars adds one bulk button; off, the row is the
+    // select alone, exactly as before.
+    let control = if bulk_select_on(ui) && !calendars.is_empty() {
+        row()
+            .key("calendar-calendars-controls")
+            .gap(8.0)
+            .center_y()
+            .child(small_button(
+                p,
+                "calendar-select-all",
+                if included == calendars.len() {
+                    tr("Deselect all")
+                } else {
+                    tr("Select all")
+                },
+                |ui: &mut Ui, _| {
+                    // Read the calendars and the direction now, at the click,
+                    // not when the row was drawn.
+                    let ids: Vec<String> = ui
+                        .platform
+                        .calendar
+                        .calendars
+                        .iter()
+                        .map(|info| info.id.clone())
+                        .collect();
+                    let all_included = ids
+                        .iter()
+                        .all(|id| ui.settings.meetings.calendar.includes(id));
+                    ui.update(move |settings| {
+                        let excluded = &mut settings.meetings.calendar.excluded_calendars;
+                        if all_included {
+                            // Deselect all: the setting stores exclusions, so
+                            // calendars added later are still included.
+                            *excluded = ids;
+                        } else {
+                            excluded.clear();
+                        }
+                    });
+                },
+            ))
+            .child(select)
+    } else {
+        select
+    };
+    setting_row(p, "calendar-calendars", tr("Calendars"), None, control)
 }
 
 /// Whether Labs › Select all calendars adds the Calendars row's bulk button.
 /// The lab is UI only: its own toggle, in this build, with no organization
-/// lock, as the picker's and History's labs read theirs.
+/// lock, as `in_place_on` reads its lab (`src/rune_ui/model_import.rs:73`).
 fn bulk_select_on(ui: &Ui) -> bool {
     let feature = Feature::CalendarSelectAll;
     feature.shipped() && feature.managed().is_none() && feature.on(&ui.settings)

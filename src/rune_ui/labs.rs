@@ -20,7 +20,8 @@ use rune::{El, Icon, TextEdit, Tx, row, text};
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{
-    BOOK, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
+    BOOK, CALENDAR, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL,
+    TIMER, WAVE,
 };
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
@@ -572,7 +573,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if cfg!(target_os = "macos") {
             rows.push(row(Feature::CalendarMenu, Some(&CLOCK)));
             // macOS's Meetings settings draw the Calendars row's bulk button.
-            rows.push(row(Feature::CalendarSelectAll, Some(&CLOCK)));
+            rows.push(row(Feature::CalendarSelectAll, Some(&CALENDAR)));
         }
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));

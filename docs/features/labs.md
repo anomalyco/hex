@@ -2452,8 +2452,9 @@ exclusions, so a calendar added later is still included. The button hides
 while there are no calendars, and each calendar's own switch in the menu stays
 as it is. The lab is UI only: it has no runtime gate or state-word bit, and the
 row reads `Feature::CalendarSelectAll` with `shipped`, no organization lock,
-and `on`, as the picker's and History's labs read theirs. A save goes through
-`ui.update`, like the per-calendar toggle. Off, nothing is drawn.
+and `on`, as `in_place_on` in
+[model_import.rs](../../src/rune_ui/model_import.rs) reads its lab. A save goes
+through `ui.update`, like the per-calendar toggle. Off, nothing is drawn.
 
 Checks: `calendar_select_all_is_its_own_switch_and_macos_only` in
 [labs.rs](../../src/labs.rs) and
