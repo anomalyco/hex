@@ -306,6 +306,11 @@ struct Capsule {
     /// Reduce Motion, as the view last read it: a release jumps to its
     /// corner.
     reduced: Cell<bool>,
+    /// The window's scale, as the view last read it: device pixels per point.
+    scale: Cell<f32>,
+    /// The primary screen in points, for a release's corner; a type that
+    /// tests can replace with no screen at all.
+    screen: ScreenFn,
     save_corner: SaveCorner,
     /// Reads a recording's transcript through now off the main thread, then
     /// calls [`Capsule::finish_copy_new`]. Without it, Copy new copies what
@@ -319,6 +324,8 @@ type CopyNew = Arc<dyn Fn(String) + Send + Sync>;
 type Resize = Arc<dyn Fn((f32, f32)) + Send + Sync>;
 type Shift = Arc<dyn Fn(MeetingIndicatorCorner, f32, f32) + Send + Sync>;
 type SaveCorner = Arc<dyn Fn(MeetingIndicatorCorner) + Send + Sync>;
+/// The primary screen in points, given the window's pixels-per-point scale.
+type ScreenFn = fn(f32) -> Option<(f32, f32)>;
 
 impl Capsule {
     fn send(&self, command: ControllerCommand) -> bool {
@@ -536,7 +543,7 @@ impl Capsule {
             Phase::Up => {
                 let offset = self.throw.track(now, drag.dx, drag.dy);
                 let velocity = self.throw.velocity(now);
-                let Some(screen) = primary_screen_size() else {
+                let Some(screen) = (self.screen)(self.scale.get()) else {
                     self.throw.stop();
                     shift(self.corner, 0.0, 0.0);
                     return;
@@ -818,6 +825,8 @@ impl MeetingCapsules {
                     shift: None,
                     throw: throw::Throw::default(),
                     reduced: Cell::new(false),
+                    scale: Cell::new(1.0),
+                    screen: primary_screen_size,
                     save_corner: save_corner.clone(),
                     copy_new: None,
                 },
@@ -1181,6 +1190,7 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
 
 fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     capsule.reduced.set(cx.is_reduced_motion());
+    capsule.scale.set(cx.env().scale);
     view_body(capsule, cx).hover_motion_within(Anim::INSTANT, Anim::INSTANT)
 }
 
@@ -1531,6 +1541,9 @@ mod tests {
             shift: None,
             throw: throw::Throw::default(),
             reduced: Cell::new(false),
+            // No screen: a release lands back in the corner it started in.
+            scale: Cell::new(2.0),
+            screen: |_| None,
             save_corner: Arc::new(|_| {}),
             copy_new: None,
         };
@@ -2035,10 +2048,12 @@ mod tests {
         );
         rt.pointer_up(x - 20.0, y + 30.0);
         rt.frame(0.0);
-        // A release this close stays in its corner, whether the host has a
-        // screen to snap against or not (CI, and a Wayland capsule, have none).
-        let last = moves.lock().unwrap().last().cloned().expect("a move");
-        assert_eq!(last.0, MeetingIndicatorCorner::TopRight);
+        // Off the main thread there is no screen to snap against, so it
+        // returns to its corner.
+        assert_eq!(
+            moves.lock().unwrap().last(),
+            Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
+        );
         assert!(saved.lock().unwrap().is_empty());
     }
 
@@ -2174,11 +2189,34 @@ mod tests {
             "{moves:?}"
         );
         assert_eq!(
-            moves.last().map(|moved| moved.0),
-            Some(MeetingIndicatorCorner::TopRight)
+            moves.last(),
+            Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
         );
         // The drag pressed nothing.
         assert!(rt.state.kind.is_some());
+    }
+
+    /// With a screen to measure, a release far from its corner lands in the
+    /// one nearest it and saves that.
+    #[test]
+    fn a_released_capsule_snaps_to_the_corner_it_was_dragged_to() {
+        let (mut rt, _, _) = runtime(live_recording("capsule-snap"), false, true, RECORDING);
+        let saved: Arc<Mutex<Vec<MeetingIndicatorCorner>>> = Default::default();
+        let recorded = saved.clone();
+        rt.update(move |capsule, _| {
+            capsule.screen = |_| Some((1512.0, 982.0));
+            capsule.shift = Some(Arc::new(|_, _, _| {}));
+            capsule.save_corner = Arc::new(move |corner| recorded.lock().unwrap().push(corner));
+        });
+        rt.frame(0.0);
+        let (x, y) = rt.find("pill").unwrap();
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_move(x - 700.0, y + 40.0);
+        rt.frame(0.0);
+        rt.pointer_up(x - 700.0, y + 40.0);
+        rt.frame(0.0);
+        assert_eq!(*saved.lock().unwrap(), [MeetingIndicatorCorner::TopLeft]);
     }
 
     fn call_ended() -> Kind {

@@ -2,51 +2,54 @@
 //!
 //! Rune places an overlay's window on the primary display's edge, and a
 //! release lands in the corner nearest the window's centre (the throw in
-//! `throw`), so the size wanted here is that display's, in the points
-//! `rune::Drag::dx` and the capsule's window size are in: device pixels over
-//! the window's scale.
+//! `throw`), so the size wanted here is that display's in points:
+//! [`rune::Drag::dx`] and a capsule's window size are both in points, device
+//! pixels over the window's scale. That scale is Rune's own, read from the
+//! view's [`rune::Cx::env`], so a capsule measures the display the way Rune
+//! laid it out.
 
-/// The primary screen in points, where Rune places the capsules.
+/// The primary screen in points, where Rune places the capsules. macOS
+/// already answers in points.
 #[cfg(target_os = "macos")]
-pub(super) fn primary_screen_size() -> Option<(f32, f32)> {
+pub(super) fn primary_screen_size(_scale: f32) -> Option<(f32, f32)> {
     let mtm = objc2::MainThreadMarker::new()?;
     let screen = objc2_app_kit::NSScreen::screens(mtm).iter().next()?;
     let size = screen.frame().size;
     Some((size.width as f32, size.height as f32))
 }
 
-/// Windows lays an overlay out in its primary display's points, so the
-/// monitor's pixels come back over its DPI scale.
+/// Windows places an overlay's `x` on the whole primary monitor and its top
+/// or bottom edge inside that monitor's work area, so the height is the work
+/// area's.
 #[cfg(target_os = "windows")]
-pub(super) fn primary_screen_size() -> Option<(f32, f32)> {
+pub(super) fn primary_screen_size(scale: f32) -> Option<(f32, f32)> {
     let monitor = scrawl_capture::win::primary_monitor()?;
-    let scale = if monitor.scale.is_finite() && monitor.scale > 0.0 {
-        monitor.scale
-    } else {
-        1.0
-    };
     Some((
-        (monitor.rect[2] / scale) as f32,
-        (monitor.rect[3] / scale) as f32,
+        points(monitor.rect[2] as f32, scale),
+        points(monitor.work[3] as f32, scale),
     ))
 }
 
-/// X11's primary RandR monitor in points (the root window's size without
-/// RandR). Wayland tells an app nothing of its outputs, so a drag there still
+/// X11's primary RandR monitor in points, which is what Rune places an X11 or
+/// XWayland overlay against. A capsule on a native Wayland surface has no
+/// RandR behind it, so that is not supported on Wayland yet and its drag
 /// returns to the corner it started in.
 #[cfg(target_os = "linux")]
-pub(super) fn primary_screen_size() -> Option<(f32, f32)> {
+pub(super) fn primary_screen_size(scale: f32) -> Option<(f32, f32)> {
     use x11rb::connection::Connection as _;
     use x11rb::protocol::randr::ConnectionExt as _;
 
-    if crate::linux::session::LinuxSession::detect().is_wayland() {
+    // A capsule floating on XWayland is an X11 window placed by RandR, even
+    // though the session is Wayland.
+    if crate::linux::session::LinuxSession::detect().is_wayland()
+        && !crate::linux::meeting_capsules::on_xwayland()
+    {
         return None;
     }
     let (connection, screen) = x11rb::connect(None).ok()?;
     let root = &connection.setup().roots[screen];
-    let scale = xft_scale(&connection, root.root);
     // RandR 1.5 names the primary monitor; without it the root window spans
-    // every display.
+    // every display. Only the size decides a corner, not the origin.
     let monitors = connection
         .randr_get_monitors(root.root, true)
         .ok()
@@ -60,33 +63,27 @@ pub(super) fn primary_screen_size() -> Option<(f32, f32)> {
         .map_or((root.width_in_pixels, root.height_in_pixels), |monitor| {
             (monitor.width, monitor.height)
         });
-    Some((f32::from(width) / scale, f32::from(height) / scale))
+    Some((
+        points(f32::from(width), scale),
+        points(f32::from(height), scale),
+    ))
 }
 
-/// `Xft.dpi` from the root window's resource database as a scale, the way
-/// Rune's own X11 overlay reads it; 1 when unset. Matches winit's X11 window
-/// scale, which the pointer's points are divided by.
-#[cfg(target_os = "linux")]
-fn xft_scale(connection: &impl x11rb::connection::Connection, root: u32) -> f32 {
-    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+/// Device pixels to points. A scale Rune hasn't set yet (0) counts as 1.
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+fn points(pixels: f32, scale: f32) -> f32 {
+    pixels / if scale > 0.0 { scale } else { 1.0 }
+}
 
-    let Some(property) = connection
-        .get_property(
-            false,
-            root,
-            AtomEnum::RESOURCE_MANAGER,
-            AtomEnum::STRING,
-            0,
-            1 << 16,
-        )
-        .ok()
-        .and_then(|cookie| cookie.reply().ok())
-    else {
-        return 1.0;
-    };
-    let database = String::from_utf8_lossy(&property.value);
-    database
-        .lines()
-        .find_map(|line| line.strip_prefix("Xft.dpi:")?.trim().parse::<f32>().ok())
-        .map_or(1.0, |dpi| (dpi / 96.0).clamp(1.0, 4.0))
+#[cfg(test)]
+mod tests {
+    use super::points;
+
+    #[test]
+    fn device_pixels_become_points() {
+        assert_eq!(points(2880.0, 2.0), 1440.0);
+        assert_eq!(points(1920.0, 1.0), 1920.0);
+        // Before Rune sets the view's scale, points are pixels.
+        assert_eq!(points(1920.0, 0.0), 1920.0);
+    }
 }
