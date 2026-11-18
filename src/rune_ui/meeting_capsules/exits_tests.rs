@@ -67,6 +67,34 @@ fn not_now_and_a_timeout_let_the_offer_go_over_several_frames() {
     }
 }
 
+/// The reminder, "left the call" and the automatic-start notice share the
+/// offer's arrival and exit; none of them hides in the frame of its press.
+#[test]
+fn the_other_capsules_arrive_and_leave_the_same_way() {
+    for name in ["reminder", "call-ended", "auto-started"] {
+        let shots = play(replay(name), |_, _, _| {});
+        assert!(shots[0].surface > 0.0 && shots[0].surface < 0.3, "{name}");
+        assert!(
+            shots[..30]
+                .windows(2)
+                .all(|p| p[1].surface >= p[0].surface && p[1].surface - p[0].surface < 0.2),
+            "{name}"
+        );
+        assert_eq!(shots[30].surface, 1.0, "{name}");
+        // The saved corner's edges stay put while it shrinks toward them.
+        let rest = shots[39].pill.unwrap();
+        let gone = leaves(&shots, 40);
+        for shot in &shots[..gone] {
+            let [x, y, w, _] = shot.pill.unwrap();
+            assert!(
+                (x + w - rest[0] - rest[2]).abs() < 0.03 && (y - rest[1]).abs() < 0.03,
+                "{name}: {:?} against {rest:?}",
+                shot.pill
+            );
+        }
+    }
+}
+
 #[test]
 fn a_refused_start_goes_where_it_is_without_saying_starting() {
     // Refused while the offer is still contracting: the outline carries on

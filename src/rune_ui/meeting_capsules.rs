@@ -1162,9 +1162,13 @@ fn button(
         } else {
             ButtonVariant::Neutral
         })
-        .on_press(press)
         .build_push(p.k)
         .key(key)
+        // The surface answers in the frame of the press.
+        .on_press_tx(move |c: &mut Capsule, tx| {
+            press(c);
+            c.stir(tx);
+        })
 }
 
 static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
@@ -1176,9 +1180,12 @@ fn dismiss_button(p: Paint) -> El {
         .variant(IconButtonVariant::Ghost)
         .control_size(ControlSize::Large)
         .label(tr("Close"))
-        .on_press(|c: &mut Capsule| c.close())
         .build(p.k)
         .key("dismiss")
+        .on_press_tx(|c: &mut Capsule, tx| {
+            c.close();
+            c.stir(tx);
+        })
 }
 
 /// The overlay's frame hook: steps the surface, and a glide into its corner,

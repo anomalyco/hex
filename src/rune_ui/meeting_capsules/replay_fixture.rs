@@ -138,6 +138,34 @@ const REPLAYS: &[Replay] = &[
         enters: true,
         cues: &[(36, Cue::Over("not-now")), (40, Cue::Press("not-now"))],
     },
+    // The other capsules arrive and leave the same way.
+    Replay {
+        name: "reminder",
+        reduced: false,
+        frames: 80,
+        live: false,
+        enters: true,
+        cues: &[(36, Cue::Over("not-now")), (40, Cue::Press("not-now"))],
+    },
+    Replay {
+        name: "call-ended",
+        reduced: false,
+        frames: 80,
+        live: false,
+        enters: true,
+        cues: &[
+            (36, Cue::Over("keep-recording")),
+            (40, Cue::Press("keep-recording")),
+        ],
+    },
+    Replay {
+        name: "auto-started",
+        reduced: false,
+        frames: 80,
+        live: false,
+        enters: true,
+        cues: &[(36, Cue::Over("dismiss")), (40, Cue::Press("dismiss"))],
+    },
     // Nobody answers the offer.
     Replay {
         name: "timeout",
@@ -297,9 +325,20 @@ fn play(
     mut each: impl FnMut(usize, &mut Runtime<Capsule>, &Shot),
 ) -> Vec<Shot> {
     use stage::Layer;
-    let size = (500., 328.5);
+    let size = match replay.name {
+        "reminder" => REMINDER,
+        "call-ended" => CALL_ENDED,
+        "auto-started" => PANEL,
+        _ => (500., 328.5),
+    };
     let kind = if replay.live {
         live_recording("replay")
+    } else if replay.name == "reminder" {
+        reminder(true, false)
+    } else if replay.name == "call-ended" {
+        call_ended()
+    } else if replay.name == "auto-started" {
+        auto_started()
     } else {
         offer(
             provider_cases()
@@ -481,12 +520,17 @@ fn play(
                     offer::Route::Keep
                 );
             }
-            Some(Cue::Press("not-now")) => {
-                assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Dismiss)));
-                assert!(rt.state.kind.is_none(), "Not now is true the frame it is pressed");
-            }
-            Some(Cue::Press("dismiss")) => {
-                assert!(rt.state.kind.is_none(), "✕ is true the frame it is pressed");
+            Some(Cue::Press(key)) => {
+                // Not now tells the controller; ✕ and Keep recording only close.
+                let sent = commands.try_recv();
+                match (replay.name, key) {
+                    ("reminder", "not-now") => {
+                        assert!(matches!(sent, Ok(ControllerCommand::DismissReminder(_))))
+                    }
+                    (_, "not-now") => assert!(matches!(sent, Ok(ControllerCommand::Dismiss))),
+                    _ => assert!(sent.is_err(), "{key} sent a command"),
+                }
+                assert!(rt.state.kind.is_none(), "{key} is true the frame it is pressed");
             }
             Some(Cue::Timeout) => {
                 assert!(matches!(
@@ -495,7 +539,6 @@ fn play(
                 ));
                 assert!(rt.state.kind.is_none());
             }
-            Some(Cue::Press(_)) => (),
             Some(_) => {
                 assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
                 assert!(rt.state.stopping, "Stop is true the frame it is pressed");
@@ -730,15 +773,20 @@ fn an_interrupted_panel_turns_round_without_a_stop_or_a_jump() {
         assert!(b.abs() < 20.0, "f{frame}: a {b} pt step");
         assert!((b - a).abs() < 7.5, "f{frame}: speed {a} → {b}");
     }
-    // The first candidate dropped from 651 to -57 pt/s in the frame the
-    // pointer left at 20. The speed now bends round: the frame after each
-    // reversal the edge still travels the way it was going, a little slower.
-    for at in [20, 27, 33] {
+    // The first candidate dropped from 651 to -57 pt/s in the frame after
+    // the pointer left at 20. The speed now bends round: in that frame the
+    // edge still travels the way it was going, a little slower, and no frame
+    // anywhere changes its speed by more than a launch from rest (532 pt/s).
+    for at in [21, 28, 34] {
         let (before, after) = (shots[at - 1].velocity.1, shots[at].velocity.1);
         assert!(
             before * after > 0.0 && (after - before).abs() < 350.0,
             "f{at}: {before} → {after} pt/s"
         );
+    }
+    for (frame, pair) in shots.windows(2).enumerate() {
+        let step = (pair[1].velocity.1 - pair[0].velocity.1).abs();
+        assert!(step < 540.0, "f{}: the speed stepped {step} pt/s", frame + 1);
     }
     assert!(sizes[21].1 > sizes[20].1 && sizes[20].1 > sizes[19].1);
     assert!(sizes[26].1 < sizes[22].1);
@@ -785,12 +833,20 @@ fn hud_replay_frames() {
     let only = std::env::var("HEX_HUD_CASE").ok();
     let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
     for replay in REPLAYS {
-        if only.as_deref().is_some_and(|name| name != replay.name) {
+        if only
+            .as_deref()
+            .is_some_and(|names| !names.split(',').any(|name| name == replay.name))
+        {
             continue;
         }
         let dir = root.join(replay.name);
         std::fs::create_dir_all(&dir).unwrap();
-        let (w, h) = (1000, 657);
+        // Two pixels per point; a panel capsule is painted at its window's size.
+        let (w, h) = match replay.name {
+            "reminder" | "call-ended" => (1040, 128),
+            "auto-started" => (840, 128),
+            _ => (1000, 657),
+        };
         let mut renderer = offscreen::renderer(&gpu.device);
         let target = offscreen::target(&gpu.device, w, h);
         let mut ink = waveform::Ink::default();
