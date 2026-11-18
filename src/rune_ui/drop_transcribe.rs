@@ -15,7 +15,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 
 use rune::{El, Tx, col, el, icon, row, text};
-use rune_kit::{ProgressCircle, Toast, ToastRegion};
+use rune_kit::{Loader, ProgressCircle, Toast, ToastRegion};
 
 use super::Ui;
 use super::controls::Paint;
@@ -61,15 +61,21 @@ pub(super) enum Drag {
 /// One file's transcription on a worker thread.
 pub(super) struct Job {
     pub(super) path: PathBuf,
-    /// The fraction of the file decoded, as the worker last reported it.
-    progress: f32,
+    /// The fraction of the file decoded, as the worker last reported it:
+    /// `None` while the file's length is unknown (an MP3 with no total
+    /// duration), so the toast shows no percentage.
+    progress: Option<f32>,
+    /// The person cancelled it and the worker has not answered yet. The job
+    /// stays tracked until it does, so nothing else starts on a second
+    /// worker or a second `TranscriptionService` meanwhile.
+    cancelling: bool,
     events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
 }
 
 /// What a worker reports: how far it has decoded the file, then how it went.
 enum Event {
-    Progress(f32),
+    Progress(Option<f32>),
     Done(Result<PathBuf, FileTranscriptError>),
 }
 
@@ -105,8 +111,9 @@ impl Reporter {
         }
     }
 
-    /// Reports how much of the file the worker has decoded.
-    pub(super) fn progress(&self, fraction: f32) {
+    /// Reports how much of the file the worker has decoded, or `None` while
+    /// its length is unknown.
+    pub(super) fn progress(&self, fraction: Option<f32>) {
         self.send(Event::Progress(fraction));
     }
 
@@ -131,8 +138,10 @@ impl Default for DropTranscribe {
 
 impl DropTranscribe {
     /// Starts the next queued file when the worker is free: one file at a
-    /// time, in the order they arrived. `selection` is the dictation model
-    /// and language every file in this run uses.
+    /// time, in the order they arrived. A cancelled file still winding down
+    /// keeps the worker, so a drop while it cancels waits behind it.
+    /// `selection` is the dictation model and language every file in this
+    /// run uses.
     fn start_next(&mut self, wake: Option<rune::Waker>, selection: TranscriptionSelection) {
         if self.job.is_some() {
             return;
@@ -150,43 +159,72 @@ impl DropTranscribe {
         );
         self.job = Some(Job {
             path,
-            progress: 0.0,
+            progress: None,
+            cancelling: false,
             events: receiver,
             cancel,
         });
     }
 
-    /// Stops the file running now and forgets the ones queued behind it.
+    /// Stops the file running now and forgets the ones queued behind it. The
+    /// running file stays tracked as cancelling until its worker answers, so
+    /// a drop right after Cancel queues behind it instead of starting a
+    /// second worker and a second `TranscriptionService`.
     pub(super) fn cancel(&mut self) {
         self.queue.clear();
-        if let Some(job) = self.job.take() {
+        if let Some(job) = &mut self.job {
+            job.cancelling = true;
             job.cancel.store(true, Ordering::Release);
         }
         self.notice = None;
     }
 
     /// Forgets every file, cancelling the one running: turning the lab off
-    /// leaves nothing of it behind.
+    /// leaves nothing of it behind. A worker still winding down stays
+    /// tracked, so turning the lab back on cannot start a second one.
     fn clear(&mut self) -> bool {
-        let shown = self.drag != Drag::None
-            || self.job.is_some()
+        let notice = self.notice.take();
+        let chooser = self.chooser.take();
+        let changed = self.drag != Drag::None
             || !self.queue.is_empty()
-            || self.notice.is_some()
-            || self.chooser.is_some();
+            || notice.is_some()
+            || chooser.is_some()
+            || self.job.as_ref().is_some_and(|job| !job.cancelling);
         self.drag = Drag::None;
         self.queue.clear();
-        if let Some(job) = self.job.take() {
+        if let Some(job) = &mut self.job {
+            job.cancelling = true;
             job.cancel.store(true, Ordering::Release);
         }
-        self.notice = None;
-        self.chooser = None;
-        shown
+        changed
+    }
+
+    /// Drops a cancelled job once its worker has answered while the lab is
+    /// off: the window polls nothing else from it.
+    fn forget_finished(&mut self) -> bool {
+        let finished = self.job.as_ref().is_some_and(|job| {
+            matches!(
+                job.events.try_recv(),
+                Ok(Event::Done(_)) | Err(TryRecvError::Disconnected)
+            )
+        });
+        if finished {
+            self.job = None;
+        }
+        finished
     }
 
     /// The file the worker is on, if one is.
     #[cfg(all(test, target_os = "linux"))]
     pub(super) fn running(&self) -> Option<&Path> {
         self.job.as_ref().map(|job| job.path.as_path())
+    }
+
+    /// Whether the running file's worker was told to stop and has not
+    /// answered yet.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn cancelling(&self) -> bool {
+        self.job.as_ref().is_some_and(|job| job.cancelling)
     }
 
     /// The files still waiting behind the running one.
@@ -221,7 +259,7 @@ impl DropTranscribe {
         ]);
         pane.start_next(None, TranscriptionSelection::default());
         if let Some(job) = &mut pane.job {
-            job.progress = 0.42;
+            job.progress = Some(0.42);
         }
         // A drop of several files: the one before this saved while this runs.
         pane.notice = Some(Notice::Saved(PathBuf::from("/recordings/Standup 2.txt")));
@@ -315,7 +353,7 @@ pub(super) fn choose(ui: &mut Ui) {
                 label: tr("Audio files").into(),
                 extensions: extensions(),
             }]),
-            directory: dirs::audio_dir(),
+            directory: crate::app_paths::audio_dir(),
         },
         move || {
             if let Some(waker) = &waker {
@@ -344,6 +382,8 @@ fn poll_chooser(ui: &mut Ui) -> bool {
 }
 
 /// Takes the running file's progress and answer, then starts the next one.
+/// A cancelled file is only dropped when its worker answers, and only then
+/// does anything queued behind it start.
 fn poll_job(ui: &mut Ui) -> bool {
     let mut changed = false;
     loop {
@@ -352,28 +392,32 @@ fn poll_job(ui: &mut Ui) -> bool {
         };
         match job.events.try_recv() {
             Ok(Event::Progress(fraction)) => {
-                job.progress = fraction.clamp(0.0, 1.0);
+                job.progress = fraction.map(|fraction| fraction.clamp(0.0, 1.0));
                 changed = true;
             }
             Ok(Event::Done(result)) => {
                 let job = ui.drop.job.take().expect("the job just read");
-                ui.drop.notice = Some(match result {
-                    Ok(path) => Notice::Saved(path),
-                    Err(error) => Notice::Failed {
-                        name: name_of(&job.path),
-                        error: error.to_string(),
-                    },
-                });
+                if !job.cancelling {
+                    ui.drop.notice = Some(match result {
+                        Ok(path) => Notice::Saved(path),
+                        Err(error) => Notice::Failed {
+                            name: name_of(&job.path),
+                            error: error.to_string(),
+                        },
+                    });
+                }
                 start(ui);
                 return true;
             }
             Err(TryRecvError::Empty) => return changed,
             Err(TryRecvError::Disconnected) => {
                 let job = ui.drop.job.take().expect("the job just read");
-                ui.drop.notice = Some(Notice::Failed {
-                    name: name_of(&job.path),
-                    error: tr("Transcription stopped.").to_owned(),
-                });
+                if !job.cancelling {
+                    ui.drop.notice = Some(Notice::Failed {
+                        name: name_of(&job.path),
+                        error: tr("Transcription stopped.").to_owned(),
+                    });
+                }
                 start(ui);
                 return true;
             }
@@ -385,15 +429,22 @@ fn poll_job(ui: &mut Ui) -> bool {
 /// off cancels and forgets everything it started.
 pub(super) fn poll(ui: &mut Ui) -> bool {
     if !on(ui) {
-        return ui.drop.clear();
+        let cleared = ui.drop.clear();
+        let forgotten = ui.drop.forget_finished();
+        return cleared || forgotten;
     }
     let chosen = poll_chooser(ui);
     poll_job(ui) || chosen
 }
 
 /// The window's drop surface: the hint while a file drag is over the window,
-/// else the toasts of the last drop's outcome and the file running now.
+/// else the toasts of the last drop's outcome and the file running now. With
+/// the lab off the window shows nothing of it, even while a cancelled worker
+/// finishes.
 pub(super) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
+    if !on(ui) {
+        return None;
+    }
     if let Some(hint) = hint(ui, p) {
         return Some(hint);
     }
@@ -478,26 +529,42 @@ fn status(ui: &Ui, p: Paint) -> Option<El> {
 }
 
 /// The file running now: its name, a ring and a percentage of its audio
-/// decoded, how many wait behind it, and Cancel.
+/// decoded (or a spinner while its length is unknown), how many wait behind
+/// it, and Cancel. A cancelled file still waiting on its worker says
+/// "Cancelling…" and offers no Cancel of its own.
 fn running(p: Paint, job: &Job, queued: usize) -> El {
-    let percent = (job.progress * 100.0).round();
-    let mut description = tr_fill("Transcribing… {}%", &format!("{percent:.0}"));
+    let mut description = match (job.cancelling, job.progress) {
+        (true, _) => tr("Cancelling…").to_owned(),
+        (false, Some(progress)) => tr_fill(
+            "Transcribing… {}%",
+            &format!("{:.0}", (progress * 100.0).round()),
+        ),
+        (false, None) => tr("Transcribing…").to_owned(),
+    };
     if queued > 0 {
         description.push_str(" · ");
         description.push_str(&tr_fill("{} more queued", &queued.to_string()));
     }
-    Toast::new("drop-transcribe-running", name_of(&job.path))
-        .lead(
-            ProgressCircle::new(job.progress)
-                .size(18.0)
-                .label(tr("Transcribing"))
-                .build(p.k),
-        )
-        .description(description)
-        .action(p.k, tr("Cancel"), false, |ui: &mut Ui, _: &mut Tx| {
-            cancel(ui)
-        })
-        .build(p.k)
+    let lead = match (job.cancelling, job.progress) {
+        (false, Some(progress)) => ProgressCircle::new(progress)
+            .label(tr("Transcribing"))
+            .build(p.k),
+        // No percentage to draw, and a cancelled file is on its way out:
+        // both show movement rather than a ring stuck at 0%.
+        (true, _) | (false, None) => Loader::new().build(p.k),
+    };
+    let toast = Toast::new("drop-transcribe-running", name_of(&job.path))
+        .lead(lead)
+        .description(description);
+    if job.cancelling {
+        toast.build(p.k)
+    } else {
+        toast
+            .action(p.k, tr("Cancel"), false, |ui: &mut Ui, _: &mut Tx| {
+                cancel(ui)
+            })
+            .build(p.k)
+    }
 }
 
 /// The last drop's outcome: a transcript saved, a file that failed, a drop
@@ -515,7 +582,13 @@ fn finished(p: Paint, notice: &Notice) -> El {
                 .description(path.display().to_string())
                 .action(p.k, tr("Show in folder"), true, {
                     let path = path.clone();
-                    move |_: &mut Ui, _: &mut Tx| crate::meeting::reveal(&path)
+                    // Through the host, as the Meetings pane reveals its
+                    // Markdown, so a headless window records the request
+                    // instead of opening a file manager.
+                    move |ui: &mut Ui, _: &mut Tx| {
+                        let reveal = crate::meeting::RevealTarget::Markdown(path.clone());
+                        let _ = ui.send_meeting(super::platform::MeetingRequest::Reveal(reveal));
+                    }
                 })
                 .on_close(dismiss)
                 .build(p.k)
@@ -564,13 +637,13 @@ fn name_of(path: &Path) -> String {
     )
 }
 
-/// The kinds of file this build reads, as a phrase for the hint and the
-/// refusal.
-fn formats() -> &'static str {
+/// The kinds of file this build reads, as a phrase for the hint, the
+/// refusal, and the Labs card's description.
+pub(super) fn formats() -> &'static str {
     if cfg!(target_os = "macos") {
-        tr("WAV, MP3, M4A, AIFF, and CAF")
+        tr("WAV, MP3, M4A, AIFF, or CAF")
     } else {
-        tr("WAV and MP3")
+        tr("WAV or MP3")
     }
 }
 

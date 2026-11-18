@@ -2,7 +2,7 @@
 //! with the lab on, says what Hex reads for one it can't, and queues what it
 //! takes one at a time on a stand-in worker, so no model loads.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -27,8 +27,10 @@ fn window(lab: bool) -> (Runtime<Ui>, Arc<Mutex<Started>>) {
     let record = started.clone();
     let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
     state.settings.labs.drop_transcribe = lab;
+    // Previews and tests record platform requests instead of performing them.
+    state.host = crate::rune_ui::platform::PlatformHost::Fixture(Vec::new());
     state.drop = DropTranscribe::with_runner(Arc::new(move |file, selection, cancel, reporter| {
-        reporter.progress(0.5);
+        reporter.progress(Some(0.5));
         let mut started = record.lock().unwrap_or_else(|error| error.into_inner());
         started.files.push(file);
         started.selections.push(selection);
@@ -154,7 +156,13 @@ fn cancel_stops_the_running_file_and_the_queue() {
     settle(&mut rt);
     rt.update(|ui, _| super::super::drop_transcribe::cancel(ui));
     settle(&mut rt);
-    assert!(rt.state.drop.running().is_none());
+    // The worker is still winding down, so its file stays tracked: nothing
+    // else may start until it answers.
+    assert_eq!(
+        rt.state.drop.running(),
+        Some(Path::new("/recordings/first.wav"))
+    );
+    assert!(rt.state.drop.cancelling());
     assert!(rt.state.drop.waiting().is_empty());
     assert!(
         started
@@ -165,7 +173,83 @@ fn cancel_stops_the_running_file_and_the_queue() {
             .all(|cancel| cancel.load(Ordering::Acquire)),
         "the worker is told to stop"
     );
-    assert!(rt.find("drop-transcribe-running").is_none());
+    let shown = texts(&rt);
+    assert!(
+        shown.iter().any(|text| text == "Cancelling…"),
+        "the toast says it is cancelling: {shown:?}"
+    );
+    assert!(
+        !shown.iter().any(|text| text == "Cancel"),
+        "a cancelled file offers no second Cancel: {shown:?}"
+    );
+}
+
+/// Cancel used to forget the running file at once, so a drop right after it
+/// started a second worker (and a second transcription service) while the
+/// first was still loading or running.
+#[test]
+fn a_drop_after_cancel_waits_for_the_cancelled_worker() {
+    let (mut rt, started) = window(true);
+    let at = landing(&rt);
+    let first = PathBuf::from("/recordings/first.wav");
+    let second = PathBuf::from("/recordings/second.wav");
+    rt.drop_files(vec![first.clone()], at);
+    settle(&mut rt);
+    rt.update(|ui, _| super::super::drop_transcribe::cancel(ui));
+    settle(&mut rt);
+
+    rt.drop_files(vec![second.clone()], at);
+    settle(&mut rt);
+    assert_eq!(
+        files_ran(&started),
+        vec![first.clone()],
+        "one worker runs while the cancelled one finishes"
+    );
+    assert_eq!(rt.state.drop.waiting(), vec![second.as_path()]);
+    assert!(rt.state.drop.cancelling());
+
+    // The cancelled worker answers: only now does the queued file start.
+    let reporter = started
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .reporters
+        .remove(0);
+    reporter.done(Err(
+        crate::transcription::file_transcript::FileTranscriptError::Cancelled,
+    ));
+    settle(&mut rt);
+    assert_eq!(files_ran(&started), vec![first, second]);
+    assert!(!rt.state.drop.cancelling());
+    assert!(rt.state.drop.waiting().is_empty(), "the drop started");
+}
+
+/// An MP3 whose header says no duration has no percentage to show, so the
+/// toast says "Transcribing…" and a spinner instead of a stuck 0%.
+#[test]
+fn a_file_of_unknown_length_says_transcribing_without_a_percentage() {
+    let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+    state.settings.labs.drop_transcribe = true;
+    let held: Arc<Mutex<Option<Reporter>>> = Arc::default();
+    let keep = held.clone();
+    state.drop = DropTranscribe::with_runner(Arc::new(move |_, _, _, reporter| {
+        reporter.progress(None);
+        *keep.lock().unwrap_or_else(|error| error.into_inner()) = Some(reporter);
+    }));
+    let mut rt = runtime_for(state, false, PANE_SIZE);
+    let at = landing(&rt);
+    rt.drop_files(vec![PathBuf::from("/recordings/live.mp3")], at);
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown.iter().any(|text| text == "Transcribing…"),
+        "{shown:?}"
+    );
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("Transcribing… ") && text.contains('%')),
+        "no percentage is invented: {shown:?}"
+    );
 }
 
 #[test]
@@ -178,7 +262,7 @@ fn a_file_hex_cannot_read_is_refused() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text == "Hex can transcribe WAV and MP3 files"),
+            .any(|text| text == "Hex can transcribe WAV or MP3 files"),
         "{:?}",
         texts(&rt)
     );
@@ -219,6 +303,7 @@ fn a_saved_transcript_says_where_it_is_and_dismisses() {
     let answer = saved.clone();
     let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
     state.settings.labs.drop_transcribe = true;
+    state.host = crate::rune_ui::platform::PlatformHost::Fixture(Vec::new());
     state.drop = DropTranscribe::with_runner(Arc::new(move |_, _, _, reporter| {
         reporter.done(Ok(answer.clone()));
     }));
@@ -242,12 +327,45 @@ fn a_saved_transcript_says_where_it_is_and_dismisses() {
     assert!(rt.state.drop.running().is_none());
     assert!(rt.find("drop-transcribe-running").is_none());
 
+    // Show in folder goes through the host, as the Meetings pane's reveal
+    // does: a headless window records the request instead of opening a file
+    // manager.
+    press_labelled(&mut rt, "Show in folder");
+    let asked: Vec<_> = match &rt.state.host {
+        crate::rune_ui::platform::PlatformHost::Fixture(asked) => asked.clone(),
+        _ => panic!("a fixture records platform requests"),
+    };
+    assert_eq!(
+        asked,
+        [crate::rune_ui::platform::PlatformRequest::Meeting(
+            crate::rune_ui::platform::MeetingRequest::Reveal(
+                crate::meeting::RevealTarget::Markdown(saved)
+            )
+        )]
+    );
+
     tap(&mut rt, "close");
     settle(&mut rt);
     assert!(
         rt.find("drop-transcribe-saved").is_none(),
         "the toast's close dismisses it"
     );
+}
+
+/// Presses the button a person would read as `label`.
+fn press_labelled(rt: &mut Runtime<Ui>, label: &str) {
+    let button = rt
+        .elements()
+        .into_iter()
+        .find(|element| element.role == "button" && element.label.as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("no button says {label:?}"));
+    let (x, y) = (
+        button.rect[0] + button.rect[2] * 0.5,
+        button.rect[1] + button.rect[3] * 0.5,
+    );
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(rt);
 }
 
 /// A file Hex reads starts with nothing on screen but the window's own

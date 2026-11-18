@@ -3649,39 +3649,58 @@ The drop target is the window root
 `on_drop_files` takes the files whose extension this build reads
 (`file_transcript::extensions()`), `on_drop_hover` shows the hint over the
 whole window while a file drag is on it, and a drag with nothing Hex reads
-says what it reads instead ("Hex can transcribe WAV and MP3 files", or the
+says what it reads instead ("Hex can transcribe WAV or MP3 files", or the
 macOS extras) through `on_drop_rejected_hover`, and again as a toast if it is
 dropped. With the lab off the window sets no drop handler at all, so nothing
 of this draws or runs. A file's toast shows its name, a ring and percentage of
-the audio decoded (the backend's progress callback), how many files wait
-behind it, and Cancel, which stops the running file and empties the queue.
-The finished toast says "Saved <name>", the full path, and Show in folder
-(`meeting::reveal`, the existing helper); a failure shows the
-`FileTranscriptError`'s own words. Both dismiss with their ✕, and the next
-file starts on its own.
+the audio decoded (the backend's progress callback; a spinner and
+"Transcribing…" when the file's length is unknown), how many files wait
+behind it, and Cancel, which stops the running file, empties the queue, and
+leaves that file's toast saying "Cancelling…" with no Cancel of its own until
+its worker answers. The finished toast says "Saved <name>", the full path, and
+Show in folder (the host's meeting `Reveal` request, as the Meetings pane
+reveals its Markdown, so a preview or headless window records it instead of
+opening a file manager); a failure shows the `FileTranscriptError`'s own
+words. Both dismiss with their ✕, and the next file starts on its own.
 
 The queue runs on one named worker per file (`hex-transcribe-file`) with the
 dictation model and language in use when the file starts, so a drop never
 waits on the window; the window wakes on the worker's channel, as History's
-Transcribe again does. Files keep their order, one worker runs at a time, and
-a file's own gate (`labs::drop_transcribe`) is checked again inside the
-backend when it starts.
+Transcribe again does. Files keep their order and exactly one worker runs at a
+time: Cancel clears the files waiting behind the running one and marks it
+cancelling, and the job stays tracked until its worker reports Done or its
+channel closes. Only then does the next queued file start, so a drop right
+after Cancel — or the lab turned off and on again — queues behind the old
+worker instead of starting a second one and a second `TranscriptionService`
+while the first still loads or runs. A file's own gate
+(`labs::drop_transcribe`) is checked again inside the backend when it starts.
 
 The backend
 ([transcription/file_transcript.rs](../../src/transcription/file_transcript.rs))
 starts its own `TranscriptionService` on the calling thread, so it must run on
 that worker, never the window thread. A WAV is read through the shared pieces
-reader ([transcription/pieces.rs](../../src/transcription/pieces.rs)); an MP3
-goes through rodio on every OS, and M4A, AIFF, and CAF go through the meeting
-import bridge on macOS only. Every format is downmixed to mono, resampled to
-16 kHz, cut at most every 30 s, and each speechful piece is sent to the
-service in order; the pieces' text joins with one space. The whole transcript
-is written as `<stem>.txt` in the source's folder, never replacing an existing
-file (`<stem> 2.txt`, `<stem> 3.txt`, …), through a reserved name and an
-atomic rename. A file in the OS temp folder or in an unwritable folder has its
-transcript written to Downloads. Cancelling stops between pieces and while one
-waits for its transcript; progress is reported as the fraction of the file
-decoded.
+reader ([transcription/pieces.rs](../../src/transcription/pieces.rs)) and
+checked whole once before the model loads, as `hex transcribe` does, so a
+truncated or corrupt file is refused up front; an MP3 goes through rodio on
+every OS, and M4A, AIFF, and CAF go through the meeting import bridge on macOS
+only (a file the bridge cannot decode is `Unreadable`, not a transcription
+failure). Every format is downmixed to mono, resampled to 16 kHz, cut at most
+every 30 s, and each speechful piece is sent to the service in order; the
+pieces' text joins with one space. A piece runs on the dictation engine's
+loaded copy when that copy is the model the file asks for and dictation stays
+idle for up to `SHARED_WAIT` (20 s,
+[service.rs](../../src/transcription/service.rs)); otherwise the service
+loads its own copy, so a file keeps moving while dictation is busy or the
+engine holds another model. The whole transcript is written as `<stem>.txt` in
+the source's folder, never replacing an existing file (`<stem> 2.txt`,
+`<stem> 3.txt`, …), through a reserved name and an atomic rename. A file in the
+OS temp folder or in an unwritable folder has its transcript written to
+Downloads; a writable source folder needs no Downloads at all. Cancelling
+stops between pieces, every 100 ms while one waits for its transcript, and
+once more before the transcript is saved, so a cancelled file never writes
+one; progress is the fraction of the file decoded, and an MP3 whose header
+gives no duration reports no fraction, which the toast shows as
+"Transcribing…" with a spinner rather than 0%.
 
 Entry points: a file drag on the window (macOS, Windows, and Linux X11), and
 Labs › Transcribe dropped audio's card button (every desktop, including
@@ -3692,6 +3711,8 @@ Checks: `a_dropped_file_does_nothing_with_the_lab_off`,
 `a_dropped_file_hovers_then_queues_a_job`,
 `dropped_files_queue_one_at_a_time`,
 `cancel_stops_the_running_file_and_the_queue`,
+`a_drop_after_cancel_waits_for_the_cancelled_worker`,
+`a_file_of_unknown_length_says_transcribing_without_a_percentage`,
 `a_file_hex_cannot_read_is_refused`,
 `a_saved_transcript_says_where_it_is_and_dismisses`,
 `the_labs_card_offers_a_file_choice_only_with_its_lab_on`, and
@@ -3701,8 +3722,13 @@ Linux, with a stand-in worker, so no model loads); the goldens `drop-hover`
 and `drop-running` in both appearances; `the_first_free_name_numbering_counts_up`,
 `a_transcript_never_overwrites_an_earlier_one`,
 `a_file_beside_its_source_keeps_its_own_folder`,
+`a_writable_source_folder_needs_no_downloads_folder`,
 `an_unwritable_folder_sends_the_transcript_to_downloads`,
 `a_file_in_the_temp_folder_sends_the_transcript_to_downloads`,
+`a_temp_folder_reached_through_a_symlink_still_sends_the_transcript_to_downloads`,
+`a_cancel_after_the_last_piece_stops_the_save`,
+`a_truncated_wav_is_refused_before_anything_is_transcribed`,
+`a_checked_wav_still_reads_from_its_first_sample`,
 `only_the_formats_this_build_reads_are_accepted`,
 `the_extensions_on_offer_are_the_ones_this_build_reads`,
 `an_unsupported_file_is_refused_before_anything_loads`, and

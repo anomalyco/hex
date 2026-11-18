@@ -112,13 +112,15 @@ impl std::error::Error for FileTranscriptError {}
 /// Transcribes `source` and writes `<stem>.txt` beside it (or in Downloads),
 /// returning the file it wrote. Blocks, model load included: call it on a
 /// worker thread. `progress` receives the fraction of the file decoded so
-/// far, from 0 to 1, on this thread; `cancel` stops between pieces and while
-/// one waits for its transcript and is polled between decode blocks.
+/// far, from 0 to 1, on this thread, or `None` when the file's length is not
+/// known (an MP3 with no total duration). `cancel` stops between pieces,
+/// every [`CANCEL_POLL`] while a piece waits for its transcript, and once
+/// more before the transcript is saved.
 pub fn transcribe_audio_file(
     source: &Path,
     selection: TranscriptionSelection,
     cancel: Arc<AtomicBool>,
-    mut progress: impl FnMut(f32),
+    mut progress: impl FnMut(Option<f32>),
 ) -> Result<PathBuf, FileTranscriptError> {
     if !crate::labs::drop_transcribe() {
         return Err(FileTranscriptError::Disabled);
@@ -148,9 +150,19 @@ pub fn transcribe_audio_file(
     drop(handle);
     service.shutdown();
     let text = result?;
+    still_wanted(&cancel)?;
     let path = save_transcript(source, &text)?;
-    progress(1.0);
+    progress(Some(1.0));
     Ok(path)
+}
+
+/// Whether a finished transcript may still be written: a cancel that lands
+/// while the last piece runs stops the file from being saved.
+fn still_wanted(cancel: &AtomicBool) -> Result<(), FileTranscriptError> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(FileTranscriptError::Cancelled);
+    }
+    Ok(())
 }
 
 /// Decodes and transcribes every speechful piece in order, joining their
@@ -162,10 +174,10 @@ fn transcribe_pieces(
     source: &Path,
     total: Option<usize>,
     cancel: &AtomicBool,
-    progress: &mut impl FnMut(f32),
+    progress: &mut impl FnMut(Option<f32>),
 ) -> Result<String, FileTranscriptError> {
     let mut texts = Vec::new();
-    progress(0.0);
+    progress(total.is_some().then_some(0.0));
     loop {
         if cancel.load(Ordering::Acquire) {
             return Err(FileTranscriptError::Cancelled);
@@ -178,9 +190,8 @@ fn transcribe_pieces(
         if !text.is_empty() {
             texts.push(text);
         }
-        let fraction = total
-            .map(|total| (decoded.position() as f32 / total as f32).clamp(0.0, 1.0))
-            .unwrap_or(0.0);
+        let fraction =
+            total.map(|total| (decoded.position() as f32 / total as f32).clamp(0.0, 1.0));
         progress(fraction);
     }
     let text = texts.join(" ");
@@ -268,9 +279,18 @@ enum Decoded {
 impl Decoded {
     fn open(path: &Path) -> Result<Self, FileTranscriptError> {
         match format_of(path) {
-            Some(Format::Wav) => Pieces::open(path)
-                .map(Self::Wav)
-                .map_err(|error| decoded_error(path, error)),
+            Some(Format::Wav) => {
+                // Every sample is read once here, as `hex transcribe` does, so
+                // a truncated or corrupt file is refused before a model loads
+                // rather than after minutes of transcription. The check reads
+                // to the end, so it uses its own reader.
+                Pieces::open(path)
+                    .and_then(|mut check| check.validate())
+                    .map_err(|error| decoded_error(path, error))?;
+                Pieces::open(path)
+                    .map(Self::Wav)
+                    .map_err(|error| decoded_error(path, error))
+            }
             Some(Format::Mp3) => Mp3Pieces::open(path)
                 .map(Self::Mp3)
                 .map_err(|error| decoded_error(path, error)),
@@ -460,9 +480,13 @@ struct Bridged {
 impl Bridged {
     fn open(path: &Path) -> Result<Self, FileTranscriptError> {
         let wav = temporary_wav_path();
-        if let Err(error) = crate::meeting::import::decode_to_wav(path, &wav) {
+        if crate::meeting::import::decode_to_wav(path, &wav).is_err() {
             let _ = fs::remove_file(&wav);
-            return Err(transcription_failed(error));
+            // The bridge refused the file itself: a format or sample layout
+            // Hex can't read, not a transcription that went wrong.
+            return Err(FileTranscriptError::Unreadable {
+                path: path.to_path_buf(),
+            });
         }
         match Pieces::open(&wav) {
             Ok(pieces) => Ok(Self { pieces, wav }),
@@ -492,37 +516,49 @@ fn temporary_wav_path() -> PathBuf {
 }
 
 /// Writes `text` beside `source`, or in Downloads when `source`'s own folder
-/// can't take it, and returns the file.
+/// can't take it, and returns the file. Downloads is only needed for that
+/// fallback: a writable source folder needs no Downloads at all.
 fn save_transcript(source: &Path, text: &str) -> Result<PathBuf, FileTranscriptError> {
     let stem = transcript_stem(source);
     let source_directory = parent_directory(source);
-    let downloads = crate::app_paths::downloads_dir().ok_or_else(|| {
-        FileTranscriptError::WriteFailed("the Downloads folder is unavailable".into())
-    })?;
+    let downloads = crate::app_paths::downloads_dir();
     let directory = transcript_directory(
         source,
         &std::env::temp_dir(),
-        &downloads,
+        downloads.as_deref(),
         directory_is_writable(&source_directory),
-    );
+    )
+    .ok_or_else(|| {
+        FileTranscriptError::WriteFailed("the Downloads folder is unavailable".into())
+    })?;
     let contents = format!("{text}\n");
-    match write_transcript(&directory, &stem, &contents) {
-        Err(FileTranscriptError::WriteFailed(_)) if directory != downloads => {
-            write_transcript(&downloads, &stem, &contents)
-        }
+    let result = write_transcript(&directory, &stem, &contents);
+    match result {
+        Err(FileTranscriptError::WriteFailed(_)) => match downloads {
+            Some(downloads) if downloads != directory => {
+                write_transcript(&downloads, &stem, &contents)
+            }
+            _ => result,
+        },
         result => result,
     }
 }
 
 /// Where a transcript for `source` goes: its own folder, unless that folder
 /// is unwritable or the file sits in the OS temp folder (a promised drop's
-/// copy), in which case `downloads`.
-fn transcript_directory(source: &Path, temp: &Path, downloads: &Path, writable: bool) -> PathBuf {
+/// copy), in which case `downloads`, or `None` when there is no Downloads
+/// folder to fall back to.
+fn transcript_directory(
+    source: &Path,
+    temp: &Path,
+    downloads: Option<&Path>,
+    writable: bool,
+) -> Option<PathBuf> {
     let directory = parent_directory(source);
     if !writable || inside(&directory, temp) {
-        downloads.to_path_buf()
+        downloads.map(Path::to_path_buf)
     } else {
-        directory
+        Some(directory)
     }
 }
 
@@ -565,8 +601,8 @@ fn resolve(path: &Path) -> PathBuf {
 }
 
 /// Whether a transcript may be written into `directory`: a probe file is
-/// created and removed, so an unwritable folder is found before decoding
-/// waits on it.
+/// created and removed, so an unwritable folder is found before anything is
+/// written, and its transcript goes to Downloads instead.
 fn directory_is_writable(directory: &Path) -> bool {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let probe = directory.join(format!(
@@ -691,10 +727,40 @@ mod tests {
             transcript_directory(
                 Path::new("/home/a/notes/talk.mp3"),
                 Path::new("/tmp"),
-                Path::new("/home/a/Downloads"),
+                Some(Path::new("/home/a/Downloads")),
                 true,
             ),
-            PathBuf::from("/home/a/notes")
+            Some(PathBuf::from("/home/a/notes"))
+        );
+    }
+
+    /// Downloads is only the fallback: a writable folder beside the source
+    /// needs no Downloads folder at all.
+    #[test]
+    fn a_writable_source_folder_needs_no_downloads_folder() {
+        assert_eq!(
+            transcript_directory(
+                Path::new("/home/a/notes/talk.wav"),
+                Path::new("/tmp"),
+                None,
+                true,
+            ),
+            Some(PathBuf::from("/home/a/notes"))
+        );
+        assert_eq!(
+            transcript_directory(
+                Path::new("/home/a/notes/talk.wav"),
+                Path::new("/tmp"),
+                None,
+                false,
+            ),
+            None,
+            "an unwritable folder with no Downloads cannot be saved"
+        );
+        assert_eq!(
+            transcript_directory(Path::new("/tmp/talk.wav"), Path::new("/tmp"), None, true),
+            None,
+            "a temp file with no Downloads cannot be saved"
         );
     }
 
@@ -704,10 +770,10 @@ mod tests {
             transcript_directory(
                 Path::new("/home/a/notes/talk.wav"),
                 Path::new("/tmp"),
-                Path::new("/home/a/Downloads"),
+                Some(Path::new("/home/a/Downloads")),
                 false,
             ),
-            PathBuf::from("/home/a/Downloads")
+            Some(PathBuf::from("/home/a/Downloads"))
         );
     }
 
@@ -727,10 +793,10 @@ mod tests {
                 transcript_directory(
                     Path::new(source),
                     Path::new("/tmp"),
-                    Path::new("/home/a/Downloads"),
+                    Some(Path::new("/home/a/Downloads")),
                     true,
                 ),
-                PathBuf::from(expected),
+                Some(PathBuf::from(expected)),
                 "{source}"
             );
         }
@@ -749,19 +815,95 @@ mod tests {
         std::os::unix::fs::symlink(&real, &alias).unwrap();
         let downloads = Path::new("/home/a/Downloads");
         assert_eq!(
-            transcript_directory(&real.join("talk.wav"), &alias, downloads, true),
-            downloads
+            transcript_directory(&real.join("talk.wav"), &alias, Some(downloads), true),
+            Some(downloads.to_path_buf())
         );
         assert_eq!(
             transcript_directory(
                 &alias.join("gone").join("talk.mp3"),
                 &alias,
-                downloads,
+                Some(downloads),
                 true
             ),
-            downloads
+            Some(downloads.to_path_buf())
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A cancel that lands while the last piece runs stops the file before
+    /// anything is written, so a cancelled drop never leaves a transcript.
+    #[test]
+    fn a_cancel_after_the_last_piece_stops_the_save() {
+        let cancel = AtomicBool::new(false);
+        assert!(still_wanted(&cancel).is_ok());
+        cancel.store(true, Ordering::Release);
+        assert!(matches!(
+            still_wanted(&cancel),
+            Err(FileTranscriptError::Cancelled)
+        ));
+    }
+
+    /// A WAV is read whole once before a model loads, as `hex transcribe`
+    /// does, so a truncated file is refused up front instead of after
+    /// minutes of transcription.
+    #[test]
+    fn a_truncated_wav_is_refused_before_anything_is_transcribed() {
+        let path = temp_directory("truncated-wav").join("talk.wav");
+        {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+            for sample in 0..16_000 {
+                writer.write_sample((sample % 200) as i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        let bytes = fs::read(&path).unwrap();
+        fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
+
+        let error = match Decoded::open(&path) {
+            Err(error) => error,
+            Ok(_) => panic!("a truncated WAV must be refused"),
+        };
+        assert!(
+            matches!(error, FileTranscriptError::Corrupt { .. }),
+            "{error}"
+        );
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The up-front check reads the file to its end on its own reader, so the
+    /// reader the transcription uses still starts at the first sample.
+    #[test]
+    fn a_checked_wav_still_reads_from_its_first_sample() {
+        let directory = temp_directory("checked-wav");
+        let path = directory.join("talk.wav");
+        {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: 16_000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+            for sample in 0..32_000 {
+                writer.write_sample((sample % 200) as i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+
+        let mut decoded = Decoded::open(&path).unwrap();
+        let first = decoded
+            .next_piece()
+            .unwrap()
+            .expect("a checked file still has audio");
+        assert!(!first.is_empty(), "the first piece holds its samples");
+        assert_eq!(decoded.position(), first.len());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
