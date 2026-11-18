@@ -749,7 +749,9 @@ mod tests {
     }
 
     /// `hex restart` waits on the old process, so the wait must end as soon
-    /// as it does and say so when it doesn't.
+    /// as it does and say so when it doesn't. Linux only: macOS restarts
+    /// itself and never takes a watch, and Windows waits on a process handle.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn waiting_for_a_process_reports_whether_it_exited() {
         let mut quick = std::process::Command::new("true").spawn().unwrap();

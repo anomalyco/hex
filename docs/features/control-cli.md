@@ -258,11 +258,11 @@ pre-skip and end trim, a video with no audio track, and a cut-short file;
 `control::cli::prepare::tests` cover the prompt's answers and that `--json`
 never asks; `local_api::discovery::tests` cover choosing an endpoint (absent,
 stale, wrong version or token) and validating the embedded ready line, and
-`waiting_for_a_process_reports_whether_it_exited` pins the pid wait restart
+`waiting_for_a_process_reports_whether_it_exited` pins the process wait restart
 uses (an exited process reads as gone at once, a live one only at the
-timeout). That test runs on Unix only (`cfg(all(test, unix))`); the Windows
-wait goes through a process handle and is covered only by the CI compile, not
-by a test.
+timeout). That test runs on Linux only: macOS restarts itself and never takes
+the watch, and the Windows wait goes through a process handle, so both are
+covered only by the CI compile.
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -283,10 +283,11 @@ shortcut, by `stop`, and by `stop --print`) before trusting it. A CLI volume
 change does not preview a tone as the window does. Onboarding
 permission prompts, calendar connection, and meeting deletion or renaming have
 no command. `hex restart`'s relaunch has no end-to-end test on any OS: the
-pid wait it uses is unit-tested on Unix only
-(`waiting_for_a_process_reports_whether_it_exited`; Windows opens a process
-handle instead, compiled but untested), and the handoff from the old process's
-exit to the new one's instance claim has only been read, so
+process wait it uses is unit-tested on Linux only
+(`waiting_for_a_process_reports_whether_it_exited`; macOS never takes the
+watch, and Windows opens a process handle instead, compiled but untested), and
+the handoff from the old process's exit to the new one's instance claim has
+only been read, so
 verify a Windows restart and a login-launch restart by hand before trusting
 it. Linux and Windows dictation through the CLI has not run with a
 microphone, and meeting recording through the CLI has not run on Linux or
