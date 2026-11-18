@@ -203,6 +203,14 @@ pub fn history_stats() -> bool {
     on(HISTORY_STATS)
 }
 
+/// Labs › Yearly stats: a daily rollup of dictations that outlives History's
+/// retention, and the year heatmap in Dictation stats (read as each entry is
+/// recorded, when the History pane reloads, and when `hex history stats`
+/// starts). Off, the rollup is never written or read.
+pub fn yearly_stats() -> bool {
+    on(YEARLY_STATS)
+}
+
 /// The menu bar's Copy Recent Dictation submenu (macOS; read each time the
 /// menu opens).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

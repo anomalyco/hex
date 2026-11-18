@@ -233,6 +233,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Output time", "Tempo de saída"),
     ("Dictations per day: {today} today, {busiest} on the busiest day", "Ditados por dia: hoje {today}, {busiest} no dia com mais"),
     ("median {median} s · slowest {slowest} s", "mediana {median} s · mais lento {slowest} s"),
+    ("Time saved", "Tempo economizado"),
+    ("Busiest hour", "Hora mais movimentada"),
+    ("Typing speed", "Velocidade de digitação"),
+    ("{} wpm", "{} palavras/min"),
+    ("Past year", "Último ano"),
+    ("Dictations by hour: busiest at {hour}", "Ditados por hora: mais às {hour}"),
+    ("Dictations per day over the past year: {total} in total", "Ditados por dia no último ano: {total} no total"),
     ("Details", "Detalhes"),
     ("Hide details", "Ocultar detalhes"),
     ("Peak memory: {memory} on {hardware}; not measured on other hardware", "Memória máxima: {memory} em {hardware}; não medida em outro hardware"),
@@ -1386,10 +1393,12 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Apps that use Hex's local API can ask for text with Global mode's replacements, corrections, rewriting, and transformations applied", "Apps que usam a API local do Hex podem pedir o texto com as substituições, correções, reescrita e transformações do modo Global aplicadas"),
     ("A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it", "Um comando como hex dictation start --print recebe o texto no fim de um ditado, sem colar nem copiar"),
     ("A finished Annotate capture copies as one zip file, without the video or audio", "Uma captura do Annotate concluída é copiada como um único arquivo zip, sem o vídeo nem o áudio"),
-    ("Add a Stats button to History that summarizes the dictations you kept. The hex history stats command prints it too", "Adiciona um botão Estatísticas ao Histórico, que resume os ditados que você manteve. O comando hex history stats também mostra isso"),
+    ("Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed and the hour you dictate most. The hex history stats command prints it too", "Adiciona um botão Estatísticas ao Histórico, que resume os ditados que você manteve, com o tempo economizado em relação à sua velocidade de digitação e a hora em que você mais dita. O comando hex history stats também mostra isso"),
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Se um atalho é feito só de Ctrl, Alt, Shift ou da tecla Windows, sem tecla de letra ou número, pressionar outra tecla ou clicar depois do primeiro segundo não termina mais o ditado; solte para terminar"),
     ("Modes editor", "Editor de modos"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Edite os apps, as correções e a reescrita do OpenCode de cada modo em um painel Modos"),
+    ("Yearly stats", "Estatísticas anuais"),
+    ("Add a year-long heatmap of your dictations to Dictation stats. Keeps a daily count that outlives History's retention, so the totals cover all time", "Adiciona às estatísticas de ditado um mapa de calor de um ano de ditados. Mantém uma contagem diária que dura mais que a retenção do histórico, então os totais cobrem todo o período"),
 ];
 
 #[cfg(test)]

@@ -11,10 +11,12 @@ use super::super::Ui;
 use super::super::controls::{
     ButtonKind, Paint, STATS_NUMBER, button, modal_scrim_transition, modal_transition,
 };
-use super::super::lists::section_label;
+use super::super::lists::{inline_slider, section_label};
+use super::super::meetings::length;
 use crate::desktop::i18n::numbers;
-use crate::desktop::i18n::{tr, tr_named};
+use crate::desktop::i18n::{clock_time, tr, tr_fill, tr_named};
 use crate::history::stats::{DayCount, HistoryStats, ProfileOutputTime};
+use crate::history::usage::Usage;
 
 /// The stats dialog's width and padding.
 const STATS_WIDTH: f32 = 460.0;
@@ -33,6 +35,8 @@ const BAR_GAP: f32 = 3.0;
 /// A top app's name, and its count on the trailing edge.
 const APP_NAME_WIDTH: f32 = 120.0;
 const COUNT_WIDTH: f32 = 34.0;
+/// A headline tile: three per row inside the dialog's width.
+const TILE_WIDTH: f32 = 136.0;
 /// Room beside the body's scroll bar.
 const SCROLL_BAR_INSET: f32 = 12.0;
 
@@ -44,12 +48,26 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
     if !ui.history.stats_open || !ui.settings.labs.history_stats {
         return None;
     }
-    let stats = ui
-        .history
-        .stats
-        .as_ref()
-        .filter(|stats| stats.dictations > 0)?;
+    let stats = ui.history.stats.as_ref()?;
+    if !ui.history.has_stats() {
+        return None;
+    }
     let c = &p.k.c;
+    let typing_wpm = ui
+        .history
+        .typing_speed_drag
+        .unwrap_or_else(|| crate::app_settings::clamp_typing_wpm(ui.settings.typing_wpm));
+    let usage = ui
+        .history
+        .usage
+        .as_ref()
+        .filter(|usage| usage.dictations() > 0);
+    // The headline tile and the hourly strip read the same hours: the
+    // rollup while Labs › Yearly stats has one, else retained entries.
+    let (hours, busiest_hour) = match usage {
+        Some(usage) => (usage.hours(), usage.busiest_hour()),
+        None => (stats.hours, stats.busiest_hour),
+    };
     // The window is the layer the panel centers in; the title and footer are
     // measured so their real heights set the body's room.
     let window_height = cx
@@ -73,9 +91,16 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         // Keep the bar off the counts and timings.
         sections = sections.pr(SCROLL_BAR_INSET);
     }
-    let mut sections = sections.child(tiles(p, stats));
+    let mut sections = sections.child(tiles(p, stats, usage, typing_wpm, busiest_hour));
+    sections = sections.child(typing_speed(p, typing_wpm));
     if let Some(daily) = daily(p, stats) {
         sections = sections.child(daily);
+    }
+    if let Some(hours) = super::heatmap::hours(p, &hours, busiest_hour) {
+        sections = sections.child(hours);
+    }
+    if let Some(yearly) = usage.and_then(|usage| super::heatmap::yearly(p, usage)) {
+        sections = sections.child(yearly);
     }
     if let Some(apps) = top_apps(p, stats) {
         sections = sections.child(apps);
@@ -160,38 +185,92 @@ pub(crate) fn close_stats(ui: &mut Ui) {
     ui.history.stats_open = false;
 }
 
-/// The four headline numbers, each a large value over a muted label.
-fn tiles(p: Paint, stats: &HistoryStats) -> El {
-    let wpm = stats
-        .words_per_minute
-        .map_or_else(|| "–".to_owned(), |wpm| numbers::grouped(u64::from(wpm)));
+/// The six headline numbers, each a large value over a muted label. With
+/// Labs › Yearly stats on, dictations, words, time saved, words per minute,
+/// the streak, and the busiest hour cover the rollup's whole span instead of
+/// only what History retains.
+fn tiles(
+    p: Paint,
+    stats: &HistoryStats,
+    usage: Option<&Usage>,
+    typing_wpm: u32,
+    busiest_hour: Option<u8>,
+) -> El {
+    let all = usage.filter(|usage| usage.dictations() > 0);
+    let dictations = all.map_or(stats.dictations, Usage::dictations);
+    let words = all.map_or(stats.words, Usage::words);
+    let audio_ms = all.map_or(stats.audio_ms, Usage::audio_ms);
+    let time_saved = crate::history::stats::time_saved_ms(words, audio_ms, typing_wpm);
+    let words_per_minute = all.map_or(stats.words_per_minute, Usage::words_per_minute);
+    let streak = all.map_or(stats.streak_days, |usage| {
+        usage.streak_days(crate::history::stats::local_day(crate::history::now_ms()))
+    });
+    let wpm =
+        words_per_minute.map_or_else(|| "–".to_owned(), |wpm| numbers::grouped(u64::from(wpm)));
+    let busiest =
+        busiest_hour.map_or_else(|| "–".to_owned(), |hour| clock_time(u32::from(hour), 0));
     let values = [
-        (
-            "dictations",
-            numbers::grouped(stats.dictations),
-            tr("Dictations"),
-        ),
-        ("words", numbers::grouped(stats.words), tr("Words")),
+        ("dictations", numbers::grouped(dictations), tr("Dictations")),
+        ("words", numbers::grouped(words), tr("Words")),
+        ("time-saved", length(time_saved), tr("Time saved")),
         ("wpm", wpm, tr("Words per minute")),
         (
             "streak",
-            numbers::grouped(u64::from(stats.streak_days)),
+            numbers::grouped(u64::from(streak)),
             tr("Daily streak"),
         ),
+        ("busiest-hour", busiest, tr("Busiest hour")),
     ];
-    values
-        .into_iter()
-        .fold(row().key("tiles").w_full().gap(8.0), |tiles, value| {
-            tiles.child(tile(p, value.0, &value.1, value.2))
-        })
+    values.into_iter().fold(
+        row().key("tiles").w_full().gap(8.0).flex_wrap(),
+        |tiles, value| tiles.child(tile(p, value.0, &value.1, value.2)),
+    )
+}
+
+/// The typing speed time saved is measured against, adjustable in place.
+fn typing_speed(p: Paint, typing_wpm: u32) -> El {
+    use crate::app_settings::{MAX_TYPING_WPM, MIN_TYPING_WPM};
+    let range = (MAX_TYPING_WPM - MIN_TYPING_WPM) as f32;
+    let value = (typing_wpm - MIN_TYPING_WPM) as f32 / range;
+    let display = tr_fill("{} wpm", &typing_wpm.to_string());
+    row()
+        .key("history-stats-typing")
+        .w_full()
+        .gap(12.0)
+        .center_y()
+        .child(
+            text(tr("Typing speed"))
+                .key("label")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .grow(1.0),
+        )
+        .child(inline_slider(
+            p,
+            "history-stats-typing-speed",
+            tr("Typing speed"),
+            value,
+            display,
+            160.0,
+            move |ui: &mut Ui, position: f32, done: bool| {
+                let wpm = crate::app_settings::clamp_typing_wpm(
+                    (MIN_TYPING_WPM as f32 + position.clamp(0.0, 1.0) * range).round() as u32,
+                );
+                ui.history.typing_speed_drag = (!done).then_some(wpm);
+                if done && ui.update(|settings| settings.typing_wpm = wpm) {
+                    ui.history.typing_wpm = wpm;
+                    ui.history.reload_stats();
+                }
+            },
+        ))
 }
 
 /// One tile: the value over its label, on a raised surface.
 fn tile(p: Paint, key: &str, value: &str, label: &str) -> El {
     col()
         .key(format!("tile-{key}"))
-        .grow(1.0)
-        .shrink()
+        .w(TILE_WIDTH)
+        .min_w(TILE_WIDTH)
         .gap(2.0)
         .px(10.0)
         .py(8.0)

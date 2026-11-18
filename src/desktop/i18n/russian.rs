@@ -230,6 +230,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Output time", "Время вывода"),
     ("Dictations per day: {today} today, {busiest} on the busiest day", "Диктовок в день: сегодня {today}, больше всего {busiest} за день"),
     ("median {median} s · slowest {slowest} s", "медиана {median} с · медленнее всего {slowest} с"),
+    ("Time saved", "Сэкономленное время"),
+    ("Busiest hour", "Самая активная година"),
+    ("Typing speed", "Скорость печати"),
+    ("{} wpm", "{} слов/мин"),
+    ("Past year", "Последний год"),
+    ("Dictations by hour: busiest at {hour}", "Диктовки по часам: больше всего в {hour}"),
+    ("Dictations per day over the past year: {total} in total", "Диктовок в день за последний год: всего {total}"),
     ("Details", "Подробности"),
     ("Hide details", "Скрыть подробности"),
     ("Peak memory: {memory} on {hardware}; not measured on other hardware", "Пиковая память: {memory} на {hardware}; на другом оборудовании не измерялась"),
@@ -1389,10 +1396,12 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Apps that use Hex's local API can ask for text with Global mode's replacements, corrections, rewriting, and transformations applied", "Приложения, использующие локальный API Hex, могут запросить текст с применёнными заменами, исправлениями, переписыванием и преобразованиями Глобального режима"),
     ("A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it", "Команда вроде hex dictation start --print получает текст по окончании диктовки, без вставки и копирования"),
     ("A finished Annotate capture copies as one zip file, without the video or audio", "Готовая запись Annotate копируется одним zip-файлом, без видео и звука"),
-    ("Add a Stats button to History that summarizes the dictations you kept. The hex history stats command prints it too", "Добавляет в Историю кнопку «Статистика», которая подводит итог сохранённым диктовкам. Команда hex history stats тоже это выводит"),
+    ("Add a Stats button to History that summarizes the dictations you kept, with time saved against your typing speed and the hour you dictate most. The hex history stats command prints it too", "Добавляет в Историю кнопку «Статистика», которая подводит итог сохранённым диктовкам, с сэкономленным временем относительно скорости печати и часом, когда вы диктуете чаще всего. Команда hex history stats тоже это выводит"),
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Если сочетание состоит только из Ctrl, Alt, Shift или клавиши Windows, без буквенной или цифровой клавиши, нажатие другой клавиши или клик после первой секунды больше не завершает диктовку; отпустите, чтобы закончить"),
     ("Modes editor", "Редактор режимов"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Изменяйте приложения, исправления и переписывание OpenCode каждого режима на панели «Режимы»"),
+    ("Yearly stats", "Статистика за год"),
+    ("Add a year-long heatmap of your dictations to Dictation stats. Keeps a daily count that outlives History's retention, so the totals cover all time", "Добавляет в статистику диктовки тепловую карту за год. Ведёт ежедневный счёт, который живёт дольше срока хранения Истории, поэтому итоги охватывают всё время"),
 ];
 
 #[cfg(test)]

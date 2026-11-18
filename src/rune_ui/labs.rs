@@ -692,6 +692,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         });
     }
     rows.push(row(Feature::HistoryStats, None));
+    rows.push(row(Feature::YearlyStats, None));
     rows.push(row(Feature::KeepRecordings, None));
     rows.push(row(Feature::CopyDictationAudio, None));
     rows.push(row(Feature::OutputFixes, Some(&BOOK)));
@@ -879,6 +880,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
+        Feature::YearlyStats => "lab-yearly-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
         Feature::OutputFixes => "lab-output-fixes",

@@ -464,7 +464,9 @@ substitute for source inspection or a second roadmap.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
   search. Text and bounded metadata; audio only with Labs › Keep recordings
-  (`history/recordings`: one owner-only WAV per entry, Transcribe again).
+  (`history/recordings`: one owner-only WAV per entry, Transcribe again), and
+  Labs › Yearly stats' owner-only daily rollup (`history/usage`, counts but no
+  text, 400 days) that outlives retention.
 - `control/transcript_cli`: read-only release commands `hex history` and
   `hex meetings list|show|search` on every OS, versioned JSON projections and
   filters.
