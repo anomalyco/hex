@@ -441,8 +441,9 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.modes_editor",
         Kind::Bool,
-        "Labs: a Modes pane in the main sidebar edits each mode's apps, corrections, and \
-         OpenCode rewrite",
+        "Labs: a Modes pane in the main sidebar edits each mode's apps and websites, \
+         corrections, OpenCode rewrite (on or off, and its model), and transformations; \
+         Output stays the read-only view",
     ),
     key(
         "labs.benchmark_details",

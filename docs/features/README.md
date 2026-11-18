@@ -1007,9 +1007,9 @@ recorder, onboarding or another modal keeps its keys. Labs keeps its own ⌘F.
 
 ```ts
 Sidebar                                  // settings.nav
-├── General, Output, History, then each feature that is on: Captures
-│   (Labs › Screenshots, macOS), Meetings and Voice Filter (Labs toggles),
-│   Annotate, Playground (Labs, an item)
+├── General, Output, Modes (Labs › Modes editor, while on), History, then each
+│   feature that is on: Captures (Labs › Screenshots, macOS), Meetings and
+│   Voice Filter (Labs toggles), Annotate, Playground (Labs, an item)
 ├── Labs -> a store of unfinished features, each off by default: search, categories, cards with their own settings inline; hex://labs/<feature> opens its group and scrolls to its card (labs.md)
 └── What’s new -> recent features and their controls; Down from Labs selects it
     // Version, update actions, and Quit (Linux and Windows) are outside the navigation list

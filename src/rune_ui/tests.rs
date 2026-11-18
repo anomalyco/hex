@@ -864,10 +864,16 @@ fn the_modes_editor_lab_brings_modes_back_to_the_sidebar() {
     rt.invalidate();
     settle(&mut rt);
     assert_eq!(rt.state.pane, Pane::Modes);
-    // Off, the pane hides again (the window's settings adoption then leaves
-    // it, as Meetings does when turned off).
+    // Off while the editor shows, the adoption fallback leaves the hidden
+    // pane for Output, as a saved `hex settings set labs.modes_editor off`
+    // does while the window shows it.
     crate::labs::Feature::ModesEditor.set(&mut rt.state.settings, false);
     assert!(!Pane::Modes.shown(&rt.state));
+    assert!(leave_hidden_pane(&mut rt.state));
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Output);
+    assert!(rt.find("nav-modes").is_none());
 }
 
 #[test]
