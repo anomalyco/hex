@@ -1343,6 +1343,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Allowed once", "Разрешено один раз"),
     ("Always allowed", "Всегда разрешено"),
     ("Name not verified", "Имя не проверено"),
+    ("This desktop can't show Hex's permission window (GNOME on Wayland can't), so apps and websites can't ask", "Этот рабочий стол не может показать окно разрешений Hex (GNOME на Wayland не может), поэтому приложения и сайты не могут запрашивать"),
     ("Allow microphone recording?", "Разрешить запись с микрофона?"),
     ("This page wants Hex to record from your microphone. Nothing records until it asks.", "Эта страница хочет, чтобы Hex записывал с микрофона. Ничего не записывается, пока она не попросит."),
     ("This app wants Hex to record from your microphone. Nothing records until it asks.", "Это приложение хочет, чтобы Hex записывал с микрофона. Ничего не записывается, пока оно не попросит."),

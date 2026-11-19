@@ -331,6 +331,10 @@ pub(super) struct PlatformState {
     /// typing can't work here (GNOME, KDE): its card says so. Fixtures keep
     /// it false.
     pub(super) live_typing_unsupported: bool,
+    /// A Wayland compositor without layer-shell (GNOME): Hex's permission
+    /// window can't show, so Labs › Connected apps' card says so. Fixtures
+    /// keep it false.
+    pub(super) consent_window_unsupported: bool,
     /// A scene's state: [`Self::setup_status`] reports `permissions` on
     /// every OS rather than asking this computer.
     preview: bool,
@@ -438,6 +442,7 @@ impl PlatformState {
             paste: None,
             clipboard_unrestorable: false,
             live_typing_unsupported: false,
+            consent_window_unsupported: false,
             preview: false,
             developer: false,
             accessibility_renamed: false,

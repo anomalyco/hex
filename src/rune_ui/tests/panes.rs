@@ -3825,6 +3825,36 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     assert!(rt.state.settings.labs.live_typing);
 }
 
+/// Labs › Connected apps says when this desktop can't show Hex's permission
+/// window, and refuses to turn on; on already, it still turns off.
+#[test]
+fn connected_apps_says_when_the_desktop_cannot_show_its_window() {
+    let mut rt = runtime("linux-labs", false, PANE_SIZE);
+    rt.state.platform.consent_window_unsupported = true;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    rt.state.lab_store.search = rune::TextEdit::new("Connected apps".to_owned());
+    refresh(&mut rt);
+    tap(&mut rt, "lab-connected-apps");
+    assert!(!rt.state.settings.labs.connected_apps, "the switch stays off");
+    let says = |rt: &rune::Runtime<Ui>| {
+        texts(rt)
+            .iter()
+            .any(|text| text.starts_with("This desktop can't show Hex's permission window"))
+    };
+    assert!(says(&rt), "its card says why");
+    rt.state.settings.labs.connected_apps = true;
+    refresh(&mut rt);
+    assert!(says(&rt), "the note stays while it's on");
+    tap(&mut rt, "lab-connected-apps");
+    assert!(!rt.state.settings.labs.connected_apps);
+    rt.state.platform.consent_window_unsupported = false;
+    refresh(&mut rt);
+    assert!(!says(&rt));
+    tap(&mut rt, "lab-connected-apps");
+    assert!(rt.state.settings.labs.connected_apps);
+}
+
 /// Labs › Clean up with Apple Intelligence says why Apple Intelligence can't
 /// run here, locks its switch while it is off, and still turns off once on.
 #[test]
