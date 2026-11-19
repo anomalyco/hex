@@ -16,9 +16,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetForegroundWindow, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
-    LLKHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
-    WM_SYSKEYDOWN, WM_SYSKEYUP,
+    LLKHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_KEYDOWN,
+    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -31,6 +30,7 @@ mod activity;
 mod disposition;
 mod modifiers;
 mod rearm;
+mod watchdog;
 
 pub(crate) use self::activity::foreground_window;
 use self::disposition::Handled;
@@ -706,18 +706,18 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
 
     let hooks = rearm::KeyboardHooks::install();
     if hooks.keyboard().is_null() {
+        let error = std::io::Error::last_os_error();
+        hooks.uninstall();
         CALLBACK_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
         let _ = ready.send(Err(format!(
-            "could not install the Windows keyboard hook: {}",
-            std::io::Error::last_os_error()
+            "could not install the Windows keyboard hook: {error}"
         )));
         return;
     }
-    let mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), ptr::null_mut(), 0) };
-    if mouse.is_null() {
+    if hooks.mouse().is_null() {
         let error = std::io::Error::last_os_error();
         hooks.uninstall();
         CALLBACK_STATE
@@ -731,9 +731,6 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
     }
     if ready.send(Ok(thread_id)).is_err() {
         hooks.uninstall();
-        unsafe {
-            UnhookWindowsHookEx(mouse);
-        }
         CALLBACK_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -755,9 +752,6 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
         }
         rearm::KeyboardHooks::on_message(&message);
     }
-    unsafe {
-        UnhookWindowsHookEx(mouse);
-    }
     hooks.uninstall();
     CALLBACK_STATE
         .lock()
@@ -766,6 +760,7 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    watchdog::stamp_keyboard();
     if code != HC_ACTION as i32 {
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
@@ -869,6 +864,7 @@ fn mouse_message(message: u32, data: u32) -> Option<(u32, bool)> {
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    watchdog::stamp();
     if code == HC_ACTION as i32 {
         // SAFETY: Windows supplies a live MSLLHOOKSTRUCT for this callback.
         let event = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
@@ -1076,6 +1072,7 @@ fn process_button(
                 if is_down && !state.cancel_down {
                     state.cancel_down = true;
                     if let Some(action) = state.capture.cancel() {
+                        watchdog::note_cancelled();
                         send_event(state, action, time);
                     }
                 } else if is_up {
@@ -1167,8 +1164,7 @@ fn process_button(
                     }
                 }
             } else if vk == u32::from(VK_ESCAPE) {
-                // Escape ends no dictation, not even as a chord: it reaches
-                // the app (#786).
+                watchdog::escape_reached_app(state, is_down);
             } else if !modifier_event {
                 // A key or button joining a held modifier-only shortcut makes
                 // a chord meant for another application, such as Alt+Tab,
@@ -1520,11 +1516,22 @@ mod tests {
     /// [`process_button`], whose `key_held` lookup stands in for the physical
     /// modifiers a test cannot press.
     fn callback_state(binding: WindowsHotkey, share_trigger: bool) -> Receiver<HotkeyEvent> {
-        let (events, receiver) = mpsc::sync_channel(EVENT_CAPACITY);
-        let (errors, _unread) = mpsc::channel();
+        let (state, receiver) = callback_state_value(binding, share_trigger);
         *CALLBACK_STATE
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(CallbackState {
+            .unwrap_or_else(|error| error.into_inner()) = Some(state);
+        receiver
+    }
+
+    /// [`callback_state`] without the listener's global: a test that drives
+    /// the watchdog's heal directly must not compete with its peers.
+    fn callback_state_value(
+        binding: WindowsHotkey,
+        share_trigger: bool,
+    ) -> (CallbackState, Receiver<HotkeyEvent>) {
+        let (events, receiver) = mpsc::sync_channel(EVENT_CAPACITY);
+        let (errors, _unread) = mpsc::channel();
+        let state = CallbackState {
             events,
             errors,
             activity: InputActivity::default(),
@@ -1559,8 +1566,8 @@ mod tests {
             capture: CaptureState::default(),
             dirty: false,
             mask_release: false,
-        });
-        receiver
+        };
+        (state, receiver)
     }
 
     #[test]
@@ -2240,6 +2247,97 @@ mod tests {
                 Some(HotkeyAction::Start)
             );
         }
+    }
+
+    /// A keyless chord whose release never arrived: Toggle locks exactly as
+    /// its release would, Hold finishes, and a chord still holds while a
+    /// required modifier is down leaves it alone.
+    #[test]
+    fn a_keyless_chord_whose_release_never_arrived_resynchronizes() {
+        let binding = WindowsHotkey {
+            control: None,
+            windows: Some(ModifierSide::Either),
+            alt: Some(ModifierSide::Either),
+            shift: None,
+            key: None,
+        };
+
+        // Hold: both modifiers still report down, so the chord is held.
+        let (mut state, events) = callback_state_value(binding.clone(), false);
+        assert_eq!(
+            state.capture.press(false, false, 1_000),
+            Some(HotkeyAction::Start)
+        );
+        state.mask_release = true;
+        assert!(!watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU || key == VK_LWIN));
+        assert!(state.capture.active && !state.dirty && state.mask_release);
+        assert!(events.try_recv().is_err());
+
+        // Windows is up and Alt still down: the release arrived, and the
+        // capture stays dirty until Alt comes up, as the normal path does.
+        assert!(watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU));
+        assert!(!state.mask_release);
+        assert_eq!(
+            events.try_recv().map(|event| event.action),
+            Ok(HotkeyAction::Finish)
+        );
+        assert!(!state.capture.active && state.dirty);
+
+        // Toggle: the lost release locks, and the next press finishes.
+        let (mut state, events) = callback_state_value(binding, false);
+        state.capture = CaptureState {
+            toggle: true,
+            ..CaptureState::default()
+        };
+        assert_eq!(
+            state.capture.press(false, false, 1_000),
+            Some(HotkeyAction::Start)
+        );
+        state.mask_release = true;
+        assert!(watchdog::heal(&mut state, 2_000, |_| false));
+        assert!(!state.capture.active && state.capture.locked && !state.mask_release);
+        assert!(events.try_recv().is_err());
+        assert_eq!(
+            state.capture.press(false, false, 3_000),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    /// The release heal leaves alone what it does not own: a chord with a
+    /// key, another shortcut's capture, and an idle capture.
+    #[test]
+    fn the_release_heal_leaves_other_captures_alone() {
+        let (mut keyed, events) = callback_state_value(WindowsHotkey::default(), false);
+        assert_eq!(
+            keyed.capture.press(false, false, 1_000),
+            Some(HotkeyAction::Start)
+        );
+        assert!(!watchdog::heal(&mut keyed, 2_000, |_| false));
+        assert!(keyed.capture.active);
+        assert!(events.try_recv().is_err());
+
+        let keyless = WindowsHotkey {
+            control: None,
+            windows: Some(ModifierSide::Either),
+            alt: None,
+            shift: None,
+            key: None,
+        };
+        let (mut other, events) = callback_state_value(keyless, false);
+        other.capture = CaptureState {
+            active: true,
+            recording: true,
+            flavour: DictationFlavour::Raw,
+            ..CaptureState::default()
+        };
+        assert!(!watchdog::heal(&mut other, 2_000, |_| false));
+        assert!(other.capture.active);
+        assert!(events.try_recv().is_err());
+
+        let (mut idle, events) = callback_state_value(WindowsHotkey::default(), false);
+        assert!(!watchdog::heal(&mut idle, 2_000, |_| false));
+        assert!(!idle.capture.active);
+        assert!(events.try_recv().is_err());
     }
 
     /// Labs › Stop phrase ends only a hands-free capture, as the shortcut's

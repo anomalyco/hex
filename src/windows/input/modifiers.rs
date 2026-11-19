@@ -310,6 +310,17 @@ impl SideDownTimes {
         }
     }
 
+    /// Forgets sides the asynchronous key state now reports up, after a
+    /// release the hook never saw: a fresh press must not pair with a stale
+    /// one in `together`.
+    pub(super) fn forget_released(&mut self, key_held: impl Fn(u16) -> bool) {
+        for (index, &key) in SIDE_KEYS.iter().enumerate() {
+            if self.0[index].is_some() && !key_held(key) {
+                self.0[index] = None;
+            }
+        }
+    }
+
     /// Both keys of each `Both` modifier went down within
     /// `BOTH_SIDES_WINDOW`, in either order; true for every other chord.
     pub(super) fn together(&self, binding: &super::WindowsHotkey) -> bool {
@@ -395,6 +406,30 @@ mod tests {
             next_left_control(REAL_DOWN, LeftControl::Other, true, true),
             REAL_DOWN
         );
+    }
+
+    #[test]
+    fn a_lost_release_forgets_sides_now_up() {
+        let both_alt = super::super::WindowsHotkey {
+            control: None,
+            windows: None,
+            alt: Some(ModifierSide::Both),
+            shift: None,
+            key: None,
+        };
+        let mut times = SideDownTimes::default();
+        times.update(u32::from(VK_LMENU), true, 100);
+        times.update(u32::from(VK_RMENU), true, 120);
+        assert!(times.together(&both_alt));
+
+        // The right side's release was lost: reading it up forgets it, and a
+        // fresh press on that side no longer pairs with the stale one.
+        times.forget_released(|key| key == VK_LMENU);
+        assert!(!times.together(&both_alt));
+        times.update(u32::from(VK_LMENU), true, 130);
+        assert!(!times.together(&both_alt), "the left side is still down");
+        times.update(u32::from(VK_RMENU), true, 140);
+        assert!(times.together(&both_alt), "a new pair within the window");
     }
 
     #[test]
