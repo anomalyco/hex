@@ -33,7 +33,7 @@ mod transcriptions;
 
 pub(crate) use access::{Access, AppConsent};
 pub(crate) use connect::Connect;
-pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
+pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient, Verification};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use permissions::Permissions;
 pub(crate) use permissions::View as PermissionView;

@@ -29,7 +29,7 @@ use rune_theme_opencode::icons::{CIRCLE_CHECK, MONITOR, OUTLINE_TEXT, SHIELD};
 use super::controls::{ButtonKind, DESCRIPTION, Paint, state_button};
 use super::icons::{CLOCK, GLOBE, MIC, WAVE, tile};
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::local_api::{Answer, Intent, Prompt, Recipient};
+use crate::local_api::{Answer, Intent, Prompt, Recipient, Verification};
 
 /// The dialog's width and padding.
 const WIDTH: f32 = 440.0;
@@ -299,12 +299,22 @@ fn ask_copy(intent: Intent, recipient: &Recipient) -> Ask {
 fn requester(p: Paint, recipient: &Recipient) -> El {
     let c = &p.k.c;
     let (glyph, kind, proof, proven): (&'static Icon, _, _, _) = match recipient {
-        Recipient::Native { team, .. } => (
+        Recipient::Native { verification, .. } => (
             &MONITOR,
             tr("App"),
-            match team {
-                Some(team) => tr_fill("Code signature verified · team {}", team),
-                None => tr("Code signature verified · no team").to_owned(),
+            match verification {
+                Verification::MacSignature { team: Some(team) } => {
+                    tr_fill("Code signature verified · team {}", team)
+                }
+                Verification::MacSignature { team: None } => {
+                    tr("Code signature verified · no team").to_owned()
+                }
+                Verification::WindowsSignature { publisher } => {
+                    tr_fill("Code signature verified · {}", publisher)
+                }
+                Verification::Sandbox { .. } | Verification::Executable { .. } => {
+                    tr("Identified by your system").to_owned()
+                }
             },
             true,
         ),
@@ -603,6 +613,7 @@ mod tests {
             recipient: Recipient::Web {
                 origin: "https://notes.example".into(),
                 client_name: Some("Field Notes".into()),
+                icon: None,
             },
         }
     }
@@ -614,7 +625,11 @@ mod tests {
             recipient: Recipient::Native {
                 identifier: "com.example.recorder".into(),
                 cdhash: "fixture-digest".into(),
-                team: Some("ABCDE12345".into()),
+                verification: Verification::MacSignature {
+                    team: Some("ABCDE12345".into()),
+                },
+                name: None,
+                icon: None,
             },
         }
     }

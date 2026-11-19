@@ -255,7 +255,11 @@ pub(super) const SCENES: &[Scene] = &[
                 recipient: crate::local_api::Recipient::Native {
                     identifier: "com.example.fieldnotes".into(),
                     cdhash: "fixture-digest".into(),
-                    team: Some("K7Z4Q2M8A1".into()),
+                    verification: crate::local_api::Verification::MacSignature {
+                        team: Some("K7Z4Q2M8A1".into()),
+                    },
+                    name: None,
+                    icon: None,
                 },
                 phase: crate::local_api::RecordPhase::Recording,
                 // Past the two minutes recordings used to be capped at.
@@ -993,6 +997,7 @@ pub(super) const SCENES: &[Scene] = &[
                     recipient: crate::local_api::Recipient::Web {
                         origin: "https://notes.example".into(),
                         client_name: None,
+                        icon: None,
                     },
                 },
                 crate::local_api::PermissionView {
@@ -1001,7 +1006,11 @@ pub(super) const SCENES: &[Scene] = &[
                     recipient: crate::local_api::Recipient::Native {
                         identifier: "com.example.fieldnotes".into(),
                         cdhash: "fixture-digest".into(),
-                        team: Some("K7Z4Q2M8A1".into()),
+                        verification: crate::local_api::Verification::MacSignature {
+                            team: Some("K7Z4Q2M8A1".into()),
+                        },
+                        name: None,
+                        icon: None,
                     },
                 },
             ];
@@ -1011,7 +1020,9 @@ pub(super) const SCENES: &[Scene] = &[
                 recipient: crate::local_api::Recipient::Native {
                     identifier: "com.example.recorder".into(),
                     cdhash: "fixture-digest".into(),
-                    team: None,
+                    verification: crate::local_api::Verification::MacSignature { team: None },
+                    name: None,
+                    icon: None,
                 },
             }];
         }

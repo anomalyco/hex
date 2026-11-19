@@ -149,6 +149,7 @@ mod tests {
             recipient: crate::local_api::Recipient::Web {
                 origin: "https://notes.example".into(),
                 client_name: Some("Field Notes".into()),
+                icon: None,
             },
         }
     }

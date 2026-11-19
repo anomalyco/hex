@@ -94,6 +94,7 @@ mod tests {
             recipient: Recipient::Web {
                 origin: "https://notes.example".into(),
                 client_name: None,
+                icon: None,
             },
         };
         assert_eq!(
