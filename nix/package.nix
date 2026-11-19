@@ -189,7 +189,16 @@ rustPlatform.buildRustPackage (finalAttrs: {
           else
             lib.replaceStrings (map (fragment: fragment.from) fragments) (map (
               fragment: fragment.to
-            ) fragments) old.buildCommand;
+            ) fragments) old.buildCommand
+            + ''
+              # Rune's `crates/rune-text` includes the fonts in
+              # `crates/rune/assets` by a path relative to the workspace root
+              # (`../../../rune/assets/…`). A vendored crate sits in `git/`
+              # beside `rune-0.0.1`, not inside Rune's workspace, so give that
+              # path the `rune/assets` it expects.
+              mkdir -p $out/git
+              ln -sfn rune-0.0.1 $out/git/rune
+            '';
       });
 
   nativeBuildInputs = [
@@ -232,6 +241,11 @@ rustPlatform.buildRustPackage (finalAttrs: {
   preCheck = ''
     export HOME="$TMPDIR/hex-test-home"
     mkdir -p "$HOME"
+    # Hex's suite keeps process-global state (the lab switches, a model
+    # download in flight), while CI and `scripts/check` run nextest, which
+    # isolates each test in its own process. Plain `cargo test` runs them in
+    # threads in one process, so run it one at a time here.
+    export RUST_TEST_THREADS=1
   '';
 
   postInstall = ''
