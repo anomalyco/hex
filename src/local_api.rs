@@ -4208,14 +4208,27 @@ mod tests {
 
         NATIVE_LAB.store(true, Ordering::Release);
         assert!(settles(true), "the channel opens with the lab");
+        // Eight quiet clients hold every place. Past them, a client is
+        // answered busy once its request has arrived, and one that sends
+        // nothing is dropped after the busy wait without holding up the next.
         let mut quiet: Vec<_> = (0..8).map(|_| native_client(&socket)).collect();
-        thread::sleep(Duration::from_millis(200));
+        let silent = native_client(&socket);
         let (status, response) = native_request(
             &socket,
             "GET /record/status HTTP/1.1\r\nHost: hex\r\nConnection: close\r\n\r\n",
         );
         assert_eq!(status, 503, "{response}");
         assert!(response.contains("native-busy"));
+        // A request that arrives in pieces is still read whole first.
+        let mut slow = native_client(&socket);
+        slow.write_all(b"GET /record/status HTTP/1.1\r\n").unwrap();
+        thread::sleep(Duration::from_millis(300));
+        slow.write_all(b"Host: hex\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut answer = String::new();
+        let _ = slow.read_to_string(&mut answer);
+        assert!(answer.contains("native-busy"), "{answer}");
+        drop(silent);
         quiet.truncate(1);
 
         NATIVE_LAB.store(false, Ordering::Release);

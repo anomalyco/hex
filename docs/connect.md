@@ -71,7 +71,8 @@ A page's fetch -> POST /connect/authorize            // no bearer token
   (within 0.2 s, ending its connections; Hex does no identity work while it
   is off), and saved grants, the website lists, and the websites switch are
   kept but unused until it is on again. The native channel serves at most 8
-  clients at once; one more is answered `503 native-busy`.
+  clients at once; one more is answered `503 native-busy` once its request
+  arrives (within 1 s, else it is dropped), a few at a time.
 - A desktop that can show Hex's permission window. A Wayland compositor
   without layer-shell (GNOME) can't: there Settings › Labs keeps the
   Connected apps card, disabled while off, with a note saying so, `hex labs`

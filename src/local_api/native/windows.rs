@@ -73,7 +73,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::display::{self, Shown};
-use super::{HttpContext, Slot, busy, client};
+use super::{Busy, HttpContext, Slot, client};
 use super::{Identity, PeerId};
 use crate::local_api::consent::Verification;
 
@@ -165,6 +165,8 @@ fn serve(
 ) {
     let user = Arc::new(user);
     let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // Reads poll (PeekNamedPipe), so the busy responder's deadline holds.
+    let busy = Busy::start(Pipe::close_answered);
     let mut waiting = Some(first);
     while !stop.load(Ordering::Acquire) {
         let pipe = match waiting.take() {
@@ -189,7 +191,9 @@ fn serve(
             continue;
         }
         let Some(slot) = Slot::take(&served) else {
-            pipe.answer_and_close(busy());
+            if let Ok(busy) = &busy {
+                busy.turn_away(pipe);
+            }
             continue;
         };
         let context = context.clone();
@@ -206,6 +210,9 @@ fn serve(
         if let Err(error) = spawned {
             tracing::warn!(%error, "could not serve a native record client");
         }
+    }
+    if let Ok(busy) = busy {
+        busy.stop();
     }
 }
 
@@ -726,10 +733,9 @@ impl Write for Pipe {
 }
 
 impl Pipe {
-    /// Writes `response` and closes this end without waiting for the client
-    /// to read it: what it wrote stays readable, and nothing here blocks.
-    fn answer_and_close(mut self, response: crate::local_api::http::HttpResponse) {
-        let _ = crate::local_api::write_response(&mut self, response, None);
+    /// Closes this end without disconnecting or flushing, so it never waits
+    /// on the client: an answer already written stays readable to it.
+    fn close_answered(self) {
         let handle = std::mem::ManuallyDrop::new(self).0;
         // SAFETY: this value owned the handle; `ManuallyDrop` skips its Drop.
         unsafe { CloseHandle(handle) };
