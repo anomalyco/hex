@@ -367,7 +367,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
     }
 
-    /// A still hold on the Hex key; a tap does nothing, so a stray one while typing is harmless.
+    /// A tap or still hold on the Hex key.
     private func hexKeyHeld() {
         if allowsHaptics() { haptics.impactOccurred() }
         dismissStyleMenu()

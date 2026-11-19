@@ -2,7 +2,7 @@ import UIKit
 
 /// The Hex key right of space. Warm session: an orange core, and a hold records here.
 /// Otherwise the mark is faded with ↗, and a hold leaves for Hex to start one.
-/// A tap does nothing; holding and sliding opens the style menu (`HexKeyGesture`).
+/// A tap or hold dictates; sliding opens the style menu (`HexKeyGesture`).
 @MainActor
 final class HexKeyControl: UIControl {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { setNeedsDisplay() } } }
@@ -46,7 +46,7 @@ final class HexKeyControl: UIControl {
 
     private func updateAccessibility() {
         accessibilityLabel = isWarm ? "Dictate with Hex" : "Open Hex to dictate"
-        accessibilityHint = "Hold to dictate, hold and slide for styles"
+        accessibilityHint = "Tap to dictate, slide for styles"
     }
 
     override func accessibilityActivate() -> Bool {
@@ -82,8 +82,13 @@ final class HexKeyControl: UIControl {
     override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
         stopTimer()
         isHighlighted = false
-        if gesture.touchUp() == .releaseMenu, let touch {
-            onMenuRelease?(touch.location(in: self))
+        switch gesture.touchUp() {
+        case .releaseMenu:
+            if let touch { onMenuRelease?(touch.location(in: self)) }
+        case .tap:
+            onHold?()
+        default:
+            break
         }
     }
 

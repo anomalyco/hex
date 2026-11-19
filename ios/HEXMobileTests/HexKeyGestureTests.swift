@@ -3,11 +3,11 @@ import XCTest
 @testable import HEX
 
 final class HexKeyGestureTests: XCTestCase {
-    func testTapDoesNothing() {
+    func testTapDictates() {
         var gesture = HexKeyGesture()
         gesture.touchDown(at: .zero)
         XCTAssertEqual(gesture.touchMoved(to: CGPoint(x: 3, y: 2)), .ignored, "a jitter is still a tap")
-        XCTAssertEqual(gesture.touchUp(), .ignored)
+        XCTAssertEqual(gesture.touchUp(), .tap)
         XCTAssertEqual(gesture.holdElapsed(), .ignored, "a timer left over from the tap")
         XCTAssertEqual(gesture.state, .idle)
     }

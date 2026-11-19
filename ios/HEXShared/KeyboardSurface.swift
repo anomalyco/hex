@@ -600,8 +600,12 @@ struct KeyboardSurfaceView: View {
     private func defaultTopBar(palette p: KeyboardChromePalette) -> some View {
         HStack(spacing: 8) {
             Button {
-                let target = model.hasFullAccess ? model.coldStartURL : KeyboardLaunchRequest.setup.url
-                model.onOpenURL?(target)
+                if model.hasFullAccess, !model.isWarmAvailable, let local = model.onLocalDictateTap {
+                    local()
+                } else {
+                    let target = model.hasFullAccess ? model.coldStartURL : KeyboardLaunchRequest.setup.url
+                    model.onOpenURL?(target)
+                }
             } label: {
                 HexMarkView(
                     size: 16,
