@@ -26,7 +26,7 @@ pub(super) fn on_xwayland_for(opted_in: bool) -> bool {
 
 /// Whether this session is Wayland on a compositor without layer-shell
 /// (GNOME), where an overlay that takes clicks can only show on XWayland.
-pub(super) fn without_layer_shell() -> bool {
+pub(crate) fn without_layer_shell() -> bool {
     crate::linux::session::LinuxSession::detect().is_wayland()
         && !crate::linux::paste::wayland_offers(crate::linux::rune_hud::LAYER_SHELL)
 }

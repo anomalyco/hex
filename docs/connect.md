@@ -68,6 +68,12 @@ A page's fetch -> POST /connect/authorize            // no bearer token
   `401` for a grant or session token), a pending dialog is withdrawn, a live
   consented recording is cancelled, and saved grants, the website lists, and
   the websites switch are kept but unused until it is on again.
+- A desktop that can show Hex's permission window. A Wayland compositor
+  without layer-shell (GNOME) can't: there Settings › Labs keeps the
+  Connected apps card, disabled while off, with a note saying so, `hex labs`
+  prints the same note in its list and after `hex labs on connected-apps`,
+  and every ask answers unavailable within a second instead of waiting
+  unseen.
 - For a web page, also the lab's **Allow websites to use Hex** and the page's
   exact origin under **Allowed websites** (added with Allow on its entry in
   **Asking to connect**). Being allowed to ask grants nothing. Both lists
