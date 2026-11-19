@@ -16,9 +16,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetForegroundWindow, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
-    LLKHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
-    WM_SYSKEYDOWN, WM_SYSKEYUP,
+    LLKHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_KEYDOWN,
+    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -707,18 +706,18 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
 
     let hooks = rearm::KeyboardHooks::install();
     if hooks.keyboard().is_null() {
+        let error = std::io::Error::last_os_error();
+        hooks.uninstall();
         CALLBACK_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
         let _ = ready.send(Err(format!(
-            "could not install the Windows keyboard hook: {}",
-            std::io::Error::last_os_error()
+            "could not install the Windows keyboard hook: {error}"
         )));
         return;
     }
-    let mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), ptr::null_mut(), 0) };
-    if mouse.is_null() {
+    if hooks.mouse().is_null() {
         let error = std::io::Error::last_os_error();
         hooks.uninstall();
         CALLBACK_STATE
@@ -732,9 +731,6 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
     }
     if ready.send(Ok(thread_id)).is_err() {
         hooks.uninstall();
-        unsafe {
-            UnhookWindowsHookEx(mouse);
-        }
         CALLBACK_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -755,9 +751,6 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
             break;
         }
         rearm::KeyboardHooks::on_message(&message);
-    }
-    unsafe {
-        UnhookWindowsHookEx(mouse);
     }
     hooks.uninstall();
     CALLBACK_STATE
@@ -1079,7 +1072,7 @@ fn process_button(
                 if is_down && !state.cancel_down {
                     state.cancel_down = true;
                     if let Some(action) = state.capture.cancel() {
-                        tracing::info!("dictation cancelled by Escape");
+                        watchdog::note_cancelled();
                         send_event(state, action, time);
                     }
                 } else if is_up {
@@ -1523,11 +1516,22 @@ mod tests {
     /// [`process_button`], whose `key_held` lookup stands in for the physical
     /// modifiers a test cannot press.
     fn callback_state(binding: WindowsHotkey, share_trigger: bool) -> Receiver<HotkeyEvent> {
-        let (events, receiver) = mpsc::sync_channel(EVENT_CAPACITY);
-        let (errors, _unread) = mpsc::channel();
+        let (state, receiver) = callback_state_value(binding, share_trigger);
         *CALLBACK_STATE
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(CallbackState {
+            .unwrap_or_else(|error| error.into_inner()) = Some(state);
+        receiver
+    }
+
+    /// [`callback_state`] without the listener's global: a test that drives
+    /// the watchdog's heal directly must not compete with its peers.
+    fn callback_state_value(
+        binding: WindowsHotkey,
+        share_trigger: bool,
+    ) -> (CallbackState, Receiver<HotkeyEvent>) {
+        let (events, receiver) = mpsc::sync_channel(EVENT_CAPACITY);
+        let (errors, _unread) = mpsc::channel();
+        let state = CallbackState {
             events,
             errors,
             activity: InputActivity::default(),
@@ -1562,21 +1566,8 @@ mod tests {
             capture: CaptureState::default(),
             dirty: false,
             mask_release: false,
-        });
-        receiver
-    }
-
-    /// The hook's state taken out of the listener's global, for a test that
-    /// drives the watchdog's heal directly: leaving it in the global would
-    /// make it compete with its peers.
-    fn standalone_state(binding: WindowsHotkey) -> (CallbackState, Receiver<HotkeyEvent>) {
-        let events = callback_state(binding, false);
-        let state = CALLBACK_STATE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
-            .expect("the callback state just installed");
-        (state, events)
+        };
+        (state, receiver)
     }
 
     #[test]
@@ -2272,18 +2263,20 @@ mod tests {
         };
 
         // Hold: both modifiers still report down, so the chord is held.
-        let (mut state, events) = standalone_state(binding.clone());
+        let (mut state, events) = callback_state_value(binding.clone(), false);
         assert_eq!(
             state.capture.press(false, false, 1_000),
             Some(HotkeyAction::Start)
         );
-        watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU || key == VK_LWIN);
-        assert!(state.capture.active && !state.dirty);
+        state.mask_release = true;
+        assert!(!watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU || key == VK_LWIN));
+        assert!(state.capture.active && !state.dirty && state.mask_release);
         assert!(events.try_recv().is_err());
 
         // Windows is up and Alt still down: the release arrived, and the
         // capture stays dirty until Alt comes up, as the normal path does.
-        watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU);
+        assert!(watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU));
+        assert!(!state.mask_release);
         assert_eq!(
             events.try_recv().map(|event| event.action),
             Ok(HotkeyAction::Finish)
@@ -2291,7 +2284,7 @@ mod tests {
         assert!(!state.capture.active && state.dirty);
 
         // Toggle: the lost release locks, and the next press finishes.
-        let (mut state, events) = standalone_state(binding);
+        let (mut state, events) = callback_state_value(binding, false);
         state.capture = CaptureState {
             toggle: true,
             ..CaptureState::default()
@@ -2300,8 +2293,9 @@ mod tests {
             state.capture.press(false, false, 1_000),
             Some(HotkeyAction::Start)
         );
-        watchdog::heal(&mut state, 2_000, |_| false);
-        assert!(!state.capture.active && state.capture.locked);
+        state.mask_release = true;
+        assert!(watchdog::heal(&mut state, 2_000, |_| false));
+        assert!(!state.capture.active && state.capture.locked && !state.mask_release);
         assert!(events.try_recv().is_err());
         assert_eq!(
             state.capture.press(false, false, 3_000),
@@ -2313,12 +2307,12 @@ mod tests {
     /// key, another shortcut's capture, and an idle capture.
     #[test]
     fn the_release_heal_leaves_other_captures_alone() {
-        let (mut keyed, events) = standalone_state(WindowsHotkey::default());
+        let (mut keyed, events) = callback_state_value(WindowsHotkey::default(), false);
         assert_eq!(
             keyed.capture.press(false, false, 1_000),
             Some(HotkeyAction::Start)
         );
-        watchdog::heal(&mut keyed, 2_000, |_| false);
+        assert!(!watchdog::heal(&mut keyed, 2_000, |_| false));
         assert!(keyed.capture.active);
         assert!(events.try_recv().is_err());
 
@@ -2329,19 +2323,19 @@ mod tests {
             shift: None,
             key: None,
         };
-        let (mut other, events) = standalone_state(keyless);
+        let (mut other, events) = callback_state_value(keyless, false);
         other.capture = CaptureState {
             active: true,
             recording: true,
             flavour: DictationFlavour::Raw,
             ..CaptureState::default()
         };
-        watchdog::heal(&mut other, 2_000, |_| false);
+        assert!(!watchdog::heal(&mut other, 2_000, |_| false));
         assert!(other.capture.active);
         assert!(events.try_recv().is_err());
 
-        let (mut idle, events) = standalone_state(WindowsHotkey::default());
-        watchdog::heal(&mut idle, 2_000, |_| false);
+        let (mut idle, events) = callback_state_value(WindowsHotkey::default(), false);
+        assert!(!watchdog::heal(&mut idle, 2_000, |_| false));
         assert!(!idle.capture.active);
         assert!(events.try_recv().is_err());
     }
