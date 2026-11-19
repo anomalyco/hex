@@ -417,9 +417,10 @@ fn version_name(image: &Path) -> Option<String> {
                 };
                 let text = std::slice::from_raw_parts(value.cast::<u16>(), length as usize);
                 let text = String::from_utf16_lossy(text);
-                let text = text.trim_end_matches('\0').trim();
-                if !text.is_empty() {
-                    return Some(text.to_owned());
+                if let Some(name) =
+                    crate::local_api::consent::shown_name(text.trim_end_matches('\0'))
+                {
+                    return Some(name);
                 }
             }
         }

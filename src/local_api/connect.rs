@@ -523,9 +523,7 @@ fn plain_name(name: &str) -> bool {
     let name = name.trim();
     !name.is_empty()
         && name.chars().count() <= 40
-        && name.chars().all(|character| {
-            !character.is_control() && !('\u{202a}'..='\u{202e}').contains(&character)
-        })
+        && !name.chars().any(super::consent::hidden)
         && !name.contains("  ")
 }
 

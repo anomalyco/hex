@@ -35,7 +35,7 @@ pub(super) fn shown(verification: &Verification) -> Shown {
         return Shown::default();
     };
     Shown {
-        name: value(&text, "Name").map(str::to_owned),
+        name: value(&text, "Name").and_then(crate::local_api::consent::shown_name),
         icon: display::platform_icon(&path),
     }
 }

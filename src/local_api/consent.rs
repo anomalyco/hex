@@ -14,6 +14,42 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+/// A character a name could hide or reorder text with: a control, a bidi
+/// control, or one that is invisible by default (Unicode's
+/// `Default_Ignorable_Code_Point`).
+pub(crate) fn hidden(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            u32::from(character),
+            0x00AD
+                | 0x034F
+                | 0x061C
+                | 0x115F..=0x1160
+                | 0x17B4..=0x17B5
+                | 0x180B..=0x180F
+                | 0x200B..=0x200F
+                | 0x202A..=0x202E
+                | 0x2060..=0x206F
+                | 0x3164
+                | 0xFE00..=0xFE0F
+                | 0xFEFF
+                | 0xFFA0
+                | 0xFFF0..=0xFFF8
+                | 0x1BCA0..=0x1BCA3
+                | 0x1D173..=0x1D17A
+                | 0xE0000..=0xE0FFF
+        )
+}
+
+/// A name Hex derived from an app's files, as it may show: trimmed, at most
+/// 64 characters, with nothing [`hidden`] in it. `None` otherwise.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn shown_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty() && name.chars().count() <= 64 && !name.chars().any(hidden))
+        .then(|| name.to_owned())
+}
+
 /// What the person is being asked to allow.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intent {
@@ -237,6 +273,21 @@ mod tests {
         let big = ConsentIcon::MAX_SIZE + 1;
         let pixels: Arc<[u8]> = vec![0; (big * big * 4) as usize].into();
         assert!(ConsentIcon::new(big, pixels).is_none());
+    }
+
+    /// Bidi isolates and marks, and invisible characters, can't hide in a
+    /// name a page claims or an app's files give.
+    #[test]
+    fn a_name_shows_nothing_hidden() {
+        for invisible in [
+            '\u{2067}', '\u{200F}', '\u{061C}', '\u{200B}', '\u{FEFF}', '\u{202E}',
+        ] {
+            assert!(hidden(invisible), "{:04x}", u32::from(invisible));
+            assert_eq!(shown_name(&format!("Notes{invisible}")), None);
+        }
+        assert!(!hidden('é') && !hidden('笔'));
+        assert_eq!(shown_name("  Field Notes "), Some("Field Notes".into()));
+        assert_eq!(shown_name(&"x".repeat(65)), None);
     }
 
     #[test]
