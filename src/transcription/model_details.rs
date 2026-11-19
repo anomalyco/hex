@@ -139,15 +139,14 @@ const FLUID_SPEECH_PRO: ModelDetails = ModelDetails {
              Parakeet Ultra GGUF (https://huggingface.co/handy-computer/parakeet-ultra-gguf, \
              CC BY 4.0).",
     peak_memory: None,
-    // The card's per-language figures: its FLEURS test table for every
-    // language but English, and English from the multilingual track.
+    // The card's FLEURS test table: 24 languages, all of its languages but
+    // English, for which it publishes no FLEURS figure.
     published: &[
         ("bg", 10.19),
         ("hr", 9.73),
         ("cs", 8.83),
         ("da", 14.57),
         ("nl", 5.51),
-        ("en", 6.06),
         ("et", 9.51),
         ("fi", 8.82),
         ("fr", 4.65),
@@ -168,12 +167,11 @@ const FLUID_SPEECH_PRO: ModelDetails = ModelDetails {
         ("sv", 11.1),
         ("uk", 4.77),
     ],
-    published_conditions: "English: the Open ASR Leaderboard's multilingual track (beam \
-                           search, 4 beams); the other 24: the card's FLEURS test table (greedy \
-                           decoding). The reference NeMo model's figures, not the Q8_0 file Hex \
-                           downloads, whose own card reports only 10.2% WER on EdAcc's 600 \
-                           accented-English clips against the .nemo's 10.1%. Dataset revisions, \
-                           normalization, and scorer versions unknown",
+    published_conditions: "The card's FLEURS test figures (greedy decoding) for the reference \
+                           NeMo model, not the Q8_0 file Hex downloads. The Q8_0 card reports \
+                           only 10.2% WER on EdAcc's 600 accented-English clips against the \
+                           .nemo's 10.1%. The card publishes no FLEURS English figure. Dataset \
+                           revisions, normalization, and scorer versions unknown",
 };
 
 pub fn details(id: TranscriptionModelId) -> Option<&'static ModelDetails> {
@@ -236,10 +234,20 @@ mod tests {
         let fluid = details(TranscriptionModelId::FluidSpeechPro).unwrap();
         let model = super::super::models::definition(TranscriptionModelId::FluidSpeechPro);
         let mut scored: Vec<_> = fluid.published.iter().map(|(code, _)| *code).collect();
-        let mut languages = model.languages.to_vec();
+        // The card publishes FLEURS figures for every language but English.
+        let mut languages: Vec<_> = model
+            .languages
+            .iter()
+            .copied()
+            .filter(|code| *code != "en")
+            .collect();
         scored.sort_unstable();
         languages.sort_unstable();
         assert_eq!(scored, languages);
+        assert!(
+            fluid.published.iter().all(|(code, _)| *code != "en"),
+            "the card publishes no FLEURS English figure"
+        );
         assert!(fluid.attribution.starts_with(
             "Fluid Speech Pro by FluidVoice, based on NVIDIA Parakeet TDT 0.6B v3 and \
              Moondream Parakeet Ultra."

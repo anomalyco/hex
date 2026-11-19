@@ -140,6 +140,10 @@ Creative Commons Attribution 4.0 International (CC BY 4.0). Hex downloads
 https://huggingface.co/TalkMate/fluid-speech-pro-gguf/tree/d59dc79f7e04715c5b0ba07f01106f71ebea97dc
 and does not ship the weights.
 
+Copyright (c) 2026 FluidVoice. Licensed under CC BY 4.0 (see LICENSE).
+
+Attribution for use: "Fluid Speech Pro by FluidVoice. Built on NVIDIA Parakeet TDT 0.6B v3 and Moondream Parakeet Ultra."
+
 License: https://creativecommons.org/licenses/by/4.0/legalcode.en
 
 Notice supplied with the files:

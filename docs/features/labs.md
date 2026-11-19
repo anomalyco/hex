@@ -1838,7 +1838,7 @@ Picker row -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // l
 │   Ultra by Moondream, based on NVIDIA Parakeet TDT 0.6B v3. GGUF conversion and
 │   quantization by handy-computer. Creative Commons Attribution 4.0 International
 │   (CC BY 4.0)."); the publisher's NOTICE; Source and License links
-├── "Published conversion benchmarks; not measured in Hex" (folded) -> conditions
+├── "Published benchmarks; not measured in Hex" (folded) -> conditions
 │   (FLEURS test, Q8_0, CUDA, batch 8, each language's hint, no timestamps,
 │   transcribe.cpp 021aa17d; file digest, dataset revision, scorer unknown), then
 │   25 FLEURS WERs from transcribe.cpp 7045d1c's catalog/parakeet-ultra.json

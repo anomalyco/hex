@@ -262,7 +262,7 @@ export type ModelId =
   | "parakeet_v2"
   | "parakeet_v3"
   | "orukeet"
-  | "fluid-speech-pro"
+  | "fluid_speech_pro"
   | "whisper_large_v3_turbo"
   | "qwen3_asr06_b"
   | "qwencleo_asr_1_7b"

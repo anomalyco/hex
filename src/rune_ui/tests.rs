@@ -3866,3 +3866,23 @@ fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() 
     tap(&mut on, "output-vocabulary");
     assert!(on.state.vocabulary.open);
 }
+
+#[test]
+fn fluid_speech_pros_details_list_only_the_fleurs_rows_its_card_publishes() {
+    let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+    super::picker::all_fixture(&mut state);
+    state.picker.details =
+        super::model_details::DetailsState::open_with_table(TranscriptionModelId::FluidSpeechPro);
+    let rt = runtime_for(state, false, GOLDEN_SIZE);
+    assert!(rt.find("published-bg").is_some());
+    assert!(rt.find("published-de").is_some());
+    // The card publishes no FLEURS English figure, so the table has no
+    // English row; the conditions say so in its place.
+    assert!(rt.find("published-en").is_none());
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.contains("publishes no FLEURS English figure"))
+    );
+    assert!(rt.find("published-toggle").is_some());
+}

@@ -134,7 +134,7 @@ pub(super) fn section(ui: &Ui, p: Paint, model: &ModelDefinition) -> Option<El> 
 /// conditions beside them. They rank nothing in Hex.
 fn published(ui: &Ui, p: Paint, details: &ModelDetails) -> El {
     let open = ui.picker.details.published;
-    let label = tr("Published conversion benchmarks; not measured in Hex");
+    let label = tr("Published benchmarks; not measured in Hex");
     let disclosure = Button::new(label)
         .variant(ButtonVariant::Ghost)
         .control_size(ControlSize::Small)

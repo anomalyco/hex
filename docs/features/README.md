@@ -482,8 +482,10 @@ Settings picker > Every model row          // fixed height; scrolls
 │   `orukeet_is_offered_for_exactly_parakeet_v3s_languages_and_never_badged`,
 │   `orukeets_details_credit_its_base_and_cover_its_languages_once`
 ├── Fluid Speech Pro -> ordinary row with Details: languages, the CC BY 4.0  // setup.fluid-speech-pro
-│   credit and notice, Source/License links, folded published FLEURS benchmarks
-│   "not measured in Hex"; never recommended or badged. Checks:
+│   credit and notice, Source/License links, folded published benchmarks "not
+│   measured in Hex": the card's FLEURS figures for 24 of its 25 languages
+│   (greedy decoding, the reference NeMo model; no English figure); never
+│   recommended or badged. Checks:
 │   `fluid_speech_pro_is_offered_for_exactly_parakeet_v3s_languages_and_never_badged`,
 │   `fluid_speech_pros_details_credit_its_bases_and_cover_its_languages_once`
 ├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
