@@ -236,7 +236,12 @@ impl Connect {
             state.prompting = true;
             drop(state);
 
-            let answer = gate.ask(&prompt, self.prompt_wait);
+            // A gate that panics answers unavailable, never leaving the
+            // next ask busy.
+            let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                gate.ask(&prompt, self.prompt_wait)
+            }))
+            .unwrap_or(Answer::Unavailable);
 
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             state.prompting = false;
@@ -292,7 +297,11 @@ impl Connect {
         state
             .grants
             .retain(|_, grant| grant.expires > Instant::now());
-        let code = random_token("hexc_");
+        // Never a guessable token: without randomness, nothing is issued.
+        let Ok(code) = super::record::random_token("hexc_") else {
+            tracing::error!("could not generate a connect code");
+            return HttpResponse::code(500, "token-generation-failed");
+        };
         state.grants.insert(
             code.clone(),
             Grant {
@@ -340,7 +349,10 @@ impl Connect {
             return HttpResponse::code(403, "invalid-grant");
         }
         state.audio.retain(|_, audio| audio.expires > now);
-        let token = random_token("hexa_");
+        let Ok(token) = super::record::random_token("hexa_") else {
+            tracing::error!("could not generate a connect token");
+            return HttpResponse::code(500, "token-generation-failed");
+        };
         state.audio.insert(
             token.clone(),
             Audio {
@@ -538,24 +550,6 @@ fn equal(left: &[u8], right: &[u8]) -> bool {
             .zip(right)
             .fold(0_u8, |mismatch, (a, b)| mismatch | (a ^ b))
             == 0
-}
-
-/// `prefix` plus 32 random bytes as hex, like the API token.
-fn random_token(prefix: &str) -> String {
-    use std::fmt::Write as _;
-    let mut random = [0_u8; 32];
-    // `getrandom` failing is not something a request can recover from; a
-    // zero token would still be one-use, but keep the failure visible.
-    if let Err(error) = getrandom::fill(&mut random) {
-        tracing::error!(%error, "could not generate a connect token");
-        random = [0xFF; 32];
-    }
-    let mut token = String::with_capacity(prefix.len() + 64);
-    token.push_str(prefix);
-    for byte in random {
-        write!(token, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    token
 }
 
 /// Base64url without padding, as PKCE's S256 challenge is written.

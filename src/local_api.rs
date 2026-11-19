@@ -4419,6 +4419,44 @@ mod tests {
         (sessions, channel, grant, session)
     }
 
+    /// A consent gate that panics answers unavailable, and the next ask
+    /// still reaches the window instead of answering consent-busy.
+    #[test]
+    fn a_panicking_gate_leaves_the_next_ask_free() {
+        struct Panics(AtomicU64);
+        impl ConsentGate for Panics {
+            fn ask(&self, _: &Prompt, _: Duration) -> Answer {
+                self.0.fetch_add(1, Ordering::AcqRel);
+                panic!("the window went away");
+            }
+        }
+        let gate = Arc::new(Panics(AtomicU64::new(0)));
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(gate.clone()),
+            FakeRecording::with_text("unused"),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record_timings(),
+        ));
+        let channel = record::Channel::Web("https://app.example".into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        for _ in 0..2 {
+            let answered = sessions.pair(channel.clone(), body.as_bytes());
+            assert_eq!(body_code_of(&answered.body), "record-unavailable");
+        }
+        assert_eq!(gate.0.load(Ordering::Acquire), 2);
+    }
+
+    fn body_code_of(body: &[u8]) -> String {
+        serde_json::from_slice::<serde_json::Value>(body).unwrap()["code"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
     /// An Allow Once grant left unused lapses with its code's lifetime, so
     /// "one recording" can't start hours later without a new ask.
     #[test]

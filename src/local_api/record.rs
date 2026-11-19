@@ -413,7 +413,12 @@ impl Sessions {
         state.prompting = true;
         drop(state);
 
-        let answer = gate.ask(&prompt, self.timings.prompt);
+        // A gate that panics answers unavailable, never leaving the next ask
+        // busy.
+        let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gate.ask(&prompt, self.timings.prompt)
+        }))
+        .unwrap_or(Answer::Unavailable);
 
         let mut state = lock(&self.state);
         state.prompting = false;
