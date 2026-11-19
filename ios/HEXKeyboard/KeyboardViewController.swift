@@ -90,8 +90,11 @@ final class KeyboardViewController: UIInputViewController {
         fullKeyboard.warmUpTextCheckerAsync()
         guard !didWarmLexicon else { return }
         didWarmLexicon = true
-        requestSupplementaryLexicon { [weak self] lexicon in
-            DispatchQueue.main.async {
+        // UIKit calls back on its lexicon-request queue. A main-actor closure here trips
+        // Swift's runtime isolation check (EXC_BREAKPOINT, TestFlight build 3), so the
+        // callback is nonisolated and hops to the main actor itself.
+        requestSupplementaryLexicon { @Sendable [weak self] lexicon in
+            Task { @MainActor in
                 self?.fullKeyboard?.loadLexicon(lexicon)
             }
         }

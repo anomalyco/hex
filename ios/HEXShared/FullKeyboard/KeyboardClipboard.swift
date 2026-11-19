@@ -87,12 +87,13 @@ final class KeyboardPasteReceiver: UIView {
 
     override func paste(itemProviders: [NSItemProvider]) {
         if let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: String.self) }) {
-            _ = provider.loadObject(ofClass: String.self) { [weak self] text, _ in
+            // Item providers call back off the main thread; keep these closures nonisolated.
+            _ = provider.loadObject(ofClass: String.self) { @Sendable [weak self] text, _ in
                 guard let text else { return }
                 Task { @MainActor in self?.deliver(text) }
             }
         } else if let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: URL.self) }) {
-            _ = provider.loadObject(ofClass: URL.self) { [weak self] url, _ in
+            _ = provider.loadObject(ofClass: URL.self) { @Sendable [weak self] url, _ in
                 guard let url else { return }
                 Task { @MainActor in self?.deliver(url.absoluteString) }
             }
