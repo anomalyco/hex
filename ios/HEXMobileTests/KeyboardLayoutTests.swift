@@ -21,11 +21,11 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs253PointsAndLandscapeIs176Points() {
+    func testPortraitIs262PointsAndLandscapeIs176Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 262, "width \(width)")
         }
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 262)
         XCTAssertEqual(KeyboardLayout.height(for: .landscape), 176)
     }
 
@@ -34,7 +34,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
-        XCTAssertEqual(q.frame.minY, 35, accuracy: 0.001)
+        XCTAssertEqual(q.frame.minY, 44, accuracy: 0.001)
         XCTAssertEqual(q.frame.height, 45)
         let shift = proMax.key(.shift)!
         XCTAssertEqual(shift.frame.width, proMax.letterWidth * 1.34, accuracy: 0.001)
@@ -87,7 +87,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    func testBalloonsStayInsideThe253PointKeyboard() {
+    func testBalloonsStayInsideThe262PointKeyboard() {
         for layout in everyPortraitLayout() {
             let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
             for key in layout.keys where key.character != nil {

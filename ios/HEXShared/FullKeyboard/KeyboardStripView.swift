@@ -176,7 +176,7 @@ final class KeyboardStripView: UIView {
     }
 
     private var contentCenterY: CGFloat {
-        inSystemPlatter ? bounds.height * 0.42 : bounds.height * 0.50
+        bounds.height * 0.5
     }
 
     override func layoutSubviews() {
@@ -269,7 +269,7 @@ final class KeyboardStripView: UIView {
 
         override func draw(_ rect: CGRect) {
             guard let suggestion else { return }
-            let midY = inSystemPlatter ? bounds.height * 0.42 : bounds.height * 0.50
+            let midY = bounds.height * 0.5
             let pillH = min(26, max(22, bounds.height - 6))
             let pillInset = CGRect(
                 x: 5,

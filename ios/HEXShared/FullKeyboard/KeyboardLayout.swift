@@ -74,11 +74,13 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     let keysBottom: CGFloat
     let cornerRadius: CGFloat
 
-    /// Matches iOS 26 portrait keyboard geometry inside the system's +17 pt Liquid Glass crown:
-    /// 35 pt strip area + 218 pt of keys (4 × 45 pt + 3 × 11 pt + 5 pt) = 253 pt extension height.
+    /// iOS 26 key geometry with a 44 pt suggestion strip: 44 pt + 218 pt of keys
+    /// (4 × 45 pt + 3 × 11 pt + 5 pt) = 262 pt. The 35 pt strip assumed iOS 26's +17 pt
+    /// Liquid Glass crown above the extension; iOS 27 adds none, which left suggestions
+    /// cramped against the keyboard's top edge (TestFlight build 4).
     static let portrait = KeyboardMetrics(
         side: 6.5, gap: 6, rowGap: 11, keyHeight: 45,
-        stripTop: 0, stripHeight: 33, stripBottom: 2,
+        stripTop: 4, stripHeight: 36, stripBottom: 4,
         keysTop: 0, keysBottom: 5, cornerRadius: 8.5
     )
 
@@ -86,7 +88,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// 39 pt strip area + 137 pt of keys (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 176 pt extension height.
     static let landscape = KeyboardMetrics(
         side: 4, gap: 6, rowGap: 8, keyHeight: 27.5,
-        stripTop: 0, stripHeight: 33, stripBottom: 6,
+        stripTop: 3, stripHeight: 32, stripBottom: 4,
         keysTop: 0, keysBottom: 3, cornerRadius: 7.5
     )
 
