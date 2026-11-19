@@ -247,3 +247,17 @@ pub(super) fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
     crate::linux::login_item::set_enabled(enabled).map_err(|error| format!("{error:#}"))?;
     crate::linux::login_item::is_enabled().map_err(|error| format!("{error:#}"))
 }
+
+/// Hex's permission window: its own overlay, so an ask shows whether the
+/// main window is open or not and never opens it.
+pub(super) fn install_consent(app: &mut rune::App<super::Ui>, host: &HostHandle) {
+    if let Some(consent) = host.consent().cloned() {
+        let desk = consent.desk.clone();
+        consent.desk.watch(super::consent_window::install(
+            app,
+            Arc::new(move |id, answer| {
+                desk.answer(id, answer);
+            }),
+        ));
+    }
+}

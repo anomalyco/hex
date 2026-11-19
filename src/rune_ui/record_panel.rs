@@ -23,10 +23,10 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
         .as_ref()
         .and_then(|view| view.record.as_ref())
         .map(|view| view.id);
-    if record == ui.record_seen {
+    if record == ui.connected.record_seen {
         return false;
     }
-    ui.record_seen = record;
+    ui.connected.record_seen = record;
     if record.is_some() && ui.live() {
         #[cfg(target_os = "macos")]
         crate::macos_rune::bring_window_forward();
