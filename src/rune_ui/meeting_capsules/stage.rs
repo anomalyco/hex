@@ -179,6 +179,9 @@ impl Stage {
         self.outline.map_or((0.0, 0.0), |[w, h, ..]| (w.v, h.v))
     }
 
+    /// The stage has never stepped: only the tests ask, and the shipped
+    /// callers read `travelling`.
+    #[cfg(test)]
     pub(super) fn resting(&self) -> bool {
         self.last.is_none()
     }
