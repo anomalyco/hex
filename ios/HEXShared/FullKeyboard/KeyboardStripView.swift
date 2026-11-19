@@ -183,7 +183,7 @@ final class KeyboardStripView: UIView {
         super.layoutSubviews()
         let midY = contentCenterY
         statusLabel.frame = CGRect(x: 16, y: max(0, midY - 12), width: max(0, bounds.width - 32), height: 24)
-        let chipH = min(28, max(24, bounds.height - 5))
+        let chipH = min(34, max(24, bounds.height - 10))
         let chipSize = undoChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
         undoChip.frame = CGRect(
             x: (bounds.width - chipSize.width) / 2,
@@ -270,24 +270,25 @@ final class KeyboardStripView: UIView {
         override func draw(_ rect: CGRect) {
             guard let suggestion else { return }
             let midY = bounds.height * 0.5
-            let pillH = min(26, max(22, bounds.height - 6))
+            // Like Apple's strip, the highlight fills its slot, 4 pt in from each edge.
+            let pillH = max(22, bounds.height - 8)
             let pillInset = CGRect(
-                x: 5,
+                x: 4,
                 y: max(0.5, midY - pillH / 2),
-                width: max(0, bounds.width - 10),
+                width: max(0, bounds.width - 8),
                 height: pillH
             )
             if isHighlighted {
                 palette.keyPressedFill.setFill()
-                UIBezierPath(roundedRect: pillInset, cornerRadius: 8).fill()
+                UIBezierPath(roundedRect: pillInset, cornerRadius: 10).fill()
             } else if suggestion.willAutoReplace {
                 palette.selectFill.setFill()
-                UIBezierPath(roundedRect: pillInset, cornerRadius: 8).fill()
+                UIBezierPath(roundedRect: pillInset, cornerRadius: 10).fill()
             }
 
             let isLiteral = suggestion.kind == .keepLiteral
             let font = UIFont.systemFont(
-                ofSize: 15.5,
+                ofSize: 17,
                 weight: suggestion.willAutoReplace ? .medium : .regular
             )
             let ink = isLiteral && !suggestion.willAutoReplace ? palette.textBase.withAlphaComponent(0.88) : palette.textBase
@@ -300,7 +301,7 @@ final class KeyboardStripView: UIView {
             var size = (drawString as NSString).size(withAttributes: attributes)
             if size.width > maxTextW {
                 let smallAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 13.5, weight: suggestion.willAutoReplace ? .medium : .regular),
+                    .font: UIFont.systemFont(ofSize: 15, weight: suggestion.willAutoReplace ? .medium : .regular),
                     .foregroundColor: ink,
                 ]
                 size = (drawString as NSString).size(withAttributes: smallAttrs)

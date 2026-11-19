@@ -80,7 +80,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// cramped against the keyboard's top edge (TestFlight build 4).
     static let portrait = KeyboardMetrics(
         side: 6.5, gap: 6, rowGap: 11, keyHeight: 45,
-        stripTop: 4, stripHeight: 36, stripBottom: 4,
+        stripTop: 0, stripHeight: 44, stripBottom: 0,
         keysTop: 0, keysBottom: 5, cornerRadius: 8.5
     )
 
@@ -88,7 +88,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// 39 pt strip area + 137 pt of keys (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 176 pt extension height.
     static let landscape = KeyboardMetrics(
         side: 4, gap: 6, rowGap: 8, keyHeight: 27.5,
-        stripTop: 3, stripHeight: 32, stripBottom: 4,
+        stripTop: 0, stripHeight: 39, stripBottom: 0,
         keysTop: 0, keysBottom: 3, cornerRadius: 7.5
     )
 
