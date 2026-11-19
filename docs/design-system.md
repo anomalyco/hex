@@ -77,7 +77,7 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 | A few exclusive choices / a dropdown | `segmented`, `select` |
 | A value whose choices open in a sheet, not a menu | `sheet_button` (the value and a trailing chevron) |
 | Main, other, and destructive actions | `button(…, ButtonKind::{Primary, Secondary, Danger}, …)`; inside a row: `small_button`; icon only (with an accessible label): `icon_button` |
-| How a modal enters and leaves | `modal_transition` on the surface (scale 0.96 and fade), `modal_scrim_transition` on its scrim |
+| How a modal enters and leaves | `modal_layers` builds its scrim and surface with `modal_transition` on the surface (scale 0.96 and fade) and `modal_scrim_transition` on its scrim; the scrim holds the modal, so a press outside closes on release, as Done does |
 | Shortcut keycaps | `keycaps` (Small keys in a recessed tray as tall as a recorder); one live key that sinks when pressed: `keycap` inside `key_tray`; the recorder is `settings::hotkey_control` |
 | Status (never clickable) | `tone_tag`; a live or recorded state: `status_dot` |
 | Short message under a control | `note` |

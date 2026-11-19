@@ -19,7 +19,7 @@ use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 use self::hud::Hud;
 pub(crate) use self::hud::Preview;
 use super::Ui;
-use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
+use super::controls::{ButtonKind, Paint, button, modal_layers};
 use super::lists::{list_row, source_list};
 use super::platform::Os;
 use crate::app_settings::IndicatorPosition;
@@ -252,25 +252,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("sound-sets-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("sound-sets-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row's button that opened it.
-            .child(panel.modal(true, close)),
-    ])
+    Some(modal_layers(
+        p,
+        "sound-sets-scrim",
+        "sound-sets-layer",
+        panel,
+        close,
+    ))
 }
 
 fn play_button(p: Paint, set: SoundSet, sounding: bool) -> El {

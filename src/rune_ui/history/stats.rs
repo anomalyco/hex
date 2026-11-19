@@ -8,9 +8,7 @@ use rune::{Align, Cx, El, col, el, row, text};
 use rune_kit::Progress;
 
 use super::super::Ui;
-use super::super::controls::{
-    ButtonKind, Paint, STATS_NUMBER, button, modal_scrim_transition, modal_transition,
-};
+use super::super::controls::{ButtonKind, Paint, STATS_NUMBER, button, modal_layers};
 use super::super::lists::{inline_slider, section_label};
 use super::super::meetings::length;
 use crate::desktop::i18n::numbers;
@@ -159,25 +157,13 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("history-stats-scrim")
-            .fill(c.scrim)
-            .on_press(close_stats)
-            .transition(modal_scrim_transition(p)),
-        layer("history-stats-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the Stats button that opened it.
-            .child(panel.modal(true, close_stats)),
-    ])
+    Some(modal_layers(
+        p,
+        "history-stats-scrim",
+        "history-stats-layer",
+        panel,
+        close_stats,
+    ))
 }
 
 /// Closes the stats dialog, from its button, Escape, or the scrim.

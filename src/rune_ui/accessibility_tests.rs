@@ -265,7 +265,9 @@ fn choices_name_what_they_choose_and_read_their_value() {
 }
 
 /// The model picker is a dialog named by its title, the only part of the
-/// window a screen reader reaches while it is open.
+/// window a screen reader reaches while it is open. The scrim behind it is
+/// the runtime's modal element (role none, so unspoken): it takes a press
+/// outside, and the dialog keeps its name and role.
 #[test]
 fn the_model_picker_is_a_named_modal_dialog() {
     let mut rt = runtime("portal");
@@ -275,8 +277,12 @@ fn the_model_picker_is_a_named_modal_dialog() {
     let picker = node(&rt, "transcription-picker");
     assert_eq!(picker["role"], "dialog");
     assert!(!name(&picker).is_empty());
-    assert!(states(&picker).contains(&"modal"), "{picker}");
     let tree = rt.accessibility_json();
+    let dialogs = nodes(&tree)
+        .into_iter()
+        .filter(|(_, node)| node["role"] == "dialog")
+        .count();
+    assert_eq!(dialogs, 1, "the picker is the tree's one dialog: {tree}");
     assert!(
         !nodes(&tree)
             .iter()

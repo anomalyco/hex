@@ -2896,6 +2896,89 @@ fn the_vocabulary_row_opens_its_sheet() {
     assert!(!rt.state.vocabulary.open);
 }
 
+/// An outside press closes the sheet on release, as Done does, and its exit
+/// plays even on the first frame after the window was away: the press is the
+/// scrim's own, so a host settle landing that frame can't drop the exit.
+#[test]
+fn an_outside_press_closes_the_vocabulary_sheet_on_release() {
+    /// Whether a layer is exiting, and its opacity.
+    fn layer(rt: &Runtime<Ui>, key: &str) -> Option<(bool, f32)> {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key))
+            .map(|e| (e.exiting, e.opacity))
+    }
+    fn assert_closing(rt: &Runtime<Ui>, settled: bool) {
+        for key in ["vocabulary-scrim", "vocabulary-layer"] {
+            let (exiting, opacity) = layer(rt, key).unwrap_or_else(|| panic!("{key} left"));
+            assert!(
+                exiting,
+                "settled {settled}: {key} is still at rest after the release"
+            );
+            assert!(
+                opacity > 0.0 && opacity < 1.0,
+                "settled {settled}: {key} opacity {opacity}"
+            );
+        }
+    }
+
+    for settled in [false, true] {
+        let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
+        let bounds = element(&rt, "vocabulary-layer").rect;
+        let (x, y) = (bounds[0] + 8.0, bounds[1] + bounds[3] / 2.0);
+        if settled {
+            rt.settle_all();
+        }
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        assert!(
+            rt.state.vocabulary.open,
+            "settled {settled}: the press closed the sheet"
+        );
+        assert!(
+            rt.find("vocabulary-layer").is_some(),
+            "settled {settled}: the layers left on the press"
+        );
+        for key in ["vocabulary-scrim", "vocabulary-layer"] {
+            assert_eq!(
+                layer(&rt, key).map(|layer| layer.0),
+                Some(false),
+                "settled {settled}: {key} exits on the press"
+            );
+        }
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert!(
+            !rt.state.vocabulary.open,
+            "settled {settled}: the release left the sheet open"
+        );
+        assert_closing(&rt, settled);
+        settle(&mut rt);
+        assert!(
+            rt.find("vocabulary-scrim").is_none(),
+            "settled {settled}: the scrim stayed"
+        );
+        assert!(
+            rt.find("vocabulary-layer").is_none(),
+            "settled {settled}: the layer stayed"
+        );
+    }
+
+    // A press over the sidebar reaches the scrim, never the nav row behind it.
+    let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
+    let pane = rt.state.pane;
+    let (x, y) = rt.find("nav-output").expect("the Output nav row");
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(
+        rt.state.pane, pane,
+        "the click behind the sheet switched panes"
+    );
+    assert!(!rt.state.vocabulary.open);
+}
+
 /// Add term on a list longer than the sheet scrolls the new row into view.
 #[test]
 fn add_term_scrolls_the_new_row_into_view() {

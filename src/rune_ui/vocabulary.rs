@@ -8,9 +8,7 @@ use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, 
 use rune_kit::{ControlSize, TextInput};
 
 use super::Ui;
-use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
-};
+use super::controls::{ButtonKind, DESCRIPTION, Paint, button, modal_layers, note};
 use super::lists::remove_button;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::dictation::vocabulary::{self, VocabularyEntry};
@@ -388,25 +386,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("vocabulary-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("vocabulary-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row's button that opened it.
-            .child(panel.modal(true, close)),
-    ])
+    Some(modal_layers(
+        p,
+        "vocabulary-scrim",
+        "vocabulary-layer",
+        panel,
+        close,
+    ))
 }
 
 /// A few terms, one with spellings, with the sheet open.

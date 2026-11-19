@@ -14,12 +14,11 @@ mod compare;
 mod facts;
 mod list;
 
-use rune::{El, col, el, row, text};
+use rune::{El, col, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::controls::{
-    ButtonKind, Paint, button, modal_scrim_transition, modal_transition, pressable_row, row_switch,
-    segmented,
+    ButtonKind, Paint, button, modal_layers, pressable_row, row_switch, segmented,
 };
 use super::lists::{Tone, error_panel};
 use super::{Request, Ui};
@@ -589,25 +588,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("picker-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(modal_scrim_transition(p)),
-        layer("picker-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the control that opened it.
-            .child(panel.modal(true, close)),
-    ])
+    Some(modal_layers(
+        p,
+        "picker-scrim",
+        "picker-layer",
+        panel,
+        close,
+    ))
 }
 
 /// `model`'s preparation label and progress while the service prepares it.

@@ -11,11 +11,12 @@
 use std::cell::Cell;
 use std::time::Duration;
 
-use rune::{Color, Cx, El, LineCap, Shape, SpringPair, Transition, Tx, canvas, col, el, row, text};
+use rune::{Color, Cx, El, LineCap, Shape, Tx, canvas, col, el, row, text};
 
 use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, KEY_GAP, KeySize, Paint, TRAY_PADDING, button, key_tray, keycap,
+    modal_layers,
 };
 use super::shortcut_mode::{Trigger, pick};
 use crate::desktop::i18n::tr;
@@ -276,25 +277,13 @@ pub(super) fn modal(ui: &Ui, cx: &Cx<Ui>, p: Paint) -> Option<[El; 2]> {
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("explainer-scrim")
-            .fill(c.scrim)
-            .on_press(close)
-            .transition(Transition::opacity().springs(overlay_springs(p))),
-        layer("explainer-layer")
-            .center()
-            .transition(panel_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the row that opened it.
-            .child(panel.modal(true, close)),
-    ])
+    Some(modal_layers(
+        p,
+        "explainer-scrim",
+        "explainer-layer",
+        panel,
+        close,
+    ))
 }
 
 /// The key tray's width until layout measures it: a one-glyph legend is
@@ -317,15 +306,6 @@ fn panel_width(keys: f32, window: Option<f32>) -> f32 {
     let wanted = option + 2.0 * PADDING;
     let room = window.map_or(f32::INFINITY, |window| window - 2.0 * WINDOW_MARGIN);
     wanted.min(room).max(MODAL_WIDTH)
-}
-
-/// How the panel enters and leaves: the same as the picker's.
-fn panel_transition(p: Paint) -> Transition {
-    super::controls::modal_transition(p)
-}
-
-fn overlay_springs(p: Paint) -> SpringPair {
-    SpringPair::new(p.k.motion.overlay, p.k.motion.overlay)
 }
 
 /// One trigger: its name and what it does beside its keys and lanes.

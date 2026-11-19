@@ -968,6 +968,41 @@ pub(super) fn modal_scrim_transition(p: Paint) -> Transition {
     Transition::opacity().springs(overlay_springs(p))
 }
 
+/// A modal's two layers, keyed `scrim_key` and `layer_key`: the scrim and the
+/// centered surface over it, each with its own exit transition, and `panel`
+/// as the layer's only child. The scrim holds the modal so it is part of the
+/// modal's own scope: an outside press reaches the scrim's own handler and
+/// closes on release, as the panel's Done button does, instead of the
+/// runtime dismissing it on the press before it.
+pub(super) fn modal_layers(
+    p: Paint,
+    scrim_key: &str,
+    layer_key: &str,
+    panel: El,
+    close: fn(&mut Ui),
+) -> [El; 2] {
+    let layer = |key: &str| {
+        el().key(key)
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+    };
+    [
+        layer(scrim_key)
+            .fill(p.k.c.scrim)
+            .on_press(close)
+            .transition(modal_scrim_transition(p))
+            .modal(true, close),
+        layer(layer_key)
+            .center()
+            .transition(modal_transition(p))
+            // Keys stay inside, Escape or a press outside closes, and focus
+            // returns to the control that opened it.
+            .child(panel),
+    ]
+}
+
 fn overlay_springs(p: Paint) -> SpringPair {
     SpringPair::new(p.k.motion.overlay, p.k.motion.overlay)
 }

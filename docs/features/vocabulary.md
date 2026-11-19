@@ -30,7 +30,9 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing
-├── Done, Escape, or a press outside -> Saves, drops blank rows, closes
+├── Done, Escape, or a press outside -> Saves, drops blank rows, closes; the
+│   press outside closes on release, as Done does, so the sheet plays its
+│   exit and the press never reaches a control behind the scrim
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
 │   that fit; inline danger note    // never drops the term
 └── Boost -> no control in the window: Normal (default) unless changed with
