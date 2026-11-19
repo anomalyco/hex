@@ -170,6 +170,10 @@ impl Backend {
                     .as_ref()
                     .map(|record| record.grants())
                     .unwrap_or_default(),
+                websites: record
+                    .as_ref()
+                    .map(|record| record.websites())
+                    .unwrap_or_default(),
             },
             settings,
         })

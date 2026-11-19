@@ -187,6 +187,11 @@ impl Runtime {
                     record.revoke(id);
                 }
             }
+            Request::Website { origin, action } => {
+                if let Some(record) = &self.record {
+                    record.website(&origin, action);
+                }
+            }
             Request::ReloadSettings => self.reload_settings(),
             Request::Desktop(_)
             | Request::CaptureShortcutFor(_)
@@ -391,6 +396,11 @@ impl Runtime {
                 .record
                 .as_ref()
                 .map(|record| record.grants())
+                .unwrap_or_default(),
+            websites: self
+                .record
+                .as_ref()
+                .map(|record| record.websites())
                 .unwrap_or_default(),
         }
     }

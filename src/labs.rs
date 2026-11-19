@@ -28,7 +28,7 @@
 //! that does it), not only where its UI shows.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{LazyLock, RwLock};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
 
@@ -179,6 +179,7 @@ impl Feature {
             Self::ApiProcessing => settings.labs.api_processing,
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::ApiBrowserAccess => settings.labs.api_browser_access,
+            Self::ConnectedApps => settings.labs.connected_apps,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::CalendarMenu => settings.labs.calendar_menu,
             Self::CalendarSelectAll => settings.labs.calendar_bulk_select,
@@ -264,6 +265,7 @@ impl Feature {
             &mut labs.api_processing,
             &mut labs.api_timestamps,
             &mut labs.api_browser_access,
+            &mut labs.connected_apps,
             &mut labs.speakers_only,
             &mut labs.calendar_menu,
             &mut labs.calendar_bulk_select,
@@ -357,6 +359,7 @@ impl Feature {
             Self::ApiProcessing => settings.labs.api_processing = on,
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::ApiBrowserAccess => settings.labs.api_browser_access = on,
+            Self::ConnectedApps => settings.labs.connected_apps = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::CalendarMenu => settings.labs.calendar_menu = on,
             Self::CalendarSelectAll => settings.labs.calendar_bulk_select = on,
@@ -522,6 +525,15 @@ static COPY_DICTATION_AUDIO: AtomicBool = AtomicBool::new(false);
 /// like [`PRINT_START`], written by [`state`] and [`apply`].
 static API_BROWSER_ACCESS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Connected apps' switch, and its Allow websites to use Hex, set
+/// beside [`STATE`] like [`PRINT_START`], written by [`state`] and [`apply`].
+static CONNECTED_APPS: AtomicBool = AtomicBool::new(false);
+static CONNECTED_APPS_WEBSITES: AtomicBool = AtomicBool::new(false);
+
+/// What a change to Labs › Connected apps calls, so a pending ask and a live
+/// recording the switches no longer allow end at once (`local_api`).
+static CONNECTED_APPS_WATCHERS: Mutex<Vec<Box<dyn Fn() + Send>>> = Mutex::new(Vec::new());
+
 /// Labs › Smaller model files' switch, set beside [`STATE`] like
 /// [`PRINT_START`], written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
@@ -595,6 +607,7 @@ fn state() -> u64 {
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
+                store_connected_apps(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
                 store_stop_phrase_text(&saved.stop_phrase_text);
             }
@@ -742,6 +755,32 @@ fn store_api_browser_access(settings: &LabsSettings) {
     API_BROWSER_ACCESS.store(enabled, Ordering::Release);
 }
 
+/// Whether `settings` turn on Labs › Connected apps in this build, before
+/// its managed lock; the state word has no bit for it.
+fn connected_apps_enabled(settings: &LabsSettings) -> bool {
+    settings.connected_apps
+        && Feature::ConnectedApps.shipped()
+        && Feature::ConnectedApps.managed().is_none()
+}
+
+/// Keeps Connected apps' two switches, and tells its watchers when either
+/// changed. Websites read on only while the lab is.
+fn store_connected_apps(settings: &LabsSettings) -> bool {
+    let enabled = connected_apps_enabled(settings);
+    let websites = enabled && settings.connected_apps_websites;
+    let was = CONNECTED_APPS.swap(enabled, Ordering::AcqRel);
+    let websites_were = CONNECTED_APPS_WEBSITES.swap(websites, Ordering::AcqRel);
+    was != enabled || websites_were != websites
+}
+
+/// Calls `watcher` after every change to Labs › Connected apps' switches.
+pub(crate) fn watch_connected_apps(watcher: impl Fn() + Send + 'static) {
+    CONNECTED_APPS_WATCHERS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .push(Box::new(watcher));
+}
+
 /// Records the trigger phrase matching reads; an invalid value never turns
 /// matching off.
 fn store_voice_prompt_phrase(phrase: &str) {
@@ -799,6 +838,15 @@ pub(crate) fn apply(settings: &LabsSettings) {
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
+    if store_connected_apps(settings) {
+        for watcher in CONNECTED_APPS_WATCHERS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+        {
+            watcher();
+        }
+    }
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     // Labs › Pause from menu bar: turning it off resumes at once, without

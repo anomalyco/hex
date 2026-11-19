@@ -6,6 +6,10 @@
 //! team. A claimed client name is never stored. Each request re-verifies its
 //! scope before matching an entry, so the file cannot make Hex trust a name
 //! no code signature or `Origin` supports.
+//!
+//! The same file keeps Labs › Connected apps' website lists: the origins the
+//! person allowed to ask, the ones that tried without being allowed (origin
+//! and last attempt time only), and the ones the person blocked.
 
 use std::collections::HashSet;
 use std::fs;
@@ -20,6 +24,11 @@ use super::consent::{Intent, Recipient};
 /// The name of the permissions file in Hex's support folder.
 const FILE: &str = "local-consent.json";
 const VERSION: u32 = 1;
+/// How many websites that tried to contact Hex are kept; the oldest attempt
+/// goes first.
+pub(crate) const TRIED_LIMIT: usize = 20;
+/// A website that keeps trying rewrites its time on disk at most this often.
+const TRIED_RESAVE_MS: u64 = 60_000;
 
 /// One capability the person can allow once or always.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -126,12 +135,57 @@ struct Document {
     version: u32,
     #[serde(default)]
     permissions: Vec<Entry>,
+    #[serde(default)]
+    websites: Websites,
+}
+
+/// Labs › Connected apps' website lists. An origin is in at most one.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Websites {
+    /// May ask Hex's permission window, newest first.
+    #[serde(default)]
+    pub(crate) allowed: Vec<String>,
+    /// Tried to ask without being allowed, most recent attempt first.
+    #[serde(default)]
+    pub(crate) tried: Vec<Tried>,
+    /// Never ask and are never listed as trying again, newest first.
+    #[serde(default)]
+    pub(crate) blocked: Vec<String>,
+}
+
+/// One website that tried to contact Hex: its origin and when it last did.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Tried {
+    pub(crate) origin: String,
+    pub(crate) at_ms: u64,
+}
+
+/// Where an origin stands in Connected apps' website lists.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WebsiteStatus {
+    Allowed,
+    Blocked,
+    Unknown,
+}
+
+/// What the window does with a listed website.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WebsiteAction {
+    /// Lets it ask on its next request (from tried, or from blocked).
+    Allow,
+    /// It never asks again and is never listed as trying.
+    Block,
+    /// Takes it off Allowed or Blocked; it is listed again if it tries.
+    Forget,
 }
 
 /// The person's Always Allow choices, and the file they are saved in.
 pub(crate) struct Permissions {
     path: Option<PathBuf>,
     entries: Mutex<Vec<Entry>>,
+    websites: Mutex<Websites>,
     next_id: Mutex<u64>,
 }
 
@@ -147,15 +201,93 @@ impl Permissions {
     /// A store at `path`; `None` keeps permissions in memory only, which
     /// makes Always Allow fail rather than silently becoming Once.
     pub(crate) fn new(path: Option<PathBuf>) -> Arc<Self> {
-        let (entries, next_id) = match path.as_deref() {
+        let (entries, websites, next_id) = match path.as_deref() {
             Some(path) => load(path),
-            None => (Vec::new(), 1),
+            None => (Vec::new(), Websites::default(), 1),
         };
         Arc::new(Self {
             path,
             entries: Mutex::new(entries),
+            websites: Mutex::new(websites),
             next_id: Mutex::new(next_id),
         })
+    }
+
+    /// Where `origin` stands in the website lists.
+    pub(crate) fn website(&self, origin: &str) -> WebsiteStatus {
+        let websites = lock(&self.websites);
+        if websites.allowed.iter().any(|allowed| allowed == origin) {
+            WebsiteStatus::Allowed
+        } else if websites.blocked.iter().any(|blocked| blocked == origin) {
+            WebsiteStatus::Blocked
+        } else {
+            WebsiteStatus::Unknown
+        }
+    }
+
+    /// The website lists, as the window shows them.
+    pub(crate) fn websites(&self) -> Websites {
+        lock(&self.websites).clone()
+    }
+
+    /// Lists `origin` as having tried to contact Hex now: once, at the top,
+    /// with the oldest dropped past [`TRIED_LIMIT`]. An allowed or blocked
+    /// origin is never listed.
+    pub(crate) fn website_tried(&self, origin: &str) {
+        self.website_tried_at(origin, crate::desktop::events::now_ms());
+    }
+
+    pub(crate) fn website_tried_at(&self, origin: &str, at_ms: u64) {
+        let entries = lock(&self.entries);
+        let mut websites = lock(&self.websites);
+        if websites.allowed.iter().any(|o| o == origin)
+            || websites.blocked.iter().any(|o| o == origin)
+        {
+            return;
+        }
+        let previous = websites
+            .tried
+            .iter()
+            .position(|tried| tried.origin == origin)
+            .map(|index| websites.tried.remove(index));
+        websites.tried.insert(
+            0,
+            Tried {
+                origin: origin.to_owned(),
+                at_ms,
+            },
+        );
+        websites.tried.truncate(TRIED_LIMIT);
+        // A page that keeps trying moves its time in memory at once and on
+        // disk at most once a minute.
+        if previous.is_some_and(|previous| at_ms.saturating_sub(previous.at_ms) < TRIED_RESAVE_MS) {
+            return;
+        }
+        if let Err(error) = self.save(&entries, &websites) {
+            tracing::warn!(%error, "could not save a website that tried to contact Hex");
+        }
+    }
+
+    /// Moves `origin` between the website lists. False when it could not be
+    /// saved, which leaves the lists as they were.
+    pub(crate) fn website_action(&self, origin: &str, action: WebsiteAction) -> bool {
+        let entries = lock(&self.entries);
+        let mut websites = lock(&self.websites);
+        let mut updated = websites.clone();
+        updated.tried.retain(|tried| tried.origin != origin);
+        updated.allowed.retain(|allowed| allowed != origin);
+        updated.blocked.retain(|blocked| blocked != origin);
+        match action {
+            WebsiteAction::Allow => updated.allowed.insert(0, origin.to_owned()),
+            WebsiteAction::Block => updated.blocked.insert(0, origin.to_owned()),
+            WebsiteAction::Forget => {}
+        }
+        if let Err(error) = self.save(&entries, &updated) {
+            tracing::error!(%error, "could not save a website change");
+            return false;
+        }
+        *websites = updated;
+        true
     }
 
     /// Whether this exact verified recipient already has `intent` allowed
@@ -236,7 +368,7 @@ impl Permissions {
             capability,
             scope,
         });
-        self.save(&updated)?;
+        self.save(&updated, &lock(&self.websites))?;
         *entries = updated;
         Ok((id, proof))
     }
@@ -260,7 +392,7 @@ impl Permissions {
         let index = entries.iter().position(|entry| entry.id == id)?;
         let mut updated = entries.clone();
         let removed = updated.remove(index);
-        if let Err(error) = self.save(&updated) {
+        if let Err(error) = self.save(&updated, &lock(&self.websites)) {
             tracing::error!(%error, "could not save a revoked permission");
             return None;
         }
@@ -276,13 +408,14 @@ impl Permissions {
         lock(&self.entries).iter().any(|e| e.id == id)
     }
 
-    fn save(&self, entries: &[Entry]) -> Result<(), String> {
+    fn save(&self, entries: &[Entry], websites: &Websites) -> Result<(), String> {
         let Some(path) = self.path.as_deref() else {
             return Err("Hex has no permission file to save into".into());
         };
         let document = Document {
             version: VERSION,
             permissions: entries.to_vec(),
+            websites: websites.clone(),
         };
         write_private(path, &document)
     }
@@ -290,24 +423,25 @@ impl Permissions {
 
 /// Reads the file, ignoring entries that no longer parse individually and a
 /// whole file that is unreadable or corrupt.
-fn load(path: &Path) -> (Vec<Entry>, u64) {
+fn load(path: &Path) -> (Vec<Entry>, Websites, u64) {
+    let nothing = || (Vec::new(), Websites::default(), 1);
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), 1),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return nothing(),
         Err(error) => {
             tracing::warn!(%error, "could not read saved permissions");
-            return (Vec::new(), 1);
+            return nothing();
         }
     };
     let document = match serde_json::from_slice::<Document>(&bytes) {
         Ok(document) if document.version == VERSION => document,
         Ok(_) => {
             tracing::warn!("saved permissions have an unknown version");
-            return (Vec::new(), 1);
+            return nothing();
         }
         Err(error) => {
             tracing::warn!(%error, "saved permissions are not readable JSON");
-            return (Vec::new(), 1);
+            return nothing();
         }
     };
     // Duplicate capabilities are harmless but confusing in the window.
@@ -320,7 +454,33 @@ fn load(path: &Path) -> (Vec<Entry>, u64) {
             entries.push(entry);
         }
     }
-    (entries, next)
+    (entries, websites_from(document.websites), next)
+}
+
+/// The saved website lists, keeping only exact origins, each in one list,
+/// and at most [`TRIED_LIMIT`] tries.
+fn websites_from(saved: Websites) -> Websites {
+    let exact = |origin: &String| {
+        crate::app_settings::normalize_browser_origin(origin).as_deref() == Some(origin.as_str())
+    };
+    let mut seen = HashSet::new();
+    let mut websites = Websites::default();
+    for origin in saved.blocked.into_iter().filter(exact) {
+        if seen.insert(origin.clone()) {
+            websites.blocked.push(origin);
+        }
+    }
+    for origin in saved.allowed.into_iter().filter(exact) {
+        if seen.insert(origin.clone()) {
+            websites.allowed.push(origin);
+        }
+    }
+    for tried in saved.tried.into_iter().filter(|tried| exact(&tried.origin)) {
+        if websites.tried.len() < TRIED_LIMIT && seen.insert(tried.origin.clone()) {
+            websites.tried.push(tried);
+        }
+    }
+    websites
 }
 
 /// Writes JSON through a mode-0600 temporary file and renames it, so a crash
@@ -418,6 +578,88 @@ mod tests {
 
         let reloaded = Permissions::new(Some(path.clone()));
         assert!(!reloaded.allows(Intent::Record, &app()));
+        let _ = fs::remove_file(path);
+    }
+
+    /// A website that keeps trying is listed once, at the top, with its
+    /// latest time; past the limit the oldest attempt goes.
+    #[test]
+    fn websites_that_tried_are_listed_once_and_bounded() {
+        let store = Permissions::new(Some(temp_path()));
+        for index in 0..TRIED_LIMIT + 5 {
+            store.website_tried_at(&format!("https://site{index}.example"), index as u64);
+        }
+        store.website_tried_at("https://site10.example", 1_000);
+        let tried = store.websites().tried;
+        assert_eq!(tried.len(), TRIED_LIMIT);
+        assert_eq!(tried[0].origin, "https://site10.example");
+        assert_eq!(tried[0].at_ms, 1_000);
+        assert_eq!(
+            tried
+                .iter()
+                .filter(|t| t.origin == "https://site10.example")
+                .count(),
+            1
+        );
+        assert!(!tried.iter().any(|t| t.origin == "https://site0.example"));
+        assert_eq!(
+            tried[1].origin,
+            format!("https://site{}.example", TRIED_LIMIT + 4)
+        );
+    }
+
+    #[test]
+    fn website_lists_survive_a_reload_and_keep_each_origin_in_one() {
+        let path = temp_path();
+        let store = Permissions::new(Some(path.clone()));
+        store.website_tried_at("https://tried.example", 7);
+        store.website_tried_at("https://allowed.example", 8);
+        store.website_tried_at("https://blocked.example", 9);
+        assert!(store.website_action("https://allowed.example", WebsiteAction::Allow));
+        assert!(store.website_action("https://blocked.example", WebsiteAction::Block));
+        // Allowed and blocked sites are never listed as trying.
+        store.website_tried_at("https://blocked.example", 99_999);
+        store.website_tried_at("https://allowed.example", 99_999);
+        store.remember(Intent::Record, &app()).unwrap();
+
+        let reloaded = Permissions::new(Some(path.clone()));
+        let websites = reloaded.websites();
+        assert_eq!(websites.allowed, ["https://allowed.example"]);
+        assert_eq!(websites.blocked, ["https://blocked.example"]);
+        assert_eq!(
+            websites.tried,
+            [Tried {
+                origin: "https://tried.example".into(),
+                at_ms: 7
+            }]
+        );
+        assert_eq!(
+            reloaded.website("https://allowed.example"),
+            WebsiteStatus::Allowed
+        );
+        assert_eq!(
+            reloaded.website("https://blocked.example"),
+            WebsiteStatus::Blocked
+        );
+        assert_eq!(
+            reloaded.website("https://tried.example"),
+            WebsiteStatus::Unknown
+        );
+        assert!(
+            reloaded.allows(Intent::Record, &app()),
+            "grants are kept beside them"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_file_without_website_lists_still_loads() {
+        let path = temp_path();
+        fs::write(&path, br#"{"version":1,"permissions":[]}"#).unwrap();
+        assert_eq!(
+            Permissions::new(Some(path.clone())).websites(),
+            Websites::default()
+        );
         let _ = fs::remove_file(path);
     }
 

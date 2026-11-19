@@ -15,6 +15,7 @@ use crate::app_settings::AppSettings;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 use cors::{Cors, CorsOrigin};
 
+mod access;
 mod connect;
 mod consent;
 mod control;
@@ -32,10 +33,13 @@ mod streams;
 pub(crate) mod timestamps;
 mod transcriptions;
 
+pub(crate) use access::{Access, AppConsent};
 pub(crate) use connect::Connect;
 pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub(crate) use permissions::Permissions;
 pub(crate) use permissions::View as PermissionView;
-pub(crate) use permissions::{Capability as PermissionCapability, Permissions};
+pub(crate) use permissions::{Capability as PermissionCapability, WebsiteAction, Websites};
 pub(crate) use record::View as RecordView;
 pub(crate) use record::{
     GrantView as RecordGrant, Phase as RecordPhase, Sessions as RecordSessions,
@@ -56,30 +60,10 @@ use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
 
 /// The recording slice's app-facing names.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use record::app_sessions as record_sessions;
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use record::native_socket_path;
-
-/// The Linux and Windows apps' two asks, browser connect and consented
-/// recording, answered in the window through `gate`; native clients have no
-/// channel there, so only web pages ask.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-pub(crate) struct AppConsent {
-    connect: Connect,
-    /// The window's Stop, Cancel, and Revoke reach these.
-    pub(crate) record: Arc<RecordSessions>,
-}
-
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-impl AppConsent {
-    pub(crate) fn new(gate: Arc<dyn ConsentGate>, control: dictation::Control) -> Self {
-        let permissions = Permissions::app();
-        Self {
-            record: record_sessions(gate.clone(), control, permissions.clone()),
-            connect: Connect::new(crate::labs::api_browser_origins, Some(gate), permissions),
-        }
-    }
-}
 
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
@@ -155,7 +139,10 @@ struct HttpContext {
     processing: processing::Processing,
     timestamps: timestamps::Timestamps,
     cors: Cors,
-    /// Browser connect (Labs › Browser access to the local API): a web page's
+    /// Labs › Connected apps, when this API serves its asks: the consent
+    /// routes' own CORS.
+    connected: Option<Access>,
+    /// Browser connect (Labs › Connected apps): a web page's
     /// one-transcription ask. Absent without a window to ask.
     connect: Option<connect::Connect>,
     /// Consented one-recording sessions; absent without a capture loop.
@@ -361,6 +348,11 @@ impl LocalApi {
             processing: options.processing,
             timestamps: options.timestamps,
             cors: options.cors,
+            connected: options
+                .connect
+                .as_ref()
+                .map(connect::Connect::access)
+                .or_else(|| options.record.as_ref().map(|record| record.access())),
             connect: options.connect,
             record: options.record,
         };
@@ -792,15 +784,27 @@ fn handle_request(
     request: HttpRequest,
     context: &HttpContext,
 ) -> (RequestAction, Option<CorsOrigin>) {
-    let cors = context.cors.allowed(&request);
-    if request.method == "OPTIONS"
-        && let Some(cors) = cors.clone()
-    {
-        return (
-            RequestAction::Respond(HttpResponse::preflight(cors.private_network)),
-            Some(cors),
-        );
+    // Labs › Browser access lists origins for the whole bearer-token API;
+    // Labs › Connected apps answers any website on its own routes only.
+    let browser = context.cors.allowed(&request);
+    let connected = context.connected.and_then(|access| access.cors(&request));
+    if request.method == "OPTIONS" {
+        // A consent route's preflight names that route's own headers, even
+        // for an origin Browser access also lists.
+        if let Some(cors) = connected {
+            return (
+                RequestAction::Respond(HttpResponse::consent_preflight(cors.private_network)),
+                Some(cors),
+            );
+        }
+        if let Some(cors) = browser {
+            return (
+                RequestAction::Respond(HttpResponse::preflight(cors.private_network)),
+                Some(cors),
+            );
+        }
     }
+    let cors = browser.or(connected);
     (route(request, context), cors)
 }
 
@@ -820,7 +824,7 @@ fn route(request: HttpRequest, context: &HttpContext) -> RequestAction {
         }
         connect::Intercept::Pass(request) => request,
     };
-    // One consented recording: a listed page asks without the bearer token,
+    // One consented recording: an allowed page asks without the bearer token,
     // and its session token reaches only the record action it names.
     let request = match record::route(request, context) {
         record::Routed::Record(request) => return RequestAction::Record(request),
@@ -1491,6 +1495,8 @@ mod tests {
     use super::*;
     use crate::dictation::service::DictationControl;
 
+    mod connected_apps;
+
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     /// How long a test waits on another thread before failing instead of hanging.
     const TEST_WAIT: Duration = Duration::from_secs(5);
@@ -1530,7 +1536,7 @@ mod tests {
         for header in [
             "Access-Control-Allow-Origin: https://app.example\r\n",
             "Access-Control-Allow-Methods: GET, POST\r\n",
-            "Access-Control-Allow-Headers: Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token, X-Hex-Connect-Token, X-Hex-Record-Grant, X-Hex-Record-Token\r\n",
+            "Access-Control-Allow-Headers: Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token\r\n",
             "Access-Control-Max-Age: 600\r\n",
             "Access-Control-Allow-Private-Network: true\r\n",
             "Vary: Origin\r\n",
@@ -2379,6 +2385,7 @@ mod tests {
             processing: Processing::default(),
             timestamps: Timestamps::default(),
             cors: Cors::default(),
+            connected: None,
             connect: None,
             record: None,
         };
@@ -2557,6 +2564,23 @@ mod tests {
         .unwrap()
     }
 
+    fn on() -> bool {
+        true
+    }
+
+    /// Labs › Connected apps on, websites included.
+    fn connected() -> Access {
+        Access::gated(on, on)
+    }
+
+    /// `store` with `origins` allowed to ask in Labs › Connected apps.
+    fn allowing(store: Arc<Permissions>, origins: &[String]) -> Arc<Permissions> {
+        for origin in origins {
+            assert!(store.website_action(origin, WebsiteAction::Allow));
+        }
+        store
+    }
+
     fn app_origin() -> Vec<String> {
         vec!["https://app.example".to_owned()]
     }
@@ -2605,26 +2629,28 @@ mod tests {
     ) -> LocalApi {
         let directory = temp_directory();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        // Labs › Connected apps on, with `origins` allowed to ask; Labs ›
+        // Browser access lists nothing.
+        let store = allowing(
+            Permissions::new(Some(directory.join("permissions.json"))),
+            &origins(),
+        );
         let connect = match timings {
             Some((code, token, wait, cooldown)) => connect::Connect::with_timings(
-                origins,
+                connected(),
                 Some(gate),
-                Permissions::new(Some(directory.join("permissions.json"))),
+                store,
                 code,
                 token,
                 wait,
                 cooldown,
             ),
-            None => connect::Connect::new(
-                origins,
-                Some(gate),
-                Permissions::new(Some(directory.join("permissions.json"))),
-            ),
+            None => connect::Connect::new(connected(), Some(gate), store),
         };
         start_unpublished(
             events,
             LocalApiOptions {
-                cors: Cors::gated(origins),
+                cors: Cors::gated(Vec::new),
                 connect: Some(connect),
                 stream_engine: Some(crate::transcription::stream::tests::fake_source()),
                 ..LocalApiOptions::default()
@@ -2795,9 +2821,11 @@ mod tests {
             connect::AUTHORIZE_PATH,
             &body,
         );
+        // Labs › Connected apps lists it instead, and answers CORS so the
+        // page can read why.
         assert!(other.starts_with("HTTP/1.1 403"), "{other}");
-        assert_eq!(body_code(&other), "origin-not-allowed");
-        assert!(!other.contains("Access-Control-Allow-Origin"));
+        assert_eq!(body_code(&other), "website-not-allowed");
+        assert!(other.contains("Access-Control-Allow-Origin: https://other.example"));
 
         // No Origin at all is not a browser page Hex knows.
         let missing = raw_request(
@@ -3206,10 +3234,6 @@ mod tests {
         }
     }
 
-    fn always_enabled() -> bool {
-        true
-    }
-
     fn record_timings() -> record::Timings {
         record::Timings {
             code: Duration::from_secs(60),
@@ -3228,17 +3252,19 @@ mod tests {
         let directory = temp_directory();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
         let sessions = Arc::new(record::Sessions::with_timings(
-            app_origin,
-            always_enabled,
+            connected(),
             Some(gate),
             recording,
-            Permissions::new(Some(directory.join("permissions.json"))),
+            allowing(
+                Permissions::new(Some(directory.join("permissions.json"))),
+                &app_origin(),
+            ),
             timings,
         ));
         let api = start_unpublished(
             events,
             LocalApiOptions {
-                cors: Cors::gated(app_origin),
+                cors: Cors::gated(Vec::new),
                 record: Some(sessions.clone()),
                 stream_engine: Some(crate::transcription::stream::tests::fake_source()),
                 ..LocalApiOptions::default()
@@ -3393,10 +3419,9 @@ mod tests {
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("saved");
         let start = || {
-            let store = Permissions::new(Some(path.clone()));
+            let store = allowing(Permissions::new(Some(path.clone())), &app_origin());
             let sessions = Arc::new(record::Sessions::with_timings(
-                app_origin,
-                always_enabled,
+                connected(),
                 Some(gate.clone()),
                 recording.clone(),
                 store.clone(),
@@ -3405,8 +3430,8 @@ mod tests {
             let api = start_unpublished(
                 EventLog::create(&temp_directory().join("events.ndjson")).unwrap(),
                 LocalApiOptions {
-                    cors: Cors::gated(app_origin),
-                    connect: Some(Connect::new(app_origin, Some(gate.clone()), store)),
+                    cors: Cors::gated(Vec::new),
+                    connect: Some(Connect::new(connected(), Some(gate.clone()), store)),
                     record: Some(sessions.clone()),
                     ..LocalApiOptions::default()
                 },
@@ -4185,11 +4210,13 @@ mod tests {
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("native words");
         let sessions = Arc::new(record::Sessions::with_timings(
-            app_origin,
-            always_enabled,
+            connected(),
             Some(gate),
             recording,
-            Permissions::new(Some(temp_directory().join("permissions.json"))),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
             record_timings(),
         ));
         let identity = record::Identity {
@@ -4262,11 +4289,13 @@ mod tests {
     fn a_native_client_name_never_becomes_its_identity() {
         let gate = ScriptedGate::new(Answer::Always);
         let sessions = Arc::new(record::Sessions::with_timings(
-            app_origin,
-            always_enabled,
+            connected(),
             Some(gate.clone()),
             FakeRecording::with_text("x"),
-            Permissions::new(Some(temp_directory().join("permissions.json"))),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
             record_timings(),
         ));
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
@@ -4312,18 +4341,20 @@ mod tests {
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("native words");
         let sessions = Arc::new(record::Sessions::with_timings(
-            app_origin,
-            always_enabled,
+            connected(),
             Some(gate.clone()),
             recording.clone(),
-            Permissions::new(Some(temp_directory().join("permissions.json"))),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
             record_timings(),
         ));
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
         let api = start_unpublished(
             events,
             LocalApiOptions {
-                cors: Cors::gated(app_origin),
+                cors: Cors::gated(Vec::new),
                 record: Some(sessions),
                 native_socket: Some(socket.clone()),
                 stream_engine: Some(crate::transcription::stream::tests::fake_source()),
@@ -4432,11 +4463,13 @@ mod tests {
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("window words");
         let sessions = Arc::new(record::Sessions::with_timings(
-            app_origin,
-            always_enabled,
+            connected(),
             Some(gate),
             recording.clone(),
-            Permissions::new(Some(temp_directory().join("permissions.json"))),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
             record_timings(),
         ));
         let origin = "https://app.example";

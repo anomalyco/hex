@@ -29,8 +29,8 @@
 //! A client reaches the consent in one of two ways, and the grant is bound
 //! to which:
 //!
-//! - a browser page over the loopback HTTP API, by its `Origin` (a listed
-//!   Labs origin, checked by CORS like every browser request);
+//! - a browser page over the loopback HTTP API, by its `Origin` (a website
+//!   Labs › Connected apps allows, see [`super::access`]);
 //! - a native process over the owner-only Unix socket, by the audit token
 //!   `Security.framework` resolves from the peer, never by a name or path the
 //!   process claims.
@@ -47,6 +47,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
+use super::access::Access;
 use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 use super::http::HttpResponse;
 use super::permissions::Permissions;
@@ -255,8 +256,7 @@ impl Default for Timings {
 
 /// Every pairing and recording session the running app serves.
 pub(crate) struct Sessions {
-    origins: fn() -> Vec<String>,
-    enabled: fn() -> bool,
+    access: Access,
     gate: Option<Arc<dyn ConsentGate>>,
     recording: Arc<dyn Recording>,
     permissions: Arc<Permissions>,
@@ -266,15 +266,13 @@ pub(crate) struct Sessions {
 
 impl Sessions {
     pub(crate) fn new(
-        origins: fn() -> Vec<String>,
-        enabled: fn() -> bool,
+        access: Access,
         gate: Option<Arc<dyn ConsentGate>>,
         recording: Arc<dyn Recording>,
         permissions: Arc<Permissions>,
     ) -> Self {
         Self {
-            origins,
-            enabled,
+            access,
             gate,
             recording,
             permissions,
@@ -285,16 +283,14 @@ impl Sessions {
 
     #[cfg(test)]
     pub(crate) fn with_timings(
-        origins: fn() -> Vec<String>,
-        enabled: fn() -> bool,
+        access: Access,
         gate: Option<Arc<dyn ConsentGate>>,
         recording: Arc<dyn Recording>,
         permissions: Arc<Permissions>,
         timings: Timings,
     ) -> Self {
         Self {
-            origins,
-            enabled,
+            access,
             gate,
             recording,
             permissions,
@@ -303,22 +299,60 @@ impl Sessions {
         }
     }
 
-    /// Whether a browser page may pair or spend a grant: its origin is
-    /// canonical and listed.
-    pub(super) fn origin_allowed(&self, origin: &str) -> bool {
-        let canonical = crate::app_settings::normalize_browser_origins(&[origin.to_owned()]);
-        canonical.len() == 1
-            && canonical[0] == origin
-            && (self.origins)().iter().any(|allowed| allowed == origin)
+    /// Labs › Connected apps' switches, for the routes' CORS.
+    pub(super) fn access(&self) -> Access {
+        self.access
     }
 
-    /// This request's channel, when it names one Hex accepts. A browser
-    /// request needs a listed `Origin`; a native request's channel is its
-    /// verified peer.
+    /// This token-bearing request's channel, when it names one Hex accepts:
+    /// a browser request needs an `Origin` Connected apps allows. (A native
+    /// request's channel is its verified peer.)
     pub(super) fn web_channel(&self, origin: Option<&str>) -> Option<Channel> {
         origin
-            .filter(|origin| self.origin_allowed(origin))
+            .filter(|origin| self.access.website_allowed(&self.permissions, origin))
             .map(|origin| Channel::Web(origin.to_owned()))
+    }
+
+    /// Labs › Connected apps' website lists, as the window shows them.
+    pub(crate) fn websites(&self) -> super::permissions::Websites {
+        self.permissions.websites()
+    }
+
+    /// The window moved `origin` between the website lists; whatever that
+    /// website no longer may do ends at once.
+    pub(crate) fn website(&self, origin: &str, action: super::permissions::WebsiteAction) -> bool {
+        let saved = self.permissions.website_action(origin, action);
+        self.reconcile();
+        saved
+    }
+
+    /// Ends what Labs › Connected apps no longer allows: a pending ask from a
+    /// recipient it no longer admits is withdrawn (answered unavailable), and
+    /// a live recording for one is cancelled. Saved grants stay, unusable
+    /// until the lab allows them again.
+    pub(crate) fn reconcile(&self) {
+        let (access, permissions) = (self.access, self.permissions.clone());
+        if let Some(gate) = &self.gate {
+            gate.withdraw(&|prompt: &Prompt| access.admits(&permissions, &prompt.recipient));
+        }
+        let live = {
+            let state = lock(&self.state);
+            state.active.as_ref().and_then(|token| {
+                let session = state.sessions.get(token)?;
+                let grant = state
+                    .grants
+                    .values()
+                    .find(|grant| grant.id == session.grant)?;
+                (session.phase.live() && !access.admits(&permissions, &grant.recipient))
+                    .then_some(session.id)
+            })
+        };
+        if let Some(id) = live {
+            tracing::info!(
+                "Labs › Connected apps no longer allows a live recording; cancelling it"
+            );
+            self.cancel(id);
+        }
     }
 
     /// The panel Hex's window shows while a recording is live.
@@ -577,7 +611,7 @@ impl Sessions {
         else {
             return HttpResponse::code(400, "invalid-request");
         };
-        if !(self.enabled)() {
+        if !self.access.lab() {
             return HttpResponse::code(403, "record-unavailable");
         }
         let Some(recipient) = self.recipient_for(&channel, request.client_name.as_deref()) else {
@@ -731,6 +765,9 @@ impl Sessions {
         };
         if !valid_verifier(&request.code_verifier) {
             return HttpResponse::code(400, "invalid-request");
+        }
+        if !self.access.lab() {
+            return HttpResponse::code(403, "record-unavailable");
         }
         let challenge = sha256(request.code_verifier.as_bytes());
         let now = Instant::now();
@@ -1118,20 +1155,30 @@ pub(crate) fn native_socket_path() -> Option<std::path::PathBuf> {
 }
 
 /// The app's sessions: its capture loop, the window's gate, saved Always
-/// Allow permissions, and the Labs switch that turns both recording and
-/// browser access on.
+/// Allow permissions, and Labs › Connected apps, whose changes end at once
+/// what it no longer allows.
 pub(crate) fn app_sessions(
     gate: Arc<dyn ConsentGate>,
     control: super::dictation::Control,
     permissions: Arc<Permissions>,
 ) -> Arc<Sessions> {
-    Arc::new(Sessions::new(
-        crate::labs::api_browser_origins,
-        crate::labs::api_browser_access,
+    let sessions = Arc::new(Sessions::new(
+        Access::app(),
         Some(gate),
         Arc::new(super::dictation::DictationRecording::new(control)),
         permissions,
-    ))
+    ));
+    let weak = Arc::downgrade(&sessions);
+    // Settings apply on whichever thread saved them, the window's included;
+    // cancelling a recording waits on the capture loop, so it runs apart.
+    crate::labs::watch_connected_apps(move || {
+        if let Some(sessions) = weak.upgrade() {
+            let _ = thread::Builder::new()
+                .name("hex-connected-apps".into())
+                .spawn(move || sessions.reconcile());
+        }
+    });
+    sessions
 }
 
 /// One request that belongs to consented recording, or a refusal for a path
@@ -1164,16 +1211,22 @@ impl Request {
                 Some(sessions) => call.respond(sessions, stream, shutdown),
                 None => HttpResponse::code(403, "record-unavailable"),
             },
+            // Labs › Connected apps off keeps grants and sessions but lets
+            // none of them be used.
             Self::Session {
                 action,
                 token,
                 channel,
             } => match context.record.as_ref() {
-                Some(sessions) => action.respond(sessions, &token, &channel),
+                Some(sessions) if sessions.access.lab() => {
+                    action.respond(sessions, &token, &channel)
+                }
+                Some(_) => HttpResponse::empty(401),
                 None => HttpResponse::code(403, "record-unavailable"),
             },
             Self::Revoke { token, channel } => match context.record.as_ref() {
-                Some(sessions) => sessions.revoke_token(&token, &channel),
+                Some(sessions) if sessions.access.lab() => sessions.revoke_token(&token, &channel),
+                Some(_) => HttpResponse::empty(401),
                 None => HttpResponse::code(403, "record-unavailable"),
             },
         }
@@ -1202,11 +1255,15 @@ pub(super) fn route(request: super::HttpRequest, context: &super::HttpContext) -
                 "record-unavailable",
             )));
         };
-        let Some(channel) = sessions.web_channel(request.origin.as_deref()) else {
-            return Routed::Record(Request::Refused(HttpResponse::code(
-                403,
-                "origin-not-allowed",
-            )));
+        // Only a pairing ask lists a website that tried; a token exchange
+        // can't come from one that never asked.
+        let channel = match sessions.access.admit_website(
+            &sessions.permissions,
+            request.origin.as_deref(),
+            endpoint == Endpoint::Pair,
+        ) {
+            Ok(origin) => Channel::Web(origin),
+            Err(response) => return Routed::Record(Request::Refused(response)),
         };
         return Routed::Record(match Call::admit(endpoint, request, channel) {
             Ok(call) => Request::Pair(call),

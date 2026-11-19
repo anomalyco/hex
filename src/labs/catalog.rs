@@ -74,6 +74,7 @@ impl Feature {
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::ApiBrowserAccess
+            | Self::ConnectedApps
             | Self::SpeakersOnly
             | Self::PauseMenu
             | Self::CalendarMenu
@@ -165,6 +166,7 @@ impl Feature {
             Self::StopPhrase | Self::HoldThroughKeys => 20261116,
             Self::ModesEditor => 20261118,
             Self::CalendarSelectAll => 20261118,
+            Self::ConnectedApps => 20261119,
         }
     }
 
@@ -205,6 +207,9 @@ impl Feature {
         }
         if key == "labs.api_browser_origins" {
             return Some(Self::ApiBrowserAccess);
+        }
+        if key == "labs.connected_apps_websites" {
+            return Some(Self::ConnectedApps);
         }
         if key == "capture.replay_hotkey" {
             return Some(Self::AnnotateReplay);
@@ -309,6 +314,7 @@ impl Feature {
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::ApiBrowserAccess
+            | Self::ConnectedApps
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::DropTranscribe
@@ -386,6 +392,7 @@ impl Feature {
             Self::ApiProcessing => "api-processing",
             Self::ApiTimestamps => "api-timestamps",
             Self::ApiBrowserAccess => "api-browser-access",
+            Self::ConnectedApps => "connected-apps",
             Self::SpeakersOnly => "speakers-only",
             Self::PauseMenu => "pause-menu",
             Self::PrintStart => "print-start",
@@ -470,6 +477,7 @@ impl Feature {
             Self::ApiProcessing => "labs.api_processing",
             Self::ApiTimestamps => "labs.api_timestamps",
             Self::ApiBrowserAccess => "labs.api_browser_access",
+            Self::ConnectedApps => "labs.connected_apps",
             Self::SpeakersOnly => "labs.speakers_only",
             Self::PauseMenu => "labs.pause_menu",
             Self::PrintStart => "labs.print_start",

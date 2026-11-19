@@ -1,13 +1,12 @@
 //! Labs › Browser access to the local API's card while on: the origins whose
 //! web pages may call Hex's local API from the browser, comma-separated and
-//! saved in their normalized `scheme://host[:port]` form, and the clients
-//! already paired to start recordings, each with a Revoke button.
+//! saved in their normalized `scheme://host[:port]` form.
 
 use rune::{El, col, row, text};
 use rune_kit::TextInput;
 
 use super::super::Ui;
-use super::super::controls::{ButtonKind, DESCRIPTION, Paint, button};
+use super::super::controls::{DESCRIPTION, Paint};
 use crate::desktop::i18n::tr;
 
 /// How wide the origins field is inside its card.
@@ -20,7 +19,7 @@ pub(super) fn body(ui: &Ui, p: Paint) -> El {
         .on_edit(|ui: &mut Ui| &mut ui.lab_store.origins)
         .build(p.k)
         .key("api-browser-origins");
-    let mut card = col().key("api-browser-access").gap(4.0).child(
+    col().key("api-browser-access").gap(4.0).child(
         row()
             .key("api-browser-origins-row")
             .gap(8.0)
@@ -32,83 +31,5 @@ pub(super) fn body(ui: &Ui, p: Paint) -> El {
                     .color(p.muted()),
             )
             .child(field),
-    );
-    let grants = ui
-        .view
-        .as_ref()
-        .map(|view| view.grants.as_slice())
-        .unwrap_or_default();
-    let grants: Vec<_> = grants.iter().filter(|g| !g.durable).collect();
-    if !grants.is_empty() {
-        card = card.child(
-            text(tr("Allowed one recording"))
-                .key("api-paired-label")
-                .font(DESCRIPTION)
-                .color(p.muted()),
-        );
-        for grant in grants {
-            let id = grant.id;
-            card = card.child(
-                row()
-                    .key(format!("api-paired-{id}"))
-                    .gap(8.0)
-                    .center_y()
-                    .child(
-                        text(grant.recipient.label())
-                            .key("name")
-                            .font(DESCRIPTION)
-                            .color(p.text()),
-                    )
-                    .child(button(
-                        p,
-                        &format!("api-revoke-{id}"),
-                        tr("Revoke"),
-                        ButtonKind::Secondary,
-                        move |ui: &mut Ui, _| {
-                            ui.send(super::super::Request::RevokeRecordGrant { id });
-                        },
-                    )),
-            );
-        }
-        card = card.child(
-            text(tr(
-                "Revoking ends a recording it is running. It can pair again, with a new ask.",
-            ))
-            .key("api-paired-note")
-            .font(DESCRIPTION)
-            .color(p.muted())
-            .wrap(),
-        );
-    }
-    if let Some(view) = &ui.view {
-        for perm in &view.permissions {
-            let id = perm.id;
-            card = card.child(
-                row()
-                    .key(format!("permission-{id}"))
-                    .gap(8.0)
-                    .center_y()
-                    .child(
-                        text(format!(
-                            "{} · {}",
-                            perm.recipient.label(),
-                            perm.capability.label()
-                        ))
-                        .font(DESCRIPTION)
-                        .color(p.text())
-                        .wrap(),
-                    )
-                    .child(button(
-                        p,
-                        &format!("permission-revoke-{id}"),
-                        tr("Revoke"),
-                        ButtonKind::Secondary,
-                        move |ui: &mut Ui, _| {
-                            ui.send(super::super::Request::RevokePermission { id })
-                        },
-                    )),
-            );
-        }
-    }
-    card
+    )
 }

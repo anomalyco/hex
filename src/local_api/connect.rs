@@ -16,19 +16,20 @@
 //! Codes and tokens expire (two minutes each), and one code, one token, and
 //! one transcription are all the grant is worth. The token reaches nothing
 //! else: not `/control`, `/dictations`, `/streams`, model preparation, or the
-//! developer control. A page that is not on the Labs origins list is refused
-//! before the dialog, and a Deny starts a short cooldown so a page cannot
-//! reopen the dialog in a loop.
+//! developer control. Only a website Labs › Connected apps allows may ask
+//! (see [`super::access`]): any other is refused before the dialog, and a
+//! Deny starts a short cooldown so a page cannot reopen the dialog in a loop.
 //!
 //! Always Allow saves the capability for this exact `Origin` in
 //! [`Permissions`]. A later ask from the same origin skips the dialog and
 //! mints a fresh one-operation code; the saved permission survives a restart
-//! until the person revokes it in Labs › Browser access.
+//! until the person revokes it in Labs › Connected apps.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::access::Access;
 use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
 use super::http::HttpResponse;
 use super::permissions::Permissions;
@@ -72,11 +73,11 @@ struct State {
     prompting: bool,
 }
 
-/// The running app's browser-connect gate: the Labs browser origins, the
-/// window's consent gate, saved Always Allow permissions, and the one-use
-/// grants between them.
+/// The running app's browser-connect gate: Labs › Connected apps, the
+/// window's consent gate, saved Always Allow permissions (and the lab's
+/// website lists beside them), and the one-use grants between them.
 pub(crate) struct Connect {
-    origins: fn() -> Vec<String>,
+    access: Access,
     gate: Option<Arc<dyn ConsentGate>>,
     permissions: Arc<Permissions>,
     code_lifetime: Duration,
@@ -88,12 +89,12 @@ pub(crate) struct Connect {
 
 impl Connect {
     pub(crate) fn new(
-        origins: fn() -> Vec<String>,
+        access: Access,
         gate: Option<Arc<dyn ConsentGate>>,
         permissions: Arc<Permissions>,
     ) -> Self {
         Self {
-            origins,
+            access,
             gate,
             permissions,
             code_lifetime: GRANT_LIFETIME,
@@ -108,7 +109,7 @@ impl Connect {
     /// touch the process's Labs state.
     #[cfg(test)]
     pub(crate) fn with_timings(
-        origins: fn() -> Vec<String>,
+        access: Access,
         gate: Option<Arc<dyn ConsentGate>>,
         permissions: Arc<Permissions>,
         code_lifetime: Duration,
@@ -117,7 +118,7 @@ impl Connect {
         cooldown: Duration,
     ) -> Self {
         Self {
-            origins,
+            access,
             gate,
             permissions,
             code_lifetime,
@@ -128,13 +129,15 @@ impl Connect {
         }
     }
 
-    /// Whether this page may prompt at all: its `Origin` is an exact,
-    /// canonical entry on the Labs list, and the gate exists.
+    /// Labs › Connected apps' switches, for the routes' CORS.
+    pub(super) fn access(&self) -> Access {
+        self.access
+    }
+
+    /// Whether this page may still use what it was given: Connected apps
+    /// allows its exact origin.
     pub(super) fn origin_allowed(&self, origin: &str) -> bool {
-        let canonical = crate::app_settings::normalize_browser_origins(&[origin.to_owned()]);
-        canonical.len() == 1
-            && canonical[0] == origin
-            && (self.origins)().iter().any(|allowed| allowed == origin)
+        self.access.website_allowed(&self.permissions, origin)
     }
 
     /// Spends `token` for one transcription from `origin`. The token is gone
@@ -447,12 +450,13 @@ impl Call {
         endpoint: Endpoint,
         request: HttpRequest,
     ) -> Result<Self, HttpResponse> {
-        let Some(origin) = request.origin.clone() else {
-            return Err(HttpResponse::code(403, "origin-not-allowed"));
-        };
-        if !connect.origin_allowed(&origin) {
-            return Err(HttpResponse::code(403, "origin-not-allowed"));
-        }
+        // Only an ask lists a website that tried; a token exchange can't come
+        // from one that never asked.
+        let origin = connect.access.admit_website(
+            &connect.permissions,
+            request.origin.as_deref(),
+            matches!(endpoint, Endpoint::Authorize),
+        )?;
         if !request.has_content_type("application/json") {
             return Err(HttpResponse::code(415, "unsupported-content-type"));
         }

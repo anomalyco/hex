@@ -311,7 +311,7 @@ fn requester(p: Paint, recipient: &Recipient) -> El {
         Recipient::Web { .. } => (
             &GLOBE,
             tr("Website"),
-            tr("On your list in Labs › Browser access").to_owned(),
+            tr("Address reported by your browser").to_owned(),
             false,
         ),
     };
@@ -514,7 +514,7 @@ fn footer(p: Paint, armed: bool) -> El {
         )
         .child(
             text(tr(
-                "Always Allow lasts until you revoke it in Labs › Browser access.",
+                "Always Allow lasts until you revoke it in Labs › Connected apps.",
             ))
             .key("limits")
             .font(p.k.ty.caption())
@@ -788,6 +788,20 @@ mod tests {
                 .any(|s| s == "Calls itself “Field Notes” · not verified")
         );
         assert!(!copy.iter().any(|s| s.contains("Code signature")));
+        // The browser reports the address; Hex can't verify it.
+        assert!(copy.iter().any(|s| s == "Address reported by your browser"));
+    }
+
+    #[test]
+    fn always_allow_is_revoked_in_connected_apps() {
+        for prompt in [ask(), record_ask()] {
+            let (rt, _) = shown(prompt, true, false);
+            assert!(
+                copy(&rt).iter().any(
+                    |s| s == "Always Allow lasts until you revoke it in Labs › Connected apps."
+                )
+            );
+        }
     }
 
     #[test]

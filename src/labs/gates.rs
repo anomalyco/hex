@@ -425,26 +425,36 @@ pub fn api_timestamps() -> bool {
     on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
 }
 
-/// Whether Labs › Browser access to the local API is on: the one switch
-/// behind browser CORS, browser connect, and native recording consent.
-pub fn api_browser_access() -> bool {
-    // A process that never applied its settings still loads its saved
-    // switches on the first read, as `screen_vocabulary` does.
-    let _ = state();
-    API_BROWSER_ACCESS.load(Ordering::Acquire) && Feature::ApiBrowserAccess.on_this_os()
-}
-
 /// The browser origins the local API answers with CORS, while Labs › Browser
 /// access to the local API is on (read as each request's `Origin` is
 /// checked). Empty turns every response back to what it was, without CORS.
 pub fn api_browser_origins() -> Vec<String> {
-    if !api_browser_access() {
+    // A process that never applied its settings still loads its saved
+    // switches on the first read, as `screen_vocabulary` does.
+    let _ = state();
+    if !API_BROWSER_ACCESS.load(Ordering::Acquire) || !Feature::ApiBrowserAccess.on_this_os() {
         return Vec::new();
     }
     API_BROWSER_ORIGINS
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
+}
+
+/// Labs › Connected apps: apps on this computer may ask, in Hex's permission
+/// window, to transcribe audio or record (read as each consent or recording
+/// request arrives).
+pub fn connected_apps() -> bool {
+    // A process that never applied its settings still loads its saved
+    // switches on the first read, as `screen_vocabulary` does.
+    let _ = state();
+    CONNECTED_APPS.load(Ordering::Acquire) && Feature::ConnectedApps.on_this_os()
+}
+
+/// Labs › Connected apps' Allow websites to use Hex: with the lab on, the
+/// websites the person allowed may ask too.
+pub fn connected_apps_websites() -> bool {
+    connected_apps() && CONNECTED_APPS_WEBSITES.load(Ordering::Acquire)
 }
 
 /// Labs › Smaller model files: your own speech model imports may use Q6_K,

@@ -1700,6 +1700,7 @@ mod tests {
         include_str!("../rune_ui/hud_lab.rs"),
         include_str!("../rune_ui/labs.rs"),
         include_str!("../rune_ui/labs/browser_access.rs"),
+        include_str!("../rune_ui/labs/connected_apps.rs"),
         include_str!("../rune_ui/labs/group.rs"),
         include_str!("../rune_ui/labs/screenshots.rs"),
         include_str!("../rune_ui/labs/store.rs"),

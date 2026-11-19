@@ -23,12 +23,13 @@ fresh session that runs for as long as the client checks in
 `HEX_RECORD_MS` for the Electron one). Stop checking in (quit, crash) and Hex
 stops the microphone within one lease (10 s). Hex's window shows the live card
 with **Stop recording** and **Cancel**. **Revoke** in Hex's window
-(Labs › Browser access) or `POST /record/revoke` ends the grant, cancelling a
+(Labs › Connected apps, under Connected) or `POST /record/revoke` ends the grant, cancelling a
 live session and making further starts fail.
 
 Grant tokens expire when Hex quits. Always Allow persists until revoked; the
 same signed binary can pair on the next launch without another dialog.
 
-Web pages use the loopback HTTP API instead (`POST /record/pair` with an
-`Origin` listed in Labs › Browser access to the local API); they cannot open
-the Unix socket.
+Both need Labs › Connected apps on in Hex (native apps need nothing else).
+Web pages use the loopback HTTP API instead (`POST /record/pair` from an
+`Origin` allowed in Labs › Connected apps, with Allow websites to use Hex
+on); they cannot open the Unix socket.

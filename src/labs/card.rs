@@ -70,6 +70,7 @@ impl Feature {
             Self::ApiProcessing => "Process API transcripts",
             Self::ApiTimestamps => "Timestamps in API transcripts",
             Self::ApiBrowserAccess => "Browser access to the local API",
+            Self::ConnectedApps => "Connected apps",
             Self::SpeakersOnly => "Only on speakers",
             Self::MoreDictationShortcuts => "More dictation shortcuts",
             Self::PauseMenu => "Pause from menu bar",
@@ -260,6 +261,9 @@ impl Feature {
             }
             Self::ApiBrowserAccess => {
                 "Let web pages from the addresses you list use Hex's local API. They still need the API token"
+            }
+            Self::ConnectedApps => {
+                "Let apps and websites on this computer ask to use Hex's transcription and microphone. You approve each one and can revoke it."
             }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone."

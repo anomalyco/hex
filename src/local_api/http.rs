@@ -170,7 +170,7 @@ impl HttpResponse {
             ("Access-Control-Allow-Methods", "GET, POST"),
             (
                 "Access-Control-Allow-Headers",
-                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token, X-Hex-Connect-Token, X-Hex-Record-Grant, X-Hex-Record-Token",
+                "Authorization, Content-Type, X-Hex-Dictation-Token, X-Hex-Stream-Token",
             ),
             ("Access-Control-Max-Age", "600"),
         ];
@@ -184,6 +184,20 @@ impl HttpResponse {
             body: Vec::new(),
             headers,
         }
+    }
+
+    /// Labs › Connected apps' preflight, for its consent, pairing, record,
+    /// and connect-grant routes: only their own headers, never
+    /// `Authorization`, so a page can't send the bearer token through it.
+    pub(super) fn consent_preflight(private_network: bool) -> Self {
+        let mut response = Self::preflight(private_network);
+        for header in &mut response.headers {
+            if header.0 == "Access-Control-Allow-Headers" {
+                header.1 =
+                    "Content-Type, X-Hex-Connect-Token, X-Hex-Record-Grant, X-Hex-Record-Token";
+            }
+        }
+        response
     }
 
     pub(super) fn json<T: Serialize>(status: u16, value: &T) -> Self {

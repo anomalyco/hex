@@ -10,7 +10,7 @@
 // each recording; `record_once` starts one session under it, which runs for
 // as long as this process checks in (`POST /record/heartbeat`) and stops
 // itself within one lease (10 s) after the check-ins stop. Revoking
-// the grant (here, or in Hex's window under Labs › Browser access) ends the
+// the grant (here, or in Hex's window under Labs › Connected apps) ends the
 // permission; the next run pairs and asks again.
 //
 // Dependencies: `sha2 = "0.11"` and `serde_json = "1"` (both already in

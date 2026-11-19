@@ -40,16 +40,21 @@ impl HostHandle {
 
     /// The window's Stop, Cancel, and Revoke for consented recordings.
     pub(super) fn record_request(&self, request: HostRequest) {
-        let Some(consent) = self.consent() else {
+        let Some(record) = self.consent().map(|consent| consent.record.clone()) else {
             return;
         };
-        match request {
-            HostRequest::RecordControl { id, stop: true } => _ = consent.record.stop(id),
-            HostRequest::RecordControl { id, stop: false } => consent.record.cancel(id),
-            HostRequest::RevokePermission { id } => _ = consent.record.revoke_permission(id),
-            HostRequest::RevokeRecordGrant { id } => _ = consent.record.revoke(id),
-            _ => {}
-        }
+        // Stop transcribes and Cancel waits on the capture loop, so neither
+        // holds the window's thread or the host.
+        let _ = std::thread::Builder::new()
+            .name("hex-consent-request".into())
+            .spawn(move || match request {
+                HostRequest::RecordControl { id, stop: true } => _ = record.stop(id),
+                HostRequest::RecordControl { id, stop: false } => record.cancel(id),
+                HostRequest::RevokePermission { id } => _ = record.revoke_permission(id),
+                HostRequest::RevokeRecordGrant { id } => _ = record.revoke(id),
+                HostRequest::Website { origin, action } => _ = record.website(&origin, action),
+                _ => {}
+            });
     }
 
     /// The window's app failed, and its permission window with it: an ask

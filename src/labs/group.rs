@@ -97,6 +97,7 @@ impl Feature {
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::ApiBrowserAccess
+            | Self::ConnectedApps
             | Self::PrintStart
             | Self::ShellCompletions
             | Self::YoloMode

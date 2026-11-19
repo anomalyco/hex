@@ -174,6 +174,20 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // browser_access_shows_its_origins_on_its_card_while_on and
 │                                        // browser_access_keeps_its_typing_through_its_own_save (rune_ui); not observed
 │                                        // from a real browser page, and no live macOS or Windows request
+├── Connected apps  no    labs.connected_apps + labs.connected_apps_websites (every OS)
+│                                        apps on this computer may ask, in Hex's permission window, to transcribe
+│                                        audio or start recordings (docs/connect.md); with Allow websites to use Hex
+│                                        on, so may the websites allowed in its card. An unknown website gets no
+│                                        dialog: 403 website-not-allowed, and it is listed once (origin and time)
+│                                        under Websites that tried to contact Hex with Allow and Block; blocked ones
+│                                        answer 403 website-blocked and are never listed again (Unblock). Connected
+│                                        lists every app and website with a saved grant, with Revoke. Off, the routes
+│                                        answer as before, a pending dialog is withdrawn, a live consented recording is
+│                                        cancelled, and grants and lists are kept unused. Labs › Browser access plays
+│                                        no part; any website may ask to be let in while both switches are on
+│                                        // checks: local_api::tests::connected_apps, local_api::permissions website-list
+│                                        // tests, connected_apps_lists_websites_and_connected_clients (rune_ui);
+│                                        // not observed from a real browser page or on Windows or macOS
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Smaller model files no labs.k_quant_models         (macOS) adding a model file also accepts Q6_K, Q5_K, and Q4_K weights, smaller than Q8_0 and unverified

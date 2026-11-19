@@ -184,6 +184,9 @@ impl Feature {
             Self::ApiBrowserAccess => {
                 "Let web pages from the addresses you list call Hex's local API from the browser; every request still needs the API token"
             }
+            Self::ConnectedApps => {
+                "Let apps and websites on this computer ask, in Hex's permission window, to transcribe audio or record from the microphone; each needs your Allow, and you can revoke it in Labs"
+            }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
             }
