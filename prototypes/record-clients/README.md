@@ -1,6 +1,7 @@
 # Recording clients
 
-Minimal clients for Hex's revocable recording grant, as specified in
+Example clients, not part of Hex: copy them into your own app. They show
+Hex's revocable recording grant, as specified in
 [`docs/connect.md`](../../docs/connect.md#recording-by-a-paired-client). They
 use Hex's owner-only native channel, so Hex identifies the process itself and
 no app name, `Origin`, or discovery token is trusted or read:
