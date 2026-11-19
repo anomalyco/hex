@@ -57,7 +57,6 @@ use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
 
 mod activation;
-mod consent;
 mod control;
 mod launch;
 mod main_menu;
@@ -357,7 +356,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (recognition_controls, recognition_control_receiver) = mpsc::sync_channel(8);
     // A web page's ask is answered in this process's window, so the local API
     // can wait on it without ever handing the page the API token.
-    let consent = Arc::new(consent::Desk::default());
+    let consent = Arc::new(crate::desktop::consent::Desk::default());
     // One consented recording runs on the listener's own programmatic
     // dictation; the window can stop or cancel it.
     let permissions = crate::local_api::Permissions::app();

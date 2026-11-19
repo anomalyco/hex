@@ -39,9 +39,10 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 
 ## Requirements
 
-- The running Hex app on macOS (`hex app`). `hex service` has no window, so
-  the routes answer `403 connect-unavailable`. Linux and Windows serve the
-  routes but wire no dialog; the same `403` is what a page sees.
+- The running Hex app (`hex app`) on macOS, Linux, or Windows. `hex service`
+  has no window, so the routes answer `403 connect-unavailable`. Native
+  clients pair only on macOS: Linux and Windows have no socket that can tell
+  Hex a peer's verified identity, so there a web page is the only caller.
 - Labs › Browser access to the local API on. Its switch gates both asks; only
   a web caller also needs its origin in the list. That list already gates CORS
   (`src/local_api/cors.rs`); connect and recording add no second list, and a
@@ -156,14 +157,18 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
 An HTTP worker blocks while the dialog is open (up to a minute); the local API
 has four, so a page cannot starve the app by asking repeatedly.
 
-### The permission window (macOS)
+### The permission window
 
 Both asks show in Hex's permission window: a floating window of its own, not
-a dialog inside Hex's main window. It appears whether the main window is
-open, closed, or Hex is only in the menu bar, and never opens or raises the
-main window. It sits centred on the screen under the pointer, above other
-apps' windows, takes the keyboard while shown without activating Hex (so the
-app in front keeps focus after), and holds no GPU surface while hidden.
+a dialog inside Hex's main window, on every OS. It appears whether the main
+window is open, closed, or Hex is only in the menu bar or tray, and never
+opens or raises the main window. It sits centred on the screen under the
+pointer, above other apps' windows, and holds no GPU surface while hidden.
+On macOS it takes the keyboard while shown without activating Hex (so the
+app in front keeps focus after). On Linux and Windows it is the same Rune
+overlay spanning that screen, with only the dialog taking the pointer
+(layer-shell on Wayland, override-redirect on X11, a topmost no-activate
+window on Windows).
 
 ```ts
 ask starts          -> the window shows, Deny focused; Allow Once and Always Allow disabled for 1 s
@@ -174,17 +179,35 @@ an answer, a 60 s timeout, or the ask otherwise ending -> the window hides at on
 ```
 
 There is no scrim and nothing outside the dialog to click. One ask at a time,
-as before. Windows and Linux don't serve these asks yet, as before.
+as before.
+
+Where the window can't take keys or can't open, the platform decides:
+
+```ts
+macOS, Wayland with layer-shell -> as above
+X11, Windows                    -> buttons work; Return and Escape never reach it
+                                   (Rune's overlays there take no keyboard), so
+                                   they go to the app in front and grant nothing
+Wayland without layer-shell     -> no overlay that takes keys (Rune refuses XWayland
+(GNOME)                            for one): the ask answers 403 *-unavailable
+                                   within a second instead of waiting unseen
+the window's app failed (Linux) -> the same, at once
+```
 
 ## What is not proven
 
 The permission window's view is rendered offscreen by an ignored test
 (`HEX_CONSENT_SNAPS=<folder> cargo test --bin hex -- --ignored
 rune_ui::consent_window::tests::snapshots`), and its state, guard, keys, and
-answers are tested headless. The native window itself (its placement, level,
-key focus, and focus returning to the app in front) was not shown on a real
-screen in a test; a real browser page, a real click, and a real model
-transcription from a page were not exercised. Copy is
+answers are tested headless. On Linux the running app was driven under Xvfb
+(X11, lavapipe) with `curl` asks from a listed origin and `xdotool` clicks:
+both asks showed centred with the main window closed, Allow Once during the
+guard did nothing, Escape did not reach the window, Deny answered
+`consent-denied` and hid it, and Allow Once after the guard issued a code.
+On macOS the native window (its placement, level, key focus, and focus
+returning to the app in front) was not shown on a real screen in a test;
+Windows was only compiled, and Wayland, GNOME's fallback, a real browser
+page, and a real model transcription from a page were not exercised. Copy is
 English only. The origin check trusts the browser's `Origin` header, which is
 the same trust the CORS gate already places in it; a malicious local process
 can claim a listed origin to *ask*, but not silently reuse its saved permission.

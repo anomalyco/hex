@@ -1,5 +1,6 @@
 pub(crate) mod activity;
 pub(crate) mod background_process;
+pub(crate) mod consent;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod events;
 pub(crate) mod file_dialog;

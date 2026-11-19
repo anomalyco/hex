@@ -2957,15 +2957,17 @@ estimates the times, and `/streams` and `/dictations` are unchanged
 Browser connect and recording ([contract](../connect.md)) are the narrower
 asks beside that token-bearing access: a listed page calls
 `POST /connect/authorize` without the token, Hex's permission window (its own
-floating window on macOS, shown whether or not the main window is open, with
-both allows disabled for its first second) names its verified
+floating window on every OS, shown whether or not the main window is open, with
+both allows disabled for its first second; on X11 and Windows it takes clicks
+but no keys, and Wayland without layer-shell answers unavailable) names its verified
 origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
 upload token that spends itself on one plain `POST /transcriptions` from the
 same origin. Codes and tokens expire in two minutes, a Deny starts a 30 s
 cooldown, and the dialog is answered (Return and Escape deny) rather than
 dismissed. `local_api` tests cover the whole exchange, origin binding, one-use
 codes and tokens, expiry, the scope refusals, and deny/timeout. The window's
-only rendering proof is the `consent_window` snapshot test; no real
+rendering proof is the `consent_window` snapshot test and one Xvfb (X11) run
+of the Linux app ([connect.md](../connect.md#what-is-not-proven)); no real
 browser page, click, or model transcription was run, and its copy is English
 only.
 

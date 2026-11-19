@@ -99,7 +99,9 @@ pub(crate) enum Channel {
     /// A browser page's verified `Origin` over loopback HTTP.
     Web(String),
     /// A native process over Hex's Unix socket: its audit token, and the
-    /// signing identity `Security.framework` resolved for that token.
+    /// signing identity `Security.framework` resolved for that token. Only
+    /// macOS has the socket: elsewhere native clients have no channel.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Native { peer: PeerId, identity: Identity },
 }
 
@@ -680,6 +682,7 @@ impl Sessions {
 
     /// One allowed ask's pairing code, carrying whether its grant should last
     /// past one recording session.
+    #[allow(clippy::too_many_arguments)]
     fn issue_pairing(
         &self,
         state: &mut State,
@@ -1102,6 +1105,7 @@ fn recipient_key(recipient: &Recipient) -> String {
 }
 
 /// Where the app's native recording socket lives.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn native_socket_path() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {

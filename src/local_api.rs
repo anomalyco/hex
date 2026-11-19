@@ -54,7 +54,30 @@ use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
 
 /// The recording slice's app-facing names.
-pub(crate) use record::{app_sessions as record_sessions, native_socket_path};
+pub(crate) use record::app_sessions as record_sessions;
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+pub(crate) use record::native_socket_path;
+
+/// The Linux and Windows apps' two asks, browser connect and consented
+/// recording, answered in the window through `gate`; native clients have no
+/// channel there, so only web pages ask.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) struct AppConsent {
+    connect: Connect,
+    /// The window's Stop, Cancel, and Revoke reach these.
+    pub(crate) record: Arc<RecordSessions>,
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+impl AppConsent {
+    pub(crate) fn new(gate: Arc<dyn ConsentGate>, control: dictation::Control) -> Self {
+        let permissions = Permissions::app();
+        Self {
+            record: record_sessions(gate.clone(), control, permissions.clone()),
+            connect: Connect::new(crate::labs::api_browser_origins, Some(gate), permissions),
+        }
+    }
+}
 
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
@@ -214,7 +237,11 @@ impl LocalApi {
         control: SyncSender<crate::control::ControlCall>,
         dictation_control: Option<dictation::Control>,
         processing: Option<Processing>,
+        consent: Option<AppConsent>,
     ) -> Option<Self> {
+        let (connect, record) = consent.map_or((None, None), |consent| {
+            (Some(consent.connect), Some(consent.record))
+        });
         let started = EventLog::create(event_path)
             .map_err(Into::into)
             .and_then(|events| {
@@ -224,6 +251,8 @@ impl LocalApi {
                         control: Some(control),
                         dictation_control,
                         processing: processing.unwrap_or_default(),
+                        connect,
+                        record,
                         ..Default::default()
                     },
                 )
@@ -305,6 +334,7 @@ impl LocalApi {
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
+        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
         let native_socket = options.native_socket.clone();
         let http_context = HttpContext {
             token: token.into(),

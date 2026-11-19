@@ -136,14 +136,20 @@ impl Backend {
     }
 
     pub(super) fn state(&self) -> Option<HostState> {
-        let (desktop, settings, editing) = match self {
+        let (desktop, settings, editing, record) = match self {
             Self::Host(host, _) => {
                 let snapshot = host.snapshot();
-                (snapshot.desktop, snapshot.settings, snapshot.editing)
+                let record = host.consent().map(|consent| consent.record.clone());
+                (
+                    snapshot.desktop,
+                    snapshot.settings,
+                    snapshot.editing,
+                    record,
+                )
             }
             Self::Status(status, _) => {
                 let status = *status.clone()?;
-                (status.desktop, status.settings, status.editing)
+                (status.desktop, status.settings, status.editing, None)
             }
         };
         Some(HostState {
@@ -155,9 +161,15 @@ impl Backend {
                 update_notes: desktop.update_notes,
                 update_blocked: None,
                 editing,
-                record: None,
-                permissions: Vec::new(),
-                grants: Vec::new(),
+                record: record.as_ref().and_then(|record| record.view()),
+                permissions: record
+                    .as_ref()
+                    .map(|record| record.permissions())
+                    .unwrap_or_default(),
+                grants: record
+                    .as_ref()
+                    .map(|record| record.grants())
+                    .unwrap_or_default(),
             },
             settings,
         })

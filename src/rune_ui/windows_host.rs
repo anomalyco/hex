@@ -67,6 +67,28 @@ impl Backend {
                 self.chords = None;
                 Ok(())
             }
+            Request::RecordControl { id, stop } => {
+                if let Some(runtime) = &self.runtime {
+                    if stop {
+                        runtime.record().stop(id);
+                    } else {
+                        runtime.record().cancel(id);
+                    }
+                }
+                Ok(())
+            }
+            Request::RevokePermission { id } => {
+                if let Some(runtime) = &self.runtime {
+                    runtime.record().revoke_permission(id);
+                }
+                Ok(())
+            }
+            Request::RevokeRecordGrant { id } => {
+                if let Some(runtime) = &self.runtime {
+                    runtime.record().revoke(id);
+                }
+                Ok(())
+            }
             request => match &self.runtime {
                 Some(runtime) => runtime.send(request),
                 None => Err(color_eyre::eyre::eyre!("Hex's runtime is not running")),
@@ -109,7 +131,9 @@ impl Backend {
     }
 
     pub(super) fn state(&self) -> Option<HostState> {
-        let published = self.runtime.as_ref()?.published()?;
+        let runtime = self.runtime.as_ref()?;
+        let published = runtime.published()?;
+        let record = runtime.record();
         Some(HostState {
             view: ServiceView {
                 listener: published.listener.clone(),
@@ -119,9 +143,9 @@ impl Backend {
                 update_notes: published.update_notes.clone(),
                 update_blocked: published.update_blocked,
                 editing: false,
-                record: None,
-                permissions: Vec::new(),
-                grants: Vec::new(),
+                record: record.view(),
+                permissions: record.permissions(),
+                grants: record.grants(),
             },
             settings: published.settings.clone(),
         })

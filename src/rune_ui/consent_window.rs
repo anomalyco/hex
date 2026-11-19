@@ -1,13 +1,16 @@
 //! Hex's permission window: consent for audio transcription or microphone
-//! recording, scoped to the named recipient (macOS).
+//! recording, scoped to the named recipient, on every OS.
 //!
 //! It is its own floating window (a Rune overlay), not a dialog inside Hex's
 //! main window, so it asks whether that window is open, closed, or Hex is
-//! only in the menu bar, and it never opens or raises the main window. It
-//! shows on the screen under the pointer, takes the keyboard while shown
-//! (its panel never activates Hex, so the app in front keeps focus once it
-//! hides), and holds no GPU surface while hidden. One ask at a time; it
-//! hides at once on an answer, a timeout, or anything else that ends the ask.
+//! only in the menu bar or tray, and it never opens or raises the main
+//! window. It shows on the screen under the pointer, asks for the keyboard
+//! while shown (on macOS its panel never activates Hex, so the app in front
+//! keeps focus once it hides), and holds no GPU surface while hidden. One ask
+//! at a time; it hides at once on an answer, a timeout, or anything else
+//! that ends the ask. Where the overlay can't open (a Wayland compositor
+//! without layer-shell has none that takes keys), the ask answers
+//! unavailable rather than waiting unseen.
 //!
 //! The dialog reads as the question a person has to answer, in order: what
 //! Hex is being asked for, who is asking and how Hex knows, what they get,
@@ -81,6 +84,14 @@ impl Sheet {
             place(overlay);
             overlay.show();
             overlay.request_keys();
+            #[cfg(not(target_os = "macos"))]
+            if let Some(reply) = &self.reply {
+                when_unshown(
+                    overlay.clone(),
+                    reply.clone(),
+                    self.prompt.as_ref().map_or(0, |p| p.id),
+                );
+            }
         }
     }
 
@@ -129,10 +140,35 @@ fn poll(sheet: &mut Sheet, _: f64, _: &mut Tx) -> bool {
     sheet.arm(Instant::now())
 }
 
+/// How long after showing Linux and Windows check that the window opened.
+#[cfg(not(target_os = "macos"))]
+const SHOW_CHECK: Duration = Duration::from_secs(1);
+
+/// Linux and Windows: answers the ask `id` unavailable when its window could
+/// not open (Wayland without layer-shell, or a failed show), so the asker
+/// hears at once instead of after a minute nobody could see. The gate
+/// ignores it once the ask has ended.
+#[cfg(not(target_os = "macos"))]
+fn when_unshown(overlay: rune::OverlayHandle<Sheet>, reply: Reply, id: u64) {
+    let _ = std::thread::Builder::new()
+        .name("hex-consent-check".into())
+        .spawn(move || {
+            std::thread::sleep(SHOW_CHECK);
+            if overlay.availability() != rune::Availability::Unavailable {
+                return;
+            }
+            let failure = overlay.failure();
+            tracing::warn!(
+                failure = failure.as_deref().unwrap_or("no reason given"),
+                "Hex's permission window could not open; the ask is unavailable"
+            );
+            reply(id, Answer::Unavailable);
+        });
+}
+
 /// Adds the permission window to the app, hidden, and returns what the
 /// consent gate calls as each ask starts (`Some`) and ends (`None`); it may
 /// be called from any thread.
-#[cfg(target_os = "macos")]
 pub(crate) fn install<S: 'static>(
     app: &mut rune::App<S>,
     reply: Reply,
@@ -140,7 +176,11 @@ pub(crate) fn install<S: 'static>(
     use rune::{DisplayTarget, KeyPolicy, OverlayInput, OverlayOptions, OverlaySpec};
     let spec = OverlaySpec::new("Hex permission request", SIZE, view)
         .options(OverlayOptions {
-            // Placed for real each time it shows (see [`place`]).
+            // macOS places it for real each time it shows (see [`place`]).
+            // Elsewhere it spans the screen under the pointer, the dialog
+            // centred in it; only the dialog takes the pointer.
+            #[cfg(not(target_os = "macos"))]
+            placement: Some(rune::OverlayPlacement::FullScreen),
             display: DisplayTarget::UnderPointer,
             input: OverlayInput::Regions,
             keys: KeyPolicy::OnDemand,

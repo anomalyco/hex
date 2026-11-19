@@ -138,6 +138,17 @@ pub(crate) fn run_app(
         app = app.float_on_open();
     }
     crate::linux::rune_hud::install(&mut app);
+    // Hex's permission window: its own overlay, so an ask shows whether the
+    // main window is open or not and never opens it.
+    if let Some(consent) = host.consent().cloned() {
+        let desk = consent.desk.clone();
+        consent.desk.watch(consent_window::install(
+            &mut app,
+            Arc::new(move |id, answer| {
+                desk.answer(id, answer);
+            }),
+        ));
+    }
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
     let _capture_overlays =
@@ -587,10 +598,9 @@ struct ServiceView {
     update_blocked: Option<&'static str>,
     /// The service is recording or saving a shortcut.
     editing: bool,
-    /// A consented recording Hex's window can stop or cancel (macOS).
+    /// A consented recording Hex's window can stop or cancel.
     record: Option<crate::local_api::RecordView>,
-    /// Clients paired to start recordings, which the window can revoke
-    /// (macOS).
+    /// Clients paired to start recordings, which the window can revoke.
     permissions: Vec<crate::local_api::PermissionView>,
     grants: Vec<crate::local_api::RecordGrant>,
 }

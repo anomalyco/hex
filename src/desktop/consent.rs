@@ -1,5 +1,5 @@
-//! The macOS app's side of consent: Hex's permission window shows one ask,
-//! and the local API's worker waits for the answer.
+//! The app's side of consent on every OS: Hex's permission window shows one
+//! ask, and the local API's worker waits for the answer.
 //!
 //! The local API thread blocks in [`Desk::ask`] until the person presses a
 //! button in the permission window, or a minute passes. The window learns of

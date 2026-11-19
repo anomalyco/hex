@@ -1,6 +1,5 @@
 //! What a Linux window asks of its host: settings reloads, shortcut capture,
-//! model choices, and the macOS-only consent and recording requests the
-//! shared window type carries (Linux accepts and ignores those).
+//! model choices, and the consented recordings' Stop, Cancel, and Revoke.
 
 use crate::desktop::host::{DesktopAction, DesktopShortcut};
 use crate::transcription::models::TranscriptionModelId;
@@ -30,19 +29,17 @@ pub(crate) enum HostRequest {
     /// other one, through the same installed-only preparation as a picker
     /// choice.
     SwapModel,
-    /// The window stopped or cancelled a consented recording; macOS only.
+    /// The window stopped (`stop`) or cancelled a consented recording.
     RecordControl {
-        #[allow(dead_code)]
         id: u64,
-        #[allow(dead_code)]
         stop: bool,
     },
-    /// The window withdrew a client's grant; macOS only.
+    /// The window withdrew a saved permission (Labs › Browser access).
     RevokePermission {
         id: u64,
     },
+    /// The window withdrew a client's grant to start recordings.
     RevokeRecordGrant {
-        #[allow(dead_code)]
         id: u64,
     },
 }
