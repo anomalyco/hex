@@ -73,6 +73,9 @@ pub(super) enum Pane {
     /// The Hex Microphone's driver, tuning, and try-it demo (macOS, while
     /// its Labs toggle is on).
     VoiceFilter,
+    /// Apps and websites that may use Hex, and the websites asking (while
+    /// Labs › Connected apps is on).
+    ConnectedApps,
     /// The dictation indicator's tuning scene (Playground only).
     HudLab,
     /// Legacy event-log inspector scene (Playground only).
@@ -91,6 +94,7 @@ impl Pane {
         #[cfg(hex_capture)]
         Pane::Annotate,
         Pane::VoiceFilter,
+        Pane::ConnectedApps,
         Pane::HudLab,
         Pane::Activity,
     ];
@@ -111,6 +115,7 @@ impl Pane {
             }
             // On from Labs (dev builds), or while its driver is installed.
             Pane::VoiceFilter => caps.fun && fun::running(ui),
+            Pane::ConnectedApps => ui.settings.labs.connected_apps,
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
             _ => true,
@@ -127,6 +132,7 @@ impl Pane {
             #[cfg(hex_capture)]
             Pane::Annotate => tr("Annotate"),
             Pane::VoiceFilter => tr("Voice Filter"),
+            Pane::ConnectedApps => tr("Connected apps"),
             Pane::HudLab => "HUD Lab",
             Pane::Activity => tr("Activity"),
             Pane::WhatsNew => tr("What's new"),
@@ -143,6 +149,7 @@ impl Pane {
             #[cfg(hex_capture)]
             Pane::Annotate => "nav-annotate",
             Pane::VoiceFilter => "nav-voice-filter",
+            Pane::ConnectedApps => "nav-connected-apps",
             Pane::HudLab => "nav-hud-lab",
             Pane::Activity => "nav-activity",
             Pane::WhatsNew => "nav-whats-new",
@@ -159,6 +166,7 @@ impl Pane {
             #[cfg(hex_capture)]
             Pane::Annotate => &SCRAWL_ICON,
             Pane::VoiceFilter => &VOICE_FILTER_ICON,
+            Pane::ConnectedApps => super::connected_apps::ICON,
             Pane::HudLab => &HUD_LAB_ICON,
             Pane::Activity => &ACTIVITY_ICON,
             Pane::WhatsNew => &icons::PLAIN_BOOK,

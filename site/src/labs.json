@@ -708,7 +708,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Let apps and websites on this computer ask to use Hex's transcription and microphone. You approve each one and can revoke it.",
+      "summary": "Let apps and websites ask to use Hex's transcription and microphone",
       "title": "Connected apps"
     },
     {

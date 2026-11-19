@@ -2878,8 +2878,12 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 ├── An app or web page asks -> Labs › Connected apps (Browser access plays no part)
 │   ├── Lab off -> the routes answer as before; a pending dialog withdrawn, a live recording cancelled
 │   ├── Website, Allow websites to use Hex off -> 403 origin-not-allowed, no CORS, nothing listed
-│   ├── Unknown website -> 403 website-not-allowed + CORS, listed once under Websites that tried (Allow / Block)
+│   ├── Unknown website -> 403 website-not-allowed + CORS, listed once under Asking to connect (Allow / Block)
 │   ├── Blocked website -> 403 website-blocked, never listed again (Unblock)
+│   ├── Who asks -> the window's identity card: icon, verified name (macOS bundle), identifier, how verified;
+│   │   a website's address, its favicon if it sent a valid data: URL (never fetched), its claimed name
+│   ├── Connected apps pane (sidebar, while on) -> Connected (Revoke), Websites switch, Asking to connect,
+│   │   Allowed and Blocked websites folded; names and icons kept with grants for offline display
 │   ├── POST /connect/authorize -> Hex's permission window asks; Allow Once or Always Allow -> code + PKCE
 │   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
@@ -2994,10 +2998,13 @@ it runs while the client checks in (`POST /record/heartbeat`, the 10 s
 dictation lease) and stops itself once the check-ins stop. Grant tokens are
 memory-only. Always Allow saves the capability and either a signed binary
 identity or an origin plus a digest of the page's permission proof.
-Revoking in Labs › Connected apps removes the permission across restarts. An
-unknown website gets no dialog; it is listed under Websites that tried to
-contact Hex for the person to Allow or Block, so with both switches on any
-website can ask to be let in.
+Revoking in the Connected apps pane removes the permission across restarts.
+An unknown website gets no dialog; it is listed under Asking to connect for
+the person to Allow or Block, so with both switches on any website can ask
+to be let in. The permission window and the pane show a native app's icon
+and the name from its verified bundle (macOS), and a website's favicon when
+the page sent a valid PNG or ICO `data:` URL with its ask; Hex never fetches
+one.
 Allow Once records one session and saves nothing. See the contract for the
 loopback Origin trust boundary and why a changed native binary asks again.
 `local_api` tests drive the whole exchange with a fake recording backend

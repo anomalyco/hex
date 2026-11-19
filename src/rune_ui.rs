@@ -13,6 +13,7 @@ mod activity;
 mod calls;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
+mod connected_apps;
 pub(crate) mod consent_window;
 mod controls;
 #[cfg(target_os = "macos")]
@@ -42,6 +43,7 @@ mod live_notes;
 pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
+pub(crate) mod requester_icon;
 pub(crate) use self::meetings::meeting_import_failed;
 #[cfg(hex_capture)]
 mod captures;
@@ -693,6 +695,9 @@ pub(crate) struct Ui {
     find: find_popover::Find,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
+    /// The Connected apps pane's requester icons and website disclosures.
+    requester_icons: requester_icon::Icons,
+    connected: connected_apps::Disclosures,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
     /// The Labs store's search, tab, and chip.
@@ -846,6 +851,8 @@ impl Ui {
             mic_level: general::MicLevel::default(),
             find: Default::default(),
             advanced: Vec::new(),
+            requester_icons: Default::default(),
+            connected: Default::default(),
             labs_open: false,
             lab_store: labs::Store::default(),
             #[cfg(all(target_os = "macos", hex_capture))]
@@ -1374,6 +1381,10 @@ fn local_meetings(ui: &mut Ui) -> bool {
 fn setup(ui: &mut Ui, waker: Waker) {
     ui.modes.waker = Some(waker.clone());
     ui.modes.icon_cache = Some(rune::ImageCache::new(waker.clone()));
+    if !ui.is_fixture() {
+        ui.requester_icons
+            .set_cache(rune::ImageCache::new(waker.clone())); // scenes decode at once
+    }
     #[cfg(hex_capture)]
     ui.captures.set_cache(rune::ImageCache::new(waker.clone()));
     if let Service::Pending(connect) = &mut ui.service {
@@ -1573,6 +1584,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
         Pane::VoiceFilter => (Vec::new(), fun::pane(ui, p)),
+        Pane::ConnectedApps => (Vec::new(), connected_apps::pane(ui, p)),
         Pane::HudLab => hud_lab::pane(ui, p),
         Pane::Activity => activity::pane(ui, p),
         Pane::WhatsNew => (Vec::new(), whats_new::feed(ui, p)),

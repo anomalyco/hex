@@ -966,66 +966,43 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.screenshots = true;
         ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
-    // Labs › Connected apps with websites on: an allowed website, two that
-    // tried, a blocked one, and an app and a website connected.
+    // Labs › Connected apps' card while on: its switch and summary; its
+    // settings are the Connected apps pane's.
     ("mac-labs-connected-apps", |ui| {
         labs_with_some_on(ui);
         ui.settings.labs.connected_apps = true;
         ui.settings.labs.connected_apps_websites = true;
         ui.lab_store.search = rune::TextEdit::new("Connected apps".to_owned());
         ui.lab_store.group = Some(crate::labs::Feature::ConnectedApps.group());
-        if let Some(view) = &mut ui.view {
-            let now = crate::history::now_ms();
-            view.websites = crate::local_api::Websites {
-                allowed: vec!["https://notes.example".into()],
-                tried: vec![
-                    crate::local_api::permissions::Tried {
-                        origin: "https://new-tool.example".into(),
-                        at_ms: now.saturating_sub(4 * 60_000),
-                    },
-                    crate::local_api::permissions::Tried {
-                        origin: "http://localhost:5173".into(),
-                        at_ms: now.saturating_sub(3 * 3_600_000),
-                    },
-                ],
-                blocked: vec!["https://ads.example".into()],
-            };
-            view.permissions = vec![
-                crate::local_api::PermissionView {
-                    id: 2,
-                    capability: crate::local_api::PermissionCapability::TranscribeAudio,
-                    recipient: crate::local_api::Recipient::Web {
-                        origin: "https://notes.example".into(),
-                        client_name: None,
-                        icon: None,
-                    },
-                },
-                crate::local_api::PermissionView {
-                    id: 3,
-                    capability: crate::local_api::PermissionCapability::MicrophoneRecording,
-                    recipient: crate::local_api::Recipient::Native {
-                        identifier: "com.example.fieldnotes".into(),
-                        cdhash: "fixture-digest".into(),
-                        verification: crate::local_api::Verification::MacSignature {
-                            team: Some("K7Z4Q2M8A1".into()),
-                        },
-                        name: None,
-                        icon: None,
-                    },
-                },
-            ];
-            view.grants = vec![crate::local_api::RecordGrant {
-                durable: false,
-                id: 1,
-                recipient: crate::local_api::Recipient::Native {
-                    identifier: "com.example.recorder".into(),
-                    cdhash: "fixture-digest".into(),
-                    verification: crate::local_api::Verification::MacSignature { team: None },
-                    name: None,
-                    icon: None,
-                },
-            }];
-        }
+    }),
+    // The Connected apps pane: two apps and two websites connected (one app
+    // allowed once), two websites asking, and the allowed and blocked
+    // websites folded away.
+    ("connected-apps", |ui| {
+        *ui = mac_fixture();
+        connected_apps_fixture(ui);
+        ui.pane = Pane::ConnectedApps;
+    }),
+    // The same with the allowed and blocked websites unfolded.
+    ("connected-apps-lists", |ui| {
+        *ui = mac_fixture();
+        connected_apps_fixture(ui);
+        ui.connected = connected_apps::Disclosures::open();
+        ui.pane = Pane::ConnectedApps;
+    }),
+    // Websites off: the lists hide, and the switch says why.
+    ("connected-apps-websites-off", |ui| {
+        *ui = mac_fixture();
+        connected_apps_fixture(ui);
+        ui.settings.labs.connected_apps_websites = false;
+        ui.pane = Pane::ConnectedApps;
+    }),
+    // The pane with nothing connected and no website asking.
+    ("connected-apps-empty", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.connected_apps = true;
+        ui.settings.labs.connected_apps_websites = true;
+        ui.pane = Pane::ConnectedApps;
     }),
     // Labs › YOLO mode's card while on, limited to two apps.
     ("mac-labs-yolo-mode", |ui| {
@@ -1370,4 +1347,90 @@ fn labs_with_some_on(ui: &mut Ui) {
         ui.platform.scrawl = Some(platform::ScrawlView::preview());
     }
     ui.labs_open = true;
+}
+
+/// Labs › Connected apps on, with connected apps and websites, two websites
+/// asking, and allowed and blocked ones.
+fn connected_apps_fixture(ui: &mut Ui) {
+    use crate::local_api::{
+        PermissionCapability, PermissionView, Recipient, RecordGrant, Verification, Websites,
+        permissions::Tried,
+    };
+    use crate::rune_ui::requester_icon::fixtures;
+    ui.settings.labs.connected_apps = true;
+    ui.settings.labs.connected_apps_websites = true;
+    let Some(view) = &mut ui.view else {
+        return;
+    };
+    let now = crate::history::now_ms();
+    let favicon = fixtures::favicon();
+    let mut icons = std::collections::BTreeMap::new();
+    icons.insert(
+        "https://notes.example".to_owned(),
+        crate::local_api::icon::Stored(favicon.clone()),
+    );
+    view.websites = Websites {
+        allowed: vec![
+            "https://notes.example".into(),
+            "https://studio.example".into(),
+            "http://localhost:5173".into(),
+        ],
+        tried: vec![
+            Tried {
+                origin: "https://new-tool.example".into(),
+                at_ms: now.saturating_sub(4 * 60_000),
+            },
+            Tried {
+                origin: "https://meeting-notes.example".into(),
+                at_ms: now.saturating_sub(3 * 3_600_000),
+            },
+        ],
+        blocked: vec!["https://ads.example".into()],
+        icons,
+    };
+    let field_notes = Recipient::Native {
+        identifier: "com.example.fieldnotes".into(),
+        cdhash: "fixture-digest".into(),
+        verification: Verification::MacSignature {
+            team: Some("K7Z4Q2M8A1".into()),
+        },
+        name: Some("Field Notes".into()),
+        icon: Some(fixtures::app()),
+    };
+    view.permissions = vec![
+        PermissionView {
+            id: 3,
+            capability: PermissionCapability::MicrophoneRecording,
+            recipient: field_notes,
+        },
+        PermissionView {
+            id: 2,
+            capability: PermissionCapability::TranscribeAudio,
+            recipient: Recipient::Web {
+                origin: "https://notes.example".into(),
+                client_name: None,
+                icon: Some(favicon),
+            },
+        },
+        PermissionView {
+            id: 4,
+            capability: PermissionCapability::TranscribeAudio,
+            recipient: Recipient::Web {
+                origin: "https://studio.example".into(),
+                client_name: None,
+                icon: None,
+            },
+        },
+    ];
+    view.grants = vec![RecordGrant {
+        durable: false,
+        id: 1,
+        recipient: Recipient::Native {
+            identifier: "com.example.recorder".into(),
+            cdhash: "fixture-digest".into(),
+            verification: Verification::MacSignature { team: None },
+            name: None,
+            icon: None,
+        },
+    }];
 }

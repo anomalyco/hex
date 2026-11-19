@@ -285,7 +285,7 @@ impl Feature {
                 "Apps that use Hex's local API can ask when each word or phrase starts and ends"
             }
             Self::ConnectedApps => {
-                "Let apps and websites on this computer ask to use Hex's transcription and microphone. You approve each one and can revoke it."
+                "Let apps and websites ask to use Hex's transcription and microphone"
             }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone."

@@ -23,7 +23,7 @@
 //! Always Allow saves the capability for this exact `Origin` in
 //! [`Permissions`]. A later ask from the same origin skips the dialog and
 //! mints a fresh one-operation code; the saved permission survives a restart
-//! until the person revokes it in Labs › Connected apps.
+//! until the person revokes it in the Connected apps pane.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -43,8 +43,9 @@ pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(60);
 pub(super) const GRANT_LIFETIME: Duration = Duration::from_secs(120);
 /// How long an origin that was denied waits before it may prompt again.
 pub(super) const DENY_COOLDOWN: Duration = Duration::from_secs(30);
-/// The connect bodies are two short JSON objects.
-pub(super) const MAX_BODY_BYTES: usize = 8 * 1024;
+/// The connect bodies are two short JSON objects; an ask may also carry the
+/// page's favicon (at most 64 KiB, base64 in a `data:` URL).
+pub(super) const MAX_BODY_BYTES: usize = 96 * 1024;
 const BODY_DEADLINE: Duration = Duration::from_secs(5);
 
 struct Grant {
@@ -196,11 +197,15 @@ impl Connect {
         let Some(gate) = self.gate.clone() else {
             return HttpResponse::code(403, "connect-unavailable");
         };
+        // The page's favicon, decoded here or ignored; Hex never fetches it.
+        let icon = request.icon.as_deref().and_then(super::icon::from_data_url);
         let recipient = Recipient::Web {
             origin: origin.to_owned(),
             client_name,
-            icon: None,
+            icon,
         };
+        // The pane shows what it last asked with, even while it's offline.
+        self.permissions.keep_display(&recipient);
         // Always Allow is the person's earlier answer for this exact origin,
         // so this ask needs no dialog. A saved permission never carries the
         // page's claimed name, only the `Origin` Hex verified.
@@ -485,6 +490,9 @@ struct AuthorizeRequest {
     code_challenge_method: Option<String>,
     #[serde(default)]
     client_name: Option<String>,
+    /// The page's favicon as a `data:` URL (PNG or ICO). Display only.
+    #[serde(default)]
+    icon: Option<String>,
     #[serde(default)]
     state: Option<String>,
 }

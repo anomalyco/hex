@@ -9,7 +9,7 @@
 //! Always Allow in the window. A website that is neither allowed nor blocked
 //! gets no window: its first consent or pairing request is answered
 //! `403 website-not-allowed` and its origin is listed (origin and time only)
-//! under Websites that tried to contact Hex, where the person may allow or
+//! under Asking to connect in the Connected apps pane, where the person may allow or
 //! block it. A blocked website answers `403 website-blocked` and is never
 //! listed again.
 //!

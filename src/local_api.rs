@@ -21,6 +21,9 @@ mod control;
 mod dictation;
 mod discovery;
 mod http;
+pub(crate) mod icon;
+#[cfg(target_os = "macos")]
+mod mac_app;
 mod meeting_events;
 #[cfg(target_os = "macos")]
 mod native;
@@ -33,7 +36,9 @@ mod transcriptions;
 
 pub(crate) use access::{Access, AppConsent};
 pub(crate) use connect::Connect;
-pub(crate) use consent::{Answer, ConsentGate, Intent, Prompt, Recipient, Verification};
+pub(crate) use consent::{
+    Answer, ConsentGate, ConsentIcon, Intent, Prompt, Recipient, SandboxKind, Verification,
+};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use permissions::Permissions;
 pub(crate) use permissions::View as PermissionView;
@@ -1449,6 +1454,7 @@ mod tests {
     use crate::dictation::service::DictationControl;
 
     mod connected_apps;
+    mod requester_icons;
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     /// How long a test waits on another thread before failing instead of hanging.

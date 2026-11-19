@@ -10,6 +10,12 @@
 //! The same file keeps Labs › Connected apps' website lists: the origins the
 //! person allowed to ask, the ones that tried without being allowed (origin
 //! and last attempt time only), and the ones the person blocked.
+//!
+//! So the Connected apps pane can show who is connected while they are
+//! offline, each saved permission also keeps the recipient's display name and
+//! icon (a small PNG), and each listed website the favicon it last sent. Both
+//! are display data: matching an entry never reads them, and an icon that no
+//! longer reads is dropped.
 
 use std::collections::HashSet;
 use std::fs;
@@ -19,7 +25,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use super::consent::{Intent, Recipient, Verification};
+use std::collections::BTreeMap;
+
+use super::consent::{ConsentIcon, Intent, Recipient, Verification};
+use super::icon::Stored;
 
 /// The name of the permissions file in Hex's support folder.
 const FILE: &str = "local-consent.json";
@@ -45,14 +54,6 @@ impl Capability {
         match intent {
             Intent::Transcribe => Self::TranscribeAudio,
             Intent::Record => Self::MicrophoneRecording,
-        }
-    }
-
-    /// The short line the window puts beside a permitted recipient.
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::TranscribeAudio => "Transcribe audio",
-            Self::MicrophoneRecording => "Microphone recording",
         }
     }
 }
@@ -148,6 +149,53 @@ struct Entry {
     id: u64,
     capability: Capability,
     scope: Scope,
+    /// The display name Hex derived for a native app. Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    /// The recipient's icon, as it last asked. Display only.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::icon::lenient"
+    )]
+    icon: Option<Stored>,
+}
+
+impl Entry {
+    /// The recipient as Hex verified it, with the name and icon it kept.
+    fn recipient(&self) -> Recipient {
+        let mut recipient = self.scope.recipient();
+        let kept = self.icon.as_ref().map(|stored| stored.0.clone());
+        match &mut recipient {
+            Recipient::Native { name, icon, .. } => {
+                *name = self.name.clone();
+                *icon = kept;
+            }
+            Recipient::Web { icon, .. } => *icon = kept,
+        }
+        recipient
+    }
+
+    /// Takes `recipient`'s name and icon; true when that changed anything.
+    fn keep_display(&mut self, recipient: &Recipient) -> bool {
+        let (name, icon) = display(recipient);
+        let changed = self.name != name || self.icon != icon;
+        if changed {
+            self.name = name;
+            self.icon = icon;
+        }
+        changed
+    }
+}
+
+/// What is kept of a recipient's display: a native app's name, and its icon.
+/// A page's claimed name is never kept.
+fn display(recipient: &Recipient) -> (Option<String>, Option<Stored>) {
+    let name = match recipient {
+        Recipient::Native { name, .. } => name.clone(),
+        Recipient::Web { .. } => None,
+    };
+    (name, recipient.icon().cloned().map(Stored))
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -174,6 +222,21 @@ pub(crate) struct Websites {
     /// Never ask and are never listed as trying again, newest first.
     #[serde(default)]
     pub(crate) blocked: Vec<String>,
+    /// The favicon each allowed or blocked website last sent with an ask.
+    /// Display only.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "super::icon::lenient_map"
+    )]
+    pub(crate) icons: BTreeMap<String, Stored>,
+}
+
+impl Websites {
+    /// The favicon `origin` last sent, if Hex kept one.
+    pub(crate) fn icon(&self, origin: &str) -> Option<&ConsentIcon> {
+        self.icons.get(origin).map(|stored| &stored.0)
+    }
 }
 
 /// One website that tried to contact Hex: its origin and when it last did.
@@ -302,7 +365,9 @@ impl Permissions {
         match action {
             WebsiteAction::Allow => updated.allowed.insert(0, origin.to_owned()),
             WebsiteAction::Block => updated.blocked.insert(0, origin.to_owned()),
-            WebsiteAction::Forget => {}
+            WebsiteAction::Forget => {
+                updated.icons.remove(origin);
+            }
         }
         if let Err(error) = self.save(&entries, &updated) {
             tracing::error!(%error, "could not save a website change");
@@ -368,7 +433,10 @@ impl Permissions {
             .iter()
             .find(|entry| entry.capability == capability && entry.scope == scope)
         {
-            return Ok((entry.id, None));
+            let id = entry.id;
+            drop(entries);
+            self.keep_display(recipient);
+            return Ok((id, None));
         }
         let id = {
             let mut next = lock(&self.next_id);
@@ -384,15 +452,58 @@ impl Permissions {
         };
         use sha2::{Digest, Sha256};
         let proof_hash = proof.as_ref().map(|s| Sha256::digest(s.as_bytes()).into());
+        let (name, icon) = display(recipient);
         updated.push(Entry {
             proof_hash,
             id,
             capability,
             scope,
+            name,
+            icon,
         });
         self.save(&updated, &lock(&self.websites))?;
         *entries = updated;
         Ok((id, proof))
+    }
+
+    /// Keeps the name and icon `recipient` asked with, for every saved
+    /// permission it has and, for a listed website, its favicon, so the
+    /// Connected apps pane shows them while it is offline. Never changes who
+    /// matches; saved only when something changed, and a failed save keeps
+    /// what was there.
+    pub(crate) fn keep_display(&self, recipient: &Recipient) {
+        let scope = Scope::of(recipient);
+        let mut entries = lock(&self.entries);
+        let mut websites = lock(&self.websites);
+        let mut updated_entries = entries.clone();
+        let mut changed = false;
+        for entry in updated_entries
+            .iter_mut()
+            .filter(|entry| entry.scope == scope)
+        {
+            changed |= entry.keep_display(recipient);
+        }
+        let mut updated_websites = websites.clone();
+        if let Recipient::Web { origin, icon, .. } = recipient
+            && let Some(icon) = icon
+            && (updated_websites.allowed.contains(origin)
+                || updated_websites.blocked.contains(origin))
+            && updated_websites.icon(origin) != Some(icon)
+        {
+            updated_websites
+                .icons
+                .insert(origin.clone(), Stored(icon.clone()));
+            changed = true;
+        }
+        if !changed {
+            return;
+        }
+        if let Err(error) = self.save(&updated_entries, &updated_websites) {
+            tracing::warn!(%error, "could not save a connected app's name and icon");
+            return;
+        }
+        *entries = updated_entries;
+        *websites = updated_websites;
     }
 
     /// Every saved permission, in the order it was granted.
@@ -402,7 +513,7 @@ impl Permissions {
             .map(|entry| View {
                 id: entry.id,
                 capability: entry.capability,
-                recipient: entry.scope.recipient(),
+                recipient: entry.recipient(),
             })
             .collect()
     }
@@ -422,7 +533,7 @@ impl Permissions {
         Some(View {
             id,
             capability: removed.capability,
-            recipient: removed.scope.recipient(),
+            recipient: removed.recipient(),
         })
     }
 
@@ -502,6 +613,14 @@ fn websites_from(saved: Websites) -> Websites {
             websites.tried.push(tried);
         }
     }
+    // Icons only for the websites still listed as allowed or blocked.
+    websites.icons = saved
+        .icons
+        .into_iter()
+        .filter(|(origin, _)| {
+            websites.allowed.contains(origin) || websites.blocked.contains(origin)
+        })
+        .collect();
     websites
 }
 
@@ -592,6 +711,45 @@ mod tests {
         let reloaded = Permissions::new(Some(path.clone()));
         assert!(reloaded.allows(Intent::Transcribe, &page()));
         assert!(!reloaded.allows(Intent::Record, &page()));
+        let _ = fs::remove_file(path);
+    }
+
+    /// A native app's name and icon are kept with its permission, survive a
+    /// restart, and play no part in matching; a broken saved icon is dropped
+    /// without losing the permission.
+    #[test]
+    fn a_name_and_icon_are_kept_but_never_matched() {
+        let path = temp_path();
+        let store = Permissions::new(Some(path.clone()));
+        let icon = crate::local_api::icon::from_rgba(2, 2, vec![90; 16]).unwrap();
+        let mut named = app();
+        if let Recipient::Native {
+            name, icon: slot, ..
+        } = &mut named
+        {
+            *name = Some("Field Notes".into());
+            *slot = Some(icon.clone());
+        }
+        store.remember(Intent::Record, &named).unwrap();
+        assert!(
+            store.allows(Intent::Record, &app()),
+            "display data never matches"
+        );
+
+        let reloaded = Permissions::new(Some(path.clone()));
+        let saved = &reloaded.list()[0];
+        assert_eq!(saved.recipient.display_name(), "Field Notes");
+        assert_eq!(saved.recipient.icon(), Some(&icon));
+        assert!(reloaded.allows(Intent::Record, &app()));
+
+        let text = fs::read_to_string(&path).unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(&text).unwrap();
+        document["permissions"][0]["icon"] = "not a png".into();
+        fs::write(&path, document.to_string()).unwrap();
+        let broken = Permissions::new(Some(path.clone()));
+        assert_eq!(broken.list().len(), 1);
+        assert_eq!(broken.list()[0].recipient.icon(), None);
+        assert_eq!(broken.list()[0].recipient.display_name(), "Field Notes");
         let _ = fs::remove_file(path);
     }
 
