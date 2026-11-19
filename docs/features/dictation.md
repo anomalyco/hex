@@ -388,15 +388,17 @@ exercised, and no automated check covers the re-arm.
 
 **Fixed November 19, 2026:** a Toggle-mode Alt+Windows chord started recording,
 then for 50 minutes every shortcut press and Escape did nothing and wrote
-nothing to `process.log`; one later press finally ended the capture. The
-keyboard hook had stopped being called with no foreground change to re-arm it
-(Windows removes a low-level hook that exceeds `LowLevelHooksTimeout`, and an
-app with raw keyboard input in front can silence every keyboard hook). The
+nothing to `process.log`; one later press finally ended the capture. The likely
+cause is the keyboard hook stopping: Windows removes a low-level hook that
+exceeds `LowLevelHooksTimeout`, and an app with raw keyboard input in front can
+silence every keyboard hook. Nothing was logged, so that was not proved. The
 fix that ends a stuck Toggle capture is the watchdog's re-arm: once the hooks
 are back, the next press finishes it. The lost-release heal matters mainly for
 Hold mode, where the capture is still recording, and keeps the hook state
-consistent in Toggle. The hook thread now keeps a repeating timer and checks
-both:
+consistent in Toggle. It covers only a keyless normal dictation chord; a
+keyless raw, Terminal-paste, or second-shortcut capture with a lost release
+still relies on the re-arm and its next press. The hook thread now keeps a
+repeating timer and checks both:
 
 ```ts
 Windows hook watchdog                                  // dictate.windows-hook-watchdog
@@ -405,34 +407,49 @@ Windows hook watchdog                                  // dictate.windows-hook-w
   │   │   and Hex is not in front
   │   │   -> Install fresh WH_KEYBOARD_LL and WH_MOUSE_LL hooks; one info line
   │   │      when a silent streak starts, one with its count when a longer
-  │   │      streak ends
+  │   │      streak ends (both count successful re-arms; a failed re-arm logs
+  │   │      the one-time warning instead)
   │   │   -> The wait doubles after each silent re-arm: 3, 6, 12, ... 60 s
+  │   │   -> Only a keyboard event resets the wait; a mouse move proves the
+  │   │      mouse hook runs, not the keyboard hook, so it cannot reset it
   │   │   -> A lock screen, a UAC secure desktop, or an elevated window, where
   │   │      no non-elevated hook sees input, just backs off instead of looping
-  │   ├── A keyless normal dictation chord still active with its modifiers up
+  │   ├── The keyboard hook has been quiet past Windows' auto-repeat delay plus
+  │   │   250 ms, and a keyless normal dictation chord is active with its
+  │   │   modifiers reading up (GetAsyncKeyState)
   │   │   -> Release it as the missing event would: Toggle locks, Hold finishes;
   │   │      the tick stamps the release, so Hold keeps up to ~1 s more audio
+  │   │   -> A held key that another hook hides from GetAsyncKeyState still
+  │   │      repeats into Hex's hook, so that recent keyboard event blocks this
   │   └── Its info line is written by this tick after it drops the hook state
-  ├── Every keyboard and mouse hook event stamps the tick first, injected ones
-  │   included; the mouse hook is re-armed with the keyboard hook
+  ├── Every keyboard and mouse hook event stamps the shared tick first, injected
+  │   included; the keyboard hook also stamps a keyboard-only tick
   ├── Toggle only: "dictation cancelled by the cancel key", or "Escape ignored
   │   while recording" with the reason; the hook records each as an atomic and
-  │   the next tick writes it, so no log file write ever runs on the hook path
-  └── Limits: Hex in front is skipped, and a mouse moved without pause can keep
-      a dead keyboard hook from being noticed until it stops
+  │   the next tick writes it
+  └── Limits: Hex in front is skipped; a mouse moved without pause can keep a
+      dead keyboard hook from being noticed until it stops, though it no longer
+      resets the wait
 ```
 
+No hook callback writes a log line, and nothing logs while the hook state lock
+is held. The tick writes at most a few rare lines on the hook thread (streak
+start/end, a cancel, an ignored Escape, a heal), so a stalled log writer can
+delay pending hook calls there, but never blocks a callback.
+
 Checks: `silence_is_judged_from_the_session_and_the_hooks`,
-`a_silent_streak_waits_longer_after_each_rearm`, and
+`a_silent_streak_backs_off_and_only_a_keyboard_event_resets_it`,
+`a_single_rearm_streak_ends_quietly`, `a_recent_keyboard_event_blocks_the_heal`,
+`the_repeat_delay_maps_and_clamps`, and
 `distances_survive_the_tick_count_wrapping` in
 [windows/input/watchdog.rs](../../src/windows/input/watchdog.rs),
 `a_lost_release_forgets_sides_now_up` in
 [windows/input/modifiers.rs](../../src/windows/input/modifiers.rs), and
 `a_keyless_chord_whose_release_never_arrived_resynchronizes` and
 `the_release_heal_leaves_other_captures_alone` in
-[windows/input.rs](../../src/windows/input.rs). Proof limit: cross-compiled
-only. The watchdog, the release heal, and the new log lines have not run on a
-Windows PC, and no hook-killing app or 50-minute stuck capture was reproduced.
+[windows/input.rs](../../src/windows/input.rs). Proof limit: the unit tests run
+natively on the Windows x64 and ARM64 CI runners; nothing has run on a real PC
+with a hook-killing app or a long stuck capture.
 
 Apps that grab the keyboard with their own low-level hook (VMs and remote
 desktop clients often do) may now get Hex's hook re-installed ahead of theirs

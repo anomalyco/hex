@@ -760,7 +760,7 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    watchdog::stamp();
+    watchdog::stamp_keyboard();
     if code != HC_ACTION as i32 {
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
