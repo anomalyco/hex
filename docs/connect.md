@@ -66,8 +66,11 @@ A page's fetch -> POST /connect/authorize            // no bearer token
   websites alike; off, every consent route answers as it did before the lab
   (`origin-not-allowed` for a page, `record-unavailable` for a native app,
   `401` for a grant or session token), a pending dialog is withdrawn, a live
-  consented recording is cancelled, and saved grants, the website lists, and
-  the websites switch are kept but unused until it is on again.
+  consented recording is cancelled, the native socket or pipe is closed
+  (within 0.2 s, ending its connections; Hex does no identity work while it
+  is off), and saved grants, the website lists, and the websites switch are
+  kept but unused until it is on again. The native channel serves at most 8
+  clients at once; one more is answered `503 native-busy`.
 - A desktop that can show Hex's permission window. A Wayland compositor
   without layer-shell (GNOME) can't: there Settings › Labs keeps the
   Connected apps card, disabled while off, with a note saying so, `hex labs`
@@ -478,6 +481,7 @@ save never grants access, and a failed revoke does not disappear from the list.
 | 409 | `session-busy`, `session-expired`, `session-finished`, `session-cancelled`, `not-started`, `finish-in-progress` | Session state |
 | 429 | `consent-cooldown` | The recipient was denied less than 30 s ago |
 | 503 | `capture-unavailable` | No capture loop could start the recording |
+| 503 | `native-busy` | The native channel already serves 8 clients |
 
 ### What is not exposed
 

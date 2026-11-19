@@ -73,7 +73,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::display::{self, Shown};
-use super::{HttpContext, handle};
+use super::{HttpContext, Slot, busy, client};
 use super::{Identity, PeerId};
 use crate::local_api::consent::Verification;
 
@@ -84,20 +84,17 @@ const READ_POLL: Duration = Duration::from_millis(10);
 const RETRY_WAIT: Duration = Duration::from_millis(50);
 
 /// The pipe's accept thread and the file that names it.
-pub(in crate::local_api) struct Listener {
+pub(super) struct Bound {
     pointer: PathBuf,
     name: String,
+    stop: Arc<AtomicBool>,
     worker: JoinHandle<()>,
 }
 
-impl Listener {
+impl Bound {
     /// Creates the pipe, names it in `pointer`, and serves native
-    /// `/record/*` requests until the app's shutdown flag is set.
-    pub(in crate::local_api) fn start(
-        pointer: &Path,
-        context: Arc<HttpContext>,
-        shutdown: Arc<AtomicBool>,
-    ) -> std::io::Result<Self> {
+    /// `/record/*` requests until stopped.
+    pub(super) fn start(pointer: &Path, context: Arc<HttpContext>) -> std::io::Result<Self> {
         let user = Sid::of_process(current_process()).ok_or_else(std::io::Error::last_os_error)?;
         let security = Security::owner_only(&user)?;
         let mut random = [0_u8; 16];
@@ -117,20 +114,28 @@ impl Listener {
         let staged = pointer.with_extension("pipe.tmp");
         fs::write(&staged, format!("{name}\n"))?;
         fs::rename(&staged, pointer)?;
+        let stop = Arc::new(AtomicBool::new(false));
         let worker = std::thread::Builder::new()
-            .name("hex-native-record".into())
-            .spawn(move || serve(first, wide_name, security, user, context, shutdown))?;
+            .name("hex-native-accept".into())
+            .spawn({
+                let stop = stop.clone();
+                move || serve(first, wide_name, security, user, context, stop)
+            })?;
         Ok(Self {
             pointer: pointer.to_path_buf(),
             name,
+            stop,
             worker,
         })
     }
 
-    pub(in crate::local_api) fn shutdown(self) {
-        // The app set its shutdown flag; a connection wakes the accept
-        // thread from its wait so it sees it. Between two instances there is
-        // nothing to connect to, so it tries again.
+    /// Closes the pipe, removes its name, and ends its connections within
+    /// their read wait.
+    pub(super) fn stop(self) {
+        self.stop.store(true, Ordering::Release);
+        // A connection wakes the accept thread from its wait so it sees the
+        // flag. Between two instances there is nothing to connect to, so it
+        // tries again.
         for _ in 0..40 {
             if self.worker.is_finished() {
                 break;
@@ -156,11 +161,12 @@ fn serve(
     security: Security,
     user: Sid,
     context: Arc<HttpContext>,
-    shutdown: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 ) {
     let user = Arc::new(user);
+    let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut waiting = Some(first);
-    while !shutdown.load(Ordering::Acquire) {
+    while !stop.load(Ordering::Acquire) {
         let pipe = match waiting.take() {
             Some(pipe) => pipe,
             None => match Pipe::create(&name, &security, false) {
@@ -176,19 +182,26 @@ fn serve(
         let connected = unsafe { ConnectNamedPipe(pipe.0, std::ptr::null_mut()) } != 0
             || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         let connected_at = now();
-        if shutdown.load(Ordering::Acquire) {
+        if stop.load(Ordering::Acquire) {
             break;
         }
         if !connected {
             continue;
         }
+        let Some(slot) = Slot::take(&served) else {
+            pipe.answer_and_close(busy());
+            continue;
+        };
         let context = context.clone();
         let user = user.clone();
+        let stop = stop.clone();
         let spawned = std::thread::Builder::new()
             .name("hex-native-record-client".into())
             .spawn(move || {
-                let identity = identify(pipe.0, &user, connected_at);
-                handle(pipe, identity, &context);
+                let _slot = slot;
+                client(pipe, &context, &stop, |pipe| {
+                    identify(pipe.0, &user, connected_at)
+                });
             });
         if let Err(error) = spawned {
             tracing::warn!(%error, "could not serve a native record client");
@@ -708,6 +721,17 @@ impl Write for Pipe {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+impl Pipe {
+    /// Writes `response` and closes this end without waiting for the client
+    /// to read it: what it wrote stays readable, and nothing here blocks.
+    fn answer_and_close(mut self, response: crate::local_api::http::HttpResponse) {
+        let _ = crate::local_api::write_response(&mut self, response, None);
+        let handle = std::mem::ManuallyDrop::new(self).0;
+        // SAFETY: this value owned the handle; `ManuallyDrop` skips its Drop.
+        unsafe { CloseHandle(handle) };
     }
 }
 

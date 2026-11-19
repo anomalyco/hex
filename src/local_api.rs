@@ -4098,6 +4098,84 @@ mod tests {
         (status, response)
     }
 
+    static NATIVE_LAB: AtomicBool = AtomicBool::new(false);
+
+    fn native_lab() -> bool {
+        NATIVE_LAB.load(Ordering::Acquire)
+    }
+
+    /// A quiet client of the native channel: connected, sending nothing.
+    #[cfg(unix)]
+    fn native_client(socket: &Path) -> std::os::unix::net::UnixStream {
+        let stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+        stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+        stream
+    }
+
+    #[cfg(windows)]
+    fn native_client(socket: &Path) -> fs::File {
+        native::tests::connect(socket)
+    }
+
+    /// The native channel exists only while Labs › Connected apps is on,
+    /// serves a few clients at once (one more hears it is busy), and closes
+    /// with its connections when the lab turns off.
+    #[test]
+    fn the_native_channel_follows_its_lab_and_serves_a_few_at_once() {
+        let directory = temp_directory();
+        let socket = directory.join(if cfg!(windows) {
+            "record.pipe"
+        } else {
+            "record.sock"
+        });
+        let sessions = Arc::new(record::Sessions::with_timings(
+            Access::gated(native_lab, native_lab),
+            Some(ScriptedGate::new(Answer::Deny)),
+            FakeRecording::with_text("unused"),
+            Permissions::new(Some(temp_directory().join("permissions.json"))),
+            record_timings(),
+        ));
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                record: Some(sessions),
+                native_socket: Some(socket.clone()),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+        let settles = |present: bool| {
+            let deadline = Instant::now() + TEST_WAIT;
+            while socket.exists() != present && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            socket.exists() == present
+        };
+        thread::sleep(Duration::from_millis(500));
+        assert!(!socket.exists(), "no channel while the lab is off");
+
+        NATIVE_LAB.store(true, Ordering::Release);
+        assert!(settles(true), "the channel opens with the lab");
+        let mut quiet: Vec<_> = (0..8).map(|_| native_client(&socket)).collect();
+        thread::sleep(Duration::from_millis(200));
+        let (status, response) = native_request(
+            &socket,
+            "GET /record/status HTTP/1.1\r\nHost: hex\r\nConnection: close\r\n\r\n",
+        );
+        assert_eq!(status, 503, "{response}");
+        assert!(response.contains("native-busy"));
+        quiet.truncate(1);
+
+        NATIVE_LAB.store(false, Ordering::Release);
+        assert!(settles(false), "the channel closes with the lab");
+        // Its open connection ends too.
+        let mut rest = Vec::new();
+        let _ = quiet[0].read_to_end(&mut rest);
+        api.shutdown();
+    }
+
     #[test]
     fn a_native_socket_client_pairs_then_records_twice_under_its_identity() {
         let directory = temp_directory();
@@ -4132,6 +4210,11 @@ mod tests {
         )
         .unwrap();
 
+        // The channel opens with the lab, which these tests keep on.
+        let deadline = Instant::now() + TEST_WAIT;
+        while !socket.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
         let body = format!(r#"{{"codeChallenge":"{CHALLENGE}","clientName":"Totally Trusted"}}"#);
         let pair = format!(
             "POST {} HTTP/1.1\r\nHost: hex\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

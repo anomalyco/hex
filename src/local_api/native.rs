@@ -25,8 +25,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-#[cfg(unix)]
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use super::HttpContext;
 use super::consent::{ConsentIcon, Verification};
@@ -48,7 +49,7 @@ use linux::identify;
 #[cfg(target_os = "macos")]
 use macos::identify;
 #[cfg(target_os = "windows")]
-pub(super) use windows::Listener;
+use windows::Bound;
 #[cfg(all(test, target_os = "windows"))]
 pub(super) mod tests {
     pub(in crate::local_api) use super::windows::tests::connect;
@@ -89,6 +90,12 @@ impl Eq for Identity {}
 
 #[cfg(unix)]
 const ACCEPT_WAIT: Duration = Duration::from_millis(50);
+/// How often the channel checks Labs › Connected apps, to open or close.
+const LAB_CHECK: Duration = Duration::from_millis(200);
+/// How long a channel that failed to open waits before it tries again.
+const REOPEN_WAIT: Duration = Duration::from_secs(5);
+/// The most native clients served at once; one more is told it is busy.
+const CLIENTS: usize = 8;
 #[cfg(unix)]
 const CONNECTION_WAIT: Duration = Duration::from_millis(500);
 
@@ -105,22 +112,119 @@ pub(crate) fn socket_path() -> Option<PathBuf> {
         .map(|folder| folder.join(name))
 }
 
-/// The bound owner-only socket and the thread accepting on it.
-#[cfg(unix)]
+/// Hex's native channel, open only while Labs › Connected apps is on: a
+/// thread opens it when the lab turns on and closes it, ending its
+/// connections, when the lab turns off or the app shuts down.
 pub(super) struct Listener {
-    path: PathBuf,
-    worker: std::thread::JoinHandle<()>,
+    worker: JoinHandle<()>,
 }
 
-#[cfg(unix)]
 impl Listener {
-    /// Binds `path` and serves native `/record/*` requests until the app's
-    /// shutdown flag is set.
     pub(super) fn start(
         path: &Path,
         context: Arc<HttpContext>,
         shutdown: Arc<AtomicBool>,
     ) -> std::io::Result<Self> {
+        let path = path.to_path_buf();
+        let worker = std::thread::Builder::new()
+            .name("hex-native-record".into())
+            .spawn(move || supervise(&path, &context, &shutdown))?;
+        Ok(Self { worker })
+    }
+
+    pub(super) fn shutdown(self) {
+        // Bounded by the lab check's wait after the app sets its flag.
+        if self.worker.join().is_err() {
+            tracing::error!("native record channel thread panicked");
+        }
+    }
+}
+
+fn supervise(path: &Path, context: &Arc<HttpContext>, shutdown: &AtomicBool) {
+    let Some(record) = context.record.clone() else {
+        return;
+    };
+    let mut open: Option<Bound> = None;
+    let mut failed: Option<Instant> = None;
+    while !shutdown.load(Ordering::Acquire) {
+        let on = record.access().lab();
+        if on && open.is_none() && failed.is_none_or(|at| at.elapsed() >= REOPEN_WAIT) {
+            match Bound::start(path, context.clone()) {
+                Ok(bound) => (open, failed) = (Some(bound), None),
+                Err(error) => {
+                    tracing::warn!(%error, "native record channel is unavailable");
+                    failed = Some(Instant::now());
+                }
+            }
+        } else if !on && let Some(bound) = open.take() {
+            bound.stop();
+        }
+        std::thread::sleep(LAB_CHECK);
+    }
+    if let Some(bound) = open {
+        bound.stop();
+    }
+}
+
+/// One of the [`CLIENTS`] places for a connection being served; freed on
+/// drop.
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    fn take(served: &Arc<AtomicUsize>) -> Option<Self> {
+        served
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < CLIENTS).then_some(count + 1)
+            })
+            .ok()
+            .map(|_| Self(served.clone()))
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The answer for a connection past [`CLIENTS`].
+fn busy() -> HttpResponse {
+    HttpResponse::code(503, "native-busy")
+}
+
+/// Serves one connection: no identity work unless the lab is still on,
+/// then the request, ending early once `stop` is set.
+fn client<S: Read + Write>(
+    mut stream: S,
+    context: &HttpContext,
+    stop: &AtomicBool,
+    identify: impl FnOnce(&S) -> Option<(PeerId, Identity)>,
+) {
+    if !context
+        .record
+        .as_ref()
+        .is_some_and(|record| record.access().lab())
+    {
+        let unavailable = HttpResponse::code(403, "record-unavailable");
+        let _ = write_response(&mut stream, unavailable, None);
+        return;
+    }
+    let identity = identify(&stream);
+    handle(stream, identity, context, stop);
+}
+
+/// The bound owner-only socket and the thread accepting on it.
+#[cfg(unix)]
+struct Bound {
+    path: PathBuf,
+    stop: Arc<AtomicBool>,
+    worker: JoinHandle<()>,
+}
+
+#[cfg(unix)]
+impl Bound {
+    /// Binds `path` and serves native `/record/*` requests until stopped.
+    fn start(path: &Path, context: Arc<HttpContext>) -> std::io::Result<Self> {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         #[cfg(target_os = "linux")]
@@ -137,16 +241,23 @@ impl Listener {
         let listener = std::os::unix::net::UnixListener::bind(path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
-        let path = path.to_path_buf();
+        let stop = Arc::new(AtomicBool::new(false));
         let worker = std::thread::Builder::new()
-            .name("hex-native-record".into())
-            .spawn(move || serve(listener, context, shutdown))?;
-        Ok(Self { path, worker })
+            .name("hex-native-accept".into())
+            .spawn({
+                let stop = stop.clone();
+                move || serve(listener, context, stop)
+            })?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            stop,
+            worker,
+        })
     }
 
-    pub(super) fn shutdown(self) {
-        // The join is bounded by the accept loop's wait after the app sets
-        // its shutdown flag.
+    /// Closes the socket and ends its connections within their read wait.
+    fn stop(self) {
+        self.stop.store(true, Ordering::Release);
         if self.worker.join().is_err() {
             tracing::error!("native record socket thread panicked");
         }
@@ -158,23 +269,31 @@ impl Listener {
 fn serve(
     listener: std::os::unix::net::UnixListener,
     context: Arc<HttpContext>,
-    shutdown: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 ) {
     use std::os::fd::AsRawFd;
-    while !shutdown.load(std::sync::atomic::Ordering::Acquire) {
+    let served = Arc::new(AtomicUsize::new(0));
+    while !stop.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((stream, _)) => {
+            Ok((mut stream, _)) => {
                 let _ = stream.set_read_timeout(Some(CONNECTION_WAIT));
                 let _ = stream.set_write_timeout(Some(CONNECTION_WAIT));
+                let Some(slot) = Slot::take(&served) else {
+                    let _ = write_response(&mut stream, busy(), None);
+                    continue;
+                };
                 let context = context.clone();
+                let stop = stop.clone();
                 // Each connection is short; a finish waits on the engine, and
                 // reading a peer's identity may wait on the disk, so each gets
                 // its own thread rather than blocking the accept loop.
                 let spawned = std::thread::Builder::new()
                     .name("hex-native-record-client".into())
                     .spawn(move || {
-                        let identity = identify(stream.as_raw_fd());
-                        handle(stream, identity, &context);
+                        let _slot = slot;
+                        client(stream, &context, &stop, |stream| {
+                            identify(stream.as_raw_fd())
+                        });
                     });
                 if let Err(error) = spawned {
                     tracing::warn!(%error, "could not serve a native record client");
@@ -195,8 +314,9 @@ fn handle(
     mut stream: impl Read + Write,
     identity: Option<(PeerId, Identity)>,
     context: &HttpContext,
+    stop: &AtomicBool,
 ) {
-    let request = match read_request(&mut stream, &context.shutdown) {
+    let request = match read_request(&mut stream, stop) {
         Ok(request) => request,
         Err(super::http::RequestReadError::Shutdown) => return,
         Err(error) => {
@@ -205,8 +325,7 @@ fn handle(
             return;
         }
     };
-    let response =
-        route(request, identity, context).respond(context, &mut stream, &context.shutdown);
+    let response = route(request, identity, context).respond(context, &mut stream, stop);
     if let Err(error) = write_response(&mut stream, response, None) {
         tracing::debug!(%error, "native record client disconnected");
     }
