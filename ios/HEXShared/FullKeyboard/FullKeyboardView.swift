@@ -373,6 +373,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         dismissStyleMenu()
         if hexKey.isWarm {
             model.onDictateTap?()
+        } else if let local = model.onLocalDictateTap {
+            local()
         } else {
             model.onOpenURL?(model.coldStartURL)
         }
