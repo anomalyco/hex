@@ -1235,7 +1235,7 @@ final class DotScopeHostView: UIView {
         layer as! CAMetalLayer
     }
 
-    init(tuning: DotScopeTuning) {
+    init(tuning: DotScopeTuning, maximumDrawableCount: Int = 3) {
         self.requestedTuning = tuning
         self.simulation = DotScopeSimulation(tuning: tuning)
         if let gpu = DotScopeMetalPipeline.shared {
@@ -1258,13 +1258,21 @@ final class DotScopeHostView: UIView {
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
             metalLayer.allowsNextDrawableTimeout = false
-            metalLayer.maximumDrawableCount = 3
+            metalLayer.maximumDrawableCount = max(2, min(3, maximumDrawableCount))
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }
 
         proxy.tickHandler = { [weak self] link in
             self?.stepAndRender(timestamp: link.timestamp, targetTimestamp: link.targetTimestamp)
         }
+    }
+
+    /// Releases the display link and shrinks Metal drawables so keyboard extensions reclaim IOSurfaces.
+    func tearDown() {
+        displayLink?.invalidate()
+        displayLink = nil
+        visibilityObservations.removeAll()
+        metalLayer.drawableSize = CGSize(width: 1, height: 1)
     }
 
     @available(*, unavailable)

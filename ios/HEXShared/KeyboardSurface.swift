@@ -69,6 +69,7 @@ final class KeyboardViewModel: ObservableObject {
     private(set) var pendingCommand: PendingCommand?
 
     var onDictateTap: (() -> Void)?
+    var onLocalDictateTap: (() -> Void)?
     var onStopTap: (() -> Void)?
     var onCancelTap: (() -> Void)?
     var onStyleSelected: ((DictationStyle) -> Void)?
@@ -599,8 +600,12 @@ struct KeyboardSurfaceView: View {
     private func defaultTopBar(palette p: KeyboardChromePalette) -> some View {
         HStack(spacing: 8) {
             Button {
-                let target = model.hasFullAccess ? model.coldStartURL : KeyboardLaunchRequest.setup.url
-                model.onOpenURL?(target)
+                if model.hasFullAccess, !model.isWarmAvailable, let local = model.onLocalDictateTap {
+                    local()
+                } else {
+                    let target = model.hasFullAccess ? model.coldStartURL : KeyboardLaunchRequest.setup.url
+                    model.onOpenURL?(target)
+                }
             } label: {
                 HexMarkView(
                     size: 16,
@@ -923,7 +928,11 @@ struct KeyboardSurfaceView: View {
         if !model.hasFullAccess {
             model.onOpenURL?(KeyboardLaunchRequest.setup.url)
         } else if !model.isWarmAvailable || model.stagePhase == .failed {
-            model.onOpenURL?(model.coldStartURL)
+            if let local = model.onLocalDictateTap {
+                local()
+            } else {
+                model.onOpenURL?(model.coldStartURL)
+            }
         } else {
             model.onDictateTap?()
         }

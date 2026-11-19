@@ -5,9 +5,14 @@
 (`HEXWidgets`). The containing app records a generation-scoped temporary WAV,
 transcribes on-device with Apple Speech (`SpeechTranscriber` on iOS 26+) or
 FluidAudio Parakeet V2 (iOS 18+), and removes each capture's file after
-inference, cancellation, or failure. The keyboard extension sends commands and
-inserts completed text over the shared App Group (`group.anomaly.hex.mobile`);
-it never accesses the microphone, speech model, or network.
+inference, cancellation, or failure. During a warm session the keyboard
+extension sends commands and inserts completed text over the shared App Group
+(`group.anomaly.hex.mobile`). Otherwise it dictates by itself (in-keyboard
+dictation, iOS 26+): iOS refuses to record from a keyboard extension
+directly, so it captures through `getUserMedia` in a hidden `WKWebView`
+under Hex's microphone permission, writes a temporary WAV, and transcribes
+it on-device with Apple Speech, downloading the speech assets on first use
+(`HEXKeyboard/KeyboardLocalDictation.swift`). Audio never leaves the iPhone.
 
 ## Capabilities
 
@@ -22,7 +27,7 @@ it never accesses the microphone, speech model, or network.
     do nothing in a keyboard extension, so the keyboard opens Hex through
     the `UIApplication` at the end of its responder chain
     (`ContainingAppOpener`).
-  - **Cold start:** Tapping **Dictate** opens the containing app
+  - **Cold start (before iOS 26):** Tapping **Dictate** opens the containing app
     (`hex-dictation://keyboard/record?...`) with a 10-second
     handoff window, starts recording, and opens the selected host app's URL
     scheme (`messages://`, `slack://`, `claude://`, `chatgpt://`,
@@ -58,11 +63,10 @@ it never accesses the microphone, speech model, or network.
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
     insertion spacing and repeating backspace.
-  - **Full keyboard Hex key (Experiments › Full keyboard):** A tap does
-    nothing, so a stray one while typing is harmless. A still hold of 0.35 s
-    starts dictation in a warm session (or opens Hex without one), with a
-    haptic. Moving more than 10 pt before then opens the style and **Return
-    to** menu; releasing over a row picks it, and releasing elsewhere leaves
+  - **Full keyboard Hex key (Experiments › Full keyboard):** A tap, or a
+    still hold of 0.35 s, starts dictation: in a warm session, else inside
+    the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving
+    more than 10 pt first opens the style and **Return to** menu; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
   - **Apple Intelligence cleanup (Experiments › Clean up with Apple

@@ -1,10 +1,10 @@
 import CoreGraphics
 import Foundation
 
-/// The full keyboard's Hex key as a pure state machine, so a stray tap while typing
-/// does nothing. A still hold of `holdDuration` fires the hold action (dictate, or open
-/// Hex); moving more than `slop` before that opens the style menu, and the release
-/// picks the row under the finger. Once the hold fires, moves and the release are ignored.
+/// The full keyboard's Hex key as a pure state machine. A tap, or a still hold of
+/// `holdDuration`, dictates; moving more than `slop` before either opens the style menu,
+/// and the release picks the row under the finger. Once the hold fires, moves and the
+/// release are ignored.
 nonisolated struct HexKeyGesture: Equatable, Sendable {
     static let holdDuration: TimeInterval = 0.35
     static let slop: CGFloat = 10
@@ -18,6 +18,7 @@ nonisolated struct HexKeyGesture: Equatable, Sendable {
 
     enum Output: Equatable, Sendable {
         case ignored
+        case tap
         case hold
         case openMenu
         case dragMenu
@@ -53,7 +54,11 @@ nonisolated struct HexKeyGesture: Equatable, Sendable {
     }
 
     mutating func touchUp() -> Output {
-        let output: Output = state == .menu ? .releaseMenu : .ignored
+        let output: Output = switch state {
+        case .menu: .releaseMenu
+        case .pressing: .tap
+        case .idle, .fired: .ignored
+        }
         state = .idle
         return output
     }
