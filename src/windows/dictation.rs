@@ -78,7 +78,7 @@ struct Job {
     stop_phrase: Option<String>,
     /// The window in front when the capture started, where a paste returns
     /// when the desktop or a taskbar is in front instead.
-    return_to: Option<isize>,
+    return_to: Option<crate::windows::paste::CaptureWindow>,
 }
 
 /// A release whose capture is still collecting its post-release tail.
@@ -92,7 +92,7 @@ struct Finishing {
     /// Labs › Stop phrase: the words that ended this capture, when they did.
     stop_phrase: Option<String>,
     /// The window in front when the capture started.
-    return_to: Option<isize>,
+    return_to: Option<crate::windows::paste::CaptureWindow>,
 }
 
 enum OutputJob {
@@ -726,8 +726,7 @@ pub fn run(
                     recording_by_shortcut = !deliberate;
                     // The window in front now, where a paste returns if the
                     // desktop or a taskbar is in front when it is sent.
-                    let start_window = crate::windows::input::foreground_window();
-                    recording_return_to = (start_window != 0).then_some(start_window);
+                    recording_return_to = crate::windows::paste::CaptureWindow::read();
                     // Labs › Stop phrase: a new capture listens for the
                     // phrase from its own words.
                     stop_phrase = crate::dictation::stop_phrase::Detector::new();

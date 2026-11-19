@@ -17,7 +17,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
-    IsWindow, IsWindowVisible, SetForegroundWindow,
+    IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow,
 };
 
 use crate::continuation::{Continuation, InputActivity};
@@ -156,6 +156,33 @@ impl Foreground {
     }
 }
 
+/// The window a capture started in, with the process that owned it then, so
+/// a reused handle is not mistaken for the same window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CaptureWindow {
+    window: isize,
+    pid: u32,
+}
+
+impl CaptureWindow {
+    /// The window in front now, or `None` when nothing is.
+    pub fn read() -> Option<Self> {
+        // SAFETY: plain queries; a null foreground window owns no process.
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return None;
+            }
+            let mut pid = 0_u32;
+            GetWindowThreadProcessId(window, &mut pid);
+            (pid != 0).then_some(Self {
+                window: window as isize,
+                pid,
+            })
+        }
+    }
+}
+
 /// The window's class name, empty when Windows has none to give.
 fn window_class(window: HWND) -> String {
     let mut buffer = [0_u16; 256];
@@ -239,12 +266,17 @@ impl WindowsPaster {
     /// `return_to` is the window the capture started in: the desktop or a
     /// taskbar takes no paste, so Hex returns there first and, when it can't,
     /// leaves the transcript on the clipboard instead of sending it nowhere.
-    pub fn paste(&mut self, text: &str, shift: bool, return_to: Option<isize>) -> Result<Paste> {
+    pub fn paste(
+        &mut self,
+        text: &str,
+        shift: bool,
+        return_to: Option<CaptureWindow>,
+    ) -> Result<Paste> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
         let revision = self.activity.revision();
-        let text = text_to_paste(&self.continuation, revision, text);
+        let plain = text;
         let mut restore = self
             .clipboard_restore
             .lock()
@@ -268,30 +300,9 @@ impl WindowsPaster {
             }
         };
         wait_for_conflicting_modifiers();
-        if clipboard_sequence() != original_sequence {
-            return Err(eyre!(
-                "the clipboard changed while the transcript was being prepared"
-            ));
-        }
-        if keep {
-            // Labs › Keep dictation on clipboard: an ordinary entry, so
-            // Windows keeps it in clipboard history (Win+V) and cloud sync,
-            // as macOS keeps its kept entry ordinary too.
-            self.clipboard
-                .set()
-                .text(text.to_string())
-                .wrap_err("could not place the transcript on the Windows clipboard")?;
-            restore.keep();
-        } else {
-            // Marked so Windows keeps the transcript out of clipboard history
-            // (Win+V) and cloud sync, as macOS marks it transient (#851).
-            self.clipboard
-                .set()
-                .exclude_from_history()
-                .exclude_from_cloud()
-                .text(text.to_string())
-                .wrap_err("could not place the transcript on the Windows clipboard")?;
-        }
+        // Resolve the target before the clipboard write: a copy for the shell
+        // leaves the plain transcript, while a paste carries the
+        // continuation's join.
         let mut target = Foreground::read();
         let returned = target.is_shell() && return_to.is_some_and(bring_to_front);
         if returned {
@@ -305,25 +316,44 @@ impl WindowsPaster {
             returned,
             "Windows paste target"
         );
-        if target.is_shell() {
-            // Nothing in front takes a paste: keep the words on the
-            // clipboard, as Labs › Copy dictation only does, rather than
-            // sending Ctrl+V to the desktop or taskbar and losing them.
+        if clipboard_sequence() != original_sequence {
+            return Err(eyre!(
+                "the clipboard changed while the transcript was being prepared"
+            ));
+        }
+        let copied = target.is_shell();
+        let text = if copied {
+            plain.to_string()
+        } else {
+            text_to_paste(&self.continuation, revision, plain)
+        };
+        if keep {
+            // Labs › Keep dictation on clipboard: an ordinary entry, so
+            // Windows keeps it in clipboard history (Win+V) and cloud sync,
+            // as macOS keeps its kept entry ordinary too.
+            self.clipboard
+                .set()
+                .text(text.clone())
+                .wrap_err("could not place the transcript on the Windows clipboard")?;
+            restore.keep();
+        } else {
+            // Marked so Windows keeps the transcript out of clipboard history
+            // (Win+V) and cloud sync, as macOS marks it transient (#851).
+            // A copy for the shell keeps the same marking: the fallback is
+            // still a dictation, not a kept one.
+            self.clipboard
+                .set()
+                .exclude_from_history()
+                .exclude_from_cloud()
+                .text(text.clone())
+                .wrap_err("could not place the transcript on the Windows clipboard")?;
+        }
+        if copied {
+            // Nothing in front takes a paste: the words stay on the
+            // clipboard for Paste Last or a manual Ctrl+V instead of being
+            // sent to the desktop or taskbar and lost.
             restore.keep();
             drop(restore);
-            // Re-set it as an ordinary entry, so Windows also keeps it in
-            // clipboard history (Win+V) for the person to paste by hand.
-            if let Err(error) = self
-                .clipboard
-                .set()
-                .text(text.to_string())
-                .wrap_err("could not keep the transcript on the Windows clipboard")
-            {
-                tracing::warn!(
-                    %error,
-                    "the transcript is on the clipboard but not as an ordinary entry"
-                );
-            }
             tracing::warn!(
                 class = %target.class,
                 application = target.application.as_deref().unwrap_or(""),
@@ -532,25 +562,26 @@ pub(crate) fn is_shell_window(window: HWND) -> bool {
     is_shell_target(Some(&class), application.as_deref(), None)
 }
 
-/// Brings `window` back to the front when it is still a window another
-/// process can paste into, and says whether it arrived within
-/// [`RETURN_TIMEOUT`]. The shell, Hex's own window, and a window that closed
-/// since it was remembered are left alone.
-fn bring_to_front(window: isize) -> bool {
-    if window == 0 {
-        return false;
-    }
-    let window = window as HWND;
-    // SAFETY: plain queries on a window that may have closed since it was
-    // remembered, vetted by `IsWindow`; the foreground request targets that
-    // same live window.
+/// Brings the capture's window back to the front when it is still the same
+/// process's window and another process can paste into it, and says whether
+/// it arrived within [`RETURN_TIMEOUT`]. The shell, Hex's own window, a
+/// minimized window, and a handle whose process changed are left alone.
+fn bring_to_front(capture: CaptureWindow) -> bool {
+    let window = capture.window as HWND;
+    // SAFETY: plain queries on a window that may have closed or been reused
+    // since it was remembered; `IsWindow`, the pid it had at capture start,
+    // and `IsIconic` vet the handle before the foreground request.
     unsafe {
-        if IsWindow(window) == 0 || IsWindowVisible(window) == 0 {
+        if IsWindow(window) == 0 || IsWindowVisible(window) == 0 || IsIconic(window) != 0 {
             return false;
         }
         let mut pid = 0_u32;
         let thread = GetWindowThreadProcessId(window, &mut pid);
-        if thread == 0 || pid == GetCurrentProcessId() || is_shell_window(window) {
+        if thread == 0
+            || pid != capture.pid
+            || pid == GetCurrentProcessId()
+            || is_shell_window(window)
+        {
             return false;
         }
         SetForegroundWindow(window);

@@ -17,7 +17,7 @@ pub(super) fn submit_capture(
     by_shortcut: bool,
     context: crate::windows::context::PendingContext,
     stop_phrase: Option<String>,
-    return_to: Option<isize>,
+    return_to: Option<crate::windows::paste::CaptureWindow>,
 ) -> Result<bool> {
     let mut submitted = false;
     let no_speech = |print: Option<PrintReply>| {
