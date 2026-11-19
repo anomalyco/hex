@@ -235,7 +235,8 @@ const GRANITE_SPEECH_5_RECORD: BenchmarkRecord = BenchmarkRecord {
 };
 
 /// `model`'s benchmark record, or `None` when the system manages the model
-/// and publishes no figure (Apple Speech).
+/// and publishes no figure (Apple Speech) or its card publishes no single
+/// comparable figure (Fluid Speech Pro).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
     match model.id {
         TranscriptionModelId::Qwen3Asr06B => Some(QWEN3_ASR_RECORD),

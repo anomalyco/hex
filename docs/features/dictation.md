@@ -1634,6 +1634,10 @@ Model advertises streaming, GPU device             // dictate.streaming
   │   under Auto) follows without a badge; 1.86% WER on LibriSpeech test-clean
   │   from transcribe.cpp's published conversion benchmark, with its FLEURS
   │   figures in Details
+  ├── Fluid Speech Pro: FluidVoice's Parakeet v3 retrain (742 MB, no hint, also
+  │   offered under Auto) follows without a badge; its card publishes no
+  │   LibriSpeech figure, so it carries no single rate, and its FLEURS figures
+  │   are in Details
   └── Every other available model follows without a badge, selectable and
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```

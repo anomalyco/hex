@@ -46,12 +46,13 @@ strip = true
 # transcribe.cpp 0.4.1 plus one ggml patch that builds only the Vulkan
 # shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml),
 # Parakeet's vocabulary rescoring (branches hex/parakeet-vocabulary and
-# hex/vocabulary-sounds-like), and a Metal residency heartbeat that sleeps once
-# its keep-alive runs out (branch hex/metal-idle-residency). Drop this once a
-# transcribe.cpp release carries them.
+# hex/vocabulary-sounds-like), a Metal residency heartbeat that sleeps once
+# its keep-alive runs out (branch hex/metal-idle-residency), and Fluid Speech
+# Pro's pre-Conformer encoder block (branch hex/fluid-pre-block). Drop this
+# once a transcribe.cpp release carries them.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "295c7e601ee5a25da0d1f169c996aee839d49943" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "295c7e601ee5a25da0d1f169c996aee839d49943" }
 # The crates Rune patches in its own workspace (Rune's README, "Depending on
 # Rune"): a dependency's `[patch]` never reaches the workspace that depends on
 # it, and without these Hex builds against stock winit, sctk-adwaita,
