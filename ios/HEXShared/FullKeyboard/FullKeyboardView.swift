@@ -26,6 +26,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private let accentCallout = AccentCalloutView()
     private let hexKey = HexKeyControl()
     private let globeButton = UIButton(type: .custom)
+    /// The capsule that grows from the Hex mark across the strip into the recording bar.
+    private let morph = UIView()
     private var recordingPanel: HexKeyRecordingPanel?
     private var styleMenu: HexStyleMenuView?
     private var palette = FullKeyboardPalette(isDark: false)
@@ -49,6 +51,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         backgroundColor = .clear
 
         addSubview(stripView)
+        morph.isUserInteractionEnabled = false
+        morph.isHidden = true
+        addSubview(morph)
         addSubview(plane)
         addSubview(hexKey)
         addSubview(globeButton)
@@ -245,6 +250,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
         hexKey.cornerRadius = layout.metrics.cornerRadius
         if let hex = layout.key(.hex) {
+            hexKey.inStrip = hex.row < 0
             hexKey.frame = hex.hitFrame
             hexKey.keycapFrame = hex.frame.offsetBy(dx: -hex.hitFrame.minX, dy: -hex.hitFrame.minY)
         }
@@ -387,14 +393,77 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             panel.frame = bounds
             refreshRecordingPanel()
             panel.isHidden = false
-            fade(in: [panel], out: [stripView, plane, hexKey, globeButton, callout, accentCallout])
+            if let (mark, bar) = morphFrames(), window != nil {
+                // The mark grows into a capsule and runs across the strip, then the panel takes over.
+                runMorph(from: mark, to: bar, appearing: true)
+                fade(in: [], out: [stripView, plane, hexKey, globeButton, callout, accentCallout])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self, weak panel] in
+                    guard let self, self.showsRecording, let panel else { return }
+                    self.fade(in: [panel], out: [self.morph])
+                }
+            } else {
+                fade(in: [panel], out: [stripView, plane, hexKey, globeButton, callout, accentCallout])
+            }
         } else if let panel = recordingPanel {
             panel.scope.phase = .hidden
+            if let (mark, bar) = morphFrames(), window != nil {
+                runMorph(from: bar, to: mark, appearing: false)
+            }
             fade(in: [stripView, plane, hexKey, globeButton, callout], out: [panel]) { [weak self, weak panel] in
                 guard let self, !self.showsRecording, let panel, panel === self.recordingPanel else { return }
                 panel.tearDown()
                 panel.removeFromSuperview()
                 self.recordingPanel = nil
+            }
+        }
+    }
+
+    /// The Hex mark's frame in the strip and the full-width bar it grows into, or nil when
+    /// the Hex key sits in the bottom row.
+    private func morphFrames() -> (CGRect, CGRect)? {
+        let layout = engine.layout
+        guard let hex = layout.key(.hex), hex.row < 0 else { return nil }
+        let m = layout.metrics
+        let bar = CGRect(
+            x: layout.horizontalInset + m.side,
+            y: hex.frame.minY,
+            width: bounds.width - 2 * (layout.horizontalInset + m.side),
+            height: hex.frame.height
+        )
+        return (hex.frame, bar)
+    }
+
+    private func runMorph(from start: CGRect, to end: CGRect, appearing: Bool) {
+        morph.layer.removeAllAnimations()
+        // Under the recording panel on the way in (the panel fades in over it), above it on the
+        // way out so the bar is seen shrinking back into the mark.
+        if appearing {
+            insertSubview(morph, aboveSubview: stripView)
+        } else {
+            bringSubviewToFront(morph)
+        }
+        morph.backgroundColor = palette.chipFill
+        morph.frame = start
+        morph.layer.cornerRadius = start.height / 2
+        morph.alpha = appearing ? 0.6 : 1
+        morph.isHidden = false
+        UIView.animate(
+            withDuration: 0.34,
+            delay: 0,
+            usingSpringWithDamping: 0.82,
+            initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.morph.frame = end
+            self.morph.layer.cornerRadius = end.height / 2
+            if appearing { self.morph.alpha = 1 }
+        }
+        guard !appearing else { return }
+        UIView.animate(withDuration: 0.12, delay: 0.24, options: [.allowUserInteraction]) {
+            self.morph.alpha = 0
+        } completion: { _ in
+            if !self.showsRecording {
+                self.morph.isHidden = true
             }
         }
     }
