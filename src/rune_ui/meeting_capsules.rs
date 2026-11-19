@@ -31,7 +31,7 @@
 //! throw carries a capsule toward the corner it heads for ([`throw`]).
 //!
 //! On a Linux Wayland compositor without layer-shell (GNOME) the capsules
-//! float on XWayland only with Labs › Floating meeting capsules on GNOME
+//! float on XWayland only with Labs › Call recording controls on GNOME
 //! (`linux::meeting_capsules`); otherwise an offer opens the Meetings pane.
 
 use std::cell::Cell;
@@ -62,6 +62,7 @@ mod offer;
 mod offer_surface;
 mod panel;
 mod presence;
+mod screen;
 mod stage;
 mod throw;
 mod waveform;
@@ -70,6 +71,7 @@ use panel::{
     agent_prompt, finalizing_window_size, hex_command, ready, ready_window_size, recording,
     recording_window_size,
 };
+use screen::primary_screen_size;
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
@@ -337,6 +339,11 @@ struct Capsule {
     /// Reduce Motion, as the view last read it: a release jumps to its
     /// corner.
     reduced: Cell<bool>,
+    /// The window's scale, as the view last read it: device pixels per point.
+    scale: Cell<f32>,
+    /// The primary screen in points, for a release's corner; a type that
+    /// tests can replace with no screen at all.
+    screen: ScreenFn,
     save_corner: SaveCorner,
     /// Reads a recording's transcript through now off the main thread, then
     /// calls [`Capsule::finish_copy_new`]. Without it, Copy new copies what
@@ -350,6 +357,8 @@ type CopyNew = Arc<dyn Fn(String) + Send + Sync>;
 type Resize = Arc<dyn Fn((f32, f32)) + Send + Sync>;
 type Shift = Arc<dyn Fn(MeetingIndicatorCorner, f32, f32) + Send + Sync>;
 type SaveCorner = Arc<dyn Fn(MeetingIndicatorCorner) + Send + Sync>;
+/// The primary screen in points, given the window's pixels-per-point scale.
+type ScreenFn = fn(f32) -> Option<(f32, f32)>;
 
 impl Capsule {
     fn send(&self, command: ControllerCommand) -> bool {
@@ -577,7 +586,7 @@ impl Capsule {
             Phase::Up => {
                 let offset = self.throw.track(now, drag.dx, drag.dy);
                 let velocity = self.throw.velocity(now);
-                let Some(screen) = primary_screen_size() else {
+                let Some(screen) = (self.screen)(self.scale.get()) else {
                     self.throw.stop();
                     shift(self.corner, 0.0, 0.0);
                     return;
@@ -631,21 +640,6 @@ fn corner_placement(
     (edge, margin, align, inset)
 }
 
-/// The primary screen in points, where Rune places the capsules.
-#[cfg(target_os = "macos")]
-fn primary_screen_size() -> Option<(f32, f32)> {
-    let mtm = objc2::MainThreadMarker::new()?;
-    let screen = objc2_app_kit::NSScreen::screens(mtm).iter().next()?;
-    let size = screen.frame().size;
-    Some((size.width as f32, size.height as f32))
-}
-
-/// Linux and Windows leave a dragged capsule in its corner.
-#[cfg(not(target_os = "macos"))]
-fn primary_screen_size() -> Option<(f32, f32)> {
-    None
-}
-
 fn place_capsule(
     handle: &OverlayHandle<Capsule>,
     corner: MeetingIndicatorCorner,
@@ -658,7 +652,7 @@ fn place_capsule(
 }
 
 /// Linux: lets the capsule's next show float on XWayland where Wayland has
-/// no layer-shell, only by Labs › Floating meeting capsules on GNOME (#1274).
+/// no layer-shell, only by Labs › Call recording controls on GNOME (#1274).
 /// Off, Rune can't open it there and the Meetings pane stands in (#1271).
 fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
     #[cfg(target_os = "linux")]
@@ -844,6 +838,8 @@ impl MeetingCapsules {
                     shift: None,
                     throw: throw::Throw::default(),
                     reduced: Cell::new(false),
+                    scale: Cell::new(1.0),
+                    screen: primary_screen_size,
                     save_corner: save_corner.clone(),
                     copy_new: None,
                 },
@@ -1230,6 +1226,7 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
 
 fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     capsule.reduced.set(cx.is_reduced_motion());
+    capsule.scale.set(cx.env().scale);
     presence::present(capsule, view_body(capsule, cx))
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT)
 }
@@ -1599,6 +1596,9 @@ mod tests {
             shift: None,
             throw: throw::Throw::default(),
             reduced: Cell::new(false),
+            scale: Cell::new(1.0),
+            // No screen: a release lands back in the corner it started in.
+            screen: |_| None,
             save_corner: Arc::new(|_| {}),
             copy_new: None,
         };
