@@ -1,0 +1,125 @@
+name: iOS
+
+# Builds and tests the iOS targets, which no other workflow compiles. Runs on a
+# pull request that touches them and by hand. `ios/README.md` describes the
+# project; XcodeGen generates it from `ios/project.yml`.
+on:
+  push:
+    # `dev` and `production` take no push checks; Release builds both.
+    branches-ignore: ["dev", "production"]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: List simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+
+      - name: Pick an iPhone simulator on the newest iOS runtime
+        id: simulator
+        run: |
+          python3 - <<'PY' > "$GITHUB_OUTPUT"
+          import json, os, subprocess
+
+          devices = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "--json"]
+          ))["devices"]
+          runtimes = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "runtimes", "--json"]
+          ))["runtimes"]
+          version = {
+              runtime["identifier"]: tuple(int(part) for part in runtime["version"].split(".") if part.isdigit())
+              for runtime in runtimes
+              if runtime.get("isAvailable")
+          }
+          best = None
+          for runtime_id, entries in devices.items():
+              if runtime_id not in version:
+                  continue
+              for device in entries:
+                  if not device["name"].startswith("iPhone"):
+                      continue
+                  key = (version[runtime_id], device["name"])
+                  if best is None or key > best[0]:
+                      best = (key, device["udid"], device["name"])
+          if best is None:
+              raise SystemExit("no available iPhone simulator")
+          print(f"udid={best[1]}")
+          print(f"name={best[2]}")
+          PY
+
+      - name: Build and test
+        working-directory: ios
+        run: |
+          xcodebuild test \
+            -project HEXMobile.xcodeproj \
+            -scheme HEXMobile \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Build the shipping configuration for a device
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project HEXMobile.xcodeproj \
+            -scheme HEXMobile \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Inspect the keyboard extension
+        if: always()
+        run: |
+          set -euo pipefail
+          appex=$(find ~/Library/Developer/Xcode/DerivedData -type d -name HEXKeyboard.appex | head -1)
+          if [ -z "$appex" ]; then
+            echo "::error::HEXKeyboard.appex was not built"
+            exit 1
+          fi
+          echo "appex: $appex"
+          plutil -p "$appex/Info.plist"
+          otool -L "$appex/HEXKeyboard"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-derived-data
+          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
