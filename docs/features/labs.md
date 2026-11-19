@@ -854,7 +854,8 @@ chosen apps, picked with the Modes pane's application picker
 (`modes::PickerTarget::YoloMode`; a popover over the cards below its +,
 closed by a pick, a click outside, or Escape) and matched as a Mode's
 applications are (`ContextSnapshot::application_is`) against the frontmost
-app captured with the dictation; with apps chosen, a dictation whose app is
+app captured with the dictation, under its own name or, on macOS, the name
+Finder shows for its bundle (`Rex Beta.app` runs as `Rex`); with apps chosen, a dictation whose app is
 unknown (Wayland without foreign-toplevel) never sends. It never applies to Dictate
 without processing, `hex dictation` or local API captures, printing stops,
 Live typing's input-method commits, meetings, Annotate

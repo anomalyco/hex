@@ -1213,7 +1213,7 @@ fn process_dictation_job(
             // Labs › YOLO mode, read as the output commits.
             let sends = job.by_shortcut
                 && !job.flavour.raw()
-                && crate::dictation::yolo_mode::sends(application.as_deref());
+                && crate::dictation::yolo_mode::sends(application.as_deref(), None);
             // Labs › Copy dictation only, read as the output commits:
             // dictations go to the clipboard unpasted; Paste Last still pastes.
             // A dictation YOLO mode sends is pasted anyway.

@@ -40,6 +40,10 @@ pub struct ContextSnapshot {
     /// around this dictation's insertion point. Set only on the snapshot a
     /// capture finishes with, and never saved or logged.
     pub caret_text: Option<CaretText>,
+    /// macOS: the name Finder shows for the frontmost app's bundle, which is
+    /// what the app picker saves, when it differs from the name the running
+    /// app reports (`Rex Beta.app` runs as `Rex`). Matching accepts either.
+    pub bundle_name: Option<String>,
 }
 
 /// The page refresh one capture owes. A shortcut's press starts it
@@ -111,6 +115,8 @@ pub struct ContextMonitor {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Frontmost {
     application: Option<String>,
+    /// [`ContextSnapshot::bundle_name`].
+    bundle_name: Option<String>,
     bundle_id: Option<String>,
     pid: i32,
     window_title: Option<String>,
@@ -284,6 +290,7 @@ fn snapshot_of(front: &Frontmost, page: Option<Url>) -> ContextSnapshot {
         input_revision: None,
         screen_terms: Vec::new(),
         caret_text: None,
+        bundle_name: front.bundle_name.clone(),
     }
 }
 
@@ -334,6 +341,7 @@ impl ContextSnapshot {
                         input_revision: None,
                         screen_terms: Vec::new(),
                         caret_text: None,
+                        bundle_name: None,
                     });
                 }
                 Ok(None) => {}
@@ -376,6 +384,7 @@ impl ContextSnapshot {
                     input_revision: None,
                     screen_terms: Vec::new(),
                     caret_text: None,
+                    bundle_name: None,
                 });
             }
         }
@@ -407,9 +416,10 @@ impl ContextSnapshot {
     }
 
     pub fn application_is(&self, application: &str) -> bool {
-        self.application
-            .as_deref()
-            .is_some_and(|current| application_names_equal(current, application))
+        [&self.application, &self.bundle_name]
+            .into_iter()
+            .flatten()
+            .any(|current| application_names_equal(current, application))
     }
 
     pub fn label(&self) -> String {
@@ -445,7 +455,7 @@ fn frontmost() -> Result<Frontmost> {
 
 #[cfg(target_os = "macos")]
 fn capture_frontmost(reads: Reads) -> Result<Frontmost> {
-    let (application, bundle_id, pid) = autoreleasepool(|_| {
+    let (application, bundle_name, bundle_id, pid) = autoreleasepool(|_| {
         let application = NSWorkspace::sharedWorkspace()
             .frontmostApplication()
             .ok_or_else(|| eyre!("macOS did not report a foreground application"))?;
@@ -453,8 +463,23 @@ fn capture_frontmost(reads: Reads) -> Result<Frontmost> {
             .localizedName()
             .map(|name| name.to_string())
             .ok_or_else(|| eyre!("the foreground application has no display name"))?;
+        let bundle_name = application
+            .bundleURL()
+            .and_then(|url| url.path())
+            .map(|path| {
+                objc2_foundation::NSFileManager::defaultManager()
+                    .displayNameAtPath(&path)
+                    .to_string()
+            })
+            .map(|finder| strip_bundle_extension(&finder).to_owned())
+            .filter(|finder| !finder.is_empty() && !application_names_equal(finder, &name));
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
-        Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
+        Ok::<_, color_eyre::Report>((
+            name,
+            bundle_name,
+            bundle_id,
+            application.processIdentifier(),
+        ))
     })?;
     // A scriptable browser's page is read out of process and cached, so its
     // Accessibility fallback runs with that read instead of every poll.
@@ -472,6 +497,7 @@ fn capture_frontmost(reads: Reads) -> Result<Frontmost> {
         .flatten();
     Ok(Frontmost {
         application: Some(application),
+        bundle_name,
         bundle_id,
         pid,
         window_title,
@@ -781,6 +807,24 @@ mod tests {
             );
             assert!(!ContextSelector::browser_host("news.x.com").matches(&context));
         }
+    }
+
+    /// A Mode picked as `Visual Studio Code` matches the app macOS reports
+    /// as `Code`, through the name Finder shows for its bundle.
+    #[test]
+    fn an_application_selector_matches_the_bundles_finder_name_too() {
+        let context = ContextSnapshot {
+            application: Some("Code".into()),
+            bundle_name: Some("Visual Studio Code".into()),
+            ..Default::default()
+        };
+        for picked in ["Code", "Visual Studio Code", "visual studio code.app"] {
+            assert!(
+                ContextSelector::application(picked).matches(&context),
+                "{picked}"
+            );
+        }
+        assert!(!ContextSelector::application("Visual Studio").matches(&context));
     }
 
     fn next(monitor: &ContextMonitor) -> ContextSnapshot {
