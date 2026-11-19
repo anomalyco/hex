@@ -2945,12 +2945,17 @@ mod tests {
         response.split_once("\r\n\r\n").unwrap().1
     }
 
+    /// A fresh, empty directory. Test runners such as nextest give each
+    /// test its own process, and an OS may reuse a finished test's process
+    /// id, so the id and counter alone can name a directory an earlier run
+    /// left files in.
     fn temp_directory() -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "hex-local-api-{}-{}",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));
+        let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
     }
