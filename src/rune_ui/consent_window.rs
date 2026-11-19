@@ -24,12 +24,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rune::{Cx, El, Icon, TextStyle, Tx, col, el, row, spacer, text};
-use rune_theme_opencode::icons::{CIRCLE_CHECK, MONITOR, OUTLINE_TEXT, SHIELD};
+use rune_theme_opencode::icons::{CIRCLE_CHECK, OUTLINE_TEXT, SHIELD, WARNING};
 
 use super::controls::{ButtonKind, DESCRIPTION, Paint, state_button};
-use super::icons::{CLOCK, GLOBE, MIC, WAVE, tile};
+use super::icons::{CLOCK, MIC, WAVE};
+use super::requester_icon::Icons;
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::local_api::{Answer, Intent, Prompt, Recipient, Verification};
+use crate::local_api::{Answer, Intent, Prompt, Recipient, SandboxKind, Verification};
 
 /// The dialog's width and padding.
 const WIDTH: f32 = 440.0;
@@ -56,6 +57,8 @@ pub(crate) struct Sheet {
     armed: bool,
     reply: Option<Reply>,
     overlay: Option<rune::OverlayHandle<Sheet>>,
+    /// Decodes the requester's icon off the window's thread.
+    icons: Icons,
 }
 
 impl Sheet {
@@ -187,6 +190,7 @@ pub(crate) fn install<S: 'static>(
             ..Default::default()
         })
         .release_gpu_when_hidden()
+        .setup(|sheet, waker| sheet.icons.set_cache(rune::ImageCache::new(waker)))
         .poll(poll);
     let overlay = app.overlay(spec, Sheet::new(reply));
     let handle = overlay.clone();
@@ -296,42 +300,44 @@ fn ask_copy(intent: Intent, recipient: &Recipient) -> Ask {
 
 /// Who is asking: the identity Hex checked, foremost, then how it knows,
 /// then (for a page) the name the page gave itself, framed as a claim.
-fn requester(p: Paint, recipient: &Recipient) -> El {
+fn requester(p: Paint, icons: &Icons, recipient: &Recipient) -> El {
     let c = &p.k.c;
-    let (glyph, kind, proof, proven): (&'static Icon, _, _, _) = match recipient {
-        Recipient::Native { verification, .. } => (
-            &MONITOR,
-            tr("App"),
-            match verification {
-                Verification::MacSignature { team: Some(team) } => {
-                    tr_fill("Code signature verified · team {}", team)
-                }
-                Verification::MacSignature { team: None } => {
-                    tr("Code signature verified · no team").to_owned()
-                }
-                Verification::WindowsSignature { publisher } => {
-                    tr_fill("Code signature verified · {}", publisher)
-                }
-                Verification::Sandbox { .. } | Verification::Executable { .. } => {
-                    tr("Identified by your system").to_owned()
-                }
-            },
-            true,
-        ),
+    let (kind, proof) = match recipient {
+        Recipient::Native { verification, .. } => (tr("App"), verified(verification)),
         Recipient::Web { .. } => (
-            &GLOBE,
             tr("Website"),
-            tr("Address reported by your browser").to_owned(),
-            false,
+            Proof {
+                line: tr("Address reported by your browser").to_owned(),
+                tone: ProofTone::Reported,
+            },
         ),
     };
-    let identity = recipient.label();
-    let mut said = format!("{kind}: {identity}. {proof}.");
+    // A native app leads with the name Hex read from its verified bundle,
+    // its identifier under it; a website is named by its address alone.
+    let name = recipient.display_name().to_owned();
+    let identity = match recipient {
+        Recipient::Native {
+            name: Some(_),
+            identifier,
+            ..
+        } => Some(identifier.clone()),
+        _ => None,
+    };
+    let mut said = format!("{kind}: {name}");
+    if let Some(identity) = &identity {
+        said.push_str(&format!(", {identity}"));
+    }
+    said.push_str(&format!(". {}.", proof.line));
+    let (proof_icon, proof_color): (&'static Icon, _) = match proof.tone {
+        ProofTone::Verified => (&CIRCLE_CHECK, c.success.icon),
+        ProofTone::Unsigned => (&WARNING, c.warning.icon),
+        ProofTone::Reported => (&SHIELD, c.icon_muted),
+    };
     let mut copy = col()
         .key("requester-copy")
         .grow(1.0)
         .shrink()
-        .gap(2.0)
+        .gap(1.0)
         .child(
             text(kind)
                 .key("requester-kind")
@@ -340,35 +346,46 @@ fn requester(p: Paint, recipient: &Recipient) -> El {
                 .a11y_hidden(),
         )
         .child(
-            text(identity)
+            text(name)
                 .key("recipient-value")
                 .font(p.k.ty.body_medium)
                 .color(p.text())
                 .wrap()
                 .a11y_hidden(),
-        )
-        .child(
-            row()
-                .key("proof")
-                .gap(5.0)
-                .pt(2.0)
-                .center_y()
-                .child(
-                    rune::icon(if proven { &CIRCLE_CHECK } else { &SHIELD }, 14.0)
-                        .key("proof-icon")
-                        .color(if proven { c.success.icon } else { c.icon_muted })
-                        .a11y_hidden(),
-                )
-                .child(
-                    text(proof)
-                        .key("signing-note")
-                        .font(DESCRIPTION)
-                        .color(p.muted())
-                        .wrap()
-                        .shrink()
-                        .a11y_hidden(),
-                ),
         );
+    if let Some(identity) = identity {
+        copy = copy.child(
+            text(identity)
+                .key("recipient-identifier")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap()
+                .a11y_hidden(),
+        );
+    }
+    copy = copy.child(
+        row()
+            .key("proof")
+            .gap(5.0)
+            .pt(4.0)
+            .items_start()
+            .child(
+                rune::icon(proof_icon, 14.0)
+                    .key("proof-icon")
+                    .color(proof_color)
+                    .mt(1.0)
+                    .a11y_hidden(),
+            )
+            .child(
+                text(proof.line)
+                    .key("signing-note")
+                    .font(DESCRIPTION)
+                    .color(p.muted())
+                    .wrap()
+                    .shrink()
+                    .a11y_hidden(),
+            ),
+    );
     if let Some(name) = recipient.claimed_name() {
         let claim = tr_fill("Calls itself “{}” · not verified", name);
         said.push(' ');
@@ -395,8 +412,54 @@ fn requester(p: Paint, recipient: &Recipient) -> El {
         .radius(p.k.radius.lg)
         .fill(c.layer_01)
         .border(p.hair, c.border_weak)
-        .child(tile(p, glyph, 32.0))
+        .child(super::requester_icon::mark(p, icons, recipient, 36.0))
         .child(copy)
+}
+
+/// How the OS vouched for a requester, as the identity card's last line.
+pub(super) struct Proof {
+    pub(super) line: String,
+    pub(super) tone: ProofTone,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ProofTone {
+    /// The OS verified it: a signature, or a sandbox's app id.
+    Verified,
+    /// Only the program's path, with no signature behind it.
+    Unsigned,
+    /// What the browser reported: a website's address.
+    Reported,
+}
+
+/// The line for each way the OS can verify a native app.
+pub(super) fn verified(verification: &Verification) -> Proof {
+    let (line, tone) = match verification {
+        Verification::MacSignature { team: Some(team) } => (
+            tr_fill("Code signature verified · team {}", team),
+            ProofTone::Verified,
+        ),
+        Verification::MacSignature { team: None } => (
+            tr("Code signature verified · no team").to_owned(),
+            ProofTone::Verified,
+        ),
+        Verification::WindowsSignature { publisher } => {
+            (tr_fill("Signed by {}", publisher), ProofTone::Verified)
+        }
+        Verification::Sandbox {
+            kind: SandboxKind::Flatpak,
+            app_id,
+        } => (tr_fill("Flatpak app {}", app_id), ProofTone::Verified),
+        Verification::Sandbox {
+            kind: SandboxKind::Snap,
+            app_id,
+        } => (tr_fill("Snap app {}", app_id), ProofTone::Verified),
+        Verification::Executable { path } => (
+            tr_fill("Not signed · {}", &path.display().to_string()),
+            ProofTone::Unsigned,
+        ),
+    };
+    Proof { line, tone }
 }
 
 /// What the recipient gets if allowed, one line each.
@@ -524,7 +587,7 @@ fn footer(p: Paint, armed: bool) -> El {
         )
         .child(
             text(tr(
-                "Always Allow lasts until you revoke it in Labs › Connected apps.",
+                "Always Allow lasts until you revoke it in Hex › Connected apps.",
             ))
             .key("limits")
             .font(p.k.ty.caption())
@@ -541,10 +604,11 @@ pub(crate) fn view(sheet: &Sheet, cx: &mut Cx<Sheet>) -> El {
     let Some(prompt) = sheet.prompt.as_ref() else {
         return root;
     };
-    root.center().child(dialog(p, prompt, sheet.armed))
+    root.center()
+        .child(dialog(p, &sheet.icons, prompt, sheet.armed))
 }
 
-fn dialog(p: Paint, prompt: &Prompt, armed: bool) -> El {
+fn dialog(p: Paint, icons: &Icons, prompt: &Prompt, armed: bool) -> El {
     let c = &p.k.c;
     let ask = ask_copy(prompt.intent, &prompt.recipient);
     let question = col()
@@ -574,7 +638,7 @@ fn dialog(p: Paint, prompt: &Prompt, armed: bool) -> El {
         .gap(16.0)
         .child(capability(p, &ask))
         .child(question)
-        .child(requester(p, &prompt.recipient))
+        .child(requester(p, icons, &prompt.recipient))
         .child(gets(p, ask.gets));
     let mut panel = col()
         .key("browser-connect-dialog")
@@ -630,6 +694,36 @@ mod tests {
                 },
                 name: None,
                 icon: None,
+            },
+        }
+    }
+
+    /// A recording ask from a signed app whose bundle gave a name and icon.
+    fn named_app_ask() -> Prompt {
+        Prompt {
+            id: 11,
+            intent: Intent::Record,
+            recipient: Recipient::Native {
+                identifier: "com.example.fieldnotes".into(),
+                cdhash: "fixture-digest".into(),
+                verification: Verification::MacSignature {
+                    team: Some("K7Z4Q2M8A1".into()),
+                },
+                name: Some("Field Notes".into()),
+                icon: Some(super::super::requester_icon::fixtures::app()),
+            },
+        }
+    }
+
+    /// A transcription ask from a website that sent its favicon.
+    fn site_ask() -> Prompt {
+        Prompt {
+            id: 12,
+            intent: Intent::Transcribe,
+            recipient: Recipient::Web {
+                origin: "https://notes.example".into(),
+                client_name: Some("Field Notes".into()),
+                icon: Some(super::super::requester_icon::fixtures::favicon()),
             },
         }
     }
@@ -813,7 +907,7 @@ mod tests {
             let (rt, _) = shown(prompt, true, false);
             assert!(
                 copy(&rt).iter().any(
-                    |s| s == "Always Allow lasts until you revoke it in Labs › Connected apps."
+                    |s| s == "Always Allow lasts until you revoke it in Hex › Connected apps."
                 )
             );
         }
@@ -848,7 +942,103 @@ mod tests {
         assert_eq!(y, 37.0 + (945.0 - SIZE.1) / 2.0);
     }
 
-    /// Renders the permission window to `HEX_CONSENT_SNAPS/standalone-*.png`
+    /// Whether the identity card holds an element keyed `key`.
+    fn card_has(rt: &rune::Runtime<Sheet>, key: &str) -> bool {
+        rt.elements()
+            .into_iter()
+            .any(|e| e.key.as_deref() == Some(key) && e.path.contains("recipient"))
+    }
+
+    /// A named app leads with the name its bundle gave, its identifier under
+    /// it, and shows its icon in place of the glyph; a website keeps its
+    /// address first, with its favicon on the tile.
+    #[test]
+    fn the_requester_is_named_first_with_its_icon() {
+        let (rt, _) = shown(named_app_ask(), true, false);
+        let words = copy(&rt);
+        let name = words.iter().position(|s| s == "Field Notes").unwrap();
+        let identifier = words
+            .iter()
+            .position(|s| s == "com.example.fieldnotes")
+            .unwrap();
+        assert!(name < identifier);
+        assert!(
+            words
+                .iter()
+                .any(|s| s == "Code signature verified · team K7Z4Q2M8A1")
+        );
+        let tile = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("tile"))
+            .unwrap();
+        assert!(!card_has(&rt, "glyph"), "the icon replaces the glyph");
+        assert!(tile.rect[2] > 0.0);
+
+        let (rt, _) = shown(site_ask(), true, false);
+        let words = copy(&rt);
+        assert_eq!(
+            words
+                .iter()
+                .find(|s| s.starts_with("https://"))
+                .map(String::as_str),
+            Some("https://notes.example")
+        );
+        assert!(card_has(&rt, "favicon"));
+        // Without an icon, the glyph stays.
+        let (rt, _) = shown(ask(), true, false);
+        assert!(!card_has(&rt, "favicon"));
+        assert!(card_has(&rt, "glyph"));
+    }
+
+    /// Each way the OS verified an app reads as what it is, and a program
+    /// with only a path says it is not signed.
+    #[test]
+    fn each_verification_has_its_own_line() {
+        use crate::local_api::SandboxKind;
+        for (verification, line, tone) in [
+            (
+                Verification::WindowsSignature {
+                    publisher: "Example Software Ltd".into(),
+                },
+                "Signed by Example Software Ltd",
+                ProofTone::Verified,
+            ),
+            (
+                Verification::Sandbox {
+                    kind: SandboxKind::Flatpak,
+                    app_id: "org.example.Notes".into(),
+                },
+                "Flatpak app org.example.Notes",
+                ProofTone::Verified,
+            ),
+            (
+                Verification::Sandbox {
+                    kind: SandboxKind::Snap,
+                    app_id: "notes".into(),
+                },
+                "Snap app notes",
+                ProofTone::Verified,
+            ),
+            (
+                Verification::Executable {
+                    path: "/usr/bin/notes".into(),
+                },
+                "Not signed · /usr/bin/notes",
+                ProofTone::Unsigned,
+            ),
+            (
+                Verification::MacSignature { team: None },
+                "Code signature verified · no team",
+                ProofTone::Verified,
+            ),
+        ] {
+            let proof = verified(&verification);
+            assert_eq!((proof.line.as_str(), proof.tone), (line, tone));
+        }
+    }
+
+    /// Renders the permission window to `HEX_CONSENT_SNAPS/*.png`
     /// over a plain desktop grey, to look at.
     #[test]
     #[ignore = "set HEX_CONSENT_SNAPS to a folder; needs a GPU"]
@@ -856,11 +1046,15 @@ mod tests {
         let folder = std::path::PathBuf::from(std::env::var("HEX_CONSENT_SNAPS").unwrap());
         let gpu = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None).unwrap();
         for (name, prompt, armed, dark) in [
-            ("record-light", record_ask(), true, false),
-            ("record-dark", record_ask(), true, true),
-            ("transcribe-light", ask(), true, false),
-            ("transcribe-dark", ask(), true, true),
-            ("guard-light", record_ask(), false, false),
+            ("standalone-record-light", record_ask(), true, false),
+            ("standalone-record-dark", record_ask(), true, true),
+            ("standalone-transcribe-light", ask(), true, false),
+            ("standalone-transcribe-dark", ask(), true, true),
+            ("standalone-guard-light", record_ask(), false, false),
+            ("conn-dialog-app-light", named_app_ask(), true, false),
+            ("conn-dialog-app-dark", named_app_ask(), true, true),
+            ("conn-dialog-site-light", site_ask(), true, false),
+            ("conn-dialog-site-dark", site_ask(), true, true),
         ] {
             let (mut rt, _) = shown(prompt, armed, dark);
             rt.frame(0.0);
@@ -884,7 +1078,7 @@ mod tests {
             );
             target.copy(&mut encoder);
             gpu.queue.submit([encoder.finish()]);
-            let path = folder.join(format!("standalone-{name}.png"));
+            let path = folder.join(format!("{name}.png"));
             rune::render::write_png(&path, w, h, &target.read(&gpu.device)).unwrap();
         }
     }

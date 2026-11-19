@@ -36,8 +36,8 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 │     -> 403 origin-not-allowed (no dialog, nothing listed, no CORS)
 ├── Blocked in the lab -> 403 website-blocked (no dialog, never listed)
 ├── Not allowed yet -> 403 website-not-allowed (no dialog); listed once under
-│     Websites that tried to contact Hex (origin and time), where the person
-│     chooses Allow (it may ask on its next request) or Block
+│     Asking to connect in Hex › Connected apps (origin and time), where the
+│     person chooses Allow (it may ask on its next request) or Block
 ├── No JSON body, or not S256 -> 400 invalid-request
 ├── A dialog is already open -> 409 consent-busy
 ├── Allowed origin -> Hex's permission window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
@@ -68,7 +68,8 @@ A page's fetch -> POST /connect/authorize            // no bearer token
   the websites switch are kept but unused until it is on again.
 - For a web page, also the lab's **Allow websites to use Hex** and the page's
   exact origin under **Allowed websites** (added with Allow on its entry in
-  Websites that tried to contact Hex). Being allowed to ask grants nothing.
+  **Asking to connect**). Being allowed to ask grants nothing. Both lists
+  are in the Connected apps pane, Hex's sidebar item while the lab is on.
   The switch off works like the lab off for websites only: no website asks,
   is listed, gets CORS, or uses a grant it has.
 - CORS (`src/local_api/access.rs`): with both switches on, `OPTIONS` and the
@@ -84,13 +85,14 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 
 ## `POST /connect/authorize`
 
-Request (JSON, at most 8 KiB):
+Request (JSON, at most 96 KiB):
 
 ```json
 {
   "codeChallenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
   "codeChallengeMethod": "S256",
   "clientName": "Field Notes",
+  "icon": "data:image/png;base64,iVBORw0KGgo…",
   "state": "opaque-app-value"
 }
 ```
@@ -99,6 +101,15 @@ Request (JSON, at most 8 KiB):
 `codeVerifier`, per RFC 7636. `codeChallengeMethod` may be omitted, but only
 `S256` is accepted. `clientName` is optional; Hex shows it as "The page calls itself: …"
 only when it is at most 40 plain characters (no controls, no bidi overrides). `state` is echoed back unchanged (at most the body limit).
+
+`icon` is optional: the page's favicon as a `data:` URL of a PNG
+(`image/png`) or ICO (`image/x-icon`, `image/vnd.microsoft.icon`), base64,
+at most 64 KiB decoded and 1024 px a side. Hex decodes it locally, on the
+request's worker, scales it to at most 128 px, and shows it on the identity
+card's tile. Anything else (a URL, another type, a broken or oversized
+image) is ignored and the card shows its globe; Hex never fetches an icon.
+Like a browser tab's favicon it is only the page's claim: the card still
+names the page by its address. The same field works on `POST /record/pair`.
 
 The response requires a fresh Allow Once / Always Allow answer or an existing Always Allow permission for transcription:
 
@@ -178,7 +189,7 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
 
 | Limit | Value |
 | --- | --- |
-| Authorize/token body | 8 KiB, read within 5 s |
+| Authorize/token body | 96 KiB (for the favicon), read within 5 s |
 | Code lifetime | 120 s, one use |
 | Upload token lifetime | 120 s, one use |
 | Dialog wait | 60 s, then `403 consent-timeout` |
@@ -212,6 +223,30 @@ an answer, a 60 s timeout, or the ask otherwise ending -> the window hides at on
 
 There is no scrim and nothing outside the dialog to click. One ask at a time,
 as before.
+
+The identity card names who is asking, by what Hex verified:
+
+```ts
+native app -> its icon, the name from its verified bundle (CFBundleDisplayName,
+              else CFBundleName), its identifier under it, then how it was verified:
+              macOS signature   -> "Code signature verified · team K7Z4Q2M8A1" (or "· no team")
+              Windows signature -> "Signed by {publisher}"
+              Flatpak / Snap    -> "Flatpak app {app id}" / "Snap app {app id}"
+              only a path       -> "Not signed · {program path}" (warning icon)
+              no name or icon   -> its identifier, and the app glyph
+website    -> its favicon on the tile (if it sent a valid one, else the globe),
+              its address, "Address reported by your browser", and the name it
+              gave itself as "Calls itself “…” · not verified"
+```
+
+On macOS the name and icon come from the bundle at the path
+`Security.framework` reports for the peer's verified static code
+(`src/local_api/mac_app.rs`): the code is resolved again from the peer's
+audit token and used only when its code-directory hash matches the identity
+the grant is bound to. The lookup runs on the request's worker, is skipped
+after 0.8 s, and is cached by code-directory hash. Nothing the client sends
+names it. The footer says Always Allow lasts until it is revoked in Hex ›
+Connected apps.
 
 Where the window can't take keys or can't open, the platform decides:
 
@@ -247,12 +282,12 @@ Windows was only compiled, and Wayland, GNOME's fallback, a real browser
 page, and a real model transcription from a page were not exercised. Copy is
 English only. The origin check trusts the browser's `Origin` header; a
 malicious local process can claim an allowed origin to *ask*, or fill
-Websites that tried to contact Hex with made-up origins (20 at most), but
+Asking to connect with made-up origins (20 at most), but
 not silently reuse a saved permission.
 On the first Always Allow response, a web client receives `permissionProof`.
 Store it in origin-scoped storage and send it in later authorize/pair JSON for
 that capability. Hex saves only its SHA-256 digest. A missing or incorrect proof
-returns `403 permission-proof-required`; revoke in Labs and pair again if the
+returns `403 permission-proof-required`; revoke in Hex › Connected apps and pair again if the
 browser lost its copy. Native callers use socket peer identity instead.
 
 ## Recording by a paired client
@@ -303,7 +338,7 @@ naming the recipient, how long it has recorded, **Stop recording** (keeps
 the transcript for the client's `finish`) and **Cancel** (discards it). The
 client can stop or cancel through its session token too.
 
-A grant is withdrawn in Hex's window (Labs › Connected apps lists every
+A grant is withdrawn in Hex's window (the Connected apps pane lists every
 connected app and website with **Revoke**) or by the client's own `POST /record/revoke`. Revoking
 cancels any live session, drops pairing codes issued before the revoke, and
 makes further starts fail. The client may pair again, which asks the person
@@ -336,7 +371,7 @@ loopback API is not their channel, and the Unix socket has no route for it.
 | Check-in lease | 10 s (`leaseMs`); the microphone stops when it lapses |
 | After the stop | 30 s for `finish`, then discarded (`409 session-expired`) |
 | Concurrent recordings | 1 (`409 session-busy` on the next start) |
-| Body | 8 KiB; start/status/heartbeat/finish/cancel/revoke take no body |
+| Body | 96 KiB (a page's favicon in `pair`); start/status/heartbeat/finish/cancel/revoke take no body |
 
 The lease is the one Hex's `/dictations` and `/streams` use. Only
 `POST /record/heartbeat` with the session's own token, on the channel that
@@ -364,15 +399,25 @@ matches require the validated signing identifier, team and code-directory hash;
 a changed binary must ask again. Allowed web origins match independently of the
 page's claimed name. Transcription and microphone recording are separate choices.
 
-Labs › Connected apps lists saved permissions under **Connected** even when
-the client is offline.
+The Connected apps pane (Hex's sidebar item while Labs › Connected apps is
+on) lists saved permissions under **Connected** even when the client is
+offline: each with its icon and name, who it is, what it may do (Microphone
+recording or Transcription, always allowed or allowed once), and **Revoke**.
+So it can, each saved permission also keeps the recipient's display name (a
+native app's, from its verified bundle) and icon as a small PNG, refreshed
+whenever it asks again; matching never reads either, and an icon that no
+longer reads is dropped without losing the permission.
 
-The same owner-only file keeps the lab's website lists: **Allowed websites**
-(may ask; **Remove**), **Websites that tried to contact Hex** (origin and the
-most recent attempt time only, one entry per origin, the newest 20, rewritten
-on disk at most once a minute per origin; **Allow** or **Block**), and
+The same owner-only file keeps the lab's website lists, which the pane shows
+under **Websites** while **Allow websites to use Hex** is on (off, they are
+hidden and the switch says websites can't ask): **Asking to connect**, with
+its count (origin and the most recent attempt time only, one entry per
+origin, the newest 20, rewritten on disk at most once a minute per origin;
+**Allow** or **Block**), then **Allowed websites** (may ask; **Remove**) and
 **Blocked websites** (answer `website-blocked`, never listed again;
-**Unblock**). An origin is in one list at most. Removing or blocking a website
+**Unblock**), both folded behind a disclosure with their counts. An allowed
+or blocked website keeps the favicon it last sent with an ask; a website
+asking to connect has none, since Hex refuses its request before reading it. An origin is in one list at most. Removing or blocking a website
 ends its pending dialog and live recording at once; Hex never shows a dialog
 after the fact for a website the person just allowed.
 Revoke deletes just that capability from disk. It invalidates its outstanding
@@ -387,7 +432,7 @@ save never grants access, and a failed revoke does not disappear from the list.
 | 401 | `invalid-grant` | Unknown, revoked, or other-channel grant; a session token used as a grant |
 | 403 | `identity-unverified` | The native peer's signature could not be read |
 | 403 | `origin-not-allowed` | Labs › Connected apps or its websites switch is off, or the Origin is missing or not an http(s) origin |
-| 403 | `website-not-allowed` | A website the person has not allowed (listed under Websites that tried to contact Hex) |
+| 403 | `website-not-allowed` | A website the person has not allowed (listed under Asking to connect) |
 | 403 | `website-blocked` | A website the person blocked |
 | 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Deny, no answer, no window/gate |
 | 403 | `invalid-grant` | Wrong, spent, or expired pairing code |

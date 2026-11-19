@@ -1115,12 +1115,42 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
 }
 
 pub(super) fn disclosure_toggle(ui: &Ui, p: Paint, pane: Pane, label: &str) -> El {
+    disclosure(
+        p,
+        "advanced-toggle",
+        label,
+        None,
+        advanced_open(ui, pane),
+        move |ui: &mut Ui| {
+            if let Some(index) = ui.advanced.iter().position(|open| *open == pane) {
+                ui.advanced.remove(index);
+            } else {
+                ui.advanced.push(pane);
+            }
+        },
+    )
+}
+
+/// A disclosure on the page's text edge: `label`, an optional count after
+/// it, and the arrow; `toggle` opens or closes what follows it.
+pub(super) fn disclosure(
+    p: Paint,
+    key: &str,
+    label: &str,
+    count: Option<usize>,
+    open: bool,
+    toggle: impl Fn(&mut Ui) + 'static,
+) -> El {
     let c = &p.k.c;
-    let open = advanced_open(ui, pane);
+    let said = match count {
+        Some(count) => format!("{label}, {count}"),
+        None => label.to_owned(),
+    };
     row()
-        .key("advanced-toggle")
+        .key(key)
         .role("button")
-        .label(label)
+        .label(said)
+        .expanded(open)
         .h(18.0)
         .px(6.0)
         .ml(METRICS.row_px - 6.0)
@@ -1132,19 +1162,20 @@ pub(super) fn disclosure_toggle(ui: &Ui, p: Paint, pane: Pane, label: &str) -> E
         .press(c.pressed)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
-        .on_press(move |ui: &mut Ui| {
-            if let Some(index) = ui.advanced.iter().position(|open| *open == pane) {
-                ui.advanced.remove(index);
-            } else {
-                ui.advanced.push(pane);
-            }
-        })
+        .on_press(toggle)
         .child(
             text(label)
                 .key("title")
                 .font(p.k.ty.ui.lh(16.0))
                 .color(c.text_muted),
         )
+        .children(count.map(|count| {
+            text(count.to_string())
+                .key("count")
+                .font(p.k.ty.ui.lh(16.0))
+                .color(c.text_faint)
+                .ml(4.0)
+        }))
         .child(
             rune::icon(
                 if open {

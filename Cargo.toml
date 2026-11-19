@@ -156,6 +156,10 @@ scrawl-capture = { path = "crates/capture", default-features = false, features =
 pollster = "1.0.1"
 # Screenshot PNGs and the screenshot editor's export.
 png = "0.18"
+# Requester icons in Hex's permission window: a page's favicon (PNG or ICO),
+# decoded and scaled locally. Both already build for Rune.
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+base64 = "0.22"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
 procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "431469b999268a56ef7fbc60ed55975753ee22df" }
 rune = { git = "https://github.com/anomalyco/rune.git", rev = "431469b999268a56ef7fbc60ed55975753ee22df", features = ["native-file-dialog", "macos-background-cursor"] }

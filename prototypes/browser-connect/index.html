@@ -21,8 +21,8 @@
     from your microphone for as long as the page keeps checking in. Hex must have
     Labs › Connected apps on, with Allow websites to use Hex. The first ask
     from this page (<code id="origin"></code>) shows no dialog: it answers
-    <code>website-not-allowed</code> and lists the page in Labs › Connected
-    apps under Websites that tried to contact Hex. Press Allow there, then
+    <code>website-not-allowed</code> and lists the page in Hex's Connected
+    apps pane under Asking to connect. Press Allow there, then
     ask again. The API port comes from Hex's discovery file; this page never
     reads the token.
   </p>
@@ -48,6 +48,31 @@
 
   <script type="module">
     const origin = location.origin;
+
+    // The page's favicon, drawn here and used as the tab's icon too. Each ask
+    // sends it as a PNG data: URL (64 KiB at most, PNG or ICO); Hex shows it
+    // beside the address and never fetches anything. It is only a claim:
+    // Hex names the page by its address.
+    const favicon = (() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 64;
+      const c = canvas.getContext("2d");
+      c.fillStyle = "#2563eb";
+      c.beginPath();
+      c.roundRect(2, 2, 60, 60, 14);
+      c.fill();
+      c.fillStyle = "#fff";
+      c.font = "bold 40px system-ui, sans-serif";
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.fillText("H", 32, 35);
+      const url = canvas.toDataURL("image/png");
+      const link = document.createElement("link");
+      link.rel = "icon";
+      link.href = url;
+      document.head.append(link);
+      return url;
+    })();
     document.querySelector("#origin").textContent = origin;
     const log = (line) => {
       document.querySelector("#log").textContent += `\n${line}`;
@@ -82,7 +107,7 @@
       const text = await response.text();
       if (text.includes('"website-not-allowed"')) {
         throw new Error(
-          "Hex doesn't know this page yet. In Hex, open Labs › Connected apps, press Allow beside this page under Websites that tried to contact Hex, then ask again.",
+          "Hex doesn't know this page yet. In Hex, open Connected apps, press Allow beside this page under Asking to connect, then ask again.",
         );
       }
       if (text.includes('"website-blocked"')) {
@@ -118,6 +143,7 @@
               codeChallenge: challenge,
               codeChallengeMethod: "S256",
               clientName: "Hex browser connect demo",
+              icon: favicon,
               permissionProof: localStorage.getItem("hex.record.proof"),
               state,
             }),
@@ -179,6 +205,7 @@
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
             clientName: "Hex browser connect demo",
+            icon: favicon,
             permissionProof: localStorage.getItem("hex.transcribe.proof"),
             state,
           }),

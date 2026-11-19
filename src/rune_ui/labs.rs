@@ -7,7 +7,6 @@
 //! and is hidden while off.
 
 mod browser_access;
-mod connected_apps;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 pub(super) mod screenshots;
@@ -52,9 +51,10 @@ pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
         Pane::Meetings,
         Pane::Annotate,
         Pane::VoiceFilter,
+        Pane::ConnectedApps,
     ];
     #[cfg(not(hex_capture))]
-    let optional = [Pane::Meetings, Pane::VoiceFilter];
+    let optional = [Pane::Meetings, Pane::VoiceFilter, Pane::ConnectedApps];
     panes.extend(optional.into_iter().filter(|pane| pane.shown(ui)));
     panes
 }
@@ -744,7 +744,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
     rows.push(row(Feature::ApiBrowserAccess, Some(&GLOBE)));
-    rows.push(row(Feature::ConnectedApps, None));
+    rows.push(row(
+        Feature::ConnectedApps,
+        Some(super::connected_apps::ICON),
+    ));
     rows.push(row(Feature::SpeakersOnly, None));
     rows.push(row(Feature::KeepMicrophoneOpen, Some(&TIMER)));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
@@ -1084,7 +1087,6 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
         // Wayland reports no file drags, so its card offers the file dialog.
         Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
-        Lab::Feature(Feature::ConnectedApps) => Some(connected_apps::body(ui, p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

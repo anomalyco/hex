@@ -23,7 +23,7 @@ while the page checks in. It never reads Hex's discovery file or token.
 
 4. Allow the site first. Press either button once: Hex shows no dialog yet
    and the page gets `403 website-not-allowed`. The page's origin now appears
-   in Labs › Connected apps under **Websites that tried to contact Hex**;
+   in Hex's Connected apps pane under **Asking to connect**;
    press **Allow** there (or **Block** to refuse it for good). Hex never
    shows a dialog after the fact, so ask again from the page.
 
@@ -31,8 +31,10 @@ while the page checks in. It never reads Hex's discovery file or token.
    permission window with **Deny**, **Allow Once**, and **Always Allow**, unless this
    page already has permission. Either approval lets the page transcribe the
    selected file. Always Allow saves a proof in this origin's local storage;
-   if you clear site data, revoke the permission in Labs › Connected apps
-   before pairing again.
+   if you clear site data, revoke the permission in Hex › Connected apps
+   before pairing again. Each ask sends the page's favicon (drawn on a canvas,
+   as a PNG `data:` URL); Hex shows it beside the address and never fetches
+   it.
 
 6. Or press **Record with Hex**. After the recording dialog, Hex records
    until you press **Stop and get the transcript** (or Stop in Hex). The page

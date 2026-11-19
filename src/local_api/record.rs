@@ -76,7 +76,7 @@ pub(super) const CODE_LIFETIME: Duration = Duration::from_secs(120);
 pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(60);
 /// How long a denied recipient waits before it may ask again.
 pub(super) const DENY_COOLDOWN: Duration = Duration::from_secs(30);
-pub(super) const MAX_BODY_BYTES: usize = 8 * 1024;
+pub(super) const MAX_BODY_BYTES: usize = 96 * 1024; // room for a page's favicon
 const BODY_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The verified identity of one native process, from its peer audit token.
@@ -617,6 +617,7 @@ impl Sessions {
         let Some(recipient) = self.recipient_for(&channel, request.client_name.as_deref()) else {
             return HttpResponse::code(403, "identity-unverified");
         };
+        let recipient = super::icon::dress(&self.permissions, recipient, &channel, request.icon);
         let Some(gate) = self.gate.clone() else {
             return HttpResponse::code(403, "record-unavailable");
         };
@@ -1446,6 +1447,8 @@ struct PairRequest {
     code_challenge_method: Option<String>,
     #[serde(default)]
     client_name: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
     #[serde(default)]
     state: Option<String>,
 }
