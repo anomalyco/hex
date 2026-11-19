@@ -376,15 +376,56 @@ Windows keyboard hook re-arm                             // dictate.windows-rear
   │   -> Covers an app that shows its window first and installs its hook only then
   ├── The new hook fails -> The old one stays; one warning, later failures quiet
   ├── The foreground watcher fails -> The listener runs as before
-  └── Known gap: such an app installs its hook while already in front, more than
-      ~1.5 s after it came to the front
-      -> The shortcut works again at the next foreground change
+  └── An app that installs its hook while already in front, more than ~1.5 s
+      after it came to the front, used to wait for the next foreground change
+      -> The watchdog below re-arms once input keeps arriving unseen
 ```
 
 Proof limit: a C# harness reimplementing the swap, with its own window and a
 message loop that dispatches, ran on a GitHub Windows runner with injected
 input. Hex's Rust listener, a real Tauri app and a physical keyboard were not
 exercised, and no automated check covers the re-arm.
+
+**Fixed November 19, 2026:** a Toggle-mode Alt+Windows chord started recording,
+then for 50 minutes every shortcut press and Escape did nothing and wrote
+nothing to `process.log`; one later press finally ended the capture. Two
+things combined: the keyboard hook stopped being called with no foreground
+change to re-arm it (Windows removes a low-level hook that exceeds
+`LowLevelHooksTimeout`, and an app with raw keyboard input in front can
+silence every keyboard hook), and the lost release left the hook state with
+`capture.active` while both chord keys were physically up. The hook thread now
+keeps a repeating timer and checks both:
+
+```ts
+Windows hook watchdog                                  // dictate.windows-hook-watchdog
+  ├── Every 1 s on the hook thread, as a thread timer the message loop handles
+  │   ├── Session input within 1 s (GetLastInputInfo) but neither hook stamped
+  │   │   an event for 3 s, and Hex is not in front
+  │   │   -> Install a fresh WH_KEYBOARD_LL hook; info log: the first, then the
+  │   │      count at most once a minute (foreground re-arms stay at debug)
+  │   └── A normal dictation chord is still active, needs no key, and its
+  │       modifiers read up (GetAsyncKeyState, AltGr's Ctrl handled as in the hook)
+  │       -> Release it as the missing event would: Toggle locks, Hold finishes;
+  │          info: "the shortcut's release never arrived; resynchronized"
+  ├── Every keyboard and mouse hook event stamps the tick first, injected ones
+  │   included; the mouse hook is always installed, so a move never looks silent
+  ├── Escape while recording now logs: "dictation cancelled by Escape", or
+  │   "Escape ignored while recording" with the reason its chord did not match
+  │   (at most one line a second while the key repeats)
+  └── Limits: input on another desktop or a Hex window in front is skipped, and
+      a mouse moved without pause can keep a dead keyboard hook from being
+      noticed until it stops
+```
+
+Checks: `silence_is_judged_from_the_session_and_the_hooks`,
+`distances_survive_the_tick_count_wrapping`, and
+`only_the_first_rearm_and_its_counts_are_logged` in
+[windows/input/watchdog.rs](../../src/windows/input/watchdog.rs), and
+`a_keyless_chord_whose_release_never_arrived_resynchronizes` and
+`the_release_heal_leaves_other_captures_alone` in
+[windows/input.rs](../../src/windows/input.rs). Proof limit: cross-compiled
+only. The watchdog, the release heal, and the new log lines have not run on a
+Windows PC, and no hook-killing app or 50-minute stuck capture was reproduced.
 
 ### Shortcuts Under Secure Input (macOS)
 

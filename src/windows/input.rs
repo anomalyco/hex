@@ -31,6 +31,7 @@ mod activity;
 mod disposition;
 mod modifiers;
 mod rearm;
+mod watchdog;
 
 pub(crate) use self::activity::foreground_window;
 use self::disposition::Handled;
@@ -766,6 +767,7 @@ fn run_hook(mut initial: CallbackState, ready: SyncSender<Result<u32, String>>) 
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    watchdog::stamp();
     if code != HC_ACTION as i32 {
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
@@ -869,6 +871,7 @@ fn mouse_message(message: u32, data: u32) -> Option<(u32, bool)> {
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    watchdog::stamp();
     if code == HC_ACTION as i32 {
         // SAFETY: Windows supplies a live MSLLHOOKSTRUCT for this callback.
         let event = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
@@ -1076,6 +1079,7 @@ fn process_button(
                 if is_down && !state.cancel_down {
                     state.cancel_down = true;
                     if let Some(action) = state.capture.cancel() {
+                        tracing::info!("dictation cancelled by Escape");
                         send_event(state, action, time);
                     }
                 } else if is_up {
@@ -1167,8 +1171,7 @@ fn process_button(
                     }
                 }
             } else if vk == u32::from(VK_ESCAPE) {
-                // Escape ends no dictation, not even as a chord: it reaches
-                // the app (#786).
+                watchdog::escape_reached_app(state, is_down);
             } else if !modifier_event {
                 // A key or button joining a held modifier-only shortcut makes
                 // a chord meant for another application, such as Alt+Tab,
@@ -1561,6 +1564,19 @@ mod tests {
             mask_release: false,
         });
         receiver
+    }
+
+    /// The hook's state taken out of the listener's global, for a test that
+    /// drives the watchdog's heal directly: leaving it in the global would
+    /// make it compete with its peers.
+    fn standalone_state(binding: WindowsHotkey) -> (CallbackState, Receiver<HotkeyEvent>) {
+        let events = callback_state(binding, false);
+        let state = CALLBACK_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("the callback state just installed");
+        (state, events)
     }
 
     #[test]
@@ -2240,6 +2256,94 @@ mod tests {
                 Some(HotkeyAction::Start)
             );
         }
+    }
+
+    /// A keyless chord whose release never arrived: Toggle locks exactly as
+    /// its release would, Hold finishes, and a chord still holds while a
+    /// required modifier is down leaves it alone.
+    #[test]
+    fn a_keyless_chord_whose_release_never_arrived_resynchronizes() {
+        let binding = WindowsHotkey {
+            control: None,
+            windows: Some(ModifierSide::Either),
+            alt: Some(ModifierSide::Either),
+            shift: None,
+            key: None,
+        };
+
+        // Hold: both modifiers still report down, so the chord is held.
+        let (mut state, events) = standalone_state(binding.clone());
+        assert_eq!(
+            state.capture.press(false, false, 1_000),
+            Some(HotkeyAction::Start)
+        );
+        watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU || key == VK_LWIN);
+        assert!(state.capture.active && !state.dirty);
+        assert!(events.try_recv().is_err());
+
+        // Windows is up and Alt still down: the release arrived, and the
+        // capture stays dirty until Alt comes up, as the normal path does.
+        watchdog::heal(&mut state, 2_000, |key| key == VK_LMENU);
+        assert_eq!(
+            events.try_recv().map(|event| event.action),
+            Ok(HotkeyAction::Finish)
+        );
+        assert!(!state.capture.active && state.dirty);
+
+        // Toggle: the lost release locks, and the next press finishes.
+        let (mut state, events) = standalone_state(binding);
+        state.capture = CaptureState {
+            toggle: true,
+            ..CaptureState::default()
+        };
+        assert_eq!(
+            state.capture.press(false, false, 1_000),
+            Some(HotkeyAction::Start)
+        );
+        watchdog::heal(&mut state, 2_000, |_| false);
+        assert!(!state.capture.active && state.capture.locked);
+        assert!(events.try_recv().is_err());
+        assert_eq!(
+            state.capture.press(false, false, 3_000),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    /// The release heal leaves alone what it does not own: a chord with a
+    /// key, another shortcut's capture, and an idle capture.
+    #[test]
+    fn the_release_heal_leaves_other_captures_alone() {
+        let (mut keyed, events) = standalone_state(WindowsHotkey::default());
+        assert_eq!(
+            keyed.capture.press(false, false, 1_000),
+            Some(HotkeyAction::Start)
+        );
+        watchdog::heal(&mut keyed, 2_000, |_| false);
+        assert!(keyed.capture.active);
+        assert!(events.try_recv().is_err());
+
+        let keyless = WindowsHotkey {
+            control: None,
+            windows: Some(ModifierSide::Either),
+            alt: None,
+            shift: None,
+            key: None,
+        };
+        let (mut other, events) = standalone_state(keyless);
+        other.capture = CaptureState {
+            active: true,
+            recording: true,
+            flavour: DictationFlavour::Raw,
+            ..CaptureState::default()
+        };
+        watchdog::heal(&mut other, 2_000, |_| false);
+        assert!(other.capture.active);
+        assert!(events.try_recv().is_err());
+
+        let (mut idle, events) = standalone_state(WindowsHotkey::default());
+        watchdog::heal(&mut idle, 2_000, |_| false);
+        assert!(!idle.capture.active);
+        assert!(events.try_recv().is_err());
     }
 
     /// Labs › Stop phrase ends only a hands-free capture, as the shortcut's

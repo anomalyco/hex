@@ -12,7 +12,9 @@
 //! loop: the new hook goes in first, then the old one is dropped, with nothing
 //! pumped in between, so a held chord is neither duplicated nor lost. A
 //! one-shot thread timer swaps once more shortly after, covering an app that
-//! shows its window first and installs its hook only then.
+//! shows its window first and installs its hook only then. A repeating timer
+//! (`watchdog`) covers a hook Windows stopped calling with no foreground
+//! change at all.
 
 use std::ffi::c_void;
 use std::ptr;
@@ -56,6 +58,7 @@ impl KeyboardHooks {
         KEYBOARD_HOOK.store(keyboard, Ordering::SeqCst);
         let mut foreground = ptr::null_mut();
         if !keyboard.is_null() {
+            super::watchdog::install();
             // Hex's own process registers raw keyboard input (winit's event
             // loop), so re-arming while a Hex window is in front would
             // recreate the silencing condition.
@@ -84,9 +87,13 @@ impl KeyboardHooks {
         KEYBOARD_HOOK.load(Ordering::SeqCst)
     }
 
-    /// Handles the hook thread's messages: the re-arm timer swaps once more.
+    /// Handles the hook thread's messages: the re-arm timer swaps once more,
+    /// and the watchdog checks the hooks every second.
     pub fn on_message(message: &MSG) {
         if message.message != WM_TIMER {
+            return;
+        }
+        if super::watchdog::on_message(message) {
             return;
         }
         let timer = REARM_TIMER.load(Ordering::SeqCst);
@@ -107,6 +114,7 @@ impl KeyboardHooks {
     /// Stops the watcher and its timer, then drops the keyboard hook installed
     /// now: the foreground callback may have replaced the one `install` made.
     pub fn uninstall(self) {
+        super::watchdog::uninstall();
         unsafe {
             if !self.foreground.is_null() {
                 UnhookWinEvent(self.foreground);
@@ -134,9 +142,16 @@ unsafe extern "system" fn foreground_changed(
     swap(true);
 }
 
+/// Installs a fresh keyboard hook because the session's input stopped
+/// reaching the one installed, which the watchdog logs. `false` if the new
+/// hook could not be installed; `swap` warns once about that.
+pub(super) fn rearm_after_silence() -> bool {
+    swap(false)
+}
+
 /// Installs a fresh keyboard hook and drops the one it replaces. `schedule`
 /// arms the follow-up swap; the timer's own swap never arms another.
-fn swap(schedule: bool) {
+fn swap(schedule: bool) -> bool {
     let previous = KEYBOARD_HOOK.load(Ordering::SeqCst);
     let keyboard = unsafe {
         SetWindowsHookExW(
@@ -153,11 +168,13 @@ fn swap(schedule: bool) {
                 "could not re-arm the Windows keyboard hook; the shortcut may do nothing in the app now in front"
             );
         }
-        return;
+        return false;
     }
     KEYBOARD_HOOK.store(keyboard, Ordering::SeqCst);
     REARM_FAILED.store(false, Ordering::Relaxed);
     unsafe { UnhookWindowsHookEx(previous) };
+    // The watchdog logs the re-arms it decides on at info; a foreground
+    // change can repeat often, so these swaps stay at debug.
     tracing::debug!("re-armed the Windows keyboard hook");
     if schedule {
         let stale = REARM_TIMER.swap(0, Ordering::SeqCst);
@@ -169,4 +186,5 @@ fn swap(schedule: bool) {
         let timer = unsafe { SetTimer(ptr::null_mut(), 0, REARM_DELAY_MS, None) };
         REARM_TIMER.store(timer, Ordering::SeqCst);
     }
+    true
 }
