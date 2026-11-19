@@ -74,18 +74,19 @@ impl SendGate {
 }
 
 /// Read at output commit, only for a shortcut dictation's processed paste.
-pub fn sends(application: Option<&str>) -> bool {
-    crate::labs::yolo_mode_apps().is_some_and(|apps| in_app(&apps, application))
+pub fn sends(application: Option<&str>, bundle_name: Option<&str>) -> bool {
+    crate::labs::yolo_mode_apps().is_some_and(|apps| in_app(&apps, application, bundle_name))
 }
 
 /// No apps chosen sends anywhere; otherwise the frontmost app must match
 /// one as a Mode's application does, and an unknown app never sends.
-fn in_app(apps: &[String], application: Option<&str>) -> bool {
+fn in_app(apps: &[String], application: Option<&str>, bundle_name: Option<&str>) -> bool {
     if apps.is_empty() {
         return true;
     }
     let context = crate::dictation::context::ContextSnapshot {
         application: application.map(str::to_owned),
+        bundle_name: bundle_name.map(str::to_owned),
         ..Default::default()
     };
     apps.iter().any(|app| context.application_is(app))
@@ -126,12 +127,24 @@ mod tests {
 
     #[test]
     fn chosen_apps_limit_where_it_sends() {
-        assert!(in_app(&[], None));
-        assert!(in_app(&[], Some("Notes")));
+        assert!(in_app(&[], None, None));
+        assert!(in_app(&[], Some("Notes"), None));
         let apps = ["Slack".to_owned(), "Messages.app".to_owned()];
-        assert!(in_app(&apps, Some("Slack")));
-        assert!(in_app(&apps, Some("messages")));
-        assert!(!in_app(&apps, Some("Notes")));
-        assert!(!in_app(&apps, None), "an unknown app never sends");
+        assert!(in_app(&apps, Some("Slack"), None));
+        assert!(in_app(&apps, Some("messages"), None));
+        assert!(!in_app(&apps, Some("Notes"), None));
+        assert!(!in_app(&apps, None, None), "an unknown app never sends");
+    }
+
+    /// The picker saves Finder's name (`Rex Beta.app`), while the running
+    /// app calls itself `Rex`: either name sends.
+    #[test]
+    fn a_picked_app_sends_under_its_finder_name_or_its_own() {
+        let picked = ["Rex Beta".to_owned()];
+        assert!(in_app(&picked, Some("Rex"), Some("Rex Beta")));
+        assert!(!in_app(&picked, Some("Rex"), None));
+        let typed = ["Rex".to_owned()];
+        assert!(in_app(&typed, Some("Rex"), Some("Rex Beta")));
+        assert!(!in_app(&typed, Some("Rex Nightly"), Some("Rex Beta")));
     }
 }

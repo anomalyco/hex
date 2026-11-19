@@ -114,7 +114,7 @@ impl DictationOutput {
             let send = by_shortcut
                 && !flavour.raw()
                 && !crate::labs::copy_only()
-                && crate::dictation::yolo_mode::sends(application.as_deref());
+                && crate::dictation::yolo_mode::sends(application.as_deref(), None);
             // A paste that fails (another app changed the clipboard while
             // Hex saved it, or a format couldn't be read) keeps the text
             // for Paste last dictation, so the dictation isn't lost;

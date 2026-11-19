@@ -162,6 +162,8 @@ struct CompletedTranscript {
     /// Corrected local transcript before mode processing.
     raw: String,
     application: Option<String>,
+    /// [`crate::dictation::context::ContextSnapshot::bundle_name`].
+    bundle_name: Option<String>,
     /// Labs › Return to app: the app the capture started in, which the
     /// paste returns to (macOS).
     return_to: Option<i32>,
@@ -670,6 +672,7 @@ fn run_processor_worker(
                     nothing: processed.nothing,
                     raw: job.text,
                     application: job.context.application,
+                    bundle_name: job.context.bundle_name,
                     return_to: job.return_to,
                     timings: job.timings,
                     processing: processed.observation,
@@ -895,12 +898,14 @@ fn run_inference_worker(
             }
             result => {
                 let application = job.context.application;
+                let bundle_name = job.context.bundle_name;
                 let recording = job.recording;
                 let result = result.map(|text| CompletedTranscript {
                     raw: text.clone(),
                     text,
                     nothing: false,
                     application,
+                    bundle_name,
                     return_to: job.return_to,
                     timings,
                     processing: None,
@@ -1064,7 +1069,10 @@ fn finish_output(
                                     | TranscriptionTarget::RawCopyOnlyPaste
                             );
                             let send_gate = completed.timings.send_gate.filter(|_| {
-                                !rescued && crate::dictation::yolo_mode::sends(completed.application.as_deref())
+                                !rescued && crate::dictation::yolo_mode::sends(
+                                    completed.application.as_deref(),
+                                    completed.bundle_name.as_deref(),
+                                )
                             });
                             // Labs › Copy dictation only, read as the output
                             // commits: dictations go to the clipboard
@@ -1621,6 +1629,7 @@ mod tests {
                     text: text.into(),
                     nothing: false,
                     application: Some(app.into()),
+                    bundle_name: None,
                     return_to: None,
                     timings: JobTimings {
                         audio_ms: 1_000,
@@ -1689,6 +1698,7 @@ mod tests {
                     nothing: false,
                     raw: text.into(),
                     application: None,
+                    bundle_name: None,
                     return_to: None,
                     timings: JobTimings {
                         total_started: Instant::now(),
@@ -1746,6 +1756,7 @@ mod tests {
                         nothing: false,
                         raw: text.into(),
                         application: Some("Call".into()),
+                        bundle_name: None,
                         return_to: None,
                         timings: JobTimings {
                             total_started: Instant::now(),
@@ -1835,6 +1846,7 @@ mod tests {
                 nothing: false,
                 raw: "a long message".into(),
                 application: None,
+                bundle_name: None,
                 return_to: None,
                 timings: JobTimings {
                     total_started: Instant::now(),
