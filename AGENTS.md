@@ -204,7 +204,7 @@ substitute for source inspection or a second roadmap.
 - `transcription/model_details`: what a catalog model's details view adds:
   licence credit, source and licence links, the publisher's notice, measured
   memory, and benchmarks the publisher (never Hex) measured (Parakeet Ultra,
-  Orukeet).
+  Orukeet, Fluid Speech Pro).
 - `transcription/custom_models`, `transcription/gguf_header`: your own speech
   models: GGUF imports checked from their header alone (family, variant,
   languages, F32/F16/Q8_0 tensors, plus Q4_K/Q5_K/Q6_K under Labs › Smaller

@@ -269,6 +269,7 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
         def.id,
         TranscriptionModelId::ParakeetV3
             | TranscriptionModelId::Orukeet
+            | TranscriptionModelId::FluidSpeechPro
             | TranscriptionModelId::ParakeetUltra
     ) && language != AUTO_LANGUAGE
     {

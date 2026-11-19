@@ -986,6 +986,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("The English model before Parakeet Unified", "Английская модель до Parakeet Unified"),
     ("25 European languages, and it hears which one you speak", "25 европейских языков, и сама слышит, на каком вы говорите"),
     ("A Parakeet v3 fine-tune, a bit more accurate in 20 of its 25 languages", "Дообученная версия Parakeet v3, немного точнее в 20 из 25 языков"),
+    ("A Parakeet v3 retrain that does better on spontaneous speech in its 25 languages", "Переобученная версия Parakeet v3, лучше на спонтанной речи в 25 языках"),
     ("Parakeet v3, retrained for fewer wrong words", "Parakeet v3, дообученная для меньшего числа ошибок"),
     ("Chinese and 29 more, and it reads your vocabulary", "Китайский и ещё 29, и читает ваш словарь"),
     ("Egyptian Arabic, mixed with English", "Египетский арабский вперемешку с английским"),

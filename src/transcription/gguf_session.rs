@@ -1354,6 +1354,7 @@ mod tests {
             TranscriptionModelId::ParakeetV3,
             TranscriptionModelId::ParakeetUltra,
             TranscriptionModelId::Orukeet,
+            TranscriptionModelId::FluidSpeechPro,
             TranscriptionModelId::GraniteSpeech5,
         ] {
             assert_eq!(validate_auto(model, false).unwrap(), None, "{model:?}");

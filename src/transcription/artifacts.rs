@@ -60,6 +60,23 @@ pub(super) const ORUKEET_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "parakeet",
     variant: "tdt-0.6b-orukeet",
 };
+// FluidVoice's Fluid Speech Pro (CC-BY-4.0), a Parakeet TDT 0.6B v3 retrain
+// that also declares Moondream's Parakeet Ultra as a base. It adds one block
+// between the encoder's subsampling and its first Conformer layer, which its
+// file announces as `stt.parakeet.encoder.pre_block_kernel` (15, dim 1024).
+// TalkMate converted FluidVoice-Labs/fluid-speech-pro to GGUF for
+// transcribe.cpp and quantized it to Q8_0; a transcribe.cpp built without
+// pre-block support loads the file without that block and transcribes worse.
+pub(super) const FLUID_SPEECH_PRO_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "fluid-speech-pro-Q8_0.gguf",
+    stored_as: None,
+    revision: "d59dc79f7e04715c5b0ba07f01106f71ebea97dc",
+    repository: "TalkMate/fluid-speech-pro-gguf",
+    bytes: 741_819_456,
+    sha256: "c3848e98e1c54add4ff425e183b1f8cdb2a54ba6d576d08b07a07855634d693c",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-fluid-speech-pro",
+};
 pub(super) const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "whisper-large-v3-turbo-Q8_0.gguf",
     stored_as: None,
