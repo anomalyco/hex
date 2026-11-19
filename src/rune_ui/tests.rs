@@ -2896,6 +2896,35 @@ fn the_vocabulary_row_opens_its_sheet() {
     assert!(!rt.state.vocabulary.open);
 }
 
+/// A settle frame plus an outside press closes the sheet with its exit: the runtime lands the
+/// tree the press found, so both layers fade instead of vanishing.
+#[test]
+fn an_outside_press_on_a_settle_frame_still_exits_the_vocabulary_sheet() {
+    let mut rt = runtime("mac-settings-vocabulary", true, GOLDEN_SIZE);
+    let bounds = element(&rt, "vocabulary-layer").rect;
+    let (x, y) = (bounds[0] + 8.0, bounds[1] + bounds[3] / 2.0);
+    rt.settle_all();
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    for key in ["vocabulary-scrim", "vocabulary-layer"] {
+        let layer = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("{key} vanished in the settle frame"));
+        assert!(layer.exiting, "{key} is not exiting");
+        assert!(
+            layer.opacity > 0.0 && layer.opacity < 1.0,
+            "{key} opacity {}",
+            layer.opacity
+        );
+    }
+    settle(&mut rt);
+    assert!(rt.find("vocabulary-scrim").is_none());
+    assert!(rt.find("vocabulary-layer").is_none());
+}
+
 /// Add term on a list longer than the sheet scrolls the new row into view.
 #[test]
 fn add_term_scrolls_the_new_row_into_view() {
