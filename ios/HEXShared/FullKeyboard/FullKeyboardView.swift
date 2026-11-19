@@ -142,6 +142,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     func syncSettings() {
+        if TypingJournalSettings().isEnabled {
+            if engine.journal == nil { engine.journal = TypingJournal() }
+        } else {
+            engine.journal?.save()
+            engine.journal = nil
+        }
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
             engine.autocorrect.isEnabled = wantsAutocorrect

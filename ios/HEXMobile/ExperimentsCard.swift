@@ -8,6 +8,7 @@ struct ExperimentsCard: View {
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var autocorrect = FullKeyboardSettings().autocorrect
+    @State private var learnTyping = TypingJournalSettings().isEnabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -54,6 +55,33 @@ struct ExperimentsCard: View {
                     .padding(.vertical, 10)
                     .onChange(of: autocorrect) { _, enabled in
                         FullKeyboardSettings().autocorrect = enabled
+                    }
+
+                    Divider()
+                        .overlay(HexTheme.borderWeak)
+                        .padding(.leading, 16)
+
+                    Toggle(isOn: $learnTyping) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Learn how I type")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(HexTheme.textBase)
+                            Text("Keeps where you tap and the words you fix on this iPhone, never what you write")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HexTheme.textMuted)
+                        }
+                    }
+                    .tint(HexTheme.success)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .onChange(of: learnTyping) { _, enabled in
+                        TypingJournalSettings().isEnabled = enabled
+                    }
+
+                    if learnTyping {
+                        TypingInsightsView()
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
                     }
                 }
             }
@@ -131,6 +159,7 @@ struct ExperimentsCard: View {
             customVocabulary = CustomVocabularySettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
             autocorrect = FullKeyboardSettings().autocorrect
+            learnTyping = TypingJournalSettings().isEnabled
         }
     }
 }

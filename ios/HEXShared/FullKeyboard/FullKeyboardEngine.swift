@@ -85,6 +85,13 @@ final class FullKeyboardEngine {
 
     let target: KeyboardTextTarget
     let autocorrect: AutocorrectEngine
+    /// Learn how I type (Experiments); nil while off.
+    var journal: TypingJournal?
+
+    private var learning: TypingJournal? {
+        guard let journal, TypingJournal.allows(field: field, target: target) else { return nil }
+        return journal
+    }
     var width: CGFloat = 375 { didSet { if width != oldValue { rebuildLayout() } } }
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { rebuildLayout() } } }
     var showsGlobe = false { didSet { if showsGlobe != oldValue { rebuildLayout() } } }
@@ -185,6 +192,14 @@ final class FullKeyboardEngine {
     }
 
     func acceptSuggestion(_ suggestion: KeyboardSuggestion) {
+        if let journal = learning {
+            let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput)
+            if let token, !token.isEmpty, token != suggestion.replacement {
+                journal.record(.picked, typed: token, final: suggestion.replacement)
+            } else {
+                journal.didFinish(word: token)
+            }
+        }
         if let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) {
             for _ in 0..<token.count {
                 target.deleteBackward()
@@ -222,6 +237,9 @@ final class FullKeyboardEngine {
             committed: false,
             returnLayer: nil
         )
+        if key.character != nil {
+            learning?.recordTap(on: key, at: point)
+        }
         switch key.kind {
         case .shift:
             shift.shiftDown(now: clock())
@@ -353,6 +371,7 @@ final class FullKeyboardEngine {
             if target.enablesReturnKeyAutomatically == true && !target.hasText {
                 break
             }
+            learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
             autocorrect.clearPendingUndo()
             insert("\n")
         case .layerSwitch:
@@ -423,11 +442,17 @@ final class FullKeyboardEngine {
             }
             target.insertText(undo.original)
             autocorrect.suppressAndKeep(undo.original)
+            learning?.record(
+                .undone,
+                typed: undo.insertedText.trimmingCharacters(in: .whitespaces),
+                final: undo.original
+            )
             lastSpaceAt = nil
             didEdit()
             return
         }
         autocorrect.clearPendingUndo()
+        learning?.willErase(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
         target.deleteBackward()
         lastSpaceAt = nil
         didEdit()
@@ -439,6 +464,7 @@ final class FullKeyboardEngine {
             deleteBackward(allowAutocorrectUndo: false)
             return
         }
+        learning?.willErase(word: AutocorrectEngine.currentToken(in: before))
         var count = 0
         var index = before.endIndex
         while index > before.startIndex, before[before.index(before: index)].isWhitespace {
@@ -488,6 +514,7 @@ final class FullKeyboardEngine {
             didEdit()
             return
         }
+        learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
         if let (original, replacement) = autocorrect.replacementOnSpace(
             beforeInput: target.documentContextBeforeInput,
             field: field,
@@ -499,6 +526,7 @@ final class FullKeyboardEngine {
             let inserted = replacement + " "
             target.insertText(inserted)
             autocorrect.recordAppliedCorrection(original: original, insertedText: inserted)
+            learning?.record(.autocorrected, typed: original, final: replacement)
             lastSpaceAt = now
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()

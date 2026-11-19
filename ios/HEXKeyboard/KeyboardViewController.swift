@@ -41,6 +41,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        fullKeyboard?.engine.journal?.save()
         pollTimer?.invalidate()
         pollTimer = nil
     }
