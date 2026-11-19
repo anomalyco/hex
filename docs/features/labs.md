@@ -1794,7 +1794,10 @@ transcribe.cpp's WER harness on the FLEURS Hebrew test (18.45% WER, 792
 utterances, batch 1, no timestamps, Radeon 8060S over Vulkan, source revision
 7045d1c), NB-Whisper Medium Hex's run on the FLEURS Norwegian test (6.68%
 WER, 357 utterances, same conditions), and Granite Speech 5.0 Hex's run on
-the FLEURS English test (4.77% WER, 647 utterances, same conditions); every other figure is English WER with dataset and source
+the FLEURS English test (4.77% WER, 647 utterances, same conditions);
+KB-Whisper Medium names KBLab's model card for the FLEURS Swedish test
+(6.6% WER, its default checkpoint, with utterances, batch, hardware, and
+scorer unrecorded); every other figure is English WER with dataset and source
 unrecorded. A "Most accurate" badge stays only when its record is comparable
 (`BenchmarkRecord::comparable`: same metric, language, and a known, equal
 dataset) with every other recommended model's for the saved language, so

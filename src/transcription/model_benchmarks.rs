@@ -208,6 +208,19 @@ const NB_WHISPER_MEDIUM_RECORD: BenchmarkRecord = BenchmarkRecord {
     ..GIGAAM_V3_RECORD
 };
 
+/// KBLab's model card figure for KB-Whisper Medium on the FLEURS Swedish
+/// test, for the default (`standard`) stage-2 checkpoint. The pinned GGML
+/// files date from the repository's 2025-02 weights and were carried
+/// unchanged into its later `strict` branch, so they are these weights; the
+/// card records no utterance count, dataset revision, batch, hardware, or
+/// scorer, and Hex has not run it. The card's CommonVoice (5.4%) and NST
+/// (5.8%) figures are other Swedish datasets, not another language set.
+const KB_WHISPER_MEDIUM_RECORD: BenchmarkRecord = BenchmarkRecord {
+    dataset: Some("FLEURS test"),
+    source: Some("The model card's own figure for its default checkpoint"),
+    ..BenchmarkRecord::unrecorded(ErrorMetric::Wer, 6.6, "sv")
+};
+
 /// Hex's run of the same harness over the full FLEURS English test split on
 /// apollo (#1252). On the same run Parakeet Unified English scored 4.01%,
 /// Whisper large-v3-turbo 4.38%, Parakeet v3 4.88%, and Cohere 5.08%; in
@@ -234,6 +247,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::Nemotron35Asr => Some(NEMOTRON_3_5_ASR_RECORD),
         TranscriptionModelId::GigaAmV3 => Some(GIGAAM_V3_RECORD),
         TranscriptionModelId::NbWhisperMedium => Some(NB_WHISPER_MEDIUM_RECORD),
+        TranscriptionModelId::KbWhisperMedium => Some(KB_WHISPER_MEDIUM_RECORD),
         TranscriptionModelId::GraniteSpeech5 => Some(GRANITE_SPEECH_5_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.

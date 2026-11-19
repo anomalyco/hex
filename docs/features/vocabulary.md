@@ -74,7 +74,7 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 │   ("Kip" -> Kit)
 └── SenseVoice, Cohere, GigaAM, Granite, Apple Speech -> no vocabulary in transcription
 
-Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
+Context prompt (Whisper incl. ivrit.ai, NB-Whisper and KB-Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
 ├── Always on (not Labs): replaced the per-model Recognition hints box (#129)
 ├── Every whole-clip run reads the list at its start: dictation, meetings,
 │   captures, the local API; live streams run without it

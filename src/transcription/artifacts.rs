@@ -16,6 +16,7 @@ pub(super) const COHERE_LANGUAGES: &[&str] = &[
 
 pub(super) const PARAKEET_V2_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
+    stored_as: None,
     revision: "07cee0616125a08ef619729bb47f40ef747e4bc4",
     repository: "handy-computer/parakeet-tdt-0.6b-v2-gguf",
     bytes: 729_574_912,
@@ -25,6 +26,7 @@ pub(super) const PARAKEET_V2_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 pub(super) const PARAKEET_UNIFIED_ENGLISH_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "parakeet-unified-en-0.6b-Q8_0.gguf",
+    stored_as: None,
     revision: "7e948f21b7bdbac698d3318db9d350f1096f3b6c",
     repository: "handy-computer/parakeet-unified-en-0.6b-gguf",
     bytes: 731_357_568,
@@ -34,6 +36,7 @@ pub(super) const PARAKEET_UNIFIED_ENGLISH_ARTIFACT: GgufArtifact = GgufArtifact 
 };
 pub(super) const PARAKEET_V3_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+    stored_as: None,
     revision: "85ac09ea12fc4b1112fa76810059364bc6adc9de",
     repository: "handy-computer/parakeet-tdt-0.6b-v3-gguf",
     bytes: 739_508_576,
@@ -49,6 +52,7 @@ pub(super) const PARAKEET_V3_ARTIFACT: GgufArtifact = GgufArtifact {
 // materializes the fitted taps as ordinary convolution weights.
 pub(super) const ORUKEET_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "orukeet-Q8_0.gguf",
+    stored_as: None,
     revision: "c5511a3850fce1cbbfa5d94ef815966e1d99275f",
     repository: "handy-computer/orukeet-gguf",
     bytes: 739_508_704,
@@ -58,6 +62,7 @@ pub(super) const ORUKEET_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 pub(super) const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "whisper-large-v3-turbo-Q8_0.gguf",
+    stored_as: None,
     revision: "d222c9f621c1128299248f2ded4d8a1820519780",
     repository: "handy-computer/whisper-large-v3-turbo-gguf",
     bytes: 886_381_824,
@@ -67,6 +72,7 @@ pub(super) const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 pub(super) const QWEN_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "Qwen3-ASR-0.6B-Q8_0.gguf",
+    stored_as: None,
     revision: "e4e16599b900eb0cb36e524514756bb92eb092b7",
     repository: "handy-computer/Qwen3-ASR-0.6B-gguf",
     bytes: 850_423_456,
@@ -81,6 +87,7 @@ pub(super) const QWEN_ARTIFACT: GgufArtifact = GgufArtifact {
 // rebuilding it that way reproduces this file byte for byte.
 pub(super) const QWENCLEO_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "QwenCleo-ASR-1.7B-Q8_0.gguf",
+    stored_as: None,
     revision: "08c66976a0496e1e3f1a88965eea123631e634fa",
     repository: "reomar15/QwenCleo-ASR-transcribe-cpp-GGUF",
     bytes: 2_185_030_816,
@@ -96,6 +103,7 @@ pub(super) const QWENCLEO_ARTIFACT: GgufArtifact = GgufArtifact {
 // file byte for byte.
 pub(super) const IVRIT_WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "ivrit-whisper-large-v3-turbo-Q8_0.gguf",
+    stored_as: None,
     revision: "a12befaff80add995ac6a8fe10cbb7f38438c7b5",
     repository: "adolan/ivrit-whisper-large-v3-turbo-gguf",
     bytes: 886_381_536,
@@ -105,6 +113,7 @@ pub(super) const IVRIT_WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 pub(super) const SENSEVOICE_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "SenseVoiceSmall-Q8_0.gguf",
+    stored_as: None,
     revision: "4a08b8e900b38a977e32eb08d5d0697d6e72ba04",
     repository: "handy-computer/SenseVoiceSmall-gguf",
     bytes: 252_684_608,
@@ -114,6 +123,7 @@ pub(super) const SENSEVOICE_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 pub(super) const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "cohere-transcribe-03-2026-Q8_0.gguf",
+    stored_as: None,
     revision: "dfa4adebb64f3076b7b6b90b721275cc069cb421",
     repository: "handy-computer/cohere-transcribe-03-2026-gguf",
     bytes: 2_410_655_232,
@@ -126,6 +136,7 @@ pub(super) const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
 // recipe.
 pub(super) const UNDERDOG_BARK_3_PRO_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "underdog-bark-3.0-pro-Q8_0.gguf",
+    stored_as: None,
     revision: "5c10586263806666c0a8b4905a3346a7c679803e",
     repository: "joshthomasdev/underdog-bark-3.0-pro-gguf",
     bytes: 739_508_480,
@@ -135,6 +146,7 @@ pub(super) const UNDERDOG_BARK_3_PRO_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 pub(super) const UNDERDOG_BARK_3_CLEAN_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "underdog-bark-3.0-clean-Q8_0.gguf",
+    stored_as: None,
     revision: "868701fd53d62c59d759ed1d79e095118f3fa7b9",
     repository: "joshthomasdev/underdog-bark-3.0-clean-gguf",
     bytes: 739_508_480,
@@ -147,6 +159,7 @@ pub(super) const UNDERDOG_BARK_3_CLEAN_ARTIFACT: GgufArtifact = GgufArtifact {
 // (430 F32, 225 Q8_0, and 48 F16 tensors). Behind Labs › Parakeet Ultra.
 pub(super) const PARAKEET_ULTRA_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "parakeet-ultra-Q8_0.gguf",
+    stored_as: None,
     revision: "a1539be1b849ea7463b88343e5277b373d0c4ea9",
     repository: "handy-computer/parakeet-ultra-gguf",
     bytes: 740_363_168,
@@ -164,6 +177,7 @@ pub(super) const PARAKEET_ULTRA_ARTIFACT: GgufArtifact = GgufArtifact {
 // which ships the licence and notice beside it.
 pub(super) const NEMOTRON_3_5_ASR_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+    stored_as: None,
     revision: "53ce288f69326b415aeef030cfcb02a08a8096dd",
     repository: "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
     bytes: 751_094_240,
@@ -181,6 +195,7 @@ pub(super) const NEMOTRON_3_5_ASR_ARTIFACT: GgufArtifact = GgufArtifact {
 // licence and notice beside it.
 pub(super) const GIGAAM_V3_E2E_RNNT_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "gigaam-v3-e2e-rnnt-Q8_0.gguf",
+    stored_as: None,
     revision: "3efd5b39882ceadca5570a8fb9fa1a2c801d6d6d",
     repository: "handy-computer/gigaam-v3-e2e-rnnt-gguf",
     bytes: 273_724_832,
@@ -196,10 +211,31 @@ pub(super) const GIGAAM_V3_E2E_RNNT_ARTIFACT: GgufArtifact = GgufArtifact {
 // Norwegian against this file's 6.68%, so the authors' smaller file stays.
 pub(super) const NB_WHISPER_MEDIUM_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "ggml-model-q5_0.bin",
+    stored_as: None,
     revision: "0ed074d5985bd56ca4140159a9dbffbc3fb5117e",
     repository: "NbAiLab/nb-whisper-medium",
     bytes: 539_212_484,
     sha256: "18733de634af639a43b0f8c5f5a2ea0920de4c5b32a5570ec130981581c0e5e7",
+    architecture: "whisper",
+    // transcribe.cpp names a legacy Whisper file by its geometry.
+    variant: "whisper-medium",
+};
+// The National Library of Sweden's KB-Whisper Medium (Apache-2.0), a
+// Whisper medium fine-tune trained on Swedish speech: KBLab's own
+// whisper.cpp Q5_0 file at kb-whisper-medium 0abe10b9, which transcribe.cpp
+// loads as Whisper. The GGML files were uploaded at fcfa0af8 from the
+// repository's standard stage-2 weights and were carried unchanged into the
+// later `strict` tag, which replaced only model.safetensors, so the card's
+// default-checkpoint figures apply. Its file is also called
+// `ggml-model-q5_0.bin`, the same as NbAiLab's Norwegian file at exactly the
+// same size, so Hex stores its copy under `stored_as` instead.
+pub(super) const KB_WHISPER_MEDIUM_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "ggml-model-q5_0.bin",
+    stored_as: Some("kb-whisper-medium-q5_0.bin"),
+    revision: "0abe10b9d7f75d0902656e5c06c5c4d549604dc5",
+    repository: "KBLab/kb-whisper-medium",
+    bytes: 539_212_484,
+    sha256: "7f8762e0ade9e0073674c0d5acae942a0b1ea98add9baa008ee89c94eaba43d0",
     architecture: "whisper",
     // transcribe.cpp names a legacy Whisper file by its geometry.
     variant: "whisper-medium",
@@ -214,6 +250,7 @@ pub(super) const NB_WHISPER_MEDIUM_ARTIFACT: GgufArtifact = GgufArtifact {
 // and notice beside it.
 pub(super) const GRANITE_SPEECH_5_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "granite-speech-5.0-470m-turboctc-multilingual-Q8_0.gguf",
+    stored_as: None,
     revision: "62f64d9d5ad35989b06caf199cafe7155944a22b",
     repository: "17slever17/granite-speech-5.0-470m-turboctc-multilingual-GGUF",
     bytes: 505_663_136,

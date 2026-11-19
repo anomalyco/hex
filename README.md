@@ -53,7 +53,8 @@ Settings' picker offers more, among others:
 - Nemotron 3.5 ASR: writes while you talk, in 27 languages
 - Granite Speech 5.0: IBM's model, seven languages, with punctuation
 - one-language models: ivrit.ai Whisper for Hebrew, GigaAM v3 for Russian,
-  NB-Whisper for Norwegian, QwenCleo-ASR for Egyptian Arabic
+  NB-Whisper for Norwegian, KB-Whisper for Swedish, QwenCleo-ASR for Egyptian
+  Arabic
 - more English models: Parakeet v2 and Underdog Bark 3.0
 
 Add a GGUF model of your own with "Add model file…" in the picker; see

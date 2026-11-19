@@ -14,12 +14,12 @@ use sha2::{Digest, Sha256};
 
 use super::artifacts::{
     COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, GRANITE_SPEECH_5_ARTIFACT,
-    GRANITE_SPEECH_5_LANGUAGES, IVRIT_WHISPER_ARTIFACT, NB_WHISPER_MEDIUM_ARTIFACT,
-    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES, ORUKEET_ARTIFACT,
-    PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
-    PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
-    SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
-    WHISPER_ARTIFACT,
+    GRANITE_SPEECH_5_LANGUAGES, IVRIT_WHISPER_ARTIFACT, KB_WHISPER_MEDIUM_ARTIFACT,
+    NB_WHISPER_MEDIUM_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES,
+    NEMOTRON_3_5_LOCALES, ORUKEET_ARTIFACT, PARAKEET_ULTRA_ARTIFACT,
+    PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT, PARAKEET_V3_ARTIFACT,
+    PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT, SENSEVOICE_ARTIFACT,
+    UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT, WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
 pub use super::languages::{LANGUAGES, language_name, menu_order};
@@ -49,6 +49,7 @@ pub enum TranscriptionModelId {
     Nemotron35Asr,
     GigaAmV3,
     NbWhisperMedium,
+    KbWhisperMedium,
     GraniteSpeech5,
     AppleSpeech,
     Custom(CustomModelId),
@@ -86,6 +87,7 @@ impl TranscriptionModelId {
             Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::GigaAmV3 => "gigaam_v3",
             Self::NbWhisperMedium => "nb_whisper_medium",
+            Self::KbWhisperMedium => "kb_whisper_medium",
             Self::GraniteSpeech5 => "granite_speech_5",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
@@ -125,6 +127,7 @@ impl FromStr for TranscriptionModelId {
             "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "gigaam_v3" => Ok(Self::GigaAmV3),
             "nb_whisper_medium" => Ok(Self::NbWhisperMedium),
+            "kb_whisper_medium" => Ok(Self::KbWhisperMedium),
             "granite_speech_5" => Ok(Self::GraniteSpeech5),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
@@ -229,7 +232,14 @@ pub enum ModelRuntime {
 }
 
 pub struct GgufArtifact {
+    /// The file name in its repository, which every download URL uses.
     pub filename: &'static str,
+    /// The name Hex stores it under in its one flat models folder, when that
+    /// must differ from `filename`. `None` keeps `filename`. Only a collision
+    /// needs one: KBLab's and NbAiLab's Whisper medium files are both called
+    /// `ggml-model-q5_0.bin` and are both 539,212,484 bytes, and the folder's
+    /// installed check compares size alone.
+    pub stored_as: Option<&'static str>,
     pub revision: &'static str,
     pub repository: &'static str,
     pub bytes: u64,
@@ -244,6 +254,11 @@ impl GgufArtifact {
             "https://huggingface.co/{}/resolve/{}/{}",
             self.repository, self.revision, self.filename
         )
+    }
+
+    /// The name Hex's models folder holds this artifact under.
+    pub fn local_name(&self) -> &'static str {
+        self.stored_as.unwrap_or(self.filename)
     }
 }
 
@@ -397,6 +412,7 @@ impl ModelDefinition {
 /// and room noise. It downloads with every transcription model.
 pub const SPEECH_DETECTOR_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "silero-vad-v6.2-F32.gguf",
+    stored_as: None,
     revision: "a9b2d61c20ae4ddf3644edb34969e8185a485448",
     repository: "handy-computer/silero-vad-v6.2-gguf",
     bytes: 1_241_056,
@@ -625,6 +641,23 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_language_detection: false,
     },
     ModelDefinition {
+        id: TranscriptionModelId::KbWhisperMedium,
+        name: "KB-Whisper Medium",
+        // Not timed in Hex. It is the same whisper-medium graph at the same
+        // Q5_0 quantization as NB-Whisper Medium, which ran FLEURS Norwegian
+        // at ~17x on apollo's Vulkan GPU.
+        realtime: "~17x",
+        // KBLab's model card for its default (standard) checkpoint on the
+        // FLEURS Swedish test (`model_benchmarks`); Hex has not measured it.
+        word_error_rate: Some(6.6),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&KB_WHISPER_MEDIUM_ARTIFACT),
+        // The card's only language; the pinned file takes the `sv` hint.
+        languages: &["sv"],
+        accepts_language_hint: true,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
         id: TranscriptionModelId::GraniteSpeech5,
         name: "Granite Speech 5.0",
         // On apollo's Vulkan GPU it ran 2.1 to 2.4 times as fast as Whisper
@@ -682,7 +715,7 @@ pub fn all_models() -> Vec<&'static ModelDefinition> {
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
     use TranscriptionModelId::{
-        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, NbWhisperMedium,
+        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, KbWhisperMedium, NbWhisperMedium,
         ParakeetUnifiedEnglish, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
     };
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
@@ -712,7 +745,7 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             (CohereTranscribe, Recommended),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
-        "fi" | "sv" | "da" => &[(WhisperLargeV3Turbo, Recommended), (ParakeetV3, Fastest)],
+        "fi" | "da" => &[(WhisperLargeV3Turbo, Recommended), (ParakeetV3, Fastest)],
         "mt" => &[(ParakeetV3, Recommended)],
         "ar" => &[
             (WhisperLargeV3Turbo, Recommended),
@@ -731,6 +764,14 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         // 0.89 times its speed and 60% of its download (Hex's run).
         "no" => &[
             (NbWhisperMedium, Recommended),
+            (WhisperLargeV3Turbo, Vocabulary),
+        ],
+        // KBLab's model card figure for the default (standard) checkpoint on
+        // the FLEURS Swedish test at 6.6% WER (Hex hasn't measured any of the
+        // three in Swedish); Parakeet v3 is the faster, less accurate pick.
+        "sv" => &[
+            (KbWhisperMedium, Recommended),
+            (ParakeetV3, Fastest),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
         "vi" => &[
@@ -894,7 +935,7 @@ pub fn model_path(model: &ModelDefinition) -> Result<PathBuf> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is managed by macOS and has no model path", model.name);
     };
-    let managed = models_dir()?.join(artifact.filename);
+    let managed = models_dir()?.join(artifact.local_name());
     // A catalog model another app downloaded (one already in use, or an
     // exact match the last scan found), used where it is.
     if !model.id.is_custom()
@@ -1178,7 +1219,7 @@ pub fn download_speech_detector(canceled: &AtomicBool) -> Result<PathBuf> {
 }
 
 pub fn speech_detector_path() -> Result<PathBuf> {
-    Ok(models_dir()?.join(SPEECH_DETECTOR_ARTIFACT.filename))
+    Ok(models_dir()?.join(SPEECH_DETECTOR_ARTIFACT.local_name()))
 }
 
 /// Whether the speech detector is installed at its pinned size. Its checksum
@@ -1200,7 +1241,7 @@ fn download_artifact(
     check_canceled(canceled)?;
     let directory = models_dir()?;
     fs::create_dir_all(&directory)?;
-    let destination = directory.join(artifact.filename);
+    let destination = directory.join(artifact.local_name());
     let partial = destination.with_extension("gguf.partial");
     // Another process may be writing this same partial file: its bytes are
     // this download's progress too, so waiting shows them instead of 0.
@@ -1459,6 +1500,7 @@ mod tests {
     /// A five-byte artifact whose checksum is `sha256("hello")`.
     const FIXTURE_ARTIFACT: GgufArtifact = GgufArtifact {
         filename: "fixture.gguf",
+        stored_as: None,
         revision: "fixture",
         repository: "fixture",
         bytes: 5,
@@ -1607,6 +1649,36 @@ mod tests {
     }
 
     #[test]
+    fn swedish_recommends_kb_whisper_with_its_hint() {
+        use Recommendation::{Fastest, Recommended, Vocabulary};
+        use TranscriptionModelId::{KbWhisperMedium, ParakeetV3, WhisperLargeV3Turbo};
+        let swedish: Vec<_> = choices_for_runtime("sv")
+            .into_iter()
+            .map(|choice| (choice.model.id, choice.recommendation))
+            .collect();
+        assert_eq!(
+            swedish,
+            [
+                (KbWhisperMedium, Recommended),
+                (ParakeetV3, Fastest),
+                (WhisperLargeV3Turbo, Vocabulary)
+            ]
+        );
+        let kb = definition(KbWhisperMedium);
+        assert_eq!(kb.language_choices(), ["sv"]);
+        assert_eq!(kb.runtime_language_hint("sv"), Some("sv"));
+        assert!(!kb.supports_language(AUTO_LANGUAGE));
+        assert!(kb.languages.iter().all(|code| *code != "no"));
+        assert!(definition(ParakeetV3).supports_language("sv"));
+        assert!(
+            definition(WhisperLargeV3Turbo)
+                .language_choices()
+                .contains(&"sv")
+        );
+        assert_eq!(language_name("sv"), "Swedish");
+    }
+
+    #[test]
     fn russian_recommends_gigaam_without_a_hint() {
         use Recommendation::{Recommended, Vocabulary};
         use TranscriptionModelId::{GigaAmV3, WhisperLargeV3Turbo};
@@ -1715,10 +1787,11 @@ mod tests {
 
     #[test]
     fn gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset() {
-        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, and NB-Whisper's
-        // whisper.cpp file q5_0 too: the types the Vulkan backend is built
-        // for (`CMAKE_ARGS` in .cargo/config.toml). Another quantization
-        // needs its type added there, or Vulkan aborts.
+        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, and the National
+        // Libraries' Whisper files (NB-Whisper, KB-Whisper) q5_0 too: the
+        // types the Vulkan backend is built for (`CMAKE_ARGS` in
+        // .cargo/config.toml). Another quantization needs its type added
+        // there, or Vulkan aborts.
         for model in MODELS {
             if let ModelRuntime::Gguf(artifact) = model.runtime {
                 assert!(
@@ -1729,6 +1802,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn no_two_catalog_artifacts_share_a_file_in_the_models_folder() {
+        // The folder is flat and `is_installed` compares bytes alone: two
+        // artifacts stored under one name would each claim the other's file,
+        // fail its checksum, and delete it. KB-Whisper Medium therefore
+        // stores its copy as a different name than NB-Whisper's, which
+        // publishes the same `ggml-model-q5_0.bin` at the same size.
+        let mut stored = std::collections::HashMap::new();
+        for artifact in MODELS
+            .iter()
+            .filter_map(|model| match model.runtime {
+                ModelRuntime::Gguf(artifact) => Some(artifact),
+                ModelRuntime::AppleSpeech => None,
+            })
+            .chain([&SPEECH_DETECTOR_ARTIFACT])
+        {
+            if let Some(other) = stored.insert(artifact.local_name(), artifact.filename) {
+                panic!(
+                    "{} and {} would both install as {}",
+                    artifact.filename,
+                    other,
+                    artifact.local_name()
+                );
+            }
+        }
+        let kb = definition(TranscriptionModelId::KbWhisperMedium);
+        let nb = definition(TranscriptionModelId::NbWhisperMedium);
+        let (ModelRuntime::Gguf(kb), ModelRuntime::Gguf(nb)) = (kb.runtime, nb.runtime) else {
+            unreachable!("both Whisper fine-tunes are GGUF models")
+        };
+        assert_eq!(kb.filename, nb.filename);
+        assert_eq!(kb.bytes, nb.bytes);
+        assert_eq!(kb.local_name(), "kb-whisper-medium-q5_0.bin");
+        // Every model keeps the name it was installed under before the field.
+        assert_eq!(nb.local_name(), nb.filename);
     }
 
     #[test]
@@ -1808,6 +1918,7 @@ mod tests {
             (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
             (TranscriptionModelId::GigaAmV3, "gigaam_v3"),
             (TranscriptionModelId::NbWhisperMedium, "nb_whisper_medium"),
+            (TranscriptionModelId::KbWhisperMedium, "kb_whisper_medium"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
@@ -1934,7 +2045,7 @@ mod tests {
                 (CohereTranscribe, MostAccurate)
             ]
         );
-        for language in ["fi", "sv", "da"] {
+        for language in ["fi", "da"] {
             assert_eq!(
                 routing(language),
                 [(WhisperLargeV3Turbo, Recommended), (ParakeetV3, Fastest)]
@@ -2195,7 +2306,8 @@ mod tests {
                 Qwen3Asr06B,
                 QwenCleoAsr17B,
                 IvritWhisperLargeV3Turbo,
-                NbWhisperMedium
+                NbWhisperMedium,
+                KbWhisperMedium
             ]
         );
         assert_eq!(
@@ -2295,9 +2407,11 @@ mod tests {
             &AtomicU64::new(0),
         );
         TEST_MODELS_DIR.with(|models| *models.borrow_mut() = None);
-        let detector_touched = directory.join(SPEECH_DETECTOR_ARTIFACT.filename).exists()
+        let detector_touched = directory
+            .join(SPEECH_DETECTOR_ARTIFACT.local_name())
+            .exists()
             || directory
-                .join(SPEECH_DETECTOR_ARTIFACT.filename)
+                .join(SPEECH_DETECTOR_ARTIFACT.local_name())
                 .with_extension("gguf.partial")
                 .exists();
         fs::remove_dir_all(&directory).unwrap();

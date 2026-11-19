@@ -995,6 +995,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Whisper, tuned for Hebrew", "Whisper, ajusté pour l'hébreu"),
     ("IBM's model for seven languages, with punctuation", "Le modèle d'IBM pour sept langues, avec ponctuation"),
     ("Whisper, tuned for Norwegian by its National Library", "Whisper, ajusté pour le norvégien par la Bibliothèque nationale de Norvège"),
+    ("Whisper, tuned for Swedish by its National Library", "Whisper, ajusté pour le suédois par la Bibliothèque nationale de Suède"),
     ("Chinese, Japanese, Korean and English. A small download", "Chinois, japonais, coréen et anglais. Un petit téléchargement"),
     ("Parakeet, tuned for fewer wrong words in English", "Parakeet, ajusté pour moins de mots erronés en anglais"),
     ("English, with the ums and uhs taken out", "Anglais, sans les euh et les hum"),

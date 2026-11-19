@@ -394,7 +394,7 @@ Choose a supported language              // setup.language-conditioning; macOS +
 ├── Granite Speech 5.0 -> No language input; transcribes whichever of en, fr,
 │   de, es, pt, it, ja it hears, so it is offered under Auto too (#1252)
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
-├── Whisper (ivrit.ai's and NB-Whisper too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
+├── Whisper (ivrit.ai's, NB-Whisper's, and KB-Whisper's too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
 │   context prompt (vocabulary.md); output that only repeats it is dropped
 ├── Hebrew -> ivrit.ai Whisper large-v3-turbo, always with the `he` hint (it
 │   lost Whisper's language detection); stock Whisper turbo also offers it
@@ -402,6 +402,10 @@ Choose a supported language              // setup.language-conditioning; macOS +
 │   Whisper turbo also offer it
 ├── Norwegian -> NB-Whisper Medium, always with the `no` hint (Bokmål is all
 │   Hex measured); stock Whisper turbo also offers it (#1150)
+├── Swedish -> KB-Whisper Medium, always with the `sv` hint; its 6.6% WER on
+│   FLEURS Swedish is the model card's figure for its default checkpoint, not
+│   Hex's run; Parakeet v3 is Fastest there, and stock Whisper turbo also
+│   offers it (#1991)
 ├── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ├── Khmer -> Whisper only, with the `km` hint; Auto lets Whisper guess per clip
 └── Azerbaijani -> Whisper only, with the `az` hint; Auto lets Whisper guess per clip
