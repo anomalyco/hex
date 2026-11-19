@@ -200,14 +200,19 @@ impl DropTranscribe {
     }
 
     /// Drops a cancelled job once its worker has answered while the lab is
-    /// off: the window polls nothing else from it.
+    /// off: the window polls nothing else from it, so the channel is drained
+    /// until its answer or its end rather than one event read per poll.
     fn forget_finished(&mut self) -> bool {
-        let finished = self.job.as_ref().is_some_and(|job| {
-            matches!(
-                job.events.try_recv(),
-                Ok(Event::Done(_)) | Err(TryRecvError::Disconnected)
-            )
-        });
+        let Some(job) = &self.job else {
+            return false;
+        };
+        let finished = loop {
+            match job.events.try_recv() {
+                Ok(Event::Done(_)) | Err(TryRecvError::Disconnected) => break true,
+                Ok(Event::Progress(_)) => {}
+                Err(TryRecvError::Empty) => break false,
+            }
+        };
         if finished {
             self.job = None;
         }

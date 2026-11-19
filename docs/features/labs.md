@@ -192,7 +192,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
 │                                        // a sourced script in a real shell
 ├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV, MP3, AAC, M4A, MP4, MOV, AIFF,
-│                                        CAF, FLAC, Ogg, Opus, WebM, or Matroska file dropped anywhere on
+│                                        CAF, FLAC, OGG, Opus, WebM, or MKV file dropped anywhere on
 │                                        Hex's window queues
 │                                        behind any file already being transcribed, one at a time, each with the
 │                                        dictation model and language in use;
@@ -228,8 +228,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_truncated_wav_is_refused_before_anything_is_transcribed,
 │                                        // a_checked_wav_still_reads_from_its_first_sample,
 │                                        // only_the_formats_this_build_reads_are_accepted,
-│                                        // the_extensions_on_offer_are_the_ones_this_build_reads,
-│                                        // every_extension_on_offer_reads_its_own_fixture,
+│                                        // every_offered_extension_is_named_in_the_copy,
+│                                        // every_extension_on_offer_reads_a_fixture_under_that_name,
 │                                        // every_labs_line_names_the_formats_this_build_reads,
 │                                        // an_unsupported_file_is_refused_before_anything_loads,
 │                                        // a_file_without_audio_and_an_unknown_codec_say_what_is_wrong,
@@ -3694,9 +3694,11 @@ the shared pieces reader
 whole once before the model loads, as `hex transcribe` does, so a truncated or
 corrupt file is refused up front, and compressed audio decodes once, as it
 transcribes, with damage found later reported where it is. The drop target and
-the card's dialog offer the same extensions on every OS, one per container the
-shared reader takes: `wav`, `mp3`, `aac`, `m4a`/`mp4`/`mov`, `aiff`/`aif`,
-`caf`, `flac`, `ogg`/`oga`, `opus` (an Ogg file), `webm`, and `mkv`. Every
+the card's dialog offer the same common extensions on every OS, one set per
+container the shared reader takes, which detects the format from the file's
+contents rather than the name: `wav`/`wave`, `mp3`, `aac`, `m4a`/`m4b`,
+`mp4`/`m4v`/`3gp`, `mov`, `aiff`/`aif`/`aifc`, `caf`, `flac`, `ogg`/`oga`,
+`opus` (an Ogg file), `webm`/`weba`, and `mkv`/`mka`. Every
 format is downmixed to mono, resampled to 16 kHz, cut at most every 30 s, and
 each
 piece is sent to the service in order, which skips one the speech detector
@@ -3753,8 +3755,8 @@ and `drop-running` in both appearances; `the_first_free_name_numbering_counts_up
 `a_truncated_wav_is_refused_before_anything_is_transcribed`,
 `a_checked_wav_still_reads_from_its_first_sample`,
 `only_the_formats_this_build_reads_are_accepted`,
-`the_extensions_on_offer_are_the_ones_this_build_reads`,
-`every_extension_on_offer_reads_its_own_fixture`,
+`every_offered_extension_is_named_in_the_copy`,
+`every_extension_on_offer_reads_a_fixture_under_that_name`,
 `every_labs_line_names_the_formats_this_build_reads`,
 `an_unsupported_file_is_refused_before_anything_loads`,
 `a_file_without_audio_and_an_unknown_codec_say_what_is_wrong`, and
@@ -3769,8 +3771,10 @@ so a real Finder, Explorer, or file-manager drag is unobserved; Wayland
 reports no file drags, so there only the card's dialog works, and its native
 picker is unobserved here too; no model transcribed a dropped file, so no
 dropped file ran through a model end to end (each offered extension's fixture
-was read by the shared reader only); and no transcript saved by the toast was
-opened by a person.
+was read by the shared reader only); on macOS, writing a transcript beside a
+file in Documents, Desktop, or Downloads may trigger that folder's access
+prompt, not observed; and no transcript saved by the toast was opened by a
+person.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,
