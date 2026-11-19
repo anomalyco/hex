@@ -18,7 +18,7 @@ sign-windows (release env, .github/release only)
 ├── azure/login (OIDC, no client secret)
 ├── artifact-signing-action: both hex.exe     // SHA-256, RFC 3161 timestamp
 └── verify-authenticode.ps1                   // every exe Valid + timestamped
-setup-engine (windows-setup-engine.yml)        // no secrets
+setup-engine (windows-setup-engine.yml)        // signed runs only; no secrets
 └── build-windows-installer.ps1 -ExtractSignedEngine: uninst-<inno>-<hash>.e32
 sign-windows-engine (release env)              // signs that setup engine
 installers (windows-installers.yml)            // no secrets
@@ -43,7 +43,8 @@ publish                                       // stable requires the signatures
 - `SignedUninstaller=yes` fixes both: Inno Setup embeds a signature in the
   engine, so the extracted copy and the installed uninstaller verify. The
   signature cannot be applied inside the compile that uses it, because that
-  job has no credentials, so the engine is signed in its own passes:
+  job has no credentials, so the engine is signed in its own passes, and only
+  when Windows is signed (`setup-engine` waits for `sign-windows`):
 
 1. `setup-engine` compiles `packaging/windows/hex.iss` with
    `SignedUninstaller=yes` and a `SignedUninstallerDir`. With no SignTool
@@ -52,8 +53,9 @@ publish                                       // stable requires the signatures
    signed. `build-windows-installer.ps1 -ExtractSignedEngine` treats exactly
    that abort as success, keeps the engine, and fails if the abort or the file
    is missing.
-2. `sign-windows-engine` Authenticode-signs each `.e32` and verifies it
-   (`verify-authenticode.ps1 -Extensions .e32, .e64`).
+2. `sign-windows-engine` Authenticode-signs the `.e32` and verifies it
+   (`verify-authenticode.ps1 -Extensions .e32`). Its steps run unguarded, so a
+   missing credential fails the job instead of publishing an empty digest.
 3. `installers` compiles again with `-SignedEngineDir` pointing at the signed
    engine. ISCC copies the signature into the engine it embeds, so no sign
    tool runs there. If ISCC instead asks for a signature again, the signed
@@ -68,14 +70,18 @@ Setup.exe (signed after compile)
 ```
 
 - Both passes must use the same Inno Setup, because the engine's file name
-  carries the compiler version and a hash of the engine bytes.
-  `build-windows-installer.ps1` pins 6.7.1 (read from the compiler's banner,
-  since ISCC.exe's version resource is 0.0.0), installs that version when ISCC
-  is missing, and fails rather than compile with another version in either
-  pass. A runner image update surfaces here, on every build that reaches
-  `setup-engine`.
+  carries the compiler version and a hash of the engine bytes. The Inno Setup
+  engine is always 32-bit (`.e32` on both architectures). The script pins
+  6.7.1, read from the compiler's banner since ISCC.exe's version resource is
+  0.0.0; when ISCC is missing it installs that version, and when another
+  version is installed it re-pins with `choco upgrade --version=6.7.1
+  --allow-downgrade` (a plain `choco install --version` treats a preinstalled
+  package as already installed). Either pass then fails rather than compile
+  with another version. A runner image update surfaces here, on every signed
+  run.
 - Test builds and any run without the Azure values compile the installer once
-  with no `SignedUninstaller` define: unchanged, unsigned, no engine pass.
+  with no `SignedUninstaller` define: unchanged, unsigned, and no engine pass
+  at all.
 - Self-updates download `hex.exe` through Hex itself, so SmartScreen is not
   involved there either. The manifest's SHA-256 and the Authenticode check
   protect it.

@@ -69,7 +69,7 @@ jobs:
             if ($console.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.com, found $($console.Count)." }
             scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Console $console[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out -ExtractSignedEngine
           }
-          Get-ChildItem $out | Where-Object Extension -notin '.e32', '.e64' | Remove-Item -Force
+          Get-ChildItem $out | Where-Object { $_.Name -notlike 'uninst-*.e32' } | Remove-Item -Force
           Get-ChildItem $out | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
       - id: upload
         uses: ./.github/release/upload

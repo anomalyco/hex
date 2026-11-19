@@ -241,11 +241,14 @@ jobs:
   # directory", error 4551). The compiler needs credentials to sign that
   # engine, so it has none: this job compiles once with SignedUninstaller=yes
   # and keeps the unsigned uninst-*.e32 ISCC asks to have signed, and
-  # sign-windows-engine signs it for the installers job to embed. Repository
-  # code: a build, like the installers.
+  # sign-windows-engine signs it for the installers job to embed. Runs only
+  # when Windows is signed, because an unsigned run has no engine pass at all.
+  # Repository code: a build, like the installers.
   setup-engine:
-    needs: [plan, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [plan, build, sign-windows]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' && needs.sign-windows.result == 'success'
+      && needs.sign-windows.outputs.signed == 'true' }}
     uses: ./.github/workflows/windows-setup-engine.yml
     with:
       sha: ${{ github.sha }}
@@ -460,7 +463,9 @@ jobs:
   # without the Azure values nothing Windows is signed at all.
   sign-windows-engine:
     needs: [plan, sign-windows, setup-engine]
-    if: ${{ !cancelled() && needs.sign-windows.outputs.signed == 'true' && needs.setup-engine.result == 'success' }}
+    if: >-
+      ${{ !cancelled() && needs.sign-windows.result == 'success'
+      && needs.sign-windows.outputs.signed == 'true' && needs.setup-engine.result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 30
     environment: release
@@ -474,38 +479,30 @@ jobs:
       - *checkout-release
       - *azure-credentials
       - name: Download
-        if: steps.credentials.outputs.available == 'true'
         uses: ./.github/release/download
         with:
           pattern: windows-setup-engine
           digests: windows-setup-engine=${{ needs.setup-engine.outputs.digest }}
       - name: Gather the setup engine
-        if: steps.credentials.outputs.available == 'true'
         run: |
           temp=$(cygpath -u "$RUNNER_TEMP")
           mkdir -p "$temp/work"
           shopt -s nullglob
-          engines=("$temp"/in/windows-setup-engine/uninst-*)
+          engines=("$temp"/in/windows-setup-engine/uninst-*.e32)
           [ ${#engines[@]} -gt 0 ] || { echo "::error::No setup engine in windows-setup-engine."; exit 1; }
-          for file in "${engines[@]}"; do
-            case "$file" in
-              *.e32|*.e64) cp "$file" "$temp/work/" ;;
-              *) echo "::error::Unexpected file in the setup engine artifact: $file"; exit 1 ;;
-            esac
-          done
+          cp "${engines[@]}" "$temp/work/"
       - *azure-login
       # The same action and settings as *azure-sign, for the setup engine's
       # extension: a YAML anchor cannot change one value of a shared step, and
       # signing the installers must not touch the engine files they embed.
       - name: Sign the setup engine
-        if: steps.credentials.outputs.available == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
         with:
           endpoint: ${{ env.AZURE_TRUSTED_SIGNING_ENDPOINT }}
           signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
           files-folder: ${{ runner.temp }}\work
-          files-folder-filter: e32,e64
+          files-folder-filter: e32
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
@@ -526,11 +523,9 @@ jobs:
           # a poisoned module run here, in the release environment.
           cache-dependencies: false
       - name: Check the signatures
-        if: steps.credentials.outputs.available == 'true'
         shell: pwsh
-        run: .github/release/verify-authenticode.ps1 -Folders "$env:RUNNER_TEMP/work" -Extensions .e32, .e64
+        run: .github/release/verify-authenticode.ps1 -Folders "$env:RUNNER_TEMP/work" -Extensions .e32
       - id: upload
-        if: steps.credentials.outputs.available == 'true'
         uses: ./.github/release/upload
         with:
           name: sign-windows-engine

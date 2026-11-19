@@ -86,8 +86,8 @@ jobs:
           $engine = $null
           if ($env:SIGNED_ENGINE -eq 'true') {
             $engine = Join-Path "$env:RUNNER_TEMP/in" $env:ENGINE_ARTIFACT
-            $found = @(Get-ChildItem -LiteralPath $engine -File | Where-Object { $_.Name -like 'uninst-*' -and $_.Extension -in '.e32', '.e64' })
-            if ($found.Count -eq 0) { throw "No signed uninst-*.e32 setup engine in $engine." }
+            $found = @(Get-ChildItem -LiteralPath $engine -File | Where-Object { $_.Name -like 'uninst-*.e32' })
+            if ($found.Count -eq 0) { throw "No signed uninst-*.e32 in $engine." }
           }
           foreach ($arch in 'x86_64', 'aarch64') {
             $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }

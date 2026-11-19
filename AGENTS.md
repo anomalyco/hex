@@ -1898,10 +1898,12 @@ Release's `sign-windows` job Authenticode-signs both `hex.exe` through Azure
 Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp), the installers
 are built around the signed bytes, and `sign-windows-installers` signs them
 (`.github/release/verify-authenticode.ps1` checks both). The setup engine is
-signed in its own two passes, `setup-engine` then `sign-windows-engine`:
-setup runs from a copy of that engine it extracts to `%TEMP%`, so an unsigned
-engine is what Windows 11 Smart App Control blocks (error 4551), and
-`installers` embeds the signed one. Compile jobs and test
+signed in three steps, and only when Windows is signed: `setup-engine`
+compiles pass 1 and keeps the unsigned engine ISCC asks to be signed,
+`sign-windows-engine` signs it, and `installers` compiles pass 2 with the
+signed engine. Setup runs from a copy of that engine it extracts to `%TEMP%`,
+so an unsigned engine is what Windows 11 Smart App Control blocks (error
+4551). Compile jobs and test
 builds never hold signing credentials; until the Azure values exist in
 `release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
 

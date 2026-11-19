@@ -1,8 +1,9 @@
 # Builds hex-setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
 # installer, around an already-built (and signed) release hex.exe and its
 # console entry point hex.com. Installs the pinned Inno Setup when ISCC is
-# missing or is another version. The installer embeds both byte for byte.
-# -Console is left out only to wrap a release published before hex.com.
+# missing, and re-pins another installed version to it. The installer embeds
+# both byte for byte. -Console is left out only to wrap a release published
+# before hex.com.
 #
 #   scripts/build-windows-installer.ps1 -Executable dist\hex-2.4.0-windows-x64.exe `
 #     -Console dist\hex-2.4.0-windows-x64.com -Version 2.3.0 -Arch x86_64 -OutDir dist
@@ -46,11 +47,10 @@ if ($Console) { $consoleDefine = @("/DConsole=$((Resolve-Path $Console).Path)") 
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 if ($SignedEngineDir) {
-    if (-not (Test-Path -LiteralPath $SignedEngineDir)) { throw "No signed setup engine directory at $SignedEngineDir." }
+    if (-not (Test-Path -LiteralPath $SignedEngineDir -PathType Container)) { throw "No signed setup engine directory at $SignedEngineDir." }
     $SignedEngineDir = (Resolve-Path $SignedEngineDir).Path
-    $signedEngines = @(Get-ChildItem -LiteralPath $SignedEngineDir -File |
-        Where-Object { $_.Name -like 'uninst-*' -and $_.Extension -in '.e32', '.e64' })
-    if ($signedEngines.Count -eq 0) { throw "No signed uninst-*.e32 setup engine in $SignedEngineDir." }
+    $signedEngines = @(Get-ChildItem -LiteralPath $SignedEngineDir -File | Where-Object { $_.Name -like 'uninst-*.e32' })
+    if ($signedEngines.Count -eq 0) { throw "No signed uninst-*.e32 in $SignedEngineDir." }
 }
 $label = if ($Arch -eq 'x86_64') { 'x64' } else { 'arm64' }
 $issFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging\windows\hex.iss'
@@ -67,10 +67,18 @@ function Find-Iscc {
     $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
 
-function Install-Iscc {
+function Install-Iscc([switch]$Repin) {
     if (Get-Command choco.exe -ErrorAction SilentlyContinue) {
-        choco install innosetup --version=$InnoVersion --yes --no-progress | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "choco could not install Inno Setup $InnoVersion (exit $LASTEXITCODE)." }
+        # `choco install --version` treats a preinstalled package as "already
+        # installed" whatever its version, so a re-pin upgrades (and may
+        # downgrade) to the pinned version instead.
+        if ($Repin) {
+            choco upgrade innosetup --version=$InnoVersion --allow-downgrade --yes --no-progress | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "choco could not change Inno Setup to $InnoVersion (exit $LASTEXITCODE)." }
+        } else {
+            choco install innosetup --version=$InnoVersion --yes --no-progress | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "choco could not install Inno Setup $InnoVersion (exit $LASTEXITCODE)." }
+        }
     } elseif ($engineSigning) {
         throw "Signing the setup engine needs Inno Setup $InnoVersion from Chocolatey, and choco.exe is not on PATH."
     } else {
@@ -87,19 +95,47 @@ if (-not $iscc) {
     if (-not $iscc) { throw 'Inno Setup could not be installed.' }
 }
 
-function Invoke-Iscc([string[]]$Arguments) {
-    $text = (& $iscc @Arguments 2>&1 | Out-String)
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = $text }
+function Invoke-Iscc([string[]]$Arguments, [string[]]$InputLines) {
+    # The compiler's lines are data, even on stderr: keep them from becoming
+    # terminating errors in Windows PowerShell or with
+    # $PSNativeCommandUseErrorActionPreference on, and echo them so a
+    # successful compile keeps its log.
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = if ($InputLines) {
+        @($InputLines | & $iscc @Arguments 2>&1 | ForEach-Object { "$_" })
+    } else {
+        @(& $iscc @Arguments 2>&1 | ForEach-Object { "$_" })
+    }
+    $exitCode = $LASTEXITCODE
+    $text = $lines -join "`n"
+    if ($text) { Write-Host $text }
+    [pscustomobject]@{ ExitCode = $exitCode; Text = $text }
 }
 
 function Get-IsccVersion {
     # ISCC.exe's version resource is 0.0.0, so ask the compiler itself: a
     # compile without /Q prints "Compiler engine version: Inno Setup 6.7.1"
-    # before it does anything else. /O- suppresses the output files, so this
-    # only parses the script.
-    $arguments = @("/DAppVersion=$Version", "/DArch=$label", "/DExecutable=$Executable") +
-        $consoleDefine + @('/O-', "/DOutputDir=$OutDir", $issFile)
-    $result = Invoke-Iscc $arguments
+    # before it does anything else. ISCC reads a script from standard input
+    # ("-") and /O- disables output, so nothing is built; the throwaway
+    # OutputDir is only there because ISCC uses it for scratch files, and
+    # never the caller's.
+    $dir = Join-Path ([IO.Path]::GetTempPath()) ("hex-inno-version-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    try {
+        $lines = @(
+            '[Setup]',
+            'AppName=Hex Inno Setup version probe',
+            'AppVersion=0.0.1',
+            'DefaultDirName={autopf}\HexInnoSetupVersionProbe',
+            "OutputDir=$dir",
+            'OutputBaseFilename=probe',
+            'Uninstallable=no'
+        )
+        $result = Invoke-Iscc -Arguments @('/O-', '-') -InputLines $lines
+    } finally {
+        Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+    }
     $match = [regex]::Match($result.Text, 'Compiler engine version:\s*Inno Setup\s+(\d+(?:\.\d+)+)')
     if (-not $match.Success) {
         throw "Could not read the Inno Setup version from ISCC (exit $($result.ExitCode)):`n$($result.Text)"
@@ -112,8 +148,8 @@ $defines = @('/Qp', "/DAppVersion=$Version", "/DArch=$label", "/DExecutable=$Exe
 if ($engineSigning) {
     $found = Get-IsccVersion
     if ($found -ne $InnoVersion) {
-        Write-Output "Inno Setup $found is installed; the setup engine passes need $InnoVersion. Installing it."
-        Install-Iscc
+        Write-Host "Inno Setup $found is installed; the setup engine passes need $InnoVersion. Re-pinning it."
+        Install-Iscc -Repin
         $iscc = Find-Iscc
         if (-not $iscc) { throw 'Inno Setup could not be installed.' }
         $found = Get-IsccVersion
@@ -131,15 +167,14 @@ if ($ExtractSignedEngine) {
         if (Test-Path -LiteralPath $dir) { Remove-Item -Recurse -Force $dir }
         New-Item -ItemType Directory -Force $dir | Out-Null
     }
-    $result = Invoke-Iscc ($defines + @("/DOutputDir=$compileOut", "/DSignedEngineDir=$engineDir", $issFile))
+    $result = Invoke-Iscc -Arguments ($defines + @("/DOutputDir=$compileOut", "/DSignedEngineDir=$engineDir", $issFile))
     # Without a signature, ISCC writes the engine it just built into
     # SignedUninstallerDir and aborts asking for that exact file to be signed
     # ("Signed uninstaller mode is enabled. Using an external code-signing
     # tool, please attach your digital signature to the following executable
     # file: ... and compile again", Compiler.SetupCompiler.pas). A compile
     # failure is exit code 2 (ISCC.dpr).
-    $engines = @(Get-ChildItem -LiteralPath $engineDir -File |
-        Where-Object { $_.Name -like 'uninst-*' -and $_.Extension -in '.e32', '.e64' })
+    $engines = @(Get-ChildItem -LiteralPath $engineDir -File | Where-Object { $_.Name -like 'uninst-*.e32' })
     if ($result.Text -notmatch 'Signed uninstaller mode is enabled') {
         throw "ISCC did not ask for a signed setup engine (exit $($result.ExitCode)):`n$($result.Text)"
     }
@@ -166,7 +201,7 @@ if ($ExtractSignedEngine) {
 }
 
 if ($SignedEngineDir) { $defines += "/DSignedEngineDir=$SignedEngineDir" }
-$result = Invoke-Iscc ($defines + @("/DOutputDir=$OutDir", $issFile))
+$result = Invoke-Iscc -Arguments ($defines + @("/DOutputDir=$OutDir", $issFile))
 if ($result.ExitCode -ne 0) {
     if ($result.Text -match 'Signed uninstaller mode is enabled|differ unexpectedly') {
         throw "ISCC could not use the signed setup engine in $SignedEngineDir. It needs the engine built by Inno Setup $InnoVersion from this same script; compile the engine again with -ExtractSignedEngine.`n$($result.Text)"

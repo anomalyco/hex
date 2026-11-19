@@ -7,8 +7,9 @@
 #     -Executable dist\hex-2.4.0-windows-x64.exe -Console dist\hex-2.4.0-windows-x64.com -Version 2.4.0
 #
 # -Console (hex.com) is left out only for a release published before it.
-# -SignedEngine checks the installed uninstaller's Authenticode signature and
-# timestamp (Release signs the setup engine; Test builds do not sign it).
+# -SignedEngine checks the installed uninstaller's Authenticode signature, its
+# timestamp, and that the release publisher signed it (Release signs the setup
+# engine; Test builds do not sign it).
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Installer,
@@ -75,6 +76,7 @@ if ($SignedEngine) {
     $signature = Get-AuthenticodeSignature -LiteralPath $uninstaller
     Check ($signature.Status -eq 'Valid') "the uninstaller has a valid Authenticode signature ($($signature.Status))"
     Check ($null -ne $signature.TimeStamperCertificate) 'the uninstaller signature has an RFC 3161 timestamp'
+    Check ($signature.SignerCertificate.Subject -match 'Anomaly Innovations') "the uninstaller is signed by the release publisher ($($signature.SignerCertificate.Subject))"
 }
 function Run-Value { (Get-ItemProperty -Path $runKey -Name 'Hex' -ErrorAction SilentlyContinue).Hex }
 Check ($null -eq (Run-Value)) 'installing leaves Launch at login off'
