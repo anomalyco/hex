@@ -394,9 +394,14 @@ can usually reach another's process (debugging it, or injecting into it on
 Windows); outside a sandbox the identity says which program connected, not
 that no other code runs inside it. On Linux kernels before 6.5 (no
 `SO_PEERPIDFD`), a peer that exits right after connecting leaves a short
-window in which a new process could reuse its pid unseen. Flatpak and Snap
-apps reach the socket only when their sandbox lets them see Hex's data
-folder.
+window in which a new process could reuse its pid unseen. Linux reads the
+identity when a connection is accepted: a process that connects, then execs
+an allowed program (same pid and start time) and hands the socket to
+another, is served as that program. Windows checks the image at the path
+the process reports, not the mapped image, and a signed grant (publisher
+plus file name) matches any same-named program from that publisher. Flatpak
+and Snap apps reach the socket only when their sandbox lets them see Hex's
+data folder.
 
 Native clients need no `Origin`, no bearer token, and no discovery file. The
 loopback API is not their channel, and the native channel has no route for it.
