@@ -933,6 +933,8 @@ Completed output                         // output
 │   │   -> joined with a space and sentence-aware capitalization (macOS, Windows)
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
 │   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
+│   ├── Windows -> a paste only goes to a window that can take it: the desktop
+│   │   and taskbars keep the words on the clipboard and report "copied" (dictation.md)
 │   ├── Labs > Keep dictation on clipboard (every OS, off) -> the dictation stays on the clipboard (labs.md)
 │   │   └── Windows -> kept as an ordinary entry, in history too
 │   └── Labs > Copy dictation only (macOS, Windows, off) -> clipboard only: no paste, typing, or restore (labs.md)

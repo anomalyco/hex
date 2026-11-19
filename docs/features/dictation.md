@@ -767,6 +767,41 @@ Paste last dictation's own shortcut has no runtime filter beside dictation's,
 so one saved on the dictation shortcut's chord is cleared (logged) when
 settings load or save.
 
+### Windows Paste Target
+
+A Windows dictation sends Ctrl+V to whichever window is in front. The desktop
+and the taskbars belong to Explorer and take no paste, so a chord sent there is
+lost with no error. Before sending it, the listener reads the foreground
+window, its class, its process, and the keyboard-focused child, and logs one
+line per paste (`Windows paste target`, with the process stem and class; never
+the words). The desktop and taskbar classes (`Progman`, `WorkerW`,
+`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`) owned by `explorer` count as the
+shell; an Explorer window that is not one of them (`CabinetWClass`) pastes as
+usual, and a desktop rename box (`Edit`) still takes the paste.
+
+```ts
+Windows paste                                     // dictate.windows-paste-target
+├── Capture starts -> The window in front is remembered
+├── Target is an app -> Ctrl+V goes there
+├── Target is the shell
+│   ├── The remembered window is alive, visible, not Hex's, not the shell
+│   │   -> Bring it forward, poll GetForegroundWindow 10 ms up to 200 ms
+│   └── Still the shell -> No chord; the transcript stays on the clipboard,
+│       the job reports "copied" (never "pasted"), and History and Paste Last
+│       still keep it
+└── Tray Paste Last -> The tracker skips the desktop and taskbars, so it never
+    brings one forward; the listener applies the same rule per paste
+```
+
+Checks: `the_desktop_and_taskbars_take_no_paste`,
+`no_foreground_window_takes_no_paste`,
+`a_desktop_rename_box_still_takes_a_paste`,
+`explorer_windows_that_are_not_the_shell_still_take_a_paste`, and
+`another_process_using_a_shell_class_is_not_the_shell` in
+[paste_target.rs](../../src/dictation/paste_target.rs). Proof limits: the
+classification is unit-tested only; the foreground read, the return attempt,
+and the copy-only fallback have not run on a real Windows PC.
+
 ### Copy Recent Dictation (Labs, macOS)
 
 Paste Last Dictation reaches only the newest dictation. With Labs › Copy

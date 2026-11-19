@@ -15,9 +15,9 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_RETURN, VK_RMENU, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetForegroundWindow, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
-    LLKHF_INJECTED, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_KEYDOWN,
-    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, MSG,
+    MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
+    WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -35,14 +35,6 @@ mod watchdog;
 pub(crate) use self::activity::foreground_window;
 use self::disposition::Handled;
 use self::modifiers::{LeftControl, ModifierState, SideDownTimes, key_down};
-
-/// The focused application's executable stem (e.g. "chrome"), lowercased,
-/// for per-application dictation modes and history entries.
-pub fn foreground_process_stem() -> Option<String> {
-    let window = unsafe { GetForegroundWindow() };
-    let path = window_process_path(window)?;
-    Some(path.file_stem()?.to_string_lossy().to_lowercase())
-}
 
 /// The executable of the process that owns `window`.
 pub fn window_process_path(

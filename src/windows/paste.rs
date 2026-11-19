@@ -3,21 +3,32 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arboard::SetExtWindows;
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboardSequenceNumber};
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
     KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyExW, SendInput, VK_CONTROL, VK_LWIN, VK_MENU,
     VK_RETURN, VK_RWIN, VK_SHIFT, VK_V,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+    IsWindow, IsWindowVisible, SetForegroundWindow,
+};
 
 use crate::continuation::{Continuation, InputActivity};
+use crate::dictation::paste_target::is_shell_target;
 
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
+
+/// How long a paste waits for the window its capture started in to come back
+/// to the front, and how often it asks.
+const RETURN_TIMEOUT: Duration = Duration::from_millis(200);
+const RETURN_POLL: Duration = Duration::from_millis(10);
 
 /// Remote desktop clients (#866) forward a clipboard change to the remote
 /// session asynchronously, and the remote fetches the text only when it
@@ -45,6 +56,16 @@ fn paste_with_shift_into(stem: Option<&str>, terminal_paste: bool) -> bool {
 /// paste shortcut) or the saved Terminal paste setting is on.
 fn shift_paste(for_this_capture: bool, terminal_paste: bool) -> bool {
     for_this_capture || terminal_paste
+}
+
+/// What a paste did with the text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Paste {
+    /// The chord was sent to the window in front.
+    Sent,
+    /// Nothing was sent: the text stayed on the clipboard, because the window
+    /// in front was the shell or Labs › Copy dictation only is on.
+    Copied,
 }
 
 enum ClipboardSnapshot {
@@ -92,6 +113,69 @@ impl ClipboardSnapshot {
         }
         Ok(())
     }
+}
+
+/// The window in front as a paste sees it: its class and process, and the
+/// child of the foreground thread that holds the keyboard focus.
+#[derive(Default)]
+struct Foreground {
+    window: isize,
+    class: String,
+    application: Option<String>,
+    focus_class: Option<String>,
+}
+
+impl Foreground {
+    /// Reads the window in front now, for one paste's decision and log line.
+    fn read() -> Self {
+        // SAFETY: plain Win32 queries; a null foreground window owns nothing.
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return Self::default();
+            }
+            Self {
+                window: window as isize,
+                class: window_class(window),
+                application: crate::windows::input::window_process_path(window).and_then(|path| {
+                    path.file_stem()
+                        .map(|stem| stem.to_string_lossy().to_lowercase())
+                }),
+                focus_class: focused_window_class(),
+            }
+        }
+    }
+
+    /// Whether a paste here would be lost in the shell.
+    fn is_shell(&self) -> bool {
+        is_shell_target(
+            (self.window != 0).then_some(self.class.as_str()),
+            self.application.as_deref(),
+            self.focus_class.as_deref(),
+        )
+    }
+}
+
+/// The window's class name, empty when Windows has none to give.
+fn window_class(window: HWND) -> String {
+    let mut buffer = [0_u16; 256];
+    // SAFETY: `buffer` is writable for the length it states.
+    let length = unsafe { GetClassNameW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
+    if length <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buffer[..length as usize])
+}
+
+/// The keyboard-focused child of the foreground thread, if any.
+fn focused_window_class() -> Option<String> {
+    let mut info = GUITHREADINFO {
+        cbSize: size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `info` states its own size; a null thread asks for the one in front.
+    let filled = unsafe { GetGUIThreadInfo(0, &mut info) } != 0;
+    (filled && !info.hwndFocus.is_null()).then(|| window_class(info.hwndFocus))
 }
 
 pub struct WindowsPaster {
@@ -152,7 +236,10 @@ impl WindowsPaster {
 
     /// Pastes `text`, with Ctrl+Shift+V when `shift` asks for it or the
     /// saved Terminal paste setting is on. Java games still take Ctrl+V.
-    pub fn paste(&mut self, text: &str, shift: bool) -> Result<()> {
+    /// `return_to` is the window the capture started in: the desktop or a
+    /// taskbar takes no paste, so Hex returns there first and, when it can't,
+    /// leaves the transcript on the clipboard instead of sending it nowhere.
+    pub fn paste(&mut self, text: &str, shift: bool, return_to: Option<isize>) -> Result<Paste> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
@@ -205,6 +292,46 @@ impl WindowsPaster {
                 .text(text.to_string())
                 .wrap_err("could not place the transcript on the Windows clipboard")?;
         }
+        let mut target = Foreground::read();
+        let returned = target.is_shell() && return_to.is_some_and(bring_to_front);
+        if returned {
+            target = Foreground::read();
+        }
+        tracing::info!(
+            hwnd = target.window,
+            class = %target.class,
+            application = target.application.as_deref().unwrap_or(""),
+            focus = target.focus_class.as_deref().unwrap_or(""),
+            returned,
+            "Windows paste target"
+        );
+        if target.is_shell() {
+            // Nothing in front takes a paste: keep the words on the
+            // clipboard, as Labs › Copy dictation only does, rather than
+            // sending Ctrl+V to the desktop or taskbar and losing them.
+            restore.keep();
+            drop(restore);
+            // Re-set it as an ordinary entry, so Windows also keeps it in
+            // clipboard history (Win+V) for the person to paste by hand.
+            if let Err(error) = self
+                .clipboard
+                .set()
+                .text(text.to_string())
+                .wrap_err("could not keep the transcript on the Windows clipboard")
+            {
+                tracing::warn!(
+                    %error,
+                    "the transcript is on the clipboard but not as an ordinary entry"
+                );
+            }
+            tracing::warn!(
+                class = %target.class,
+                application = target.application.as_deref().unwrap_or(""),
+                "the paste target is the Windows shell; the dictation stays on the clipboard"
+            );
+            self.continuation.clear();
+            return Ok(Paste::Copied);
+        }
         let generation = if keep {
             None
         } else {
@@ -213,13 +340,12 @@ impl WindowsPaster {
         };
         drop(restore);
 
-        let stem = crate::windows::input::foreground_process_stem();
-        let remote_desktop = is_remote_desktop(stem.as_deref());
+        let remote_desktop = is_remote_desktop(target.application.as_deref());
         if remote_desktop {
             thread::sleep(REMOTE_DESKTOP_PASTE_DELAY);
         }
         let shift = paste_with_shift_into(
-            stem.as_deref(),
+            target.application.as_deref(),
             shift_paste(shift, self.paste_with_shift.load(Ordering::Relaxed)),
         );
         if let Err(error) = send_paste_shortcut(shift) {
@@ -231,7 +357,7 @@ impl WindowsPaster {
         // Only a paste that reached the app is continued by the next one.
         self.continuation.record(revision, true, text);
         let Some(generation) = generation else {
-            return Ok(());
+            return Ok(Paste::Sent);
         };
         let clipboard_restore = self.clipboard_restore.clone();
         let restore_delay = if remote_desktop {
@@ -243,7 +369,7 @@ impl WindowsPaster {
             thread::sleep(restore_delay);
             restore_clipboard_generation(&clipboard_restore, generation);
         });
-        Ok(())
+        Ok(Paste::Sent)
     }
 
     /// Labs › YOLO mode: one press of Return after a paste, once
@@ -386,6 +512,60 @@ fn foreground_scan_code(key: u16) -> u16 {
 
 fn key_down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
+}
+
+/// Whether `window` is the desktop or a taskbar rather than a window a paste
+/// can land in. The window is not in front, so the foreground thread's focus
+/// says nothing about it: its class and process alone decide.
+pub(crate) fn is_shell_window(window: HWND) -> bool {
+    if window.is_null() {
+        return true;
+    }
+    let class = window_class(window);
+    if !crate::dictation::paste_target::is_shell_class(&class) {
+        return false;
+    }
+    let application = crate::windows::input::window_process_path(window).and_then(|path| {
+        path.file_stem()
+            .map(|stem| stem.to_string_lossy().to_lowercase())
+    });
+    is_shell_target(Some(&class), application.as_deref(), None)
+}
+
+/// Brings `window` back to the front when it is still a window another
+/// process can paste into, and says whether it arrived within
+/// [`RETURN_TIMEOUT`]. The shell, Hex's own window, and a window that closed
+/// since it was remembered are left alone.
+fn bring_to_front(window: isize) -> bool {
+    if window == 0 {
+        return false;
+    }
+    let window = window as HWND;
+    // SAFETY: plain queries on a window that may have closed since it was
+    // remembered, vetted by `IsWindow`; the foreground request targets that
+    // same live window.
+    unsafe {
+        if IsWindow(window) == 0 || IsWindowVisible(window) == 0 {
+            return false;
+        }
+        let mut pid = 0_u32;
+        let thread = GetWindowThreadProcessId(window, &mut pid);
+        if thread == 0 || pid == GetCurrentProcessId() || is_shell_window(window) {
+            return false;
+        }
+        SetForegroundWindow(window);
+    }
+    let started = Instant::now();
+    loop {
+        // SAFETY: plain query.
+        if unsafe { GetForegroundWindow() } == window {
+            return true;
+        }
+        if started.elapsed() >= RETURN_TIMEOUT {
+            return false;
+        }
+        thread::sleep(RETURN_POLL);
+    }
 }
 
 fn send_paste_shortcut(shift: bool) -> Result<()> {

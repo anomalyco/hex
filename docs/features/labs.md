@@ -831,6 +831,9 @@ gate as each job's output commits and calls
 `windows::paste::WindowsPaster::copy_only`, which writes an ordinary entry,
 calls its `ClipboardRestore::keep`, ends its continuation, and sends no
 keystroke, so the dictation appears in Windows clipboard history (Win+V).
+Windows reports it as `copied`, not `pasted` (so does a dictation whose paste
+target was the desktop or a taskbar; see
+[dictation.md](dictation.md#windows-paste-target)).
 History and Paste last dictation
 update as for a paste, and Paste last dictation still pastes (meeting pastes
 on macOS too). With Labs › YOLO mode on, a dictation YOLO mode sends (its
