@@ -1634,12 +1634,15 @@ The picker saves the name Finder shows for the bundle's file, which can differ
 from the name the running app reports (`Rex Beta.app` runs as `Rex`,
 `Visual Studio Code.app` as `Code`). The macOS frontmost read also keeps
 Finder's name for the frontmost bundle (`ContextSnapshot::bundle_name`, set
-only when it differs), and `application_is` accepts either, so Modes and
-Labs › YOLO mode match an app under both names. Checked by
-`an_application_selector_matches_the_bundles_finder_name_too` (context.rs)
-and `a_picked_app_sends_under_its_finder_name_or_its_own` (yolo_mode.rs).
+only when it differs), and `application_is` accepts either, so Modes,
+Labs › YOLO mode, and Labs › Switch model with app match an app under both
+names. Checked by
+`an_application_selector_matches_the_bundles_finder_name_too` (context.rs),
+`a_picked_app_sends_under_its_finder_name_or_its_own` (yolo_mode.rs), and
+`a_mode_picked_under_its_finder_name_switches` (app_model_switching.rs).
 **Fixed on dev, Nov 19 2026:** before, a picked app whose file name differs
-from its own name never activated its Mode and YOLO mode never sent in it.
+from its own name never activated its Mode, YOLO mode never sent in it, and
+Switch model with app never switched to its mode's model.
 
 **Fixed in 2.1.14:** through 2.1.13, a mode saved with that Finder
 preference enabled never activates and every dictation falls back to Global.
