@@ -38,5 +38,9 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).KeyboardViewController</string>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hex records only while you dictate and transcribes locally on this iPhone.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Hex uses Apple's on-device SpeechTranscriber to turn your recording into text.</string>
 </dict>
 </plist>
