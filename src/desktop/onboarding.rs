@@ -1291,7 +1291,7 @@ mod tests {
         let ModelRuntime::Gguf(artifact) = models::definition(fallback.model).runtime else {
             panic!("the fallback is a download");
         };
-        fs::File::create(directory.join(artifact.filename))
+        fs::File::create(directory.join(artifact.local_name()))
             .unwrap()
             .set_len(artifact.bytes)
             .unwrap();

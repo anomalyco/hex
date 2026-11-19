@@ -1604,7 +1604,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   └── Owner already claimed the commit -> Wait up to 750 ms; never paste over it
   Picker -> "Streams" tag on catalog models whose artifact streams   // setup.model-card
   Picker -> The saved language's Recommended/Fastest/Most accurate cards first  // setup.model-routing
-  ├── el: Cohere; tr, ms, fil, fa, mk, ar, ja, fi, sv, da: Whisper turbo first
+  ├── el: Cohere; tr, ms, fil, fa, mk, ar, ja, fi, da: Whisper turbo first
   ├── auto, yue, ko: no SenseVoice; mt: Parakeet v3 only (Whisper fails Maltese)
   ├── en: Underdog Bark 3.0 Pro and Clean (Parakeet v3 fine-tunes; Clean
   │   drops filler words) follow without a badge
@@ -1621,6 +1621,11 @@ Model advertises streaming, GPU device             // dictate.streaming
   │   only, always with the `no` hint, 539 MB; 6.68% WER on FLEURS Norwegian
   │   test against Whisper turbo's 8.94%, Hex's run), then Whisper turbo for
   │   Vocabulary (#1150)
+  ├── sv: KB-Whisper Medium Recommended (National Library of Sweden, Swedish
+  │   only, always with the `sv` hint, 539 MB; 6.6% WER on FLEURS Swedish
+  │   test, the model card's figure for its default checkpoint and not Hex's
+  │   run), then Parakeet v3 as Fastest and Whisper turbo for Vocabulary
+  │   (#1991)
   ├── en, fr, de, es, pt, it, ja: Granite Speech 5.0 (IBM's TurboCTC, 506 MB,
   │   no hint, also offered under Auto) follows without a badge: on FLEURS
   │   test it trailed Parakeet Unified/v3 in every European language and tied
