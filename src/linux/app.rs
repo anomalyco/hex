@@ -305,7 +305,8 @@ impl HostHandle {
                 }
                 request @ (HostRequest::RecordControl { .. }
                 | HostRequest::RevokePermission { .. }
-                | HostRequest::RevokeRecordGrant { .. }) => {
+                | HostRequest::RevokeRecordGrant { .. }
+                | HostRequest::Website { .. }) => {
                     self.record_request(request);
                     Ok(())
                 }

@@ -67,26 +67,25 @@ impl Backend {
                 self.chords = None;
                 Ok(())
             }
-            Request::RecordControl { id, stop } => {
-                if let Some(runtime) = &self.runtime {
-                    if stop {
-                        runtime.record().stop(id);
-                    } else {
-                        runtime.record().cancel(id);
-                    }
-                }
-                Ok(())
-            }
-            Request::RevokePermission { id } => {
-                if let Some(runtime) = &self.runtime {
-                    runtime.record().revoke_permission(id);
-                }
-                Ok(())
-            }
-            Request::RevokeRecordGrant { id } => {
-                if let Some(runtime) = &self.runtime {
-                    runtime.record().revoke(id);
-                }
+            request @ (Request::RecordControl { .. }
+            | Request::RevokePermission { .. }
+            | Request::RevokeRecordGrant { .. }
+            | Request::Website { .. }) => {
+                let Some(record) = self.runtime.as_ref().map(RuntimeHandle::record) else {
+                    return Ok(());
+                };
+                // Stop transcribes and Cancel waits on the capture loop, so
+                // neither holds the window's thread.
+                let _ = std::thread::Builder::new()
+                    .name("hex-consent-request".into())
+                    .spawn(move || match request {
+                        Request::RecordControl { id, stop: true } => _ = record.stop(id),
+                        Request::RecordControl { id, stop: false } => record.cancel(id),
+                        Request::RevokePermission { id } => _ = record.revoke_permission(id),
+                        Request::RevokeRecordGrant { id } => _ = record.revoke(id),
+                        Request::Website { origin, action } => _ = record.website(&origin, action),
+                        _ => {}
+                    });
                 Ok(())
             }
             request => match &self.runtime {
@@ -146,6 +145,7 @@ impl Backend {
                 record: record.view(),
                 permissions: record.permissions(),
                 grants: record.grants(),
+                websites: record.websites(),
             },
             settings: published.settings.clone(),
         })

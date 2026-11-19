@@ -106,6 +106,8 @@ pub(crate) struct Published {
     /// Clients paired to start recordings, which the window can revoke.
     pub(crate) permissions: Vec<crate::local_api::PermissionView>,
     pub(crate) grants: Vec<crate::local_api::RecordGrant>,
+    /// Labs › Connected apps' website lists.
+    pub(crate) websites: crate::local_api::Websites,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -373,7 +375,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             control: Some(control_sender),
             processing: crate::local_api::processing::profiles_processing(transformations.clone()),
             connect: Some(crate::local_api::Connect::new(
-                crate::labs::api_browser_origins,
+                crate::local_api::Access::app(),
                 Some(consent.clone()),
                 permissions,
             )),

@@ -205,6 +205,7 @@ define_features! {
     OpenCodeInWsl => labs(opencode_in_wsl), "opencode-in-wsl", Output, Everyone, WINDOWS, 20261108;
     ApiProcessing => labs(api_processing), "api-processing", Output, Everyone, EVERY, 20261109;
     ApiTimestamps => labs(api_timestamps), "api-timestamps", Output, Everyone, EVERY, 20261110;
+    ConnectedApps => labs(connected_apps), "connected-apps", Output, Everyone, EVERY, 20261119, extra: ["labs.connected_apps_websites"];
     SpeakersOnly => labs(speakers_only), "speakers-only", Dictation, Everyone, EVERY, 20261109;
     CalendarMenu => labs(calendar_menu), "calendar-menu", Meetings, Everyone, MACOS, 20261114;
     CalendarSelectAll => labs(calendar_bulk_select), "calendar-select-all", Meetings, Everyone, MACOS, 20261118;

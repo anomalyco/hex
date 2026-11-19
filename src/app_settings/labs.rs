@@ -320,6 +320,12 @@ pub struct LabsSettings {
     /// The local API's `timestamps=segment|word` returns the speech model's
     /// own segment and word times.
     pub api_timestamps: bool,
+    /// Apps and websites on this computer may ask, in Hex's permission
+    /// window, to transcribe audio or record (Labs › Connected apps).
+    pub connected_apps: bool,
+    /// With `connected_apps` on, websites may ask too: those the person
+    /// allowed in the lab's list. Off, no website can ask or use a grant.
+    pub connected_apps_websites: bool,
     /// "While dictating" applies only while the default output is speakers;
     /// headphones are left alone.
     pub speakers_only: bool,
@@ -583,6 +589,8 @@ impl Default for LabsSettings {
             dictate_while_annotating: false,
             api_processing: false,
             api_timestamps: false,
+            connected_apps: false,
+            connected_apps_websites: false,
             speakers_only: false,
             app_model_switching: false,
             model_switch_shortcut: false,

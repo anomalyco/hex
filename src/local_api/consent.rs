@@ -80,4 +80,9 @@ pub(crate) enum Answer {
 /// person answers or `wait` passes.
 pub(crate) trait ConsentGate: Send + Sync {
     fn ask(&self, prompt: &Prompt, wait: Duration) -> Answer;
+
+    /// Ends the ask shown now, answered [`Answer::Unavailable`], unless
+    /// `keep` says it may stay (Labs › Connected apps no longer allows its
+    /// recipient).
+    fn withdraw(&self, _keep: &dyn Fn(&Prompt) -> bool) {}
 }

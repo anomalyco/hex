@@ -603,6 +603,8 @@ struct ServiceView {
     /// Clients paired to start recordings, which the window can revoke.
     permissions: Vec<crate::local_api::PermissionView>,
     grants: Vec<crate::local_api::RecordGrant>,
+    /// Labs › Connected apps' website lists.
+    websites: crate::local_api::Websites,
 }
 
 /// The one modal sheet currently open over the window.

@@ -19,9 +19,12 @@
   <p class="hint">
     This page asks Hex's window to transcribe one recording, or to record
     from your microphone for as long as the page keeps checking in. Hex must have
-    Labs › Browser access to the local API on, with this page's origin
-    (<code id="origin"></code>) in its list. The API port comes from Hex's
-    discovery file; this page never reads the token.
+    Labs › Connected apps on, with Allow websites to use Hex. The first ask
+    from this page (<code id="origin"></code>) shows no dialog: it answers
+    <code>website-not-allowed</code> and lists the page in Labs › Connected
+    apps under Websites that tried to contact Hex. Press Allow there, then
+    ask again. The API port comes from Hex's discovery file; this page never
+    reads the token.
   </p>
 
   <label for="port">Hex's local API port</label>
@@ -77,6 +80,14 @@
         body,
       });
       const text = await response.text();
+      if (text.includes('"website-not-allowed"')) {
+        throw new Error(
+          "Hex doesn't know this page yet. In Hex, open Labs › Connected apps, press Allow beside this page under Websites that tried to contact Hex, then ask again.",
+        );
+      }
+      if (text.includes('"website-blocked"')) {
+        throw new Error("This page is blocked in Labs › Connected apps.");
+      }
       if (!response.ok) throw new Error(`${response.status} ${text}`);
       return text ? JSON.parse(text) : null;
     }

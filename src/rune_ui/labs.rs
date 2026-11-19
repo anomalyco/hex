@@ -7,6 +7,7 @@
 //! and is hidden while off.
 
 mod clipboard_phrase;
+mod connected_apps;
 mod group;
 #[cfg(target_os = "macos")]
 mod hud_height;
@@ -922,6 +923,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     });
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
+    rows.push(row(Feature::ConnectedApps, None));
     rows.push(row(Feature::SpeakersOnly, None));
     rows.push(row(Feature::KeepMicrophoneOpen, Some(&TIMER)));
     // macOS opens dictation's microphone through Apple's voice processing, so
@@ -1114,6 +1116,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::YoloMode => "lab-yolo-mode",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
+        Feature::ConnectedApps => "lab-connected-apps",
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
         Feature::VoicePrompt => "lab-voice-prompt",
@@ -1295,6 +1298,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         ),
         // Wayland reports no file drags, so its card offers the file dialog.
         Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
+        Lab::Feature(Feature::ConnectedApps) => Some(connected_apps::body(ui, p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

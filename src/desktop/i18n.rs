@@ -641,6 +641,7 @@ mod tests {
         include_str!("../rune_ui/history/selection.rs"),
         include_str!("../rune_ui/hud_lab.rs"),
         include_str!("../rune_ui/labs.rs"),
+        include_str!("../rune_ui/labs/connected_apps.rs"),
         include_str!("../rune_ui/labs/group.rs"),
         include_str!("../rune_ui/labs/clipboard_phrase.rs"),
         include_str!("../rune_ui/labs/hud_height.rs"),

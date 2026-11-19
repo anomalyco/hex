@@ -2916,20 +2916,87 @@ fn clipboard_phrase_shows_its_phrase_on_its_card_while_on() {
 
 #[test]
 fn signature_shows_its_line_on_its_card_while_on() {
-fn browser_access_lists_a_paired_client_and_revokes_it() {
-    let mut rt = runtime("mac-labs-browser-access", true, (980.0, 2000.0));
-    assert!(rt.find("api-paired-1").is_some());
+fn connected_apps_lists_websites_and_connected_clients() {
+    use crate::local_api::WebsiteAction;
+    let size = (980.0, 2400.0);
+    let rt = runtime("mac-labs-connected-apps", true, size);
+    let copy = texts(&rt);
+    for line in [
+        "Allow websites to use Hex",
+        "Allowed websites",
+        "Websites that tried to contact Hex",
+        "Blocked websites",
+        "Connected",
+    ] {
+        assert!(copy.iter().any(|text| text == line), "{line:?} missing");
+    }
     assert!(
-        texts(&rt)
-            .iter()
-            .any(|text| text.contains("com.example.fieldnotes")),
-        "the paired client is named"
+        copy.iter()
+            .any(|text| text.contains("com.example.fieldnotes"))
     );
-    tap(&mut rt, "permission-revoke-2");
-    assert!(matches!(sent(&rt), [Request::RevokePermission { id: 2 }]));
-    let mut rt = runtime("mac-labs-browser-access", true, (980.0, 2000.0));
+    assert!(
+        copy.iter()
+            .any(|text| text.starts_with("https://new-tool.example · "))
+    );
+    for (key, origin, action) in [
+        (
+            "tried0-action0",
+            "https://new-tool.example",
+            WebsiteAction::Allow,
+        ),
+        (
+            "tried0-action1",
+            "https://new-tool.example",
+            WebsiteAction::Block,
+        ),
+        (
+            "tried1-action1",
+            "http://localhost:5173",
+            WebsiteAction::Block,
+        ),
+        (
+            "blocked0-action0",
+            "https://ads.example",
+            WebsiteAction::Forget,
+        ),
+        (
+            "allowed0-action0",
+            "https://notes.example",
+            WebsiteAction::Forget,
+        ),
+    ] {
+        let mut rt = runtime("mac-labs-connected-apps", true, size);
+        tap(&mut rt, key);
+        assert!(
+            matches!(sent(&rt), [Request::Website { origin: sent, action: a }] if sent == origin && *a == action),
+            "{key}"
+        );
+    }
+    let mut rt = runtime("mac-labs-connected-apps", true, size);
+    tap(&mut rt, "permission-revoke-3");
+    assert!(matches!(sent(&rt), [Request::RevokePermission { id: 3 }]));
+    let mut rt = runtime("mac-labs-connected-apps", true, size);
     tap(&mut rt, "api-revoke-1");
     assert!(matches!(sent(&rt), [Request::RevokeRecordGrant { id: 1 }]));
+}
+
+#[test]
+fn connected_apps_hides_its_website_lists_while_websites_are_off() {
+    let mut rt = runtime("mac-labs-connected-apps", true, (980.0, 2400.0));
+    rt.update(|ui, _| ui.settings.labs.connected_apps_websites = false);
+    rt.settle_all();
+    rt.frame(0.0);
+    let copy = texts(&rt);
+    assert!(copy.iter().any(|text| text == "Allow websites to use Hex"));
+    assert!(
+        !copy
+            .iter()
+            .any(|text| text == "Websites that tried to contact Hex")
+    );
+    assert!(
+        copy.iter().any(|text| text == "Connected"),
+        "grants stay listed"
+    );
 }
 
 #[test]

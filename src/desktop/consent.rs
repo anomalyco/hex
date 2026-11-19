@@ -118,6 +118,16 @@ impl ConsentGate for Desk {
         }
         answer
     }
+
+    fn withdraw(&self, keep: &dyn Fn(&Prompt) -> bool) {
+        let mut state = lock(&self.state);
+        let Some(pending) = state.pending.take_if(|pending| !keep(&pending.prompt)) else {
+            return;
+        };
+        drop(state);
+        self.tell(None);
+        let _ = pending.answer.send(Answer::Unavailable);
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -207,6 +217,25 @@ mod tests {
         assert!(desk.answer(shown.id, Answer::Deny));
         assert_eq!(asking.join().unwrap(), Answer::Deny);
         assert_eq!(*heard.lock().unwrap(), [Some(1), None, Some(2), None]);
+    }
+
+    /// Labs › Connected apps turned off ends the shown ask at once; an ask
+    /// it still allows stays.
+    #[test]
+    fn a_withdrawn_ask_answers_unavailable_and_hides() {
+        let desk = Arc::new(Desk::default());
+        let asking = {
+            let desk = desk.clone();
+            thread::spawn(move || desk.ask(&prompt(), Duration::from_secs(5)))
+        };
+        while desk.prompt().is_none() {
+            thread::sleep(Duration::from_millis(5));
+        }
+        desk.withdraw(&|_| true);
+        assert!(desk.prompt().is_some());
+        desk.withdraw(&|_| false);
+        assert_eq!(asking.join().unwrap(), Answer::Unavailable);
+        assert!(desk.prompt().is_none());
     }
 
     #[test]

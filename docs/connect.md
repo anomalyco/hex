@@ -7,23 +7,40 @@ receives Hex's local API bearer token. Hex asks the person in its own window,
 and a code plus PKCE produces a token scoped to the caller's verified identity:
 
 - a web page is bound to the `Origin` its browser sent, on the loopback HTTP
-  API (a Labs › Browser access origin);
+  API (a website the person allowed in Labs › Connected apps);
 - a native process is bound to the audit token of the Unix-socket peer, and
   its identity is the code-signing identifier and team `Security.framework`
   reports for that token. A name it claims is never the identity.
 
 This is a prototype contract. It exists to prove the consent boundary, not to
-be a general local API. `api-browser-access` (the Lab) stays off by default.
+be a general local API. `connected-apps` (the Lab, Labs › Connected apps)
+stays off by default, and so does its Allow websites to use Hex. Labs ›
+Browser access to the local API is a separate developer feature (CORS for
+the full bearer-token API from the origins it lists) and plays no part in
+any of this.
+
+**Any website can now ask to be let in.** With the lab and its websites
+switch on, Hex answers these routes' CORS for every `http(s)` origin, so any
+page the person visits can send a consent request. An unknown page never
+gets a dialog: it is refused and listed for the person to allow or block,
+and only an allowed page can open the window, where it still needs Allow
+Once or Always Allow. One dialog at a time, a 30 s cooldown per denied
+recipient, and the window's 1 s allow guard still apply.
 
 The recording section is [below](#recording-by-a-paired-client); the existing
 upload flow keeps its own paths and scope.
 
 ```ts
 A page's fetch -> POST /connect/authorize            // no bearer token
-├── Origin not listed, or missing -> 403 origin-not-allowed (no dialog)
+├── Lab or Allow websites to use Hex off, Origin missing or not http(s)
+│     -> 403 origin-not-allowed (no dialog, nothing listed, no CORS)
+├── Blocked in the lab -> 403 website-blocked (no dialog, never listed)
+├── Not allowed yet -> 403 website-not-allowed (no dialog); listed once under
+│     Websites that tried to contact Hex (origin and time), where the person
+│     chooses Allow (it may ask on its next request) or Block
 ├── No JSON body, or not S256 -> 400 invalid-request
 ├── A dialog is already open -> 409 consent-busy
-├── Listed origin -> Hex's permission window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
+├── Allowed origin -> Hex's permission window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
 │   ├── Deny, Return, Escape, or 60 s with no answer -> 403, no code
 │   │   └── Deny also starts a 30 s cooldown for that origin (429 consent-cooldown)
 │   └── Allow Once or Always Allow -> 200 { code, expiresInMs, origin, scope, state }
@@ -43,13 +60,27 @@ A page's fetch -> POST /connect/authorize            // no bearer token
   has no window, so the routes answer `403 connect-unavailable`. Native
   clients pair only on macOS: Linux and Windows have no socket that can tell
   Hex a peer's verified identity, so there a web page is the only caller.
-- Labs › Browser access to the local API on. Its switch gates both asks; only
-  a web caller also needs its origin in the list. That list already gates CORS
-  (`src/local_api/cors.rs`); connect and recording add no second list, and a
-  native caller never needs an origin.
-- A preflight from the origin is answered as before (`OPTIONS` 204). The
-  connect POSTs are JSON, so a browser sends a preflight: a page cannot
-  trigger a dialog with a cross-site form or `no-cors` fetch.
+- Labs › Connected apps on. Its switch gates both asks, for apps and
+  websites alike; off, every consent route answers as it did before the lab
+  (`origin-not-allowed` for a page, `record-unavailable` for a native app,
+  `401` for a grant or session token), a pending dialog is withdrawn, a live
+  consented recording is cancelled, and saved grants, the website lists, and
+  the websites switch are kept but unused until it is on again.
+- For a web page, also the lab's **Allow websites to use Hex** and the page's
+  exact origin under **Allowed websites** (added with Allow on its entry in
+  Websites that tried to contact Hex). Being allowed to ask grants nothing.
+  The switch off works like the lab off for websites only: no website asks,
+  is listed, gets CORS, or uses a grant it has.
+- CORS (`src/local_api/access.rs`): with both switches on, `OPTIONS` and the
+  responses of `/connect/*`, `/record/*`, and a `POST /transcriptions` that
+  carries `X-Hex-Connect-Token` and no `Authorization` name the request's own
+  `Origin` (never `*`, never credentials). The preflight allows only
+  `Content-Type`, `X-Hex-Connect-Token`, `X-Hex-Record-Grant`, and
+  `X-Hex-Record-Token`, so a page can't send the bearer token through it. No
+  other route (`/control`, `/dictations`, `/streams`, `/health`, …) answers
+  CORS for Connected apps; Labs › Browser access keeps its own list for
+  those. The connect POSTs are JSON, so a browser sends a preflight: a page
+  cannot trigger a dialog with a cross-site form or `no-cors` fetch.
 
 ## `POST /connect/authorize`
 
@@ -82,7 +113,8 @@ The response requires a fresh Allow Once / Always Allow answer or an existing Al
 ```
 
 The origin named in the dialog is the request's own `Origin` header, checked
-to be a canonical, listed entry. The grant is bound to that exact origin.
+to be a canonical, allowed entry; the dialog says it is the address reported
+by the browser. The grant is bound to that exact origin.
 
 `GET /capabilities` adds `"connect": true` when a window can ask.
 
@@ -200,17 +232,23 @@ The permission window's view is rendered offscreen by an ignored test
 (`HEX_CONSENT_SNAPS=<folder> cargo test --bin hex -- --ignored
 rune_ui::consent_window::tests::snapshots`), and its state, guard, keys, and
 answers are tested headless. On Linux the running app was driven under Xvfb
-(X11, lavapipe) with `curl` asks from a listed origin and `xdotool` clicks:
+(X11, lavapipe) with `curl` asks from an allowed origin and `xdotool` clicks:
 both asks showed centred with the main window closed, Allow Once during the
 guard did nothing, Escape did not reach the window, Deny answered
 `consent-denied` and hid it, and Allow Once after the guard issued a code.
+A later run with Labs › Connected apps on (websites included, one allowed
+origin in `local-consent.json`) answered an unknown page's pairing with
+`website-not-allowed` and CORS, wrote it to the file's tried list, and showed
+the allowed page's dialog with "Address reported by your browser" and the
+Connected apps footer.
 On macOS the native window (its placement, level, key focus, and focus
 returning to the app in front) was not shown on a real screen in a test;
 Windows was only compiled, and Wayland, GNOME's fallback, a real browser
 page, and a real model transcription from a page were not exercised. Copy is
-English only. The origin check trusts the browser's `Origin` header, which is
-the same trust the CORS gate already places in it; a malicious local process
-can claim a listed origin to *ask*, but not silently reuse its saved permission.
+English only. The origin check trusts the browser's `Origin` header; a
+malicious local process can claim an allowed origin to *ask*, or fill
+Websites that tried to contact Hex with made-up origins (20 at most), but
+not silently reuse a saved permission.
 On the first Always Allow response, a web client receives `permissionProof`.
 Store it in origin-scoped storage and send it in later authorize/pair JSON for
 that capability. Hex saves only its SHA-256 digest. A missing or incorrect proof
@@ -265,8 +303,8 @@ naming the recipient, how long it has recorded, **Stop recording** (keeps
 the transcript for the client's `finish`) and **Cancel** (discards it). The
 client can stop or cancel through its session token too.
 
-A grant is withdrawn in Hex's window (Labs › Browser access lists each paired
-client with **Revoke**) or by the client's own `POST /record/revoke`. Revoking
+A grant is withdrawn in Hex's window (Labs › Connected apps lists every
+connected app and website with **Revoke**) or by the client's own `POST /record/revoke`. Revoking
 cancels any live session, drops pairing codes issued before the revoke, and
 makes further starts fail. The client may pair again, which asks the person
 again. Pairing while a grant already exists is `409 already-paired`; it does
@@ -323,10 +361,20 @@ Codes, grant tokens and sessions are never persisted. Only **Always Allow** save
 recipient and capability in `local-consent.json` (mode 0600). After restarting
 Hex the client pairs afresh, without a new dialog for that permission. Native
 matches require the validated signing identifier, team and code-directory hash;
-a changed binary must ask again. Listed web origins match independently of the
+a changed binary must ask again. Allowed web origins match independently of the
 page's claimed name. Transcription and microphone recording are separate choices.
 
-Labs › Browser access lists saved permissions even when the client is offline.
+Labs › Connected apps lists saved permissions under **Connected** even when
+the client is offline.
+
+The same owner-only file keeps the lab's website lists: **Allowed websites**
+(may ask; **Remove**), **Websites that tried to contact Hex** (origin and the
+most recent attempt time only, one entry per origin, the newest 20, rewritten
+on disk at most once a minute per origin; **Allow** or **Block**), and
+**Blocked websites** (answer `website-blocked`, never listed again;
+**Unblock**). An origin is in one list at most. Removing or blocking a website
+ends its pending dialog and live recording at once; Hex never shows a dialog
+after the fact for a website the person just allowed.
 Revoke deletes just that capability from disk. It invalidates its outstanding
 codes and tokens; for recording it also cancels an active session. A failed
 save never grants access, and a failed revoke does not disappear from the list.
@@ -338,7 +386,9 @@ save never grants access, and a failed revoke does not disappear from the list.
 | 400 | `invalid-request` | Not the JSON above, not S256, a body on a token action |
 | 401 | `invalid-grant` | Unknown, revoked, or other-channel grant; a session token used as a grant |
 | 403 | `identity-unverified` | The native peer's signature could not be read |
-| 403 | `origin-not-allowed` | A browser request's Origin is missing or unlisted |
+| 403 | `origin-not-allowed` | Labs › Connected apps or its websites switch is off, or the Origin is missing or not an http(s) origin |
+| 403 | `website-not-allowed` | A website the person has not allowed (listed under Websites that tried to contact Hex) |
+| 403 | `website-blocked` | A website the person blocked |
 | 403 | `consent-denied`, `consent-timeout`, `record-unavailable` | Deny, no answer, no window/gate |
 | 403 | `invalid-grant` | Wrong, spent, or expired pairing code |
 | 404 | `record-not-found` | Unknown session token or one bound to another channel |
@@ -387,7 +437,14 @@ capture loop lost is cancelled. One ignored test runs the real 10 s lease for
 125 s, past the old two-minute cap. On macOS, one test connects to the real `record.sock`, reads the
 peer's audit token, pairs, records twice through the fake backend, and revokes;
 it skips (with a printed note) when the test binary has no signing identity.
-The live card and the Labs › Browser access revoke rows are rendered by
-`hex app -- --snap` scenes (`record-active`, `mac-labs-browser-access`), and
+Labs › Connected apps is covered by `local_api::tests::connected_apps` (each
+switch off on every consent route, CORS on only its own routes and never with
+`Authorization`, an unknown website refused and listed once, Allow and Block,
+an allowed website still needing an answer, Browser access having no effect,
+the revoke list covering apps and websites, and a pending ask and live
+recording ending when the lab goes off) and the website lists' bounds and
+reload by `local_api::permissions` tests. The live card and the Labs ›
+Connected apps section are rendered by `hex app -- --snap` scenes
+(`record-active`, `mac-labs-connected-apps`), and
 the permission window by the ignored snapshot test above; nothing was recorded from a real microphone, no
 OS grant was approved, and no real browser page or Electron process was run.

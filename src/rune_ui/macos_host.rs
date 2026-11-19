@@ -157,6 +157,7 @@ impl Backend {
                 record: published.record.clone(),
                 permissions: published.permissions.clone(),
                 grants: published.grants.clone(),
+                websites: published.websites.clone(),
             },
             settings: published.settings.clone(),
         })

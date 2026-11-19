@@ -42,4 +42,9 @@ pub(crate) enum HostRequest {
     RevokeRecordGrant {
         id: u64,
     },
+    /// The window moved a website between Labs › Connected apps' lists.
+    Website {
+        origin: String,
+        action: crate::local_api::WebsiteAction,
+    },
 }

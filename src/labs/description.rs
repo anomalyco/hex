@@ -192,6 +192,9 @@ impl Feature {
             Self::ApiTimestamps => {
                 "Let apps using Hex's local API ask when each word or phrase starts and ends, as the speech model heard them"
             }
+            Self::ConnectedApps => {
+                "Let apps and websites on this computer ask, in Hex's permission window, to transcribe audio or record from the microphone; each needs your Allow, and you can revoke it in Labs"
+            }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
             }

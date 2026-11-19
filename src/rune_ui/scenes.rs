@@ -962,29 +962,56 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.screenshots = true;
         ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
-    // Labs › Browser access with one app paired to start recordings and its
-    // Revoke button.
-    ("mac-labs-browser-access", |ui| {
+    // Labs › Connected apps with websites on: an allowed website, two that
+    // tried, a blocked one, and an app and a website connected.
+    ("mac-labs-connected-apps", |ui| {
         labs_with_some_on(ui);
-        ui.settings.labs.api_browser_access = true;
-        ui.lab_store.search = rune::TextEdit::new("Browser access".to_owned());
-        ui.lab_store.group = Some(crate::labs::Feature::ApiBrowserAccess.group());
+        ui.settings.labs.connected_apps = true;
+        ui.settings.labs.connected_apps_websites = true;
+        ui.lab_store.search = rune::TextEdit::new("Connected apps".to_owned());
+        ui.lab_store.group = Some(crate::labs::Feature::ConnectedApps.group());
         if let Some(view) = &mut ui.view {
-            view.permissions = vec![crate::local_api::PermissionView {
-                id: 2,
-                capability: crate::local_api::PermissionCapability::TranscribeAudio,
-                recipient: crate::local_api::Recipient::Web {
-                    origin: "https://notes.example".into(),
-                    client_name: None,
+            let now = crate::history::now_ms();
+            view.websites = crate::local_api::Websites {
+                allowed: vec!["https://notes.example".into()],
+                tried: vec![
+                    crate::local_api::permissions::Tried {
+                        origin: "https://new-tool.example".into(),
+                        at_ms: now.saturating_sub(4 * 60_000),
+                    },
+                    crate::local_api::permissions::Tried {
+                        origin: "http://localhost:5173".into(),
+                        at_ms: now.saturating_sub(3 * 3_600_000),
+                    },
+                ],
+                blocked: vec!["https://ads.example".into()],
+            };
+            view.permissions = vec![
+                crate::local_api::PermissionView {
+                    id: 2,
+                    capability: crate::local_api::PermissionCapability::TranscribeAudio,
+                    recipient: crate::local_api::Recipient::Web {
+                        origin: "https://notes.example".into(),
+                        client_name: None,
+                    },
                 },
-            }];
+                crate::local_api::PermissionView {
+                    id: 3,
+                    capability: crate::local_api::PermissionCapability::MicrophoneRecording,
+                    recipient: crate::local_api::Recipient::Native {
+                        identifier: "com.example.fieldnotes".into(),
+                        cdhash: "fixture-digest".into(),
+                        team: Some("K7Z4Q2M8A1".into()),
+                    },
+                },
+            ];
             view.grants = vec![crate::local_api::RecordGrant {
                 durable: false,
                 id: 1,
                 recipient: crate::local_api::Recipient::Native {
-                    identifier: "com.example.fieldnotes".into(),
+                    identifier: "com.example.recorder".into(),
                     cdhash: "fixture-digest".into(),
-                    team: Some("K7Z4Q2M8A1".into()),
+                    team: None,
                 },
             }];
         }
@@ -1311,6 +1338,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         record: None,
         permissions: Vec::new(),
         grants: Vec::new(),
+        websites: Default::default(),
     });
     ui
 }

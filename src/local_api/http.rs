@@ -134,6 +134,20 @@ impl HttpResponse {
         }
     }
 
+    /// Labs › Connected apps' preflight, for its consent, pairing, record,
+    /// and connect-grant routes: only their own headers, never
+    /// `Authorization`, so a page can't send the bearer token through it.
+    pub(super) fn consent_preflight(private_network: bool) -> Self {
+        let mut response = Self::preflight(private_network);
+        for header in &mut response.headers {
+            if header.0 == "Access-Control-Allow-Headers" {
+                header.1 =
+                    "Content-Type, X-Hex-Connect-Token, X-Hex-Record-Grant, X-Hex-Record-Token";
+            }
+        }
+        response
+    }
+
     pub(super) fn json<T: Serialize>(status: u16, value: &T) -> Self {
         match serde_json::to_vec(value) {
             Ok(body) => Self {

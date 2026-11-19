@@ -47,6 +47,11 @@ pub(crate) enum Request {
     RevokeRecordGrant {
         id: u64,
     },
+    /// The window moved a website between Labs › Connected apps' lists.
+    Website {
+        origin: String,
+        action: crate::local_api::WebsiteAction,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
 }

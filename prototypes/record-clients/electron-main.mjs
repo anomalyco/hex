@@ -7,8 +7,8 @@
 //   node electron-main.mjs                 # macOS, default socket
 //   node electron-main.mjs /path/record.sock
 //
-// Requires Node 18+ and Hex running with Labs › Browser access to the local
-// API on (the same gate lists the recording socket's consent). No token from
+// Requires Node 18+ and Hex running with Labs › Connected apps on (a native
+// app needs nothing else; the dialog names its code signature). No token from
 // Hex's discovery file is used or needed. Pairing asks once and starts
 // nothing; each recording is its own session under the grant, and it runs for
 // as long as this process checks in (`POST /record/heartbeat`). If the process

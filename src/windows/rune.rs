@@ -88,6 +88,11 @@ pub(crate) enum Request {
     RevokeRecordGrant {
         id: u64,
     },
+    /// The window moved a website between Labs › Connected apps' lists.
+    Website {
+        origin: String,
+        action: crate::local_api::WebsiteAction,
+    },
     /// The window saved `settings.json`; adopt it.
     ReloadSettings,
     /// The tray's Enable / Disable Hex.
@@ -172,8 +177,8 @@ impl RuntimeHandle {
         self.history.clone()
     }
 
-    pub(crate) fn record(&self) -> &crate::local_api::RecordSessions {
-        &self.record
+    pub(crate) fn record(&self) -> Arc<crate::local_api::RecordSessions> {
+        self.record.clone()
     }
 
     /// Wakes `wake` after every publication.

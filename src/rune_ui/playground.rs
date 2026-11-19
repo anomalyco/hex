@@ -291,8 +291,8 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-search", "Window/General/Labs search"),
     ("mac-labs-settings", "Window/General/Labs settings"),
     (
-        "mac-labs-browser-access",
-        "Window/General/Labs browser access",
+        "mac-labs-connected-apps",
+        "Window/General/Labs connected apps",
     ),
     ("mac-labs-yolo-mode", "Window/General/Labs YOLO mode"),
     (
