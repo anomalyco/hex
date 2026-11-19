@@ -96,9 +96,12 @@ it on-device with Apple Speech, downloading the speech assets on first use
     audio file.
   - Phone/FaceTime/Siri audio interruptions finalize captures `>= 300 ms` so
     spoken words are not lost, cancel shorter taps cleanly out of `Listening`,
-    and resume warm keepalive when iOS signals `.shouldResume`. Bluetooth HFP
-    input is opt-in (**Use Bluetooth headphones**, default off) so AirPods stay
-    in full-fidelity output by default.
+    and resume warm keepalive when iOS signals `.shouldResume`. **Always use
+    iPhone microphone** (on by default) records from the built-in microphone in
+    `playAndRecord` with `mixWithOthers` and A2DP output, in the app and in
+    in-keyboard dictation, so music in a car or headphones keeps playing and the
+    route never drops into call audio. Turning it off allows Bluetooth HFP
+    microphones, which pause other audio.
 - **Action Button, Control Center, Back Tap & Live Activity:**
   - `DictateWithHexIntent` (`AudioRecordingIntent` + `LiveActivityIntent`) and
     `HexDictationControl` (`ControlWidget`) start recording on first press with
