@@ -336,10 +336,24 @@ pub(super) fn rest_width(shown: &Recording) -> f32 {
 /// The recording: at rest only its levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
+pub(super) fn meter(p: Paint, shown: &Recording) -> El {
+    let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
+    row()
+        .key("meter")
+        .gap(6.)
+        .center_y()
+        .child(waveform::slot())
+        .child(
+            text(elapsed)
+                .key("elapsed")
+                .font(TextStyle::new(13.0, 500.0).mono().lh(18.0))
+                .color(p.muted()),
+        )
+}
+
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let open = capsule.hovered;
     let notice = recording_notice(shown);
-    let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
     let notice_text = |notice: Notice| {
         text(notice.text().to_owned())
             .key("notice")
@@ -350,17 +364,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     };
     let right = capsule.corner.is_right();
     let top = capsule.corner.is_top();
-    let meter = row()
-        .key("meter")
-        .gap(6.0)
-        .center_y()
-        .child(waveform::slot())
-        .child(
-            text(elapsed)
-                .key("elapsed")
-                .font(TextStyle::new(13.0, 500.0).mono().lh(18.0))
-                .color(p.muted()),
-        );
+    let meter = meter(p, shown);
     let accessory = if open {
         Some(
             row()
@@ -496,6 +500,21 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         // as large as the open panel, lets clicks through. On Windows the
         // window is only as large as the pill it draws instead.
         .hit();
+    let body = if capsule.presentation.hold_hover {
+        body.on_pointer_move(|c: &mut Capsule, point| {
+            if c.presentation
+                .pointer
+                .is_some_and(|(x, y)| (point.x - x).abs().max((point.y - y).abs()) > 4.)
+            {
+                c.presentation.hold_hover = false;
+                c.set_hovered(true);
+            } else if c.presentation.pointer.is_none() {
+                c.presentation.pointer = Some((point.x, point.y));
+            }
+        })
+    } else {
+        body
+    };
     in_corner(capsule, body)
 }
 

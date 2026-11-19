@@ -19,8 +19,63 @@ pub(super) struct Presentation {
     v: f32,
     last: Option<f64>,
     pub(super) icon: Option<rune::Pixels>,
+    departure: Option<(OfferId, MeetingCandidate)>,
+    travel: Reveal,
+    live: Reveal,
+    pub(super) hold_hover: bool,
+    pub(super) pointer: Option<(f32, f32)>,
 }
+
+#[derive(Default)]
+struct Reveal {
+    at: Option<f64>,
+    t: f32,
+}
+
+impl Reveal {
+    fn step(&mut self, now: f64, spring: Spring) -> bool {
+        if self.t == 1. {
+            return false;
+        }
+        let dt = (now - *self.at.get_or_insert(now)).max(0.) as f32;
+        let t = spring.sample(0., 0., 1., dt).0;
+        self.t = if t >= 0.9995 { 1. } else { t };
+        true
+    }
+}
+
 impl Presentation {
+    pub(super) fn inherits_offer_window(&self) -> bool {
+        self.travel.at.is_some() || self.departure.is_some()
+    }
+    pub(super) fn begin(&mut self, id: OfferId, candidate: MeetingCandidate) {
+        self.departure = Some((id, candidate));
+        self.hold_hover = true;
+    }
+    pub(super) fn blocks_hover(&mut self, inside: bool) -> bool {
+        if !inside {
+            self.hold_hover = false;
+        }
+        self.hold_hover
+    }
+    pub(super) fn step_handoff(&mut self, live: bool, reduced: bool, now: f64) -> bool {
+        if self.departure.is_none() {
+            return false;
+        }
+        let moving = self.travel.step(
+            now,
+            if reduced {
+                Spring::new(0.16, 0.)
+            } else {
+                RECORDING_CLOSE
+            },
+        );
+        let lighting = live && self.live.step(now, Spring::new(0.18, 0.));
+        if self.travel.t == 1. && self.live.t == 1. {
+            self.departure = None;
+        }
+        moving || lighting
+    }
     pub(super) fn for_kind(kind: &Kind, open: bool) -> Self {
         let Kind::Offer(_, c) = kind else {
             return Self::default();
@@ -63,8 +118,8 @@ impl Presentation {
     }
     pub(super) fn window(&self) -> (f32, f32) {
         (
-            self.widths[0].max(self.widths[1]) + 2.0 * CAPSULE_INSET,
-            H + 2.0 * CAPSULE_INSET,
+            self.widths[0].max(self.widths[1]).max(PANEL_WIDTH) + 2.0 * CAPSULE_INSET,
+            RECORDING_WINDOW.1,
         )
     }
     pub(super) fn step(&mut self, open: bool, reduced: bool, now: f64) -> bool {
@@ -194,6 +249,18 @@ fn mark(p: Paint, c: &MeetingCandidate, local: Option<&rune::Pixels>) -> El {
 }
 
 pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandidate) -> El {
+    draw(p, p, c, id, candidate)
+}
+
+pub(super) fn transition(c: &Capsule, p: Paint, dark: Paint) -> Option<El> {
+    let (id, candidate) = c.presentation.departure.as_ref()?;
+    if !matches!(c.kind, Some(Kind::Offer(..) | Kind::Recording(_))) {
+        return None;
+    }
+    Some(draw(p, dark, c, *id, candidate))
+}
+
+fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandidate) -> El {
     let a = &c.presentation;
     let [ask, wide] = a.widths;
     let reduced = c.reduced.get();
@@ -214,7 +281,18 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
     } else {
         (t / split).min(1.)
     };
-    let w = ask + (wide - ask) * fraction;
+    let from = ask + (wide - ask) * fraction;
+    let t = a.travel.t;
+    let g = if reduced { f32::from(t >= 0.5) } else { t };
+    let lerp = |from: f32, to: f32| from + (to - from) * g;
+    let grid = |v: f32| (v * 64.).round() / 64.;
+    let w = grid(lerp(from, REST_WIDTH));
+    let h = grid(lerp(H, REST_HEIGHT));
+    let top = if c.corner.is_top() {
+        CAPSULE_INSET
+    } else {
+        a.window().1 - CAPSULE_INSET - h
+    };
     let x = |width| {
         if c.corner.is_right() {
             a.window().0 - CAPSULE_INSET - width
@@ -244,7 +322,7 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
         }));
     let page = row()
         .key("page")
-        .absolute(x(a.widths[i]), CAPSULE_INSET)
+        .absolute(x(a.widths[i]) - x(w), (h - H) / 2.)
         .w(a.widths[i])
         .h(H)
         .pl(START)
@@ -261,46 +339,97 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
                 .child(lines),
         )
         .child(row().key("actions").gap(8.0).children(actions))
-        .opacity(alpha);
-    let page = if rules != c.more_open || alpha < 0.2 {
+        .opacity(alpha * (1. - t * 3.).max(0.));
+    let page = if a.inherits_offer_window() || rules != c.more_open || alpha < 0.2 {
         page.inert().a11y_hidden()
     } else {
         page
     };
-    let radius = panel_radius(p);
-    let shell = row()
+    let radius = lerp(panel_radius(p), REST_HEIGHT * 0.5);
+    let label = match &c.kind {
+        Some(Kind::Recording(r)) => format!("{} · {}", tr("Recording"), r.title),
+        _ if a.inherits_offer_window() => tr("Starting…").to_owned(),
+        _ => title,
+    };
+    let mut shell = row()
         .key("pill")
         .role("status")
-        .label(title)
-        .absolute(x(w), CAPSULE_INSET)
+        .label(label)
+        .absolute(x(w), top)
         .w(w)
-        .h(H)
+        .h(h)
         .radius(radius)
-        .fill(p.k.c.bg_base)
-        .border(p.hair, p.k.c.border_base);
+        .fill(p.k.c.bg_base.mix(dark.k.c.bg_base, t))
+        .border(p.hair, p.k.c.border_base.mix(dark.k.c.border_base, t))
+        .clip_rounded(radius);
+    if t < 1. / 3. {
+        shell = shell.child(page);
+    }
+    let enter = ((t - 0.33) / 0.67).clamp(0., 1.);
+    if enter > 0. {
+        let layer = |key, opacity| {
+            let layer = row()
+                .key(key)
+                .absolute(0., 0.)
+                .size(w, h)
+                .px(REST_PX)
+                .center_y()
+                .opacity(opacity);
+            if c.corner.is_right() {
+                layer.justify_end()
+            } else {
+                layer
+            }
+        };
+        let live = a.live.t;
+        if live < 1. {
+            shell = shell.child(
+                row()
+                    .key("pending")
+                    .absolute(0., 0.)
+                    .size(w, h)
+                    .center()
+                    .opacity(enter * (1. - live))
+                    .child(
+                        text(tr("Starting…"))
+                            .font(dark.k.ty.ui_medium)
+                            .color(dark.muted()),
+                    ),
+            );
+        }
+        if live > 0.
+            && let Some(Kind::Recording(r)) = &c.kind
+        {
+            shell = shell.child(layer("live", enter * live).child(panel::meter(dark, r)));
+        }
+    }
     // Regions are rectangles. Inscribe bands in the rounded body rather
     // than claiming the clear window, including its transparent corners.
     let region = |y, h, inset| {
         rune::el()
-            .absolute(x(w) + inset, CAPSULE_INSET + y)
+            .absolute(x(w) + inset, top + y)
             .w(w - 2.0 * inset)
             .h(h)
             .hit()
             .a11y_hidden()
     };
-    let bands = (0..radius as usize).flat_map(|line| {
+    let bands = (0..radius.floor() as usize).flat_map(|line| {
         let y = line as f32;
         let inset = (radius - (radius * radius - (radius - y).powi(2)).sqrt()).ceil();
-        [region(y, 1., inset), region(H - y - 1., 1., inset)]
+        [region(y, 1., inset), region(h - y - 1., 1., inset)]
     });
     row()
         .key("capsule")
         .w_full()
         .h_full()
         .child(shell)
-        .child(region(radius, H - 2. * radius, 0.))
+        .child(region(radius, h - 2. * radius, 0.))
         .children(bands)
-        .child(page)
+        .on_pointer_move(|c: &mut Capsule, p| {
+            if !c.presentation.inherits_offer_window() {
+                c.presentation.pointer = Some((p.x, p.y));
+            }
+        })
         .cursor(Cursor::Grab)
         .on_drag(|c: &mut Capsule, d, tx| c.drag(d, tx))
 }

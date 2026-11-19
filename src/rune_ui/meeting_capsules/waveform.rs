@@ -277,7 +277,7 @@ impl Compositor<Capsule> for Ink {
             return;
         };
         wave.reduced = f.rt.reduced_motion;
-        let Some(drawn) = wave.drawn.as_ref() else {
+        let Some(drawn) = wave.drawn.as_mut() else {
             return;
         };
         let px = rect.map(|v| v * scale);
@@ -304,6 +304,9 @@ impl Compositor<Capsule> for Ink {
             self.0 = Some((dev, Painter::dots_only(f.device, f.format)));
         }
         let painter = &self.0.as_ref().unwrap().1;
+        // The field is composited after the UI, so it must inherit the
+        // header's presented opacity explicitly during the offer handoff.
+        drawn.pose.opacity = opacity;
         let uniforms = painter.write(drawn, Default::default(), target, |buf, bytes| {
             f.queue.write_buffer(buf, 0, bytes)
         });
