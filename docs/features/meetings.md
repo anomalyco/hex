@@ -648,8 +648,7 @@ inputs and the rendering computer's installed app icons. No network or call is n
 
 `a_record_click_keeps_its_corner_until_the_worker_is_live` exercises Record
 on the same surface at each corner, with an immediate or delayed start, a
-second click and Reduce Motion. `HEX_RECORD_CLICK=<folder>` with
-`record_click_frames` renders successful and refused starts without audio.
+second click and Reduce Motion.
 Observed on macOS with synthetic events: the 500 ms open lost no frames of
 the capsule (previously 30 at 60 fps). An AppKit probe addressed mouse events
 to the real panel: one visible window and frame across 50 samples, never key,
@@ -979,8 +978,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   baseline. Notes grow from the outer edge, past the copy rows, without
      │   moving a copy button away from the pointer.
      │   A recorder failure yields to the Meetings error instead of showing a
-     │   finished transcript. Checks: `stop_handoff_frames`,
-     │   `stop_says_stopping_in_place_and_the_field_cools`, and
+     │   finished transcript. Checks: `stop_says_stopping_in_place_and_the_field_cools` and
      │   `HEX_HUD_REPLAY=<dir> cargo test --bin hex hud_replay_frames` for
      │   every frame of the whole path (offscreen Rune).
      │   ├── A title or summary whose words change lets the old words fade
