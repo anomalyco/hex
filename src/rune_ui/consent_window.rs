@@ -17,8 +17,11 @@
 //! then the three answers. Allow Once is the one accent; Always Allow sits
 //! apart as a Secondary button, so lasting access is never the easiest press,
 //! and Deny is the Return default and the first focus (Escape denies too).
-//! For [`GUARD`] after it appears, both allows are disabled, so a keystroke
-//! or click meant for another app can't grant anything; Deny always works.
+//! For [`GUARD`] after it first draws on screen, and again after every key
+//! pressed while it shows, both allows are disabled, so a keystroke or click
+//! meant for another app can't grant anything (typing that lands here keeps
+//! them disabled); Deny always works, and after a pause the keyboard can
+//! still reach and press an allow.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -43,6 +46,8 @@ pub(crate) const SIZE: (f32, f32) = (520.0, 620.0);
 /// How long both allows stay disabled after the window appears, as a
 /// browser's permission prompt guards against a keystroke meant elsewhere.
 pub(crate) const GUARD: Duration = Duration::from_secs(1);
+/// How often a shown window checks that its first frame reached the screen.
+const FRAME_CHECK: Duration = Duration::from_millis(30);
 
 /// Where an answer goes: the consent gate's `answer(id, answer)`.
 pub(crate) type Reply = Arc<dyn Fn(u64, Answer) + Send + Sync>;
@@ -51,8 +56,12 @@ pub(crate) type Reply = Arc<dyn Fn(u64, Answer) + Send + Sync>;
 #[derive(Default)]
 pub(crate) struct Sheet {
     prompt: Option<Prompt>,
-    /// When the current ask appeared.
+    /// When the guard last started: the current ask's first frame on
+    /// screen, or the latest key pressed while it shows.
     shown_at: Option<Instant>,
+    /// Frames the window had presented when the current ask asked to show,
+    /// while its first frame since is still to come.
+    presents_before: Option<u64>,
     /// The guard has passed: the allows work.
     armed: bool,
     reply: Option<Reply>,
@@ -79,9 +88,18 @@ impl Sheet {
             return;
         }
         self.prompt = Some(prompt);
-        self.shown_at = Some(Instant::now());
         self.armed = false;
-        tx.wake_after(GUARD);
+        // The guard starts once the window is on screen, not when asked to
+        // show: a slow first frame mustn't use it up unseen. Headless (no
+        // overlay), it starts now.
+        match &self.overlay {
+            Some(overlay) => {
+                self.shown_at = None;
+                self.presents_before = Some(overlay.surface_stats().totals.presents);
+                tx.wake_after(FRAME_CHECK);
+            }
+            None => self.restart_guard(Instant::now(), tx),
+        }
         if let Some(overlay) = &self.overlay {
             #[cfg(target_os = "macos")]
             place(overlay);
@@ -102,10 +120,43 @@ impl Sheet {
     fn close(&mut self) {
         self.prompt = None;
         self.shown_at = None;
+        self.presents_before = None;
         self.armed = false;
         if let Some(overlay) = &self.overlay {
             overlay.hide();
         }
+    }
+
+    /// Disables both allows for another [`GUARD`] from `now`.
+    fn restart_guard(&mut self, now: Instant, tx: &mut Tx) {
+        self.shown_at = Some(now);
+        self.armed = false;
+        tx.wake_after(GUARD);
+    }
+
+    /// Starts the guard at the ask's first frame on screen; true when it
+    /// started.
+    fn first_frame(&mut self, now: Instant, tx: &mut Tx) -> bool {
+        let (Some(before), Some(overlay)) = (self.presents_before, &self.overlay) else {
+            return false;
+        };
+        if overlay.surface_stats().totals.presents <= before {
+            tx.wake_after(FRAME_CHECK);
+            return false;
+        }
+        self.presents_before = None;
+        self.restart_guard(now, tx);
+        true
+    }
+
+    /// A key pressed while the window shows: whatever it does, the allows
+    /// wait out a fresh guard, so typing meant for another app can't reach
+    /// one. Never consumes the key.
+    fn key_pressed(&mut self, tx: &mut Tx) -> bool {
+        if self.prompt.is_some() && self.presents_before.is_none() {
+            self.restart_guard(Instant::now(), tx);
+        }
+        false
     }
 
     /// Ends the guard once it has run; true when that changed what shows.
@@ -139,8 +190,9 @@ fn answer(sheet: &mut Sheet, answer: Answer) {
     }
 }
 
-fn poll(sheet: &mut Sheet, _: f64, _: &mut Tx) -> bool {
-    sheet.arm(Instant::now())
+fn poll(sheet: &mut Sheet, _: f64, tx: &mut Tx) -> bool {
+    let now = Instant::now();
+    sheet.first_frame(now, tx) | sheet.arm(now)
 }
 
 /// How long after showing Linux and Windows check that the window opened.
@@ -563,14 +615,19 @@ fn footer(p: Paint, armed: bool) -> El {
                 .key("footer")
                 .gap(8.0)
                 .center_y()
-                .child(state_button(
-                    p,
-                    "browser-connect-always",
-                    tr("Always Allow"),
-                    ButtonKind::Secondary,
-                    !armed,
-                    |sheet: &mut Sheet, _| answer(sheet, Answer::Always),
-                ))
+                // Disabled during the guard yet still in the Tab order, so a
+                // key that restarts the guard keeps the focus where it is.
+                .child(
+                    state_button(
+                        p,
+                        "browser-connect-always",
+                        tr("Always Allow"),
+                        ButtonKind::Secondary,
+                        !armed,
+                        |sheet: &mut Sheet, _| answer(sheet, Answer::Always),
+                    )
+                    .focusable(true),
+                )
                 .child(spacer())
                 .child(
                     state_button(
@@ -584,14 +641,17 @@ fn footer(p: Paint, armed: bool) -> El {
                     .default_button()
                     .autofocus(),
                 )
-                .child(state_button(
-                    p,
-                    "browser-connect-allow",
-                    tr("Allow Once"),
-                    ButtonKind::Primary,
-                    !armed,
-                    |sheet: &mut Sheet, _| answer(sheet, Answer::Once),
-                )),
+                .child(
+                    state_button(
+                        p,
+                        "browser-connect-allow",
+                        tr("Allow Once"),
+                        ButtonKind::Primary,
+                        !armed,
+                        |sheet: &mut Sheet, _| answer(sheet, Answer::Once),
+                    )
+                    .focusable(true),
+                ),
         )
         .child(
             text(tr(
@@ -668,7 +728,18 @@ fn dialog(p: Paint, icons: &Icons, prompt: &Prompt, armed: bool) -> El {
         panel = panel.box_shadow(*shadow);
     }
     // Keys stay inside and Escape denies; there is nothing outside to click.
-    panel.modal(false, |sheet: &mut Sheet| answer(sheet, Answer::Deny))
+    // Every other key restarts the guard before it moves focus or presses,
+    // except a Space once the allows have waited out a quiet guard.
+    panel
+        .on_key(|sheet: &mut Sheet, event: &rune::KeyEvent, tx: &mut Tx| {
+            let space = matches!(&event.key, rune::Key::Text(typed) if typed == " ");
+            match event.key {
+                rune::Key::Escape | rune::Key::Enter => false,
+                _ if space && sheet.armed => false,
+                _ => sheet.key_pressed(tx),
+            }
+        })
+        .modal(false, |sheet: &mut Sheet| answer(sheet, Answer::Deny))
 }
 
 #[cfg(test)]
@@ -822,8 +893,9 @@ mod tests {
                 .find(|e| e.key.as_deref() == Some(key))
                 .is_some_and(|e| e.focusable)
         };
-        assert!(!focusable(&rt, "browser-connect-allow"));
-        assert!(!focusable(&rt, "browser-connect-always"));
+        // In the Tab order, but inert.
+        assert!(focusable(&rt, "browser-connect-allow"));
+        assert!(focusable(&rt, "browser-connect-always"));
         assert!(focusable(&rt, "browser-connect-deny"));
         press(&mut rt, "browser-connect-allow");
         press(&mut rt, "browser-connect-always");
@@ -844,6 +916,57 @@ mod tests {
         let (mut rt, replies) = shown(record_ask(), false, false);
         press(&mut rt, "browser-connect-deny");
         assert_eq!(*replies.lock().unwrap(), [(9, Answer::Deny)]);
+    }
+
+    /// Typing that lands in the window can't answer Allow: Tab then Space
+    /// right after the guard, or Shift-Tab to Always Allow, restarts the
+    /// guard first. After a pause with no key, Space presses the focused
+    /// allow, so the keyboard can still answer.
+    #[test]
+    fn keys_restart_the_guard() {
+        for shift in [false, true] {
+            let (mut rt, replies) = shown(record_ask(), true, false);
+            assert!(rt.state.armed);
+            rt.key(rune::KeyEvent {
+                key: rune::Key::Tab,
+                mods: rune::Mods {
+                    shift,
+                    ..Default::default()
+                },
+            });
+            rt.frame(0.0);
+            assert!(!rt.state.armed, "Tab restarted the guard");
+            key(&mut rt, rune::Key::Text(" ".into()));
+            assert!(replies.lock().unwrap().is_empty(), "Space granted nothing");
+            assert!(!rt.state.armed);
+            // A quiet guard later, Space presses what Tab reached.
+            rt.update(|sheet, _| {
+                sheet.shown_at = Some(Instant::now() - GUARD);
+                assert!(sheet.arm(Instant::now()));
+            });
+            rt.settle_all();
+            rt.frame(0.0);
+            key(&mut rt, rune::Key::Text(" ".into()));
+            let answered = if shift { Answer::Always } else { Answer::Once };
+            assert_eq!(*replies.lock().unwrap(), [(9, answered)]);
+        }
+    }
+
+    /// The guard starts when the window's first frame reaches the screen,
+    /// not when it is asked to show, so a slow first frame can't use it up.
+    #[test]
+    fn the_guard_waits_for_the_first_frame() {
+        let mut sheet = Sheet::new(Arc::new(|_, _| {}));
+        sheet.prompt = Some(record_ask());
+        sheet.presents_before = Some(3);
+        // No overlay to report frames: nothing starts it here.
+        let mut tx = Tx::default();
+        assert!(!sheet.first_frame(Instant::now(), &mut tx));
+        assert!(sheet.shown_at.is_none());
+        assert!(!sheet.arm(Instant::now() + GUARD * 5));
+        // A key before the first frame doesn't arm or start it either.
+        sheet.key_pressed(&mut tx);
+        assert!(sheet.shown_at.is_none());
     }
 
     /// Return presses the default, Deny, and Escape denies too, during the
