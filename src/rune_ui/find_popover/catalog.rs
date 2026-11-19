@@ -7,11 +7,11 @@ use crate::labs::Feature;
 pub(super) fn entries(ui: &Ui) -> Vec<Entry> {
     let caps = ui.platform.caps;
     let mut all = Vec::new();
-    let mut add = |pane: Pane, key, advanced, title, about| {
+    let mut add = |pane: Pane, key, advanced, title, about: &'static str| {
         all.push(Entry {
             link: Link::Setting(pane, key, advanced),
             title,
-            about,
+            about: about.into(),
             path: if advanced {
                 format!("{} › {}", pane.title(), tr("Advanced"))
             } else {

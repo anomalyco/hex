@@ -1404,6 +1404,21 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Si un raccourci n'est fait que de Ctrl, Alt, Majuscule ou de la touche Windows, sans touche de lettre ni de chiffre, appuyer sur une autre touche ou cliquer après la première seconde ne termine plus la dictée ; relâchez pour finir"),
     ("Modes editor", "Éditeur de modes"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Modifiez les apps, les corrections et la réécriture OpenCode de chaque mode dans un panneau Modes"),
+    ("Transcribe dropped audio", "Transcrire l’audio déposé"),
+    ("Transcribe a file", "Transcrire un fichier"),
+    ("Transcribe a file…", "Transcrire un fichier…"),
+    ("Drop to save a transcript", "Déposez pour enregistrer une transcription"),
+    ("WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV", "WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM ou MKV"),
+    ("Drop a {} file on the Hex window to save its transcript as a text file next to it", "Déposez un fichier {} sur la fenêtre de Hex pour enregistrer sa transcription dans un fichier texte à côté"),
+    ("Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it", "Déposez un fichier WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM ou MKV sur la fenêtre de Hex pour enregistrer sa transcription dans un fichier texte à côté"),
+    ("Hex can transcribe {} files", "Hex peut transcrire des fichiers {}"),
+    ("Transcribing… {}%", "Transcription… {}%"),
+    ("Cancelling…", "Annulation…"),
+    ("{} more queued", "{} de plus en attente"),
+    ("Saved {}", "{} enregistré"),
+    ("Show in folder", "Afficher dans le dossier"),
+    ("Could not transcribe {}", "Impossible de transcrire {}"),
+    ("A file could not be chosen.", "Impossible de choisir un fichier."),
 ];
 
 #[cfg(test)]

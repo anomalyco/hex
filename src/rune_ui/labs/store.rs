@@ -159,7 +159,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, cx: &rune::Cx<Ui>, layer: &mut
 fn matches(row: &Row, query: &str) -> bool {
     let note = row.note.as_deref().unwrap_or("");
     query.is_empty()
-        || [row.title, row.about, note, group::name(row.group)]
+        || [row.title, row.about.as_ref(), note, group::name(row.group)]
             .iter()
             .any(|copy| copy.to_lowercase().contains(query))
 }
@@ -423,7 +423,7 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut V
         .gap(2.0)
         .child(title)
         .child(
-            text(entry.about)
+            text(entry.about.clone())
                 .key("description")
                 .font(DESCRIPTION)
                 .color(p.muted())

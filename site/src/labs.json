@@ -863,6 +863,19 @@
       ],
       "summary": "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane",
       "title": "Modes editor"
+    },
+    {
+      "added": "2026-11-13",
+      "group": "models",
+      "groupTitle": "Models",
+      "id": "drop-transcribe",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it",
+      "title": "Transcribe dropped audio"
     }
   ]
 }

@@ -203,6 +203,10 @@ pub struct LabsSettings {
     /// The apps Labs › YOLO mode sends in, by the names
     /// Modes match; empty means every app.
     pub yolo_mode_apps: Vec<String>,
+    /// A WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or
+    /// MKV file dropped on the window is transcribed and saved as a text file
+    /// beside it.
+    pub drop_transcribe: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -416,6 +420,7 @@ impl Default for LabsSettings {
             shell_completions: false,
             yolo_mode: false,
             yolo_mode_apps: Vec::new(),
+            drop_transcribe: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,

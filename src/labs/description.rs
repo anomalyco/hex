@@ -172,6 +172,9 @@ impl Feature {
             Self::OpenCodeInWsl => {
                 "Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker; looking for it can start WSL"
             }
+            Self::DropTranscribe => {
+                "Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it"
+            }
             Self::ApiProcessing => {
                 "Let apps using Hex's local API ask for text with Global mode's replacements, corrections, rewriting, and transformations applied"
             }

@@ -460,6 +460,17 @@ pub fn yolo_mode_apps() -> Option<Vec<String>> {
         .clone()
 }
 
+/// Labs › Transcribe dropped audio: a file with one of this build's
+/// extensions, dropped on the window, is transcribed in this process and saved
+/// as a text file beside it (read as each drop starts, and by the window's
+/// drop target).
+pub fn drop_transcribe() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    DROP_TRANSCRIBE.load(Ordering::Acquire) && Feature::DropTranscribe.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Free memory when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {

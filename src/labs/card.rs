@@ -85,6 +85,7 @@ impl Feature {
             Self::StopPhrase => "Stop phrase",
             Self::HoldThroughKeys => "Hold through other keys",
             Self::ModesEditor => "Modes editor",
+            Self::DropTranscribe => "Transcribe dropped audio",
         }
     }
 
@@ -307,6 +308,9 @@ impl Feature {
             }
             Self::ModesEditor => {
                 "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane"
+            }
+            Self::DropTranscribe => {
+                "Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it"
             }
         }
     }

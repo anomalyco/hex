@@ -1401,6 +1401,21 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If a shortcut is made only of Ctrl, Alt, Shift, or the Windows key, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish", "Se um atalho é feito só de Ctrl, Alt, Shift ou da tecla Windows, sem tecla de letra ou número, pressionar outra tecla ou clicar depois do primeiro segundo não termina mais o ditado; solte para terminar"),
     ("Modes editor", "Editor de modos"),
     ("Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane", "Edite os apps, as correções e a reescrita do OpenCode de cada modo em um painel Modos"),
+    ("Transcribe dropped audio", "Transcrever áudio arrastado"),
+    ("Transcribe a file", "Transcrever um arquivo"),
+    ("Transcribe a file…", "Transcrever um arquivo…"),
+    ("Drop to save a transcript", "Solte para salvar uma transcrição"),
+    ("WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV", "WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM ou MKV"),
+    ("Drop a {} file on the Hex window to save its transcript as a text file next to it", "Arraste um arquivo {} para a janela do Hex para salvar a transcrição como um arquivo de texto ao lado dele"),
+    ("Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it", "Arraste um arquivo WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM ou MKV para a janela do Hex para salvar a transcrição como um arquivo de texto ao lado dele"),
+    ("Hex can transcribe {} files", "O Hex pode transcrever arquivos {}"),
+    ("Transcribing… {}%", "Transcrevendo… {}%"),
+    ("Cancelling…", "Cancelando…"),
+    ("{} more queued", "{} mais na fila"),
+    ("Saved {}", "{} salvo"),
+    ("Show in folder", "Mostrar na pasta"),
+    ("Could not transcribe {}", "Não foi possível transcrever {}"),
+    ("A file could not be chosen.", "Não foi possível escolher um arquivo."),
 ];
 
 #[cfg(test)]

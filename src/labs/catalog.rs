@@ -81,6 +81,7 @@ impl Feature {
             | Self::PrintStart
             | Self::VoicePrompt
             | Self::CopyCaptureZip
+            | Self::DropTranscribe
             | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
@@ -154,7 +155,7 @@ impl Feature {
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::ApiBrowserAccess => 20261112,
-            Self::KQuantModels => 20261113,
+            Self::KQuantModels | Self::DropTranscribe => 20261113,
             Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
@@ -310,6 +311,7 @@ impl Feature {
             | Self::ApiBrowserAccess
             | Self::VoicePrompt
             | Self::CopyCaptureZip
+            | Self::DropTranscribe
             | Self::SpeakersOnly
             | Self::ShellCompletions
             | Self::YoloMode
@@ -389,6 +391,7 @@ impl Feature {
             Self::PrintStart => "print-start",
             Self::VoicePrompt => "voice-prompt",
             Self::CopyCaptureZip => "copy-capture-zip",
+            Self::DropTranscribe => "drop-transcribe",
             Self::ShellCompletions => "shell-completions",
             Self::YoloMode => "yolo-mode",
             Self::CursorContext => "cursor-context",
@@ -472,6 +475,7 @@ impl Feature {
             Self::PrintStart => "labs.print_start",
             Self::VoicePrompt => "labs.voice_prompt",
             Self::CopyCaptureZip => "labs.copy_capture_zip",
+            Self::DropTranscribe => "labs.drop_transcribe",
             Self::ShellCompletions => "labs.shell_completions",
             Self::YoloMode => "labs.yolo_mode",
             Self::CursorContext => "labs.cursor_context",

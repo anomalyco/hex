@@ -3700,6 +3700,10 @@ fn goldens() {
             "modes-picker",
             "modes-speech",
             "picker-downloading",
+            // Labs › Transcribe dropped audio: the hint a file drag shows and
+            // the toast of the file running with its progress.
+            "drop-hover",
+            "drop-running",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }
@@ -3719,6 +3723,7 @@ fn goldens() {
 }
 
 mod application_picker;
+mod drop_transcribe;
 mod onboarding_check;
 mod panes;
 

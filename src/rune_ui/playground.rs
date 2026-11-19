@@ -248,6 +248,15 @@ const PATHS: &[(&str, &str)] = &[
         "mac-labs-yolo-mode-picker",
         "Window/General/Labs YOLO mode picker",
     ),
+    ("drop-hover", "Window/General/Labs dropped file hover"),
+    (
+        "drop-running",
+        "Window/General/Labs dropped file transcribing",
+    ),
+    (
+        "mac-labs-drop-transcribe",
+        "Window/General/Labs transcribe audio",
+    ),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),

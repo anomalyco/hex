@@ -620,6 +620,13 @@ pub(super) const KEYS: &[Key] = &[
          application names as Modes match them; an empty list means every app",
     ),
     key(
+        "labs.drop_transcribe",
+        Kind::Bool,
+        "Labs: a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file \
+         dropped on the Hex window is transcribed with the selected dictation model and saved \
+         as a text file next to it",
+    ),
+    key(
         "labs.api_processing",
         Kind::Bool,
         "Labs: apps using Hex's local API can ask for transcripts with Global mode's corrections, \

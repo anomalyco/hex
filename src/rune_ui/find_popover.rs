@@ -24,7 +24,7 @@ enum Link {
 struct Entry {
     link: Link,
     title: &'static str,
-    about: &'static str,
+    about: std::borrow::Cow<'static, str>,
     path: String,
 }
 
@@ -201,7 +201,7 @@ pub(super) fn layer(ui: &Ui, p: Paint, layer: &mut Vec<El>) {
                             .child(text(hit.path.clone()).font(p.k.ty.small).color(p.muted())),
                     )
                     .child(
-                        text(hit.about)
+                        text(hit.about.clone())
                             .font(p.k.ty.small)
                             .color(p.muted())
                             .truncate(),

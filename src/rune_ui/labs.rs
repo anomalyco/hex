@@ -15,6 +15,8 @@ mod store;
 mod voice_prompt;
 mod yolo_mode;
 
+use std::borrow::Cow;
+
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
 pub(super) use self::store::{page, search_field, tabs};
@@ -438,7 +440,9 @@ struct Row {
     lab: Lab,
     icon: &'static Icon,
     title: &'static str,
-    about: &'static str,
+    /// The card's description: translated copy, or a translated template
+    /// filled with this build's audio formats.
+    about: Cow<'static, str>,
     /// A line computed from this computer's state, shown in addition to
     /// `about` (the Live text card naming the models that stream, or the Live
     /// typing card explaining this desktop has no input method it can use).
@@ -474,7 +478,7 @@ fn find_cards(ui: &Ui) -> impl Iterator<Item = Row> {
 
 pub(super) fn search_entries(
     ui: &Ui,
-) -> impl Iterator<Item = (Lab, &'static str, &'static str, &'static str)> {
+) -> impl Iterator<Item = (Lab, &'static str, Cow<'static, str>, &'static str)> {
     find_cards(ui).map(|row| (row.lab, row.title, row.about, group::name(row.group)))
 }
 
@@ -500,7 +504,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             lab,
             icon: icon.unwrap_or_else(|| group::icon(group)),
             title: tr(feature.title()),
-            about: tr(feature.summary()),
+            about: tr(feature.summary()).into(),
             note: None,
             on: feature.on(settings),
             locked: false,
@@ -512,7 +516,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Some(_) => Row {
             on: false,
             locked: true,
-            about: super::managed_note(),
+            about: super::managed_note().into(),
             ..row(feature, icon)
         },
         None => row(feature, icon),
@@ -530,9 +534,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
             on: super::fun::running(ui),
             locked,
             about: if locked {
-                tr("On while the Hex Microphone driver is installed. Uninstall the driver in Voice Filter to turn it off.")
+                tr("On while the Hex Microphone driver is installed. Uninstall the driver in Voice Filter to turn it off.").into()
             } else {
-                voice_filter.about
+                voice_filter.about.clone()
             },
             ..voice_filter
         });
@@ -721,6 +725,20 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::KQuantModels, None));
     }
     rows.push(row(Feature::PickerDownloaded, None));
+    // The card names the kinds the drop target offers, unless an
+    // organization's lock already says why it can't be used.
+    let drop = row(Feature::DropTranscribe, Some(&WAVE));
+    rows.push(match Feature::DropTranscribe.managed() {
+        Some(_) => drop,
+        None => Row {
+            about: tr_fill(
+                "Drop a {} file on the Hex window to save its transcript as a text file next to it",
+                super::drop_transcribe::formats(),
+            )
+            .into(),
+            ..drop
+        },
+    });
     rows.push(row(Feature::ShellCompletions, None));
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
@@ -736,7 +754,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     } else {
         Row {
             locked: true,
-            about: tr("On while it is the dictation model. Choose another model to turn it off."),
+            about: tr("On while it is the dictation model. Choose another model to turn it off.")
+                .into(),
             ..ultra
         }
     });
@@ -765,9 +784,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(Row {
             locked,
             about: if locked {
-                super::managed_note()
+                super::managed_note().into()
             } else {
-                copy_zip.about
+                copy_zip.about.clone()
             },
             on: !locked && Feature::CopyCaptureZip.on(settings),
             ..copy_zip
@@ -778,9 +797,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
             icon: Pane::Annotate.icon(),
             title: tr("Annotate"),
             about: if locked {
-                super::managed_note()
+                super::managed_note().into()
             } else {
-                tr("Record your screen, draw on it, and talk over it with a shortcut")
+                tr("Record your screen, draw on it, and talk over it with a shortcut").into()
             },
             note: None,
             on: !locked && ui.settings.capture.enabled,
@@ -924,6 +943,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::StopPhrase => "lab-stop-phrase",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
         Feature::ModesEditor => "lab-modes-editor",
+        Feature::DropTranscribe => "lab-drop-transcribe",
     }
 }
 
@@ -1059,6 +1079,8 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::StopPhrase) => Some(stop_phrase::body(ui, p)),
         Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
+        // Wayland reports no file drags, so its card offers the file dialog.
+        Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,
