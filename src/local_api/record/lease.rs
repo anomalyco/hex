@@ -58,7 +58,11 @@ impl Sessions {
     /// `POST /record/heartbeat`: the client is still there, so its recording
     /// keeps going for another lease. A lapsed lease has already stopped
     /// the recording, and no check-in starts it again.
-    pub(in crate::local_api) fn heartbeat(self: &Arc<Self>, token: &str, channel: &Channel) -> HttpResponse {
+    pub(in crate::local_api) fn heartbeat(
+        self: &Arc<Self>,
+        token: &str,
+        channel: &Channel,
+    ) -> HttpResponse {
         let now = Instant::now();
         let mut state = lock(&self.state);
         let Some(session) = state.sessions.get_mut(token) else {

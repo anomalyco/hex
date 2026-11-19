@@ -261,8 +261,7 @@ impl HostHandle {
                     host.cancel_transcription_preparation();
                     Ok(())
                 }
-                HostRequest::AnswerConsent { .. }
-                | HostRequest::RecordControl { .. }
+                HostRequest::RecordControl { .. }
                 | HostRequest::RevokePermission { .. }
                 | HostRequest::RevokeRecordGrant { .. } => Ok(()),
             }

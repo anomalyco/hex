@@ -2737,7 +2737,7 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
 ├── A web page's fetch -> Labs › Browser access to the local API
 │   ├── A listed origin -> OPTIONS 204 + Access-Control-Allow-Origin, then a token-bearing request
-│   ├── POST /connect/authorize -> Hex's window asks; Allow Once or Always Allow -> code + PKCE
+│   ├── POST /connect/authorize -> Hex's permission window asks; Allow Once or Always Allow -> code + PKCE
 │   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
 │   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
@@ -2838,14 +2838,16 @@ real browser page.
 
 Browser connect and recording ([contract](../connect.md)) are the narrower
 asks beside that token-bearing access: a listed page calls
-`POST /connect/authorize` without the token, Hex's window names its verified
+`POST /connect/authorize` without the token, Hex's permission window (its own
+floating window on macOS, shown whether or not the main window is open, with
+both allows disabled for its first second) names its verified
 origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
 upload token that spends itself on one plain `POST /transcriptions` from the
 same origin. Codes and tokens expire in two minutes, a Deny starts a 30 s
-cooldown, and the dialog is answered (Escape and the scrim deny) rather than
+cooldown, and the dialog is answered (Return and Escape deny) rather than
 dismissed. `local_api` tests cover the whole exchange, origin binding, one-use
-codes and tokens, expiry, the scope refusals, and deny/timeout. The dialog's
-only rendering proof is the `--scene browser-connect` snapshot; no real
+codes and tokens, expiry, the scope refusals, and deny/timeout. The window's
+only rendering proof is the `consent_window` snapshot test; no real
 browser page, click, or model transcription was run, and its copy is English
 only.
 

@@ -71,14 +71,6 @@ pub(crate) enum Request {
         language: String,
     },
     CancelModel,
-    /// The window answered a web page's one-transcription ask; macOS only,
-    /// where the local API has a window to ask.
-    AnswerConsent {
-        #[allow(dead_code)]
-        id: u64,
-        #[allow(dead_code)]
-        answer: crate::local_api::Answer,
-    },
     /// The window stopped or cancelled a consented recording; macOS only.
     RecordControl {
         #[allow(dead_code)]

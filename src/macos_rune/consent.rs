@@ -1,10 +1,10 @@
-//! The macOS app's side of browser connect: the window shows one web page's
-//! ask, and the local API's worker waits for the answer.
+//! The macOS app's side of consent: Hex's permission window shows one ask,
+//! and the local API's worker waits for the answer.
 //!
 //! The local API thread blocks in [`Desk::ask`] until the person presses a
-//! button in the window, or a minute passes. The runtime thread reads
-//! [`Desk::prompt`] into the state it publishes, and the window answers with
-//! [`Desk::answer`]; nothing about the page's request touches the microphone,
+//! button in the permission window, or a minute passes. The window learns of
+//! each ask, and of its end, from [`Desk::watch`], and answers with
+//! [`Desk::answer`]; nothing about the request touches the microphone,
 //! Accessibility, or any other desktop authority.
 
 use std::sync::Mutex;
@@ -25,15 +25,32 @@ struct State {
     next_id: u64,
 }
 
-/// The one dialog the app can show. A page's ask is published from here, so
-/// every window and menu reads the same pending ask.
+/// Told the ask to show when one starts, and `None` when it ends (answered
+/// or timed out).
+type Watcher = Box<dyn Fn(Option<Prompt>) + Send + Sync>;
+
+/// The one dialog the app can show, at most one ask at a time.
 #[derive(Default)]
 pub(crate) struct Desk {
     state: Mutex<State>,
+    watcher: Mutex<Option<Watcher>>,
 }
 
 impl Desk {
+    /// Hands each ask to `watcher` as it starts, and `None` as it ends.
+    pub(crate) fn watch(&self, watcher: impl Fn(Option<Prompt>) + Send + Sync + 'static) {
+        *lock(&self.watcher) = Some(Box::new(watcher));
+    }
+
+    /// Tells the watcher, outside the state lock, so it may answer at once.
+    fn tell(&self, prompt: Option<Prompt>) {
+        if let Some(watcher) = lock(&self.watcher).as_ref() {
+            watcher(prompt);
+        }
+    }
+
     /// The ask the window should draw, if one is waiting.
+    #[cfg(test)]
     pub(crate) fn prompt(&self) -> Option<Prompt> {
         lock(&self.state)
             .pending
@@ -52,6 +69,8 @@ impl Desk {
             return false;
         }
         let pending = state.pending.take().expect("checked just above");
+        drop(state);
+        self.tell(None);
         pending.answer.send(answer).is_ok()
     }
 }
@@ -68,14 +87,17 @@ impl ConsentGate for Desk {
             }
             state.next_id += 1;
             let id = state.next_id;
+            let shown = Prompt {
+                id,
+                intent: prompt.intent,
+                recipient: prompt.recipient.clone(),
+            };
             state.pending = Some(Pending {
-                prompt: Prompt {
-                    id,
-                    intent: prompt.intent,
-                    recipient: prompt.recipient.clone(),
-                },
+                prompt: shown.clone(),
                 answer,
             });
+            drop(state);
+            self.tell(Some(shown));
             id
         };
         let answer = match answered.recv_timeout(wait) {
@@ -91,6 +113,8 @@ impl ConsentGate for Desk {
             .is_some_and(|pending| pending.prompt.id == id)
         {
             state.pending = None;
+            drop(state);
+            self.tell(None);
         }
         answer
     }
@@ -154,6 +178,35 @@ mod tests {
         assert!(!desk.answer(shown.id + 1, Answer::Once));
         assert!(desk.answer(shown.id, Answer::Deny));
         assert_eq!(asking.join().unwrap(), Answer::Deny);
+    }
+
+    /// The permission window hears each ask start and end: shown, then
+    /// hidden on an answer or a timeout.
+    #[test]
+    fn the_watcher_hears_each_ask_start_and_end() {
+        let desk = Arc::new(Desk::default());
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        {
+            let heard = heard.clone();
+            desk.watch(move |prompt| heard.lock().unwrap().push(prompt.map(|p| p.id)));
+        }
+        assert_eq!(
+            desk.ask(&prompt(), Duration::from_millis(1)),
+            Answer::Timeout
+        );
+        let asking = {
+            let desk = desk.clone();
+            thread::spawn(move || desk.ask(&prompt(), Duration::from_secs(5)))
+        };
+        let shown = loop {
+            if let Some(shown) = desk.prompt() {
+                break shown;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert!(desk.answer(shown.id, Answer::Deny));
+        assert_eq!(asking.join().unwrap(), Answer::Deny);
+        assert_eq!(*heard.lock().unwrap(), [Some(1), None, Some(2), None]);
     }
 
     #[test]
