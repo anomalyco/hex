@@ -790,7 +790,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     } else {
         event.time
     };
-    let handled = process_button(vk, left_control, is_down, time);
+    let handled = process_button(vk, left_control, is_down, time, key_down);
     if handled.ends_continuation(is_down, ModifierState::is_modifier(vk), event.dwExtraInfo) {
         activity::invalidate();
     }
@@ -879,7 +879,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             // A mouse event settles stale Left Ctrl bits too: a release can
             // land on another desktop and never reach the keyboard hook.
             modifiers::note_left_control(LeftControl::Other, down);
-            let handled = process_button(vk, LeftControl::Other, down, event.time);
+            let handled = process_button(vk, LeftControl::Other, down, event.time, key_down);
             if handled.ends_continuation(down, false, event.dwExtraInfo) {
                 activity::invalidate();
             }
@@ -969,7 +969,15 @@ fn held_modifiers() -> scrawl_capture::hosted_input::Modifiers {
 }
 
 // Both low-level hooks feed exactly the same capture and suppression rules.
-fn process_button(vk: u32, left_control: LeftControl, is_down: bool, time: u32) -> Handled {
+// `key_held` is the asynchronous key state the event is judged against, which
+// a test cannot make physical, so it arrives here as a lookup.
+fn process_button(
+    vk: u32,
+    left_control: LeftControl,
+    is_down: bool,
+    time: u32,
+    key_held: impl Fn(u16) -> bool,
+) -> Handled {
     let is_up = !is_down;
     let mut suppressed = false;
     let mut trigger = false;
@@ -991,7 +999,7 @@ fn process_button(vk: u32, left_control: LeftControl, is_down: bool, time: u32) 
             // unlocking and Ctrl+Space no longer matched. Re-read them on
             // every event: the asynchronous key state does not include this
             // event yet, so `update` applies it on top.
-            let read = ModifierState::read(key_down);
+            let read = ModifierState::read(key_held);
             let altgr_only = modifiers::altgr_only();
             state.raw_modifiers = read;
             state.modifiers = read.without_altgr(altgr_only);
@@ -1118,10 +1126,6 @@ fn process_button(vk: u32, left_control: LeftControl, is_down: bool, time: u32) 
                     state.paste_trigger_down = false;
                 }
             } else if state.trigger_vk == Some(vk) {
-                // The dictation trigger is Hex's own key even where Labs ›
-                // Share shortcut lets it reach the app, so its press never
-                // ends a paste continuation.
-                trigger = true;
                 if is_down {
                     if state.trigger_down {
                         suppressed = !state.share_trigger;
@@ -1144,6 +1148,11 @@ fn process_button(vk: u32, left_control: LeftControl, is_down: bool, time: u32) 
                             send_event(state, action, time);
                         }
                     }
+                    // The key is Hex's own only once the shortcut fired: Labs
+                    // › Share shortcut lets it reach the app, and a bare press
+                    // of it without the shortcut's modifiers is the user
+                    // typing, which ends a paste continuation.
+                    trigger = state.trigger_down;
                     if suppressed && state.binding.holds_menu_modifier() {
                         state.mask_release = true;
                     }
@@ -1504,6 +1513,95 @@ mod tests {
         assert!(!Handled::PASS.ends_continuation(true, ModifierState::is_modifier(control), 0));
         // Hex's own synthetic paste or chord carries its marker.
         assert!(!Handled::PASS.ends_continuation(true, false, HEX_INJECTED));
+    }
+
+    /// The hook's state machine as the keyboard hook installs it, for one
+    /// Ctrl+Space binding; the caller drives events through
+    /// [`process_button`], whose `key_held` lookup stands in for the physical
+    /// modifiers a test cannot press.
+    fn callback_state(binding: WindowsHotkey, share_trigger: bool) -> Receiver<HotkeyEvent> {
+        let (events, receiver) = mpsc::sync_channel(EVENT_CAPACITY);
+        let (errors, _unread) = mpsc::channel();
+        *CALLBACK_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(CallbackState {
+            events,
+            errors,
+            activity: InputActivity::default(),
+            binding,
+            trigger_vk: Some(u32::from(VK_SPACE)),
+            paste_last: None,
+            paste_trigger_vk: None,
+            raw: None,
+            raw_trigger_vk: None,
+            raw_trigger_down: false,
+            terminal_paste: None,
+            terminal_paste_trigger_vk: None,
+            terminal_paste_trigger_down: false,
+            second: None,
+            second_trigger_vk: None,
+            second_trigger_down: false,
+            annotate: None,
+            annotate_trigger_vk: None,
+            annotate_trigger_down: false,
+            drawing_escape_down: false,
+            cancel: None,
+            cancel_vk: None,
+            cancel_down: false,
+            modifiers: ModifierState::default(),
+            raw_modifiers: ModifierState::default(),
+            side_down: SideDownTimes::default(),
+            trigger_down: false,
+            paste_trigger_down: false,
+            double_tap_enabled: false,
+            double_tap_only: false,
+            share_trigger,
+            capture: CaptureState::default(),
+            dirty: false,
+            mask_release: false,
+        });
+        receiver
+    }
+
+    #[test]
+    fn a_bare_trigger_key_ends_a_paste_continuation_but_the_shortcut_does_not() {
+        let space = u32::from(VK_SPACE);
+        let ctrl_held = |key: u16| key == VK_LCONTROL;
+
+        // Labs › Share shortcut: Ctrl+Space reaches the app in front, and
+        // since Hex's shortcut fired, its press is Hex's key, not typing.
+        let events = callback_state(WindowsHotkey::default(), true);
+        let handled = process_button(space, LeftControl::Other, true, 1_000, ctrl_held);
+        assert_eq!(handled.disposition, Disposition::Pass);
+        assert!(!handled.ends_continuation(true, false, 0));
+        assert_eq!(
+            events.try_recv().map(|event| event.action),
+            Ok(HotkeyAction::Start)
+        );
+
+        // A bare Space without the shortcut's Ctrl is the user typing: it
+        // reaches the app, starts nothing, and ends the continuation.
+        let events = callback_state(WindowsHotkey::default(), true);
+        let handled = process_button(space, LeftControl::Other, true, 2_000, |_| false);
+        assert_eq!(handled.disposition, Disposition::Pass);
+        assert!(handled.ends_continuation(true, false, 0));
+        assert!(events.try_recv().is_err());
+
+        // Sharing off, the shortcut's press is swallowed before it can end
+        // anything.
+        let events = callback_state(WindowsHotkey::default(), false);
+        let handled = process_button(space, LeftControl::Other, true, 3_000, ctrl_held);
+        assert_eq!(handled.disposition, Disposition::Suppress);
+        assert!(!handled.ends_continuation(true, false, 0));
+        assert_eq!(
+            events.try_recv().map(|event| event.action),
+            Ok(HotkeyAction::Start)
+        );
+
+        CALLBACK_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
     }
 
     #[test]
