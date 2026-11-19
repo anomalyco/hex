@@ -181,6 +181,8 @@ struct Grant {
     channel: Channel,
     recipient: Recipient,
     durable: bool,
+    /// An Allow Once grant not yet used: it lapses then, as its code would.
+    unused_until: Option<Instant>,
 }
 
 struct Session {
@@ -545,6 +547,7 @@ impl Sessions {
                 channel: code.channel,
                 recipient: code.recipient,
                 durable: code.durable,
+                unused_until: (!code.durable).then(|| Instant::now() + self.timings.code),
             },
         );
         HttpResponse::json(
@@ -626,6 +629,9 @@ impl Sessions {
             },
         );
         state.active = Some(session_token.clone());
+        if let Some(grant) = state.grants.values_mut().find(|grant| grant.id == grant_id) {
+            grant.unused_until = None;
+        }
         let lease = self.timings.lease;
         drop(state);
         self.watch(id);
@@ -841,6 +847,9 @@ impl Sessions {
 
 fn prune(state: &mut State, now: Instant) {
     state.codes.retain(|_, code| code.expires > now);
+    state
+        .grants
+        .retain(|_, grant| grant.unused_until.is_none_or(|until| until > now));
     state.sessions.retain(|_, session| {
         session.phase.live() || session.deadline + Duration::from_secs(300) > now
     });

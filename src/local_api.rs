@@ -4419,6 +4419,41 @@ mod tests {
         (sessions, channel, grant, session)
     }
 
+    /// An Allow Once grant left unused lapses with its code's lifetime, so
+    /// "one recording" can't start hours later without a new ask.
+    #[test]
+    fn an_unused_allow_once_grant_lapses() {
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(ScriptedGate::new(Answer::Once)),
+            FakeRecording::with_text("late words"),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record::Timings {
+                code: Duration::from_millis(100),
+                ..record_timings()
+            },
+        ));
+        let channel = record::Channel::Web("https://app.example".into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let paired = sessions.pair(channel.clone(), body.as_bytes());
+        let code = serde_json::from_slice::<serde_json::Value>(&paired.body).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        assert_eq!(minted["duration"], "once");
+        let grant = minted["grantToken"].as_str().unwrap().to_owned();
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(sessions.start(&grant, &channel).status, 401);
+        assert!(sessions.grants().is_empty());
+    }
+
     /// Stopped from Hex's window and never collected, a recording is
     /// discarded after the grace, as a lapsed lease's is, and frees the one
     /// session for the next start.
