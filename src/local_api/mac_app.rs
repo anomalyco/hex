@@ -86,7 +86,7 @@ fn name(path: &Path) -> Option<String> {
 fn plain(name: &str) -> Option<String> {
     let name: String = name
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !super::consent::hidden(*c))
         .take(MAX_NAME_CHARS)
         .collect();
     let name = name.trim();
