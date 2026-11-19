@@ -304,7 +304,9 @@ impl Bound {
         // listening, never one between `bind` and `listen`.
         let fresh = path.with_file_name(format!(
             ".{}.{}",
-            path.file_name().and_then(|name| name.to_str()).unwrap_or("record.sock"),
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("record.sock"),
             std::process::id()
         ));
         let _ = fs::remove_file(&fresh);
