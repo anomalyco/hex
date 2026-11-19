@@ -1361,7 +1361,9 @@ fn history_clear_removes_a_usage_rollup_with_no_entries() {
     let check = history.clone();
     let mut rt = runtime("history-empty", true, PANE_SIZE);
     rt.state.history = history::HistoryPane::shared(Some(history));
-    rt.state.history.reload();
+    rt.state
+        .history
+        .reload(rt.state.settings.labs.history_stats);
     rt.state.pane = Pane::History;
     rt.invalidate();
     settle(&mut rt);
@@ -1410,7 +1412,9 @@ fn history_delete_confirmation_stops_when_the_pane_moves_on() {
     let mut rt = runtime("history-empty", true, PANE_SIZE);
     rt.state.history = history::HistoryPane::shared(Some(history));
     rt.state.history.selected = Some(first);
-    rt.state.history.reload();
+    rt.state
+        .history
+        .reload(rt.state.settings.labs.history_stats);
     rt.invalidate();
     settle(&mut rt);
     // Choosing another entry answers Delete… and leaves the first entry be.
@@ -2142,7 +2146,9 @@ fn history_search_without_matches_says_so() {
         .unwrap();
     let mut rt = runtime("history-empty", true, PANE_SIZE);
     rt.state.history = history::HistoryPane::shared(Some(history));
-    rt.state.history.reload();
+    rt.state
+        .history
+        .reload(rt.state.settings.labs.history_stats);
     rt.invalidate();
     settle(&mut rt);
     assert!(texts(&rt).iter().all(|text| text != "No dictations match."));
@@ -2235,7 +2241,9 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
         .unwrap();
     let mut rt = runtime("history-empty", true, GOLDEN_SIZE);
     rt.state.history = history::HistoryPane::shared(Some(history.clone()));
-    rt.state.history.reload();
+    rt.state
+        .history
+        .reload(rt.state.settings.labs.history_stats);
     rt.state.history.selected = Some(id);
     rt.invalidate();
     settle(&mut rt);
@@ -2340,7 +2348,9 @@ fn copy_audio_shows_only_with_its_lab_and_keep_recordings() {
         .unwrap();
     let mut rt = runtime("history-empty", true, GOLDEN_SIZE);
     rt.state.history = history::HistoryPane::shared(Some(history.clone()));
-    rt.state.history.reload();
+    rt.state
+        .history
+        .reload(rt.state.settings.labs.history_stats);
     rt.state.history.selected = Some(id);
     rt.invalidate();
     settle(&mut rt);

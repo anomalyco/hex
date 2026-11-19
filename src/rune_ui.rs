@@ -1232,7 +1232,7 @@ impl Ui {
         }
         self.pane = pane;
         match pane {
-            Pane::History => self.history.reload(),
+            Pane::History => self.history.reload(self.settings.labs.history_stats),
             Pane::HudLab => self.ask(platform::PlatformRequest::ConfigureHud(self.platform.hud)),
             #[cfg(hex_capture)]
             Pane::Annotate => self.ask(platform::PlatformRequest::Scrawl(
@@ -1392,6 +1392,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && !ui.labs_open
             && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible),
         ui.settings.labs.keep_recordings,
+        ui.settings.labs.history_stats,
         ui.settings.typing_wpm,
     );
     #[cfg(hex_capture)]

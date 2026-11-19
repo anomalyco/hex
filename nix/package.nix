@@ -87,14 +87,19 @@ let
       hash = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
     };
     "rune-0.0.1" = {
-      rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90";
-      hash = "sha256-aXs5tgrATglYprmwjDdIFkyp9gHCor7CFdla1aqJfZo=";
+      rev = "431469b999268a56ef7fbc60ed55975753ee22df";
+      hash = "sha256-1Y8Y3EmOZqI+p+0P9RjYq5piMpHycWAESSYSiQ5kzaA=";
     };
     "transcribe-cpp-sys-0.4.1" = {
       rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a";
       hash = "sha256-1VztJ0VhPTjAuk4J0NT9KapDOqplegpHOqHsTpfHXWc=";
     };
   };
+  # The vendor tree names every Git crate `<name>-<version>`, so the rune
+  # package's directory follows its key in the table above.
+  runeVendor = builtins.head (
+    builtins.filter (name: lib.hasPrefix "rune-" name) (builtins.attrNames cargoGitDependencies)
+  );
 in
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "hex";
@@ -189,7 +194,23 @@ rustPlatform.buildRustPackage (finalAttrs: {
           else
             lib.replaceStrings (map (fragment: fragment.from) fragments) (map (
               fragment: fragment.to
-            ) fragments) old.buildCommand;
+            ) fragments) old.buildCommand
+            + "\n"
+            + ''
+              # Rune's `crates/rune-text` loads its default fonts from
+              # `crates/rune/assets` through a path relative to Rune's
+              # workspace root (`../../../rune/assets/…`). A vendored crate
+              # sits in `git/` beside the rune package, not inside that
+              # workspace, so point that path at the rune package's own
+              # assets. Drop this once Rune moves the fonts into rune-text.
+              mkdir -p $out/git
+              rune_vendor=${runeVendor}
+              if [ ! -d "$out/git/$rune_vendor/assets" ]; then
+                echo "nix/package.nix: $out/git/$rune_vendor/assets is missing; rune-text's font include needs it" >&2
+                exit 1
+              fi
+              ln -sfn "$rune_vendor" $out/git/rune
+            '';
       });
 
   nativeBuildInputs = [
@@ -229,6 +250,11 @@ rustPlatform.buildRustPackage (finalAttrs: {
   env = buildEnv;
   # Desktop and installed-model tests are #[ignore]; run the remaining suite.
   doCheck = true;
+  # Hex's suite keeps process-global state (the lab switches, a model download
+  # in flight), while CI and `scripts/check` run nextest, which isolates each
+  # test in its own process. Plain `cargo test` shares one process, so let
+  # cargoCheckHook run it one test at a time (it sets RUST_TEST_THREADS=1).
+  dontUseCargoParallelTests = true;
   preCheck = ''
     export HOME="$TMPDIR/hex-test-home"
     mkdir -p "$HOME"

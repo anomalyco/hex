@@ -259,7 +259,7 @@ fn typing_speed(p: Paint, typing_wpm: u32) -> El {
                 ui.history.typing_speed_drag = (!done).then_some(wpm);
                 if done && ui.update(|settings| settings.typing_wpm = wpm) {
                     ui.history.typing_wpm = wpm;
-                    ui.history.reload_stats();
+                    ui.history.reload_stats(ui.settings.labs.history_stats);
                 }
             },
         ))

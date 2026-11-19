@@ -131,10 +131,10 @@ impl HistoryPane {
 
     /// Refreshes the bounded snapshot for the current query, and the stats.
     /// A reload, as entering the pane does, stops any Delete… confirmation.
-    pub(super) fn reload(&mut self) {
+    pub(super) fn reload(&mut self, stats_on: bool) {
         self.delete_armed = None;
         self.reload_entries();
-        self.reload_stats();
+        self.reload_stats(stats_on);
     }
 
     fn reload_entries(&mut self) {
@@ -177,9 +177,10 @@ impl HistoryPane {
     }
 
     /// Sums up every retained entry and reads the daily rollup, only while
-    /// Labs › Dictation stats is on; off, nothing is read for it.
-    pub(super) fn reload_stats(&mut self) {
-        let stats_on = crate::labs::history_stats();
+    /// Labs › Dictation stats is on; off, nothing is read for it. `stats_on`
+    /// is the window's own switch, never the process-wide mirror, so a test
+    /// that applies another setting can't close this window's dialog.
+    pub(super) fn reload_stats(&mut self, stats_on: bool) {
         self.stats = match &self.store {
             Some(store) if stats_on => Some(store.stats(self.typing_wpm)),
             _ => None,
@@ -215,7 +216,13 @@ impl HistoryPane {
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
     /// once when the dialog closes because the stats emptied.
-    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool, typing_wpm: u32) -> bool {
+    pub(super) fn poll(
+        &mut self,
+        visible: bool,
+        keep_audio: bool,
+        stats_on: bool,
+        typing_wpm: u32,
+    ) -> bool {
         let answered = self.poll_again();
         // Playback's answer returns the card to Play; it is not a reason to
         // read the stats again.
@@ -225,7 +232,7 @@ impl HistoryPane {
         let typing_wpm = crate::app_settings::clamp_typing_wpm(typing_wpm);
         if self.typing_wpm != typing_wpm {
             self.typing_wpm = typing_wpm;
-            self.reload_stats();
+            self.reload_stats(stats_on);
             changed = true;
         }
         // A playback belongs to the card that shows its Stop: leaving the
@@ -242,7 +249,7 @@ impl HistoryPane {
         }
         // The dialog belongs to the pane and its switch: leaving History,
         // turning Dictation stats off, or emptying the stats closes it.
-        if self.stats_open && (!visible || !crate::labs::history_stats() || !self.has_stats()) {
+        if self.stats_open && (!visible || !stats_on || !self.has_stats()) {
             self.stats_open = false;
             changed = true;
         }
@@ -255,11 +262,8 @@ impl HistoryPane {
             self.reload_entries();
             changed |= self.entries != previous;
         }
-        if changed
-            || self.stats.is_some() != crate::labs::history_stats()
-            || self.usage.is_some() != crate::labs::history_stats()
-        {
-            self.reload_stats();
+        if changed || self.stats.is_some() != stats_on || self.usage.is_some() != stats_on {
+            self.reload_stats(stats_on);
             return true;
         }
         answered || played || copied || changed
@@ -507,7 +511,7 @@ fn set_retention(ui: &mut Ui, retention: HistoryRetention) {
     if !ui.update(|settings| settings.history_retention = retention) {
         return;
     }
-    ui.history.reload();
+    ui.history.reload(ui.settings.labs.history_stats);
 }
 
 fn clear(ui: &mut Ui) {
@@ -521,7 +525,7 @@ fn clear(ui: &mut Ui) {
         if let Err(error) = store.clear() {
             ui.history.error = Some(error.to_string());
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else {
         ui.history.entries.clear();
         ui.history.selected = None;
@@ -691,7 +695,7 @@ fn replace(ui: &mut Ui, id: u64) {
             return;
         }
         ui.history.again = None;
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else if let Some(entry) = ui.history.entries.iter_mut().find(|entry| entry.id == id) {
         entry.replace(transcript, crate::history::now_ms());
         ui.history.again = None;
@@ -705,7 +709,7 @@ fn restore(ui: &mut Ui, id: u64, index: usize) {
         if let Err(error) = store.restore_version(id, index) {
             ui.history.error = Some(error.to_string());
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else if let Some(entry) = ui.history.entries.iter_mut().find(|entry| entry.id == id) {
         entry.restore(index);
     }
@@ -717,7 +721,7 @@ fn delete(ui: &mut Ui, id: u64) {
         if let Err(error) = store.delete(id) {
             ui.history.error = Some(error.to_string());
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else {
         ui.history.entries.retain(|entry| entry.id != id);
         ui.history.selected = None;
