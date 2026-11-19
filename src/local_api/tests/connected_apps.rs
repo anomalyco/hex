@@ -144,7 +144,9 @@ fn off_every_consent_route_answers_as_it_did_without_the_lab() {
         identity: record::Identity {
             identifier: "com.example.recorder".into(),
             cdhash: "fixture-digest".into(),
-            team: None,
+            verification: crate::local_api::Verification::MacSignature { team: None },
+            name: None,
+            icon: None,
         },
     };
     let paired = sessions.pair(native, ask_body().as_bytes());
@@ -225,7 +227,9 @@ fn websites_off_no_website_asks_is_listed_or_gets_cors() {
         identity: record::Identity {
             identifier: "com.example.recorder".into(),
             cdhash: "fixture-digest".into(),
-            team: None,
+            verification: crate::local_api::Verification::MacSignature { team: None },
+            name: None,
+            icon: None,
         },
     };
     assert_eq!(sessions.pair(native, ask_body().as_bytes()).status, 200);
@@ -403,7 +407,11 @@ fn the_revoke_list_covers_websites_and_native_apps() {
         identity: record::Identity {
             identifier: "com.example.recorder".into(),
             cdhash: "fixture-digest".into(),
-            team: Some("ABCDE12345".into()),
+            verification: crate::local_api::Verification::MacSignature {
+                team: Some("ABCDE12345".into()),
+            },
+            name: None,
+            icon: None,
         },
     };
     for channel in [record::Channel::Web(ASKING.into()), native] {
@@ -449,7 +457,9 @@ fn turning_off_withdraws_the_ask_and_cancels_the_recording() {
         identity: record::Identity {
             identifier: "com.example.recorder".into(),
             cdhash: "fixture-digest".into(),
-            team: None,
+            verification: crate::local_api::Verification::MacSignature { team: None },
+            name: None,
+            icon: None,
         },
     };
     let asking = {

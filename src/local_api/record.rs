@@ -31,9 +31,9 @@
 //!
 //! - a browser page over the loopback HTTP API, by its `Origin` (a website
 //!   Labs › Connected apps allows, see [`super::access`]);
-//! - a native process over the owner-only Unix socket, by the audit token
-//!   `Security.framework` resolves from the peer, never by a name or path the
-//!   process claims.
+//! - a native process over the owner-only Unix socket (a named pipe on
+//!   Windows), by what the OS reports for the peer (see [`super::native`]),
+//!   never by a name or path the process claims.
 //!
 //! Pairings live in this process only and are revocable from Hex's window or
 //! by the client. Only Always Allow's verified capability and scope are
@@ -79,30 +79,14 @@ pub(super) const DENY_COOLDOWN: Duration = Duration::from_secs(30);
 pub(super) const MAX_BODY_BYTES: usize = 96 * 1024; // room for a page's favicon
 const BODY_DEADLINE: Duration = Duration::from_secs(5);
 
-/// The verified identity of one native process, from its peer audit token.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct PeerId(pub(crate) [u32; 8]);
-
-/// What a code-signing check reported about a native client.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Identity {
-    /// The signing identifier (`com.example.app` for a signed bundle).
-    pub(crate) identifier: String,
-    /// Verified code-directory hash, including for ad-hoc signatures.
-    pub(crate) cdhash: String,
-    /// The Team ID, when the signature has one.
-    pub(crate) team: Option<String>,
-}
+pub(crate) use super::native::{Identity, PeerId};
 
 /// How a request reached Hex, and what a grant is bound to.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Channel {
     /// A browser page's verified `Origin` over loopback HTTP.
     Web(String),
-    /// A native process over Hex's Unix socket: its audit token, and the
-    /// signing identity `Security.framework` resolved for that token. Only
-    /// macOS has the socket: elsewhere native clients have no channel.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// A native process over Hex's native channel, and what the OS verified.
     Native { peer: PeerId, identity: Identity },
 }
 
@@ -1079,11 +1063,9 @@ impl Sessions {
             Channel::Native { identity, .. } => Some(Recipient::Native {
                 identifier: identity.identifier.clone(),
                 cdhash: identity.cdhash.clone(),
-                verification: Verification::MacSignature {
-                    team: identity.team.clone(),
-                },
-                name: None,
-                icon: None,
+                verification: identity.verification.clone(),
+                name: identity.name.clone(),
+                icon: identity.icon.clone(),
             }),
         }
     }
@@ -1147,19 +1129,6 @@ fn recipient_key(recipient: &Recipient) -> String {
             };
             format!("native:{identifier}:{cdhash}:{verified}")
         }
-    }
-}
-
-/// Where the app's native recording socket lives.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn native_socket_path() -> Option<std::path::PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        super::native::socket_path()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
     }
 }
 

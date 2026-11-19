@@ -1,28 +1,43 @@
 // Electron main process: pair with Hex once, then record twice and revoke.
 //
 // This runs in the main process (not a renderer), where Node can open Hex's
-// owner-only Unix socket. Hex identifies this process by its code signature
-// and shows that identity in its pairing dialog; nothing here claims a name.
+// owner-only channel: a Unix socket on macOS and Linux, a named pipe on
+// Windows. Hex identifies this process itself (its code signature, sandbox
+// app id, or executable) and shows that in its pairing dialog; nothing here
+// claims a name.
 //
-//   node electron-main.mjs                 # macOS, default socket
-//   node electron-main.mjs /path/record.sock
+//   node electron-main.mjs                 # Hex's default channel
+//   electron electron-main.mjs
+//   HEX_RECORD_SOCKET=/path/record.sock node electron-main.mjs   # or a pipe name
 //
 // Requires Node 18+ and Hex running with Labs › Connected apps on (a native
-// app needs nothing else; the dialog names its code signature). No token from
-// Hex's discovery file is used or needed. Pairing asks once and starts
-// nothing; each recording is its own session under the grant, and it runs for
-// as long as this process checks in (`POST /record/heartbeat`). If the process
-// quits or hangs, Hex stops the microphone within one lease (10 s). Grants
-// live in Hex's process, so a restart of Hex means pairing again.
+// app needs nothing else). No token from Hex's discovery file is used or
+// needed. Pairing asks once and starts nothing; each recording is its own
+// session under the grant, and it runs for as long as this process checks in
+// (`POST /record/heartbeat`). If the process quits or hangs, Hex stops the
+// microphone within one lease (10 s). Grants live in Hex's process, so a
+// restart of Hex means pairing again.
 
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+// Hex's data folder, as Hex finds it; on Windows `record.pipe` there names
+// the pipe.
+const folder =
+  process.env.HEX_APPLICATION_SUPPORT_DIR ??
+  {
+    darwin: () => join(homedir(), "Library", "Application Support", "hex"),
+    win32: () => join(process.env.APPDATA, "hex"),
+  }[process.platform]?.() ??
+  join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "hex");
 const socketPath =
-  process.argv[2] ??
-  join(homedir(), "Library", "Application Support", "hex", "record.sock");
+  process.env.HEX_RECORD_SOCKET ??
+  (process.platform === "win32"
+    ? readFileSync(join(folder, "record.pipe"), "utf8").trim()
+    : join(folder, "record.sock"));
 // How long each demo recording runs; your app stops whenever its UI says so.
 const recordForMs = Number(process.env.HEX_RECORD_MS ?? 5000);
 
@@ -35,7 +50,7 @@ const pkce = () => {
   return { verifier, challenge };
 };
 
-/** One JSON or empty POST/GET over Hex's Unix socket. */
+/** One JSON or empty POST/GET over Hex's socket or pipe. */
 function call(path, method, { body, grant, session } = {}) {
   const payload = body === undefined ? "" : JSON.stringify(body);
   return new Promise((resolve, reject) => {

@@ -2,9 +2,11 @@
 // desktop app.
 //
 // Build it as a small binary or paste `record_twice` into a Rune host's
-// runtime code. It talks to Hex's owner-only Unix socket (`record.sock`),
-// never to the loopback HTTP API, so Hex identifies the calling process by
-// its code signature instead of a name or an Origin. No API token is read.
+// runtime code. It talks to Hex's owner-only channel (`record.sock` on macOS
+// and Linux, the named pipe `record.pipe` names on Windows), never to the
+// loopback HTTP API, so Hex identifies the calling process itself (its code
+// signature, sandbox app id, or executable) instead of a name or an Origin.
+// No API token is read.
 //
 // Pairing asks the person once and starts nothing. The grant it returns opens
 // each recording; `record_once` starts one session under it, which runs for
@@ -13,18 +15,17 @@
 // the grant (here, or in Hex's window under Labs › Connected apps) ends the
 // permission; the next run pairs and asks again.
 //
-// Dependencies: `sha2 = "0.11"` and `serde_json = "1"` (both already in
-// Hex's tree); everything else is std.
+// Dependencies: `sha2 = "0.11"`, `serde_json = "1"` and `getrandom = "0.4"`
+// (all already in Hex's tree); everything else is std.
 //
-//     cargo new --bin record-once && cargo add sha2 serde_json
-//     HEX_RECORD_SOCKET=~/Library/Application\ Support/hex/record.sock \
-//         cargo run --release
+//     cargo new --bin record-once && cargo add sha2 serde_json getrandom
+//     cargo run --release            # Hex's default channel
+//     HEX_RECORD_SOCKET=/path/record.sock cargo run --release
 //
 // The same functions run inside a Rune app's host: Rune is a Rust host, and
-// these only block their caller on a Unix socket.
+// these only block their caller on a socket or pipe.
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::Duration;
@@ -46,6 +47,10 @@ pub fn pair(socket: &Path) -> Result<(String, bool), String> {
         )),
         None,
     )?;
+    // 403 consent-denied means the person pressed Deny (or let it time out).
+    if !paired.starts_with("HTTP/1.1 200") {
+        return Err(format!("Hex did not allow pairing: {paired}"));
+    }
     let paired = json(&paired)?;
     let code = paired
         .get("code")
@@ -149,14 +154,14 @@ fn call(
     body: Option<&str>,
     header: Option<(&str, &str)>,
 ) -> Result<String, String> {
-    let mut stream = UnixStream::connect(socket).map_err(|error| error.to_string())?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(180)))
-        .map_err(|error| error.to_string())?;
+    let mut stream = connect(socket)?;
     let body = body.unwrap_or("");
-    let header = header
+    let mut header = header
         .map(|(name, value)| format!("{name}: {value}\r\n"))
         .unwrap_or_default();
+    if !body.is_empty() {
+        header.push_str("Content-Type: application/json\r\n");
+    }
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: hex\r\n{header}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -171,6 +176,55 @@ fn call(
     Ok(response)
 }
 
+#[cfg(unix)]
+fn connect(socket: &Path) -> Result<std::os::unix::net::UnixStream, String> {
+    let stream = std::os::unix::net::UnixStream::connect(socket).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(180)))
+        .map_err(|e| e.to_string())?;
+    Ok(stream)
+}
+
+#[cfg(windows)]
+fn connect(pipe: &Path) -> Result<std::fs::File, String> {
+    // Hex keeps one pipe instance waiting; between two clients it is
+    // briefly busy (ERROR_PIPE_BUSY).
+    for _ in 0..50 {
+        match std::fs::OpenOptions::new().read(true).write(true).open(pipe) {
+            Err(error) if error.raw_os_error() == Some(231) => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            opened => return opened.map_err(|e| e.to_string()),
+        }
+    }
+    Err("Hex's pipe stayed busy".into())
+}
+
+/// Hex's channel in its data folder: the socket, or on Windows the pipe
+/// `record.pipe` names.
+fn default_channel() -> Result<PathBuf, String> {
+    let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    let folder = match env("HEX_APPLICATION_SUPPORT_DIR") {
+        Some(folder) => folder,
+        None if cfg!(target_os = "macos") => {
+            env("HOME").ok_or("no HOME")?.join("Library/Application Support/hex")
+        }
+        None if cfg!(windows) => env("APPDATA").ok_or("no APPDATA")?.join("hex"),
+        None => env("XDG_DATA_HOME")
+            .filter(|dir| dir.is_absolute())
+            .or_else(|| env("HOME").map(|home| home.join(".local/share")))
+            .ok_or("no HOME")?
+            .join("hex"),
+    };
+    if cfg!(windows) {
+        let named = std::fs::read_to_string(folder.join("record.pipe"))
+            .map_err(|error| format!("Hex is not running: {error}"))?;
+        Ok(PathBuf::from(named.trim()))
+    } else {
+        Ok(folder.join("record.sock"))
+    }
+}
+
 fn json(response: &str) -> Result<serde_json::Value, String> {
     let body = response
         .split_once("\r\n\r\n")
@@ -181,11 +235,9 @@ fn json(response: &str) -> Result<serde_json::Value, String> {
 
 fn random_verifier() -> Result<String, String> {
     // 48 bytes of entropy, base64url, 64 characters (inside RFC 7636's
-    // 43–128 range). `/dev/urandom` keeps this example std-only.
+    // 43–128 range).
     let mut bytes = [0_u8; 48];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|error| error.to_string())?;
+    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
     Ok(base64url(&bytes))
 }
 
@@ -212,12 +264,13 @@ fn base64url(bytes: &[u8]) -> String {
 }
 
 fn main() {
-    let socket = std::env::var_os("HEX_RECORD_SOCKET")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var("HOME").expect("HOME"))
-                .join("Library/Application Support/hex/record.sock")
-        });
+    let socket = match std::env::var_os("HEX_RECORD_SOCKET").map(PathBuf::from) {
+        Some(socket) => socket,
+        None => match default_channel() {
+            Ok(socket) => socket,
+            Err(error) => return eprintln!("no recording: {error}"),
+        },
+    };
     // Each demo recording runs five seconds; a real app sends on `stop` when
     // its UI says so.
     let five_seconds = || {
