@@ -5,6 +5,7 @@ import UIKit
 final class KeyboardViewController: UIInputViewController {
     private let bridge = KeyboardBridge()
     private let viewModel = KeyboardViewModel()
+    private let localDictation = KeyboardLocalDictation()
     private var pollTimer: Timer?
     private var coldStartJobID = UUID().uuidString
     private var lastURLRefreshBucket: Int = 0
@@ -53,8 +54,20 @@ final class KeyboardViewController: UIInputViewController {
 
         viewModel.inputViewController = self
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
-        viewModel.onStopTap = { [weak self] in self?.stopWarmDictation() }
-        viewModel.onCancelTap = { [weak self] in self?.cancelWarmDictation() }
+        viewModel.onStopTap = { [weak self] in
+            guard let self else { return }
+            if self.localDictation.isActive { self.localDictation.stop() } else { self.stopWarmDictation() }
+        }
+        viewModel.onCancelTap = { [weak self] in
+            guard let self else { return }
+            if self.localDictation.isActive { self.localDictation.cancel() } else { self.cancelWarmDictation() }
+        }
+        if KeyboardLocalDictation.isSupported {
+            viewModel.onLocalDictateTap = { [weak self] in
+                guard let self else { return }
+                self.localDictation.start(in: self.view)
+            }
+        }
         viewModel.onStyleSelected = { [weak self] style in
             guard let self else { return }
             self.bridge.style = style
@@ -179,7 +192,7 @@ final class KeyboardViewController: UIInputViewController {
             bridge.fullAccessSeenAt = now
         }
 
-        let snap = bridge.snapshot()
+        let snap = localDictation.snapshot(now: now) ?? bridge.snapshot()
         var insertedResult = false
 
         if snap.hasDeliverableResult(at: now),
@@ -194,6 +207,7 @@ final class KeyboardViewController: UIInputViewController {
             textDocumentProxy.insertText(insertion)
             fullKeyboard?.didInsertDictation(insertion)
             bridge.lastInsertedResultID = resultID
+            localDictation.markDelivered(resultID: resultID)
             insertedResult = true
             coldStartJobID = UUID().uuidString
         }

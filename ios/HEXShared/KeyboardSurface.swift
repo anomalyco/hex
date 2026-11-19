@@ -69,6 +69,7 @@ final class KeyboardViewModel: ObservableObject {
     private(set) var pendingCommand: PendingCommand?
 
     var onDictateTap: (() -> Void)?
+    var onLocalDictateTap: (() -> Void)?
     var onStopTap: (() -> Void)?
     var onCancelTap: (() -> Void)?
     var onStyleSelected: ((DictationStyle) -> Void)?
@@ -923,7 +924,11 @@ struct KeyboardSurfaceView: View {
         if !model.hasFullAccess {
             model.onOpenURL?(KeyboardLaunchRequest.setup.url)
         } else if !model.isWarmAvailable || model.stagePhase == .failed {
-            model.onOpenURL?(model.coldStartURL)
+            if let local = model.onLocalDictateTap {
+                local()
+            } else {
+                model.onOpenURL?(model.coldStartURL)
+            }
         } else {
             model.onDictateTap?()
         }
