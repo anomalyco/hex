@@ -1,67 +1,140 @@
-//! Native clients' owner-only Unix socket for consented recordings.
+//! Native clients' owner-only channel for consented recordings.
 //!
 //! A native process (Electron's main process, a Rune host, a CLI) cannot be
 //! identified by a name it sends or by an `Origin`, so it does not use the
-//! loopback HTTP channel at all. It connects to `record.sock` in Hex's data
-//! folder, which only this user can open (mode 0600), and Hex reads the
-//! peer's audit token from the kernel. `Security.framework` then reports the
-//! signing identifier and team for that token; the consent dialog names that
-//! verified identity, and the grant is bound to the audit token.
+//! loopback HTTP channel at all. It connects to Hex's own channel, which only
+//! this user can open, and Hex asks the OS who the peer is:
 //!
-//! This socket serves `/record/*` and nothing else: it has no bearer token,
-//! no `Authorization` path, and no route for audio, dictation, control, or
-//! settings.
+//! - macOS: `record.sock` in Hex's data folder (mode 0600). Hex reads the
+//!   peer's audit token, and `Security.framework` reports the signing
+//!   identifier and team for it ([`macos`]).
+//! - Linux: the same socket, in Hex's private data folder (0700). Hex reads
+//!   `SO_PEERCRED`, pins the process, and names it by its sandbox app id or
+//!   the executable the kernel reports ([`linux`]).
+//! - Windows: a named pipe only this user can open, whose name Hex writes to
+//!   `record.pipe` in its data folder. Hex names the client by its image's
+//!   Authenticode publisher, or by the image path when it has none
+//!   ([`windows`]).
+//!
+//! The consent dialog names that verified identity, and the grant is bound to
+//! the one peer process. This channel serves `/record/*` and nothing else: it
+//! has no bearer token, no `Authorization` path, and no route for audio,
+//! dictation, control, or settings.
 
-use std::ffi::{CStr, c_char, c_void};
-use std::fs;
-
-use std::os::fd::{AsRawFd, RawFd};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::sync::atomic::AtomicBool;
+#[cfg(unix)]
 use std::time::Duration;
 
+use super::HttpContext;
+use super::consent::{ConsentIcon, Verification};
 use super::http::HttpResponse;
-use super::record::{self, Channel, Identity, PeerId};
-use super::{HttpContext, read_request, write_response};
+use super::record::{self, Channel};
+use super::{read_request, write_response};
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod display;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
+
+#[cfg(target_os = "linux")]
+use linux::identify;
+#[cfg(target_os = "macos")]
+use macos::identify;
+#[cfg(target_os = "windows")]
+pub(super) use windows::Listener;
+
+/// The one native process a connection came from: its audit token on macOS,
+/// its pid and start time elsewhere.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct PeerId(pub(crate) [u32; 8]);
+
+/// What the OS verified about a native client.
+#[derive(Clone, Debug)]
+pub(crate) struct Identity {
+    /// The stable grant key: the signing identifier (`com.example.app` for a
+    /// signed bundle) on macOS, the sandbox app id or executable path on
+    /// Linux, the signed image's file name (with its publisher) or the
+    /// image path on Windows.
+    pub(crate) identifier: String,
+    /// Verified code-directory hash on macOS, including for ad-hoc
+    /// signatures; empty elsewhere.
+    pub(crate) cdhash: String,
+    pub(crate) verification: Verification,
+    /// Display data Hex derived from verified data. Never compared, so a
+    /// name or icon found later never unbinds a grant.
+    pub(crate) name: Option<String>,
+    pub(crate) icon: Option<ConsentIcon>,
+}
+
+impl PartialEq for Identity {
+    fn eq(&self, other: &Self) -> bool {
+        self.identifier == other.identifier
+            && self.cdhash == other.cdhash
+            && self.verification == other.verification
+    }
+}
+
+impl Eq for Identity {}
+
+#[cfg(unix)]
 const ACCEPT_WAIT: Duration = Duration::from_millis(50);
+#[cfg(unix)]
 const CONNECTION_WAIT: Duration = Duration::from_millis(500);
 
-/// Hex's native recording socket: `record.sock` beside `local-api.json`.
-pub(super) fn socket_path() -> Option<PathBuf> {
+/// Hex's native recording channel beside `local-api.json`: the socket on
+/// macOS and Linux, the file naming the pipe on Windows.
+pub(crate) fn socket_path() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "record.pipe"
+    } else {
+        "record.sock"
+    };
     crate::app_paths::support_dir()
         .ok()
-        .map(|folder| folder.join("record.sock"))
+        .map(|folder| folder.join(name))
 }
 
 /// The bound owner-only socket and the thread accepting on it.
+#[cfg(unix)]
 pub(super) struct Listener {
     path: PathBuf,
-    worker: JoinHandle<()>,
+    worker: std::thread::JoinHandle<()>,
 }
 
+#[cfg(unix)]
 impl Listener {
     /// Binds `path` and serves native `/record/*` requests until the app's
     /// shutdown flag is set.
     pub(super) fn start(
         path: &Path,
         context: Arc<HttpContext>,
-        shutdown: Arc<std::sync::atomic::AtomicBool>,
+        shutdown: Arc<AtomicBool>,
     ) -> std::io::Result<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        #[cfg(target_os = "linux")]
+        linux::prepare(path)?;
+        #[cfg(not(target_os = "linux"))]
+        {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            // The local API's instance lock already makes this the one Hex; a
+            // socket left by a crashed run is stale.
+            let _ = fs::remove_file(path);
         }
-        // The local API's instance lock already makes this the one Hex; a
-        // socket left by a crashed run is stale.
-        let _ = fs::remove_file(path);
-        let listener = UnixListener::bind(path)?;
+        let listener = std::os::unix::net::UnixListener::bind(path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let path = path.to_path_buf();
-        let worker = thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("hex-native-record".into())
             .spawn(move || serve(listener, context, shutdown))?;
         Ok(Self { path, worker })
@@ -73,44 +146,52 @@ impl Listener {
         if self.worker.join().is_err() {
             tracing::error!("native record socket thread panicked");
         }
-        let _ = fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
+#[cfg(unix)]
 fn serve(
-    listener: UnixListener,
+    listener: std::os::unix::net::UnixListener,
     context: Arc<HttpContext>,
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
+    shutdown: Arc<AtomicBool>,
 ) {
+    use std::os::fd::AsRawFd;
     while !shutdown.load(std::sync::atomic::Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let _ = stream.set_read_timeout(Some(CONNECTION_WAIT));
                 let _ = stream.set_write_timeout(Some(CONNECTION_WAIT));
-                let identity = identify(stream.as_raw_fd());
                 let context = context.clone();
-                // Each connection is short; a finish waits on the engine, so
-                // it gets its own thread rather than blocking the accept
-                // loop.
-                let spawned = thread::Builder::new()
+                // Each connection is short; a finish waits on the engine, and
+                // reading a peer's identity may wait on the disk, so each gets
+                // its own thread rather than blocking the accept loop.
+                let spawned = std::thread::Builder::new()
                     .name("hex-native-record-client".into())
-                    .spawn(move || handle(stream, identity, &context));
+                    .spawn(move || {
+                        let identity = identify(stream.as_raw_fd());
+                        handle(stream, identity, &context);
+                    });
                 if let Err(error) = spawned {
                     tracing::warn!(%error, "could not serve a native record client");
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(ACCEPT_WAIT);
+                std::thread::sleep(ACCEPT_WAIT);
             }
             Err(error) => {
                 tracing::warn!(%error, "native record socket accept failed");
-                thread::sleep(ACCEPT_WAIT);
+                std::thread::sleep(ACCEPT_WAIT);
             }
         }
     }
 }
 
-fn handle(mut stream: UnixStream, identity: Option<(PeerId, Identity)>, context: &HttpContext) {
+fn handle(
+    mut stream: impl Read + Write,
+    identity: Option<(PeerId, Identity)>,
+    context: &HttpContext,
+) {
     let request = match read_request(&mut stream, &context.shutdown) {
         Ok(request) => request,
         Err(super::http::RequestReadError::Shutdown) => return,
@@ -127,7 +208,7 @@ fn handle(mut stream: UnixStream, identity: Option<(PeerId, Identity)>, context:
     }
 }
 
-/// The native socket's whole router: `/record/*` only.
+/// The native channel's whole router: `/record/*` only.
 fn route(
     request: super::HttpRequest,
     identity: Option<(PeerId, Identity)>,
@@ -191,11 +272,11 @@ fn route(
     }
 }
 
-/// Starts the native socket when the app configured one and can record.
+/// Starts the native channel when the app configured one and can record.
 pub(super) fn start_if_configured(
     path: Option<&Path>,
     context: &Arc<HttpContext>,
-    shutdown: &Arc<std::sync::atomic::AtomicBool>,
+    shutdown: &Arc<AtomicBool>,
 ) -> Option<Listener> {
     let (Some(path), true) = (path, context.record.is_some()) else {
         return None;
@@ -203,209 +284,8 @@ pub(super) fn start_if_configured(
     match Listener::start(path, context.clone(), shutdown.clone()) {
         Ok(listener) => Some(listener),
         Err(error) => {
-            tracing::warn!(%error, "native record socket is unavailable");
+            tracing::warn!(%error, "native record channel is unavailable");
             None
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Peer identity
-
-type CFTypeRef = *const c_void;
-type CFDictionaryRef = *const c_void;
-type CFStringRef = *const c_void;
-type CFDataRef = *const c_void;
-type SecCodeRef = *mut c_void;
-type SecStaticCodeRef = *const c_void;
-
-const SOL_LOCAL: libc::c_int = 0;
-/// `LOCAL_PEERTOKEN` (Darwin's `<sys/un.h>`): the peer's audit token.
-const LOCAL_PEERTOKEN: libc::c_int = 0x006;
-const SEC_CS_SIGNING_INFORMATION: u32 = 0x2;
-const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
-
-#[link(name = "Security", kind = "framework")]
-unsafe extern "C" {
-    static kSecGuestAttributeAudit: CFStringRef;
-    static kSecCodeInfoUnique: CFStringRef;
-    fn SecCodeCheckValidity(code: SecCodeRef, flags: u32, requirement: CFTypeRef) -> i32;
-    static kSecCodeInfoIdentifier: CFStringRef;
-    static kSecCodeInfoTeamIdentifier: CFStringRef;
-    fn SecCodeCopyGuestWithAttributes(
-        host: CFTypeRef,
-        attributes: CFDictionaryRef,
-        flags: u32,
-        code: *mut SecCodeRef,
-    ) -> i32;
-    fn SecCodeCopyStaticCode(code: SecCodeRef, flags: u32, out: *mut SecStaticCodeRef) -> i32;
-    fn SecCodeCopySigningInformation(
-        code: SecStaticCodeRef,
-        flags: u32,
-        out: *mut CFDictionaryRef,
-    ) -> i32;
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-    static kCFTypeDictionaryKeyCallBacks: c_void;
-    static kCFTypeDictionaryValueCallBacks: c_void;
-    fn CFDataGetBytePtr(data: CFDataRef) -> *const u8;
-    fn CFDataGetLength(data: CFDataRef) -> isize;
-    fn CFDataCreate(alloc: CFTypeRef, bytes: *const u8, len: isize) -> CFDataRef;
-    fn CFDictionaryCreate(
-        alloc: CFTypeRef,
-        keys: *const CFTypeRef,
-        values: *const CFTypeRef,
-        count: isize,
-        key_callbacks: *const c_void,
-        value_callbacks: *const c_void,
-    ) -> CFDictionaryRef;
-    fn CFDictionaryGetValue(dict: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
-    fn CFStringGetCString(
-        string: CFStringRef,
-        buffer: *mut c_char,
-        size: isize,
-        encoding: u32,
-    ) -> bool;
-    fn CFRelease(value: CFTypeRef);
-}
-
-/// The peer behind `fd`: its audit token and the signing identity the
-/// system reports for that token. `None` when the token or identity can't be
-/// read, in which case the native flow refuses rather than guessing.
-fn identify(fd: RawFd) -> Option<(PeerId, Identity)> {
-    let token = peer_audit_token(fd)?;
-    let peer = PeerId([
-        u32::from_ne_bytes(token[0..4].try_into().ok()?),
-        u32::from_ne_bytes(token[4..8].try_into().ok()?),
-        u32::from_ne_bytes(token[8..12].try_into().ok()?),
-        u32::from_ne_bytes(token[12..16].try_into().ok()?),
-        u32::from_ne_bytes(token[16..20].try_into().ok()?),
-        u32::from_ne_bytes(token[20..24].try_into().ok()?),
-        u32::from_ne_bytes(token[24..28].try_into().ok()?),
-        u32::from_ne_bytes(token[28..32].try_into().ok()?),
-    ]);
-    let identity = signing_identity(&token)?;
-    Some((peer, identity))
-}
-
-fn peer_audit_token(fd: RawFd) -> Option<[u8; 32]> {
-    let mut token = [0_u8; 32];
-    let mut length = token.len() as libc::socklen_t;
-    // SAFETY: `fd` is the accepted socket for this call, and `token`/`length`
-    // describe a live buffer and its size.
-    let result = unsafe {
-        libc::getsockopt(
-            fd,
-            SOL_LOCAL,
-            LOCAL_PEERTOKEN,
-            token.as_mut_ptr().cast(),
-            &mut length,
-        )
-    };
-    (result == 0 && length as usize == token.len()).then_some(token)
-}
-
-fn signing_identity(token: &[u8; 32]) -> Option<Identity> {
-    // SAFETY: every CoreFoundation/Security value is created and released
-    // within this call, and every pointer is null-checked before use.
-    unsafe {
-        let data = CFDataCreate(std::ptr::null(), token.as_ptr(), token.len() as isize);
-        if data.is_null() {
-            return None;
-        }
-        let keys = [kSecGuestAttributeAudit];
-        let values = [data];
-        let attributes = CFDictionaryCreate(
-            std::ptr::null(),
-            keys.as_ptr(),
-            values.as_ptr(),
-            1,
-            std::ptr::addr_of!(kCFTypeDictionaryKeyCallBacks).cast(),
-            std::ptr::addr_of!(kCFTypeDictionaryValueCallBacks).cast(),
-        );
-        if attributes.is_null() {
-            CFRelease(data);
-            return None;
-        }
-        let mut code: SecCodeRef = std::ptr::null_mut();
-        let status = SecCodeCopyGuestWithAttributes(std::ptr::null(), attributes, 0, &mut code);
-        let identity = if status == 0 && !code.is_null() {
-            let identity = signing_identity_of(code);
-            CFRelease(code);
-            identity
-        } else {
-            None
-        };
-        CFRelease(attributes);
-        CFRelease(data);
-        identity
-    }
-}
-
-unsafe fn signing_identity_of(code: SecCodeRef) -> Option<Identity> {
-    unsafe {
-        if SecCodeCheckValidity(code, 0, std::ptr::null()) != 0 {
-            return None;
-        }
-        let mut stat: SecStaticCodeRef = std::ptr::null();
-        if SecCodeCopyStaticCode(code, 0, &mut stat) != 0 || stat.is_null() {
-            return None;
-        }
-        let mut info: CFDictionaryRef = std::ptr::null();
-        let status = SecCodeCopySigningInformation(stat, SEC_CS_SIGNING_INFORMATION, &mut info);
-        let identity = if status == 0 && !info.is_null() {
-            let identifier = cf_string(CFDictionaryGetValue(info, kSecCodeInfoIdentifier));
-            let team = cf_string(CFDictionaryGetValue(info, kSecCodeInfoTeamIdentifier));
-            let digest = CFDictionaryGetValue(info, kSecCodeInfoUnique);
-            identifier.and_then(|identifier| {
-                if digest.is_null() {
-                    return None;
-                }
-                let len = CFDataGetLength(digest);
-                if !(20..=64).contains(&len) {
-                    return None;
-                }
-                let bytes = std::slice::from_raw_parts(CFDataGetBytePtr(digest), len as usize);
-                let cdhash = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                Some(Identity {
-                    identifier,
-                    team,
-                    cdhash,
-                })
-            })
-        } else {
-            None
-        };
-        if !info.is_null() {
-            CFRelease(info);
-        }
-        CFRelease(stat);
-        identity
-    }
-}
-
-unsafe fn cf_string(value: CFTypeRef) -> Option<String> {
-    if value.is_null() {
-        return None;
-    }
-    let mut buffer = [0 as c_char; 1024];
-    // SAFETY: `value` is a CFString from the signing-information dictionary,
-    // and `buffer` is writable for its stated length.
-    let copied = unsafe {
-        CFStringGetCString(
-            value,
-            buffer.as_mut_ptr(),
-            buffer.len() as isize,
-            CF_STRING_ENCODING_UTF8,
-        )
-    };
-    copied.then(|| {
-        // SAFETY: a successful `CFStringGetCString` wrote a NUL-terminated
-        // UTF-8 string into `buffer`.
-        unsafe { CStr::from_ptr(buffer.as_ptr()) }
-            .to_string_lossy()
-            .into_owned()
-    })
 }

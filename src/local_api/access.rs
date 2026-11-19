@@ -150,8 +150,8 @@ fn canonical(origin: &str) -> bool {
 }
 
 /// The Linux and Windows apps' two asks, browser connect and consented
-/// recording, answered in the window through `gate`; native clients have no
-/// channel there, so only web pages ask.
+/// recording, answered in the window through `gate`; native clients ask over
+/// the native channel `LocalApi::start_for_app` opens.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) struct AppConsent {
     pub(super) connect: super::Connect,

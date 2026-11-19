@@ -8,9 +8,12 @@ and a code plus PKCE produces a token scoped to the caller's verified identity:
 
 - a web page is bound to the `Origin` its browser sent, on the loopback HTTP
   API (a website the person allowed in Labs › Connected apps);
-- a native process is bound to the audit token of the Unix-socket peer, and
-  its identity is the code-signing identifier and team `Security.framework`
-  reports for that token. A name it claims is never the identity.
+- a native process is bound to the one peer process on Hex's owner-only
+  native channel, and its identity is what the OS reports for it: on macOS
+  the code-signing identifier and team, on Linux its sandbox app id or
+  executable, on Windows its image's Authenticode publisher or path
+  ([Native identity](#native-identity)). A name it claims is never the
+  identity.
 
 This is a prototype contract. It exists to prove the consent boundary, not to
 be a general local API. `connected-apps` (the Lab, Labs › Connected apps)
@@ -57,9 +60,8 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 ## Requirements
 
 - The running Hex app (`hex app`) on macOS, Linux, or Windows. `hex service`
-  has no window, so the routes answer `403 connect-unavailable`. Native
-  clients pair only on macOS: Linux and Windows have no socket that can tell
-  Hex a peer's verified identity, so there a web page is the only caller.
+  has no window, so the routes answer `403 connect-unavailable`; it opens no
+  native channel either.
 - Labs › Connected apps on. Its switch gates both asks, for apps and
   websites alike; off, every consent route answers as it did before the lab
   (`origin-not-allowed` for a page, `record-unavailable` for a native app,
@@ -227,8 +229,9 @@ as before.
 The identity card names who is asking, by what Hex verified:
 
 ```ts
-native app -> its icon, the name from its verified bundle (CFBundleDisplayName,
-              else CFBundleName), its identifier under it, then how it was verified:
+native app -> its icon, the name Hex derived from verified data (macOS bundle,
+              Linux desktop entry, Windows version info; see Native identity),
+              its identifier under it, then how it was verified:
               macOS signature   -> "Code signature verified · team K7Z4Q2M8A1" (or "· no team")
               Windows signature -> "Signed by {publisher}"
               Flatpak / Snap    -> "Flatpak app {app id}" / "Snap app {app id}"
@@ -303,7 +306,7 @@ Raw audio, levels, partials, History, paste, microphone selection, and desktop
 control are not exposed.
 
 ```ts
-Native client (record.sock)        Web page (loopback + Origin)
+Native client (socket or pipe)     Web page (loopback + Origin)
         │                                   │
         └──────── POST /record/pair ────────┘     // PKCE S256, no bearer
              ├── native peer identity unreadable -> 403 identity-unverified
@@ -347,19 +350,43 @@ not open a second dialog.
 
 ### Native identity
 
-`record.sock` in Hex's data folder is mode `0600` and serves `/record/*` only.
-On each connection Hex reads `LOCAL_PEERTOKEN` and asks
-`SecCodeCopyGuestWithAttributes`/`SecCodeCopySigningInformation` for the
-signing identifier and team. The consent dialog shows that; if the identity
-cannot be read, the request is refused (`403 identity-unverified`) rather than
-falling back to an app name or path. A grant and its sessions are bound to the
-peer's audit token, so another process cannot spend them even if it learns the
-token.
+Native clients connect to Hex's own channel, which only this user can open and
+which serves `/record/*` only. Hex asks the OS who the peer is on every
+connection; if it cannot tell, the request is refused (`403
+identity-unverified`) rather than falling back to an app name or path the
+client sent. A grant and its sessions are bound to that one peer process, so
+another process cannot spend them even if it learns the token.
 
-The native identity is the signed executable, not a document, script, or renderer. Allowing a shared interpreter such as Node therefore allows that interpreter, not just one script. Use Allow Once for shared hosts.
+| | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Channel | `record.sock` in Hex's data folder, mode `0600` | `record.sock` in Hex's private data folder (`0700`, socket `0600`) | `\\.\pipe\anomaly.hex.record.<random>`, named in `record.pipe` in Hex's data folder; DACL for Hex's user only, `PIPE_REJECT_REMOTE_CLIENTS` |
+| Peer | `LOCAL_PEERTOKEN` audit token | `SO_PEERCRED`; same uid as Hex; pinned by `SO_PEERPIDFD` (Linux 6.5+) and its `/proc/<pid>/stat` start time before and after | `GetNamedPipeClientProcessId`, opened at once; started before the connection; token user is Hex's |
+| Identity | `SecCodeCopySigningInformation`: signing identifier and team | Flatpak `[Application] name` in `/proc/<pid>/root/.flatpak-info`; else an enforced Snap AppArmor label `snap.<snap>.<app>`; else `/proc/<pid>/exe` (absolute, not deleted) | `WinVerifyTrust` on the image, no revocation check and cache-only URL retrieval (Hex never reaches the network): the signer's subject CN; else the image path |
+| Grant key | identifier, team and code-directory hash | the sandbox app id, else the executable path | publisher and image file name (an update keeps it), else the full path |
+| Name and icon | the verified bundle (above) | the desktop entry the identity points to (`<app id>.desktop`, `<snap>_<app>.desktop`, or the entry whose `TryExec`/`Exec` program is that executable): its `Name`, and its `Icon` from the hicolor theme or pixmaps | the image's `FileDescription` (else `ProductName`) and first icon |
+
+The name and icon are display only, looked up off the request thread, cached,
+and waited for at most 400 ms; they never decide a grant. On Linux and for an
+unsigned Windows program they are only as trustworthy as whoever wrote the
+desktop entry or the file's version info, so the dialog's identity is the app
+id or path.
+
+The native identity is the program the OS reports, not a document, script, or
+renderer. Allowing a shared interpreter such as Node, Python, or an
+unpackaged Electron runtime therefore allows that interpreter, with every
+script it runs, not just one script. Use Allow Once for shared hosts.
+
+Same-user isolation bounds all of this. A program running as the same user
+can usually reach another's process (debugging it, or injecting into it on
+Windows); outside a sandbox the identity says which program connected, not
+that no other code runs inside it. On Linux kernels before 6.5 (no
+`SO_PEERPIDFD`), a peer that exits right after connecting leaves a short
+window in which a new process could reuse its pid unseen. Flatpak and Snap
+apps reach the socket only when their sandbox lets them see Hex's data
+folder.
 
 Native clients need no `Origin`, no bearer token, and no discovery file. The
-loopback API is not their channel, and the Unix socket has no route for it.
+loopback API is not their channel, and the native channel has no route for it.
 
 ### Lease
 
@@ -375,7 +402,7 @@ loopback API is not their channel, and the Unix socket has no route for it.
 
 The lease is the one Hex's `/dictations` and `/streams` use. Only
 `POST /record/heartbeat` with the session's own token, on the channel that
-started it (the same `Origin` or audit token), renews it; `status` does not.
+started it (the same `Origin` or native peer process), renews it; `status` does not.
 Send one every few seconds (`leaseMs / 3` in the examples). When a client
 quits, crashes, or hangs, its check-ins stop and Hex stops the microphone
 within one lease; the transcript is then finishable for the 30 s grace like
@@ -395,8 +422,9 @@ native client.
 Codes, grant tokens and sessions are never persisted. Only **Always Allow** saves a
 recipient and capability in `local-consent.json` (mode 0600). After restarting
 Hex the client pairs afresh, without a new dialog for that permission. Native
-matches require the validated signing identifier, team and code-directory hash;
-a changed binary must ask again. Allowed web origins match independently of the
+matches require the grant key above and how the OS verified it: on macOS the
+validated signing identifier, team and code-directory hash, so a changed binary
+must ask again. Allowed web origins match independently of the
 page's claimed name. Transcription and microphone recording are separate choices.
 
 The Connected apps pane (Hex's sidebar item while Labs › Connected apps is
@@ -430,7 +458,7 @@ save never grants access, and a failed revoke does not disappear from the list.
 | --- | --- | --- |
 | 400 | `invalid-request` | Not the JSON above, not S256, a body on a token action |
 | 401 | `invalid-grant` | Unknown, revoked, or other-channel grant; a session token used as a grant |
-| 403 | `identity-unverified` | The native peer's signature could not be read |
+| 403 | `identity-unverified` | The OS could not say who the native peer is (another user, a pid that changed, no signature on macOS) |
 | 403 | `origin-not-allowed` | Labs › Connected apps or its websites switch is off, or the Origin is missing or not an http(s) origin |
 | 403 | `website-not-allowed` | A website the person has not allowed (listed under Asking to connect) |
 | 403 | `website-blocked` | A website the person blocked |
@@ -452,8 +480,8 @@ save never grants access, and a failed revoke does not disappear from the list.
   History, clipboard, Accessibility, or settings. Both record headers are
   checked before the bearer token and never become it.
 - Tokens live only in Hex's process; they are 32 random bytes, the `finish`
-  transcript is handed over once, and each is bound to the Origin or audit
-  token that paired.
+  transcript is handed over once, and each is bound to the Origin or native
+  peer process that paired.
 
 ### Clients
 
@@ -479,9 +507,14 @@ check-ins from another origin, with the grant token, a guessed token, or a
 body leave the lease to lapse; Stop, Cancel, and both revokes end a
 checking-in recording and refuse its next check-in; and a recording the
 capture loop lost is cancelled. One ignored test runs the real 10 s lease for
-125 s, past the old two-minute cap. On macOS, one test connects to the real `record.sock`, reads the
-peer's audit token, pairs, records twice through the fake backend, and revokes;
-it skips (with a printed note) when the test binary has no signing identity.
+125 s, past the old two-minute cap. On macOS and Linux, one test connects to the real `record.sock`, reads the
+peer's identity, pairs, records twice through the fake backend, and revokes;
+on macOS it skips (with a printed note) when the test binary has no signing
+identity. `local_api::native::linux` tests parse `.flatpak-info` and AppArmor
+labels, refuse deleted executables, another user's peer, and a process whose
+start time changed or that went while being read, name a socket pair's peer
+by its executable, and match desktop entries by `Exec`/`TryExec`, PATH, and
+desktop file id precedence.
 Labs › Connected apps is covered by `local_api::tests::connected_apps` (each
 switch off on every consent route, CORS on only its own routes and never with
 `Authorization`, an unknown website refused and listed once, Allow and Block,
@@ -492,4 +525,15 @@ reload by `local_api::permissions` tests. The live card and the Labs ›
 Connected apps section are rendered by `hex app -- --snap` scenes
 (`record-active`, `mac-labs-connected-apps`), and
 the permission window by the ignored snapshot test above; nothing was recorded from a real microphone, no
-OS grant was approved, and no real browser page or Electron process was run.
+OS grant was approved, and no real browser page was run.
+
+On Linux the running app was driven under Xvfb with a PulseAudio null-sink
+microphone playing the JFK sample: the Rust example and an Electron 38 main
+process (`electron electron-main.mjs`) each opened the permission window
+naming their executable (`…/record-once`, `…/electron/dist/electron`), Deny
+answered `consent-denied`, Allow Once recorded and transcribed once, Always
+Allow saved an `executable` scope in `local-consent.json` and, after a Hex
+restart, paired again without a dialog, recorded twice, and revoked; Hex
+showed the Rust example with the name and SVG icon of its desktop entry.
+Windows was built and linted only
+(`cargo xwin clippy`); its pipe, signature check, and clients were not run.

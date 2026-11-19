@@ -2889,11 +2889,11 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
 │   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
 │   ├── POST /record/pair -> "Allow microphone recording?"
-│   │   ├── Web: allowed Origin; native: owner-only record.sock + verified signature
+│   │   ├── Web: allowed Origin; native: owner-only record.sock / pipe + OS-verified identity
 │   │   ├── Allow Once / Always Allow -> code, PKCE grant; Deny -> 403 + 30 s cooldown
 │   │   ├── One start (Once) or repeated starts (Always), each its own session
 │   │   ├── Runs while the client checks in (10 s lease, no length cap); card: elapsed, Stop recording / Cancel
-│   │   ├── Grant bound to Origin or peer audit token; one session at a time
+│   │   ├── Grant bound to Origin or native peer process; one session at a time
 │   │   ├── Revoke in Labs › Connected apps or POST /record/revoke ends it
 │   │   └── Transcript only: no raw audio, levels, partials, or other route
 │   └── CORS: any http(s) origin, on /connect/*, /record/*, and a grant's upload only
@@ -2990,13 +2990,15 @@ each start mints a separate short-lived session, so an Always Allow client recor
 again without another prompt until the grant is revoked in Labs › Connected
 apps or with `POST /record/revoke`. Web clients use an allowed Origin and the
 lab's own CORS on these routes; native clients (Electron main, Rune, Rust) use the owner-only
-`record.sock`, whose peer audit token `Security.framework` resolves to a
-signing identifier and team. Consent names that verified identity, the grant
+`record.sock` (a named pipe on Windows), whose peer the OS names: on macOS
+the signing identifier and team `Security.framework` resolves from its audit
+token, on Linux its Flatpak or Snap app id or executable, on Windows its
+image's Authenticode publisher or path (docs/connect.md). Consent names that verified identity, the grant
 and its sessions are bound to it, and Hex's window shows a non-modal card with
 Stop recording and Cancel while it records. A recording has no length cap:
 it runs while the client checks in (`POST /record/heartbeat`, the 10 s
 dictation lease) and stops itself once the check-ins stop. Grant tokens are
-memory-only. Always Allow saves the capability and either a signed binary
+memory-only. Always Allow saves the capability and either a verified native
 identity or an origin plus a digest of the page's permission proof.
 Revoking in the Connected apps pane removes the permission across restarts.
 An unknown website gets no dialog; it is listed under Asking to connect for

@@ -25,7 +25,6 @@ pub(crate) mod icon;
 #[cfg(target_os = "macos")]
 mod mac_app;
 mod meeting_events;
-#[cfg(target_os = "macos")]
 mod native;
 pub(crate) mod permissions;
 pub(crate) mod processing;
@@ -62,11 +61,10 @@ pub use timestamps::Timestamps;
 use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
 
+pub(crate) use native::socket_path as native_socket_path;
 /// The recording slice's app-facing names.
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use record::app_sessions as record_sessions;
-#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
-pub(crate) use record::native_socket_path;
 
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
@@ -104,7 +102,6 @@ pub struct LocalApi {
     events: EventLog,
     stop_observed: Arc<AtomicBool>,
     transcription_service: Option<crate::transcription::service::TranscriptionService>,
-    #[cfg(target_os = "macos")]
     native: Option<native::Listener>,
     _instance: Option<crate::desktop::instance::InstanceLock>,
 }
@@ -203,8 +200,9 @@ pub struct LocalApiOptions {
     pub(crate) connect: Option<Connect>,
     /// Consented one-recording sessions, when the app can record and ask.
     pub(crate) record: Option<Arc<record::Sessions>>,
-    /// Where native clients' owner-only socket binds; unset leaves them
-    /// without one (the app sets it; tests use a temporary path).
+    /// Where native clients' owner-only socket binds (on Windows, the file
+    /// that names their pipe); unset leaves them without one (the app sets
+    /// it; tests use a temporary path).
     pub(crate) native_socket: Option<PathBuf>,
 }
 
@@ -245,6 +243,7 @@ impl LocalApi {
                         processing: processing.unwrap_or_default(),
                         connect,
                         record,
+                        native_socket: native_socket_path(),
                         ..Default::default()
                     },
                 )
@@ -326,7 +325,6 @@ impl LocalApi {
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
-        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
         let native_socket = options.native_socket.clone();
         let http_context = HttpContext {
             token: token.into(),
@@ -357,7 +355,6 @@ impl LocalApi {
         let http_context = Arc::new(http_context);
         // Native recording clients get their own owner-only socket; it
         // serves `/record/*` only and needs a capture loop to be useful.
-        #[cfg(target_os = "macos")]
         let native =
             native::start_if_configured(native_socket.as_deref(), &http_context, &shutdown);
         let (ready, readiness) = mpsc::sync_channel(1);
@@ -398,7 +395,6 @@ impl LocalApi {
             events,
             stop_observed,
             transcription_service: Some(transcription_service),
-            #[cfg(target_os = "macos")]
             native,
             _instance: instance,
         })
@@ -425,7 +421,6 @@ impl LocalApi {
         }
         self.shutdown.store(true, Ordering::Release);
         wake_acceptor(self.document.port);
-        #[cfg(target_os = "macos")]
         if let Some(native) = self.native.take() {
             native.shutdown();
         }
@@ -3972,7 +3967,11 @@ mod tests {
         let identity = record::Identity {
             identifier: "com.example.recorder".into(),
             cdhash: "fixture-digest".into(),
-            team: Some("ABCDE12345".into()),
+            verification: crate::local_api::Verification::MacSignature {
+                team: Some("ABCDE12345".into()),
+            },
+            name: None,
+            icon: None,
         };
         let peer = record::PeerId([1, 2, 3, 4, 5, 6, 7, 8]);
         let channel = record::Channel::Native { peer, identity };
@@ -3994,7 +3993,9 @@ mod tests {
             identity: record::Identity {
                 identifier: "com.example.other".into(),
                 cdhash: "fixture-digest".into(),
-                team: None,
+                verification: crate::local_api::Verification::MacSignature { team: None },
+                name: None,
+                icon: None,
             },
         };
         let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
@@ -4055,7 +4056,11 @@ mod tests {
                 identity: record::Identity {
                     identifier: "com.example.recorder".into(),
                     cdhash: "fixture-digest".into(),
-                    team: Some("ABCDE12345".into()),
+                    verification: crate::local_api::Verification::MacSignature {
+                        team: Some("ABCDE12345".into()),
+                    },
+                    name: None,
+                    icon: None,
                 },
             },
             body.as_bytes(),
@@ -4067,7 +4072,7 @@ mod tests {
     }
 
     /// One HTTP exchange over the native recording socket.
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     fn native_request(socket: &Path, request: &str) -> (u16, String) {
         use std::os::unix::net::UnixStream;
         let mut stream = UnixStream::connect(socket).unwrap();
@@ -4083,7 +4088,7 @@ mod tests {
         (status, response)
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     #[test]
     fn a_native_socket_client_pairs_then_records_twice_under_its_identity() {
         let directory = temp_directory();
