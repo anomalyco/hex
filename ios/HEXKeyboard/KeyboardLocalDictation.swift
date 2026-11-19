@@ -183,8 +183,9 @@ final class KeyboardLocalDictation {
         transcription = Task { [weak self] in
             let started = Date()
             do {
-                let text = try await KeyboardSpeech.transcribe(url)
+                let heard = try await KeyboardSpeech.transcribe(url)
                 try? FileManager.default.removeItem(at: url)
+                let text = await DictationTranslator.translateIfEnabled(heard) ?? heard
                 KeyboardProbeLog.shared.write("transcribed in \(String(format: "%.2f", Date().timeIntervalSince(started))) s: \(text.count) chars \(KeyboardProbeLog.memory())")
                 guard let self, !Task.isCancelled else { return }
                 self.phase = .finished(jobID: jobID, resultID: UUID().uuidString, transcript: text)

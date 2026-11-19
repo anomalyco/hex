@@ -829,7 +829,8 @@ final class DictationController {
                 // words, then again after formatting because a style can lowercase a
                 // term or capitalize a sentence start ("iPhone" -> "IPhone").
                 let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: rawText)
-                let text = await self.cleanedTranscriptIfEnabled(spelled, session: session)
+                let cleaned = await self.cleanedTranscriptIfEnabled(spelled, session: session)
+                let text = await DictationTranslator.translateIfEnabled(cleaned) ?? cleaned
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }

@@ -141,6 +141,14 @@ struct ExperimentsCard: View {
                 CustomVocabularySettings().isEnabled = enabled
             }
 
+            TranslateDictationRow()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    HexTheme.bgBase,
+                    in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
+                )
+
             if customVocabulary {
                 CustomVocabularyEditor()
                     .padding(12)
