@@ -15,6 +15,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
+use crate::continuation::{Continuation, InputActivity};
+
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
 
 /// Remote desktop clients (#866) forward a clipboard change to the remote
@@ -98,6 +100,10 @@ pub struct WindowsPaster {
     /// Terminal paste: send Ctrl+Shift+V instead of Ctrl+V. Shared so a
     /// settings change applies to the next paste without a new paster.
     paste_with_shift: Arc<AtomicBool>,
+    /// The user's own input since the listener started: a paste joins the
+    /// one before it only while this revision is unchanged.
+    activity: InputActivity,
+    continuation: Continuation,
 }
 
 #[derive(Default)]
@@ -133,12 +139,14 @@ impl ClipboardRestore {
 }
 
 impl WindowsPaster {
-    pub fn new(paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
+    pub fn new(paste_with_shift: Arc<AtomicBool>, activity: InputActivity) -> Result<Self> {
         Ok(Self {
             clipboard: arboard::Clipboard::new()
                 .wrap_err("could not open the Windows clipboard")?,
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
             paste_with_shift,
+            activity,
+            continuation: Continuation::default(),
         })
     }
 
@@ -148,6 +156,8 @@ impl WindowsPaster {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
+        let revision = self.activity.revision();
+        let text = text_to_paste(&self.continuation, revision, text);
         let mut restore = self
             .clipboard_restore
             .lock()
@@ -218,6 +228,8 @@ impl WindowsPaster {
             }
             return Err(error);
         }
+        // Only a paste that reached the app is continued by the next one.
+        self.continuation.record(revision, true, text);
         let Some(generation) = generation else {
             return Ok(());
         };
@@ -237,6 +249,9 @@ impl WindowsPaster {
     /// Labs › YOLO mode: one press of Return after a paste, once
     /// the paste has had [`crate::dictation::yolo_mode::SETTLE`] to land.
     pub fn press_return(&mut self) -> Result<()> {
+        // Return sends the message, so the next dictation starts a new one,
+        // as macOS's Send mode ends its continuation.
+        self.continuation.clear();
         thread::sleep(crate::dictation::yolo_mode::SETTLE);
         wait_for_conflicting_modifiers();
         let scan = foreground_scan_code(VK_RETURN);
@@ -261,6 +276,9 @@ impl WindowsPaster {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to copy an empty transcript"));
         }
+        // Nothing was inserted, so the next paste starts a new
+        // continuation.
+        self.continuation.clear();
         let mut restore = self
             .clipboard_restore
             .lock()
@@ -271,6 +289,15 @@ impl WindowsPaster {
             .text(text.to_string())
             .wrap_err("could not place the transcript on the Windows clipboard")
     }
+}
+
+/// What a dictation pastes: `text`, joined onto the previous dictation when
+/// nothing in between ended the input session. Dictation and Paste Last
+/// both continue their dictation.
+fn text_to_paste(continuation: &Continuation, revision: u64, text: &str) -> String {
+    continuation
+        .join(revision, true, text)
+        .unwrap_or_else(|| text.to_string())
 }
 
 fn clipboard_sequence() -> u32 {
@@ -408,6 +435,25 @@ fn keyboard_input(key: u16, scan: u16, flags: u32) -> INPUT {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn back_to_back_dictations_join_until_input_breaks_the_session() {
+        let activity = InputActivity::default();
+        let mut continuation = Continuation::default();
+        let revision = activity.revision();
+
+        continuation.record(revision, true, "day?".into());
+        assert_eq!(
+            text_to_paste(&continuation, activity.revision(), "Oh yeah"),
+            " Oh yeah"
+        );
+
+        activity.invalidate();
+        assert_eq!(
+            text_to_paste(&continuation, activity.revision(), "Oh yeah"),
+            "Oh yeah"
+        );
+    }
 
     #[test]
     fn rapid_pastes_keep_the_original_clipboard_for_the_latest_restore() {

@@ -9,6 +9,7 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::linger::MicrophoneLinger;
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
+use crate::continuation::InputActivity;
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
@@ -299,7 +300,7 @@ pub fn run(
     }
     let hotkey_label = hotkey.label();
     let mut toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
-    let mut hotkey = shortcuts.start()?;
+    let mut hotkey = shortcuts.start(InputActivity::default())?;
     // A shortcut event the idle wait took, handled at the next turn.
     let mut held_event = None;
     let mut while_dictating = while_dictating;
@@ -323,11 +324,12 @@ pub fn run(
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
     let worker_paste_with_shift = paste_with_shift.clone();
+    let worker_activity = hotkey.activity.clone();
     let capture_modes = mode_runtime.clone();
     let worker = thread::Builder::new()
         .name("windows-dictation-output".into())
         .spawn(move || {
-            let mut paster = WindowsPaster::new(worker_paste_with_shift);
+            let mut paster = WindowsPaster::new(worker_paste_with_shift, worker_activity);
             while let Ok(job) = job_receiver.recv() {
                 let result = match job {
                     OutputJob::Dictation(job) => process_dictation_job(
@@ -396,7 +398,15 @@ pub fn run(
         };
     }
 
+    // The window in front when the loop last looked: switching windows ends
+    // a paste continuation, as a context change does on macOS.
+    let mut foreground_window = crate::windows::input::foreground_window();
     while !shutdown.load(Ordering::Relaxed) {
+        let window = crate::windows::input::foreground_window();
+        if window != foreground_window {
+            foreground_window = window;
+            hotkey.activity.invalidate();
+        }
         if let Some(failed) = model.poll() {
             fail(&events, failed.error.clone())?;
             if let Some(swap_failures) = &swap_failures {
@@ -416,10 +426,13 @@ pub fn run(
             let next_shortcuts = Shortcuts::from_config(&next_config);
             if next_shortcuts != shortcuts {
                 // The old hook goes first; one keyboard hook runs at a time.
+                // The activity survives the restart, so a pending
+                // continuation still sees the same input session.
+                let activity = hotkey.activity.clone();
                 drop(hotkey);
                 held_event = None;
                 shortcuts = next_shortcuts;
-                hotkey = shortcuts.start()?;
+                hotkey = shortcuts.start(activity)?;
                 toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
             }
             if next_config.while_dictating != while_dictating {

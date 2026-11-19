@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 
+use crate::continuation::InputActivity;
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 use crate::dictation::caret_text::CaretTextRead;
 use crate::dictation::context::{CaptureRefresh, ContextMonitor, ContextSnapshot};
 use crate::dictation::screen_vocabulary::ScreenVocabulary;
-use crate::suppression::InputActivity;
 
 /// How long a finished shortcut waits for the page its capture asked to
 /// refresh before handing the worker a context with no page.

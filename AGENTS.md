@@ -253,8 +253,11 @@ substitute for source inspection or a second roadmap.
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `control/developer_control`: the typed debug-only command/reply protocol the local
   API uses to drive the running app from `hex dev`.
-- `paste`: clipboard insertion, continuation joins, and generation-safe
-  clipboard restoration.
+- `continuation`: the platform-neutral input-activity revision and back-to-back
+  paste join macOS and Windows share; `paste` applies it, the Windows hooks in
+  `windows::input` end it on real keys and clicks, and the `windows::dictation`
+  listener ends it when the foreground window changes.
+- `paste`: clipboard insertion and generation-safe clipboard restoration.
 - `accessibility`: bounded focused-window and selected-text capture through
   Accessibility without touching the clipboard, including the bounded visible
   window text Labs › Words on screen reads (macOS).

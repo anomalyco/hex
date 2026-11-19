@@ -2192,6 +2192,27 @@ sequence and the identifier match, not insertion into a real session.
 **Windows paste (issue 477):** Windows puts the transcript on the clipboard,
 waits for Shift, Alt, and Win to come up, sends Ctrl+V, and restores the
 previous clipboard 500 ms later unless a newer paste or another app changed it.
+Back-to-back dictations join as they do on macOS: when no key, click, or
+foreground-window change happened between them, the next transcript is pasted
+as a continuation with a space and sentence-aware capitalization. Paste last
+dictation continues too. A real key or click (any of the five mouse buttons)
+ends the join, and so does input another program injects, while the
+shortcut's own chord and Hex's own synthetic keys do not; a window switch ends
+it as a context change does on macOS. The shortcut's own press never ends
+it, even when Labs › Share dictation shortcut lets that key reach the app,
+while a bare press of the same key without the shortcut's modifiers is
+ordinary typing and does end the join.
+Everything in between is the shared [`continuation`](../../src/continuation.rs)
+policy. Sources: `ends_continuation` in
+[windows/input/activity.rs](../../src/windows/input/activity.rs), wired into the
+keyboard and mouse hooks in [windows/input.rs](../../src/windows/input.rs), and
+`text_to_paste` in [windows/paste.rs](../../src/windows/paste.rs). Checks:
+`real_input_ends_a_paste_continuation_but_hexs_own_events_do_not`,
+`a_shared_shortcut_trigger_does_not_end_a_paste_continuation`,
+`a_bare_trigger_key_ends_a_paste_continuation_but_the_shortcut_does_not`,
+`back_to_back_dictations_join_until_input_breaks_the_session`, and
+`a_paste_joins_only_the_session_that_made_it`; no automated check pastes into a
+real Windows app.
 Labs › Terminal paste (`paste_with_shift`, off by default; on Linux it is a
 General › Advanced row) sends Ctrl+Shift+V instead, for apps that ignore
 a synthetic Ctrl+V (the herdr desktop app); a Labs › Terminal paste shortcut

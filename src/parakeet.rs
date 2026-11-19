@@ -10,13 +10,13 @@ use std::time::Instant;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
+use crate::continuation::InputActivity;
 use crate::dictation::context::ContextSnapshot;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
 use crate::paste::{PasteMode, Paster};
-use crate::suppression::InputActivity;
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription::gguf_session::{OfflineGgufSession, output_truncated};

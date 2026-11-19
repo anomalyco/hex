@@ -910,6 +910,8 @@ Do not start it beside an existing listener.
 ```ts
 Completed output                         // output
 ├── Paste -> Current focus, in submission order
+│   ├── Back-to-back dictations with no key, click, or window change between
+│   │   -> joined with a space and sentence-aware capitalization (macOS, Windows)
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
 │   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
 │   ├── Labs > Keep dictation on clipboard (every OS, off) -> the dictation stays on the clipboard (labs.md)
