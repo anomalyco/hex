@@ -830,7 +830,10 @@ calls its `ClipboardRestore::keep`, ends its continuation, and sends no
 keystroke, so the dictation appears in Windows clipboard history (Win+V).
 History and Paste last dictation
 update as for a paste, and Paste last dictation still pastes (meeting pastes
-on macOS too). Off, output is exactly as before. Checks:
+on macOS too). With Labs › YOLO mode on, a dictation YOLO mode sends (its
+chosen apps, or every app with none chosen) is pasted and sent anyway; a
+rescued microphone-loss dictation on macOS is always only copied. Off, output
+is exactly as before. Checks:
 `a_copy_only_dictation_is_left_on_the_clipboard_with_nothing_to_restore` in
 [paste.rs](../../src/paste.rs) (macOS only);
 `keeping_the_clipboard_is_everywhere_and_copy_only_is_macos_or_windows` in
@@ -854,8 +857,9 @@ applications are (`ContextSnapshot::application_is`) against the frontmost
 app captured with the dictation; with apps chosen, a dictation whose app is
 unknown (Wayland without foreign-toplevel) never sends. It never applies to Dictate
 without processing, `hex dictation` or local API captures, printing stops,
-Copy dictation only, Live typing's input-method commits, meetings, Annotate
-captures, or Paste last dictation. Each OS decides as the output commits
+Live typing's input-method commits, meetings, Annotate
+captures, or Paste last dictation. It wins over Copy dictation only (macOS
+and Windows): a dictation it sends is pasted rather than only copied. Each OS decides as the output commits
 (`yolo_mode::sends` reads the lab then): macOS `parakeet::finish_output`
 picks `PasteMode::Send` (⌘V, and the continuation ends), then
 `send_unless_escaped` waits until `yolo_mode::ESCAPE_WINDOW` (500 ms) after

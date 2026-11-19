@@ -746,8 +746,8 @@ Shortcut dictation (hold, lock, or Toggle)            // dictate.yolo-mode
 │   └── Escape after the release (macOS) -> No Return; History records Dictation
 └── Another app -> Paste as usual, without Return
 Never: Dictate without processing, `hex dictation`, the local API,
-printing stops, Copy dictation only, Live typing, meetings, captures,
-Paste last dictation
+printing stops, Live typing, meetings, captures, Paste last dictation
+Copy dictation only on -> YOLO mode still pastes and sends in its apps
 ```
 
 Details and checks in [labs.md](labs.md).

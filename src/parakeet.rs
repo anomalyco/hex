@@ -1056,20 +1056,22 @@ fn finish_output(
                         | TranscriptionTarget::CopyOnlyPaste
                         | TranscriptionTarget::RawCopyOnlyPaste
                         | TranscriptionTarget::RawPaste => {
+                            // A rescued microphone-loss dictation is always
+                            // copied: the disruption may have taken focus.
+                            let rescued = matches!(
+                                target,
+                                TranscriptionTarget::CopyOnlyPaste
+                                    | TranscriptionTarget::RawCopyOnlyPaste
+                            );
+                            let send_gate = completed.timings.send_gate.filter(|_| {
+                                !rescued && crate::dictation::yolo_mode::sends(completed.application.as_deref())
+                            });
                             // Labs › Copy dictation only, read as the output
                             // commits: dictations go to the clipboard
                             // unpasted; Paste last dictation still pastes.
-                            // A rescued microphone-loss dictation is always
-                            // copied: the disruption may have taken focus.
-                            let copy_only = crate::labs::copy_only()
-                                || matches!(
-                                    target,
-                                    TranscriptionTarget::CopyOnlyPaste
-                                        | TranscriptionTarget::RawCopyOnlyPaste
-                                );
-                            let send_gate = completed.timings.send_gate.filter(|_| {
-                                !copy_only && crate::dictation::yolo_mode::sends(completed.application.as_deref())
-                            });
+                            // A dictation YOLO mode sends is pasted anyway.
+                            let copy_only =
+                                rescued || (crate::labs::copy_only() && send_gate.is_none());
                             let mode = if copy_only {
                                 PasteMode::CopyOnly
                             } else if send_gate.is_some() {
@@ -1663,7 +1665,12 @@ mod tests {
         }
         labs.copy_only = true;
         crate::labs::apply(&labs);
-        assert_eq!(deliver(Ok("yep"), "Messages", true), ["copy yep"]);
+        assert_eq!(
+            deliver(Ok("yep"), "Messages", true),
+            ["paste yep", "Return"],
+            "YOLO mode's apps paste and send through Copy dictation only"
+        );
+        assert_eq!(deliver(Ok("yep"), "Notes", true), ["copy yep"]);
         crate::labs::apply(&LabsSettings::default());
         assert_eq!(deliver(Ok("yep"), "Messages", true), ["paste yep"]);
     }
