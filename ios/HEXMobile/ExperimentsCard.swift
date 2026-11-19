@@ -7,6 +7,7 @@ struct ExperimentsCard: View {
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+    @State private var autocorrect = FullKeyboardSettings().autocorrect
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -15,19 +16,47 @@ struct ExperimentsCard: View {
                 .foregroundStyle(HexTheme.textMuted)
                 .padding(.leading, 16)
 
-            Toggle(isOn: $fullKeyboard) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Full keyboard")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(HexTheme.textBase)
-                    Text("Type with Hex, with a Hex key to dictate")
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
+            VStack(spacing: 0) {
+                Toggle(isOn: $fullKeyboard) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Full keyboard")
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(HexTheme.textBase)
+                        Text("Type with Hex, with a Hex key to dictate")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+                .tint(HexTheme.success)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .onChange(of: fullKeyboard) { _, enabled in
+                    FullKeyboardSettings().isEnabled = enabled
+                }
+
+                if fullKeyboard {
+                    Divider()
+                        .overlay(HexTheme.borderWeak)
+                        .padding(.leading, 16)
+
+                    Toggle(isOn: $autocorrect) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Autocorrect")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(HexTheme.textBase)
+                            Text("Fix contractions, shortcuts, and one-edit typos on space")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HexTheme.textMuted)
+                        }
+                    }
+                    .tint(HexTheme.success)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .onChange(of: autocorrect) { _, enabled in
+                        FullKeyboardSettings().autocorrect = enabled
+                    }
                 }
             }
-            .tint(HexTheme.success)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
             .background(
                 HexTheme.bgBase,
                 in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
@@ -101,6 +130,7 @@ struct ExperimentsCard: View {
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+            autocorrect = FullKeyboardSettings().autocorrect
         }
     }
 }
