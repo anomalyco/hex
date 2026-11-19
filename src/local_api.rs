@@ -2589,6 +2589,56 @@ mod tests {
         assert_eq!(gate.asks(), 1);
     }
 
+    /// A page denied (or ignored) in one ask can't open the other at once:
+    /// the cooldown is per recipient, across transcription and recording.
+    #[test]
+    fn a_refused_page_cools_down_across_both_asks() {
+        for refusal in [Answer::Deny, Answer::Timeout] {
+            let gate = ScriptedGate::new(refusal);
+            let directory = temp_directory();
+            let store = allowing(
+                Permissions::new(Some(directory.join("permissions.json"))),
+                &app_origin(),
+            );
+            let sessions = Arc::new(record::Sessions::with_timings(
+                connected(),
+                Some(gate.clone()),
+                FakeRecording::with_text("unused"),
+                store.clone(),
+                record::Timings {
+                    cooldown: Duration::from_secs(30),
+                    ..record_timings()
+                },
+            ));
+            let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+            let api = start_unpublished(
+                events,
+                LocalApiOptions {
+                    cors: Cors::gated(Vec::new),
+                    connect: Some(Connect::new(connected(), Some(gate.clone()), store)),
+                    record: Some(sessions.clone()),
+                    stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                    ..LocalApiOptions::default()
+                },
+            )
+            .unwrap();
+            let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+            let refused = connect_post(
+                api.document.port,
+                "https://app.example",
+                connect::AUTHORIZE_PATH,
+                &body,
+            );
+            assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+            let paired = sessions.pair(
+                record::Channel::Web("https://app.example".into()),
+                body.as_bytes(),
+            );
+            assert_eq!(paired.status, 429, "{refusal:?}");
+            assert_eq!(gate.asks(), 1);
+        }
+    }
+
     #[test]
     fn an_unlisted_page_never_reaches_the_dialog() {
         let gate = ScriptedGate::new(Answer::Once);

@@ -64,7 +64,8 @@ fn a_pages_favicon_reaches_the_window_on_both_asks() {
 
 #[test]
 fn an_invalid_or_remote_favicon_is_ignored_and_the_ask_still_shows() {
-    let gate = ScriptedGate::new(Answer::Timeout);
+    // Unanswerable rather than ignored, so no cooldown stands between asks.
+    let gate = ScriptedGate::new(Answer::Unavailable);
     let (api, _, _) = start(gate.clone(), &temp_directory());
     let port = api.document.port;
     for icon in [
@@ -73,7 +74,7 @@ fn an_invalid_or_remote_favicon_is_ignored_and_the_ask_still_shows() {
         data_url("image/svg+xml", b"<svg/>"),
     ] {
         let answer = connect_post(port, PAGE, connect::AUTHORIZE_PATH, &ask(&icon));
-        assert_eq!(body_code(&answer), "consent-timeout");
+        assert_eq!(body_code(&answer), "connect-unavailable");
         assert_eq!(gate.last_prompt().unwrap().recipient.icon(), None);
     }
     // Past the body's bound, the request itself is refused.

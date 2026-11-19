@@ -2885,12 +2885,12 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   ├── Connected apps pane (sidebar, while on) -> Connected (Revoke), Websites switch, Asking to connect,
 │   │   Allowed and Blocked websites folded; names and icons kept with grants for offline display
 │   ├── POST /connect/authorize -> Hex's permission window asks; Allow Once or Always Allow -> code + PKCE
-│   │   ├── Deny, Escape, timeout -> 403, no code; Deny starts a 30 s cooldown
+│   │   ├── Deny, Escape, timeout -> 403, no code, and a 30 s cooldown for that recipient in both asks
 │   │   └── Code, then token: one plain POST /transcriptions from that origin, then spent
 │   │       └── No bearer token, microphone, /dictations, /streams, or /control (docs/connect.md)
 │   ├── POST /record/pair -> "Allow microphone recording?"
 │   │   ├── Web: allowed Origin; native: owner-only record.sock / pipe + OS-verified identity
-│   │   ├── Allow Once / Always Allow -> code, PKCE grant; Deny -> 403 + 30 s cooldown
+│   │   ├── Allow Once / Always Allow -> code, PKCE grant; Deny or no answer -> 403 + 30 s cooldown
 │   │   ├── One start (Once) or repeated starts (Always), each its own session
 │   │   ├── Runs while the client checks in (10 s lease, no length cap); card: elapsed, Stop recording / Cancel
 │   │   ├── Grant bound to Origin or native peer process; one session at a time
@@ -2975,8 +2975,8 @@ but no keys, and Wayland without layer-shell answers unavailable, its Labs card
 disabled with a note saying so) names its verified
 origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
 upload token that spends itself on one plain `POST /transcriptions` from the
-same origin. Codes and tokens expire in two minutes, a Deny starts a 30 s
-cooldown, and the dialog is answered (Return and Escape deny) rather than
+same origin. Codes and tokens expire in two minutes, a Deny or no answer
+starts a 30 s cooldown for that recipient in both asks, and the dialog is answered (Return and Escape deny) rather than
 dismissed. `local_api` tests cover the whole exchange, origin binding, one-use
 codes and tokens, expiry, the scope refusals, and deny/timeout. The window's
 rendering proof is the `consent_window` snapshot test and one Xvfb (X11) run

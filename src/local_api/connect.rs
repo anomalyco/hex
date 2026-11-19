@@ -67,8 +67,6 @@ struct State {
     grants: HashMap<String, Grant>,
     /// Minted audio tokens, by token.
     audio: HashMap<String, Audio>,
-    /// When each origin was last denied.
-    denied: HashMap<String, Instant>,
     next_prompt: u64,
     /// One dialog at a time: another page waits for this one to close.
     prompting: bool,
@@ -217,14 +215,13 @@ impl Connect {
             Ok(saved) => saved,
             Err(()) => return HttpResponse::code(403, "permission-proof-required"),
         };
+        // One cooldown per recipient across both asks.
+        let cooled = super::record::recipient_key(&recipient);
         let answer = if saved.is_some() {
             Answer::Once
         } else {
-            let now = Instant::now();
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            if let Some(denied) = state.denied.get(origin)
-                && *denied + self.cooldown > now
-            {
+            if self.permissions.cooling(&cooled, self.cooldown) {
                 return HttpResponse::code(429, "consent-cooldown");
             }
             if state.prompting {
@@ -271,10 +268,13 @@ impl Connect {
                 )
             }
             Answer::Deny => {
-                state.denied.insert(origin.to_owned(), Instant::now());
+                self.permissions.refused(&cooled);
                 HttpResponse::code(403, "consent-denied")
             }
-            Answer::Timeout => HttpResponse::code(403, "consent-timeout"),
+            Answer::Timeout => {
+                self.permissions.refused(&cooled);
+                HttpResponse::code(403, "consent-timeout")
+            }
             Answer::Unavailable => HttpResponse::code(403, "connect-unavailable"),
         }
     }
