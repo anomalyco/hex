@@ -12,7 +12,7 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   -> muted note on the row and under the sheet's description: "SenseVoice
 │   Small doesn't use these terms; rewriting and search still do"; Parakeet,
 │   Underdog Bark, Whisper, and Qwen3-ASR (QwenCleo too) show none
-├── Parakeet-based model with Labs › Vocabulary biasing off -> the sheet says
+├── Parakeet-based model with Labs › Vocabulary help off -> the sheet says
 │   transcription uses the terms only with it on
 ├── Selected model reads fewer terms than the list holds -> muted line under
 │   the sheet's description: "This model reads the first 38 of 52 terms"
@@ -38,7 +38,7 @@ General › Vocabulary   // vocabulary.settings; after Language
     (settings.json `vocabulary_boost`)  // vocabulary.boost
 
 Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too)  // vocabulary.transcription; transcription::gguf_session::with_vocabulary
-├── Only with Labs › Vocabulary biasing on (`labs.vocabulary_biasing`, off by
+├── Only with Labs › Vocabulary help on (`labs.vocabulary_biasing`, off by
 │   default; labs.md) -> off: no run takes the list; the sheet says so, and
 │   rewriting and search still use it
 ├── Every run and live stream reads the list and the boost at its start:
@@ -90,7 +90,7 @@ Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // 
 │   both models return it on silence or noise (README.md#get-ready)
 └── "Sounds like" spellings are not sent; rewriting and search use them
 
-Screen vocabulary (Labs › Screen vocabulary, macOS)  // vocabulary.screen
+Words on screen (Labs › Words on screen, macOS)  // vocabulary.screen
 ├── Off by default; off, or for a model that ignores vocabulary, no
 │   Accessibility read happens for a dictation
 ├── On, as a capture becomes real: one background read of the focused
@@ -105,7 +105,7 @@ Screen vocabulary (Labs › Screen vocabulary, macOS)  // vocabulary.screen
 ├── Joins that dictation after the mode's terms and the shared list, inside
 │   the same 64-term/character budgets; a model with VocabularyUse::None gets
 │   nothing
-├── Parakeet reads them only with Labs › Vocabulary biasing on and a boost
+├── Parakeet reads them only with Labs › Vocabulary help on and a boost
 │   other than Off; Whisper and Qwen3-ASR read them as a prompt
 ├── A capture with terms for a model that reads them uses its whole-clip run
 │   rather than a live stream's text: a stream fixes its vocabulary when it

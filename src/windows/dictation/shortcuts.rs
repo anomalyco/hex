@@ -92,10 +92,11 @@ impl Shortcuts {
         }
     }
 
-    pub(super) fn start(&self) -> Result<WindowsHotkeyMonitor> {
+    pub(super) fn start(&self, activity: InputActivity) -> Result<WindowsHotkeyMonitor> {
         // Double-tap-only depends on the double-tap window; without the lock
         // there is no second tap to wait for.
         WindowsHotkeyMonitor::start(
+            activity,
             self.hotkey.clone(),
             self.paste_last_hotkey.clone(),
             self.raw_dictation_hotkey.clone(),

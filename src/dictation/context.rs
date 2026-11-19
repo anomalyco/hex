@@ -32,7 +32,7 @@ pub struct ContextSnapshot {
     pub browser_url: Option<Url>,
     pub window_title: Option<String>,
     pub input_revision: Option<u64>,
-    /// Labs › Screen vocabulary: names and terms read from the focused window
+    /// Labs › Words on screen: names and terms read from the focused window
     /// as this capture became real. Set only on the snapshot a capture
     /// finishes with, so they never reach another dictation or a meeting.
     pub screen_terms: Vec<String>,

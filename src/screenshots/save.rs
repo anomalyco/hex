@@ -150,7 +150,7 @@ pub(crate) fn copy_saved(path: &Path, recording: bool) -> anyhow::Result<()> {
 
 /// Just `path` on the clipboard, so a paste into Finder or a chat gets the
 /// file. The capture crate's, so a written Annotate capture copies the same
-/// way (Labs › Copy captures as a zip).
+/// way (Labs › Copy a capture as one file).
 fn copy_file(path: &Path) -> anyhow::Result<()> {
     scrawl_capture::handoff::copy_file_to_clipboard(path)
 }

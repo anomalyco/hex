@@ -19,6 +19,7 @@ mod overloads;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod recovery;
+pub(crate) mod system_idle;
 mod transport;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
@@ -666,6 +667,17 @@ impl RecoveringAudioInput {
         input.route_generation = route_generation();
         input.opener = Arc::new(opener);
         input
+    }
+
+    /// An input that opens into a stream `opener` makes, without naming the
+    /// request: for a test in another module that needs each open to finish
+    /// with a stream of the test's choosing.
+    #[cfg(test)]
+    pub(crate) fn with_stream_opener_for_test(
+        selected_device: Option<&str>,
+        opener: impl Fn() -> Result<Opened> + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_opener_for_test(selected_device, input_route_generation, move |_| opener())
     }
 
     /// An input whose startup open failed, without touching CoreAudio.

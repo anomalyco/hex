@@ -40,7 +40,6 @@ pub enum Feature {
     ParakeetUltra,
     StandaloneSpecialKeys,
     HistoryStats,
-    HistoryMultiSelect,
     RecentDictations,
     SkipPauses,
     OutputFixes,
@@ -51,7 +50,6 @@ pub enum Feature {
     SectionKeyAlone,
     MicrophoneKeyAlone,
     KeepRecordings,
-    SettingsSearch,
     Appearance,
     ReleaseNotesLink,
     HideMenuBarIcon,
@@ -71,6 +69,7 @@ pub enum Feature {
     ApiBrowserAccess,
     SpeakersOnly,
     CalendarMenu,
+    CalendarSelectAll,
     MoreDictationShortcuts,
     PauseMenu,
     PrintStart,
@@ -82,10 +81,12 @@ pub enum Feature {
     CopyDictationAudio,
     StopPhrase,
     HoldThroughKeys,
+    ModesEditor,
+    DropTranscribe,
 }
 
 impl Feature {
-    pub const ALL: [Self; 77] = [
+    pub const ALL: [Self; 78] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -121,7 +122,6 @@ impl Feature {
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
-        Self::HistoryMultiSelect,
         Self::RecentDictations,
         Self::SkipPauses,
         Self::OutputFixes,
@@ -132,7 +132,6 @@ impl Feature {
         Self::SectionKeyAlone,
         Self::MicrophoneKeyAlone,
         Self::KeepRecordings,
-        Self::SettingsSearch,
         Self::Appearance,
         Self::ReleaseNotesLink,
         Self::HideMenuBarIcon,
@@ -152,6 +151,7 @@ impl Feature {
         Self::ApiBrowserAccess,
         Self::SpeakersOnly,
         Self::CalendarMenu,
+        Self::CalendarSelectAll,
         Self::MoreDictationShortcuts,
         Self::PauseMenu,
         Self::PrintStart,
@@ -163,5 +163,7 @@ impl Feature {
         Self::CopyDictationAudio,
         Self::StopPhrase,
         Self::HoldThroughKeys,
+        Self::ModesEditor,
+        Self::DropTranscribe,
     ];
 }

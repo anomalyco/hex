@@ -202,7 +202,7 @@ impl ChordWatch {
         let watching = crate::suppression::dictation_key::watch(wake.clone());
         let (sender, results) = mpsc::channel();
         let chord_sender = sender.clone();
-        // Labs › Sided modifier chords is read once, as recording starts.
+        // Labs › Left and right keys is read once, as recording starts.
         let capture = Rc::new(RefCell::new(ChordCapture::with_sides(
             crate::labs::sided_modifier_chords(),
         )));
@@ -303,7 +303,7 @@ fn recorded_microphone_key(
 /// Turns key and modifier events into a chord: a key with its held
 /// modifiers, or the most modifier keys held at once when they are all
 /// released without a key, with the sides `recorded_sides` keeps (or,
-/// with Labs › Sided modifier chords on, the side each was pressed on).
+/// with Labs › Left and right keys on, the side each was pressed on).
 struct ChordCapture {
     peak: HotkeyModifiers,
     /// A key went down with these modifiers; their release records nothing.
@@ -1801,7 +1801,7 @@ mod tests {
     }
 
     /// The recorder takes the ISO section key alone, as Linux's does; Labs ›
-    /// Section key alone is enforced by `settings::validate` before saving,
+    /// § key alone is enforced by `settings::validate` before saving,
     /// not by the recorder.
     #[test]
     fn the_section_key_records_alone() {

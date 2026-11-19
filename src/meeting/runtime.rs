@@ -149,7 +149,7 @@ fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
     );
     if !crate::labs::gnome_meeting_capsules() {
         message.push_str(
-            " On GNOME, Labs › Floating meeting capsules on GNOME can show it over your call.",
+            " On GNOME, Labs › Call recording controls on GNOME can show it over your call.",
         );
     }
     window.update(move |ui, tx| {

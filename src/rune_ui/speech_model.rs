@@ -150,7 +150,9 @@ fn language(
     layer: &mut Vec<El>,
 ) -> El {
     let current = transcription_models::language_name(&choice.language);
-    let codes = transcription_models::definition(choice.model).language_choices();
+    let codes = transcription_models::menu_order(
+        &transcription_models::definition(choice.model).language_choices(),
+    );
     if codes.len() <= 1 {
         return fixed_select(p, key, tr("Language"), current);
     }

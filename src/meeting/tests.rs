@@ -550,6 +550,27 @@ fn chapters_extend_every_title_but_one_the_user_typed() {
 }
 
 #[test]
+fn an_old_twelve_hour_default_title_stays_the_default_in_another_language() {
+    let (base, directory) = finished_meeting("old-default-title", "Meeting");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let started = transcript::LocalTime::from_ms(manifest.created_at_ms);
+    manifest.title = format!("Meeting — {}", started.twelve_hour_clock());
+    assert!(
+        manifest.title.ends_with(" AM") || manifest.title.ends_with(" PM"),
+        "{}",
+        manifest.title
+    );
+    assert_eq!(manifest.title_source, None);
+
+    crate::desktop::i18n::apply(Some("de"));
+    assert_ne!(manifest.title, default_title(None, manifest.created_at_ms));
+    assert_eq!(manifest.title_source(), TitleSource::Default);
+    crate::desktop::i18n::apply(Some("en"));
+    assert_eq!(manifest.title, default_title(None, manifest.created_at_ms));
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording() {
     let (base, directory) = finished_meeting("trash", "Design sync");
     let export = read_manifest(&directory).unwrap().export_path.unwrap();

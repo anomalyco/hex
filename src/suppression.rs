@@ -13,6 +13,7 @@ use color_eyre::eyre::{Result, eyre};
 use crate::app_settings::HotkeyBinding;
 use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
+use crate::continuation::InputActivity;
 use crate::dictation::{BOTH_SIDES_WINDOW, DOUBLE_TAP_WINDOW, MINIMUM_HOLD_DURATION};
 
 pub(crate) mod dictation_key;
@@ -303,18 +304,7 @@ impl Drop for PendingInputAcknowledgement<'_> {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct InputActivity(Arc<AtomicU64>);
-
 impl InputActivity {
-    pub fn revision(&self) -> u64 {
-        self.0.load(Ordering::Acquire)
-    }
-
-    pub fn invalidate(&self) {
-        self.0.fetch_add(1, Ordering::AcqRel);
-    }
-
     fn observe(&self, input: InputEvent, suppressed: bool) {
         if !suppressed
             && matches!(

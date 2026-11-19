@@ -184,6 +184,12 @@ pub fn get(settings: &AppSettings, name: &str) -> Result<Vec<SettingValue>, Cont
 }
 
 fn unknown(name: &str) -> ControlError {
+    if name == "labs.settings_search" {
+        return ControlError::new(
+            "unknown-setting",
+            "Settings search no longer needs a lab. Use Cmd+K (Ctrl+K off macOS) in the Hex window.",
+        );
+    }
     if let Some((_, replacement)) = RETIRED.iter().find(|(retired, _)| *retired == name) {
         return ControlError::new(
             "unknown-setting",
@@ -313,7 +319,7 @@ pub fn apply(
                     && !candidate.double_tap_modifiers_allowed())
             {
                 let modifier_only = if cfg!(target_os = "macos") {
-                    ", or with Labs › Double-tap on a lone modifier on, a shortcut without a key"
+                    ", or with Labs › Double-tap Option, Command, or Globe on, a shortcut without a key"
                 } else {
                     ""
                 };
@@ -391,7 +397,7 @@ pub fn apply(
                 }
             }
             // A row can't be double-tap only without a key, or with Labs ›
-            // Double-tap on a lone modifier, without a key but modifiers.
+            // Double-tap Option, Command, or Globe, without a key but modifiers.
             let modifiers_allowed = candidate.double_tap_modifiers_allowed();
             for row in &mut candidate.extra_dictation_hotkeys {
                 row.mode = row
@@ -1452,10 +1458,6 @@ mod tests {
             choices("labs.keep_microphone_open_seconds"),
             crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS
         );
-        assert_eq!(
-            choices("labs.yolo_mode_seconds"),
-            crate::app_settings::YOLO_MODE_SECONDS
-        );
     }
 
     #[test]
@@ -1721,7 +1723,7 @@ mod tests {
         assert_eq!(
             refused
                 .message
-                .contains("Labs › Double-tap on a lone modifier"),
+                .contains("Labs › Double-tap Option, Command, or Globe"),
             cfg!(target_os = "macos"),
             "{}",
             refused.message

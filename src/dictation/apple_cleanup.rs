@@ -124,6 +124,8 @@ fn observation(latency_ms: u64, fallback: Option<String>) -> ProcessingObservati
     ProcessingObservation {
         profile: PROFILE.into(),
         latency_ms,
+        // Apple Intelligence cleans the text on this Mac; no OpenCode model runs.
+        model: None,
         fallback,
     }
 }

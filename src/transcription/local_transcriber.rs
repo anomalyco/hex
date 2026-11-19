@@ -11,7 +11,7 @@ use crate::transcription::gpu_health;
 use crate::transcription::models::{
     TranscriptionModelId, TranscriptionSelection, download_with_progress, model_path, validate,
 };
-use crate::transcription::{pad_gguf_samples, trailing_silence_samples};
+use crate::transcription::{pad_gguf_samples, requires_closing_mark, trailing_silence_samples};
 
 /// A word or segment's start and end (ms from the clip's start) and text.
 pub type TimedSpan = (i64, i64, String);
@@ -458,6 +458,13 @@ impl LocalTranscriber {
     /// same trailing silence its whole-clip runs get.
     pub(crate) fn stream_trailing_silence(&self) -> usize {
         trailing_silence_samples(Some(self.model_id()))
+    }
+
+    /// Whether a live stream of this model must end its text with closing
+    /// sentence punctuation before it is trusted, as Unified English's does
+    /// (issue 1933).
+    pub(crate) fn stream_requires_closing_mark(&self) -> bool {
+        requires_closing_mark(Some(self.model_id()))
     }
 
     /// The model this transcriber was loaded for.

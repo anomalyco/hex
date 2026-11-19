@@ -136,12 +136,24 @@ pub(crate) fn open_opencode_docs() {
     }
 }
 
+/// What an unset model key gets, for the row's badge and the picker's first
+/// entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModelDefault {
+    /// Hex's own ranked pick, which OpenCode would not choose by itself.
+    Automatic,
+    /// OpenCode's own default model.
+    OpenCode,
+}
+
 pub(crate) struct ModelPresentation {
     pub(crate) name: String,
     pub(crate) provider: String,
+    /// Why the row shows `name` when the mode names no model; `None` when the
+    /// mode names its own.
+    pub(crate) default: Option<ModelDefault>,
     #[cfg(test)]
     key: String,
-    pub(crate) is_default: bool,
 }
 
 pub(crate) fn model_presentation(
@@ -152,6 +164,11 @@ pub(crate) fn model_presentation(
         return selected_key.map(fallback_model_presentation);
     };
     let is_default = selected_key.is_none();
+    let default = is_default.then_some(if catalog.automatic_default() {
+        ModelDefault::Automatic
+    } else {
+        ModelDefault::OpenCode
+    });
     let key = selected_key.or(catalog.default_key.as_deref())?;
     let choice = catalog.models.iter().find(|choice| choice.key == key);
     let name = choice
@@ -166,9 +183,9 @@ pub(crate) fn model_presentation(
     Some(ModelPresentation {
         name,
         provider,
+        default,
         #[cfg(test)]
         key: key.to_owned(),
-        is_default,
     })
 }
 
@@ -184,9 +201,9 @@ fn fallback_model_presentation(key: &str) -> ModelPresentation {
     ModelPresentation {
         name: model_id(key).to_owned(),
         provider: provider_label(provider),
+        default: None,
         #[cfg(test)]
         key: key.to_owned(),
-        is_default: false,
     }
 }
 
@@ -225,6 +242,15 @@ mod tests {
         }
     }
 
+    fn ranked_choice() -> ModelChoice {
+        ModelChoice {
+            key: "anthropic/claude-haiku-4-5".into(),
+            name: "Claude Haiku 4.5".into(),
+            provider: "anthropic".into(),
+            variants: Vec::new(),
+        }
+    }
+
     #[test]
     fn selected_model_presents_provider_name_and_resolved_key() {
         let catalog = ModelCatalogState::Loaded(ModelCatalog {
@@ -238,10 +264,46 @@ mod tests {
         assert_eq!(selected.name, "Example Rewrite");
         assert_eq!(selected.provider, "OpenCode");
         assert_eq!(selected.key, "opencode/example-rewrite");
-        assert!(!selected.is_default);
+        assert_eq!(selected.default, None);
 
         let default = model_presentation(&catalog, None).unwrap();
-        assert!(default.is_default);
+        assert_eq!(default.default, Some(ModelDefault::OpenCode));
+    }
+
+    /// An unset model is Hex's ranked pick whenever the catalog lists one, and
+    /// the row must not call that OpenCode's default.
+    #[test]
+    fn an_unset_model_on_a_ranked_catalog_is_automatic() {
+        let catalog = ModelCatalogState::Loaded(ModelCatalog {
+            models: vec![ranked_choice(), example_choice(Vec::new())],
+            default_key: Some("anthropic/claude-haiku-4-5".into()),
+            default_name: Some("Claude Haiku 4.5".into()),
+            default_variant: None,
+        });
+
+        let automatic = model_presentation(&catalog, None).unwrap();
+        assert_eq!(automatic.default, Some(ModelDefault::Automatic));
+        assert_eq!(automatic.name, "Claude Haiku 4.5");
+        assert_eq!(automatic.provider, "Anthropic");
+        assert_eq!(automatic.key, "anthropic/claude-haiku-4-5");
+
+        let chosen = model_presentation(&catalog, Some("opencode/example-rewrite")).unwrap();
+        assert_eq!(chosen.default, None);
+    }
+
+    /// With no ranked model listed, OpenCode's own default really answers.
+    #[test]
+    fn an_unset_model_without_a_ranked_catalog_is_opencodes_default() {
+        let catalog = ModelCatalogState::Loaded(ModelCatalog {
+            models: vec![example_choice(Vec::new())],
+            default_key: Some("opencode/example-rewrite".into()),
+            default_name: Some("Example Rewrite".into()),
+            default_variant: None,
+        });
+
+        let default = model_presentation(&catalog, None).unwrap();
+        assert_eq!(default.default, Some(ModelDefault::OpenCode));
+        assert_eq!(default.name, "Example Rewrite");
     }
 
     #[test]

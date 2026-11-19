@@ -6,6 +6,15 @@
 //! user approves it once: the portal's restore token, kept owner-only in
 //! Application Support, restores later sessions without a dialog, so the
 //! paster can close an idle session and reopen it at the next paste.
+//!
+//! A chord goes out as evdev keycodes when the desktop's keymap confirms every
+//! key of it — each letter on one key in every layout group, and Ctrl, Shift,
+//! and Enter where their keymap options leave them — and otherwise as keysyms,
+//! which the desktop resolves in the active group; KWin's lookup for a Latin
+//! `v` on a Russian layout can lose the held Ctrl. [`keymap`] reads and
+//! resolves the keymap; a chord never mixes the two.
+
+mod keymap;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -24,12 +33,18 @@ pub(crate) const INTERFACE: &str = "org.freedesktop.portal.RemoteDesktop";
 const KEYBOARD: u32 = 1;
 /// Persist the grant until the user revokes it.
 const PERSIST_UNTIL_REVOKED: u32 = 2;
+/// Keysyms, for a chord the keymap can't confirm keycode by keycode.
 const XK_CONTROL_L: i32 = 0xffe3;
 const XK_SHIFT_L: i32 = 0xffe1;
 const XK_A: i32 = 0x61;
 const XK_C: i32 = 0x63;
 const XK_V: i32 = 0x76;
 const XK_RETURN: i32 = 0xff0d;
+/// Evdev codes of the keys a chord holds; the keymap says whether they still
+/// carry what they are named for.
+const EVDEV_KEY_LEFTCTRL: i32 = 29;
+const EVDEV_KEY_LEFTSHIFT: i32 = 42;
+const EVDEV_KEY_ENTER: i32 = 28;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
 /// A restored grant starts in tens of milliseconds; a start that takes
@@ -156,13 +171,29 @@ impl RemoteDesktop {
     /// Presses and releases a clipboard chord: Ctrl+A, Ctrl+C, or Ctrl+V
     /// (Ctrl+Shift+V for terminals).
     pub(crate) fn send(&self, chord: Chord, with_shift: bool) -> Result<()> {
-        send_keys(&chord_keys(chord, with_shift), |keysym, state| {
+        // Read per chord, not per session: a session can outlive the keymap it
+        // started under (a grant that can't restore keeps it for the paster's
+        // lifetime), and changing a layout or variant replaces the keymap.
+        let keymap = keymap::read();
+        let (encoding, keys) = chord_keys(chord, with_shift, keymap.as_ref());
+        if keymap.is_none() {
+            tracing::debug!(
+                chord = ?chord,
+                "could not read the desktop's keymap; sending keysyms"
+            );
+        } else if encoding == Encoding::Keysym {
+            tracing::debug!(
+                chord = ?chord,
+                "the keymap names no single key for this chord; sending keysyms"
+            );
+        }
+        send_keys(&keys, encoding, |key, state| {
             self.bus.call_portal(
-                "NotifyKeyboardKeysym",
+                encoding.method(),
                 &(
                     &self.session,
                     HashMap::<&str, Variant<'_>>::new(),
-                    keysym,
+                    key,
                     state,
                 ),
             )
@@ -170,38 +201,70 @@ impl RemoteDesktop {
     }
 }
 
+/// How a chord names its keys to the portal. One chord never mixes the two: a
+/// keycode and a keysym for the same letter would disagree about which key is
+/// held.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Encoding {
+    Keycode,
+    Keysym,
+}
+
+impl Encoding {
+    fn method(self) -> &'static str {
+        match self {
+            Self::Keycode => "NotifyKeyboardKeycode",
+            Self::Keysym => "NotifyKeyboardKeysym",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Keycode => "keycode",
+            Self::Keysym => "keysym",
+        }
+    }
+}
+
 /// Sends each key in order. A call that fails may still have reached the
 /// desktop, so every key still held is released before the error returns.
-fn send_keys(keys: &[(i32, u32)], mut notify: impl FnMut(i32, u32) -> Result<()>) -> Result<()> {
+fn send_keys(
+    keys: &[(i32, u32)],
+    encoding: Encoding,
+    mut notify: impl FnMut(i32, u32) -> Result<()>,
+) -> Result<()> {
     let mut pressed = Vec::new();
-    for &(keysym, state) in keys {
+    for &(key, state) in keys {
         if state == PRESSED {
             // Recorded before the call: a timeout does not mean it never ran.
-            pressed.push(keysym);
+            pressed.push(key);
         }
-        if let Err(error) = notify(keysym, state) {
+        if let Err(error) = notify(key, state) {
             tracing::warn!(
-                keysym = format!("{keysym:#x}"),
+                encoding = encoding.name(),
+                key,
                 state,
                 error = format!("{error:#}"),
                 "could not send a paste key"
             );
-            for keysym in pressed.iter().rev() {
-                if let Err(error) = notify(*keysym, RELEASED) {
+            for key in pressed.iter().rev() {
+                if let Err(error) = notify(*key, RELEASED) {
                     tracing::warn!(
-                        keysym = format!("{keysym:#x}"),
+                        encoding = encoding.name(),
+                        key,
                         error = format!("{error:#}"),
                         "could not release a paste key"
                     );
                 }
             }
-            return Err(error)
-                .wrap_err_with(|| format!("could not send keysym {keysym:#x} in state {state}"));
+            return Err(error).wrap_err_with(|| {
+                format!("could not send {} {key} in state {state}", encoding.name())
+            });
         }
         // A failed release stays recorded: the key may still be down, and
         // releasing one already up is harmless.
         if state == RELEASED
-            && let Some(index) = pressed.iter().rposition(|held| *held == keysym)
+            && let Some(index) = pressed.iter().rposition(|held| *held == key)
         {
             pressed.remove(index);
         }
@@ -219,22 +282,78 @@ impl Drop for RemoteDesktop {
     }
 }
 
-fn chord_keys(chord: Chord, with_shift: bool) -> Vec<(i32, u32)> {
-    let (key, shift) = match chord {
+/// Presses and releases a chord's keys in order: as evdev keycodes when the
+/// keymap confirms every key of the chord, and as keysyms otherwise.
+fn chord_keys(
+    chord: Chord,
+    with_shift: bool,
+    keymap: Option<&keymap::Groups>,
+) -> (Encoding, Vec<(i32, u32)>) {
+    if chord == Chord::Return {
+        return match keymap.filter(|groups| types(groups, EVDEV_KEY_ENTER, XK_RETURN)) {
+            Some(_) => (
+                Encoding::Keycode,
+                vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)],
+            ),
+            None => (
+                Encoding::Keysym,
+                vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)],
+            ),
+        };
+    }
+    let (letter, shift) = match chord {
         Chord::SelectAll => (XK_A, false),
         Chord::Copy => (XK_C, false),
         Chord::Paste => (XK_V, with_shift),
-        Chord::Return => return vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)],
+        Chord::Return => unreachable!("returned above"),
     };
-    let mut keys = vec![(XK_CONTROL_L, PRESSED)];
-    if shift {
-        keys.push((XK_SHIFT_L, PRESSED));
+    let keycode = keymap.and_then(|groups| {
+        // Options such as `ctrl:swapcaps` put Control_L on another key, so the
+        // fixed code is only used when the keymap still types it there.
+        if !types(groups, EVDEV_KEY_LEFTCTRL, XK_CONTROL_L) {
+            return None;
+        }
+        if shift && !types(groups, EVDEV_KEY_LEFTSHIFT, XK_SHIFT_L) {
+            return None;
+        }
+        keymap::resolve(groups, u32::try_from(letter).ok()?)
+    });
+    match keycode {
+        Some(code) => (
+            Encoding::Keycode,
+            presses(
+                EVDEV_KEY_LEFTCTRL,
+                EVDEV_KEY_LEFTSHIFT,
+                i32::from(code),
+                shift,
+            ),
+        ),
+        None => (
+            Encoding::Keysym,
+            presses(XK_CONTROL_L, XK_SHIFT_L, letter, shift),
+        ),
+    }
+}
+
+/// Whether the keymap types `keysym` on the fixed key `code` in every group.
+fn types(groups: &keymap::Groups, code: i32, keysym: i32) -> bool {
+    let (Ok(code), Ok(keysym)) = (u16::try_from(code), u32::try_from(keysym)) else {
+        return false;
+    };
+    keymap::every_group(groups, code, keysym)
+}
+
+/// Ctrl, [Shift], key, key, [Shift], Ctrl.
+fn presses(control: i32, shift: i32, key: i32, with_shift: bool) -> Vec<(i32, u32)> {
+    let mut keys = vec![(control, PRESSED)];
+    if with_shift {
+        keys.push((shift, PRESSED));
     }
     keys.extend([(key, PRESSED), (key, RELEASED)]);
-    if shift {
-        keys.push((XK_SHIFT_L, RELEASED));
+    if with_shift {
+        keys.push((shift, RELEASED));
     }
-    keys.push((XK_CONTROL_L, RELEASED));
+    keys.push((control, RELEASED));
     keys
 }
 
@@ -272,104 +391,277 @@ fn save_restore_token(token: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// A `us` keymap: `a`, `c`, and `v` on their QWERTY keys, and the
+    /// modifiers and Return where a plain layout leaves them.
+    fn qwerty() -> keymap::Groups {
+        vec![vec![
+            (29, u32::try_from(XK_CONTROL_L).unwrap()),
+            (42, u32::try_from(XK_SHIFT_L).unwrap()),
+            (28, u32::try_from(XK_RETURN).unwrap()),
+            (30, u32::try_from(XK_A).unwrap()),
+            (46, u32::try_from(XK_C).unwrap()),
+            (47, u32::try_from(XK_V).unwrap()),
+        ]]
+    }
+
+    /// `ctrl:swapcaps`: Caps_Lock on 29 and Control_L on 58, with `v` still on
+    /// its QWERTY key.
+    fn swapcaps() -> keymap::Groups {
+        vec![vec![
+            (29, 0xffe5),
+            (58, u32::try_from(XK_CONTROL_L).unwrap()),
+            (42, u32::try_from(XK_SHIFT_L).unwrap()),
+            (28, u32::try_from(XK_RETURN).unwrap()),
+            (47, u32::try_from(XK_V).unwrap()),
+        ]]
+    }
+
+    /// Both ways a chord can go out: no keymap at all, and a keymap that names
+    /// the letters' keys.
+    fn ways() -> [Option<keymap::Groups>; 2] {
+        [None, Some(qwerty())]
+    }
+
     #[test]
     fn paste_keys_balance_their_modifiers() {
+        // Without a keymap the chord is keysyms, as it always was.
         assert_eq!(
-            chord_keys(Chord::Paste, false),
-            [
-                (XK_CONTROL_L, PRESSED),
-                (XK_V, PRESSED),
-                (XK_V, RELEASED),
-                (XK_CONTROL_L, RELEASED)
-            ]
+            chord_keys(Chord::Paste, false, None),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
         );
         assert_eq!(
-            chord_keys(Chord::Paste, true),
-            [
-                (XK_CONTROL_L, PRESSED),
-                (XK_SHIFT_L, PRESSED),
-                (XK_V, PRESSED),
-                (XK_V, RELEASED),
-                (XK_SHIFT_L, RELEASED),
-                (XK_CONTROL_L, RELEASED)
-            ]
+            chord_keys(Chord::Paste, true, None),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_SHIFT_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_SHIFT_L, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
+        );
+        // A keymap names the key each layout puts `v` on.
+        let keymap = qwerty();
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&keymap)),
+            (
+                Encoding::Keycode,
+                vec![
+                    (EVDEV_KEY_LEFTCTRL, PRESSED),
+                    (47, PRESSED),
+                    (47, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
+        );
+        assert_eq!(
+            chord_keys(Chord::Paste, true, Some(&keymap)),
+            (
+                Encoding::Keycode,
+                vec![
+                    (EVDEV_KEY_LEFTCTRL, PRESSED),
+                    (EVDEV_KEY_LEFTSHIFT, PRESSED),
+                    (47, PRESSED),
+                    (47, RELEASED),
+                    (EVDEV_KEY_LEFTSHIFT, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
         );
     }
 
     /// Select-all and copy never take the terminal paste's Shift.
     #[test]
     fn select_all_and_copy_ignore_the_terminal_paste_preference() {
+        let keymap = qwerty();
+        for (chord, keysym, code) in [(Chord::SelectAll, XK_A, 30), (Chord::Copy, XK_C, 46)] {
+            for with_shift in [false, true] {
+                assert_eq!(
+                    chord_keys(chord, with_shift, None),
+                    (
+                        Encoding::Keysym,
+                        vec![
+                            (XK_CONTROL_L, PRESSED),
+                            (keysym, PRESSED),
+                            (keysym, RELEASED),
+                            (XK_CONTROL_L, RELEASED)
+                        ]
+                    )
+                );
+                assert_eq!(
+                    chord_keys(chord, with_shift, Some(&keymap)),
+                    (
+                        Encoding::Keycode,
+                        vec![
+                            (EVDEV_KEY_LEFTCTRL, PRESSED),
+                            (code, PRESSED),
+                            (code, RELEASED),
+                            (EVDEV_KEY_LEFTCTRL, RELEASED)
+                        ]
+                    )
+                );
+            }
+        }
+    }
+
+    /// Return goes out as a keycode only where the keymap still types Return
+    /// on it; without a keymap it stays a keysym, as it always was.
+    #[test]
+    fn return_follows_the_keymap() {
         assert_eq!(
-            chord_keys(Chord::SelectAll, true),
-            [
-                (XK_CONTROL_L, PRESSED),
-                (XK_A, PRESSED),
-                (XK_A, RELEASED),
-                (XK_CONTROL_L, RELEASED)
-            ]
+            chord_keys(Chord::Return, false, None),
+            (
+                Encoding::Keysym,
+                vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)]
+            )
+        );
+        let keymap = qwerty();
+        assert_eq!(
+            chord_keys(Chord::Return, false, Some(&keymap)),
+            (
+                Encoding::Keycode,
+                vec![(EVDEV_KEY_ENTER, PRESSED), (EVDEV_KEY_ENTER, RELEASED)]
+            )
+        );
+        // A layout that moved Return off 28 keeps the keysym.
+        let moved = vec![vec![(29, 0xffe3), (47, 0x76), (24, 0xff0d)]];
+        assert_eq!(
+            chord_keys(Chord::Return, false, Some(&moved)),
+            (
+                Encoding::Keysym,
+                vec![(XK_RETURN, PRESSED), (XK_RETURN, RELEASED)]
+            )
+        );
+    }
+
+    /// `ctrl:swapcaps` moves Control_L off 29, where a keycode chord would
+    /// hold Caps_Lock instead, so the whole chord falls back to keysyms.
+    #[test]
+    fn moved_modifiers_fall_back_to_keysyms() {
+        let keymap = swapcaps();
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&keymap)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
         );
         assert_eq!(
-            chord_keys(Chord::Copy, true),
-            [
-                (XK_CONTROL_L, PRESSED),
-                (XK_C, PRESSED),
-                (XK_C, RELEASED),
-                (XK_CONTROL_L, RELEASED)
-            ]
+            chord_keys(Chord::Paste, true, Some(&keymap)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_SHIFT_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_SHIFT_L, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
+        );
+
+        // A moved Shift only matters to the chords that hold it.
+        let moved_shift = vec![vec![(29, 0xffe3), (42, 0xffe5), (47, 0x76)]];
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&moved_shift)),
+            (
+                Encoding::Keycode,
+                vec![
+                    (EVDEV_KEY_LEFTCTRL, PRESSED),
+                    (47, PRESSED),
+                    (47, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
+        );
+        assert_eq!(
+            chord_keys(Chord::Paste, true, Some(&moved_shift)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_SHIFT_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_SHIFT_L, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
+                ]
+            )
         );
     }
 
     #[test]
     fn a_successful_paste_sends_each_key_once() {
-        for chord in [Chord::Paste, Chord::SelectAll, Chord::Copy] {
-            for with_shift in [false, true] {
-                let keys = chord_keys(chord, with_shift);
-                let mut sent = Vec::new();
-                send_keys(&keys, |keysym, state| {
-                    sent.push((keysym, state));
-                    Ok(())
-                })
-                .unwrap();
-                assert_eq!(sent, keys);
+        for keymap in ways() {
+            for chord in [Chord::Paste, Chord::SelectAll, Chord::Copy] {
+                for with_shift in [false, true] {
+                    let (encoding, keys) = chord_keys(chord, with_shift, keymap.as_ref());
+                    let mut sent = Vec::new();
+                    send_keys(&keys, encoding, |key, state| {
+                        sent.push((key, state));
+                        Ok(())
+                    })
+                    .unwrap();
+                    assert_eq!(sent, keys);
+                }
             }
         }
     }
 
     #[test]
     fn a_failed_paste_releases_the_keys_it_still_holds() {
-        for chord in [Chord::Paste, Chord::SelectAll, Chord::Copy] {
-            for with_shift in [false, true] {
-                let keys = chord_keys(chord, with_shift);
-                for fail_at in 0..keys.len() {
-                    let mut sent = Vec::new();
-                    let result = send_keys(&keys, |keysym, state| {
-                        sent.push((keysym, state));
-                        if sent.len() == fail_at + 1 {
-                            return Err(eyre!("injected failure"));
+        for keymap in ways() {
+            for chord in [Chord::Paste, Chord::SelectAll, Chord::Copy] {
+                for with_shift in [false, true] {
+                    let (encoding, keys) = chord_keys(chord, with_shift, keymap.as_ref());
+                    for fail_at in 0..keys.len() {
+                        let mut sent = Vec::new();
+                        let result = send_keys(&keys, encoding, |key, state| {
+                            sent.push((key, state));
+                            if sent.len() == fail_at + 1 {
+                                return Err(eyre!("injected failure"));
+                            }
+                            Ok(())
+                        });
+                        assert!(result.is_err());
+                        // Cleanup releases every key still held: each press up to
+                        // and including the failed call, minus keys whose release
+                        // already succeeded before it. A failed release stays in,
+                        // since it may not have reached the desktop.
+                        let mut held: Vec<_> = keys[..=fail_at]
+                            .iter()
+                            .filter(|(_, state)| *state == PRESSED)
+                            .map(|(key, _)| *key)
+                            .collect();
+                        for (key, state) in &keys[..fail_at] {
+                            if *state == RELEASED
+                                && let Some(index) = held.iter().rposition(|held| held == key)
+                            {
+                                held.remove(index);
+                            }
                         }
-                        Ok(())
-                    });
-                    assert!(result.is_err());
-                    // Cleanup releases every key still held: each press up to and
-                    // including the failed call, minus keys whose release already
-                    // succeeded before it. A failed release stays in, since it may
-                    // not have reached the desktop.
-                    let mut held: Vec<_> = keys[..=fail_at]
-                        .iter()
-                        .filter(|(_, state)| *state == PRESSED)
-                        .map(|(keysym, _)| *keysym)
-                        .collect();
-                    for (keysym, state) in &keys[..fail_at] {
-                        if *state == RELEASED
-                            && let Some(index) = held.iter().rposition(|held| held == keysym)
-                        {
-                            held.remove(index);
-                        }
+                        let mut expected: Vec<_> =
+                            held.into_iter().map(|key| (key, RELEASED)).collect();
+                        expected.reverse();
+                        assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
                     }
-                    let mut expected: Vec<_> =
-                        held.into_iter().map(|keysym| (keysym, RELEASED)).collect();
-                    expected.reverse();
-                    assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
                 }
             }
         }
@@ -377,29 +669,42 @@ mod tests {
 
     #[test]
     fn a_failed_cleanup_release_keeps_the_original_error() {
-        let keys = chord_keys(Chord::Paste, true);
-        let mut sent = Vec::new();
-        let error = send_keys(&keys, |keysym, state| {
-            sent.push((keysym, state));
-            match sent.len() {
-                // The V press fails partway.
-                3 => Err(eyre!("the original failure")),
-                // Its release fails too, which must not stop the cleanup.
-                4 => Err(eyre!("a cleanup failure")),
-                _ => Ok(()),
-            }
-        })
-        .unwrap_err();
-        let error = format!("{error:#}");
-        assert!(error.contains("the original failure"), "{error}");
-        assert!(!error.contains("a cleanup failure"), "{error}");
-        assert_eq!(
-            &sent[3..],
-            [
-                (XK_V, RELEASED),
-                (XK_SHIFT_L, RELEASED),
-                (XK_CONTROL_L, RELEASED)
-            ]
-        );
+        for (keymap, tail) in [
+            (
+                None,
+                vec![
+                    (XK_V, RELEASED),
+                    (XK_SHIFT_L, RELEASED),
+                    (XK_CONTROL_L, RELEASED),
+                ],
+            ),
+            (
+                Some(qwerty()),
+                vec![
+                    (47, RELEASED),
+                    (EVDEV_KEY_LEFTSHIFT, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED),
+                ],
+            ),
+        ] {
+            let (encoding, keys) = chord_keys(Chord::Paste, true, keymap.as_ref());
+            let mut sent = Vec::new();
+            let error = send_keys(&keys, encoding, |key, state| {
+                sent.push((key, state));
+                match sent.len() {
+                    // The V press fails partway.
+                    3 => Err(eyre!("the original failure")),
+                    // Its release fails too, which must not stop the cleanup.
+                    4 => Err(eyre!("a cleanup failure")),
+                    _ => Ok(()),
+                }
+            })
+            .unwrap_err();
+            let error = format!("{error:#}");
+            assert!(error.contains("the original failure"), "{error}");
+            assert!(!error.contains("a cleanup failure"), "{error}");
+            assert!(error.contains(encoding.name()), "{error}");
+            assert_eq!(&sent[3..], tail);
+        }
     }
 }
