@@ -312,18 +312,18 @@ fn requester(p: Paint, icons: &Icons, recipient: &Recipient) -> El {
             },
         ),
     };
-    // A native app leads with the name Hex read from its verified bundle,
-    // its identifier under it; a website is named by its address alone.
+    // A native app leads with the name Hex derived (or its program's file
+    // name), its identifier under it, each once; a website is named by its
+    // address alone.
     let name = recipient.display_name().to_owned();
-    let identity = match recipient {
-        Recipient::Native {
-            name: Some(_),
-            identifier,
-            ..
-        } => Some(identifier.clone()),
-        _ => None,
-    };
+    let identity = recipient.identity_line().map(str::to_owned);
     let mut said = format!("{kind}: {name}");
+    // A name only a desktop entry or an unsigned file gave is marked, as a
+    // page's own name is.
+    let unverified = recipient.name_unverified().then(|| tr("Name not verified"));
+    if let Some(note) = unverified {
+        said.push_str(&format!(" ({note})"));
+    }
     if let Some(identity) = &identity {
         said.push_str(&format!(", {identity}"));
     }
@@ -353,6 +353,16 @@ fn requester(p: Paint, icons: &Icons, recipient: &Recipient) -> El {
                 .wrap()
                 .a11y_hidden(),
         );
+    if let Some(note) = unverified {
+        copy = copy.child(
+            text(note)
+                .key("name-unverified")
+                .font(DESCRIPTION)
+                .color(p.faint())
+                .wrap()
+                .a11y_hidden(),
+        );
+    }
     if let Some(identity) = identity {
         copy = copy.child(
             text(identity)
@@ -432,7 +442,8 @@ pub(super) enum ProofTone {
     Reported,
 }
 
-/// The line for each way the OS can verify a native app.
+/// The line for each way the OS can verify a native app. The app id or path
+/// is already the card's title or the line under it, so it isn't repeated.
 pub(super) fn verified(verification: &Verification) -> Proof {
     let (line, tone) = match verification {
         Verification::MacSignature { team: Some(team) } => (
@@ -448,16 +459,13 @@ pub(super) fn verified(verification: &Verification) -> Proof {
         }
         Verification::Sandbox {
             kind: SandboxKind::Flatpak,
-            app_id,
-        } => (tr_fill("Flatpak app {}", app_id), ProofTone::Verified),
+            ..
+        } => (tr("Flatpak app").to_owned(), ProofTone::Verified),
         Verification::Sandbox {
             kind: SandboxKind::Snap,
-            app_id,
-        } => (tr_fill("Snap app {}", app_id), ProofTone::Verified),
-        Verification::Executable { path } => (
-            tr_fill("Not signed · {}", &path.display().to_string()),
-            ProofTone::Unsigned,
-        ),
+            ..
+        } => (tr("Snap app").to_owned(), ProofTone::Verified),
+        Verification::Executable { .. } => (tr("Not signed").to_owned(), ProofTone::Unsigned),
     };
     Proof { line, tone }
 }
@@ -991,6 +999,85 @@ mod tests {
         assert!(card_has(&rt, "glyph"));
     }
 
+    /// A program known only by its path is titled by its file name, with
+    /// the path once under it and "Not signed" as its proof; a derived name
+    /// takes the title, and the path still shows once.
+    #[test]
+    fn a_programs_path_shows_once() {
+        let program = |name: Option<&str>| Prompt {
+            id: 13,
+            intent: Intent::Record,
+            recipient: Recipient::Native {
+                identifier: "/opt/notes/bin/notes".into(),
+                cdhash: String::new(),
+                verification: Verification::Executable {
+                    path: "/opt/notes/bin/notes".into(),
+                },
+                name: name.map(str::to_owned),
+                icon: None,
+            },
+        };
+        for (name, title) in [(None, "notes"), (Some("Field Notes"), "Field Notes")] {
+            let (rt, _) = shown(program(name), true, false);
+            let words = copy(&rt);
+            let mentions = words.iter().filter(|s| s.contains("/opt/notes/bin/notes"));
+            assert_eq!(mentions.count(), 1, "{words:?}");
+            let at = |text: &str| words.iter().position(|s| s == text).unwrap();
+            assert!(at(title) < at("/opt/notes/bin/notes"));
+            assert!(at("/opt/notes/bin/notes") < at("Not signed"));
+            // A desktop entry's name is marked; a bare file name isn't.
+            assert_eq!(card_has(&rt, "name-unverified"), name.is_some());
+            if name.is_some() {
+                assert!(at(title) < at("Name not verified"));
+            }
+        }
+    }
+
+    /// A signed app's name, and a sandbox's (from its desktop entry), are
+    /// marked only when nothing the OS signed backs them.
+    #[test]
+    fn only_a_name_without_a_signature_is_marked() {
+        use crate::local_api::SandboxKind;
+        let (rt, _) = shown(named_app_ask(), true, false);
+        assert!(!card_has(&rt, "name-unverified"));
+        for (verification, marked) in [
+            (
+                Verification::WindowsSignature {
+                    publisher: "Example Software Ltd".into(),
+                },
+                false,
+            ),
+            (
+                Verification::Sandbox {
+                    kind: SandboxKind::Flatpak,
+                    app_id: "org.example.Notes".into(),
+                },
+                true,
+            ),
+        ] {
+            let mut prompt = named_app_ask();
+            if let Recipient::Native {
+                verification: slot,
+                identifier,
+                ..
+            } = &mut prompt.recipient
+            {
+                *slot = verification;
+                *identifier = "org.example.Notes".into();
+            }
+            let (rt, _) = shown(prompt, true, false);
+            assert_eq!(card_has(&rt, "name-unverified"), marked);
+            let words = copy(&rt);
+            assert_eq!(
+                words
+                    .iter()
+                    .filter(|s| s.contains("org.example.Notes"))
+                    .count(),
+                1
+            );
+        }
+    }
+
     /// Each way the OS verified an app reads as what it is, and a program
     /// with only a path says it is not signed.
     #[test]
@@ -1009,7 +1096,7 @@ mod tests {
                     kind: SandboxKind::Flatpak,
                     app_id: "org.example.Notes".into(),
                 },
-                "Flatpak app org.example.Notes",
+                "Flatpak app",
                 ProofTone::Verified,
             ),
             (
@@ -1017,14 +1104,14 @@ mod tests {
                     kind: SandboxKind::Snap,
                     app_id: "notes".into(),
                 },
-                "Snap app notes",
+                "Snap app",
                 ProofTone::Verified,
             ),
             (
                 Verification::Executable {
                     path: "/usr/bin/notes".into(),
                 },
-                "Not signed · /usr/bin/notes",
+                "Not signed",
                 ProofTone::Unsigned,
             ),
             (

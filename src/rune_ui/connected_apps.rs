@@ -114,14 +114,11 @@ fn capability(capability: PermissionCapability) -> &'static str {
 fn grant_row(p: Paint, icons: &Icons, grant: Grant) -> El {
     let recipient = grant.recipient;
     let name = recipient.display_name().to_owned();
-    let who = match recipient {
-        Recipient::Native {
-            name: Some(_),
-            identifier,
-            ..
-        } => identifier.clone(),
-        Recipient::Native { .. } => tr("App").to_owned(),
-        Recipient::Web { .. } => tr("Website").to_owned(),
+    // The identifier shows once: as the name, or in this line.
+    let who = match (recipient.identity_line(), recipient) {
+        (Some(identifier), _) => identifier.to_owned(),
+        (None, Recipient::Native { .. }) => tr("App").to_owned(),
+        (None, Recipient::Web { .. }) => tr("Website").to_owned(),
     };
     let detail = format!(
         "{who} · {} · {}",
@@ -134,11 +131,12 @@ fn grant_row(p: Paint, icons: &Icons, grant: Grant) -> El {
     );
     let revoke = grant.revoke;
     let label = tr_fill("Revoke {}", &name);
+    let note = recipient.name_unverified().then(|| tr("Name not verified"));
     item(
         p,
         &grant.key,
         mark(p, icons, recipient, MARK),
-        &name,
+        (&name, note),
         &detail,
         row().key("actions").child(
             small_button(
@@ -349,7 +347,7 @@ fn site_row(
         p,
         key,
         mark(p, icons, &recipient, MARK),
-        origin,
+        (origin, None),
         detail.as_deref().unwrap_or(""),
         buttons,
     )
@@ -357,14 +355,34 @@ fn site_row(
 
 /// A list row in a card: icon, title, a muted line under it, and its
 /// actions on the right.
-fn item(p: Paint, key: &str, icon: El, title: &str, detail: &str, actions: El) -> El {
-    let heading = text(title.to_owned())
-        .key("title")
-        .font(p.k.ty.ui_medium)
-        .color(p.text())
-        .truncate()
-        .min_w(0.0)
-        .a11y_hidden();
+fn item(
+    p: Paint,
+    key: &str,
+    icon: El,
+    (title, note): (&str, Option<&str>),
+    detail: &str,
+    actions: El,
+) -> El {
+    let mut heading = row().key("heading").gap(6.0).center_y().min_w(0.0).child(
+        text(title.to_owned())
+            .key("title")
+            .font(p.k.ty.ui_medium)
+            .color(p.text())
+            .truncate()
+            .shrink()
+            .min_w(0.0)
+            .a11y_hidden(),
+    );
+    // A name nothing signed backs, marked as the dialog marks it.
+    if let Some(note) = note {
+        heading = heading.child(
+            text(note.to_owned())
+                .key("name-unverified")
+                .font(DESCRIPTION)
+                .color(p.faint())
+                .a11y_hidden(),
+        );
+    }
     let mut copy = col()
         .key("copy")
         .grow(1.0)
@@ -382,8 +400,12 @@ fn item(p: Paint, key: &str, icon: El, title: &str, detail: &str, actions: El) -
                 .a11y_hidden(),
         );
     }
+    let title = match note {
+        Some(note) => format!("{title} ({note})"),
+        None => title.to_owned(),
+    };
     let said = if detail.is_empty() {
-        title.to_owned()
+        title
     } else {
         format!("{title}, {detail}")
     };
@@ -512,6 +534,8 @@ mod tests {
             "https://notes.example",
             "Website · Transcription · Always allowed",
             "App · Microphone recording · Allowed once",
+            "Record Once",
+            "/usr/local/bin/record-once · Microphone recording · Always allowed",
             "Allow websites to use Hex",
             "Asking to connect",
             "Tried 4m ago",
@@ -523,6 +547,21 @@ mod tests {
                 "{line:?} missing: {copy:?}"
             );
         }
+        // Only the unsigned program's name, from its desktop entry, is
+        // marked; signed apps' and websites' rows aren't.
+        let marked: Vec<_> = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.key.as_deref() == Some("name-unverified"))
+            .collect();
+        assert_eq!(marked.len(), 1);
+        assert_eq!(marked[0].text.as_deref(), Some("Name not verified"));
+        assert_eq!(
+            copy.iter()
+                .filter(|text| text.contains("/usr/local/bin/record-once"))
+                .count(),
+            1
+        );
         // The allowed and blocked lists start folded.
         assert!(rt.find("allowed0-action0").is_none());
         assert!(rt.find("blocked0-action0").is_none());
