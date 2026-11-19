@@ -200,6 +200,18 @@ impl HttpResponse {
         response
     }
 
+    /// `/transcriptions` for an origin both labs answer: Browser access's
+    /// bearer-token preflight, plus a connect grant's token header.
+    pub(super) fn shared_preflight(private_network: bool) -> Self {
+        let mut response = Self::preflight(private_network);
+        for header in &mut response.headers {
+            if header.0 == "Access-Control-Allow-Headers" {
+                header.1 = "Authorization, Content-Type, X-Hex-Connect-Token, X-Hex-Dictation-Token, X-Hex-Stream-Token";
+            }
+        }
+        response
+    }
+
     pub(super) fn json<T: Serialize>(status: u16, value: &T) -> Self {
         match serde_json::to_vec(value) {
             Ok(body) => Self {

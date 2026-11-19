@@ -792,10 +792,16 @@ fn handle_request(
         // A consent route's preflight names that route's own headers, even
         // for an origin Browser access also lists.
         if let Some(cors) = connected {
-            return (
-                RequestAction::Respond(HttpResponse::consent_preflight(cors.private_network)),
-                Some(cors),
-            );
+            // `/transcriptions` is both labs': an origin Browser access lists
+            // keeps the bearer token there.
+            let shared =
+                browser.is_some() && request.path.split('?').next() == Some("/transcriptions");
+            let preflight = if shared {
+                HttpResponse::shared_preflight(cors.private_network)
+            } else {
+                HttpResponse::consent_preflight(cors.private_network)
+            };
+            return (RequestAction::Respond(preflight), Some(cors));
         }
         if let Some(cors) = browser {
             return (
@@ -1527,6 +1533,48 @@ mod tests {
         );
         assert!(missing.starts_with("HTTP/1.1 401"), "{missing}");
         assert!(!missing.contains("Vary"));
+    }
+
+    /// An origin both labs answer keeps Browser access's bearer token on
+    /// `/transcriptions`, beside a connect grant's token; a consent route's
+    /// preflight still names no `Authorization`.
+    #[test]
+    fn both_labs_share_the_transcriptions_preflight() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let store = allowing(
+            Permissions::new(Some(directory.join("permissions.json"))),
+            &app_origin(),
+        );
+        let api = start_unpublished(
+            events,
+            LocalApiOptions {
+                cors: Cors::gated(app_origin),
+                connect: Some(Connect::new(
+                    connected(),
+                    Some(ScriptedGate::new(Answer::Deny)),
+                    store,
+                )),
+                stream_engine: Some(crate::transcription::stream::tests::fake_source()),
+                ..LocalApiOptions::default()
+            },
+        )
+        .unwrap();
+        let options = |path: &str| {
+            raw_request(
+                api.document.port,
+                &format!(
+                    "OPTIONS {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://app.example\r\nAccess-Control-Request-Method: POST\r\nConnection: close\r\n\r\n"
+                ),
+            )
+        };
+        let upload = options("/transcriptions");
+        assert!(
+            upload.contains("Authorization, Content-Type, X-Hex-Connect-Token"),
+            "{upload}"
+        );
+        let consent = options(connect::AUTHORIZE_PATH);
+        assert!(!consent.contains("Authorization"), "{consent}");
     }
 
     #[test]
