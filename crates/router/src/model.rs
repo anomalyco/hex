@@ -586,6 +586,7 @@ pub enum KeyframeReason {
     Laser,
     SceneChange,
     Speech,
+    #[serde(alias = "start")]
     Initial,
 }
 

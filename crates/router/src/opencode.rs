@@ -177,6 +177,10 @@ fn light_files_tar(parent: &Path, name: &std::ffi::OsStr) -> Command {
             // Retries belong to this Mac; a copied marker would only sit there.
             "--exclude=*/.deliver.json",
             "--exclude=*/.deliver.json.tmp",
+            "--exclude=*/..deliver.json.*.tmp",
+            "--exclude=*/.hex-annotate-v1",
+            "--exclude=*/.annotation.json.*.tmp",
+            "--exclude=*/audio.wav.partial",
             // A light copy is this Mac's own attachment, not part of the capture.
             "--exclude=*.slim.zip",
             "--exclude=*.slim.zip.tmp",
@@ -781,6 +785,12 @@ pub fn normalize_slug(text: &str) -> String {
 /// else the `destination` a Mac capture of a dev site was routed to (`scrawl.json`).
 /// `context.session` only names the session that was on screen, and never chooses a destination.
 pub fn recorded_destination(bundle_dir: &Path) -> Option<String> {
+    if crate::bundle::manifest_name(bundle_dir) == Some(crate::bundle::MANIFEST) {
+        return crate::bundle::read_manifest(bundle_dir)
+            .ok()?
+            .destination
+            .map(|d| d.session);
+    }
     let read = |name: &str| -> Option<serde_json::Value> {
         serde_json::from_slice(&fs::read(bundle_dir.join(name)).ok()?).ok()
     };

@@ -162,21 +162,22 @@ pub enum RouteDelivery {
 // ---------------------------------------------------------------------------
 // The router.
 
-/// The router with Hex's `capture.routing` and Scrawl's folders under
-/// `~/Library/Application Support/scrawl`. Never reads
+/// The router with Hex's `capture.routing` and private annotation-router folder. Never reads
 /// `~/.config/scrawl`. Its own log lines name sites and sessions, so they
 /// go to tracing's debug level, except how sends went (`deliver: …`).
 pub fn router() -> Router {
     let settings = crate::app_settings::capture_settings();
     let config = settings.routing.config().clone();
-    let support = crate::app_paths::home_dir()
-        .unwrap_or_default()
-        .join("Library/Application Support/scrawl");
-    let dirs = RouterDirs::under(
-        &support.join("router"),
-        Some(support.join("routing-decisions.jsonl")),
-        Some(settings.captures_dir()),
-    );
+    let dirs = crate::app_paths::support_dir()
+        .map(|support| {
+            let router = support.join("annotation-router");
+            RouterDirs::under(
+                &router,
+                Some(router.join("routing-decisions.jsonl")),
+                Some(settings.captures_dir()),
+            )
+        })
+        .unwrap_or_default();
     let router = Router::new(config, dirs)
         .with_log(|line| {
             if line.starts_with("deliver:") || line.starts_with("routing time:") {
@@ -1045,13 +1046,18 @@ impl Worker {
         }
         let router = router();
         let captures = crate::app_settings::capture_settings().captures_dir();
-        let report = router.run(|| {
-            delivery::retry_due(
-                &captures,
-                now_ms(),
-                scrawl_capture::handoff::send_bundle_to_session,
-            )
-        });
+        let report = crate::app_paths::support_dir()
+            .map(|p| {
+                router.run(|| {
+                    delivery::annotations::retry(
+                        &p.join("annotation-router/retries"),
+                        &captures,
+                        now_ms(),
+                        scrawl_capture::handoff::send_bundle_to_session,
+                    )
+                })
+            })
+            .unwrap_or_default();
         let outbox = router.retry_outbox();
         if !report.sent.is_empty() || !outbox.sent.is_empty() {
             tracing::info!(
@@ -1492,6 +1498,8 @@ fn deliver(
         if let Err(error) = recorded {
             tracing::warn!(error = %format!("{error:#}"), "could not record a capture's destination");
         }
+        // An explicit new send supersedes any earlier queued attempt.
+        if scrawl_capture::bundle::manifest_name(bundle) == Some(scrawl_capture::bundle::MANIFEST) { let _ = std::fs::remove_file(bundle.join(delivery::PENDING)); }
         let (delivery, posted) = delivery::deliver_by(
             bundle,
             &dest.session,
@@ -1524,6 +1532,9 @@ fn deliver(
                 routing::learn_capture(bundle, &dest.session),
             ),
             Delivery::Queued { error, .. } => {
+                if scrawl_capture::bundle::manifest_name(bundle) == Some(scrawl_capture::bundle::MANIFEST) && !crate::app_paths::support_dir().ok().is_some_and(|p| delivery::annotations::remember(&p.join("annotation-router/retries"), bundle, &dest.session).is_ok()) {
+                    return (RouteDelivery::Failed { to, why: "Couldn't remember this send for retry".into() }, None, None);
+                }
                 let agent_host = router.config().agent_host().is_some();
                 let why = send_why(&error, agent_host);
                 if why == FILES_UNSEEN {
