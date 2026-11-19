@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use super::consent::{Intent, Recipient};
+use super::consent::{Intent, Recipient, Verification};
 
 /// The name of the permissions file in Hex's support folder.
 const FILE: &str = "local-consent.json";
@@ -57,8 +57,14 @@ impl Capability {
     }
 }
 
-/// Who a permission belongs to, as Hex verified it. The claimed page name is
+/// Who a permission belongs to, as Hex verified it, and what is persisted
+/// of it. The claimed page name, and a recipient's name and icon, are
 /// deliberately absent.
+///
+/// A native scope persists `identifier`, `cdhash` and `team` exactly as
+/// before; `verification` is written only for kinds other than a macOS
+/// signature, so files stay readable by older builds and an entry without
+/// it reloads as `Verification::MacSignature { team }`.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum Scope {
@@ -70,6 +76,8 @@ pub(crate) enum Scope {
         #[serde(default)]
         cdhash: String,
         team: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        verification: Option<Verification>,
     },
 }
 
@@ -81,13 +89,21 @@ impl Scope {
             },
             Recipient::Native {
                 identifier,
-                team,
                 cdhash,
-            } => Self::Native {
-                identifier: identifier.clone(),
-                cdhash: cdhash.clone(),
-                team: team.clone(),
-            },
+                verification,
+                ..
+            } => {
+                let (team, verification) = match verification {
+                    Verification::MacSignature { team } => (team.clone(), None),
+                    other => (None, Some(other.clone())),
+                };
+                Self::Native {
+                    identifier: identifier.clone(),
+                    cdhash: cdhash.clone(),
+                    team,
+                    verification,
+                }
+            }
         }
     }
 
@@ -96,15 +112,21 @@ impl Scope {
             Self::Web { origin } => Recipient::Web {
                 origin: origin.clone(),
                 client_name: None,
+                icon: None,
             },
             Self::Native {
                 identifier,
-                team,
                 cdhash,
+                team,
+                verification,
             } => Recipient::Native {
                 identifier: identifier.clone(),
                 cdhash: cdhash.clone(),
-                team: team.clone(),
+                verification: verification
+                    .clone()
+                    .unwrap_or(Verification::MacSignature { team: team.clone() }),
+                name: None,
+                icon: None,
             },
         }
     }
@@ -517,6 +539,8 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local_api::consent::{ConsentIcon, SandboxKind};
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -533,6 +557,7 @@ mod tests {
         Recipient::Web {
             origin: "https://notes.example".into(),
             client_name: Some("Notes".into()),
+            icon: None,
         }
     }
 
@@ -540,7 +565,11 @@ mod tests {
         Recipient::Native {
             identifier: "com.example.notes".into(),
             cdhash: "fixture-digest".into(),
-            team: Some("ABCDE12345".into()),
+            verification: Verification::MacSignature {
+                team: Some("ABCDE12345".into()),
+            },
+            name: None,
+            icon: None,
         }
     }
 
@@ -556,6 +585,7 @@ mod tests {
         let renamed = Recipient::Web {
             origin: "https://notes.example".into(),
             client_name: Some("Something Else".into()),
+            icon: None,
         };
         assert!(store.allows(Intent::Transcribe, &renamed));
 
@@ -578,6 +608,57 @@ mod tests {
 
         let reloaded = Permissions::new(Some(path.clone()));
         assert!(!reloaded.allows(Intent::Record, &app()));
+        let _ = fs::remove_file(path);
+    }
+
+    /// An app's name and icon are display data: a grant ignores them. Its
+    /// verification is identity: a macOS one is stored as before, another
+    /// kind is stored so it reloads as itself.
+    #[test]
+    fn native_grants_ignore_display_data_and_keep_their_verification() {
+        let path = temp_path();
+        let store = Permissions::new(Some(path.clone()));
+        store.remember(Intent::Record, &app()).unwrap();
+        let shown = Recipient::Native {
+            identifier: "com.example.notes".into(),
+            cdhash: "fixture-digest".into(),
+            verification: Verification::MacSignature {
+                team: Some("ABCDE12345".into()),
+            },
+            name: Some("Notes".into()),
+            icon: ConsentIcon::new(1, Arc::from([0u8; 4])),
+        };
+        assert!(store.allows(Intent::Record, &shown));
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("verification"), "{saved}");
+
+        let sandboxed = Recipient::Native {
+            identifier: "org.example.Notes".into(),
+            cdhash: String::new(),
+            verification: Verification::Sandbox {
+                kind: SandboxKind::Flatpak,
+                app_id: "org.example.Notes".into(),
+            },
+            name: None,
+            icon: None,
+        };
+        let mut unsandboxed = sandboxed.clone();
+        if let Recipient::Native { verification, .. } = &mut unsandboxed {
+            *verification = Verification::Executable {
+                path: "/usr/bin/notes".into(),
+            };
+        }
+        store.remember(Intent::Record, &sandboxed).unwrap();
+        assert!(!store.allows(Intent::Record, &unsandboxed));
+        let reloaded = Permissions::new(Some(path.clone()));
+        assert!(reloaded.allows(Intent::Record, &sandboxed));
+        assert!(!reloaded.allows(Intent::Record, &unsandboxed));
+        assert!(
+            reloaded
+                .list()
+                .iter()
+                .any(|view| view.recipient == sandboxed)
+        );
         let _ = fs::remove_file(path);
     }
 

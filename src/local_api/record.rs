@@ -48,7 +48,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use super::access::Access;
-use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient};
+use super::consent::{Answer, ConsentGate, Intent, Prompt, Recipient, Verification};
 use super::http::HttpResponse;
 use super::permissions::Permissions;
 use super::read_body_bounded;
@@ -1073,11 +1073,16 @@ impl Sessions {
                 client_name: client_name
                     .filter(|name| plain_name(name))
                     .map(str::to_owned),
+                icon: None,
             }),
             Channel::Native { identity, .. } => Some(Recipient::Native {
                 identifier: identity.identifier.clone(),
                 cdhash: identity.cdhash.clone(),
-                team: identity.team.clone(),
+                verification: Verification::MacSignature {
+                    team: identity.team.clone(),
+                },
+                name: None,
+                icon: None,
             }),
         }
     }
@@ -1125,18 +1130,21 @@ fn remaining(deadline: Instant) -> u64 {
         .as_millis() as u64
 }
 
+/// A recipient's grant identity; its name and icon are not part of it.
 fn recipient_key(recipient: &Recipient) -> String {
     match recipient {
         Recipient::Web { origin, .. } => format!("web:{origin}"),
         Recipient::Native {
             identifier,
-            team,
             cdhash,
+            verification,
+            ..
         } => {
-            format!(
-                "native:{identifier}:{cdhash}:{}",
-                team.as_deref().unwrap_or_default()
-            )
+            let verified = match verification {
+                Verification::MacSignature { team } => team.clone().unwrap_or_default(),
+                other => format!("{other:?}"),
+            };
+            format!("native:{identifier}:{cdhash}:{verified}")
         }
     }
 }

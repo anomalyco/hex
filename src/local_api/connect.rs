@@ -199,6 +199,7 @@ impl Connect {
         let recipient = Recipient::Web {
             origin: origin.to_owned(),
             client_name,
+            icon: None,
         };
         // Always Allow is the person's earlier answer for this exact origin,
         // so this ask needs no dialog. A saved permission never carries the
