@@ -5,9 +5,14 @@
 (`HEXWidgets`). The containing app records a generation-scoped temporary WAV,
 transcribes on-device with Apple Speech (`SpeechTranscriber` on iOS 26+) or
 FluidAudio Parakeet V2 (iOS 18+), and removes each capture's file after
-inference, cancellation, or failure. The keyboard extension sends commands and
-inserts completed text over the shared App Group (`group.anomaly.hex.mobile`);
-it never accesses the microphone, speech model, or network.
+inference, cancellation, or failure. During a warm session the keyboard
+extension sends commands and inserts completed text over the shared App Group
+(`group.anomaly.hex.mobile`). Otherwise it dictates by itself (in-keyboard
+dictation, iOS 26+): iOS refuses to record from a keyboard extension
+directly, so it captures through `getUserMedia` in a hidden `WKWebView`
+under Hex's microphone permission, writes a temporary WAV, and transcribes
+it on-device with Apple Speech, downloading the speech assets on first use
+(`HEXKeyboard/KeyboardLocalDictation.swift`). Audio never leaves the iPhone.
 
 ## Capabilities
 
@@ -22,7 +27,7 @@ it never accesses the microphone, speech model, or network.
     do nothing in a keyboard extension, so the keyboard opens Hex through
     the `UIApplication` at the end of its responder chain
     (`ContainingAppOpener`).
-  - **Cold start:** Tapping **Dictate** opens the containing app
+  - **Cold start (before iOS 26):** Tapping **Dictate** opens the containing app
     (`hex-dictation://keyboard/record?...`) with a 10-second
     handoff window, starts recording, and opens the selected host app's URL
     scheme (`messages://`, `slack://`, `claude://`, `chatgpt://`,
