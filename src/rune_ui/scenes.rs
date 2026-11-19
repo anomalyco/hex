@@ -987,7 +987,7 @@ pub(super) const SCENES: &[Scene] = &[
     ("connected-apps-lists", |ui| {
         *ui = mac_fixture();
         connected_apps_fixture(ui);
-        ui.connected = connected_apps::Disclosures::open();
+        ui.connected.unfold();
         ui.pane = Pane::ConnectedApps;
     }),
     // Websites off: the lists hide, and the switch says why.

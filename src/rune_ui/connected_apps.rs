@@ -12,10 +12,10 @@ use rune_theme_opencode::icons::LINK;
 
 use super::controls::{DESCRIPTION, METRICS, Paint, card, page, toggle_row};
 use super::lists::{Tone, small_button, tone_tag};
-use super::requester_icon::{Icons, mark};
 use super::{Request, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill};
 use crate::local_api::{PermissionCapability, Recipient, WebsiteAction};
+use requester_icon::{Icons, mark};
 
 /// The pane's sidebar icon, and the Labs card's.
 pub(super) static ICON: &Icon = &LINK;
@@ -23,20 +23,32 @@ pub(super) static ICON: &Icon = &LINK;
 /// A row's icon, in points.
 const MARK: f32 = 32.0;
 
-/// Which of the website disclosures are open; both start closed.
+pub(crate) mod requester_icon;
+
+/// The window's own Connected apps state: which website disclosures are
+/// open (both start closed), the requester icons, and the recording session
+/// the window last brought itself forward for.
 #[derive(Default)]
-pub(super) struct Disclosures {
+pub(super) struct State {
     allowed: bool,
     blocked: bool,
+    pub(super) icons: Icons,
+    pub(super) record_seen: Option<u64>,
 }
 
-impl Disclosures {
+impl State {
     /// Both lists unfolded, for scenes.
-    pub(super) fn open() -> Self {
-        Self {
-            allowed: true,
-            blocked: true,
-        }
+    pub(super) fn unfold(&mut self) {
+        (self.allowed, self.blocked) = (true, true);
+    }
+}
+
+/// Gives the requester icons their decoder; scenes decode at once.
+pub(super) fn setup(ui: &mut Ui, waker: &rune::Waker) {
+    if !ui.is_fixture() {
+        ui.connected
+            .icons
+            .set_cache(rune::ImageCache::new(waker.clone()));
     }
 }
 
@@ -84,7 +96,7 @@ fn connected(ui: &Ui, p: Paint) -> El {
     } else {
         grants
             .into_iter()
-            .map(|grant| grant_row(p, &ui.requester_icons, grant))
+            .map(|grant| grant_row(p, &ui.connected.icons, grant))
             .collect()
     };
     let mut section = counted(p, "connected", tr("Connected"), count, false, rows);
@@ -214,7 +226,7 @@ fn websites(ui: &Ui, p: Paint) -> Vec<El> {
         return out;
     };
     let websites = &view.websites;
-    let icons = &ui.requester_icons;
+    let icons = &ui.connected.icons;
     if !websites.tried.is_empty() {
         let rows = websites
             .tried

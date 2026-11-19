@@ -14,6 +14,7 @@ mod calls;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
 mod connected_apps;
+pub(crate) use connected_apps::requester_icon;
 pub(crate) mod consent_window;
 mod controls;
 #[cfg(target_os = "macos")]
@@ -43,7 +44,6 @@ mod live_notes;
 pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
-pub(crate) mod requester_icon;
 pub(crate) use self::meetings::meeting_import_failed;
 #[cfg(hex_capture)]
 mod captures;
@@ -140,17 +140,7 @@ pub(crate) fn run_app(
         app = app.float_on_open();
     }
     crate::linux::rune_hud::install(&mut app);
-    // Hex's permission window: its own overlay, so an ask shows whether the
-    // main window is open or not and never opens it.
-    if let Some(consent) = host.consent().cloned() {
-        let desk = consent.desk.clone();
-        consent.desk.watch(consent_window::install(
-            &mut app,
-            Arc::new(move |id, answer| {
-                desk.answer(id, answer);
-            }),
-        ));
-    }
+    host::install_consent(&mut app, &host);
     live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink.
     let _capture_overlays =
@@ -600,12 +590,11 @@ struct ServiceView {
     update_blocked: Option<&'static str>,
     /// The service is recording or saving a shortcut.
     editing: bool,
-    /// A consented recording Hex's window can stop or cancel.
+    /// Connected apps: a live consented recording, the saved permissions
+    /// and grants the window can revoke, and the website lists.
     record: Option<crate::local_api::RecordView>,
-    /// Clients paired to start recordings, which the window can revoke.
     permissions: Vec<crate::local_api::PermissionView>,
     grants: Vec<crate::local_api::RecordGrant>,
-    /// Labs › Connected apps' website lists.
     websites: crate::local_api::Websites,
 }
 
@@ -695,9 +684,7 @@ pub(crate) struct Ui {
     find: find_popover::Find,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
-    /// The Connected apps pane's requester icons and website disclosures.
-    requester_icons: requester_icon::Icons,
-    connected: connected_apps::Disclosures,
+    connected: connected_apps::State,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
     /// The Labs store's search, tab, and chip.
@@ -761,8 +748,6 @@ pub(crate) struct Ui {
     /// The person asked for an update check (the footer or the menu bar),
     /// so the footer says how it went.
     update_asked: bool,
-    /// The recording session the window last brought itself forward for.
-    pub(super) record_seen: Option<u64>,
 }
 
 /// Which of the window's text editors hold unsaved typing.
@@ -851,7 +836,6 @@ impl Ui {
             mic_level: general::MicLevel::default(),
             find: Default::default(),
             advanced: Vec::new(),
-            requester_icons: Default::default(),
             connected: Default::default(),
             labs_open: false,
             lab_store: labs::Store::default(),
@@ -895,7 +879,6 @@ impl Ui {
             saved: 0,
             quit_requested: false,
             update_asked: false,
-            record_seen: None,
             window: None,
             tick_at: 0.0,
         }
@@ -1381,10 +1364,7 @@ fn local_meetings(ui: &mut Ui) -> bool {
 fn setup(ui: &mut Ui, waker: Waker) {
     ui.modes.waker = Some(waker.clone());
     ui.modes.icon_cache = Some(rune::ImageCache::new(waker.clone()));
-    if !ui.is_fixture() {
-        ui.requester_icons
-            .set_cache(rune::ImageCache::new(waker.clone())); // scenes decode at once
-    }
+    connected_apps::setup(ui, &waker);
     #[cfg(hex_capture)]
     ui.captures.set_cache(rune::ImageCache::new(waker.clone()));
     if let Service::Pending(connect) = &mut ui.service {
@@ -1510,7 +1490,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         }
         if let Some(settings) = settings {
             changed |= ui.adopt(settings);
-            changed |= leave_hidden_pane(ui);
+            changed |= labs::leave_hidden_pane(ui);
         }
     }
     // The lab, the selected meeting's status, or its notes can take the
@@ -1537,23 +1517,6 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         changed |= scrawl::routing_rules::poll(ui, clock, visible);
     }
     changed | settings::advance_capture(ui, clock, tx)
-}
-
-/// Adopted settings may hide the pane on screen: the Hex Microphone turned off
-/// from `hex settings` hides Voice Filter, and Labs › Modes editor turned off
-/// while the editor shows hides Modes. The window leaves, Output standing in
-/// for the editor it replaced. Returns whether the pane moved.
-fn leave_hidden_pane(ui: &mut Ui) -> bool {
-    if ui.pane.shown(ui) {
-        return false;
-    }
-    ui.pane = match ui.pane {
-        Pane::Modes => Pane::Output,
-        _ => Pane::General,
-    };
-    ui.close_modal();
-    ui.open = None;
-    true
 }
 
 // ---------------------------------------------------------------------------
@@ -1651,9 +1614,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
     }
-    if let Some(panel) = record_panel::panel(ui, p) {
-        layer.push(panel);
-    }
+    layer.extend(record_panel::panel(ui, p));
     find_popover::layer(ui, p, &mut layer);
     // A file drag shows over everything else in the window, the first run
     // included.
