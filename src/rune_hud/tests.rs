@@ -58,6 +58,7 @@ fn revealed(reveal: f32) -> dot_scope::Pose {
         level: 0.0,
         clock: 0.0,
         done: 0.0,
+        shift: 0.0,
     }
 }
 

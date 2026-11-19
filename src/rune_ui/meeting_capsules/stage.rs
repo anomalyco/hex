@@ -153,6 +153,9 @@ pub(super) struct Target {
     pub(super) actions: Option<f64>,
     /// Stop is one of them. Once capture has ended it leaves and the copies stay.
     pub(super) stop: bool,
+    /// How wide the listening field is wanted: its resting width, or the
+    /// open header's room.
+    pub(super) field: f32,
 }
 
 impl Target {
@@ -195,6 +198,9 @@ pub(super) struct Stage {
     /// Width, height, radius, dark. `None` until something shows: a surface
     /// appears at rest, it doesn't animate its first frame.
     outline: Option<[Track; 4]>,
+    /// The listening field's width, on the outline's width spring: the
+    /// field's free end and the wall it follows are one motion.
+    field: Track,
     layers: [Track; LAYERS],
     last: Option<f64>,
     /// When the outline last followed another motion.
@@ -214,6 +220,11 @@ impl Stage {
             radius: radius.x,
             dark: dark.x,
         })
+    }
+
+    /// How wide the listening field has opened.
+    pub(super) fn field(&self) -> f32 {
+        self.field.x
     }
 
     /// Points per second: how fast the width and height are changing.
@@ -282,6 +293,7 @@ impl Stage {
     pub(super) fn land(&mut self, target: &Target, now: f64) {
         let o = target.outline;
         self.outline = Some([o.w, o.h, o.radius, o.dark].map(Track::at));
+        self.field = Track::at(target.field);
         for layer in Self::layers() {
             self.layers[layer.index()] = Track::at(f32::from(target.wants(layer, now)));
         }
@@ -329,6 +341,8 @@ impl Stage {
                 moving |= *track != Track::at(to);
                 *track = Track::at(to);
             }
+            moving |= self.field != Track::at(target.field);
+            self.field = Track::at(target.field);
         } else {
             let body = if o.w * o.h >= tracks[0].x * tracks[1].x {
                 OPEN
@@ -337,6 +351,7 @@ impl Stage {
             };
             let width = body.with_duration(body.duration * WIDTH_LEAD);
             moving |= tracks[0].step(o.w, width, dt, 0.01);
+            moving |= self.field.step(target.field, width, dt, 0.01);
             moving |= tracks[1].step(o.h, body, dt, 0.01);
             moving |= tracks[2].step(o.radius, body, dt, 0.01);
             moving |= tracks[3].step(o.dark, body, dt, 0.002);
@@ -409,6 +424,7 @@ impl Capsule {
             meter: false,
             actions: None,
             stop: true,
+            field: waveform::WIDTH,
         };
         // A surface that is leaving says nothing it hadn't already said.
         let may_say = self.kind.is_some() || self.stage.presence(Layer::Pending).shows();
@@ -438,6 +454,7 @@ impl Capsule {
                     },
                     meter: true,
                     actions: open.then(|| *self.opened.get_or_insert(now)),
+                    field: panel::field_wanted(self),
                     ..none
                 }
             }
@@ -448,6 +465,7 @@ impl Capsule {
                 meter: true,
                 actions: Some(self.opened.unwrap_or(f64::MIN)),
                 stop: false,
+                field: panel::field_wanted(self),
                 ..none
             },
             _ => return None,
@@ -528,6 +546,7 @@ mod tests {
             meter: true,
             actions: None,
             stop: true,
+            field: 78.0,
         }
     }
 

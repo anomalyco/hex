@@ -368,11 +368,14 @@ fn result(
             // The field cools after capture ends; it never cuts. On the right
             // it sits beside the time without moving it.
             .children(match (capsule.waveform.is_some(), right) {
-                (true, true) => Some(waveform::slot().absolute(
-                    -(waveform::WIDTH + METER_GAP),
-                    (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
-                )),
-                (true, false) => Some(waveform::slot()),
+                (true, true) => {
+                    let width = field_width(capsule);
+                    Some(waveform::slot(width).absolute(
+                        -(width + METER_GAP),
+                        (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
+                    ))
+                }
+                (true, false) => Some(waveform::slot(waveform::WIDTH)),
                 (false, false) => Some(el().w(waveform::WIDTH)),
                 (false, true) => None,
             })
@@ -575,15 +578,73 @@ fn bands(top: bool, meta: El, action: Option<El>) -> El {
     }
 }
 
+/// The time's width after `minutes`: its 13 pt monospaced digits each
+/// occupy 8 pt at layout resolution.
+fn timer_width(minutes: u64) -> f32 {
+    let extra = minutes.max(1).ilog10().saturating_sub(1);
+    TIMER_WIDTH + extra as f32 * 8.
+}
+
 /// Only grow the compact header for a notice or another minute digit.
-/// Its 13 pt monospaced digits each occupy 8 pt at layout resolution.
 pub(super) fn rest_width(shown: &Recording) -> f32 {
     if recording_notice(shown).is_some() {
         return PANEL_WIDTH;
     }
     let minutes = shown.started.elapsed().as_secs() / 60;
-    let extra = minutes.max(1).ilog10().saturating_sub(1);
-    (REST_WIDTH + extra as f32 * 8.).min(PANEL_WIDTH)
+    (REST_WIDTH - TIMER_WIDTH + timer_width(minutes)).min(PANEL_WIDTH)
+}
+
+/// The minutes on the time the capsule draws.
+fn minutes_shown(capsule: &Capsule) -> u64 {
+    match capsule.drawn() {
+        Some(Kind::Recording(shown)) => shown.started.elapsed().as_secs() / 60,
+        Some(Kind::Finalizing { duration_ms }) => duration_ms / 60_000,
+        Some(Kind::Ready(manifest)) => manifest.duration_ms.unwrap_or(0) / 60_000,
+        _ => 0,
+    }
+}
+
+/// The header's room for the field in a surface `width` wide: from the
+/// rows' inset to the time. Another digit on the time takes three columns.
+fn field_room(capsule: &Capsule, width: f32) -> f32 {
+    width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule))
+}
+
+/// The fewest points the field is ever drawn across.
+const FIELD_LEAST: f32 = 40.0;
+
+/// How wide the listening field wants to be: its resting width, and the
+/// whole header once the panel is open. In a left corner the time sits on
+/// the field's free side, so there the field keeps its resting width.
+pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
+    let open = match capsule.drawn() {
+        Some(Kind::Recording(_)) => capsule.hovered || capsule.stopping,
+        Some(Kind::Finalizing { .. } | Kind::Ready(_)) => true,
+        _ => false,
+    };
+    if open && capsule.corner.is_right() {
+        field_room(capsule, PANEL_WIDTH).max(waveform::WIDTH)
+    } else {
+        waveform::WIDTH
+    }
+}
+
+/// How wide the listening field is this frame. It opens on the outline's
+/// own width spring and never passes the inset from a wall still on its
+/// way, so its free end is the wall's motion, 14 pt inside it.
+pub(super) fn field_width(capsule: &Capsule) -> f32 {
+    let Some(outline) = capsule.stage.outline() else {
+        return field_wanted(capsule);
+    };
+    if !capsule.corner.is_right() {
+        return waveform::WIDTH;
+    }
+    let grid = |v: f32| (v * 64.0).round() / 64.0;
+    // A digit that arrives on the time takes its room at once, before the
+    // pill has grown for it: the field gives up columns, never the inset.
+    grid(capsule.stage.field())
+        .min(field_room(capsule, grid(outline.w)))
+        .max(FIELD_LEAST)
 }
 
 /// The recording: at rest only its levels and time; under the
@@ -603,7 +664,7 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .center_y()
         // The same meter in every state: it never arrives a second time.
         .transition(Transition::none())
-        .child(waveform::slot())
+        .child(waveform::slot(field_width(capsule)))
         .child(
             text(elapsed)
                 .key("elapsed")
