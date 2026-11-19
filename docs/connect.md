@@ -406,7 +406,7 @@ loopback API is not their channel, and the native channel has no route for it.
 | Limit | Value |
 | --- | --- |
 | Pairing code lifetime | 120 s, one use |
-| Grant token | Process-local; one session for Allow Once, reusable for Always Allow |
+| Grant token | Process-local; one session for Allow Once (unused, it lapses after 120 s), reusable for Always Allow |
 | One recording | No length limit while the client checks in |
 | Check-in lease | 10 s (`leaseMs`); the microphone stops when it lapses |
 | After the stop | 30 s for `finish`, then discarded (`409 session-expired`) |
