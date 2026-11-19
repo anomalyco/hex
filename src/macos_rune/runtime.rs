@@ -251,8 +251,12 @@ impl Runtime {
         }
         if self.app_switcher.observe(
             observation,
-            |application| {
-                crate::transcription::app_model_switching::mode_choice(&self.settings, application)
+            |application, bundle_name| {
+                crate::transcription::app_model_switching::mode_choice(
+                    &self.settings,
+                    application,
+                    bundle_name,
+                )
             },
             now,
         ) {
@@ -286,15 +290,17 @@ impl Runtime {
         self.switch_with_keyboard(now);
         // Read the frontmost application only while the lab is on. Hex's own
         // window names no mode and is ignored.
-        let application = self
+        let (application, bundle_name) = self
             .settings
             .labs
             .app_model_switching
             .then(crate::dictation::context::frontmost_other_application)
-            .flatten();
+            .flatten()
+            .unzip();
         self.follow_app(
             crate::transcription::app_model_switching::Observation::frontmost(
                 application.as_deref(),
+                bundle_name.flatten().as_deref(),
             ),
             now,
         );

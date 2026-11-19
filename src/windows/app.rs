@@ -460,9 +460,14 @@ impl WindowsDesktopHost {
         if self.app_switcher.observe(
             crate::transcription::app_model_switching::Observation::frontmost(
                 application.as_deref(),
+                None,
             ),
-            |application| {
-                crate::transcription::app_model_switching::mode_choice(&self.settings, application)
+            |application, _| {
+                crate::transcription::app_model_switching::mode_choice(
+                    &self.settings,
+                    application,
+                    None,
+                )
             },
             now,
         ) {

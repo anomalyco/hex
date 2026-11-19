@@ -27,16 +27,19 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// matched and neither schedules nor cancels a switch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Observation<'a> {
-    /// An application other than Hex is in front.
-    App(&'a str),
+    /// An application other than Hex is in front: its own name, and on
+    /// macOS the name Finder shows for its bundle when that differs.
+    App(&'a str, Option<&'a str>),
     /// Hex's own window is in front, or the system named no application.
     Ignored,
 }
 
 impl<'a> Observation<'a> {
     /// A frontmost read: `None` is Hex's own window or no application at all.
-    pub(crate) fn frontmost(application: Option<&'a str>) -> Self {
-        application.map_or(Self::Ignored, Self::App)
+    pub(crate) fn frontmost(application: Option<&'a str>, bundle_name: Option<&'a str>) -> Self {
+        application.map_or(Self::Ignored, |application| {
+            Self::App(application, bundle_name)
+        })
     }
 }
 
@@ -68,11 +71,13 @@ impl Switcher {
     pub(crate) fn observe(
         &mut self,
         observation: Observation<'_>,
-        mode: impl FnOnce(&str) -> Option<KeyboardModelChoice>,
+        mode: impl FnOnce(&str, Option<&str>) -> Option<KeyboardModelChoice>,
         now: Instant,
     ) -> bool {
         match observation {
-            Observation::App(application) => self.choice_changed(mode(application), now),
+            Observation::App(application, bundle_name) => {
+                self.choice_changed(mode(application, bundle_name), now)
+            }
             Observation::Ignored => false,
         }
     }
@@ -125,7 +130,8 @@ impl Switcher {
     }
 }
 
-/// The speech choice of the mode matching `application`.
+/// The speech choice of the mode matching `application`, or on macOS its
+/// bundle's Finder name, which is what the app picker saves.
 ///
 /// Matching is by application on both macOS and Windows: the mode's website
 /// rules are ignored, so a mode chosen only by website never matches. macOS
@@ -135,6 +141,7 @@ impl Switcher {
 pub(crate) fn mode_choice(
     settings: &AppSettings,
     application: &str,
+    bundle_name: Option<&str>,
 ) -> Option<KeyboardModelChoice> {
     #[cfg(target_os = "macos")]
     {
@@ -142,12 +149,14 @@ pub(crate) fn mode_choice(
             &settings.dictation_processing,
             &crate::dictation::context::ContextSnapshot {
                 application: Some(application.to_owned()),
+                bundle_name: bundle_name.map(str::to_owned),
                 ..Default::default()
             },
         )
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = bundle_name;
         crate::dictation::modes::speech_for(&settings.dictation_processing, Some(application), None)
     }
 }
@@ -157,10 +166,13 @@ pub(crate) fn mode_choice(
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn startup_choice(settings: &AppSettings) -> Option<KeyboardModelChoice> {
     #[cfg(target_os = "macos")]
-    let application = crate::dictation::context::frontmost_other_application();
+    let (application, bundle_name) = crate::dictation::context::frontmost_other_application()?;
     #[cfg(target_os = "windows")]
-    let application = crate::windows::app::foreground_other_process_stem();
-    mode_choice(settings, application.as_deref()?)
+    let (application, bundle_name) = (
+        crate::windows::app::foreground_other_process_stem()?,
+        None::<String>,
+    );
+    mode_choice(settings, &application, bundle_name.as_deref())
 }
 
 #[cfg(test)]
@@ -339,9 +351,36 @@ mod tests {
     fn observe(switcher: &mut Switcher, observation: Observation<'_>, now: Instant) -> bool {
         switcher.observe(
             observation,
-            |application| (application == "Notes").then(spanish),
+            |application, _| (application == "Notes").then(spanish),
             now,
         )
+    }
+
+    /// The picker saves Finder's name (`Rex Beta.app`), while the running
+    /// app calls itself `Rex`: the mode still switches the model.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_mode_picked_under_its_finder_name_switches() {
+        let mut settings = AppSettings::default();
+        settings.dictation_processing.modes = vec![crate::app_settings::DictationMode {
+            name: "Spanish".into(),
+            applications: vec!["Rex Beta".into()],
+            speech: Some(spanish()),
+            ..Default::default()
+        }];
+        let mode = |application: &str, bundle_name: Option<&str>| {
+            mode_choice(&settings, application, bundle_name)
+        };
+        let now = Instant::now();
+        let mut switcher = Switcher::new(true, None);
+        let current = selection(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
+        assert!(!switcher.observe(Observation::frontmost(Some("Rex"), None), mode, now));
+        assert!(switcher.observe(
+            Observation::frontmost(Some("Rex"), Some("Rex Beta")),
+            mode,
+            now,
+        ));
+        assert_eq!(switcher.take_due(now + DEBOUNCE, &current), Some(spanish()));
     }
 
     #[test]
@@ -349,13 +388,13 @@ mod tests {
         let now = Instant::now();
         let mut switcher = Switcher::new(true, None);
         let current = selection(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
-        assert!(observe(&mut switcher, Observation::App("Notes"), now));
+        assert!(observe(&mut switcher, Observation::App("Notes", None), now));
         assert_eq!(switcher.take_due(now + DEBOUNCE, &current), Some(spanish()));
         // Hex's own window names no mode: the Notes choice stays, nothing
         // new is due, and the mode is never even looked up.
         assert!(!switcher.observe(
             Observation::Ignored,
-            |_| panic!("Hex's own window must not name a mode"),
+            |_, _| panic!("Hex's own window must not name a mode"),
             now + Duration::from_secs(1),
         ));
         assert_eq!(
@@ -365,7 +404,7 @@ mod tests {
         // Coming back to Notes is not a change either.
         assert!(!observe(
             &mut switcher,
-            Observation::App("Notes"),
+            Observation::App("Notes", None),
             now + Duration::from_secs(3),
         ));
         assert_eq!(
@@ -379,7 +418,7 @@ mod tests {
         let now = Instant::now();
         let mut switcher = Switcher::new(true, None);
         let current = selection(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
-        assert!(observe(&mut switcher, Observation::App("Notes"), now));
+        assert!(observe(&mut switcher, Observation::App("Notes", None), now));
         assert!(!observe(
             &mut switcher,
             Observation::Ignored,
@@ -393,8 +432,12 @@ mod tests {
         let now = Instant::now();
         let mut switcher = Switcher::new(true, Some(spanish()));
         let current = selection(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
-        assert_eq!(Observation::frontmost(None), Observation::Ignored);
-        assert!(!observe(&mut switcher, Observation::frontmost(None), now));
+        assert_eq!(Observation::frontmost(None, None), Observation::Ignored);
+        assert!(!observe(
+            &mut switcher,
+            Observation::frontmost(None, None),
+            now
+        ));
         assert_eq!(
             switcher.take_due(now + Duration::from_secs(1), &current),
             None
@@ -402,12 +445,12 @@ mod tests {
         // Only a real app read names a mode; the same one seen again after
         // the blank moment is not a change.
         assert_eq!(
-            Observation::frontmost(Some("Notes")),
-            Observation::App("Notes")
+            Observation::frontmost(Some("Notes"), None),
+            Observation::App("Notes", None)
         );
         assert!(!observe(
             &mut switcher,
-            Observation::frontmost(Some("Notes")),
+            Observation::frontmost(Some("Notes"), None),
             now + Duration::from_secs(2),
         ));
         assert_eq!(

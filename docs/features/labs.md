@@ -566,7 +566,9 @@ to a mode by application and, 300 ms after the last change, starts the shared
 picker's installed-only preparation for the mode's choice; a mode without a
 choice switches nothing. Matching is by application on macOS and Windows
 alike: a mode's website rules are ignored, so a mode chosen only by website
-never switches. Hex's own window, and a moment with no application in front,
+never switches. On macOS an app matches under its own name or the name
+Finder shows for its bundle, which is what the picker saves (`Rex Beta.app`
+runs as `Rex`); Windows matches its process name. Hex's own window, and a moment with no application in front,
 are ignored: they neither schedule nor cancel a switch. A manual model
 choice cancels a pending switch, launching Hex records the mode in front
 without switching it, and a switch due while a dictation records or
@@ -587,7 +589,8 @@ models. Checks:
 `the_speech_row_needs_the_lab_and_a_capable_os` in
 [speech_model_tests.rs](../../src/rune_ui/speech_model_tests.rs); the switch
 policy tests in
-[app_model_switching.rs](../../src/transcription/app_model_switching.rs);
+[app_model_switching.rs](../../src/transcription/app_model_switching.rs),
+`a_mode_picked_under_its_finder_name_switches` (macOS) among them;
 `app_model_switching_is_opt_in_and_mode_speech_choices_round_trip` and
 `loading_drops_mode_speech_choices_that_no_longer_validate` in
 [app_settings.rs](../../src/app_settings.rs); and

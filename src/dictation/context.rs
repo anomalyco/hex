@@ -459,20 +459,8 @@ fn capture_frontmost(reads: Reads) -> Result<Frontmost> {
         let application = NSWorkspace::sharedWorkspace()
             .frontmostApplication()
             .ok_or_else(|| eyre!("macOS did not report a foreground application"))?;
-        let name = application
-            .localizedName()
-            .map(|name| name.to_string())
+        let (name, bundle_name) = application_names(&application)
             .ok_or_else(|| eyre!("the foreground application has no display name"))?;
-        let bundle_name = application
-            .bundleURL()
-            .and_then(|url| url.path())
-            .map(|path| {
-                objc2_foundation::NSFileManager::defaultManager()
-                    .displayNameAtPath(&path)
-                    .to_string()
-            })
-            .map(|finder| strip_bundle_extension(&finder).to_owned())
-            .filter(|finder| !finder.is_empty() && !application_names_equal(finder, &name));
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
         Ok::<_, color_eyre::Report>((
             name,
@@ -504,6 +492,26 @@ fn capture_frontmost(reads: Reads) -> Result<Frontmost> {
         page,
         scripted,
     })
+}
+
+/// A running application's own name and, when it differs, the name Finder
+/// shows for its bundle ([`ContextSnapshot::bundle_name`]).
+#[cfg(target_os = "macos")]
+fn application_names(
+    application: &objc2_app_kit::NSRunningApplication,
+) -> Option<(String, Option<String>)> {
+    let name = application.localizedName()?.to_string();
+    let bundle_name = application
+        .bundleURL()
+        .and_then(|url| url.path())
+        .map(|path| {
+            objc2_foundation::NSFileManager::defaultManager()
+                .displayNameAtPath(&path)
+                .to_string()
+        })
+        .map(|finder| strip_bundle_extension(&finder).to_owned())
+        .filter(|finder| !finder.is_empty() && !application_names_equal(finder, &name));
+    Some((name, bundle_name))
 }
 
 /// A scriptable browser's page: its front tab over AppleScript, else the
@@ -562,18 +570,19 @@ pub fn frontmost_bundle_id() -> Option<String> {
     })
 }
 
-/// The frontmost application's display name, without reading a page or a
-/// window title: a dictation mode's application name (Labs › Switch model
-/// with app). `None` when Hex itself owns the frontmost application, since
-/// its own window names no mode, or when macOS reports none.
+/// The frontmost application's names, as [`application_names`] reads them,
+/// without reading a page or a window title: what a dictation mode's
+/// application matches (Labs › Switch model with app). `None` when Hex itself
+/// owns the frontmost application, since its own window names no mode, or
+/// when macOS reports none.
 #[cfg(target_os = "macos")]
-pub fn frontmost_other_application() -> Option<String> {
+pub fn frontmost_other_application() -> Option<(String, Option<String>)> {
     autoreleasepool(|_| {
         let application = NSWorkspace::sharedWorkspace().frontmostApplication()?;
         if application.processIdentifier() == std::process::id() as i32 {
             return None;
         }
-        application.localizedName().map(|name| name.to_string())
+        application_names(&application)
     })
 }
 
