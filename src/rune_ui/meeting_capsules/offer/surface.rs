@@ -306,16 +306,11 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
     let offer = if c.stage.outline().is_some() {
         c.stage.presence(Layer::Offer)
     } else {
-        stage::Presence {
-            opacity: 1.0,
-            scale: 1.0,
-            blur: 0.0,
-        }
+        stage::Presence::flat(1.0)
     };
     let pending = c.stage.presence(Layer::Pending);
     let live = c.stage.presence(Layer::Meter);
-    let grid = |v: f32| (v * 64.).round() / 64.;
-    let (w, h) = (grid(o.w), grid(o.h));
+    let (w, h) = (stage::grid(o.w), stage::grid(o.h));
     let (right, top_corner) = (c.corner.is_right(), c.corner.is_top());
     let top = if top_corner {
         CAPSULE_INSET
@@ -392,18 +387,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         _ => title,
     };
     // What a moving edge crosses fades under it; at rest the veil is nothing.
-    let (veil_x, veil_y) = c.stage.veil();
-    let mut veil = rune::el()
-        .key("veil")
-        .absolute(0., 0.)
-        .size(w, h)
-        .transition(Transition::none())
-        .clip_fade_linear(
-            if right { veil_x } else { 0. },
-            if top_corner { 0. } else { veil_y },
-            if right { 0. } else { veil_x },
-            if top_corner { veil_y } else { 0. },
-        );
+    let mut veil = panel::veil(c, w, h);
     if offer.shows() {
         veil = veil.child(page);
     }

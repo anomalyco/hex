@@ -260,22 +260,24 @@ fn panel_body(p: Paint, title: &str) -> El {
         .hit()
 }
 
+/// A line replaced in place leaves sooner than it arrives, even under
+/// Reduce Motion.
+const REDUCED_EXIT: f32 = 0.15;
+
 fn replace(c: &Capsule) -> Transition {
-    let (enter, exit) = if c.reduced.get() {
-        (0.18, 0.15)
-    } else {
-        (0.3, 0.25)
-    };
+    let reduced = c.reduced.get();
     // A whole line replaced in place softens; under Reduce Motion it only fades.
-    if c.reduced.get() {
+    let look = if reduced {
         Transition::opacity()
     } else {
         Transition::blur(2.0)
-    }
-    .springs(SpringPair::new(
-        Spring::new(enter, 0.),
-        Spring::new(exit, 0.),
-    ))
+    };
+    let (enter, exit) = if reduced {
+        (stage::REDUCED, Spring::new(REDUCED_EXIT, 0.))
+    } else {
+        (stage::ENTER, stage::EXIT)
+    };
+    look.springs(SpringPair::new(enter, exit))
 }
 
 /// The finished meeting stays where its pill was; other panels take the saved corner.
@@ -497,9 +499,8 @@ fn result(
         .flatten();
     let body = match arriving {
         Some(o) => {
-            let grid = |v: f32| (v * 64.0).round() / 64.0;
             let body = body
-                .size(grid(o.w), grid(o.h))
+                .size(stage::grid(o.w), stage::grid(o.h))
                 .radius(o.radius)
                 .clip_rounded(o.radius)
                 .motion(Spring::NONE);
@@ -641,11 +642,10 @@ pub(super) fn field_width(capsule: &Capsule) -> f32 {
     if !capsule.corner.is_right() {
         return waveform::WIDTH;
     }
-    let grid = |v: f32| (v * 64.0).round() / 64.0;
     // A digit that arrives on the time takes its room at once, before the
     // pill has grown for it: the field gives up columns, never the inset.
-    grid(capsule.stage.field())
-        .min(field_room(capsule, grid(outline.w)))
+    stage::grid(capsule.stage.field())
+        .min(field_room(capsule, stage::grid(outline.w)))
         .max(FIELD_LEAST)
 }
 
@@ -675,12 +675,16 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
 
 /// The open recording's height: its header, Stop, any notice and the copies.
 pub(super) fn open_height(shown: &Recording) -> f32 {
-    open_height_without_notice()
-        + if recording_notice(shown).is_some() {
-            NOTICE_HEIGHT
-        } else {
-            0.0
-        }
+    open_height_without_notice() + notice_height(shown)
+}
+
+/// The room the recording's notice line takes, when it says anything.
+fn notice_height(shown: &Recording) -> f32 {
+    if recording_notice(shown).is_some() {
+        NOTICE_HEIGHT
+    } else {
+        0.0
+    }
 }
 
 /// The open panel a finished meeting grows from.
@@ -703,7 +707,7 @@ const UNCOVER: f32 = 32.0;
 
 /// What a moving edge of the surface crosses fades under it: the sides away
 /// from the saved corner, by as much as the stage says they are moving.
-fn veil(capsule: &Capsule, width: f32, height: f32) -> El {
+pub(super) fn veil(capsule: &Capsule, width: f32, height: f32) -> El {
     let (x, y) = capsule.stage.veil();
     let (right, top) = (capsule.corner.is_right(), capsule.corner.is_top());
     el().key("veil")
@@ -723,21 +727,13 @@ impl Capsule {
     /// Whole wherever the surface isn't in motion.
     pub(super) fn action_presence(&self, row: usize) -> stage::Presence {
         let (Some(o), Some(Kind::Recording(shown))) = (self.stage.outline(), self.drawn()) else {
-            return stage::Presence {
-                opacity: 1.0,
-                scale: 1.0,
-                blur: 0.0,
-            };
+            return stage::Presence::flat(1.0);
         };
         let mut presence = self.stage.presence(stage::Layer::Action(row));
         // A row shows only as far as the outline has uncovered it, so an
         // edge in flight never crosses words at full strength: across, as
         // the far side clears the row's start; along, as the edge passes it.
-        let notice = if recording_notice(shown).is_some() {
-            NOTICE_HEIGHT
-        } else {
-            0.0
-        };
+        let notice = notice_height(shown);
         let near = match row {
             0 => REST_HEIGHT,
             1 => OPEN_HEADER + notice + ROW_GAP,
@@ -885,12 +881,11 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         (rest_width(shown), REST_HEIGHT, REST_HEIGHT / 2.0)
     };
     // The stage owns the outline. Before its first step the pill is at rest.
-    let grid = |v: f32| (v * 64.0).round() / 64.0;
     let (width, height, radius) = capsule
         .stage
         .outline()
         .map_or((target_w, target_h, target_r), |o| {
-            (grid(o.w), grid(o.h), o.radius)
+            (stage::grid(o.w), stage::grid(o.h), o.radius)
         });
     let header = meter_band();
     let spacer = el().key("space").grow(1.0);
@@ -1051,13 +1046,7 @@ pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f
         }
         (
             RECORDING_WINDOW.0,
-            open_height_without_notice()
-                + 2. * CAPSULE_INSET
-                + if shown.and_then(recording_notice).is_some() {
-                    NOTICE_HEIGHT
-                } else {
-                    0.
-                },
+            open_height_without_notice() + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
         )
     }
     #[cfg(not(target_os = "windows"))]

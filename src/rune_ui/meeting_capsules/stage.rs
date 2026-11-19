@@ -29,9 +29,26 @@ const VEIL: f32 = 24.0;
 const VEIL_REACH: f32 = 0.035;
 /// The fade follows the edge's speed over this long, so it never pops on.
 const VEIL_EASE: f32 = 0.05;
-/// How far an arriving or leaving layer shrinks and softens.
+/// How far an arriving or leaving layer, or the whole surface, shrinks
+/// and softens.
 const LAYER_SCALE: f32 = 0.96;
 const LAYER_BLUR: f32 = 3.0;
+
+/// The spring a presence arrives or leaves on: it leaves sooner, and under
+/// Reduce Motion the one flat spring stands in for both.
+pub(super) fn spring(reduced: bool, arrived: bool) -> Spring {
+    match (reduced, arrived) {
+        (true, _) => REDUCED,
+        (false, true) => ENTER,
+        (false, false) => EXIT,
+    }
+}
+
+/// Sizes as drawn land on the 1/64-point grid, so a moving outline and the
+/// layout it uncovers agree at rest.
+pub(super) fn grid(v: f32) -> f32 {
+    (v * 64.0).round() / 64.0
+}
 
 /// How long a track in full flight takes to believe a new target. A retarget
 /// changes where the spring pulls, not how hard it pulls this frame, so the
@@ -183,6 +200,25 @@ pub(super) struct Presence {
 }
 
 impl Presence {
+    /// Opacity alone: under Reduce Motion nothing travels or softens.
+    pub(super) fn flat(opacity: f32) -> Self {
+        Self {
+            opacity,
+            scale: 1.0,
+            blur: 0.0,
+        }
+    }
+
+    /// Shrinks toward its corner and softens as it leaves: how the whole
+    /// surface and its soft layers arrive and go.
+    pub(super) fn soft(opacity: f32) -> Self {
+        Self {
+            opacity,
+            scale: LAYER_SCALE + (1.0 - LAYER_SCALE) * opacity,
+            blur: LAYER_BLUR * (1.0 - opacity),
+        }
+    }
+
     pub(super) fn shows(self) -> bool {
         self.opacity > 0.0
     }
@@ -289,15 +325,10 @@ impl Stage {
     pub(super) fn presence(&self, layer: Layer) -> Presence {
         let p = self.layers[layer.index()].x.clamp(0.0, 1.0);
         // The meter and the actions stay where they are: they only fade.
-        let soft = matches!(layer, Layer::Offer | Layer::Pending) && !self.reduced;
-        Presence {
-            opacity: p,
-            scale: if soft {
-                LAYER_SCALE + (1.0 - LAYER_SCALE) * p
-            } else {
-                1.0
-            },
-            blur: if soft { LAYER_BLUR * (1.0 - p) } else { 0.0 },
+        if matches!(layer, Layer::Offer | Layer::Pending) && !self.reduced {
+            Presence::soft(p)
+        } else {
+            Presence::flat(p)
         }
     }
 

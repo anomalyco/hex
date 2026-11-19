@@ -8,12 +8,9 @@
 //! a worker that reports several titles within a few frames shows the last
 //! one once, never a pile of them.
 
-use super::stage::{ENTER, EXIT, Presence, REDUCED, Track};
+use super::stage::{Presence, Track};
 use super::*;
 
-/// How far the surface shrinks toward its corner, and softens, as it goes.
-const SCALE: f32 = 0.96;
-const BLUR: f32 = 3.0;
 /// A line replaced in place softens this much.
 const LINE_BLUR: f32 = 2.0;
 /// Words this faint no longer show.
@@ -77,16 +74,9 @@ impl Surface {
     fn look(&self, reduced: bool) -> Presence {
         let p = self.track.x.clamp(0.0, 1.0);
         if reduced {
-            return Presence {
-                opacity: p,
-                scale: 1.0,
-                blur: 0.0,
-            };
-        }
-        Presence {
-            opacity: p,
-            scale: SCALE + (1.0 - SCALE) * p,
-            blur: BLUR * (1.0 - p),
+            Presence::flat(p)
+        } else {
+            Presence::soft(p)
         }
     }
 }
@@ -113,11 +103,7 @@ impl<T: PartialEq + Clone> Roll<T> {
             return false;
         };
         let same = *shown == wanted;
-        let spring = match (reduced, same) {
-            (true, _) => REDUCED,
-            (false, true) => ENTER,
-            (false, false) => EXIT,
-        };
+        let spring = stage::spring(reduced, same);
         let moving = self.track.step(f32::from(same), spring, dt, 0.01);
         // The old words no longer show: the new ones start from nothing,
         // without waiting out the spring's tail over an empty line.
@@ -240,11 +226,7 @@ impl Capsule {
             Some(last) => (now - last).clamp(0.0, 0.1) as f32,
             None => 1.0 / 60.0,
         };
-        let spring = match (reduced, shown) {
-            (true, _) => REDUCED,
-            (false, true) => ENTER,
-            (false, false) => EXIT,
-        };
+        let spring = stage::spring(reduced, shown);
         // Below one part in a hundred nothing shows: the window can go.
         let mut moving = s.track.step(wanted, spring, dt, 0.01);
         match title {

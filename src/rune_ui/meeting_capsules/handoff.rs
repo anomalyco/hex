@@ -83,12 +83,18 @@ impl MeetingCapsules {
         }
     }
 
-    pub(super) fn notes_progress(&self, id: &str) {
-        let handle = if self.finishing.as_deref() == Some(id) {
+    /// The capsule a finished meeting still owns: the recording's own
+    /// window while it is finishing there, else the panel.
+    pub(super) fn handle_for(&self, id: &str) -> &OverlayHandle<Capsule> {
+        if self.finishing.as_deref() == Some(id) {
             &self.pill.handle
         } else {
             &self.panel
-        };
+        }
+    }
+
+    pub(super) fn notes_progress(&self, id: &str) {
+        let handle = self.handle_for(id);
         let id = id.to_owned();
         handle.update_if(move |c, _| {
             let Some(Kind::Ready(m)) = &c.kind else {

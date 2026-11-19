@@ -1028,11 +1028,7 @@ impl MeetingCapsules {
             }
             ControllerEvent::NotesFinished(manifest) => {
                 let manifest = manifest.clone();
-                let panel = if self.finishing.as_ref() == Some(&manifest.id) {
-                    &self.pill.handle
-                } else {
-                    &self.panel
-                };
+                let panel = self.handle_for(&manifest.id);
                 panel.update(move |capsule, _| capsule.refresh_ready(manifest));
             }
             ControllerEvent::NotesProgress(id) => self.notes_progress(id),
