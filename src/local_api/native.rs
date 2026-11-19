@@ -49,6 +49,10 @@ use linux::identify;
 use macos::identify;
 #[cfg(target_os = "windows")]
 pub(super) use windows::Listener;
+#[cfg(all(test, target_os = "windows"))]
+pub(super) mod tests {
+    pub(in crate::local_api) use super::windows::tests::connect;
+}
 
 /// The one native process a connection came from: its audit token on macOS,
 /// its pid and start time elsewhere.

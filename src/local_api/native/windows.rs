@@ -264,10 +264,14 @@ fn verified(image: &Path) -> Option<(String, Verification)> {
             std::ptr::null_mut(),
         )
     });
-    if file.0 == INVALID_HANDLE_VALUE {
-        return None;
-    }
-    match publisher(&path, file.0) {
+    // Another program holding it open for writing leaves the check to the
+    // path alone.
+    let handle = if file.0 == INVALID_HANDLE_VALUE {
+        std::ptr::null_mut()
+    } else {
+        file.0
+    };
+    match publisher(&path, handle) {
         Some(publisher) => {
             let file_name = image.file_name()?.to_string_lossy().into_owned();
             Some((file_name, Verification::WindowsSignature { publisher }))
@@ -716,5 +720,160 @@ impl Drop for Pipe {
             DisconnectNamedPipe(self.0);
             CloseHandle(self.0);
         }
+    }
+}
+
+#[cfg(test)]
+pub(in crate::local_api) mod tests {
+    use std::sync::atomic::AtomicU32;
+
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSidToSidW, GetSecurityInfo, SE_KERNEL_OBJECT,
+    };
+    use windows_sys::Win32::Security::{
+        ACCESS_ALLOWED_ACE, ACL, DACL_SECURITY_INFORMATION, GetAce, PSID,
+    };
+
+    use super::*;
+
+    /// A client of the pipe `pointer` names, as the record clients open it.
+    pub(in crate::local_api) fn connect(pointer: &Path) -> fs::File {
+        let name = fs::read_to_string(pointer).unwrap();
+        let name = name.trim();
+        for _ in 0..100 {
+            match fs::OpenOptions::new().read(true).write(true).open(name) {
+                Ok(file) => return file,
+                // Busy between two instances (ERROR_PIPE_BUSY).
+                Err(error) if error.raw_os_error() == Some(231) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("could not open {name}: {error}"),
+            }
+        }
+        panic!("{name} stayed busy");
+    }
+
+    /// A pipe instance of this test's own name with this process connected
+    /// to it as the client.
+    fn connected() -> (Pipe, fs::File, Sid) {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let name = format!(
+            "{PIPE_PREFIX}test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
+        let user = Sid::of_process(current_process()).unwrap();
+        let security = Security::owner_only(&user).unwrap();
+        let server = Pipe::create(&wide(OsStr::new(&name)), &security, true).unwrap();
+        let client = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&name)
+            .unwrap();
+        // SAFETY: a live instance; the client already connected.
+        let connected = unsafe { ConnectNamedPipe(server.0, std::ptr::null_mut()) } != 0
+            || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
+        assert!(connected);
+        (server, client, user)
+    }
+
+    fn sid(text: &str) -> Sid {
+        let text = wide(OsStr::new(text));
+        let mut sid: PSID = std::ptr::null_mut();
+        // SAFETY: `text` is NUL-terminated; the SID is copied, then freed.
+        unsafe {
+            assert_ne!(ConvertStringSidToSidW(text.as_ptr(), &mut sid), 0);
+            let length = 8 + 4 * usize::from(*sid.cast::<u8>().add(1));
+            let copy = Sid(std::slice::from_raw_parts(sid.cast::<u8>(), length).to_vec());
+            LocalFree(sid as HLOCAL);
+            copy
+        }
+    }
+
+    /// This unsigned test executable, connected as the same user, is
+    /// named by its own image path, and its peer is this process.
+    #[test]
+    fn a_client_is_named_by_its_unsigned_executable() {
+        let (server, _client, user) = connected();
+        let (peer, identity) = identify(server.0, &user, now()).expect("identified");
+        assert_eq!(peer.0[0], std::process::id());
+        let Verification::Executable { path } = &identity.verification else {
+            panic!("an unsigned test binary, yet {:?}", identity.verification);
+        };
+        assert!(same_file::is_same_file(path, std::env::current_exe().unwrap()).unwrap());
+        assert_eq!(identity.identifier, path.to_string_lossy());
+        assert!(identity.cdhash.is_empty());
+    }
+
+    /// A process that started after the connection reused a gone client's
+    /// pid; a token of another user is someone else. Both are refused.
+    #[test]
+    fn a_newer_process_or_another_user_is_refused() {
+        let (server, _client, user) = connected();
+        assert!(identify(server.0, &user, 0).is_none());
+        let system = sid("S-1-5-18");
+        assert!(system != user);
+        assert!(identify(server.0, &system, now()).is_none());
+        assert!(identify(server.0, &user, now()).is_some());
+    }
+
+    /// A second first instance of the same name fails, so no other process
+    /// can take over a pipe Hex owns (or Hex one it doesn't).
+    #[test]
+    fn only_one_owner_may_create_a_pipe_name() {
+        let user = Sid::of_process(current_process()).unwrap();
+        let security = Security::owner_only(&user).unwrap();
+        let name = wide(OsStr::new(&format!(
+            "{PIPE_PREFIX}owner-{}",
+            std::process::id()
+        )));
+        let _first = Pipe::create(&name, &security, true).unwrap();
+        assert!(Pipe::create(&name, &security, true).is_err());
+    }
+
+    /// The pipe's DACL holds one allow entry, for this user alone.
+    #[test]
+    fn the_pipe_admits_only_this_user() {
+        let (server, _client, user) = connected();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        // SAFETY: a live pipe handle; the descriptor is LocalFree'd below and
+        // the DACL and its entry point into it.
+        unsafe {
+            let status = GetSecurityInfo(
+                server.0,
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            );
+            assert_eq!(status, 0);
+            assert_eq!((*dacl).AceCount, 1);
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            assert_ne!(GetAce(dacl, 0, &mut ace), 0);
+            let ace = ace.cast::<ACCESS_ALLOWED_ACE>();
+            assert_eq!((*ace).Header.AceType, 0, "an allow entry");
+            let sid = (&raw mut (*ace).SidStart).cast::<c_void>();
+            assert_ne!(EqualSid(sid, user.0.as_ptr().cast_mut().cast()), 0);
+            LocalFree(descriptor as HLOCAL);
+        }
+    }
+
+    /// A read with nothing sent returns at once, so the HTTP reader's
+    /// deadline holds; sent bytes arrive; a gone client reads as the end.
+    #[test]
+    fn a_read_never_waits_on_a_quiet_client() {
+        let (mut server, mut client, _) = connected();
+        let mut buffer = [0_u8; 16];
+        let error = server.read(&mut buffer).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        client.write_all(b"ping").unwrap();
+        assert_eq!(server.read(&mut buffer).unwrap(), 4);
+        assert_eq!(&buffer[..4], b"ping");
+        drop(client);
+        assert_eq!(server.read(&mut buffer).unwrap(), 0);
     }
 }
