@@ -135,3 +135,16 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
 - **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
   compiles or tests the iOS targets, so these checks run only in a local
   `xcodebuild test`.
+
+## Internal TestFlight releases
+
+[Hex Mobile in App Store Connect](https://appstoreconnect.apple.com/apps/6836837368/testflight/ios)
+uses Anomaly's signing team. The GitHub **Release Hex Mobile** workflow checks
+`dev` at noon and 6 p.m. Chicago time, or on manual dispatch, and cuts an
+`ios-beta-*` prerelease when iOS inputs have changed. These tags are separate
+from desktop releases. The marketing version stays fixed across beta builds.
+
+The Xcode Cloud workflow needs a tag start condition with prefix `ios-beta-`,
+container `ios/HEXMobile.xcodeproj`, shared scheme `HEXMobile`, an iOS Archive
+action, and a TestFlight post-action for **Hex Internal**. Cloud owns the build
+number. Verify the run's source tag and the processed build in that group.
