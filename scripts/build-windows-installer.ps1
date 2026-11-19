@@ -33,8 +33,9 @@ $ErrorActionPreference = 'Stop'
 
 # Both passes must use one compiler: the engine's file name carries the Inno
 # Setup version and a hash of the engine bytes, so pass 2 cannot use pass 1's
-# file from another version. windows-latest images ship this one; a runner
-# image that moves on fails here rather than at compile time.
+# file from another version. windows-latest images ship this one; another
+# installed version is re-pinned to it (Install-Iscc -Repin), and the passes
+# fail only if that still leaves another version.
 $InnoVersion = '6.7.1'
 
 if ($ExtractSignedEngine -and $SignedEngineDir) { throw 'Pass -ExtractSignedEngine or -SignedEngineDir, not both.' }

@@ -54,8 +54,9 @@ publish                                       // stable requires the signatures
    that abort as success, keeps the engine, and fails if the abort or the file
    is missing.
 2. `sign-windows-engine` Authenticode-signs the `.e32` and verifies it
-   (`verify-authenticode.ps1 -Extensions .e32`). Its steps run unguarded, so a
-   missing credential fails the job instead of publishing an empty digest.
+   (`verify-authenticode.ps1 -Extensions .e32`). Apart from the shared
+   credentials check, its steps are unguarded: with a missing credential the
+   sign step fails the job rather than uploading nothing.
 3. `installers` compiles again with `-SignedEngineDir` pointing at the signed
    engine. ISCC copies the signature into the engine it embeds, so no sign
    tool runs there. If ISCC instead asks for a signature again, the signed
