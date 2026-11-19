@@ -113,7 +113,7 @@ final class KeyboardViewController: UIInputViewController {
         if KeyboardLocalDictation.isSupported {
             viewModel.onLocalDictateTap = { [weak self] in
                 guard let self else { return }
-                self.localDictation.start(in: self.view)
+                self.localDictation.start(in: self.view, allowBluetoothMic: self.bridge.allowBluetoothMic)
             }
         }
         viewModel.onStyleSelected = { [weak self] style in

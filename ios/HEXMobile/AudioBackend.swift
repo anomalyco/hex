@@ -191,12 +191,25 @@ final class SystemAudioManager: AudioManaging {
         }
     }
 
+    /// Bluetooth off (Always use iPhone microphone, the default): record from the iPhone's
+    /// microphone and mix with other audio, so music or navigation keeps playing (over A2DP
+    /// in a car or headphones) instead of pausing and dropping into call audio.
     private func configureAudioSession(allowBluetooth: Bool) throws {
         let session = AVAudioSession.sharedInstance()
-        let options: AVAudioSession.CategoryOptions = allowBluetooth ? [.allowBluetoothHFP] : []
-        try session.setCategory(.record, mode: .measurement, options: options)
+        if allowBluetooth {
+            try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
+        } else {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
+            )
+        }
         try session.setPreferredSampleRate(16_000)
         try session.setActive(true)
+        if !allowBluetooth, let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+            try? session.setPreferredInput(builtIn)
+        }
     }
 
     nonisolated private static func discardSamples(

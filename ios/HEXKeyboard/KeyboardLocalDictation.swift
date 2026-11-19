@@ -78,7 +78,10 @@ final class KeyboardLocalDictation {
     /// The keyboard extension itself may not record (audiomxd: "it is an extension and
     /// doesn't have entitlements to record audio"), so capture runs in WebKit's media
     /// process through getUserMedia, attributed to Hex's microphone permission.
-    func start(in host: UIView) {
+    /// With Always use iPhone microphone (the app's default), capture uses the iPhone's own
+    /// microphone and mixes with other audio, so a car or headset keeps playing music
+    /// instead of switching to call audio, which pauses it and stalls the start.
+    func start(in host: UIView, allowBluetoothMic: Bool) {
         guard !isActive else { return }
         let log = KeyboardProbeLog.shared
         log.write("start(web): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) speech=\(Self.describe(SFSpeechRecognizer.authorizationStatus())) \(KeyboardProbeLog.memory())")
@@ -95,14 +98,38 @@ final class KeyboardLocalDictation {
         capture.onEvent = { [weak self] event in
             self?.handle(event, jobID: jobID, requestedAt: requestedAt)
         }
-        capture.start()
+        if !allowBluetoothMic {
+            Self.preferBuiltInMicrophone()
+        }
+        capture.start(preferBuiltIn: !allowBluetoothMic)
+    }
+
+    /// Lets music or navigation that the capture paused resume.
+    private static func releaseAudioSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private static func preferBuiltInMicrophone() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
+            )
+            if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+                try session.setPreferredInput(builtIn)
+            }
+        } catch {
+            KeyboardProbeLog.shared.write("built-in mic preference failed: \(describe(error))")
+        }
     }
 
     private func handle(_ event: KeyboardWebCapture.Event, jobID: String, requestedAt: Date) {
         let log = KeyboardProbeLog.shared
         switch event {
-        case .started(let sampleRate):
-            log.write("web capture started in \(Int(Date().timeIntervalSince(requestedAt) * 1000)) ms at \(Int(sampleRate)) Hz \(KeyboardProbeLog.memory())")
+        case .started(let sampleRate, let device):
+            log.write("web capture started in \(Int(Date().timeIntervalSince(requestedAt) * 1000)) ms at \(Int(sampleRate)) Hz from \(device) \(KeyboardProbeLog.memory())")
             do {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("keyboard-\(jobID).wav")
                 pcmFile = try KeyboardPCMFile(url: url, sampleRate: sampleRate)
@@ -134,6 +161,7 @@ final class KeyboardLocalDictation {
         if let url = pcmFile?.url { try? FileManager.default.removeItem(at: url) }
         pcmFile = nil
         phase = .idle
+        Self.releaseAudioSession()
         KeyboardProbeLog.shared.write("cancelled")
     }
 
@@ -145,6 +173,7 @@ final class KeyboardLocalDictation {
     private func finishRecording(jobID: String) {
         guard case .recording(_, let startedAt) = phase, let file = pcmFile else { return }
         pcmFile = nil
+        Self.releaseAudioSession()
         let seconds = Date().timeIntervalSince1970 - startedAt
         let frames = file.close()
         KeyboardProbeLog.shared.write("stopped after \(String(format: "%.1f", seconds)) s, frames=\(frames) \(KeyboardProbeLog.memory())")
@@ -168,6 +197,7 @@ final class KeyboardLocalDictation {
     }
 
     private func fail(_ message: String) {
+        Self.releaseAudioSession()
         KeyboardProbeLog.shared.write("FAILED: \(message) \(KeyboardProbeLog.memory())")
         phase = .failed(message: message, until: Date().timeIntervalSince1970 + 6)
     }
@@ -235,7 +265,7 @@ private final class KeyboardPCMFile {
 @MainActor
 private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     enum Event {
-        case started(sampleRate: Double)
+        case started(sampleRate: Double, device: String)
         case samples(Data, peak: Float)
         case stopped
         case failed(String)
@@ -262,12 +292,15 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         webView.loadHTMLString(Self.page, baseURL: URL(string: "https://keyboard.hex.local/"))
     }
 
-    func start() {
+    private var preferBuiltIn = true
+
+    func start(preferBuiltIn: Bool) {
+        self.preferBuiltIn = preferBuiltIn
         guard isLoaded else {
             startWhenLoaded = true
             return
         }
-        webView.evaluateJavaScript("hexStart()")
+        webView.evaluateJavaScript("hexStart(\(preferBuiltIn))")
     }
 
     func stop() {
@@ -279,7 +312,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         isLoaded = true
         if startWhenLoaded {
             startWhenLoaded = false
-            start()
+            start(preferBuiltIn: preferBuiltIn)
         }
     }
 
@@ -302,7 +335,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         switch type {
         case "started":
-            onEvent?(.started(sampleRate: (body["rate"] as? Double) ?? 48_000))
+            onEvent?(.started(sampleRate: (body["rate"] as? Double) ?? 48_000, device: (body["device"] as? String) ?? "unknown"))
         case "pcm":
             guard let encoded = body["data"] as? String, let data = Data(base64Encoded: encoded) else { return }
             onEvent?(.samples(data, peak: Float((body["peak"] as? Double) ?? 0)))
@@ -319,11 +352,25 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
     <!doctype html><meta charset="utf-8"><script>
     let ctx, stream, source, node, running = false;
     const post = (m) => webkit.messageHandlers.hex.postMessage(m);
-    async function hexStart() {
+    const base = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    async function builtInMicrophone() {
+      const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+      const found = inputs.find((d) => /iphone|ipad|built-in/i.test(d.label));
+      return found ? found.deviceId : null;
+    }
+    async function hexStart(preferBuiltIn) {
       if (running) return;
       running = true;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+        let id = preferBuiltIn ? await builtInMicrophone() : null;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base });
+        if (preferBuiltIn && !id) {
+          id = await builtInMicrophone();
+          if (id && stream.getAudioTracks()[0].getSettings().deviceId !== id) {
+            stream.getTracks().forEach((t) => t.stop());
+            stream = await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: id } } });
+          }
+        }
         ctx = new AudioContext();
         await ctx.resume();
         source = ctx.createMediaStreamSource(stream);
@@ -345,7 +392,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         };
         source.connect(node);
         node.connect(ctx.destination);
-        post({ type: "started", rate: ctx.sampleRate });
+        post({ type: "started", rate: ctx.sampleRate, device: stream.getAudioTracks()[0].label });
       } catch (error) {
         running = false;
         post({ type: "error", message: (error && (error.name + ": " + error.message)) || String(error) });

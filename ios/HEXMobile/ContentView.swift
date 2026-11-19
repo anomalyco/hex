@@ -502,11 +502,16 @@ struct ContentView: View {
 
             Toggle(
                 isOn: Binding(
-                    get: { dictation.allowBluetoothMic },
-                    set: { dictation.setAllowBluetoothMic($0) }
+                    get: { !dictation.allowBluetoothMic },
+                    set: { dictation.setAllowBluetoothMic(!$0) }
                 )
             ) {
-                rowTitle("Bluetooth microphone")
+                VStack(alignment: .leading, spacing: 2) {
+                    rowTitle("Always use iPhone microphone")
+                    Text("Keeps music playing and starts faster")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                }
             }
             .tint(HexTheme.success)
             .padding(.horizontal, 16)
