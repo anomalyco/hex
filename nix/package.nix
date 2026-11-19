@@ -91,8 +91,8 @@ let
       hash = "sha256-0yJb+UFu47T2pgDIi9B9IAxbCWNu0/OMVG5uGNF6lyI=";
     };
     "transcribe-cpp-sys-0.4.1" = {
-      rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a";
-      hash = "sha256-1VztJ0VhPTjAuk4J0NT9KapDOqplegpHOqHsTpfHXWc=";
+      rev = "295c7e601ee5a25da0d1f169c996aee839d49943";
+      hash = "sha256-tQtKhTAO7bSdPov7hq8jRdujFJgMwAw5yHuwaErNPss=";
     };
   };
   # The vendor tree names every Git crate `<name>-<version>`, so the rune
