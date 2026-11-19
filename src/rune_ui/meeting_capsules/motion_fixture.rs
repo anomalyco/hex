@@ -487,7 +487,7 @@ fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
             });
             rt.frame(0.);
             let ([_, _, w, h], _) = rt.presented("pill").unwrap();
-            assert_eq!((w, h), (148., 36.));
+            assert_eq!((w, h), (REST_WIDTH, REST_HEIGHT));
             assert!(rt.find("stop").is_none());
             open_recording(&mut rt);
             for (key, name) in [

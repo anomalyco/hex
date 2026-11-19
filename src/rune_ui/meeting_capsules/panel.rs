@@ -365,14 +365,14 @@ fn result(
         row()
             .key("meter")
             .h(REST_HEIGHT)
-            .gap(6.)
+            .gap(METER_GAP)
             .center_y()
             .transition(Transition::none())
             // The field cools after capture ends; it never cuts. On the right
             // it sits beside the time without moving it.
             .children(match (capsule.waveform.is_some(), right) {
                 (true, true) => Some(waveform::slot().absolute(
-                    -(waveform::WIDTH + 6.),
+                    -(waveform::WIDTH + METER_GAP),
                     (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
                 )),
                 (true, false) => Some(waveform::slot()),
@@ -601,7 +601,7 @@ pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     row()
         .key("meter")
         .h(REST_HEIGHT)
-        .gap(6.)
+        .gap(METER_GAP)
         .center_y()
         // The same meter in every state: it never arrives a second time.
         .transition(Transition::none())

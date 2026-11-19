@@ -89,10 +89,14 @@ const REMINDER_TICK: Duration = Duration::from_secs(5);
 const CAPSULE_INSET: f32 = 4.0;
 /// Same header at rest and open so the waveform and timer stay put.
 const REST_HEIGHT: f32 = HEADER_HEIGHT;
-const REST_WIDTH: f32 = 148.0;
-/// The resting pill's sides, and the open panel header's right side, so the
-/// timer stays put as the pill opens.
-const REST_PX: f32 = 11.0;
+const REST_WIDTH: f32 = 2.0 * REST_PX + waveform::WIDTH + METER_GAP + TIMER_WIDTH;
+/// The header's sides, at rest and open, so the timer stays put as the pill
+/// opens: the inset the rows' labels, the title and the summary keep.
+const REST_PX: f32 = PANEL_PAD + ROW_PX;
+/// Between the listening field and the time.
+const METER_GAP: f32 = 6.0;
+/// "00:00" in the timer's 13 pt monospaced digits, at layout resolution.
+const TIMER_WIDTH: f32 = 39.0;
 /// The open recording pill and the ready panel.
 const PANEL_WIDTH: f32 = 252.0;
 const PANEL_RADIUS: f32 = 13.0;
@@ -2703,6 +2707,7 @@ mod tests {
     include!("meeting_capsules/offer/proof.rs");
     include!("meeting_capsules/replay_fixture.rs");
     include!("meeting_capsules/exits_tests.rs");
+    include!("meeting_capsules/pill_tests.rs");
 
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
