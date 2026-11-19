@@ -74,7 +74,8 @@ pub(crate) enum ControllerEvent {
     ReminderWithdrawn {
         occurrence: String,
     },
-    Starting,
+    /// The accepted offer, or None for a start that did not come from one.
+    Starting(Option<OfferId>),
     /// `automatic` when the provider is set to Always record.
     RecordingStarted {
         id: String,
@@ -262,7 +263,7 @@ pub(crate) fn controller_loop(
                     // this recording keeps that code, so the page naming it
                     // never ends this one (#1896).
                     start.switched_from = detector.take_switched_from();
-                    start_recording(&mut recording, &mut reminders, start, true, &events);
+                    start_recording(&mut recording, &mut reminders, start, true, None, &events);
                 }
                 Ok(None) => {}
             }
@@ -385,7 +386,7 @@ fn handle_command(
                 "meeting recording started on request"
             );
             let start = reminders.start_for(&candidate);
-            start_recording(recording, reminders, start, false, events);
+            start_recording(recording, reminders, start, false, offer, events);
         }
         ControllerCommand::RecordMeeting { meeting, join } => {
             reminders.scheduler.answered(&meeting.occurrence());
@@ -407,6 +408,7 @@ fn handle_command(
                 reminders,
                 calendar_start(&meeting),
                 false,
+                None,
                 events,
             );
         }
@@ -836,6 +838,7 @@ fn start_recording(
     reminders: &mut Reminders,
     start: Start,
     automatic: bool,
+    offer: Option<OfferId>,
     events: &SyncSender<ControllerEvent>,
 ) {
     // `Starting` closes a showing reminder; no reminder shows over a
@@ -857,7 +860,7 @@ fn start_recording(
     let meeting_start = start.meeting;
     let worker =
         thread::spawn(move || meeting::record(meeting_start, &worker_stop, Some(update_sender)));
-    let _ = events.send(ControllerEvent::Starting);
+    let _ = events.send(ControllerEvent::Starting(offer));
     *recording = Some(ActiveRecording {
         title: start.title,
         application,

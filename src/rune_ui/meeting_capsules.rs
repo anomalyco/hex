@@ -31,7 +31,7 @@
 //! throw carries a capsule toward the corner it heads for ([`throw`]).
 //!
 //! On a Linux Wayland compositor without layer-shell (GNOME) the capsules
-//! float on XWayland only with Labs › Floating meeting capsules on GNOME
+//! float on XWayland only with Labs › Call recording controls on GNOME
 //! (`linux::meeting_capsules`); otherwise an offer opens the Meetings pane.
 
 use std::cell::Cell;
@@ -58,17 +58,23 @@ use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
 mod handoff;
 mod offer;
+#[path = "meeting_capsules/offer/surface.rs"]
+mod offer_surface;
 mod panel;
+mod screen;
+mod stage;
 mod throw;
 mod waveform;
 
 use panel::{
     agent_prompt, hex_command, ready, ready_window_size, recording, recording_window_size,
 };
+use screen::primary_screen_size;
 
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
 /// The offer's "…" choices need room for three buttons beside the name.
+#[cfg(test)]
 const MEETING_MENU_WIDTH: f32 = 560.0;
 const MEETING_PANEL_HEIGHT: f32 = 64.0;
 /// Between a capsule's buttons and its right edge.
@@ -122,9 +128,11 @@ const RECORDING_WINDOW: (f32, f32) = (
         + PANEL_PAD
         + 2.0 * CAPSULE_INSET,
 );
-/// The clip opens under the pointer and retargets when it leaves.
+/// The finished meeting's title and summary grow the panel on this.
 const RECORDING_OPEN: Spring = Spring::new(0.42, 0.0);
-const RECORDING_CLOSE: Spring = Spring::new(0.38, 0.0);
+/// A start this quick never says "Starting…": the offer contracts straight
+/// into the live pill.
+const PENDING_LABEL_AFTER: f64 = 0.18;
 /// How long a copy says "Copied".
 const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
 const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -226,7 +234,7 @@ impl PillModel {
             ControllerEvent::Offer(..) | ControllerEvent::Reminder { .. } => {
                 self.call_ended = false;
             }
-            ControllerEvent::Starting
+            ControllerEvent::Starting(_)
             | ControllerEvent::Transcribing
             | ControllerEvent::Finished(_)
             | ControllerEvent::Failed { .. } => {
@@ -290,6 +298,11 @@ struct Capsule {
     more_open: bool,
     /// Arms another 20 s if Cancel returns to an offer whose timer already fired.
     rearm_offer: Option<offer::After>,
+    presentation: offer_surface::Presentation,
+    /// The recording host's outline and layers in motion.
+    stage: stage::Stage,
+    /// When the pointer opened the recording, for its rows' order of arrival.
+    opened: Option<f64>,
     live: Live,
     waveform: Option<Box<waveform::Listening>>,
     commands: SyncSender<ControllerCommand>,
@@ -316,6 +329,11 @@ struct Capsule {
     /// Reduce Motion, as the view last read it: a release jumps to its
     /// corner.
     reduced: Cell<bool>,
+    /// The window's scale, as the view last read it: device pixels per point.
+    scale: Cell<f32>,
+    /// The primary screen in points, for a release's corner; a type that
+    /// tests can replace with no screen at all.
+    screen: ScreenFn,
     save_corner: SaveCorner,
     /// Reads a recording's transcript through now off the main thread, then
     /// calls [`Capsule::finish_copy_new`]. Without it, Copy new copies what
@@ -329,6 +347,8 @@ type CopyNew = Arc<dyn Fn(String) + Send + Sync>;
 type Resize = Arc<dyn Fn((f32, f32)) + Send + Sync>;
 type Shift = Arc<dyn Fn(MeetingIndicatorCorner, f32, f32) + Send + Sync>;
 type SaveCorner = Arc<dyn Fn(MeetingIndicatorCorner) + Send + Sync>;
+/// The primary screen in points, given the window's pixels-per-point scale.
+type ScreenFn = fn(f32) -> Option<(f32, f32)>;
 
 impl Capsule {
     fn send(&self, command: ControllerCommand) -> bool {
@@ -350,6 +370,9 @@ impl Capsule {
     /// takes the pointer.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     fn fit_recording_window(&self) {
+        if self.presentation.inherits_offer_window() {
+            return;
+        }
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
             resize(recording_window_size(
                 self.hovered || self.stopping,
@@ -359,6 +382,9 @@ impl Capsule {
     }
 
     fn set_hovered(&mut self, inside: bool) {
+        if self.presentation.blocks_hover(inside) {
+            return;
+        }
         self.hovered = inside;
         #[cfg(target_os = "windows")]
         self.fit_recording_window();
@@ -513,13 +539,16 @@ impl Capsule {
 
     /// The capsule's window size, for snapping a drag.
     fn window_size(&self) -> (f32, f32) {
+        if self.presentation.inherits_offer_window() {
+            return self.presentation.window();
+        }
         match &self.kind {
             Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
             Some(Kind::Recording(shown)) => {
                 recording_window_size(self.hovered || self.stopping, Some(shown))
             }
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
-            Some(Kind::Offer(..)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
+            Some(Kind::Offer(..)) => self.presentation.window(),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
@@ -548,7 +577,7 @@ impl Capsule {
             Phase::Up => {
                 let offset = self.throw.track(now, drag.dx, drag.dy);
                 let velocity = self.throw.velocity(now);
-                let Some(screen) = primary_screen_size() else {
+                let Some(screen) = (self.screen)(self.scale.get()) else {
                     self.throw.stop();
                     shift(self.corner, 0.0, 0.0);
                     return;
@@ -602,21 +631,6 @@ fn corner_placement(
     (edge, margin, align, inset)
 }
 
-/// The primary screen in points, where Rune places the capsules.
-#[cfg(target_os = "macos")]
-fn primary_screen_size() -> Option<(f32, f32)> {
-    let mtm = objc2::MainThreadMarker::new()?;
-    let screen = objc2_app_kit::NSScreen::screens(mtm).iter().next()?;
-    let size = screen.frame().size;
-    Some((size.width as f32, size.height as f32))
-}
-
-/// Linux and Windows leave a dragged capsule in its corner.
-#[cfg(not(target_os = "macos"))]
-fn primary_screen_size() -> Option<(f32, f32)> {
-    None
-}
-
 fn place_capsule(
     handle: &OverlayHandle<Capsule>,
     corner: MeetingIndicatorCorner,
@@ -629,7 +643,7 @@ fn place_capsule(
 }
 
 /// Linux: lets the capsule's next show float on XWayland where Wayland has
-/// no layer-shell, only by Labs › Floating meeting capsules on GNOME (#1274).
+/// no layer-shell, only by Labs › Call recording controls on GNOME (#1274).
 /// Off, Rune can't open it there and the Meetings pane stands in (#1271).
 fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
     #[cfg(target_os = "linux")]
@@ -643,12 +657,14 @@ fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
 pub(crate) struct MeetingCapsules {
     panel: OverlayHandle<Capsule>,
     panel_offer: Option<OfferId>,
+    /// While a real offer is visible it already occupies the recording host.
+    handoff: offer::Host,
     pill: Pill,
     /// Bumped whenever the panel shows something new, so a stale timeout
     /// doesn't close it.
     generation: Arc<AtomicU64>,
     /// Which finished/finalizing meeting still occupies the recording window.
-    handoff: Option<String>,
+    finishing: Option<String>,
 }
 
 /// The recording capsule, rebuilt from its [`PillModel`] and the live Show
@@ -673,12 +689,15 @@ impl Pill {
     /// Shows, refreshes, or hides the pill to match the model; returns the
     /// recording it shows.
     fn reconcile(&self) -> Option<String> {
-        let mut model = self.lock();
+        self.reconcile_locked(&mut self.lock(), false)
+    }
+
+    fn reconcile_locked(&self, model: &mut PillModel, inherit: bool) -> Option<String> {
         let Some(recording) = model
             .pill(crate::app_settings::meeting_indicator_enabled())
             .cloned()
         else {
-            if model.shown.take().is_some() {
+            if model.shown.take().is_some() || inherit {
                 self.handle.update(|capsule, _| capsule.kind = None);
                 self.handle.hide();
             }
@@ -697,22 +716,22 @@ impl Pill {
         model.shown = Some(id.clone());
         let corner = crate::app_settings::meeting_indicator_corner();
         model.last_anchor = Some((id.clone(), corner));
+        if inherit {
+            self.handle
+                .update(move |c, tx| c.start_recording(recording, tx));
+            return Some(id);
+        }
         place_capsule(&self.handle, corner, 0.0, 0.0);
         // Windows: a shown pill starts at rest.
-        #[cfg(target_os = "windows")]
         self.handle
             .resize(recording_window_size(false, Some(&recording)));
+        #[cfg(target_os = "windows")]
+        self.handle.set_input(rune::OverlayInput::All);
         self.handle.update(move |capsule, tx| {
-            capsule.kind = Some(Kind::Recording(recording));
-            capsule.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
-            tx.wake_after(Duration::ZERO);
-            capsule.live = Live::default();
-            capsule.hovered = false;
-            capsule.stopping = false;
-            capsule.expired = false;
+            capsule.presentation = Default::default();
+            capsule.stage = Default::default();
             capsule.corner = corner;
-            capsule.throw.stop();
-            tx.instant();
+            capsule.start_recording(recording, tx);
         });
         float_on_xwayland(&self.handle);
         self.handle.show();
@@ -794,6 +813,9 @@ impl MeetingCapsules {
                     kind: None,
                     more_open: false,
                     rearm_offer: None,
+                    presentation: Default::default(),
+                    stage: Default::default(),
+                    opened: None,
                     live: Live::default(),
                     waveform: None,
                     commands: commands.clone(),
@@ -808,6 +830,8 @@ impl MeetingCapsules {
                     shift: None,
                     throw: throw::Throw::default(),
                     reduced: Cell::new(false),
+                    scale: Cell::new(1.0),
+                    screen: primary_screen_size,
                     save_corner: save_corner.clone(),
                     copy_new: None,
                 },
@@ -876,15 +900,23 @@ impl MeetingCapsules {
         Self {
             panel,
             panel_offer: None,
+            handoff: Default::default(),
             pill,
             generation: Arc::default(),
-            handoff: None,
+            finishing: None,
         }
     }
 
     /// Shows, updates, or closes a capsule for each controller event.
     pub(crate) fn event(&mut self, event: &ControllerEvent) {
-        self.advance_handoff(event);
+        let route = self.handoff.route(event);
+        let inherit = route == offer::Route::Inherit;
+        if inherit {
+            self.handoff = Default::default();
+        } else if route == offer::Route::Close {
+            self.close_panel();
+        }
+        self.advance_handoff(event, inherit);
         match event {
             ControllerEvent::Reminder { meeting, automatic } => {
                 // Unanswered, it closes without recording or snoozing
@@ -926,8 +958,13 @@ impl MeetingCapsules {
                     self.close_panel();
                 }
             }
-            ControllerEvent::Starting | ControllerEvent::Transcribing => self.close_panel(),
-            ControllerEvent::Stopping => self.pill.handle.update(|c, _| c.mark_stopping()),
+            ControllerEvent::Starting(_) | ControllerEvent::Transcribing
+                if route != offer::Route::Ordinary => {}
+            ControllerEvent::Starting(_) | ControllerEvent::Transcribing => self.close_panel(),
+            ControllerEvent::Stopping => self.pill.handle.update(|c, tx| {
+                c.mark_stopping();
+                c.stir(tx);
+            }),
             ControllerEvent::RecordingStarted {
                 title, automatic, ..
             } => {
@@ -983,7 +1020,7 @@ impl MeetingCapsules {
             }
             ControllerEvent::NotesFinished(manifest) => {
                 let manifest = manifest.clone();
-                let panel = if self.handoff.as_ref() == Some(&manifest.id) {
+                let panel = if self.finishing.as_ref() == Some(&manifest.id) {
                     &self.pill.handle
                 } else {
                     &self.panel
@@ -1000,6 +1037,15 @@ impl MeetingCapsules {
     }
 
     fn show_panel(&mut self, kind: Kind, timeout: Option<Duration>) {
+        let host = match &kind {
+            Kind::Offer(id, c) if c.key != "preview" => offer::Host::Offered(*id),
+            _ => offer::Host::Panel,
+        };
+        if host.on_pill() != self.handoff.on_pill() {
+            self.close_panel();
+        }
+        self.handoff = host;
+        let panel = self.panel_handle().clone();
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
         // The saved corner, and a finished meeting its recording's corner.
@@ -1009,32 +1055,49 @@ impl MeetingCapsules {
             self.pill.lock().last_anchor.as_ref(),
             crate::app_settings::meeting_indicator_corner,
         );
-        place_capsule(&self.panel, corner, 0.0, 0.0);
-        self.panel.resize(match &kind {
+        place_capsule(&panel, corner, 0.0, 0.0);
+        let presentation = offer_surface::Presentation::for_kind(&kind, false);
+        // Only the detected offer reserves space for its wider page. The
+        // other Windows panels retain their original, window-sized input.
+        #[cfg(target_os = "windows")]
+        panel.set_input(if matches!(kind, Kind::Offer(..)) {
+            rune::OverlayInput::Regions
+        } else {
+            rune::OverlayInput::All
+        });
+        panel.resize(match &kind {
+            Kind::Offer(..) => presentation.window(),
             Kind::Ready(manifest) => ready_window_size(manifest),
             kind => (panel_width(kind), MEETING_PANEL_HEIGHT),
         });
-        self.panel_offer = match kind {
+        let offer_id = match kind {
             Kind::Offer(id, _) => Some(id),
             _ => None,
         };
-        let rearm = self
-            .panel_offer
+        self.panel_offer = offer_id.filter(|_| !host.on_pill());
+        let rearm = offer_id
             .is_some()
-            .then(|| offer::timer(self.panel.clone(), self.generation.clone(), generation));
-        self.panel.update(move |capsule, tx| {
+            .then(|| offer::timer(panel.clone(), self.generation.clone(), generation));
+        panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
+            capsule.presentation = presentation;
+            capsule.stage = Default::default();
+            capsule.opened = None;
             capsule.more_open = false;
             capsule.set_offer_timer(rearm);
             capsule.live = Live::default();
+            capsule.waveform = None;
             capsule.hovered = false;
             capsule.expired = false;
             capsule.corner = corner;
             capsule.throw.stop();
             tx.instant();
         });
-        float_on_xwayland(&self.panel);
-        self.panel.show();
+        float_on_xwayland(&panel);
+        panel.show();
+        if let Some(id) = offer_id {
+            offer_surface::load_icon(panel, id);
+        }
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
             let (panel, current) = (self.panel.clone(), self.generation.clone());
@@ -1056,7 +1119,7 @@ impl MeetingCapsules {
     /// interactive overlays, #1271), unless a newer capsule replaced it.
     #[cfg(target_os = "linux")]
     pub(crate) fn when_offer_unshown(&self, unshown: impl FnOnce(String) + Send + 'static) {
-        let (panel, current) = (self.panel.clone(), self.generation.clone());
+        let (panel, current) = (self.panel_handle().clone(), self.generation.clone());
         let generation = current.load(Ordering::SeqCst);
         std::thread::spawn(move || {
             std::thread::sleep(OFFER_CHECK);
@@ -1079,8 +1142,17 @@ impl MeetingCapsules {
     fn close_panel(&mut self) {
         self.panel_offer = None;
         self.generation.fetch_add(1, Ordering::SeqCst);
-        self.panel.update(|capsule, _| capsule.kind = None);
-        self.panel.hide();
+        self.panel_handle().update(|capsule, _| capsule.kind = None);
+        self.panel_handle().hide();
+        self.handoff = Default::default();
+    }
+
+    fn panel_handle(&self) -> &OverlayHandle<Capsule> {
+        if self.handoff.on_pill() {
+            &self.pill.handle
+        } else {
+            &self.panel
+        }
     }
 }
 
@@ -1116,10 +1188,11 @@ fn dismiss_button(p: Paint) -> El {
         .key("dismiss")
 }
 
-/// The overlay's frame hook: steps a glide into its corner, a frame at a
-/// time, until it rests, and keeps a recording's waveform fed.
+/// The overlay's frame hook: steps the surface, and a glide into its corner,
+/// a frame at a time until they rest, and keeps a recording's waveform fed.
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
-    let changed = waveform::poll(capsule, now, tx);
+    let mut changed = waveform::poll(capsule, now, tx);
+    changed |= capsule.step_stage(now, tx);
     if !capsule.throw.gliding() {
         return changed;
     }
@@ -1134,8 +1207,131 @@ fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
     changed
 }
 
+impl Capsule {
+    /// Where the surface is heading for what the capsule shows now, and
+    /// whether its outline only follows the offer's own pages.
+    fn stage_target(&mut self, now: f64) -> Option<(stage::Target, bool)> {
+        use stage::{Outline, Target};
+        let pill = |w: f32| Outline {
+            w,
+            h: REST_HEIGHT,
+            radius: REST_HEIGHT / 2.0,
+            dark: 1.0,
+        };
+        let panel = |h: f32| Outline {
+            w: PANEL_WIDTH,
+            h,
+            radius: PANEL_RADIUS,
+            dark: 1.0,
+        };
+        let none = Target {
+            outline: pill(REST_WIDTH),
+            offer: false,
+            pending: None,
+            meter: false,
+            actions: None,
+            stop: true,
+        };
+        let target = match &self.kind {
+            Some(Kind::Offer(..)) if self.presentation.departing() => Target {
+                pending: Some(self.presentation.begun(now) + PENDING_LABEL_AFTER),
+                ..none
+            },
+            Some(Kind::Offer(..)) => {
+                let target = Target {
+                    outline: self.presentation.outline(self.reduced.get()),
+                    offer: true,
+                    ..none
+                };
+                return Some((target, true));
+            }
+            Some(Kind::Recording(shown)) => {
+                let open = self.hovered || self.stopping;
+                if !open {
+                    self.opened = None;
+                }
+                Target {
+                    outline: if open {
+                        panel(panel::open_height(shown))
+                    } else {
+                        pill(panel::rest_width(shown))
+                    },
+                    meter: true,
+                    actions: open.then(|| *self.opened.get_or_insert(now)),
+                    ..none
+                }
+            }
+            // Capture has ended: Stop leaves, and the surface finishes its
+            // way to the open panel the finished meeting's layout grows from.
+            Some(Kind::Finalizing { .. } | Kind::Ready(_)) => Target {
+                outline: panel(panel::open_height_without_notice()),
+                meter: true,
+                actions: Some(self.opened.unwrap_or(f64::MIN)),
+                stop: false,
+                ..none
+            },
+            _ => return None,
+        };
+        Some((target, false))
+    }
+
+    /// Steps the surface toward what the capsule shows; true while it moves.
+    fn step_stage(&mut self, now: f64, tx: &mut Tx) -> bool {
+        let reduced = self.reduced.get();
+        let paging = matches!(self.kind, Some(Kind::Offer(..)))
+            && !self.presentation.departing()
+            && self.presentation.step(self.more_open, reduced, now);
+        let Some((target, follow)) = self.stage_target(now) else {
+            self.stage = Default::default();
+            self.opened = None;
+            return false;
+        };
+        let moving = if follow {
+            self.stage.follow(&target, now);
+            if paging {
+                tx.instant();
+            }
+            paging
+        } else {
+            self.stage.step(&target, reduced, now)
+        };
+        if matches!(self.kind, Some(Kind::Recording(_))) {
+            self.presentation.arrived(&self.stage);
+        }
+        if moving {
+            tx.wake_after(Duration::ZERO);
+        }
+        moving && (follow || !self.stage.idling())
+    }
+
+    /// The surface as it rests for what the capsule shows now.
+    #[cfg(test)]
+    fn settle_stage(&mut self, now: f64) {
+        if self.hovered || self.stopping {
+            self.opened = Some(now - 10.0);
+        }
+        self.presentation.backdate(now - 10.0);
+        match self.stage_target(now) {
+            Some((target, _)) => self.stage.land(&target, now),
+            None => self.stage = Default::default(),
+        }
+        if matches!(self.kind, Some(Kind::Recording(_))) {
+            self.presentation.arrived(&self.stage);
+        }
+    }
+
+    /// A handler changed what the capsule shows: the surface starts toward
+    /// it in this frame, not at the next poll.
+    fn stir(&mut self, tx: &mut Tx) {
+        let now = tx.clock();
+        self.step_stage(now, tx);
+        tx.wake_after(Duration::ZERO);
+    }
+}
+
 fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     capsule.reduced.set(cx.is_reduced_motion());
+    capsule.scale.set(cx.env().scale);
     view_body(capsule, cx).hover_motion_within(Anim::INSTANT, Anim::INSTANT)
 }
 
@@ -1146,6 +1342,13 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Some(Kind::Recording(_) | Kind::Finalizing { .. } | Kind::Ready(_))
     ) || cx.system_dark();
     let p = Paint::new(dark, cx.env().scale);
+    if let Some(el) = offer_surface::transition(
+        capsule,
+        Paint::new(cx.system_dark(), cx.env().scale),
+        Paint::new(true, cx.env().scale),
+    ) {
+        return el;
+    }
     let Some(kind) = &capsule.kind else {
         return row().key("empty");
     };
@@ -1170,7 +1373,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Reminder { meeting, automatic } => {
             reminder(p, meeting, *automatic, crate::calendar::wall_clock_ms())
         }
-        Kind::Offer(id, candidate) => offer::actions(p, *id, candidate, capsule.more_open),
+        Kind::Offer(id, candidate) => return offer_surface::view(p, capsule, *id, candidate),
         Kind::CallEnded { app, auto_stop } => (
             p.danger(),
             tr_fill("{} left the call", app),
@@ -1464,10 +1667,20 @@ mod tests {
         let (commands, received) = mpsc::sync_channel(4);
         let chosen = Chosen::default();
         let saved = chosen.clone();
+        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+        let presentation = offer_surface::Presentation::for_kind(&kind, more_open);
+        let size = if matches!(kind, Kind::Offer(..)) {
+            presentation.window()
+        } else {
+            size
+        };
         let capsule = Capsule {
             kind: Some(kind),
             more_open,
             rearm_offer: None,
+            presentation,
+            stage: Default::default(),
+            opened: None,
             live: Live::default(),
             waveform: None,
             commands,
@@ -1482,6 +1695,9 @@ mod tests {
             shift: None,
             throw: throw::Throw::default(),
             reduced: Cell::new(false),
+            scale: Cell::new(1.0),
+            // No screen: a release lands back in the corner it started in.
+            screen: |_| None,
             save_corner: Arc::new(|_| {}),
             copy_new: None,
         };
@@ -1489,8 +1705,10 @@ mod tests {
             system_dark: dark,
             scale: 2.0,
         };
-        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
         let mut rt = crate::rune_ui::offscreen::runtime(capsule, view, size, env, text);
+        // The native overlay polls each frame; here only the surface steps,
+        // so no test reads the wall clock or the capture meter.
+        rt.poll = Some(|c: &mut Capsule, now, tx: &mut Tx| c.step_stage(now, tx));
         rt.frame(0.0);
         (rt, received, chosen)
     }
@@ -1514,16 +1732,25 @@ mod tests {
         assert!(rt.find("offer-more").is_some());
     }
 
-    /// Apply the size requested by the real button to the same Rune runtime;
-    /// subsequent clicks hit-test the new layout, not a second fixture.
-    fn press_and_resize(rt: &mut Runtime<Capsule>, key: &str, expected: (f32, f32)) {
-        let (resize, sizes) = mpsc::channel();
-        rt.state.resize = Some(Arc::new(move |size| resize.send(size).unwrap()));
+    /// The offscreen runtime has no host poll. Step the same presentation
+    /// clock the native overlay polls, on the original surface.
+    fn navigate_offer(rt: &mut Runtime<Capsule>, key: &str) {
         tap(rt, key);
-        let size = sizes.try_recv().unwrap();
-        assert_eq!(size, expected);
-        rt.set_viewport(size, 2.0);
-        rt.frame(0.0);
+        for i in 0..60 {
+            advance_offer(rt, i as f64 / 60.0);
+        }
+    }
+
+    fn advance_offer(rt: &mut Runtime<Capsule>, _: f64) {
+        rt.frame(1.0 / 60.0);
+    }
+
+    /// Lands the hand-stepped surface, as `settle_all` lands Rune's tracks.
+    fn settle_stage(rt: &mut Runtime<Capsule>) {
+        rt.update(|c, tx| {
+            let now = tx.clock();
+            c.settle_stage(now);
+        });
     }
 
     #[test]
@@ -1536,7 +1763,7 @@ mod tests {
         let (delay, fire) = armed.try_recv().unwrap();
         assert_eq!(delay, Duration::from_secs(20));
         rt.frame(19.0);
-        press_and_resize(&mut rt, "offer-more", MENU);
+        navigate_offer(&mut rt, "offer-more");
         assert!(rt.find("always-record").is_some());
         assert!(commands.try_recv().is_err());
         assert!(chosen.lock().unwrap().is_empty());
@@ -1559,7 +1786,7 @@ mod tests {
     #[test]
     fn always_record_saves_the_choice_and_records_this_call() {
         let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
-        press_and_resize(&mut rt, "offer-more", MENU);
+        navigate_offer(&mut rt, "offer-more");
         rt.update(|c, _| c.expire_offer());
         assert_eq!(texts(&rt)[0], "Slack huddles");
         tap(&mut rt, "always-record");
@@ -1571,7 +1798,7 @@ mod tests {
             commands.try_recv(),
             Ok(ControllerCommand::Record(candidate, Some(_))) if candidate.key == "meeting-slack"
         ));
-        assert!(rt.state.kind.is_none());
+        assert!(rt.state.presentation.inherits_offer_window());
     }
 
     #[test]
@@ -1579,13 +1806,14 @@ mod tests {
         let (mut rt, commands, chosen) = runtime(offer(slack_huddle()), false, true, PANEL);
         let current = Arc::new(AtomicU64::new(1));
         let queued = offer::delivery(current.clone(), 1, Capsule::expire_offer);
-        press_and_resize(&mut rt, "offer-more", MENU);
+        navigate_offer(&mut rt, "offer-more");
         // A new offer of the very same call replaces the open choices
         // before Rune gets to the first offer's timeout update.
         current.fetch_add(1, Ordering::SeqCst);
         rt.update(|c, _| {
             c.kind = Some(offer(slack_huddle()));
             c.more_open = false;
+            c.presentation = offer_surface::Presentation::for_kind(c.kind.as_ref().unwrap(), false);
         });
         rt.set_viewport(PANEL, 2.0);
         rt.update(queued);
@@ -1620,11 +1848,11 @@ mod tests {
             })));
             let (delay, first_timeout) = armed.try_recv().unwrap();
             assert_eq!(delay, Duration::from_secs(20));
-            press_and_resize(&mut rt, "offer-more", MENU);
+            navigate_offer(&mut rt, "offer-more");
             if deadline_passed {
                 rt.update(|c, _| first_timeout(c));
             }
-            press_and_resize(&mut rt, "offer-cancel", PANEL);
+            navigate_offer(&mut rt, "offer-cancel");
             assert!(rt.find("record").is_some());
             assert!(commands.try_recv().is_err());
             assert!(chosen.lock().unwrap().is_empty());
@@ -1916,6 +2144,7 @@ mod tests {
         let (x, y) = rt.find("pill").unwrap();
         rt.pointer_move(x, y);
         rt.frame(0.0);
+        settle_stage(rt);
         rt.settle_all();
         rt.frame(0.0);
     }
@@ -1930,6 +2159,7 @@ mod tests {
                 span_ms: 4 * 60_000 + 59_000,
             };
         });
+        settle_stage(&mut rt);
         rt.settle_all();
         rt.frame(0.0);
         // At rest, the meter and time, no actions.
@@ -1981,8 +2211,8 @@ mod tests {
         );
         rt.pointer_up(x - 20.0, y + 30.0);
         rt.frame(0.0);
-        // Off the main thread there is no screen to snap against, so it
-        // returns to its corner.
+        // The test runtime has no screen to snap against, so it returns to
+        // its corner.
         assert_eq!(
             moves.lock().unwrap().last(),
             Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
@@ -2129,6 +2359,29 @@ mod tests {
         assert!(rt.state.kind.is_some());
     }
 
+    /// With a screen to measure, a release far from its corner lands in the
+    /// one nearest it and saves that.
+    #[test]
+    fn a_released_capsule_snaps_to_the_corner_it_was_dragged_to() {
+        let (mut rt, _, _) = runtime(live_recording("capsule-snap"), false, true, RECORDING);
+        let saved: Arc<Mutex<Vec<MeetingIndicatorCorner>>> = Default::default();
+        let recorded = saved.clone();
+        rt.update(move |capsule, _| {
+            capsule.screen = |_| Some((1512.0, 982.0));
+            capsule.shift = Some(Arc::new(|_, _, _| {}));
+            capsule.save_corner = Arc::new(move |corner| recorded.lock().unwrap().push(corner));
+        });
+        rt.frame(0.0);
+        let (x, y) = rt.find("pill").unwrap();
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_move(x - 700.0, y + 40.0);
+        rt.frame(0.0);
+        rt.pointer_up(x - 700.0, y + 40.0);
+        rt.frame(0.0);
+        assert_eq!(*saved.lock().unwrap(), [MeetingIndicatorCorner::TopLeft]);
+    }
+
     fn call_ended() -> Kind {
         Kind::CallEnded {
             app: MeetingSource::Teams.label().into(),
@@ -2260,6 +2513,7 @@ mod tests {
             tx.instant();
         });
         let outer = |rt: &mut Runtime<Capsule>, window: (f32, f32)| {
+            settle_stage(rt);
             rt.settle_all();
             rt.frame(0.0);
             let [x, y, _, h] = rt
@@ -2564,6 +2818,7 @@ mod tests {
         let kind = call_ended();
         assert_eq!(panel_width(&kind), CALL_ENDED.0);
         let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
+        settle_stage(&mut rt);
         rt.settle_all();
         rt.frame(0.0);
         let title = rt
@@ -2582,6 +2837,8 @@ mod tests {
     }
 
     include!("meeting_capsules/motion_fixture.rs");
+    include!("meeting_capsules/offer/proof.rs");
+    include!("meeting_capsules/replay_fixture.rs");
 
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
@@ -2747,6 +3004,11 @@ mod tests {
         for (name, kind, more_open, size, setup) in states {
             for dark in [false, true] {
                 let (mut rt, _, _) = runtime(kind.clone(), more_open, dark, size);
+                let size = if matches!(kind, Kind::Offer(..)) {
+                    rt.state.presentation.window()
+                } else {
+                    size
+                };
                 rt.update(move |capsule, _| setup(capsule));
                 let (w, h, pixels) = render(&gpu, &mut rt, size);
                 let theme = if dark { "dark" } else { "light" };
@@ -2761,6 +3023,7 @@ mod tests {
         rt: &mut Runtime<Capsule>,
         size: (f32, f32),
     ) -> (u32, u32, Vec<u8>) {
+        settle_stage(rt);
         rt.settle_all();
         rt.frame(0.0);
         let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);

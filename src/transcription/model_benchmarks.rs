@@ -21,7 +21,7 @@ impl ErrorMetric {
     }
 }
 
-/// Where one model's error rate comes from, as Labs › Benchmark details
+/// Where one model's error rate comes from, as Labs › Model test details
 /// shows it. Every `None` is something the source did not record and the
 /// picker says is unknown; nothing is guessed. Speed figures (`realtime`)
 /// have no record: they are upstream figures whose hardware and method are
@@ -244,7 +244,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
 }
 
 /// Whether `model` may keep a "Most accurate" badge for `language` with
-/// Labs › Benchmark details on: it has a record, and every other
+/// Labs › Model test details on: it has a record, and every other
 /// recommended model for the language that has one is comparable to it.
 pub(crate) fn most_accurate_is_comparable(model: &ModelDefinition, language: &str) -> bool {
     let Some(record) = benchmark(model) else {

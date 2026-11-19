@@ -56,7 +56,7 @@ impl AppearanceTheme {
     }
 }
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`, `labs.restore_shortcut_default`, and the graduated meeting labs) are ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`, `labs.transcribe_files`, `labs.restore_shortcut_default`, `labs.yearly_stats`, and the graduated meeting labs) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -130,9 +130,6 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
-    /// History selects several dictations at once, with Shift, Command (Ctrl
-    /// on Windows and Linux), or a drag, to copy or delete them together.
-    pub history_multi_select: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
     /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
@@ -157,8 +154,6 @@ pub struct LabsSettings {
     /// A kept recording may be copied from History and the menu bar or tray
     /// as a file on the clipboard; it stores no audio itself.
     pub copy_dictation_audio: bool,
-    /// General's pane starts with a search field that filters its rows.
-    pub settings_search: bool,
     /// The sidebar footer links this build's release notes.
     pub release_notes_link: bool,
     pub hide_menu_bar_icon: bool,
@@ -203,16 +198,15 @@ pub struct LabsSettings {
     /// `hex completions <shell>` prints a completion script for bash, zsh,
     /// fish, elvish, or PowerShell, generated from Hex's own commands.
     pub shell_completions: bool,
-    /// A shortcut dictation held for at least
-    /// `yolo_mode_seconds` presses Return after its paste.
+    /// Press Return after pasting a shortcut dictation.
     pub yolo_mode: bool,
-    /// One of [`YOLO_MODE_SECONDS`]; another value loads the
-    /// default.
-    #[serde(deserialize_with = "deserialize_yolo_mode_seconds")]
-    pub yolo_mode_seconds: u32,
     /// The apps Labs › YOLO mode sends in, by the names
     /// Modes match; empty means every app.
     pub yolo_mode_apps: Vec<String>,
+    /// A WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or
+    /// MKV file dropped on the window is transcribed and saved as a text file
+    /// beside it.
+    pub drop_transcribe: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -235,6 +229,10 @@ pub struct LabsSettings {
     /// end time and title; choosing one with a call link opens it (macOS,
     /// with Meetings on and a calendar connected).
     pub calendar_menu: bool,
+    /// Meetings › Settings › Calendar shows Select all or Deselect all beside
+    /// the Calendars row, so every calendar is included or left out at once
+    /// (macOS).
+    pub calendar_bulk_select: bool,
     /// The menu bar offers Pause Hex, which makes every capture shortcut
     /// inert until Resume (macOS).
     pub pause_menu: bool,
@@ -261,6 +259,9 @@ pub struct LabsSettings {
     /// after it went down reaches the app in front and leaves the dictation
     /// recording, which the release still finishes (macOS and Windows).
     pub hold_through_keys: bool,
+    /// The Modes editor joins the sidebar: every mode's apps, corrections,
+    /// OpenCode rewrite, and transformations.
+    pub modes_editor: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -277,22 +278,38 @@ pub struct LabsSettings {
     pub meeting_notes_file: Option<bool>,
     #[serde(skip_serializing)]
     pub expire_meeting_audio: Option<bool>,
+    /// Retired: `labs.yearly_stats`, read into `history_stats` once by the
+    /// `yearly-stats-merge` migration, since the daily rollup and the year
+    /// heatmap are part of Dictation stats now. Never written.
+    #[serde(skip_serializing)]
+    pub yearly_stats: Option<bool>,
 }
 
-/// The idle times Labs › Unload model when idle offers, in minutes.
+/// The idle times Labs › Free memory when idle offers, in minutes.
 pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
 
 /// The times Labs › Keep mic open after dictating offers, in seconds:
 /// 30 s, 1, 3, 5, and 30 minutes.
 pub const KEEP_MICROPHONE_OPEN_SECONDS: [u32; 5] = [30, 60, 180, 300, 1_800];
 
-/// The holds Labs › YOLO mode offers, in seconds.
-pub const YOLO_MODE_SECONDS: [u32; 5] = [1, 2, 3, 5, 10];
+/// The retired Yearly stats lab merged into Dictation stats: its daily
+/// rollup and year heatmap are part of the one lab now.
+pub(super) const YEARLY_STATS_MERGE_MIGRATION: &str = "yearly-stats-merge";
+
+impl AppSettings {
+    /// A saved `labs.yearly_stats` reads into `labs.history_stats` once, so
+    /// someone who had Yearly stats on keeps their heatmap and all-time
+    /// totals without a second switch. A later choice sticks.
+    pub(super) fn migrate_yearly_stats_lab(&mut self) {
+        if !self.has_migration(YEARLY_STATS_MERGE_MIGRATION) {
+            self.labs.history_stats |= self.labs.yearly_stats == Some(true);
+            self.migrations.push(YEARLY_STATS_MERGE_MIGRATION.into());
+        }
+        self.labs.yearly_stats = None;
+    }
+}
 
 impl LabsSettings {
-    /// The default [`YOLO_MODE_SECONDS`] choice.
-    pub const DEFAULT_YOLO_MODE_SECONDS: u32 = 2;
-
     /// The default [`KEEP_MICROPHONE_OPEN_SECONDS`] choice.
     pub const DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS: u32 = 60;
 
@@ -321,26 +338,6 @@ where
         Err(serde::de::Error::custom(format!(
             "expected one of {}",
             KEEP_MICROPHONE_OPEN_SECONDS
-                .map(|seconds| seconds.to_string())
-                .join(", ")
-        )))
-    }
-}
-
-/// A saved `yolo_mode_seconds` must name one of
-/// [`YOLO_MODE_SECONDS`]; another value fails to load, so the
-/// field returns to its default with the usual launch note.
-fn deserialize_yolo_mode_seconds<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let seconds = u32::deserialize(deserializer)?;
-    if YOLO_MODE_SECONDS.contains(&seconds) {
-        Ok(seconds)
-    } else {
-        Err(serde::de::Error::custom(format!(
-            "expected one of {}",
-            YOLO_MODE_SECONDS
                 .map(|seconds| seconds.to_string())
                 .join(", ")
         )))
@@ -397,7 +394,6 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
-            history_multi_select: false,
             recent_dictations: false,
             skip_pauses: false,
             output_fixes: false,
@@ -409,7 +405,6 @@ impl Default for LabsSettings {
             microphone_key: false,
             keep_recordings: false,
             copy_dictation_audio: false,
-            settings_search: false,
             release_notes_link: false,
             hide_menu_bar_icon: false,
             quit_closes_window: false,
@@ -424,8 +419,8 @@ impl Default for LabsSettings {
             opencode_in_wsl: false,
             shell_completions: false,
             yolo_mode: false,
-            yolo_mode_seconds: Self::DEFAULT_YOLO_MODE_SECONDS,
             yolo_mode_apps: Vec::new(),
+            drop_transcribe: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,
@@ -433,6 +428,7 @@ impl Default for LabsSettings {
             speakers_only: false,
             app_model_switching: false,
             calendar_menu: false,
+            calendar_bulk_select: false,
             pause_menu: false,
             print_start: false,
             voice_prompt: false,
@@ -440,6 +436,7 @@ impl Default for LabsSettings {
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
             hold_through_keys: false,
+            modes_editor: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,
@@ -450,6 +447,7 @@ impl Default for LabsSettings {
             meeting_descriptive_filenames: None,
             meeting_notes_file: None,
             expire_meeting_audio: None,
+            yearly_stats: None,
         }
     }
 }

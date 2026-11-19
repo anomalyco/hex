@@ -100,10 +100,12 @@ fn tap_option(rt: &mut Runtime<Ui>, index: usize) {
         if middle > list[1] && middle < list[1] + list[3] {
             break;
         }
+        // A positive delta moves the content down, so bringing a row below
+        // the list into view needs a negative one.
         let dy = if middle > list[1] + list[3] {
-            20.0
-        } else {
             -20.0
+        } else {
+            20.0
         };
         rt.wheel(list[0] + list[2] / 2.0, list[1] + list[3] / 2.0, dy);
         rt.frame(1.0 / 60.0);
@@ -408,142 +410,6 @@ fn backspace_in_an_optional_recorder_turns_the_shortcut_off() {
 }
 
 #[test]
-fn settings_search_shows_with_its_lab_and_filters_general() {
-    let mut rt = runtime("portal", true, TALL_SIZE);
-    assert!(
-        rt.find("settings-search").is_none(),
-        "hidden while Labs › Settings search is off"
-    );
-
-    rt.state.settings.labs.settings_search = true;
-    rt.invalidate();
-    settle(&mut rt);
-    assert!(rt.find("settings-search").is_some());
-    key(&mut rt, Key::Command('f'), Mods::default());
-    assert!(rt.state.general_search.focused, "⌘F focuses the field");
-
-    // A match keeps its card and hides the others.
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("microphone"));
-    settle(&mut rt);
-    assert!(rt.find("microphone").is_some());
-    assert!(rt.find("transcription").is_none());
-    assert!(rt.find("settings-empty").is_none());
-
-    // Advanced stays folded, but its rows match.
-    assert!(!rt.state.advanced.contains(&Pane::General));
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("terminal paste"));
-    settle(&mut rt);
-    assert!(rt.find("terminal-paste").is_some());
-    assert!(
-        rt.find("advanced-toggle").is_none(),
-        "the fold hides while searching"
-    );
-
-    // Nothing matching shows the empty state; clearing restores the pane.
-    rt.update(|ui, _| {
-        ui.general_search = rune::TextEdit::new("no such setting");
-    });
-    settle(&mut rt);
-    assert!(rt.find("settings-empty").is_some());
-    assert!(rt.find("microphone").is_none());
-
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new(""));
-    settle(&mut rt);
-    assert!(rt.find("settings-empty").is_none());
-    assert!(rt.find("microphone").is_some());
-    assert!(rt.find("basics").is_some());
-}
-
-#[test]
-fn the_settings_search_clear_button_empties_the_field_and_restores_the_pane() {
-    let mut rt = runtime("portal", true, TALL_SIZE);
-    rt.state.settings.labs.settings_search = true;
-    rt.invalidate();
-    settle(&mut rt);
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("microphone"));
-    settle(&mut rt);
-    assert!(rt.find("microphone").is_some());
-    assert!(rt.find("transcription").is_none());
-    tap(&mut rt, "settings-search/action");
-    assert!(
-        rt.state.general_search.text.is_empty(),
-        "the clear button empties the field"
-    );
-    assert!(
-        rt.find("transcription").is_some(),
-        "and the rest of the pane comes back"
-    );
-}
-
-#[test]
-fn settings_search_matches_descriptions() {
-    let mut rt = runtime("mac-settings", true, TALL_SIZE);
-    rt.state.settings.labs.settings_search = true;
-    rt.state.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
-    rt.invalidate();
-    settle(&mut rt);
-
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("airpods"));
-    settle(&mut rt);
-    assert!(rt.find("avoid-bluetooth-microphone").is_some());
-
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("discards"));
-    settle(&mut rt);
-    assert!(rt.find("cancel-shortcut").is_some());
-    assert!(rt.find("settings-empty").is_none());
-}
-
-#[test]
-fn settings_search_keeps_permissions_and_status_cards() {
-    // A permissions card always shows, even when nothing matches it.
-    let mut rt = runtime("mac-settings-permissions", true, TALL_SIZE);
-    rt.state.settings.labs.settings_search = true;
-    rt.invalidate();
-    settle(&mut rt);
-    rt.update(|ui, _| {
-        ui.general_search = rune::TextEdit::new("no such setting");
-    });
-    settle(&mut rt);
-    assert!(rt.find("permissions").is_some());
-    assert!(rt.find("settings-empty").is_some());
-
-    // Without a portal, the desktop-commands card counts as a match, as
-    // does the listener card on its title.
-    let mut rt = runtime("commands", true, TALL_SIZE);
-    rt.state.settings.labs.settings_search = true;
-    rt.invalidate();
-    settle(&mut rt);
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("shortcut"));
-    settle(&mut rt);
-    assert!(rt.find("desktop-shortcuts").is_some());
-    assert!(rt.find("settings-empty").is_none());
-
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("enabled"));
-    settle(&mut rt);
-    assert!(rt.find("listening").is_some());
-    assert!(rt.find("settings-empty").is_none());
-}
-
-#[test]
-fn command_f_focuses_general_search_only_with_its_lab_and_pane() {
-    let mut rt = runtime("mac-settings", true, TALL_SIZE);
-    key(&mut rt, Key::Command('f'), Mods::default());
-    assert!(!rt.state.general_search.focused, "the lab is off");
-
-    rt.state.settings.labs.settings_search = true;
-    rt.invalidate();
-    settle(&mut rt);
-    key(&mut rt, Key::Command('f'), Mods::default());
-    assert!(rt.state.general_search.focused);
-
-    rt.state.general_search.focused = false;
-    tap(&mut rt, "nav-history");
-    assert_eq!(rt.state.pane, Pane::History);
-    key(&mut rt, Key::Command('f'), Mods::default());
-    assert!(!rt.state.general_search.focused, "another pane");
-}
-
-#[test]
 fn choosing_an_update_channel_saves_it_and_checks_now() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");
@@ -608,6 +474,26 @@ fn installs_that_never_update_hide_the_update_channel() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("update-channel").is_none());
+}
+
+#[test]
+fn the_interface_language_menu_is_system_first_then_alphabetical() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    let ordered = crate::desktop::i18n::language_menu_order();
+    assert_eq!(ordered[0], (None, "System"));
+    let deutsch = ordered
+        .iter()
+        .position(|(code, _)| *code == Some("de"))
+        .unwrap();
+    pick(&mut rt, "interface-language", deutsch);
+    assert_eq!(
+        rt.state.settings.ui_language.as_deref(),
+        Some("de"),
+        "the chosen row is the language it shows, not the catalog's index"
+    );
+    pick(&mut rt, "interface-language", 0);
+    assert_eq!(rt.state.settings.ui_language, None);
 }
 
 #[test]
@@ -944,6 +830,52 @@ fn the_sidebar_always_shows_output() {
     }
 }
 
+/// Labs › Modes editor brings the old editor back as a main pane, right after
+/// Output, and the Modes destination (the menu bar, `hex window show --pane
+/// modes`) opens it instead of Output. Off, nothing changes.
+#[test]
+fn the_modes_editor_lab_brings_modes_back_to_the_sidebar() {
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
+    unfold_labs(&mut rt);
+    assert!(rt.find("nav-modes").is_none(), "off, Output replaces Modes");
+    // Off, the Modes destination still lands on Output.
+    show(&mut rt.state, Destination::Modes, &mut rune::Tx::default());
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Output);
+    // Its card turns the editor on.
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-modes-editor");
+    assert!(rt.state.settings.labs.modes_editor);
+    // It joins the sidebar right after Output, and Command-3 opens it.
+    tap(&mut rt, "nav-output");
+    assert!(rt.find("nav-modes").is_some());
+    let order = labs::order(&rt.state);
+    let output = order
+        .iter()
+        .position(|pane| *pane == Pane::Output)
+        .expect("Output is a main pane");
+    assert_eq!(order.get(output + 1), Some(&Pane::Modes));
+    key(&mut rt, Key::Command('3'), Mods::default());
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Modes, "Command-3 is Modes now");
+    // The menu bar and `hex window show --pane modes` open the editor too.
+    show(&mut rt.state, Destination::Modes, &mut rune::Tx::default());
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Modes);
+    // Off while the editor shows, the adoption fallback leaves the hidden
+    // pane for Output, as a saved `hex settings set labs.modes_editor off`
+    // does while the window shows it.
+    crate::labs::Feature::ModesEditor.set(&mut rt.state.settings, false);
+    assert!(!Pane::Modes.shown(&rt.state));
+    assert!(leave_hidden_pane(&mut rt.state));
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.pane, Pane::Output);
+    assert!(rt.find("nav-modes").is_none());
+}
+
 #[test]
 fn the_sidebar_switches_panes_and_keeps_settings() {
     let mut rt = runtime("portal", true, PANE_SIZE);
@@ -1199,6 +1131,49 @@ fn segments_and_switch_tracks_hover_at_once() {
     }
 }
 
+/// An unset model on a catalog with a ranked pick is Hex's own automatic
+/// choice, not OpenCode's default; with no ranked model it really is
+/// OpenCode's default.
+#[test]
+fn an_unset_model_says_automatic_only_while_hex_ranks_a_model() {
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.settings.dictation_processing.modes[0]
+        .post_processing
+        .model = None;
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Automatic"), "{shown:?}");
+    assert!(!shown.iter().any(|text| text == "Default"), "{shown:?}");
+
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        element(&rt, "model-picker-option-0").label.as_deref(),
+        Some("Automatic")
+    );
+
+    let mut rt = runtime("modes", true, PANE_SIZE);
+    rt.state.models = models::Models::fixture_unranked();
+    rt.state.settings.dictation_processing.modes[0]
+        .post_processing
+        .model = None;
+    rt.invalidate();
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Default"), "{shown:?}");
+    assert!(!shown.iter().any(|text| text == "Automatic"), "{shown:?}");
+
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        element(&rt, "model-picker-option-0").label.as_deref(),
+        Some("Use OpenCode default")
+    );
+}
+
 #[test]
 fn choosing_an_opencode_model_saves_it() {
     let mut rt = runtime("modes", true, PANE_SIZE);
@@ -1222,7 +1197,7 @@ fn choosing_an_opencode_model_saves_it() {
             .post_processing
             .model,
         None,
-        "back to the OpenCode default"
+        "back to the automatic model"
     );
 }
 
@@ -1363,6 +1338,45 @@ fn history_selects_deletes_and_clears_in_two_steps() {
 }
 
 #[test]
+fn history_clear_removes_a_usage_rollup_with_no_entries() {
+    use crate::history::{History, HistoryRetention, HistoryStore};
+
+    let directory =
+        std::env::temp_dir().join(format!("hex-rune-history-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("history.json");
+    let history = History::new(HistoryStore::open(
+        path.clone(),
+        HistoryRetention::Week,
+        crate::history::now_ms(),
+    ));
+    crate::history::usage::count(
+        &crate::history::usage::path(&path),
+        crate::history::now_ms(),
+        5,
+        1_000,
+    )
+    .unwrap();
+    let check = history.clone();
+    let mut rt = runtime("history-empty", true, PANE_SIZE);
+    rt.state.history = history::HistoryPane::shared(Some(history));
+    rt.state.history.reload();
+    rt.state.pane = Pane::History;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(check.has_usage(), "the rollup exists with no entries");
+
+    tap(&mut rt, "history-retention-field-trigger");
+    let clear = menu_item(&rt, "history-retention", "Clear all history…");
+    tap(&mut rt, &clear);
+    assert!(rt.state.history.clear_armed);
+    tap(&mut rt, "history-confirm-clear");
+    assert!(!check.has_usage(), "Clear all deleted the rollup");
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
 fn history_delete_confirmation_stops_when_the_pane_moves_on() {
     use crate::history::{History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore};
     let directory =
@@ -1455,6 +1469,39 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_some());
     assert!(texts(&rt).iter().any(|text| text == "Dictation stats"));
+    // Headline tiles, the daily chart, the app bars, Output's share, and
+    // Output time all show for the fixture, and the numbers group their
+    // thousands.
+    for key in [
+        "tile-dictations",
+        "tile-words",
+        "tile-time-saved",
+        "tile-wpm",
+        "tile-streak",
+        "tile-busiest-hour",
+        "history-stats-typing",
+        "history-stats-daily",
+        "history-stats-hours",
+        "history-stats-apps",
+        "history-stats-changed",
+        "history-stats-output-time",
+    ] {
+        assert!(rt.find(key).is_some(), "{key} shows");
+    }
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "128,402"), "{shown:?}");
+    assert!(shown.iter().any(|text| text == "1,284"), "{shown:?}");
+    // Labs › Dictation stats adds the year heatmap from its rollup.
+    rt.state.history.usage = Some(history::HistoryPane::fixture_usage());
+    rt.state.settings.labs.history_stats = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-stats-yearly").is_some(),
+        "the heatmap shows"
+    );
+    assert!(rt.find("history-stats-typing").is_some());
     tap(&mut rt, "history-stats-close");
     assert!(!rt.state.history.stats_open);
     assert!(rt.find("history-stats-dialog").is_none());
@@ -1501,6 +1548,7 @@ fn history_stats_button_opens_and_closes_the_dialog() {
 
     tap(&mut rt, "history-stats-open");
     rt.state.history.stats = Some(Default::default());
+    rt.state.history.usage = None;
     rt.invalidate();
     settle(&mut rt);
     assert!(
@@ -1524,11 +1572,86 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.find("history-stats-open").is_none());
 }
 
-/// History with Labs › Select multiple dictations on.
+/// The dialog leaves out the sections a summary has nothing for, and keeps
+/// the tiles.
+#[test]
+fn history_stats_dialog_hides_sections_with_nothing_to_show() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.history.stats = Some(crate::history::stats::HistoryStats {
+        dictations: 3,
+        words: 12,
+        ..Default::default()
+    });
+    rt.state.settings.labs.history_stats = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.state.history.stats_open = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-stats-dialog").is_some());
+    assert!(rt.find("tile-dictations").is_some());
+    for key in [
+        "history-stats-daily",
+        "history-stats-apps",
+        "history-stats-output-time",
+    ] {
+        assert!(rt.find(key).is_none(), "{key} stays out");
+    }
+    // With no Output changes at all, its meter still reads zero.
+    assert!(rt.find("history-stats-changed").is_some());
+}
+
+/// The dialog's worst case in the window's least size: it stays inside the
+/// window, keeps its title and Close, and scrolls the sections between them.
+#[test]
+fn the_stats_dialog_fits_the_smallest_window_with_a_scrolling_body() {
+    let rt = runtime("history-stats", true, (860.0, 560.0));
+    let (dialog, _) = rt.presented("history-stats-dialog").expect("the dialog");
+    assert!(
+        dialog[1] >= 0.0 && dialog[1] + dialog[3] <= 560.0,
+        "the dialog fits the window: {dialog:?}"
+    );
+    let (close, _) = rt.presented("history-stats-close").expect("Close");
+    assert!(
+        close[1] + close[3] <= dialog[1] + dialog[3],
+        "Close stays inside the dialog: {close:?} in {dialog:?}"
+    );
+    let (body, _) = rt.presented("history-stats-body").expect("the body");
+    let (sections, _) = rt
+        .presented("history-stats-sections")
+        .expect("the sections");
+    assert!(
+        sections[3] > body[3],
+        "the body scrolls: {sections:?} in {body:?}"
+    );
+    assert!(
+        body[1] + body[3] <= close[1],
+        "the scrolling viewport ends before the footer: {body:?} in {close:?}"
+    );
+}
+
+/// At a tall window the sections fit, so the dialog draws no scroll body at
+/// all and takes the sections' own height. The year heatmap and hourly strip
+/// make a richer dialog than the default window's, so this uses a taller one.
+#[test]
+fn the_stats_dialog_has_no_scroll_body_when_its_sections_fit() {
+    let rt = runtime("history-stats", true, (980.0, 1_080.0));
+    assert!(
+        rt.find("history-stats-body-scroll-area").is_none(),
+        "no scroll body"
+    );
+    let (body, _) = rt.presented("history-stats-body").expect("the body");
+    let (sections, _) = rt
+        .presented("history-stats-sections")
+        .expect("the sections");
+    assert!(
+        sections[3] <= body[3],
+        "the sections fit the body: {sections:?} in {body:?}"
+    );
+}
+
+/// History, settled.
 fn history_multi() -> Runtime<Ui> {
     let mut rt = runtime("history", true, PANE_SIZE);
-    rt.state.settings.labs.history_multi_select = true;
-    rt.invalidate();
     settle(&mut rt);
     rt
 }
@@ -1751,6 +1874,55 @@ fn history_selection_copies_oldest_first() {
     assert!(texts(&rt).iter().any(|text| text == "Copied"));
 }
 
+// The notches affect too few pixels to trip the whole-window golden tolerance.
+#[test]
+fn history_rounds_only_the_exposed_ends_of_selected_rows() {
+    let _goldens = Goldens::collect();
+    for dark in [false, true] {
+        for separated in [false, true] {
+            let mut rt = runtime("history", dark, PANE_SIZE);
+            // A search-result snapshot: adjacent entries need not have consecutive ids.
+            rt.state.history.entries[0].id = 17;
+            rt.invalidate();
+            settle(&mut rt);
+            tap(&mut rt, "history-entry17");
+            hold(&mut rt, if separated { command() } else { shift() });
+            tap(&mut rt, "history-entry1");
+            hold(&mut rt, Mods::default());
+            rt.pointer_move(0.0, 0.0);
+            settle(&mut rt);
+            let rows = [17, 2, 1].map(|id| element(&rt, &format!("history-entry{id}")).rect);
+            let render = render_runtime(rt, PANE_SIZE);
+            if let Some((w, _, pixels)) = &render {
+                let pixel = |x: f32, y: f32| {
+                    let at = ((y * GOLDEN_SCALE) as usize * *w as usize
+                        + (x * GOLDEN_SCALE) as usize)
+                        * 4;
+                    &pixels[at..at + 4]
+                };
+                let [x, top, width, height] = rows[0];
+                let fill = pixel(x + 2.0, top + height / 2.0);
+                for edge in [x + 1.0, x + width - 1.5] {
+                    assert_ne!(pixel(edge, top + 0.5), fill, "rounded top");
+                    for [_, join, _, _] in &rows[1..] {
+                        for y in [join - 0.5, join + 0.5] {
+                            assert_eq!(pixel(edge, y) == fill, !separated, "join at {join}");
+                        }
+                    }
+                    assert_ne!(
+                        pixel(edge, rows[2][1] + rows[2][3] - 1.0),
+                        fill,
+                        "rounded bottom"
+                    );
+                }
+            }
+            if !separated {
+                check_render("history-selected-range", dark, render);
+            }
+        }
+    }
+}
+
 #[test]
 fn history_selection_deletes_in_two_steps() {
     let mut rt = history_multi();
@@ -1778,30 +1950,13 @@ fn history_selection_deletes_in_two_steps() {
 }
 
 #[test]
-fn history_shift_click_selects_one_without_the_lab() {
-    let mut rt = runtime("history", true, PANE_SIZE);
-    assert!(!rt.state.settings.labs.history_multi_select);
-    tap(&mut rt, "history-entry2");
-    hold(&mut rt, shift());
-    tap(&mut rt, "history-entry1");
-    hold(&mut rt, Mods::default());
-    assert_eq!(rt.state.history.selected, Some(1));
-    assert_eq!(rt.state.history.selection.len(), 0);
-    assert!(rt.find("history-selection-copy").is_none());
-}
-
-#[test]
-fn history_command_click_keeps_the_row_selected_before_the_lab() {
-    let mut rt = runtime("history", true, PANE_SIZE);
-    assert!(!rt.state.settings.labs.history_multi_select);
+fn history_command_click_keeps_the_selected_row() {
+    let mut rt = history_multi();
     tap(&mut rt, "history-entry2");
     assert_eq!(rt.state.history.selected, Some(2));
 
-    // A row selected before the lab was turned on joins the set first, so
-    // Command-clicking another row keeps it instead of dropping it.
-    rt.state.settings.labs.history_multi_select = true;
-    rt.invalidate();
-    settle(&mut rt);
+    // The one selected row joins the set first, so Command-clicking another
+    // row keeps it instead of dropping it.
     hold(&mut rt, command());
     tap(&mut rt, "history-entry3");
     hold(&mut rt, Mods::default());
@@ -1814,39 +1969,18 @@ fn history_command_click_keeps_the_row_selected_before_the_lab() {
 
 #[test]
 fn history_command_click_deselects_the_only_selected_row() {
-    let mut rt = runtime("history", true, PANE_SIZE);
+    let mut rt = history_multi();
     tap(&mut rt, "history-entry2");
     assert_eq!(rt.state.history.selected, Some(2));
 
-    // A row selected before the lab was turned on is the whole set: Command
-    // deselects it, leaving nothing selected.
-    rt.state.settings.labs.history_multi_select = true;
-    rt.invalidate();
-    settle(&mut rt);
+    // The one selected row is the whole set: Command deselects it, leaving
+    // nothing selected.
     hold(&mut rt, command());
     tap(&mut rt, "history-entry2");
     hold(&mut rt, Mods::default());
     assert_eq!(rt.state.history.selection.len(), 0);
     assert_eq!(rt.state.history.selected, None);
     assert!(!rt.state.history.is_selected(2));
-}
-
-#[test]
-fn history_multi_select_turns_off_to_one_entry() {
-    let mut rt = history_multi();
-    tap(&mut rt, "history-entry3");
-    hold(&mut rt, shift());
-    tap(&mut rt, "history-entry2");
-    hold(&mut rt, Mods::default());
-    assert_eq!(rt.state.history.selection.len(), 2);
-
-    rt.state.settings.labs.history_multi_select = false;
-    rt.invalidate();
-    settle(&mut rt);
-    assert_eq!(rt.state.history.selection.len(), 0);
-    assert_eq!(rt.state.history.selected, Some(2));
-    assert!(rt.state.history.is_selected(2));
-    assert!(!rt.state.history.is_selected(3));
 }
 
 #[test]
@@ -2478,7 +2612,8 @@ fn escape_cancels_a_transformation_reorder_without_saving() {
 
 #[test]
 fn escape_restores_a_slider_dragged_from_its_press() {
-    let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
+    let mut rt = runtime("mac-voice-filter", true, (980.0, 1300.0));
+    open_advanced(&mut rt, Pane::VoiceFilter);
     let strength = |rt: &Runtime<Ui>| rt.state.platform.tuning.strength;
     let before = strength(&rt);
     let saves = saved(&rt);
@@ -2657,13 +2792,14 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     settle(&mut rt);
     tap(&mut rt, "transcription-language-control-trigger");
     assert_eq!(rt.state.open, Some(Menu::Pick("transcription-language")));
-    // Whisper lists every language in the catalog's order.
-    let japanese =
-        crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
-            .language_choices()
-            .iter()
-            .position(|code| *code == "ja")
-            .unwrap();
+    // Whisper lists every language by name, Auto first.
+    let japanese = crate::transcription::models::menu_order(
+        &crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+            .language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "ja")
+    .unwrap();
     tap_option(&mut rt, japanese);
     assert_eq!(rt.state.open, None);
     assert_eq!(
@@ -2676,6 +2812,63 @@ fn changing_only_the_language_prepares_the_same_model_again() {
     assert_eq!(
         rt.state.picker.fallback, None,
         "an explicit choice clears the note"
+    );
+}
+
+/// Whisper's language list is longer than its menu shows, so the check on
+/// the saved language would sit below the edge. The press that opens the
+/// menu reveals it.
+#[test]
+fn the_language_menu_opens_on_its_chosen_language() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    rt.state.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    rt.state.settings.transcription.language = "fr".into();
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "transcription-language-control-trigger");
+    assert_eq!(rt.state.open, Some(Menu::Pick("transcription-language")));
+    let french = crate::transcription::models::menu_order(
+        &crate::transcription::models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+            .language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "fr")
+    .unwrap();
+    let row = element(&rt, &format!("option{french}")).rect;
+    let list = element(&rt, "listbox").rect;
+    assert!(
+        row[1] >= list[1] - 0.5 && row[1] + row[3] <= list[1] + list[3] + 0.5,
+        "row {row:?} outside list {list:?}"
+    );
+    let auto = element(&rt, "option0").rect;
+    assert!(
+        auto[1] < list[1],
+        "Auto {auto:?} still at the top of {list:?}: the menu never moved"
+    );
+}
+
+/// A mode's language menu is the same long list in the kit's `Menu`, so its
+/// press reveals the chosen row too.
+#[test]
+fn a_modes_language_menu_opens_on_its_chosen_language() {
+    let mut rt = runtime("modes-speech", true, PANE_SIZE);
+    tap(&mut rt, "mode-speech-language-0-trigger");
+    assert_eq!(
+        rt.state.open,
+        Some(Menu::ModeSpeechLanguage(modes::Selection::Custom(0)))
+    );
+    let spanish = crate::transcription::models::menu_order(
+        &crate::transcription::models::definition(TranscriptionModelId::ParakeetV3)
+            .language_choices(),
+    )
+    .iter()
+    .position(|code| *code == "es")
+    .unwrap();
+    let row = element(&rt, &format!("mode-speech-language-0-item{spanish}")).rect;
+    let menu = element(&rt, "mode-speech-language-0-menu").rect;
+    assert!(
+        row[1] >= menu[1] - 0.5 && row[1] + row[3] <= menu[1] + menu[3] + 0.5,
+        "row {row:?} outside menu {menu:?}"
     );
 }
 
@@ -3501,11 +3694,16 @@ fn goldens() {
             "captures",
             "mac-labs",
             "mac-labs-link",
+            "mac-labs-yolo-mode",
             "output",
             "modes",
             "modes-picker",
             "modes-speech",
             "picker-downloading",
+            // Labs › Transcribe dropped audio: the hint a file drag shows and
+            // the toast of the file running with its progress.
+            "drop-hover",
+            "drop-running",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }
@@ -3525,6 +3723,7 @@ fn goldens() {
 }
 
 mod application_picker;
+mod drop_transcribe;
 mod onboarding_check;
 mod panes;
 

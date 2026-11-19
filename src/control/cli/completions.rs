@@ -1,4 +1,4 @@
-//! `hex completions <shell>` (Labs › Shell completions): a completion script
+//! `hex completions <shell>` (Labs › Tab completion for hex): a completion script
 //! for `hex`, generated at runtime from the same clap definitions the CLI
 //! parses, so it stays in sync with every command and flag instead of being
 //! written out by hand.
@@ -51,7 +51,7 @@ fn prepare(settings: &AppSettings) -> std::result::Result<(), ControlReply> {
         let message = match Feature::ShellCompletions.managed() {
             Some(lock) => lock.refusal().to_owned(),
             None => {
-                "Labs › Shell completions is off; turn it on with `hex labs on shell-completions`"
+                "Labs › Tab completion for hex is off; turn it on with `hex labs on shell-completions`"
                     .to_owned()
             }
         };

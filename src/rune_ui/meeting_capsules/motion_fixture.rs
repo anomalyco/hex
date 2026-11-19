@@ -40,6 +40,7 @@ fn recording_motion_frames() {
                 span_ms: 64_000,
             };
         });
+        settle_stage(&mut rt);
         rt.settle_all();
         rt.frame(0.0);
         let mut renderer = offscreen::renderer(&gpu.device);
@@ -447,6 +448,7 @@ fn stop_hits_its_center_edges_and_corners_but_not_its_neighbors() {
         }
         rt.pointer_leave();
         rt.frame(0.);
+        settle_stage(&mut rt);
         rt.settle_all();
         rt.frame(0.);
         click(&mut rt, x + w / 2., y + h / 2.);
@@ -823,7 +825,8 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 }
                 tx.instant();
             });
-            rt.settle_all();
+            settle_stage(&mut rt);
+        rt.settle_all();
             rt.frame(0.);
             let rect = |rt: &Runtime<Capsule>, key| {
                 rt.elements()

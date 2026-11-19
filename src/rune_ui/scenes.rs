@@ -89,22 +89,23 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history.clear_armed = true;
         ui.pane = Pane::History;
     }),
-    // Labs › Dictation stats: the Stats button with its dialog open.
+    // Labs › Dictation stats: the Stats button with its dialog open, the
+    // year heatmap, and the hourly strip.
     ("history-stats", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture();
         ui.history.stats = Some(history::HistoryPane::fixture_stats());
+        ui.history.usage = Some(history::HistoryPane::fixture_usage());
         ui.history.stats_open = true;
         ui.settings.labs.history_stats = true;
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),
-    // Labs › Select multiple dictations: two entries selected, with the card
+    // Two entries selected, with the card
     // that copies or deletes them.
     ("history-selection", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture_selection();
-        ui.settings.labs.history_multi_select = true;
         ui.pane = Pane::History;
     }),
     // Labs › Screenshots' Captures: a shot, a recording with its words, and
@@ -683,7 +684,9 @@ pub(super) const SCENES: &[Scene] = &[
         ui.platform.tuning.mode = crate::audio::voice_filter::VoiceFilterMode::Muted;
         ui.platform.demo = Some(fun::preview_demo(
             false,
-            Some(crate::audio::hex_microphone::DemoPlaybackTrack::CallHears),
+            Some(crate::audio::hex_microphone::DemoPlaybackTrack::Effect(
+                crate::audio::voice_filter::VoiceFilterMode::Robot,
+            )),
         ));
         ui.pane = Pane::VoiceFilter;
     }),
@@ -692,10 +695,14 @@ pub(super) const SCENES: &[Scene] = &[
         if let Some(driver) = &mut ui.platform.hex_microphone {
             driver.driver_bundle_installed = false;
             driver.driver_loaded = false;
+            driver.mic_in_use = false;
+            driver.sink_streaming = false;
             driver.installed_version = None;
             driver.active_apps.clear();
         }
-        ui.platform.demo = Some(fun::preview_demo(true, None));
+        if let Some(demo) = &mut ui.platform.demo {
+            demo.has_recording = false;
+        }
         ui.pane = Pane::VoiceFilter;
     }),
     ("voice-filter", |ui| {
@@ -761,7 +768,7 @@ pub(super) const SCENES: &[Scene] = &[
         ui.settings.labs.yolo_mode = true;
         ui.settings.labs.yolo_mode_apps = vec!["Messages".into(), "Slack".into()];
         crate::labs::apply(&ui.settings.labs);
-        ui.lab_store.group = Some(crate::labs::Feature::YoloMode.group());
+        ui.lab_store.search = rune::TextEdit::new("YOLO".to_owned());
     }),
     // The same card with its Only in picker open over the cards below.
     ("mac-labs-yolo-mode-picker", |ui| {
@@ -773,6 +780,28 @@ pub(super) const SCENES: &[Scene] = &[
         modes::fixture_catalog(ui);
         ui.modes.picker_target = modes::PickerTarget::YoloMode;
         ui.modes.application_picker_open = true;
+    }),
+    // Labs › Transcribe dropped audio: a file Hex reads held over the window,
+    // and one file at 42% with two behind it.
+    ("drop-hover", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.drop_transcribe = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.drop =
+            drop_transcribe::DropTranscribe::fixture_dragging(drop_transcribe::Drag::Accepted);
+    }),
+    ("drop-running", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.drop_transcribe = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.drop = drop_transcribe::DropTranscribe::fixture_running();
+    }),
+    // Its own card while on: the button that opens the file dialog, for the
+    // desktops that report no file drags.
+    ("mac-labs-drop-transcribe", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.drop_transcribe = true;
+        ui.lab_store.group = Some(crate::labs::Feature::DropTranscribe.group());
     }),
     // Labs on Windows and Linux: only their OS's labs, groups holding a
     // lab that's on open.

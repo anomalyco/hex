@@ -26,7 +26,7 @@ use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 mod fixture;
 
-static MORE_ICON: rune::Icon = rune::Icon {
+pub(super) static MORE_ICON: rune::Icon = rune::Icon {
     name: "hex-more",
     view: 16.0,
     body: r#"<circle cx="3.5" cy="8" r="1.25" fill="currentColor"/><circle cx="8" cy="8" r="1.25" fill="currentColor"/><circle cx="12.5" cy="8" r="1.25" fill="currentColor"/>"#,
@@ -205,7 +205,7 @@ pub(super) struct MeetingsPane {
 }
 
 /// `42 min`, `1 h 05 min`, or `< 1 min`.
-fn length(milliseconds: u64) -> String {
+pub(super) fn length(milliseconds: u64) -> String {
     let minutes = milliseconds / 60_000;
     match minutes {
         0 => tr("< 1 min").into(),

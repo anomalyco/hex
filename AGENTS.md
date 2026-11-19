@@ -42,10 +42,10 @@ feature with its own pane joins the sidebar as a normal item while on and is
 hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
 (beta), Voice Filter (Dev; locked on while its macOS driver is installed, and
 a stable build with the driver keeps its pane for Uninstall alone), Playground
-(Dev), Live text, Live chapters, Vocabulary biasing, Screen vocabulary
+(Dev), Live text, Live chapters, Vocabulary help, Words on screen
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
-macOS), Share dictation shortcut (#176, Windows), Unload model when idle
+macOS), Share dictation shortcut (#176, Windows), Free memory when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
 paste shortcut (Windows, Linux), Stop phrase, Hold through other keys
 (macOS and Windows), and Microphone key alone (#181, macOS).
@@ -136,6 +136,12 @@ substitute for source inspection or a second roadmap.
   assertion on macOS, a logind `idle:sleep` inhibitor (only `idle` where
   polkit refuses a process outside the seat session) on Linux, and a
   system-required power request on Windows.
+- `audio/system_idle`: whether the person demonstrably cannot dictate (the
+  display asleep, the session locked, or the Mac asleep), from NSWorkspace and
+  the distributed screen-lock notifications, with the display and lock state
+  read at launch, so the warm microphone is released while away and does not
+  hold coreaudiod's idle-sleep assertion. macOS only; elsewhere every reason
+  stays clear.
 - `dictation/processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
@@ -181,7 +187,7 @@ substitute for source inspection or a second roadmap.
   `transcription::engine::dictation_busy` is the press-to-paste capture state
   on macOS, and on Linux and Windows only the engine's dictation streams and
   finishes, so a host clip can start during a CPU-only capture's hold. With
-  Labs › Unload model when idle on, its worker unloads the GGUF model after
+  Labs › Free memory when idle on, its worker unloads the GGUF model after
   the chosen idle time when nothing records (`audio::idle_sleep::held`) and reloads
   it before the next command that needs it; the parked model still counts as
   held, so callers never load a second copy.
@@ -247,11 +253,14 @@ substitute for source inspection or a second roadmap.
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `control/developer_control`: the typed debug-only command/reply protocol the local
   API uses to drive the running app from `hex dev`.
-- `paste`: clipboard insertion, continuation joins, and generation-safe
-  clipboard restoration.
+- `continuation`: the platform-neutral input-activity revision and back-to-back
+  paste join macOS and Windows share; `paste` applies it, the Windows hooks in
+  `windows::input` end it on real keys and clicks, and the `windows::dictation`
+  listener ends it when the foreground window changes.
+- `paste`: clipboard insertion and generation-safe clipboard restoration.
 - `accessibility`: bounded focused-window and selected-text capture through
   Accessibility without touching the clipboard, including the bounded visible
-  window text Labs › Screen vocabulary reads (macOS).
+  window text Labs › Words on screen reads (macOS).
 - `recognition`: the macOS listener coordinator for hotkey and programmatic
   dictation controls, workers, and observations. It does not own the
   authoritative microphone timeline.
@@ -372,7 +381,8 @@ substitute for source inspection or a second roadmap.
   session-closed reporting.
 - `linux/remote_desktop`: the RemoteDesktop portal client Wayland paste uses
   without the virtual keyboard protocol: a keyboard-only session with a
-  persisted owner-only restore token, and Ctrl+V as keysyms.
+  persisted owner-only restore token, and Ctrl+V as keymap-resolved evdev
+  keycodes, keysyms as fallback.
 - `linux/context`: the focused application for modes: the X11 active
   window's process, or on Wayland the activated `zwlr_foreign_toplevel`
   window's app ID named by its `.desktop` entry (none on GNOME and KDE).
@@ -457,7 +467,9 @@ substitute for source inspection or a second roadmap.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
   search. Text and bounded metadata; audio only with Labs › Keep recordings
-  (`history/recordings`: one owner-only WAV per entry, Transcribe again).
+  (`history/recordings`: one owner-only WAV per entry, Transcribe again), and
+  Labs › Dictation stats' owner-only daily rollup (`history/usage`, counts but
+  no text, 400 days) that outlives retention.
 - `control/transcript_cli`: read-only release commands `hex history` and
   `hex meetings list|show|search` on every OS, versioned JSON projections and
   filters.
@@ -840,7 +852,15 @@ CoreAudio formats, AppleScript details, or event serialization.
   hold threshold returns the press to pending and reopens; on macOS, a later
   failure keeps the audio already delivered as a copy-only dictation, or fails
   the capture when no audio after the start arrived or it is near-silent. Cold
-  opens retry the selected device briefly before falling back.
+  opens retry the selected device briefly before falling back. With it
+  disabled, macOS still releases the warm microphone while the display sleeps,
+  the session is locked, or the Mac goes to sleep, and reopens on wake or
+  unlock (`audio/system_idle.rs`; launch reads the current display and lock
+  state, and the setting and `hex status` keep the persisted value). That away
+  release ignores Labs › Keep mic open after dictating's window. Until the
+  reopen finishes, a press keeps cold-mic behavior, and the reopen is a plain
+  open (also when the setting is switched off by hand), so a press during it
+  becomes a pending capture.
 - Model inference, optional post-processing, and paste must
   never block authoritative audio capture. Their queues remain bounded.
 - CoreAudio capture timestamps and annotated-session CGEvent shortcut timestamps
@@ -953,6 +973,9 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Cohere's advertised encoder input capacity is not its recommended inference
   window. Both GGUF adapters cap Cohere chunks at the reference processor's
   35 seconds (or a stricter advertised bound); capture duration remains unlimited.
+- macOS `main` sets `GGML_METAL_TENSOR_DISABLE` first thing, because ggml's
+  Metal tensor-API kernels give wrong results on M5-class GPUs; the simdgroup
+  kernels every earlier Mac uses are correct.
 - The microphone is either System default (`microphone` unset) or one saved
   device. System default follows the OS default input live: macOS through
   CoreAudio listeners on the default input and the device list (their callbacks
@@ -1171,10 +1194,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
   untouched. Notes rewrite only the heading Hex wrote and the
-  `<!-- hex:notes -->` block. With Meetings › Settings › Export › Descriptive
-  meeting file names on, notes or chapter refinement that change the title,
-  and user renames, also rename the exported Markdown to the new title,
-  keeping its date and time prefix and never overwriting.
+  `<!-- hex:notes -->` block. Titles and summaries are written in the language
+  spoken in the transcript, never in the instructions' English. With Meetings ›
+  Settings › Export › Descriptive meeting file names on, notes or chapter
+  refinement that change the title, and user renames, also rename the exported
+  Markdown to the new title, keeping its date and time prefix and never
+  overwriting.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
   every macOS, Linux, and Windows build and on by default in every build,
   stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
@@ -1222,8 +1247,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   `capture.routing`'s autoSend on, routed by Scrawl's router in Hex's process
   (`capture_host::routing`): one `capture-look` thread per stop, one
   `capture-route` thread with a bounded queue, a rule's send held 3 s for
-  Undo (a page naming its session, by meta tag or `.opencode-session`, sends
-  like a rule and beats one), guesses sent only when picked. Queued sends retry only while neither
+  Undo; a page naming its session, by meta tag or `.opencode-session`, only
+  suggests it. Guesses send only when picked. Queued sends retry only while neither
   Scrawl.app runs nor anything serves the ingest port, and never in tests.
   `capture.routing` never holds a Jev key. A cabled iPhone records through
   `scrawl-helper mirror --no-microphone`, narrated by the dictation timeline
@@ -1438,7 +1463,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   this user's XWayland process already runs with `DISPLAY` set; Hex never
   connects first, so it never starts XWayland. While it is off there, Settings
   › Output says the clipboard can't be restored and points to the toggle.
-  A second explicit opt-in exception: Labs › Floating meeting capsules on
+  A second explicit opt-in exception: Labs › Call recording controls on
   GNOME (`gnome-meeting-capsules`, off by default) lets the meeting capsules
   (recording offer, recording capsule) open on XWayland through Rune's
   `OverlayOptions::xwayland_input`, as override-redirect windows that take

@@ -24,7 +24,6 @@ impl Capsule {
             self.kind = Some(Kind::Finalizing {
                 duration_ms: r.started.elapsed().as_millis() as u64,
             });
-            self.waveform = None;
             #[cfg(target_os = "windows")]
             if let Some(resize) = &self.resize {
                 resize((
@@ -38,37 +37,39 @@ impl Capsule {
     pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
         self.live = Live::default();
         self.kind = Some(Kind::Ready(manifest));
-        self.waveform = None;
     }
 }
 
 impl MeetingCapsules {
-    pub(super) fn advance_handoff(&mut self, event: &ControllerEvent) {
+    pub(super) fn advance_handoff(&mut self, event: &ControllerEvent, inherit: bool) {
         // A new panel supersedes an old summary, and failure yields to the
         // host's failure UI. Notes never take ownership or show a window.
         if matches!(
             event,
-            ControllerEvent::Starting
+            ControllerEvent::Starting(_)
                 | ControllerEvent::RecordingStarted { .. }
                 | ControllerEvent::Reminder { .. }
                 | ControllerEvent::Offer(..)
                 | ControllerEvent::Failed { .. }
-        ) && self.handoff.take().is_some()
+        ) && self.finishing.take().is_some()
         {
             self.generation.fetch_add(1, Ordering::SeqCst);
             self.pill.handle.update(|c, _| c.kind = None);
             self.pill.handle.hide();
         }
-        if let Some(id) = self.pill.apply(event) {
-            self.handoff = Some(id);
+        if let Some(id) = self.pill.apply(event, inherit) {
+            self.finishing = Some(id);
             if matches!(event, ControllerEvent::Transcribing) {
-                self.pill.handle.update(|c, _| c.capture_stopped());
+                self.pill.handle.update(|c, tx| {
+                    c.capture_stopped();
+                    c.stir(tx);
+                });
             }
         }
     }
 
     pub(super) fn notes_progress(&self, id: &str) {
-        let handle = if self.handoff.as_deref() == Some(id) {
+        let handle = if self.finishing.as_deref() == Some(id) {
             &self.pill.handle
         } else {
             &self.panel
@@ -89,7 +90,7 @@ impl MeetingCapsules {
     }
 
     pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {
-        if self.handoff.as_ref() != Some(&manifest.id) {
+        if self.finishing.as_ref() != Some(&manifest.id) {
             self.show_panel(Kind::Ready(Box::new(manifest.clone())), Some(READY_TIMEOUT));
             return self.panel.clone();
         }
@@ -97,7 +98,10 @@ impl MeetingCapsules {
         let finished = Box::new(manifest.clone());
         #[cfg(target_os = "windows")]
         handle.resize(ready_window_size(&finished));
-        handle.update(move |c, _| c.published(finished));
+        handle.update(move |c, tx| {
+            c.published(finished);
+            c.stir(tx);
+        });
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.timeout(handle.clone(), generation, READY_TIMEOUT);
         handle
@@ -105,7 +109,7 @@ impl MeetingCapsules {
 }
 
 impl Pill {
-    fn apply(&self, event: &ControllerEvent) -> Option<String> {
+    fn apply(&self, event: &ControllerEvent, inherit: bool) -> Option<String> {
         // Relinquish the visible pill under the same lock as the ticker, so
         // its last reconciliation cannot hide or restore a finalizing surface.
         let mut model = self.lock();
@@ -117,8 +121,8 @@ impl Pill {
             _ => None,
         };
         model.apply(event, Instant::now());
+        self.reconcile_locked(&mut model, inherit);
         drop(model);
-        self.reconcile();
         if let ControllerEvent::RecordingStarted { id, .. } = event {
             self.tick(id.clone());
         }

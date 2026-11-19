@@ -1,5 +1,51 @@
 use super::*;
 
+/// Starting acknowledges a particular offer. The controller's later withdrawal
+/// retires the detection, not the worker it already started for that offer.
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+pub(super) enum Host {
+    #[default]
+    Panel,
+    Offered(OfferId),
+    Accepted(OfferId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Route {
+    Ordinary,
+    Keep,
+    Close,
+    Inherit,
+}
+
+impl Host {
+    pub(super) fn on_pill(self) -> bool {
+        self != Self::Panel
+    }
+    pub(super) fn route(&mut self, event: &ControllerEvent) -> Route {
+        use ControllerEvent::*;
+        match (*self, event) {
+            (Self::Offered(shown) | Self::Accepted(shown), Starting(Some(id))) if shown == *id => {
+                *self = Self::Accepted(shown);
+                Route::Keep
+            }
+            (Self::Offered(shown), OfferWithdrawn(id)) if shown == *id => Route::Close,
+            (
+                Self::Accepted(_),
+                RecordingStarted {
+                    automatic: false, ..
+                },
+            ) => Route::Inherit,
+            (Self::Accepted(_), Failed { .. }) => Route::Close,
+            (
+                Self::Offered(_) | Self::Accepted(_),
+                Starting(_) | RecordingStarted { .. } | Transcribing,
+            ) => Route::Close,
+            _ => Route::Ordinary,
+        }
+    }
+}
+
 pub(super) type After = Box<dyn Fn(Duration, fn(&mut Capsule)) + Send>;
 
 /// Each wake belongs to one presentation, even when a different offer for
@@ -39,11 +85,32 @@ pub(super) fn actions(
     choosing: bool,
 ) -> (rune::Color, String, String, Vec<El>) {
     let action = |key: &str, label: &str, primary, press: fn(&mut Capsule)| {
-        button(p, key, label, primary, move |c| {
-            if c.more_open == choosing
+        let face = match key {
+            "offer-more" => IconButton::new(&crate::rune_ui::meetings::MORE_ICON)
+                .variant(IconButtonVariant::Neutral)
+                .control_size(ControlSize::Large)
+                .help(tr("More"))
+                .build(p.k)
+                .w(34.0),
+            "record" => Button::new(label)
+                .variant(ButtonVariant::Submit)
+                .build_push(p.k),
+            _ => Button::new(label)
+                .variant(if primary {
+                    ButtonVariant::Contrast
+                } else {
+                    ButtonVariant::Neutral
+                })
+                .build_push(p.k),
+        };
+        face.key(key).on_press_tx(move |c: &mut Capsule, tx| {
+            if !c.presentation.inherits_offer_window()
+                && c.more_open == choosing
                 && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
             {
                 press(c);
+                // The surface answers in the frame of the press.
+                c.stir(tx);
             }
         })
     };
@@ -91,17 +158,36 @@ pub(super) fn actions(
 
 impl Capsule {
     fn record_offer(&mut self) {
+        if self.presentation.inherits_offer_window() {
+            return;
+        }
         let Some(Kind::Offer(id, candidate)) = &self.kind else {
             return;
         };
-        let command = if candidate.key == "preview" {
-            ControllerCommand::Dismiss
+        if candidate.key == "preview" {
+            if self.send(ControllerCommand::Dismiss) {
+                self.close();
+            }
+        } else if self.send(ControllerCommand::Record(candidate.clone(), Some(*id))) {
+            self.presentation.begin(*id, candidate.clone());
+            self.rearm_offer = None;
         } else {
-            ControllerCommand::Record(candidate.clone(), Some(*id))
-        };
-        if self.send(command) {
-            self.close();
+            tracing::warn!("could not queue the meeting recording request");
         }
+    }
+
+    pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
+        self.kind = Some(Kind::Recording(recording));
+        self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
+        self.live = Live::default();
+        self.hovered = false;
+        self.stopping = false;
+        self.expired = false;
+        self.throw.stop();
+        // Nothing here mounts with an entrance of its own: the surface
+        // carries the change.
+        tx.instant();
+        self.stir(tx);
     }
     pub(super) fn set_offer_timer(&mut self, timer: Option<After>) {
         self.rearm_offer = timer;
@@ -116,15 +202,15 @@ impl Capsule {
 
     pub(super) fn set_more_open(&mut self, open: bool) {
         self.more_open = open;
-        if let Some(resize) = &self.resize {
-            resize(self.window_size());
-        }
         if !open && std::mem::take(&mut self.expired) {
             self.arm_offer_timeout();
         }
     }
 
     pub(super) fn expire_offer(&mut self) {
+        if self.presentation.inherits_offer_window() {
+            return;
+        }
         let Some(Kind::Offer(id, candidate)) = &self.kind else {
             return;
         };

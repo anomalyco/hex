@@ -16,13 +16,13 @@ use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
 use objc2_foundation::{NSArray, NSData, NSString};
 
+use crate::continuation::{Continuation, InputActivity};
 use crate::keyboard;
-use crate::suppression::InputActivity;
 
 pub struct Paster {
     clipboard: Retained<NSPasteboard>,
     activity: InputActivity,
-    continuation: Option<Continuation>,
+    continuation: Continuation,
     clipboard_restore: Arc<Mutex<ClipboardRestore>>,
     prepared_clipboard: Option<PreparedClipboard>,
 }
@@ -46,11 +46,6 @@ struct PreparedClipboard {
     change_count: isize,
     snapshot: ClipboardSnapshot,
     capture_ms: u128,
-}
-
-struct Continuation {
-    revision: u64,
-    inserted: String,
 }
 
 /// How Hex inserts a dictation into an app that can't take a paste.
@@ -203,7 +198,7 @@ impl Paster {
         Self {
             clipboard: NSPasteboard::generalPasteboard(),
             activity,
-            continuation: None,
+            continuation: Continuation::default(),
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
             prepared_clipboard: None,
         }
@@ -242,30 +237,30 @@ impl Paster {
         }
         if matches!(mode, PasteMode::Send) {
             self.paste(text, PasteMode::Continue)?;
-            self.continuation = None;
+            self.continuation.clear();
             return Ok(());
         }
         if matches!(mode, PasteMode::Return) {
             return keyboard::post_return();
         }
         let revision = self.activity.revision();
-        let continuation = self.continuation.as_ref().filter(|continuation| {
-            !matches!(mode, PasteMode::Standalone) && continuation.revision == revision
-        });
-        let text = match continuation {
-            Some(continuation) => join(&continuation.inserted, text),
-            // Read as the paste commits, so the toggle applies at once.
-            None if crate::labs::smart_spacing() => with_smart_spacing(text),
-            None => text.to_string(),
-        };
+        let joinable = !matches!(mode, PasteMode::Standalone);
+        let text = self
+            .continuation
+            .join(revision, joinable, text)
+            .unwrap_or_else(|| {
+                // Read as the paste commits, so the toggle applies at once.
+                if crate::labs::smart_spacing() {
+                    with_smart_spacing(text)
+                } else {
+                    text.to_string()
+                }
+            });
         match typing_for_frontmost() {
-            Some(typing) => self.type_into_frontmost(&text, mode, typing)?,
-            None => self.paste_through_clipboard(&text, mode)?,
+            Some(typing) => self.type_into_frontmost(&text, joinable, typing)?,
+            None => self.paste_through_clipboard(&text, joinable)?,
         }
-        self.continuation = (!matches!(mode, PasteMode::Standalone)).then_some(Continuation {
-            revision,
-            inserted: text,
-        });
+        self.continuation.record(revision, joinable, text);
         Ok(())
     }
 
@@ -273,9 +268,11 @@ impl Paster {
     /// for the apps [`typing_for_frontmost`] names. Nothing is captured for a
     /// restore; Labs › Keep dictation on clipboard still leaves the text on
     /// the clipboard after typing.
-    fn type_into_frontmost(&mut self, text: &str, mode: PasteMode, typing: Typing) -> Result<()> {
-        if matches!(mode, PasteMode::Standalone) {
-            self.continuation = None;
+    fn type_into_frontmost(&mut self, text: &str, joinable: bool, typing: Typing) -> Result<()> {
+        // Standalone text starts its own sentence, never a continuation of
+        // the dictation before it.
+        if !joinable {
+            self.continuation.clear();
         }
         match typing {
             Typing::Burst => {
@@ -313,7 +310,7 @@ impl Paster {
     /// text, and no restore. A pending restore stands down and no earlier
     /// snapshot comes back, and the next paste starts a new continuation.
     fn copy_only(&mut self, text: &str) -> Result<()> {
-        self.continuation = None;
+        self.continuation.clear();
         self.prepared_clipboard = None;
         self.clipboard_restore
             .lock()
@@ -322,7 +319,7 @@ impl Paster {
         write_clipboard_text(&self.clipboard, text, false)
     }
 
-    fn paste_through_clipboard(&mut self, text: &str, mode: PasteMode) -> Result<()> {
+    fn paste_through_clipboard(&mut self, text: &str, joinable: bool) -> Result<()> {
         let generation = {
             let mut restore = self
                 .clipboard_restore
@@ -350,8 +347,11 @@ impl Paster {
             if self.clipboard.changeCount() != previous_change_count {
                 return Err(eyre!("clipboard changed while Hex was preserving it"));
             }
-            if matches!(mode, PasteMode::Standalone) {
-                self.continuation = None;
+            // Standalone text starts its own sentence, once the clipboard is
+            // safely preserved; a failure before this leaves the continuation
+            // alone, as it inserted nothing.
+            if !joinable {
+                self.continuation.clear();
             }
             // Read as the paste commits, so the toggle applies at once.
             let keep = crate::labs::keep_on_clipboard();
@@ -728,23 +728,6 @@ fn cf_data(value: CfDataRef) -> Result<Vec<u8>> {
     Ok(unsafe { std::slice::from_raw_parts(bytes, length as usize) }.to_vec())
 }
 
-fn join(previous: &str, next: &str) -> String {
-    let sentence_start = ends_sentence(previous);
-    let mut next = set_initial_case(next, sentence_start);
-    let needs_space = previous
-        .chars()
-        .next_back()
-        .is_some_and(|character| !character.is_whitespace() && !is_opening(character))
-        && next
-            .chars()
-            .next()
-            .is_some_and(|character| !character.is_whitespace() && !is_closing(character));
-    if needs_space {
-        next.insert(0, ' ');
-    }
-    next
-}
-
 /// Labs › Smart spacing: one leading space when the character before the
 /// focused app's cursor asks for it. A selection, or a cursor the app
 /// doesn't expose through Accessibility, leaves the text unchanged.
@@ -776,73 +759,11 @@ fn needs_leading_space(previous: char, text: &str) -> bool {
         )
 }
 
-fn ends_sentence(text: &str) -> bool {
-    text.trim_end()
-        .trim_end_matches(['\'', '"', ')', ']', '}'])
-        .ends_with(['.', '?', '!'])
-}
-
-fn is_opening(character: char) -> bool {
-    matches!(character, '(' | '[' | '{')
-}
-
 fn is_closing(character: char) -> bool {
     matches!(
         character,
         ',' | '.' | '?' | '!' | ';' | ':' | ')' | ']' | '}'
     )
-}
-
-fn set_initial_case(text: &str, uppercase: bool) -> String {
-    let Some((index, character)) = text
-        .char_indices()
-        .find(|(_, character)| character.is_alphabetic())
-    else {
-        return text.to_string();
-    };
-    if uppercase && character.is_lowercase() {
-        return replace_character(text, index, character.to_uppercase());
-    }
-    if !uppercase && character.is_uppercase() && sentence_initial_word(text, index) {
-        return replace_character(text, index, character.to_lowercase());
-    }
-    text.to_string()
-}
-
-fn sentence_initial_word(text: &str, start: usize) -> bool {
-    let word = text[start..]
-        .split(|character: char| !character.is_alphabetic() && character != '\'')
-        .next()
-        .unwrap_or_default();
-    matches!(
-        word.to_ascii_lowercase().as_str(),
-        "a" | "an"
-            | "and"
-            | "as"
-            | "because"
-            | "but"
-            | "for"
-            | "if"
-            | "nor"
-            | "or"
-            | "so"
-            | "the"
-            | "then"
-            | "though"
-            | "to"
-            | "when"
-            | "while"
-            | "yet"
-    )
-}
-
-fn replace_character(text: &str, index: usize, replacement: impl Iterator<Item = char>) -> String {
-    let character_length = text[index..].chars().next().unwrap().len_utf8();
-    let mut output = String::with_capacity(text.len());
-    output.push_str(&text[..index]);
-    output.extend(replacement);
-    output.push_str(&text[index + character_length..]);
-    output
 }
 
 #[cfg(test)]
@@ -852,6 +773,12 @@ mod tests {
     use super::*;
 
     static PASTEBOARD_TEST: Mutex<()> = Mutex::new(());
+
+    fn continuation_of(revision: u64, inserted: &str) -> Continuation {
+        let mut continuation = Continuation::default();
+        continuation.record(revision, true, inserted.into());
+        continuation
+    }
 
     #[test]
     fn sequential_pastes_settle_before_overwrite() {
@@ -1029,20 +956,6 @@ mod tests {
     }
 
     #[test]
-    fn joins_contiguous_dictation_with_sentence_aware_spacing() {
-        assert_eq!(
-            join("Because if I don't do that,", "And if you see it."),
-            " and if you see it."
-        );
-        assert_eq!(
-            join("And if you see it.", "well, that works."),
-            " Well, that works."
-        );
-        assert_eq!(join("Already spaced. ", "Next sentence."), "Next sentence.");
-        assert_eq!(join("Hello", ", world."), ", world.");
-    }
-
-    #[test]
     fn smart_spacing_adds_a_space_only_where_one_belongs() {
         for previous in ['a', 'Z', '7', '.', '?', ')', '”'] {
             assert!(needs_leading_space(previous, "in progress"), "{previous:?}");
@@ -1056,12 +969,6 @@ mod tests {
         assert!(!needs_leading_space('a', ""));
         assert!(!needs_leading_space('a', " already spaced"));
         assert!(!needs_leading_space('a', ", then more"));
-    }
-
-    #[test]
-    fn preserves_likely_proper_nouns_mid_sentence() {
-        assert_eq!(join("Open", "GitHub next."), " GitHub next.");
-        assert_eq!(join("Message", "Slack now."), " Slack now.");
     }
 
     #[test]
@@ -1154,10 +1061,7 @@ mod tests {
         let mut paster = Paster {
             clipboard: clipboard.clone(),
             activity: InputActivity::default(),
-            continuation: Some(Continuation {
-                revision: 0,
-                inserted: "earlier".into(),
-            }),
+            continuation: continuation_of(0, "earlier"),
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
             prepared_clipboard: None,
         };
@@ -1194,7 +1098,7 @@ mod tests {
         assert_eq!(restore.original, None);
         assert_eq!(restore.last_change_count, None);
         drop(restore);
-        assert!(paster.continuation.is_none());
+        assert_eq!(paster.continuation.join(0, true, "next"), None);
     }
 
     #[test]
@@ -1244,7 +1148,7 @@ mod tests {
         let mut paster = Paster {
             clipboard: clipboard.clone(),
             activity: InputActivity::default(),
-            continuation: None,
+            continuation: Continuation::default(),
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
             prepared_clipboard: None,
         };

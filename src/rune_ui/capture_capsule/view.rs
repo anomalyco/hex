@@ -353,12 +353,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .hit()
             .on_press_tx(press(id)),
         Id::Close => base.child(
-            row()
-                .center()
-                .size(28.0, 28.0)
-                .radius(ICON_BUTTON_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
+            button_box(p, BUTTON_H)
                 .child(close_glyph(p))
                 .role("button")
                 .label(tr("Close"))
@@ -407,11 +402,19 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .hit()
                     .on_press_tx(press(id));
             }
-            done.role("text").label(if shown.ident.is_empty() {
-                super::flow::copied().to_owned()
-            } else {
-                shown.ident.clone()
-            })
+            if matches!(&surface.pres, Pres::Done(d) if d.inspect_preview() && d.lead == Lead::Thumbnail)
+            {
+                return done
+                    .radius(surface::CHIP_RADIUS)
+                    .hover(c.hover)
+                    .press(c.pressed)
+                    .role("button")
+                    .label(format!("{} · {}", shown.ident, tr("Inspect")))
+                    .help(tr("Open the capture"))
+                    .hit()
+                    .on_press_tx(press(Id::Inspect));
+            }
+            done.role("text").label(shown.ident.clone())
         }
         Id::Next => keyed(p, base, &["⇥"], tr("Next"), medium()).on_press_tx(press(id)),
         // A chip beside the frame in the menu-bar flow.
@@ -439,7 +442,23 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             };
             undo_ring::chip(p, base, [w, h], ground, live.ring.as_ref()).on_press_tx(press(id))
         }
-        // Search, with the capture shortcut that opens it as Settings draws it.
+        Id::Search => {
+            let keys = chord(&surface::shortcut_keycaps());
+            let help = if keys.is_empty() {
+                tr("Search").into()
+            } else {
+                tr_fill("Search {}", &keys)
+            };
+            base.child(
+                button_box(p, BUTTON_H).child(rune::icon(p.k.glyph.search, 16.0).color(p.muted())),
+            )
+            .role("button")
+            .label(help.clone())
+            .help(help)
+            .hit()
+            .on_press_tx(press(id))
+        }
+        // A permission helper's Capture action retains its keycaps.
         Id::Ask
             if matches!(
                 &surface.pres,
@@ -466,27 +485,29 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .on_press_tx(press(id))
         }
         Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
-        Id::Paste | Id::Inspect => {
-            let (name, help) = if id == Id::Paste {
-                (tr("Paste"), tr("Paste the capture"))
-            } else {
-                (tr("Inspect"), tr("Open the capture"))
-            };
-            base.child(
-                row()
-                    .center()
-                    .size(28.0, 28.0)
-                    .radius(ICON_BUTTON_RADIUS)
-                    .hover(c.hover)
-                    .press(c.pressed)
-                    .child(mark(id, 16.0, p.muted()))
-                    .role("button")
-                    .label(name)
-                    .help(help)
-                    .hit()
-                    .on_press_tx(press(id)),
+        // The line's one worded action: a filled button the height of the
+        // icon buttons beside it, so the three are one row of boxes 6 pt
+        // apart and 6 pt in from the walls. The chip around it is its target.
+        Id::Paste => base
+            .child(
+                button_box(p, shown.rect[2] - 2.0 * surface::BUTTON_INSET)
+                    .fill(c.layer_02)
+                    .child(label(&shown.ident, medium(), p.text())),
             )
-        }
+            .role("button")
+            .label(shown.ident.clone())
+            .help(tr("Paste into the current field"))
+            .hit()
+            .on_press_tx(press(id)),
+        Id::Inspect => base.child(
+            button_box(p, BUTTON_H)
+                .child(mark(id, 16.0, p.muted()))
+                .role("button")
+                .label(tr("Inspect"))
+                .help(tr("Open the capture"))
+                .hit()
+                .on_press_tx(press(id)),
+        ),
         Id::Field => {
             let empty = rune::TextEdit::default();
             let typed = match &surface.pres {
@@ -637,20 +658,34 @@ pub(super) fn mark(id: Id, size: f32, color: Color) -> El {
 }
 
 pub(super) const CHECK: f32 = 16.0;
-/// A 28 pt icon button's corners, concentric with the shell's.
+/// The finished line's buttons (Paste, Search, Inspect, ✕) are 28 pt tall,
+/// 6 pt in from the walls, their corners concentric with the shell's.
+pub(super) const BUTTON_H: f32 = CHIP_H - 2.0 * surface::BUTTON_INSET;
 pub(super) const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
-pub(super) const THUMB_RADIUS: f32 = 4.0;
+
+/// One of those buttons, `w` wide, its content centred.
+pub(super) fn button_box(p: Paint, w: f32) -> El {
+    row()
+        .key("box")
+        .center()
+        .size(w, BUTTON_H)
+        .radius(ICON_BUTTON_RADIUS)
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+}
 
 /// The capture's first frame, cropped to fill a small rounded card, with a
 /// hairline over its edge so a white page still reads on the capsule.
 pub(super) fn thumbnail(p: Paint, pixels: &rune::Pixels) -> El {
-    el().absolute(THUMB_X, (CHIP_H - THUMB_H) * 0.5)
+    el().key("thumb")
+        .absolute(THUMB_X, (CHIP_H - THUMB_H) * 0.5)
         .size(THUMB_W, THUMB_H)
         .radius(THUMB_RADIUS)
         .fill(p.k.c.layer_02)
         .pixels_fit(pixels, rune::SurfaceFit::Fill)
         .child(
-            el().absolute(0.0, 0.0)
+            el().key("thumb-edge")
+                .absolute(0.0, 0.0)
                 .size(THUMB_W, THUMB_H)
                 .radius(THUMB_RADIUS)
                 .border(p.hair, p.k.alpha(p.k.c.text_base, 0.14)),

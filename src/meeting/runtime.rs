@@ -149,7 +149,7 @@ fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
     );
     if !crate::labs::gnome_meeting_capsules() {
         message.push_str(
-            " On GNOME, Labs › Floating meeting capsules on GNOME can show it over your call.",
+            " On GNOME, Labs › Call recording controls on GNOME can show it over your call.",
         );
     }
     window.update(move |ui, tx| {
@@ -163,7 +163,7 @@ fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
 fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
     let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
     match event {
-        ControllerEvent::Starting => *state = MeetingMenuState::Starting,
+        ControllerEvent::Starting(_) => *state = MeetingMenuState::Starting,
         ControllerEvent::RecordingStarted { id, title, .. } => {
             *state = MeetingMenuState::Recording {
                 started: Instant::now(),

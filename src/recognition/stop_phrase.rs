@@ -28,7 +28,7 @@ pub(super) fn finish(
     context: &mut ContextWatch,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
-    release_while_idle: bool,
+    pressed_cold: bool,
 ) -> Result<()> {
     if !input.is_recording() {
         return Ok(());
@@ -52,7 +52,7 @@ pub(super) fn finish(
         &input.device_name(),
         events,
         indicator,
-        release_while_idle,
+        pressed_cold,
         print,
         hotkeys.raw_capture,
         Some(phrase),

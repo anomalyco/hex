@@ -1,4 +1,4 @@
-//! Annotate 15 s rolling screen replay (`Labs › Annotate replay`, macOS 27+).
+//! Annotate last 15 seconds rolling screen replay (`Labs › Annotate last 15 seconds`, macOS 27+).
 //!
 //! While `labs.annotate_replay` and `capture.enabled` are both on (and
 //! `SCClipBufferingOutput` exists on the running macOS), a single background
@@ -183,7 +183,7 @@ impl Controller {
                         let snap = current_exclusions();
                         self.last_exclusions = Some(snap);
                         self.worker = Some(handle);
-                        tracing::info!("Annotate 15 s replay buffer enabled");
+                        tracing::info!("Annotate last 15 seconds buffer enabled");
                     }
                     Err(error) => {
                         tracing::warn!(%error, "could not start Annotate replay worker");
@@ -192,7 +192,7 @@ impl Controller {
                 (true, false) => {
                     self.cancel_narration(CaptureInstant::now(), audio, outcomes);
                     self.stop_worker();
-                    tracing::info!("Annotate 15 s replay buffer stopped");
+                    tracing::info!("Annotate last 15 seconds buffer stopped");
                 }
                 (true, true) => {
                     let snap = current_exclusions();
@@ -278,7 +278,7 @@ impl Controller {
             if !crate::labs::annotate_replay() {
                 return Err(ControlReply::error(
                     "feature-off",
-                    "Annotate replay is off; turn it on with: hex labs on annotate-replay",
+                    "Annotate last 15 seconds is off; turn it on with: hex labs on annotate-replay",
                 ));
             }
             if active_recording || self.narrating.is_some() {

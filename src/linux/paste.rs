@@ -444,7 +444,7 @@ impl LinuxPaster {
     }
 
     /// Puts `path` on the clipboard as a `text/uri-list` file, so a chat app
-    /// or agent attaches the file itself (Labs › Copy captures as a zip).
+    /// or agent attaches the file itself (Labs › Copy a capture as one file).
     pub(crate) fn copy_file_uri(&mut self, path: &Path) -> Result<()> {
         let uri = file_uri(path)?;
         let mut restore = self.restore.lock().unwrap_or_else(PoisonError::into_inner);

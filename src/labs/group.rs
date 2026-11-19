@@ -76,7 +76,6 @@ impl Feature {
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
-            | Self::SettingsSearch
             | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::SpeakersOnly
@@ -102,17 +101,18 @@ impl Feature {
             | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
-            | Self::VoicePrompt => Group::Output,
+            | Self::VoicePrompt
+            | Self::ModesEditor => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
-            | Self::HistoryMultiSelect
             | Self::RecentDictations
             | Self::CopyDictationAudio => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
-            | Self::CalendarMenu => Group::Meetings,
+            | Self::CalendarMenu
+            | Self::CalendarSelectAll => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate
@@ -140,7 +140,8 @@ impl Feature {
             | Self::ModelInPlace
             | Self::KQuantModels
             | Self::PickerDownloaded
-            | Self::ParakeetUltra => Group::Models,
+            | Self::ParakeetUltra
+            | Self::DropTranscribe => Group::Models,
         }
     }
 }
