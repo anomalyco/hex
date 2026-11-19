@@ -95,6 +95,11 @@ let
       hash = "sha256-1VztJ0VhPTjAuk4J0NT9KapDOqplegpHOqHsTpfHXWc=";
     };
   };
+  # The vendor tree names every Git crate `<name>-<version>`, so the rune
+  # package's directory follows its key in the table above.
+  runeVendor = builtins.head (
+    builtins.filter (name: lib.hasPrefix "rune-" name) (builtins.attrNames cargoGitDependencies)
+  );
 in
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "hex";
@@ -190,14 +195,21 @@ rustPlatform.buildRustPackage (finalAttrs: {
             lib.replaceStrings (map (fragment: fragment.from) fragments) (map (
               fragment: fragment.to
             ) fragments) old.buildCommand
+            + "\n"
             + ''
-              # Rune's `crates/rune-text` includes the fonts in
-              # `crates/rune/assets` by a path relative to the workspace root
-              # (`../../../rune/assets/…`). A vendored crate sits in `git/`
-              # beside `rune-0.0.1`, not inside Rune's workspace, so give that
-              # path the `rune/assets` it expects.
+              # Rune's `crates/rune-text` loads its default fonts from
+              # `crates/rune/assets` through a path relative to Rune's
+              # workspace root (`../../../rune/assets/…`). A vendored crate
+              # sits in `git/` beside the rune package, not inside that
+              # workspace, so point that path at the rune package's own
+              # assets. Drop this once Rune moves the fonts into rune-text.
               mkdir -p $out/git
-              ln -sfn rune-0.0.1 $out/git/rune
+              rune_vendor=${runeVendor}
+              if [ ! -d "$out/git/$rune_vendor/assets" ]; then
+                echo "nix/package.nix: $out/git/$rune_vendor/assets is missing; rune-text's font include needs it" >&2
+                exit 1
+              fi
+              ln -sfn "$rune_vendor" $out/git/rune
             '';
       });
 
@@ -238,14 +250,14 @@ rustPlatform.buildRustPackage (finalAttrs: {
   env = buildEnv;
   # Desktop and installed-model tests are #[ignore]; run the remaining suite.
   doCheck = true;
+  # Hex's suite keeps process-global state (the lab switches, a model download
+  # in flight), while CI and `scripts/check` run nextest, which isolates each
+  # test in its own process. Plain `cargo test` shares one process, so let
+  # cargoCheckHook run it one test at a time (it sets RUST_TEST_THREADS=1).
+  dontUseCargoParallelTests = true;
   preCheck = ''
     export HOME="$TMPDIR/hex-test-home"
     mkdir -p "$HOME"
-    # Hex's suite keeps process-global state (the lab switches, a model
-    # download in flight), while CI and `scripts/check` run nextest, which
-    # isolates each test in its own process. Plain `cargo test` runs them in
-    # threads in one process, so run it one at a time here.
-    export RUST_TEST_THREADS=1
   '';
 
   postInstall = ''
