@@ -43,12 +43,18 @@ impl State {
     }
 }
 
-/// Gives the requester icons their decoder; scenes decode at once.
+/// Gives the requester icons their decoder (scenes decode at once), and on
+/// Linux notes a compositor that can't show the permission window.
 pub(super) fn setup(ui: &mut Ui, waker: &rune::Waker) {
     if !ui.is_fixture() {
         ui.connected
             .icons
             .set_cache(rune::ImageCache::new(waker.clone()));
+        #[cfg(target_os = "linux")]
+        {
+            ui.platform.consent_window_unsupported =
+                crate::linux::meeting_capsules::without_layer_shell();
+        }
     }
 }
 
