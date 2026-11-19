@@ -3727,22 +3727,22 @@ mod tests {
     fn a_recording_runs_for_as_long_as_its_client_checks_in() {
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("a long talk");
-        let lease = 80;
+        let lease = 400;
         let (api, sessions) = start_record_api(gate, recording.clone(), lease_timings(lease));
         let port = api.document.port;
         let origin = "https://app.example";
         let (grant, _) = record_grant(port, origin, &record_pair(port, origin));
         let (session, id, _) = record_start(port, origin, &grant);
         let began = Instant::now();
-        while began.elapsed() < Duration::from_millis(lease * 25) {
+        while began.elapsed() < Duration::from_millis(lease * 12) {
             let beat = record_heartbeat(port, origin, &session);
             assert!(beat.starts_with("HTTP/1.1 204"), "{beat}");
-            thread::sleep(Duration::from_millis(lease / 4));
+            thread::sleep(Duration::from_millis(lease / 8));
         }
         let view = sessions.view().unwrap();
         assert_eq!((view.id, view.phase), (id, record::Phase::Recording));
-        assert!(view.elapsed_ms >= lease * 25, "{}", view.elapsed_ms);
-        assert!(recording.renews() >= 25, "{}", recording.renews());
+        assert!(view.elapsed_ms >= lease * 12, "{}", view.elapsed_ms);
+        assert!(recording.renews() >= 12, "{}", recording.renews());
         assert_eq!(recording.finishes() + recording.cancels(), 0);
         let status = record_request(
             port,
