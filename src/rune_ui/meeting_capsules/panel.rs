@@ -353,7 +353,7 @@ fn result(
     // go before the new ones arrive.
     let reduced = capsule.reduced.get();
     let (words, strength, soft) = capsule.surface.title.line(title.clone(), reduced);
-    let label = handoff_label(p, capsule, &words, false)
+    let label = title_label(p, capsule, &words)
         .opacity(strength)
         .opacity_motion(Anim::INSTANT)
         .blur(soft)
@@ -530,18 +530,16 @@ fn result(
 /// A fast worker can report every phase within a few frames. Keep one text
 /// run instead of leaving several fading titles in the same place. Only its
 /// slot moves: the words wrap at their destination width from the first frame.
-fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
+fn title_label(p: Paint, c: &Capsule, title: &str) -> El {
     let label = text(title.to_owned())
         .key("title")
         .w_full()
         .motion(Spring::NONE)
         .font(TextStyle::new(13., 600.).lh(20.))
-        .color(if stopping { p.muted() } else { p.text() });
-    let label = if stopping {
-        label.truncate_fade()
-    } else {
-        label.wrap_anywhere().max_lines(TITLE_LINES).a11y_hidden()
-    };
+        .color(p.text())
+        .wrap_anywhere()
+        .max_lines(TITLE_LINES)
+        .a11y_hidden();
     col()
         .key("caption")
         .min_w(0.)
@@ -549,11 +547,7 @@ fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
         .py(TITLE_INSET)
         .px(PANEL_PAD + ROW_PX)
         .justify_center()
-        .transition(if stopping {
-            Transition::none()
-        } else {
-            replace(c)
-        })
+        .transition(replace(c))
         .child(label)
 }
 
@@ -655,9 +649,7 @@ pub(super) fn field_width(capsule: &Capsule) -> f32 {
         .max(FIELD_LEAST)
 }
 
-/// The recording: at rest only its levels and time; under the
-/// pointer it springs open into Stop and the copies, its header nearest the
-/// screen edge.
+/// The recording's meter: the field and the time it has run.
 pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     // A recording that has left the surface stops counting as it goes.
     let run = capsule
@@ -799,6 +791,9 @@ pub(super) fn arriving_header(
         )
 }
 
+/// The recording: at rest only its levels and time; under the
+/// pointer it springs open into Stop and the copies, its header nearest the
+/// screen edge.
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let open = capsule.hovered || capsule.stopping;
     // Rows that are leaving stay drawn until they have gone.
@@ -897,8 +892,6 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         .map_or((target_w, target_h, target_r), |o| {
             (grid(o.w), grid(o.h), o.radius)
         });
-    // The full-size layout exists before the first hover. Its origin cancels
-    // the moving clip's origin so neither the rows nor the meter ride its edge.
     let header = meter_band();
     let spacer = el().key("space").grow(1.0);
     let header = if right {
@@ -914,6 +907,8 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
             panel_height - if actions { OPEN_HEADER } else { REST_HEIGHT }
         },
     );
+    // The full-size layout exists before the first hover. Its origin cancels
+    // the moving clip's origin so neither the rows nor the meter ride its edge.
     let mut contents = col()
         .key("panel-contents")
         .size(PANEL_WIDTH, panel_height)
@@ -1069,13 +1064,15 @@ pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f
     RECORDING_WINDOW
 }
 
-/// The ready panel's window: its header, a summary while there is one or one
-/// is being written, and the three copies.
+/// Elsewhere the window stays at its largest and only the `.hit()` panel
+/// takes the pointer.
 #[cfg(not(target_os = "windows"))]
 pub(super) fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
     RECORDING_WINDOW
 }
 
+/// The ready panel's window: its header, a summary while there is one or one
+/// is being written, and the three copies.
 #[cfg(target_os = "windows")]
 pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
     let summary = if ready_summary(manifest).is_some() {

@@ -34,6 +34,22 @@ impl Capsule {
         }
     }
 
+    /// The controller accepted the recording: the offer's handoff ends and
+    /// the recording takes the surface it left.
+    pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
+        self.kind = Some(Kind::Recording(recording));
+        self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
+        self.live = Live::default();
+        self.hovered = false;
+        self.stopping = false;
+        self.expired = false;
+        self.throw.stop();
+        // Nothing here mounts with an entrance of its own: the surface
+        // carries the change.
+        tx.instant();
+        self.stir(tx);
+    }
+
     pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
         self.live = Live::default();
         self.kind = Some(Kind::Ready(manifest));
@@ -129,31 +145,3 @@ impl Pill {
     }
 }
 
-impl MeetingCapsules {
-    pub(super) fn timeout(
-        &self,
-        panel: OverlayHandle<Capsule>,
-        generation: u64,
-        timeout: Duration,
-    ) {
-        let current = self.generation.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(timeout);
-            if current.load(Ordering::SeqCst) == generation {
-                panel.update(move |capsule, _| {
-                    // Checked again when applied: a newer capsule may
-                    // have been shown since.
-                    if current.load(Ordering::SeqCst) != generation {
-                        return;
-                    }
-                    // A ready panel waits for the pointer to leave it.
-                    if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
-                        capsule.expired = true;
-                        return;
-                    }
-                    capsule.close();
-                });
-            }
-        });
-    }
-}

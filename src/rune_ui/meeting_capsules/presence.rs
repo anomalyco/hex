@@ -25,10 +25,9 @@ const CLEARED: f32 = 0.12;
 pub(super) struct Surface {
     /// 0 hidden, 1 shown.
     track: Track,
-    /// What the surface showed when it closed, drawn until it has gone.
-    pub(super) ghost: Option<Kind>,
-    /// When it closed: a leaving recording's time stops there.
-    left: Option<Instant>,
+    /// What the surface showed when it closed, and when it closed: drawn
+    /// until it has gone, and a leaving recording's time stops there.
+    pub(super) ghost: Option<(Kind, Instant)>,
     last: Option<f64>,
     /// The finished meeting's title and summary as they are drawn.
     pub(super) title: Roll<String>,
@@ -47,8 +46,7 @@ impl Surface {
 
     pub(super) fn leave(&mut self, kind: Option<Kind>) {
         if let Some(kind) = kind {
-            self.ghost = Some(kind);
-            self.left = Some(Instant::now());
+            self.ghost = Some((kind, Instant::now()));
         }
     }
 
@@ -58,8 +56,9 @@ impl Surface {
 
     /// The time a recording's clock reads: now, or when its surface closed.
     pub(super) fn clock(&self) -> Instant {
-        self.left
-            .filter(|_| self.leaving())
+        self.ghost
+            .as_ref()
+            .map(|&(_, left)| left)
             .unwrap_or_else(Instant::now)
     }
 
@@ -72,7 +71,6 @@ impl Surface {
             self.summary.settle();
         } else {
             self.ghost = None;
-            self.left = None;
         }
     }
 
@@ -159,7 +157,9 @@ impl<T: PartialEq + Clone> Roll<T> {
 impl Capsule {
     /// What the surface draws: what it shows, or what it showed as it goes.
     pub(super) fn drawn(&self) -> Option<&Kind> {
-        self.kind.as_ref().or(self.surface.ghost.as_ref())
+        self.kind
+            .as_ref()
+            .or(self.surface.ghost.as_ref().map(|(kind, _)| kind))
     }
 
     /// Shows `kind` in this capsule's window, in place of whatever it showed
@@ -176,12 +176,12 @@ impl Capsule {
         self.kind = Some(kind);
         self.presentation = presentation;
         self.stage = Default::default();
-        self.opened = None;
         self.more_open = false;
         self.set_offer_timer(timer);
         self.live = Live::default();
         self.waveform = None;
         self.hovered = false;
+        self.stopping = false;
         self.expired = false;
         self.corner = corner;
         self.throw.stop();
@@ -202,7 +202,6 @@ impl Capsule {
         let shown = self.kind.is_some();
         if shown {
             self.surface.ghost = None;
-            self.surface.left = None;
         }
         let (title, summary) = match self.drawn() {
             Some(Kind::Finalizing { .. }) => (Some(tr("Transcribing…").to_owned()), None),
@@ -259,10 +258,8 @@ impl Capsule {
         if !shown && s.track == Track::at(0.0) {
             // Gone: nothing is drawn, and only now does the window hide.
             s.ghost = None;
-            s.left = None;
             s.last = None;
             self.stage = Default::default();
-            self.opened = None;
             if let Some(hide) = &self.hide {
                 hide();
             }

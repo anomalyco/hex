@@ -21,35 +21,49 @@ pub(super) struct Presentation {
     last: Option<f64>,
     pub(super) icon: Option<rune::Pixels>,
     /// The offer Record was pressed on, until it has left the surface.
-    departure: Option<(OfferId, MeetingCandidate)>,
-    /// When Record was pressed, on the surface's clock.
-    begun: Option<f64>,
+    departure: Option<Departure>,
     /// The recording lives in the window its offer opened.
     inherited: bool,
     pub(super) hold_hover: bool,
     pub(super) pointer: Option<(f32, f32)>,
 }
 
+/// The offer a Record press is seeing out, on the surface's clock.
+struct Departure {
+    id: OfferId,
+    candidate: MeetingCandidate,
+    /// When Record was pressed, latched the first frame it was asked for.
+    begun: Option<f64>,
+}
+
 impl Presentation {
     pub(super) fn inherits_offer_window(&self) -> bool {
-        self.inherited || self.departure.is_some()
+        self.inherited
     }
     /// Record was pressed and the offer hasn't finished leaving.
     pub(super) fn departing(&self) -> bool {
         self.departure.is_some()
     }
     pub(super) fn begin(&mut self, id: OfferId, candidate: MeetingCandidate) {
-        self.departure = Some((id, candidate));
+        self.departure = Some(Departure {
+            id,
+            candidate,
+            begun: None,
+        });
         self.inherited = true;
         self.hold_hover = true;
     }
+    /// When Record was pressed, on the surface's clock.
     pub(super) fn begun(&mut self, now: f64) -> f64 {
-        *self.begun.get_or_insert(now)
+        let Some(departure) = self.departure.as_mut() else {
+            return now;
+        };
+        *departure.begun.get_or_insert(now)
     }
     #[cfg(test)]
     pub(super) fn backdate(&mut self, now: f64) {
-        if self.departure.is_some() {
-            self.begun = Some(now);
+        if let Some(departure) = self.departure.as_mut() {
+            departure.begun = Some(now);
         }
     }
     /// The offer and "Starting…" have left a recording's surface: the
@@ -274,11 +288,11 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
 }
 
 pub(super) fn transition(c: &Capsule, p: Paint, dark: Paint) -> Option<El> {
-    let (id, candidate) = c.presentation.departure.as_ref()?;
+    let departure = c.presentation.departure.as_ref()?;
     if !matches!(c.drawn(), Some(Kind::Offer(..) | Kind::Recording(_))) {
         return None;
     }
-    Some(draw(p, dark, c, *id, candidate))
+    Some(draw(p, dark, c, departure.id, &departure.candidate))
 }
 
 fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandidate) -> El {

@@ -193,6 +193,17 @@ impl Presence {
     }
 }
 
+/// What one step of the stage found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Stepped {
+    /// Something drawn moved.
+    Moved,
+    /// Nothing drawn moved, but a layer waits its turn: the clock runs on.
+    Waiting,
+    /// At rest.
+    Still,
+}
+
 #[derive(Default)]
 pub(super) struct Stage {
     /// Width, height, radius, dark. `None` until something shows: a surface
@@ -207,7 +218,8 @@ pub(super) struct Stage {
     followed: Option<f64>,
     /// The outline itself is in flight, not only a layer.
     travelling: bool,
-    waiting: bool,
+    /// When the pointer opened the recording, for its rows' order of arrival.
+    pub(super) opened: Option<f64>,
     veil: (f32, f32),
     reduced: bool,
 }
@@ -322,13 +334,13 @@ impl Stage {
         }
     }
 
-    /// Steps every track toward `target`; true while anything still moves.
-    pub(super) fn step(&mut self, target: &Target, reduced: bool, now: f64) -> bool {
+    /// Steps every track toward `target`; what the step found.
+    pub(super) fn step(&mut self, target: &Target, reduced: bool, now: f64) -> Stepped {
         self.reduced = reduced;
         self.followed = None;
         let Some(tracks) = &mut self.outline else {
             self.land(target, now);
-            return true;
+            return Stepped::Moved;
         };
         let dt = self
             .last
@@ -362,13 +374,9 @@ impl Stage {
         let mut waiting = false;
         for layer in Self::layers() {
             let wants = target.wants(layer, now);
-            // A layer whose turn hasn't come keeps the clock running.
-            waiting |= !wants
-                && match layer {
-                    Layer::Pending => target.pending.is_some(),
-                    Layer::Action(row) => target.actions.is_some() && (row > 0 || target.stop),
-                    _ => false,
-                };
+            // A layer whose turn hasn't come keeps the clock running: it
+            // wants to show, only not yet.
+            waiting |= !wants && target.wants(layer, f64::INFINITY);
             let track = &mut self.layers[layer.index()];
             let spring = match (reduced, wants) {
                 (true, true) => REDUCED,
@@ -385,13 +393,13 @@ impl Stage {
             moving |= track.step(f32::from(wants), spring, dt, 0.002);
         }
         self.last = (moving || waiting).then_some(now);
-        self.waiting = waiting && !moving;
-        moving || waiting
-    }
-
-    /// Nothing drawn changed in the last step: a layer is only waiting its turn.
-    pub(super) fn idling(&self) -> bool {
-        self.waiting
+        if moving {
+            Stepped::Moved
+        } else if waiting {
+            Stepped::Waiting
+        } else {
+            Stepped::Still
+        }
     }
 
     fn layers() -> impl Iterator<Item = Layer> {
@@ -428,7 +436,11 @@ impl Capsule {
         };
         // A surface that is leaving says nothing it hadn't already said.
         let may_say = self.kind.is_some() || self.stage.presence(Layer::Pending).shows();
-        let target = match self.kind.as_ref().or(self.surface.ghost.as_ref()) {
+        let target = match self
+            .kind
+            .as_ref()
+            .or(self.surface.ghost.as_ref().map(|(kind, _)| kind))
+        {
             Some(Kind::Offer(..)) if self.presentation.departing() => Target {
                 pending: may_say.then(|| self.presentation.begun(now) + PENDING_LABEL_AFTER),
                 ..none
@@ -442,9 +454,9 @@ impl Capsule {
                 return Some((target, true));
             }
             Some(Kind::Recording(shown)) => {
-                let open = self.hovered || self.stopping;
+                let open = self.open();
                 if !open {
-                    self.opened = None;
+                    self.stage.opened = None;
                 }
                 Target {
                     outline: if open {
@@ -453,7 +465,7 @@ impl Capsule {
                         pill(panel::rest_width(shown))
                     },
                     meter: true,
-                    actions: open.then(|| *self.opened.get_or_insert(now)),
+                    actions: open.then(|| *self.stage.opened.get_or_insert(now)),
                     field: panel::field_wanted(self),
                     ..none
                 }
@@ -463,7 +475,7 @@ impl Capsule {
             Some(Kind::Finalizing { .. } | Kind::Ready(_)) => Target {
                 outline: panel(panel::open_height_without_notice()),
                 meter: true,
-                actions: Some(self.opened.unwrap_or(f64::MIN)),
+                actions: Some(self.stage.opened.unwrap_or(f64::MIN)),
                 stop: false,
                 field: panel::field_wanted(self),
                 ..none
@@ -482,32 +494,35 @@ impl Capsule {
             && self.presentation.step(self.more_open, reduced, now);
         let Some((target, follow)) = self.stage_target(now) else {
             self.stage = Stage::default();
-            self.opened = None;
             return surface;
         };
-        let moving = if follow {
+        let stepped = if follow {
             self.stage.follow(&target, now);
             if paging {
                 tx.instant();
             }
-            paging
+            if paging {
+                Stepped::Moved
+            } else {
+                Stepped::Still
+            }
         } else {
             self.stage.step(&target, reduced, now)
         };
         if matches!(self.kind, Some(Kind::Recording(_))) {
             self.presentation.arrived(&self.stage);
         }
-        if moving {
+        if stepped != Stepped::Still {
             tx.wake_after(Duration::ZERO);
         }
-        surface || (moving && (follow || !self.stage.idling()))
+        surface || (stepped != Stepped::Still && (follow || stepped == Stepped::Moved))
     }
 
     /// The surface as it rests for what the capsule shows now.
     #[cfg(test)]
     pub(super) fn settle_stage(&mut self, now: f64) {
-        if self.hovered || self.stopping {
-            self.opened = Some(now - 10.0);
+        if self.open() {
+            self.stage.opened = Some(now - 10.0);
         }
         self.presentation.backdate(now - 10.0);
         match self.stage_target(now) {
@@ -553,10 +568,10 @@ mod tests {
     #[test]
     fn a_surface_appears_at_rest_and_moves_only_when_its_target_does() {
         let mut stage = Stage::default();
-        assert!(stage.step(&target(148.0, 36.0), false, 0.0));
+        assert_eq!(stage.step(&target(148.0, 36.0), false, 0.0), Stepped::Moved);
         assert_eq!(stage.outline().unwrap().w, 148.0);
         assert_eq!(stage.presence(Layer::Meter).opacity, 1.0);
-        assert!(!stage.step(&target(148.0, 36.0), false, 1.0 / 60.0));
+        assert_eq!(stage.step(&target(148.0, 36.0), false, 1.0 / 60.0), Stepped::Still);
         assert!(stage.resting());
         assert_eq!(stage.veil(), (0.0, 0.0));
     }
@@ -711,7 +726,7 @@ mod tests {
             ..target(148.0, 36.0)
         };
         for frame in 1..=3 {
-            assert!(stage.step(&pending, false, frame as f64 / 60.0));
+            assert_eq!(stage.step(&pending, false, frame as f64 / 60.0), Stepped::Moved);
             assert!(!stage.presence(Layer::Pending).shows());
         }
         let live = target(148.0, 36.0);
@@ -731,7 +746,7 @@ mod tests {
             actions: Some(0.0),
             ..target(252.0, 227.0)
         };
-        assert!(stage.step(&open, true, 1.0 / 60.0));
+        assert_eq!(stage.step(&open, true, 1.0 / 60.0), Stepped::Moved);
         assert_eq!(stage.outline().unwrap().w, 252.0);
         assert_eq!(stage.veil(), (0.0, 0.0));
         let fading = stage.presence(Layer::Action(0));

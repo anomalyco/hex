@@ -309,8 +309,6 @@ struct Capsule {
     stage: stage::Stage,
     /// The whole surface arriving and leaving, and its lines changing.
     surface: presence::Surface,
-    /// When the pointer opened the recording, for its rows' order of arrival.
-    opened: Option<f64>,
     live: Live,
     waveform: Option<Box<waveform::Listening>>,
     commands: SyncSender<ControllerCommand>,
@@ -376,11 +374,13 @@ impl Capsule {
             return;
         }
         if let (Some(resize), Some(Kind::Recording(shown))) = (&self.resize, &self.kind) {
-            resize(recording_window_size(
-                self.hovered || self.stopping,
-                Some(shown),
-            ));
+            resize(recording_window_size(self.open(), Some(shown)));
         }
+    }
+
+    /// The recording's pill is held open: by the pointer, or by Stop.
+    fn open(&self) -> bool {
+        self.hovered || self.stopping
     }
 
     fn set_hovered(&mut self, inside: bool) {
@@ -545,9 +545,7 @@ impl Capsule {
         }
         match &self.kind {
             Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
-            Some(Kind::Recording(shown)) => {
-                recording_window_size(self.hovered || self.stopping, Some(shown))
-            }
+            Some(Kind::Recording(shown)) => recording_window_size(self.open(), Some(shown)),
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
             Some(Kind::Offer(..)) => self.presentation.window(),
             Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
@@ -672,7 +670,6 @@ fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
 /// recording capsule in the configured corner.
 pub(crate) struct MeetingCapsules {
     panel: OverlayHandle<Capsule>,
-    panel_offer: Option<OfferId>,
     /// While a real offer is visible it already occupies the recording host.
     handoff: offer::Host,
     pill: Pill,
@@ -831,7 +828,6 @@ impl MeetingCapsules {
                     presentation: Default::default(),
                     stage: Default::default(),
                     surface: Default::default(),
-                    opened: None,
                     live: Live::default(),
                     waveform: None,
                     commands: commands.clone(),
@@ -916,7 +912,6 @@ impl MeetingCapsules {
         });
         Self {
             panel,
-            panel_offer: None,
             handoff: Default::default(),
             pill,
             generation: Arc::default(),
@@ -968,10 +963,8 @@ impl MeetingCapsules {
                 );
                 self.show_panel(Kind::Offer(*id, candidate.clone()), None);
             }
-            ControllerEvent::OfferWithdrawn(id) => {
-                if self.panel_offer == Some(*id) {
-                    self.close_panel();
-                }
+            ControllerEvent::OfferWithdrawn(_) => {
+                // The shown offer's own route closes it.
             }
             ControllerEvent::Starting(_) | ControllerEvent::Transcribing
                 if route != offer::Route::Ordinary => {}
@@ -1053,7 +1046,7 @@ impl MeetingCapsules {
 
     fn show_panel(&mut self, kind: Kind, timeout: Option<Duration>) {
         let host = match &kind {
-            Kind::Offer(id, c) if c.key != "preview" => offer::Host::Offered(*id),
+            Kind::Offer(id, _) => offer::Host::Offered(*id),
             _ => offer::Host::Panel,
         };
         if host.on_pill() != self.handoff.on_pill() {
@@ -1089,7 +1082,6 @@ impl MeetingCapsules {
             Kind::Offer(id, _) => Some(id),
             _ => None,
         };
-        self.panel_offer = offer_id.filter(|_| !host.on_pill());
         let rearm = offer_id
             .is_some()
             .then(|| offer::timer(panel.clone(), self.generation.clone(), generation));
@@ -1113,6 +1105,30 @@ impl MeetingCapsules {
         if let Some(timeout) = timeout {
             self.timeout(self.panel.clone(), generation, timeout);
         }
+    }
+
+    /// Closes the capsule shown for `generation` after `timeout`, unless a
+    /// newer one replaced it or the pointer holds a ready panel open.
+    fn timeout(&self, panel: OverlayHandle<Capsule>, generation: u64, timeout: Duration) {
+        let current = self.generation.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            if current.load(Ordering::SeqCst) == generation {
+                panel.update(move |capsule, _| {
+                    // Checked again when applied: a newer capsule may
+                    // have been shown since.
+                    if current.load(Ordering::SeqCst) != generation {
+                        return;
+                    }
+                    // A ready panel waits for the pointer to leave it.
+                    if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
+                        capsule.expired = true;
+                        return;
+                    }
+                    capsule.close();
+                });
+            }
+        });
     }
 
     /// Linux: calls `unshown` with Rune's reason when the offer just shown
@@ -1140,7 +1156,6 @@ impl MeetingCapsules {
     // The capsule hides its own window once its surface has gone, and only
     // while it still shows nothing, so closing then showing stays shown.
     fn close_panel(&mut self) {
-        self.panel_offer = None;
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.panel_handle()
             .update(|capsule, tx| capsule.dismiss(tx));
@@ -1572,7 +1587,6 @@ mod tests {
             presentation,
             stage: Default::default(),
             surface: presence::Surface::shown(),
-            opened: None,
             live: Live::default(),
             waveform: None,
             commands,
