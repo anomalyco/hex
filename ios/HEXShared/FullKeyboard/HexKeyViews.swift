@@ -6,6 +6,8 @@ import UIKit
 @MainActor
 final class HexKeyControl: UIControl {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { setNeedsDisplay() } } }
+    /// Sits in the suggestion strip instead of the bottom row (prototype).
+    var inStrip = false { didSet { if inStrip != oldValue { setNeedsDisplay() } } }
     var isWarm = false { didSet { if isWarm != oldValue { setNeedsDisplay(); updateAccessibility() } } }
     var cornerRadius: CGFloat = FullKeyboardPalette.cornerRadius { didSet { if cornerRadius != oldValue { setNeedsDisplay() } } }
     /// The drawn keycap inside the control's (larger) touch target.
@@ -114,22 +116,23 @@ final class HexKeyControl: UIControl {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let cap = keycapFrame == .zero ? bounds : keycapFrame
-        context.fillKeycap(
-            cap,
-            fill: isHighlighted ? palette.keyPressedFill : palette.keyFill,
-            radius: cornerRadius
-        )
+        if !inStrip {
+            context.fillKeycap(
+                cap,
+                fill: isHighlighted ? palette.keyPressedFill : palette.keyFill,
+                radius: cornerRadius
+            )
+        } else if isHighlighted {
+            palette.keyPressedFill.setFill()
+            UIBezierPath(roundedRect: cap, cornerRadius: cap.height / 2).fill()
+        }
         let markSize: CGFloat = min(19, cap.height * 0.56)
         let markRect = CGRect(x: cap.midX - markSize / 2, y: cap.midY - markSize / 2, width: markSize, height: markSize)
         if isWarm {
             HexMarkPath.draw(in: context, rect: markRect, color: palette.textBase, coreColor: palette.warmCore)
         } else {
-            HexMarkPath.draw(in: context, rect: markRect, color: palette.textMuted, coreColor: nil)
-            let config = UIImage.SymbolConfiguration(pointSize: 8.5, weight: .bold)
-            if let arrow = UIImage(systemName: "arrow.up.forward", withConfiguration: config)?
-                .withTintColor(palette.textMuted, renderingMode: .alwaysOriginal) {
-                arrow.draw(at: CGPoint(x: cap.maxX - 5 - arrow.size.width, y: cap.minY + 4))
-            }
+            // A tap dictates inside the keyboard now, so no ↗ "opens Hex" badge.
+            HexMarkPath.draw(in: context, rect: markRect, color: palette.textBase, coreColor: nil)
         }
     }
 }
@@ -461,12 +464,14 @@ final class HexStyleMenuView: UIView {
         super.layoutSubviews()
         let width: CGFloat = 224
         let padding: CGFloat = 5
-        let available = max(80, anchor.minY - 6 - 4)
+        // Opens away from the edge the Hex key sits on: down from the strip, up from the keys.
+        let opensDown = anchor.midY < bounds.midY
+        let available = opensDown ? max(80, bounds.height - anchor.maxY - 6 - 4) : max(80, anchor.minY - 6 - 4)
         let rowH = min(36, (available - 2 * padding) / CGFloat(max(1, rows.count)))
         let height = CGFloat(rows.count) * rowH + 2 * padding
-        // Opens toward the middle of the keyboard: the Hex key sits right of space.
         let x = min(bounds.width - 6 - width, max(6, anchor.maxX - width))
-        panel.frame = CGRect(x: x, y: max(2, anchor.minY - 6 - height), width: width, height: height)
+        let y = opensDown ? anchor.maxY + 6 : max(2, anchor.minY - 6 - height)
+        panel.frame = CGRect(x: x, y: y, width: width, height: height)
         for (i, row) in rows.enumerated() {
             row.frame = CGRect(x: padding, y: padding + CGFloat(i) * rowH, width: width - 2 * padding, height: rowH)
         }

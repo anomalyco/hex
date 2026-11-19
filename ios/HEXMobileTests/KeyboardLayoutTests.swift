@@ -140,19 +140,29 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     func testBottomRowMatchesIOS26EmailAndURLRightOfSpace() {
-        XCTAssertEqual(bottomRow(KeyboardLayout(width: 393)), [.layerSwitch(.numbers), .space, .hex, .returnKey])
+        // The Hex key sits at the strip's trailing edge, so the bottom row is Apple's.
+        XCTAssertEqual(bottomRow(KeyboardLayout(width: 393)), [.layerSwitch(.numbers), .space, .returnKey])
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 375, showsGlobe: true)),
-            [.layerSwitch(.numbers), .globe, .space, .hex, .returnKey]
+            [.layerSwitch(.numbers), .globe, .space, .returnKey]
         )
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 393, layer: .numbers, field: .email)),
-            [.layerSwitch(.letters), .space, .character("@"), .character("."), .hex, .returnKey]
+            [.layerSwitch(.letters), .space, .character("@"), .character("."), .returnKey]
         )
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 393, field: .url)),
-            [.layerSwitch(.numbers), .space, .character("."), .character("/"), .hex, .returnKey]
+            [.layerSwitch(.numbers), .space, .character("."), .character("/"), .returnKey]
         )
+    }
+
+    func testHexKeySitsAtTheStripsTrailingEdge() {
+        let layout = KeyboardLayout(width: 402)
+        let hex = layout.key(.hex)!
+        XCTAssertEqual(hex.row, -1)
+        XCTAssertEqual(hex.frame.maxX, 402 - layout.metrics.side, accuracy: 0.001)
+        XCTAssertEqual(hex.frame.midY, layout.metrics.stripHeight / 2, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(layout.stripFrame.maxX, hex.frame.minX)
     }
 
     func testRowThreeModifiersFollowTheLayer() {

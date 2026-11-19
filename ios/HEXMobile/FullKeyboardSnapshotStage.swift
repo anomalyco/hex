@@ -13,7 +13,12 @@ struct FullKeyboardSnapshotStage: View {
             return nil
         }
         let value = args[idx + 1]
-        return value.hasPrefix("full-keyboard-") ? value : nil
+        guard value.hasPrefix("full-keyboard-") else { return nil }
+        if let p = args.firstIndex(of: "--hex-placement"), p + 1 < args.count,
+           let placement = HexKeyPlacement(rawValue: args[p + 1]) {
+            HexKeyPlacement.current = placement
+        }
+        return value
     }
 
     private var darkField: Bool { scene.hasSuffix("-dark-field") }
@@ -149,6 +154,29 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.didInsertDictation("should be home by 7:30. Start without me.")
             case "style":
                 view.debugShowStyleMenu()
+            case "morph":
+                // Loops idle → recording → idle so the strip morph can be screen-recorded.
+                func cycle(_ start: TimeInterval) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        model.configureFixture(
+                            snapshot: KeyboardSnapshot(
+                                state: .recording,
+                                heartbeat: start,
+                                expiresAt: start + 15 * 60,
+                                recordingStartedAt: start - 1,
+                                audioLevel: 0.7,
+                                loudnessDB: -30,
+                                jobID: "snap-job"
+                            ),
+                            now: start
+                        )
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                            model.configureFixture(snapshot: warm, now: start)
+                            cycle(start)
+                        }
+                    }
+                }
+                cycle(now)
             default:
                 break
             }
