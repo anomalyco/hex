@@ -210,7 +210,6 @@ struct State {
     active: Option<String>,
     /// A start is opening the microphone outside the lock.
     starting: bool,
-    denied: HashMap<String, Instant>,
     next_prompt: u64,
     prompting: bool,
     next_id: u64,
@@ -397,11 +396,7 @@ impl Sessions {
                 request.state,
             );
         }
-        if state
-            .denied
-            .get(&key)
-            .is_some_and(|denied| *denied + self.timings.cooldown > now)
-        {
+        if self.permissions.cooling(&key, self.timings.cooldown) {
             return HttpResponse::code(429, "consent-cooldown");
         }
         if state.prompting {
@@ -451,10 +446,13 @@ impl Sessions {
                 )
             }
             Answer::Deny => {
-                state.denied.insert(key, Instant::now());
+                self.permissions.refused(&key);
                 HttpResponse::code(403, "consent-denied")
             }
-            Answer::Timeout => HttpResponse::code(403, "consent-timeout"),
+            Answer::Timeout => {
+                self.permissions.refused(&key);
+                HttpResponse::code(403, "consent-timeout")
+            }
             Answer::Unavailable => HttpResponse::code(403, "record-unavailable"),
         }
     }
@@ -846,9 +844,6 @@ fn prune(state: &mut State, now: Instant) {
     state.sessions.retain(|_, session| {
         session.phase.live() || session.deadline + Duration::from_secs(300) > now
     });
-    state
-        .denied
-        .retain(|_, denied| *denied + DENY_COOLDOWN > now);
 }
 
 /// Allow Once is exactly one recording session: when that session ends, its
@@ -884,7 +879,7 @@ fn remaining(deadline: Instant) -> u64 {
 }
 
 /// A recipient's grant identity; its name and icon are not part of it.
-fn recipient_key(recipient: &Recipient) -> String {
+pub(super) fn recipient_key(recipient: &Recipient) -> String {
     match recipient {
         Recipient::Web { origin, .. } => format!("web:{origin}"),
         Recipient::Native {

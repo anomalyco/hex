@@ -27,8 +27,9 @@ switch on, Hex answers these routes' CORS for every `http(s)` origin, so any
 page the person visits can send a consent request. An unknown page never
 gets a dialog: it is refused and listed for the person to allow or block,
 and only an allowed page can open the window, where it still needs Allow
-Once or Always Allow. One dialog at a time, a 30 s cooldown per denied
-recipient, and the window's 1 s allow guard still apply.
+Once or Always Allow. One dialog at a time, a 30 s cooldown per denied or
+unanswered recipient (across both asks), and the window's allow guard
+still apply.
 
 The recording section is [below](#recording-by-a-paired-client); the existing
 upload flow keeps its own paths and scope.
@@ -45,7 +46,7 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 ├── A dialog is already open -> 409 consent-busy
 ├── Allowed origin -> Hex's permission window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
 │   ├── Deny, Return, Escape, or 60 s with no answer -> 403, no code
-│   │   └── Deny also starts a 30 s cooldown for that origin (429 consent-cooldown)
+│   │   └── Deny or no answer starts a 30 s cooldown for that origin, across both asks (429 consent-cooldown)
 │   └── Allow Once or Always Allow -> 200 { code, expiresInMs, origin, scope, state }
 ├── POST /connect/token { code, codeVerifier }
 │   ├── Wrong origin, wrong verifier, spent, or expired -> 403 invalid-grant
@@ -188,8 +189,8 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
   grant. Codes and tokens are 32 random bytes from `getrandom`, stored only in
   this process.
 - Only Always Allow remembers the origin and capability. Each token still authorizes just one file.
-  One dialog at a time; a Deny starts a cooldown; an unanswered dialog ends
-  after 60 s.
+  One dialog at a time; a Deny, or a dialog left unanswered for 60 s, starts
+  a cooldown for that recipient in both asks.
 - The browser offers no server-side proof that its request followed a click
   (`navigator.userActivation` never leaves the page), so the native dialog is
   the gate it can enforce: nothing is allowed without a press (and none in the
@@ -204,7 +205,7 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
 | Code lifetime | 120 s, one use |
 | Upload token lifetime | 120 s, one use |
 | Dialog wait | 60 s, then `403 consent-timeout` |
-| Deny cooldown | 30 s per origin (`429 consent-cooldown`) |
+| Deny cooldown | 30 s per recipient after a Deny or no answer, across transcription and recording (`429 consent-cooldown`) |
 | Concurrent dialogs | 1 (`409 consent-busy`) |
 | Upload size | The route's existing 64 MiB |
 
@@ -328,7 +329,7 @@ Native client (socket or pipe)     Web page (loopback + Origin)
              │     recipient, team note, and that pairing starts nothing
              │     [Deny] [Allow Once] [Always Allow]
              │   ├── Deny / Return / Escape / 60 s -> 403, no code
-             │   │     Deny also cools that recipient down for 30 s
+             │   │     Deny or no answer cools that recipient down for 30 s, both asks
              │   └── Allow -> 200 { code, expiresInMs, scope: "record:pair", state }
              ├── POST /record/token { code, codeVerifier }
              │   └── correct, same verified channel -> 200 { grantId, grantToken,
@@ -480,7 +481,7 @@ save never grants access, and a failed revoke does not disappear from the list.
 | 409 | `stopped` | A check-in after the recording stopped (lease, Stop in Hex, or the client's `finish`) |
 | 409 | `already-paired` | That recipient already has a grant |
 | 409 | `session-busy`, `session-expired`, `session-finished`, `session-cancelled`, `not-started`, `finish-in-progress` | Session state |
-| 429 | `consent-cooldown` | The recipient was denied less than 30 s ago |
+| 429 | `consent-cooldown` | The recipient was denied, or left unanswered, less than 30 s ago, in either ask |
 | 503 | `capture-unavailable` | No capture loop could start the recording |
 | 503 | `native-busy` | The native channel already serves 8 clients |
 

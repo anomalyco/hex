@@ -17,11 +17,12 @@
 //! are display data: matching an entry never reads them, and an icon that no
 //! longer reads is dropped.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -272,6 +273,10 @@ pub(crate) struct Permissions {
     entries: Mutex<Vec<Entry>>,
     websites: Mutex<Websites>,
     next_id: Mutex<u64>,
+    /// When each recipient was last denied, or let its ask time out, in
+    /// either ask (transcription or recording): one cooldown across both.
+    /// Memory only.
+    refused: Mutex<HashMap<String, Instant>>,
 }
 
 impl Permissions {
@@ -295,7 +300,24 @@ impl Permissions {
             entries: Mutex::new(entries),
             websites: Mutex::new(websites),
             next_id: Mutex::new(next_id),
+            refused: Mutex::default(),
         })
+    }
+
+    /// Whether `recipient` was refused (Deny or no answer) less than
+    /// `cooldown` ago, in either ask.
+    pub(crate) fn cooling(&self, recipient: &str, cooldown: Duration) -> bool {
+        let mut refused = lock(&self.refused);
+        let now = Instant::now();
+        refused.retain(|_, at| *at + cooldown.max(super::record::DENY_COOLDOWN) > now);
+        refused
+            .get(recipient)
+            .is_some_and(|at| *at + cooldown > now)
+    }
+
+    /// Starts `recipient`'s cooldown: it was denied, or nobody answered.
+    pub(crate) fn refused(&self, recipient: &str) {
+        lock(&self.refused).insert(recipient.to_owned(), Instant::now());
     }
 
     /// Where `origin` stands in the website lists.
