@@ -28,7 +28,7 @@ impl Capsule {
             if let Some(resize) = &self.resize {
                 resize((
                     RECORDING_WINDOW.0,
-                    OPEN_HEADER + 3. * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD + 2. * CAPSULE_INSET,
+                    panel::open_height_without_notice() + 2. * CAPSULE_INSET,
                 ));
             }
         }

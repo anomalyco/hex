@@ -163,10 +163,7 @@ fn panel_row(
         )
         .children(hint);
     let row_el = if first {
-        row_el
-            .fill(p.k.c.layer_02)
-            .hover(p.k.c.hover)
-            .mb(FIRST_ROW_GAP)
+        row_el.fill(p.k.c.layer_02).hover(p.k.c.hover).mb(ROW_GAP)
     } else {
         row_el.hover(p.k.c.hover)
     };
@@ -460,10 +457,11 @@ fn result(
         .key("rows")
         .px(PANEL_PAD)
         .children(copy_rows(p, capsule, false));
+    // The raised copy is as far from the title's row as from the next copy.
     let rows = if top {
-        rows.pb(PANEL_PAD)
+        rows.pt(ROW_GAP).pb(PANEL_PAD)
     } else {
-        rows.pt(PANEL_PAD)
+        rows.pt(PANEL_PAD).pb(ROW_GAP)
     };
     // The copies dim and return on their own spring, wherever the surface is.
     let rows = if manifest.is_none() {
@@ -626,7 +624,7 @@ pub(super) fn open_height(shown: &Recording) -> f32 {
 
 /// The open panel a finished meeting grows from.
 pub(super) fn open_height_without_notice() -> f32 {
-    OPEN_HEADER + 3.0 * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD
+    OPEN_HEADER + ROW_GAP + COPIES_HEIGHT + PANEL_PAD
 }
 
 /// Where Stop is while recording and where the title is afterwards: the same
@@ -681,8 +679,8 @@ impl Capsule {
         };
         let near = match row {
             0 => REST_HEIGHT,
-            1 => OPEN_HEADER + notice,
-            row => OPEN_HEADER + notice + FIRST_ROW_GAP + (row - 1) as f32 * ROW_HEIGHT,
+            1 => OPEN_HEADER + notice + ROW_GAP,
+            row => OPEN_HEADER + notice + 2.0 * ROW_GAP + (row - 1) as f32 * ROW_HEIGHT,
         };
         let smooth = |t: f32| {
             let t = t.clamp(0.0, 1.0);
@@ -852,7 +850,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
             .absolute(
                 0.0,
                 if top {
-                    panel_height - (3.0 * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD)
+                    panel_height - (COPIES_HEIGHT + PANEL_PAD)
                 } else {
                     PANEL_PAD
                 },
@@ -959,10 +957,7 @@ pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f
         }
         (
             RECORDING_WINDOW.0,
-            OPEN_HEADER
-                + 3. * ROW_HEIGHT
-                + FIRST_ROW_GAP
-                + PANEL_PAD
+            open_height_without_notice()
                 + 2. * CAPSULE_INSET
                 + if shown.and_then(recording_notice).is_some() {
                     NOTICE_HEIGHT
@@ -985,17 +980,12 @@ pub(super) fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
 #[cfg(target_os = "windows")]
 pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
     let summary = if ready_summary(manifest).is_some() {
-        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + FIRST_ROW_GAP
+        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + ROW_GAP
     } else {
         0.0
     };
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        RESULT_HEADER_MAX
-            + summary
-            + 3.0 * ROW_HEIGHT
-            + FIRST_ROW_GAP
-            + PANEL_PAD
-            + 2.0 * CAPSULE_INSET,
+        RESULT_HEADER_MAX + summary + ROW_GAP + COPIES_HEIGHT + PANEL_PAD + 2.0 * CAPSULE_INSET,
     )
 }

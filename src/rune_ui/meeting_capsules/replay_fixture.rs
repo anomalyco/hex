@@ -694,7 +694,7 @@ fn the_panel_opens_width_first_and_its_rows_follow_in_order() {
         let [_, _, w, h] = shot.pill.unwrap();
         let (dw, dh) = (
             (w - REST_WIDTH) / (PANEL_WIDTH - REST_WIDTH),
-            (h - REST_HEIGHT) / (219. - REST_HEIGHT),
+            (h - REST_HEIGHT) / (panel::open_height_without_notice() - REST_HEIGHT),
         );
         if dh > 0.02 && dh < 0.98 {
             assert!(dw > dh, "the width trails at {w}×{h}");
@@ -810,7 +810,7 @@ fn reduced_motion_lands_the_surface_and_only_fades() {
         // The outline is either where it was or where it is going.
         let rests = [
             (REST_WIDTH, REST_HEIGHT),
-            (PANEL_WIDTH, 219.),
+            (PANEL_WIDTH, panel::open_height_without_notice()),
             (a[2], a[3]),
         ];
         assert!(

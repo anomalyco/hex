@@ -105,12 +105,15 @@ const PANEL_PAD: f32 = 5.0;
 const HEADER_HEIGHT: f32 = 36.0;
 const ROW_HEIGHT: f32 = 44.0;
 const OPEN_HEADER: f32 = REST_HEIGHT + ROW_HEIGHT;
+/// The three copies and the gap under the raised one.
+const COPIES_HEIGHT: f32 = 3.0 * ROW_HEIGHT + ROW_GAP;
 /// Concentric with the panel across [`PANEL_PAD`].
 const ROW_RADIUS: f32 = PANEL_RADIUS - PANEL_PAD;
 /// A row's icon and label inset; titles and summaries share it.
 const ROW_PX: f32 = 9.0;
-/// Under the first row, which is raised.
-const FIRST_ROW_GAP: f32 = 2.0;
+/// Between two rows that can both be filled: under the raised first copy,
+/// and between Stop and the copies.
+const ROW_GAP: f32 = 2.0;
 /// "Microphone is silent" or "Started automatically" under the header.
 const NOTICE_HEIGHT: f32 = 20.0;
 /// The ready panel's summary: Apple Intelligence's two sentences.
@@ -125,9 +128,9 @@ const RECORDING_WINDOW: (f32, f32) = (
     RESULT_HEADER_MAX
         + SUMMARY_LINE * SUMMARY_LINES as f32
         + ROW_PX
-        + FIRST_ROW_GAP
-        + 3.0 * ROW_HEIGHT
-        + FIRST_ROW_GAP
+        + ROW_GAP
+        + ROW_GAP
+        + COPIES_HEIGHT
         + PANEL_PAD
         + 2.0 * CAPSULE_INSET,
 );
