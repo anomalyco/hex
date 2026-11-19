@@ -69,22 +69,33 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
-├── Linux: strokes are placed on the recorded screen in its logical points.
-│   A monitor pick whose portal names the output (`mapping_id`, as
-│   xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`) opens the pen on
-│   that output with its logical size from xdg-output (linux::output::find),
-│   so strokes land on the recorded monitor even when the overlay had opened
-│   on another one. Otherwise it uses the ScreenCast portal's stream size
-│   when it reports one smaller than the frames, so a fractional scale
-│   (1.5, 1.33), which reaches the overlay rounded up to 2, no longer pins
-│   strokes to a top-left part of the screen; without that size it divides
-│   the pixels by the overlay's scale. Window picks still report no position
-│   and no output. Check: scrawl-capture capture::platform::tests
-│   a_fractionally_scaled_screen_keeps_its_logical_size and
-│   linux::output::tests the_named_output_carries_its_global_and_logical_size;
-│   neither the follow nor a fractional scale is observed on real hardware
-│   here. Known gap: the overlay starts below a desktop bar's reserved area,
-│   so saved ink sits that bar's height off the live ink
+├── Linux: strokes are placed on the recorded screen in the ink overlay's
+│   own points. A native Wayland layer surface lays out in the desktop's
+│   logical points: a monitor pick whose portal names the output
+│   (`mapping_id`, as xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`)
+│   opens the pen on that output with its logical size from xdg-output
+│   (linux::output::find), so strokes land on the recorded monitor even when
+│   the overlay had opened on another one; otherwise it uses the ScreenCast
+│   portal's stream size when it reports one smaller than the frames, so a
+│   fractional scale (1.5, 1.33), which reaches the overlay rounded up to 2,
+│   no longer pins strokes to a top-left part of the screen; without that
+│   size it divides the pixels by the overlay's scale. The XWayland window
+│   GNOME gets instead lays out in its own points and never uses either
+│   logical size: it takes the size its view laid it out in
+│   (capture_host::InkSpace), so ink reaches the whole screen whether the
+│   compositor scales XWayland natively (1920x1200 X11 pixels at Xft's 1 on
+│   a 125% screen, where the portal says 1536x960) or traditionally (the
+│   logical 1536x960, where the stream is 1920x1200 pixels); before that size
+│   is known it divides the pixels by the overlay's scale. Window picks still
+│   report no position and no output. Check: scrawl-capture
+│   capture::platform::tests a_fractionally_scaled_screen_keeps_its_logical_size,
+│   linux::output::tests the_named_output_carries_its_global_and_logical_size,
+│   and capture_host the_ink_target_is_the_overlay_s_own_space; neither the
+│   follow nor a fractional scale is observed on real hardware here. Known
+│   gaps: the overlay starts below a desktop bar's reserved area, so saved ink
+│   sits that bar's height off the live ink; on XWayland the ink is one
+│   full-screen primary-monitor window, so it cannot follow a named output,
+│   and a recording of another monitor maps its strokes to the wrong screen
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux
@@ -187,11 +198,13 @@ On Linux                                 // capture.linux
 │   OnDemand overlay on XWayland, and keeps regions with no hit area while not
 │   drawing because a click-through XWayland window can't take the pointer
 │   later. Esc can't stop drawing there: the capsule's pen button does, or
-│   letting go of a held Annotate key (a tap of it stops the recording). The
-│   in-app picker shows on Linux only in the edge states that return to
-│   Selecting (Window starts the portal's picker, Area isn't offered), and
-│   takes the same opt-in whenever it does. Check: labs
-│   gnome_annotate_is_its_own_bit_*; not run on a GNOME session
+│   letting go of a held Annotate key (a tap of it stops the recording). Its
+│   pen draws in that window's own points, which at a fractional scale are
+│   neither the desktop's logical points nor the stream's pixels (see the
+│   pen bullet's known gaps). The in-app picker shows on Linux only in the
+│   edge states that return to Selecting (Window starts the portal's picker,
+│   Area isn't offered), and takes the same opt-in whenever it does. Check:
+│   labs gnome_annotate_is_its_own_bit_*; not run on a GNOME session
 ├── While it records, dictation starts nothing (the portal
 │   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen

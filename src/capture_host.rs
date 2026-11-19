@@ -2440,14 +2440,59 @@ fn as_pen(event: scrawl_capture::capture::InputEvent) -> scrawl_capture::capture
     }
 }
 
-/// A pointer move on the drawing overlay, at `x`, `y` in its points;
-/// `scale` is its pixels per point (Linux). The capture's target becomes
-/// the recorded screen in points, so strokes land where they were drawn:
-/// the portal's logical size when it gives one, since a fractional scale
-/// (1.5, 1.33) reaches the overlay rounded up to a whole number, which
-/// would shrink the target and pin strokes past it to its edge.
+/// The ink overlay's own space on Linux: the window its pointer moves in
+/// and the points its strokes are drawn in.
 #[cfg(target_os = "linux")]
-pub fn draw(x: f32, y: f32, scale: f32) {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InkSpace {
+    /// The overlay is the XWayland window a compositor without layer-shell
+    /// gets (GNOME).
+    pub xwayland: bool,
+    /// The overlay's size in its own points, as the view laid it out, once
+    /// known (`Cx::layout_size`).
+    pub viewport: Option<[f32; 2]>,
+}
+
+/// The recorded screen in the ink overlay's points, so strokes land where
+/// they were drawn.
+///
+/// A native Wayland layer surface lays out in the desktop's logical points,
+/// which the portal's stream `size` (or the named output's xdg-output size)
+/// gives exactly, even at a fractional scale the overlay's integer buffer
+/// scale rounds up.
+///
+/// The XWayland window GNOME gets instead lays out in its own points, and
+/// the desktop's logical size is another space there: a compositor that
+/// scales XWayland natively leaves the overlay at the screen's pixels while
+/// the portal still reports the smaller logical layout (1536x960 for a
+/// 1920x1200 screen at 125%), so using it pins every stroke past 80% of the
+/// screen to the target's edge; one that scales X11 traditionally leaves the
+/// overlay at the logical layout while the stream is the screen's pixels. The
+/// overlay's own size is the only source right in both, and before the view
+/// knows it the recorded pixels over the overlay's scale stand in.
+#[cfg(target_os = "linux")]
+fn ink_points(
+    pixels: (u32, u32),
+    scale: f32,
+    logical: Option<(f64, f64)>,
+    space: InkSpace,
+) -> [f32; 2] {
+    let in_points = [pixels.0 as f32 / scale, pixels.1 as f32 / scale];
+    if space.xwayland {
+        return space
+            .viewport
+            .filter(|[width, height]| *width > 0.0 && *height > 0.0)
+            .unwrap_or(in_points);
+    }
+    logical.map_or(in_points, |(width, height)| [width as f32, height as f32])
+}
+
+/// A pointer move on the drawing overlay, at `x`, `y` in its points;
+/// `scale` is its pixels per point, and `space` is where it lays out
+/// (Linux). The capture's target becomes the recorded screen in that same
+/// space, so strokes land where they were drawn ([`ink_points`]).
+#[cfg(target_os = "linux")]
+pub fn draw(x: f32, y: f32, scale: f32, space: InkSpace) {
     if !drawing() {
         return;
     }
@@ -2455,12 +2500,9 @@ pub fn draw(x: f32, y: f32, scale: f32) {
         && scale > 0.0
         && let Some(source) = ink_source()
     {
-        let area = crate::linux::output::pen_points()
-            .or_else(scrawl_capture::capture::recorded_screen_points)
-            .map_or(
-                [width as f32 / scale, height as f32 / scale],
-                |(width, height)| [width as f32, height as f32],
-            );
+        let logical = crate::linux::output::pen_points()
+            .or_else(scrawl_capture::capture::recorded_screen_points);
+        let area = ink_points((width, height), scale, logical, space);
         let mut frame = source
             .telemetry
             .target_frame
@@ -3684,6 +3726,65 @@ mod tests {
             "ending a stroke under the input lock deadlocked"
         );
         held.join().expect("the thread finishes");
+    }
+
+    /// The ink's target is the overlay's own space: the desktop's logical
+    /// points on a Wayland layer surface, and the XWayland window's own
+    /// points when GNOME has no layer-shell. #1995: a 1920x1200 screen at
+    /// 125% reported 1536x960 from the portal, and ink stopped at 1536/1920
+    /// of the screen.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_ink_target_is_the_overlay_s_own_space() {
+        let layer = InkSpace {
+            xwayland: false,
+            viewport: None,
+        };
+        let xwayland = |viewport| InkSpace {
+            xwayland: true,
+            viewport,
+        };
+        // GNOME scaling XWayland natively: the overlay is the screen's
+        // 1920x1200 pixels at Xft's 1, and the portal's 1536x960 is the
+        // desktop's logical layout, which it must not use.
+        assert_eq!(
+            ink_points(
+                (1920, 1200),
+                1.0,
+                Some((1536.0, 960.0)),
+                xwayland(Some([1920.0, 1200.0])),
+            ),
+            [1920.0, 1200.0]
+        );
+        // GNOME scaling XWayland traditionally: the X root, and the overlay,
+        // is the logical 1536x960 at Xft's 1 while the stream is still the
+        // screen's 1920x1200 pixels, so the pixels over that scale would
+        // confine every stroke to 80% of the screen.
+        assert_eq!(
+            ink_points(
+                (1920, 1200),
+                1.0,
+                Some((1536.0, 960.0)),
+                xwayland(Some([1536.0, 960.0])),
+            ),
+            [1536.0, 960.0]
+        );
+        // Before the view has laid the overlay out: the pixels over its
+        // scale.
+        assert_eq!(
+            ink_points((1920, 1200), 1.0, Some((1536.0, 960.0)), xwayland(None)),
+            [1920.0, 1200.0]
+        );
+        // A Wayland layer surface lays out in the desktop's logical points,
+        // where a fractional scale's rounded-up buffer scale (2) is not the
+        // space (1.5 gives 1707x960).
+        assert_eq!(
+            ink_points((2560, 1440), 2.0, Some((1707.0, 960.0)), layer),
+            [1707.0, 960.0]
+        );
+        // No portal size (X11, or a portal that reports pixels): the pixels
+        // still give the overlay's points.
+        assert_eq!(ink_points((1920, 1080), 1.0, None, layer), [1920.0, 1080.0]);
     }
 
     /// The capsule is one 640×424 panel above everything, but only its pill

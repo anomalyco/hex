@@ -36,6 +36,11 @@ const GLOW_RISE_MS: f32 = 120.0;
 const GLOW_FALL_MS: [f32; 2] = [350.0, 1100.0];
 /// While a capture records, the overlay looks for new strokes this often.
 const FRAME: Duration = Duration::from_micros(16_667);
+/// The key of the overlay's root element, which fills its viewport: reading
+/// its laid-out size (`Cx::layout_size`) is the overlay's own size in points,
+/// the space its pointer moves and its strokes are drawn in.
+#[cfg(target_os = "linux")]
+const INK_ROOT: &str = "ink";
 
 /// Scrawl's ink and laser colours: content drawn on the screen, like a
 /// pen's, not interface chrome, so they stay the same in either appearance.
@@ -512,7 +517,12 @@ pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
         }
     };
     #[cfg(target_os = "linux")]
-    let mut root = draw_surface(s.drawing, cx.env().scale);
+    let space = crate::capture_host::InkSpace {
+        xwayland: s.xwayland,
+        viewport: cx.layout_size(INK_ROOT),
+    };
+    #[cfg(target_os = "linux")]
+    let mut root = draw_surface(s.drawing, cx.env().scale, space);
     if scene.is_empty() {
         return root;
     }
@@ -586,12 +596,14 @@ fn escape(_: &mut InkState, key: &rune::KeyEvent, _: &mut Tx) -> bool {
 /// The whole screen. While Annotate draws, every pointer move draws and
 /// the screen takes the pointer, except a hole over the capsule's pill (top
 /// centre, where the capsule's panel sits), so the pen can be clicked off.
-/// `scale` is the screen's pixels per point.
+/// `scale` is the screen's pixels per point, and `space` is where the
+/// overlay lays out (XWayland or a layer surface), which [`INK_ROOT`]'s
+/// laid-out size reads.
 #[cfg(target_os = "linux")]
-fn draw_surface(drawing: bool, scale: f32) -> El {
+fn draw_surface(drawing: bool, scale: f32, space: crate::capture_host::InkSpace) -> El {
     use super::surface::PANEL_W;
     use rune::{col, row};
-    let root = el().w_full().h_full();
+    let root = el().w_full().h_full().key(INK_ROOT);
     if !drawing {
         return root;
     }
@@ -605,12 +617,12 @@ fn draw_surface(drawing: bool, scale: f32) -> El {
                     rune::Phase::Down => {
                         s.pressed_at = s.pointer;
                         crate::capture_host::pen_button(true);
-                        crate::capture_host::draw(s.pointer[0], s.pointer[1], scale);
+                        crate::capture_host::draw(s.pointer[0], s.pointer[1], scale, space);
                     }
                     rune::Phase::Move => {
                         let at = [s.pressed_at[0] + d.dx, s.pressed_at[1] + d.dy];
                         s.pointer = at;
-                        crate::capture_host::draw(at[0], at[1], scale);
+                        crate::capture_host::draw(at[0], at[1], scale, space);
                     }
                     rune::Phase::Up => crate::capture_host::pen_button(false),
                 }
@@ -642,7 +654,7 @@ fn draw_surface(drawing: bool, scale: f32) -> El {
         .on_pointer_move_local(
             move |s: &mut InkState, p: rune::PointerEvent, tx: &mut Tx| {
                 s.pointer = [p.x, p.y];
-                crate::capture_host::draw(p.x, p.y, scale);
+                crate::capture_host::draw(p.x, p.y, scale, space);
                 tx.wake_after(Duration::ZERO);
             },
         )
