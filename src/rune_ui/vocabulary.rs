@@ -344,7 +344,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         == crate::transcription::models::VocabularyUse::Bias;
     let unused = unused_note(ui).or_else(|| {
         (biases && !ui.settings.labs.vocabulary_biasing).then(|| {
-            tr("Transcription uses these only with Labs › Vocabulary biasing on; rewriting and search always do")
+            tr("Transcription uses these only with Labs › Vocabulary help on; rewriting and search always do")
                 .to_string()
         })
     });

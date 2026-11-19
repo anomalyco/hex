@@ -687,13 +687,13 @@ approved, so you're asked only once.
 
   There is no silent XWayland, direct-typing, uinput, or privileged
   input-injection fallback; the only XWayland uses besides the HUD are the
-  opt-in clipboard restore above, the opt-in floating meeting capsules
+  opt-in clipboard restore above, the opt-in call recording controls
   below, and the opt-in Annotate overlays below. Transcript text travels on stdin, not command-line
   arguments.
 - The overlay uses layer-shell. Without it (GNOME), only the HUD opens on
   XWayland as an override-redirect, click-through window that never takes
   focus. The meeting capsules take clicks, so there a call offer opens the
-  Meetings pane instead, unless you opt in to Labs › Floating meeting capsules
+  Meetings pane instead, unless you opt in to Labs › Call recording controls
   on GNOME (`hex labs on gnome-meeting-capsules`, off by default): the offer
   and recording capsule then float over the call on XWayland, taking clicks
   on their buttons but never keyboard focus. It works only while XWayland is

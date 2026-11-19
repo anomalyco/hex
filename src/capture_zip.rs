@@ -1,4 +1,4 @@
-//! Labs › Copy captures as a zip: a written Annotate capture goes on the
+//! Labs › Copy a capture as one file: a written Annotate capture goes on the
 //! clipboard as one light zip file instead of its image and summary, so it
 //! attaches anywhere, including agent apps whose server runs elsewhere.
 

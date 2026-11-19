@@ -230,13 +230,13 @@ fn list_first(ui: &Ui) -> Option<TranscriptionModelId> {
     pinned(ui).filter(|_| !sort_filter_on(ui) || ui.picker.sort == Sort::Recommended)
 }
 
-/// Whether Labs › Benchmark details is on.
+/// Whether Labs › Model test details is on.
 pub(super) fn benchmark_details_on(ui: &Ui) -> bool {
     let feature = crate::labs::Feature::BenchmarkDetails;
     feature.shipped() && feature.on(&ui.settings)
 }
 
-/// The badge a card shows. With Benchmark details on, "Most accurate" stays
+/// The badge a card shows. With Model test details on, "Most accurate" stays
 /// only when its figure is comparable with the other recommendations'.
 pub(super) fn shown_recommendation(
     recommendation: Option<Recommendation>,

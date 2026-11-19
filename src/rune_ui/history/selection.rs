@@ -1,7 +1,5 @@
-//! Labs › Select multiple dictations: which History entries are selected,
-//! how a row's press changes that, and the card that copies or deletes them
-//! together. Off, History keeps its one selected entry and none of this
-//! runs, so every press selects just its row as it always has.
+//! Which History entries are selected, how a row's press changes that, and
+//! the card that copies or deletes them together.
 
 use rune::{Drag, El, Phase, Tx, col, row, text};
 
@@ -10,13 +8,6 @@ use super::super::controls::{ButtonKind, DESCRIPTION, Paint, button};
 use super::super::list_detail as ld;
 use super::HistoryPane;
 use crate::desktop::i18n::{tr, tr_fill};
-
-/// Whether History selects several entries. The pane reads its own switch,
-/// as it reads Labs › Keep recordings; `labs::history_multi_select` is the
-/// same switch for this process.
-pub(super) fn on(ui: &Ui) -> bool {
-    crate::labs::Feature::HistoryMultiSelect.on(&ui.settings)
-}
 
 /// How far a press may travel and still be a click, as Rune pairs double
 /// clicks.
@@ -143,17 +134,12 @@ fn visible(pane: &HistoryPane) -> Vec<u64> {
     pane.entries.iter().map(|entry| entry.id).collect()
 }
 
-/// A press on entry `id`. Labs off, it selects that row alone, as History
-/// always has; on, Shift selects the range from the anchor, Command (Control
-/// on Windows and Linux) toggles the row, and a plain press selects it and
-/// makes it the anchor.
+/// A press on entry `id`. Shift selects the range from the anchor, Command
+/// (Control on Windows and Linux) toggles the row, and a plain press selects
+/// it and makes it the anchor.
 fn choose(ui: &mut Ui, id: u64, click: Click) {
     ui.history.clear_armed = false;
     ui.history.delete_armed = None;
-    if !on(ui) {
-        ui.history.selected = Some(id);
-        return;
-    }
     let previous = ui.history.selection.anchor.or(ui.history.selected);
     let rows = visible(&ui.history);
     let selection = &mut ui.history.selection;
@@ -167,8 +153,8 @@ fn choose(ui: &mut Ui, id: u64, click: Click) {
                 ui.history.selected = None;
                 return;
             }
-            // A row selected before the lab was turned on is part of the set: a
-            // Command press adds it first, so toggling another row keeps it.
+            // The one selected row is part of the set: a Command press adds
+            // it first, so toggling another row keeps it.
             if let Some(other) = ui.history.selected {
                 selection.select_only(other);
             }
@@ -187,9 +173,7 @@ fn choose(ui: &mut Ui, id: u64, click: Click) {
 
 /// The pointer's press on entry `id`, which selected it on the way down.
 fn press(ui: &mut Ui, id: u64, click: Click) {
-    if on(ui) {
-        ui.history.selection.pressed = Some(id);
-    }
+    ui.history.selection.pressed = Some(id);
     choose(ui, id, click);
 }
 
@@ -209,10 +193,8 @@ pub(super) fn gesture(row: El, id: u64, primary: bool) -> El {
     let gesture = move |ui: &mut Ui, drag: &mut Drag, tx: &mut Tx| match drag.phase {
         Phase::Down => {
             tx.instant();
-            if on(ui) {
-                ui.history.selection.drag = Some(id);
-                ui.history.selection.drag_left = false;
-            }
+            ui.history.selection.drag = Some(id);
+            ui.history.selection.drag_left = false;
             press(ui, id, Click::of(tx));
         }
         Phase::Move => dragged(ui, id, drag, tx),
@@ -255,9 +237,6 @@ pub(super) fn gesture(row: El, id: u64, primary: bool) -> El {
 /// row it is a drag, so coming back within the slop of the press still ranges
 /// through the rows between.
 fn dragged(ui: &mut Ui, from: u64, drag: &Drag, tx: &mut Tx) {
-    if !on(ui) {
-        return;
-    }
     if !ui.history.selection.drag_left && drag.dx.abs() <= CLICK_SLOP && drag.dy.abs() <= CLICK_SLOP
     {
         return;
@@ -330,19 +309,6 @@ pub(super) fn prune(pane: &mut HistoryPane) -> bool {
         changed = true;
     }
     changed
-}
-
-/// Labs › Select multiple dictations off: forgets the rest of a multiple
-/// selection, keeping the one entry the detail card shows.
-pub(super) fn collapse(pane: &mut HistoryPane) -> bool {
-    if pane.selection.ids.is_empty() {
-        return false;
-    }
-    if pane.selected.is_none() {
-        pane.selected = pane.selection.primary();
-    }
-    pane.selection.clear();
-    true
 }
 
 /// The selected entries' final texts, oldest first, a blank line between.

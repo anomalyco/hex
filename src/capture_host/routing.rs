@@ -1275,10 +1275,16 @@ fn answer_for(
         }
     };
     let mut answered = match decided {
-        // Only a rule the person saved, or a page naming its session, sends
-        // on its own; anything else the router would send is its first
-        // suggestion.
-        Decided::Judged(smart::Decision::Send { to, instead }) if policy::explicit(&to) => {
+        // The router also trusts a page naming its session. In Hex, only the
+        // user's saved site, terminal or app rule authorizes an automatic send.
+        Decided::Judged(smart::Decision::Send { to, instead })
+            if matches!(
+                to.lead().map(|r| r.basis),
+                Some(smart::Basis::Clue(
+                    smart::Source::Rule | smart::Source::AppRule | smart::Source::TerminalRule
+                ))
+            ) =>
+        {
             let dest = smart::destination_of(&to, url);
             let shown = Shown::rule(lead_why(&to));
             let to = scored(&to);
@@ -1735,11 +1741,16 @@ mod tests {
     }
 
     #[test]
-    fn only_a_saved_rule_or_a_signed_page_sends_on_its_own() {
+    fn only_a_saved_rule_sends_on_its_own() {
         use smart::{Basis, Source};
         for (basis, why, shown) in [
             (Basis::JevHome, "Jev couldn't tell, so HOME", ""),
             (Basis::Jev, "Jev's pick", ""),
+            (
+                Basis::Clue(Source::Signed),
+                "page names a session",
+                "page names it",
+            ),
             (
                 Basis::Clue(Source::Port),
                 "port 5173 is Alpha's",
@@ -1785,8 +1796,8 @@ mod tests {
                 "routing.apps sends com.example.app to /p/a",
             ),
             (
-                Basis::Clue(Source::Signed),
-                "/srv/artifacts/demo/index.html names it in a meta tag",
+                Basis::Clue(Source::TerminalRule),
+                "routing.terminals sends /p/a",
             ),
         ] {
             let answered = sent_by(basis, why);
@@ -1795,12 +1806,9 @@ mod tests {
                 Some("ses_a".into()),
                 "{why}: sent at once"
             );
-            let chip = if basis == Basis::Clue(Source::Signed) {
-                "page names it"
-            } else {
-                "rule"
-            };
-            assert!(matches!(answered.answer, RouteAnswer::Rule { ref to, .. } if to.why == chip));
+            assert!(
+                matches!(answered.answer, RouteAnswer::Rule { ref to, .. } if to.why == "rule")
+            );
             assert_eq!(answered.shown, Some(Shown::rule(why)));
         }
     }
@@ -2238,45 +2246,91 @@ mod tests {
             }
         }
 
-        /// A site rule for a gallery's whole host once sent pages a session
-        /// had signed elsewhere. The page's own session wins.
+        /// Both timings of the page read: already available at publication or
+        /// arriving with the final session list. Only a saved rule can send.
         #[test]
-        fn a_signed_page_sends_ahead_of_a_rule_for_its_host() {
-            let router = router_with(|c| {
-                c.sites
-                    .insert("https://gallery.example".into(), "ses_ruled".into());
-            });
-            let url = "https://gallery.example/2026-01-02-demo/";
-            let live = look::Live {
-                url: Some(url.into()),
-                clues: vec![smart::Clue::new(
-                    smart::Source::Signed,
-                    smart::Pointer::Session {
-                        id: "ses_signer".into(),
-                        directory: None,
-                    },
-                    "index.html names it in a meta tag",
-                )],
-                ..look::Live::default()
-            };
-            let (look, found) = held_look(router, live);
-            let outcomes = SharedOutcomes::default();
-            let mut worker = worker(outcomes.clone());
-            let bundle = written("com.example.browser");
-            lock(&outcomes).fail(bundle.clone(), "test".into());
-            worker.written(bundle, look);
-            let current = worker.current.as_ref().unwrap();
-            assert_eq!(
-                current.destination.as_ref().map(|d| d.session.as_str()),
-                Some("ses_signer")
-            );
-            assert!(
-                matches!(&current.route.answer, RouteAnswer::Rule { to, .. }
-                    if to.session == "ses_signer" && to.why == "page names it"),
-                "{:?}",
-                current.route.answer
-            );
-            drop(found);
+        fn page_metadata_is_only_a_suggestion_and_never_overrides_a_saved_rule() {
+            static POSTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+            fn post(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                POSTS.lock().unwrap().push(id.into());
+                posted(path, id)
+            }
+            for saved in [false, true] {
+                for early in [false, true] {
+                    for source in [smart::Source::Signed, smart::Source::Page] {
+                        let router = router_with(|c| {
+                            c.jev_routing = false;
+                            if saved {
+                                c.sites
+                                    .insert("https://gallery.example".into(), "ses_ruled".into());
+                            }
+                        });
+                        let url = "https://gallery.example/2026-01-02-demo/";
+                        let mut live = look::Live {
+                            url: Some(url.into()),
+                            clues: vec![smart::Clue::new(
+                                source,
+                                smart::Pointer::Session {
+                                    id: "ses_signer".into(),
+                                    directory: None,
+                                },
+                                "index.html names it in a meta tag",
+                            )],
+                            ..look::Live::default()
+                        };
+                        let (look, found) = held_look(
+                            router,
+                            if early {
+                                live.clone()
+                            } else {
+                                look::Live::default()
+                            },
+                        );
+                        let outcomes = SharedOutcomes::default();
+                        let mut worker = worker(outcomes.clone());
+                        worker.forward = post;
+                        let bundle = written("com.example.browser");
+                        lock(&outcomes).fail(bundle.clone(), "test".into());
+                        worker.written(bundle.clone(), look);
+                        assert!(worker.current.as_ref().unwrap().sent.is_none());
+                        worker.hold(true);
+                        // The local tab matched a rule. A later partial read
+                        // can return the page clue without repeating the URL.
+                        if early {
+                            live.url = None;
+                        }
+                        found.send(Some(live)).unwrap();
+                        drop(found);
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        while worker.pending.is_some() {
+                            assert!(Instant::now() < deadline);
+                            worker.prepared();
+                            std::thread::yield_now();
+                        }
+                        assert!(POSTS.lock().unwrap().is_empty(), "not during Undo");
+                        worker.hold(false);
+                        settle(&mut worker); // Advance any send deadline and drain finalization.
+                        let current = worker.current.unwrap();
+                        if saved {
+                            assert_eq!(current.sent.unwrap().session, "ses_ruled");
+                            assert!(
+                                matches!(current.route.answer, RouteAnswer::Rule { to, .. } if to.session == "ses_ruled")
+                            );
+                            assert_eq!(std::mem::take(&mut *POSTS.lock().unwrap()), ["ses_ruled"]);
+                        } else {
+                            assert!(POSTS.lock().unwrap().is_empty(), "no automatic post");
+                            assert!(current.route.delivery.is_none());
+                            assert!(current.sent.is_none() && current.due.is_none());
+                            assert!(
+                                matches!(&current.route.answer, RouteAnswer::Guess { suggested, .. } if suggested[0].session == "ses_signer"),
+                                "{:?}",
+                                current.route.answer
+                            );
+                        }
+                        std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
+                    }
+                }
+            }
         }
 
         /// A saved app rule to a session id sends before the session server

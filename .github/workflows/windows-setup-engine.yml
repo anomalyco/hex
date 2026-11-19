@@ -1,0 +1,79 @@
+name: Windows setup engine
+
+# Compiles packaging/windows/hex.iss with SignedUninstaller=yes so the compiler
+# leaves the unsigned uninst-<version>-<hash>.e32 it asks to have signed
+# (scripts/build-windows-installer.ps1 -ExtractSignedEngine). Release signs that
+# file in its release environment (sign-windows-engine), then runs
+# windows-installers.yml with it, so the installed uninstaller and the copy
+# Setup extracts to %TEMP% at launch carry the release signature; Smart App
+# Control blocks them when they do not (docs/windows-signing.md). Repository
+# code runs here, so there is no environment, no secret, and no id-token.
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      pattern:
+        description: Artifact name pattern of the executables the compile wraps
+        required: true
+        type: string
+      digests:
+        description: Space-separated name=digest pairs for those artifacts
+        required: true
+        type: string
+      artifact-name:
+        description: The setup engine's artifact
+        required: true
+        type: string
+      retention-days:
+        type: number
+        default: 0
+    outputs:
+      digest:
+        value: ${{ jobs.extract.outputs.digest }}
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    name: Compile for the setup engine
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      HEX_VERSION: ${{ inputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: ${{ inputs.pattern }}
+          digests: ${{ inputs.digests }}
+      - name: Compile for the unsigned setup engine
+        shell: pwsh
+        run: |
+          $out = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/engine"
+          foreach ($arch in 'x86_64', 'aarch64') {
+            $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
+            $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.exe")
+            if ($exe.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.exe, found $($exe.Count)." }
+            $console = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.com")
+            if ($console.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.com, found $($console.Count)." }
+            scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Console $console[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out -ExtractSignedEngine
+          }
+          Get-ChildItem $out | Where-Object { $_.Name -notlike 'uninst-*.e32' } | Remove-Item -Force
+          Get-ChildItem $out | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/engine
+          retention-days: ${{ inputs.retention-days }}

@@ -22,7 +22,7 @@ use super::artifacts::{
     WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
-pub use super::languages::{LANGUAGES, language_name};
+pub use super::languages::{LANGUAGES, language_name, menu_order};
 pub(crate) use super::model_benchmarks::most_accurate_is_comparable;
 pub use super::model_benchmarks::{BenchmarkRecord, benchmark};
 
@@ -215,7 +215,7 @@ pub struct ModelDefinition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VocabularyUse {
     /// Parakeet's transducer heads bias their decode toward the terms
-    /// (Labs › Vocabulary biasing).
+    /// (Labs › Vocabulary help).
     Bias,
     /// Whisper and Qwen3-ASR read the terms as their context prompt.
     Prompt,

@@ -56,7 +56,7 @@ const JOB_SECONDS_PER_AUDIO_SECOND: u32 = 8;
 /// How often a waiter whose job has not started checks whether the job ahead
 /// of it timed out, leaving the engine wedged.
 const QUEUE_POLL: Duration = Duration::from_millis(250);
-/// How often an idle engine looks again at Labs › Unload model when idle.
+/// How often an idle engine looks again at Labs › Free memory when idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(30);
 /// How long dropping the engine waits for its thread. A native run that cannot
 /// be aborted is left to finish on its own.
@@ -542,7 +542,7 @@ impl TranscriptionEngine {
 
     /// Starts with no model loaded, remembering `selection` to reload on the
     /// first command that needs it, as [`Worker::park`] leaves the engine.
-    /// Labs › Unload model when idle uses this so a launch stays unloaded
+    /// Labs › Free memory when idle uses this so a launch stays unloaded
     /// until the first dictation. Whether it can stream is seeded from the
     /// model's definition, not measured on this device: the first capture
     /// either streams after the reload or falls back to its whole clip.
@@ -574,6 +574,11 @@ impl TranscriptionEngine {
                 .or_else(|| parked.clone()),
         ));
         let dictating = Arc::new(AtomicBool::new(false));
+        // The model the engine adopts speaks for dictation (#1984). A parked
+        // engine has no model, so it leaves the last word alone.
+        if let Some(model) = &model {
+            publish_out_of_memory(model);
+        }
         let worker = Worker {
             model,
             parked,
@@ -934,7 +939,18 @@ fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> R
 
 #[cfg(not(target_os = "macos"))]
 fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> Result<Model> {
-    Model::load(selection)
+    let model = Model::load(selection)?;
+    publish_out_of_memory(&model);
+    Ok(model)
+}
+
+/// Publishes why the engine's model runs on the CPU (#1984). Only the model
+/// the engine holds speaks for dictation: the local API's own model, model
+/// preparation, and a superseded model swap load beside it and never get
+/// here.
+fn publish_out_of_memory(_model: &Model) {
+    #[cfg(not(target_os = "macos"))]
+    crate::transcription::gpu_health::set_out_of_memory(_model.out_of_memory());
 }
 
 static SHARED: std::sync::Mutex<std::sync::Weak<TranscriptionEngine>> =
@@ -1036,7 +1052,7 @@ impl Drop for TranscriptionEngine {
 }
 
 struct Worker {
-    /// `None` while unloaded for idleness (Labs › Unload model when idle) or
+    /// `None` while unloaded for idleness (Labs › Free memory when idle) or
     /// after its reload failed.
     model: Option<Model>,
     /// What an unloaded model reloads, before the next command that needs it.
@@ -1152,14 +1168,18 @@ impl Worker {
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
-            // Any command may load or switch the model.
+            // Any command may load or switch the model. A parked engine has
+            // no model, so it leaves the last word alone.
+            if let Some(model) = self.model.as_ref() {
+                publish_out_of_memory(model);
+            }
             self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();
         }
     }
 
-    /// The next command. With Labs › Unload model when idle on, it unloads
+    /// The next command. With Labs › Free memory when idle on, it unloads
     /// the model once nothing has used it for the chosen time and nothing
     /// records (a dictation or a meeting); between commands no request runs.
     fn wait(&mut self, commands: &Receiver<Command>) -> Option<Command> {
@@ -1327,6 +1347,7 @@ impl Worker {
             return;
         };
         let trailing_silence = stream_trailing_silence(model);
+        let closing_mark = stream_requires_closing_mark(model);
         let ended = model.with_stream(&options, cancel, |stream| {
             let mut capped = PauseCap::new(stream, trailing_silence).ignoring_head(head_ignored);
             let ended = drive_stream(
@@ -1365,6 +1386,7 @@ impl Worker {
                     finish_ms = started.elapsed().as_millis(),
                     "finished live stream"
                 );
+                let result = result.and_then(|text| check_closing_mark(text, closing_mark));
                 match result {
                     Ok(text) => job.finish(Ok(Transcribed {
                         text,

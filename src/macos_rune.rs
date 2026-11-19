@@ -302,6 +302,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // Observing first means a source change during startup still rebuilds
     // the snapshot at the pump's first turn.
     crate::keyboard_input_sources::start(mtm);
+    // The listener releases the warm microphone while the display sleeps, the
+    // session is locked, or the Mac sleeps (#1953); the main run loop delivers
+    // those notifications.
+    crate::audio::system_idle::start();
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());

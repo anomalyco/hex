@@ -7,12 +7,16 @@
 #     -Executable dist\hex-2.4.0-windows-x64.exe -Console dist\hex-2.4.0-windows-x64.com -Version 2.4.0
 #
 # -Console (hex.com) is left out only for a release published before it.
+# -SignedEngine checks the installed uninstaller's Authenticode signature, its
+# timestamp, and that the release publisher signed it (Release signs the setup
+# engine; Test builds do not sign it).
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Installer,
     [Parameter(Mandatory)] [string]$Executable,
     [string]$Console,
-    [Parameter(Mandatory)] [string]$Version
+    [Parameter(Mandatory)] [string]$Version,
+    [switch]$SignedEngine
 )
 $ErrorActionPreference = 'Stop'
 
@@ -65,6 +69,15 @@ Check ($entry.DisplayVersion -eq $Version) "Apps & Features shows $Version"
 $uninstaller = ($entry.UninstallString -replace '"', '')
 Check ($uninstaller -like "$support\uninstall\*") 'the uninstaller lives outside versions\, which updates prune'
 Check (Test-Path $uninstaller) 'the uninstaller exists'
+# The uninstaller is the setup engine, and the copy Setup extracts to %TEMP%
+# at launch is the same bytes: Smart App Control blocks an unsigned copy
+# (error 4551), so Release embeds a signed engine.
+if ($SignedEngine) {
+    $signature = Get-AuthenticodeSignature -LiteralPath $uninstaller
+    Check ($signature.Status -eq 'Valid') "the uninstaller has a valid Authenticode signature ($($signature.Status))"
+    Check ($null -ne $signature.TimeStamperCertificate) 'the uninstaller signature has an RFC 3161 timestamp'
+    Check ($signature.SignerCertificate.Subject -match 'Anomaly Innovations') "the uninstaller is signed by the release publisher ($($signature.SignerCertificate.Subject))"
+}
 function Run-Value { (Get-ItemProperty -Path $runKey -Name 'Hex' -ErrorAction SilentlyContinue).Hex }
 Check ($null -eq (Run-Value)) 'installing leaves Launch at login off'
 

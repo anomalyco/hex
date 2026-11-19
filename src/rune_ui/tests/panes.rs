@@ -49,6 +49,7 @@ fn settings_rows_follow_each_os() {
     assert!(present(&linux, "toggle-listening"));
     assert!(present(&linux, "enable-on-launch"));
     assert!(present(&linux, "launch-at-login"));
+    assert!(present(&linux, "speech-engine"));
     assert!(!present(&linux, "dock-icon"));
     assert!(!present(&linux, "meetings-enabled"));
 
@@ -69,11 +70,18 @@ fn settings_rows_follow_each_os() {
     ] {
         assert!(!present(&mac, key), "macOS General has no {key}");
     }
+    // macOS runs its models on Metal or Apple's speech engine: no Speech
+    // engine row, and no GPU fallback to explain.
+    assert!(
+        !present(&mac, "speech-engine"),
+        "macOS has no Speech engine row"
+    );
 
     let mut windows = runtime("windows-settings", true, TALL_SIZE);
     open_advanced(&mut windows, Pane::General);
     assert!(present(&windows, "launch-at-login"));
     assert!(present(&windows, "toggle-listening"));
+    assert!(present(&windows, "speech-engine"));
     assert!(!present(&windows, "dock-icon"));
     assert!(
         !present(&windows, "terminal-paste"),
@@ -1457,6 +1465,79 @@ fn a_connected_calendar_saves_reminders_and_lists_meetings() {
     assert_eq!(rt.state.open, Some(Menu::Calendars));
 }
 
+/// Labs › Select all calendars puts one bulk button beside the Calendars
+/// select; off by default, it adds nothing.
+#[test]
+fn the_select_all_calendars_lab_saves_every_calendar_at_once() {
+    let mut rt = runtime("meetings-calendar", true, (980.0, 2600.0));
+    assert!(
+        rt.find("calendar-select-all").is_none(),
+        "the lab is off by default"
+    );
+    assert!(
+        rt.find("calendar-calendars-controls").is_none(),
+        "off, the row is the select alone"
+    );
+    rt.update(|ui, _| ui.settings.labs.calendar_bulk_select = true);
+    refresh(&mut rt);
+    assert!(rt.find("calendar-select-all").is_some());
+    assert!(texts(&rt).iter().any(|text| text == "2 of 3 calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Select all"));
+
+    tap(&mut rt, "calendar-select-all");
+    assert_eq!(
+        rt.state.settings.meetings.calendar.excluded_calendars,
+        Vec::<String>::new()
+    );
+    assert!(texts(&rt).iter().any(|text| text == "All calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Deselect all"));
+
+    // A stale exclusion that names no current calendar leaves every current
+    // calendar included, so the button still offers Deselect all.
+    rt.update(|ui, _| {
+        ui.settings.meetings.calendar.excluded_calendars = vec!["gone".to_string()];
+    });
+    refresh(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "All calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Deselect all"));
+
+    tap(&mut rt, "calendar-select-all");
+    assert_eq!(
+        rt.state.settings.meetings.calendar.excluded_calendars,
+        vec![
+            "work".to_string(),
+            "home".to_string(),
+            "birthdays".to_string()
+        ],
+        "the stale id is replaced by the calendars shown now"
+    );
+    assert!(texts(&rt).iter().any(|text| text == "0 of 3 calendars"));
+    assert!(texts(&rt).iter().any(|text| text == "Select all"));
+
+    {
+        // An organization's Labs lock closes the Meetings pane itself
+        // (`meetings::available`), so the button goes with it; the saved
+        // setting stays as it was.
+        use crate::policy::{Lock, Policy};
+        let _locked = Policy::forced_for_test(Policy::default().with(Lock::Labs));
+        refresh(&mut rt);
+        assert!(
+            rt.find("meetings-enabled").is_some(),
+            "the lock takes effect"
+        );
+        assert!(
+            rt.find("calendar-select-all").is_none(),
+            "a locked lab hides the button"
+        );
+        assert!(rt.state.settings.labs.calendar_bulk_select);
+    }
+    refresh(&mut rt);
+    assert!(
+        rt.find("calendar-select-all").is_some(),
+        "unlocked, the button is back"
+    );
+}
+
 #[test]
 fn denied_calendar_access_links_to_privacy_settings() {
     let mut rt = runtime("meetings-calendar-denied", true, (980.0, 2400.0));
@@ -2409,7 +2490,7 @@ fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
     );
     assert_eq!(
         rt.state.settings.labs.voice_prompt_phrase, voice_prompt,
-        "Voice prompt's phrase is its own"
+        "Rewrite by voice's phrase is its own"
     );
     refresh(&mut rt);
     assert!(rt.find("stop-phrase-text-error").is_some());
@@ -3227,7 +3308,7 @@ fn live_typing_says_when_the_desktop_cannot_use_it() {
     assert!(
         texts(&rt)
             .iter()
-            .any(|text| text.starts_with("On Wayland, show your words in the text field")),
+            .any(|text| text.starts_with("On Wayland, show your words in the text box")),
         "its description stays under the note"
     );
 
@@ -3318,6 +3399,36 @@ fn a_managed_lock_holds_the_cleanup_lab_off() {
             .iter()
             .any(|text| text.starts_with("Turn on Apple Intelligence")),
         "the Apple Intelligence note would replace the lock's words"
+    );
+}
+
+/// An organization's lock keeps the drop card off and saying so; the formats
+/// line its copy is built from must not replace the lock's words.
+#[test]
+fn a_managed_lock_holds_the_drop_transcribe_lab_off() {
+    use crate::policy::{Lock, Policy};
+    let describe = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| {
+                e.path.contains("lab-card-drop-transcribe") && e.path.ends_with("/description")
+            })
+            .and_then(|e| e.text)
+    };
+    let locked = Policy::forced_for_test(Policy::default().with(Lock::Labs));
+    let mut rt = runtime("mac-labs", true, (980.0, 2400.0));
+    open_labs(&mut rt);
+    assert_eq!(
+        describe(&rt).as_deref(),
+        Some("Managed by your organization"),
+        "its row says why"
+    );
+
+    drop(locked);
+    refresh(&mut rt);
+    assert!(
+        describe(&rt).is_some_and(|text| text.starts_with("Drop a ")),
+        "unlocked, the card names the formats the drop target offers"
     );
 }
 

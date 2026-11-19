@@ -9,6 +9,7 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::linger::MicrophoneLinger;
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
+use crate::continuation::InputActivity;
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
@@ -68,10 +69,8 @@ struct Job {
     flavour: crate::dictation::DictationFlavour,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
-    /// How long a shortcut-started capture's shortcut was held, press to
-    /// release; `None` for a `hex dictation` capture (Labs › YOLO
-    /// mode).
-    held_ms: Option<u64>,
+    /// A physical dictation shortcut, not a control or API request.
+    by_shortcut: bool,
     /// Labs › Stop phrase: the words its capture ended with, read when the
     /// phrase was heard and removed from the transcript before processing.
     stop_phrase: Option<String>,
@@ -223,7 +222,7 @@ pub fn run(
     updates: mpsc::Receiver<Box<crate::app_settings::AppSettings>>,
     shutdown: &AtomicBool,
 ) -> Result<()> {
-    // Labs › Unload model when idle: a launch stays parked until the first
+    // Labs › Free memory when idle: a launch stays parked until the first
     // dictation, as after an idle unload.
     let transcriber = if crate::labs::unload_idle().is_some() {
         None
@@ -301,7 +300,7 @@ pub fn run(
     }
     let hotkey_label = hotkey.label();
     let mut toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
-    let mut hotkey = shortcuts.start()?;
+    let mut hotkey = shortcuts.start(InputActivity::default())?;
     // A shortcut event the idle wait took, handled at the next turn.
     let mut held_event = None;
     let mut while_dictating = while_dictating;
@@ -325,11 +324,12 @@ pub fn run(
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
     let worker_paste_with_shift = paste_with_shift.clone();
+    let worker_activity = hotkey.activity.clone();
     let capture_modes = mode_runtime.clone();
     let worker = thread::Builder::new()
         .name("windows-dictation-output".into())
         .spawn(move || {
-            let mut paster = WindowsPaster::new(worker_paste_with_shift);
+            let mut paster = WindowsPaster::new(worker_paste_with_shift, worker_activity);
             while let Ok(job) = job_receiver.recv() {
                 let result = match job {
                     OutputJob::Dictation(job) => process_dictation_job(
@@ -398,7 +398,15 @@ pub fn run(
         };
     }
 
+    // The window in front when the loop last looked: switching windows ends
+    // a paste continuation, as a context change does on macOS.
+    let mut foreground_window = crate::windows::input::foreground_window();
     while !shutdown.load(Ordering::Relaxed) {
+        let window = crate::windows::input::foreground_window();
+        if window != foreground_window {
+            foreground_window = window;
+            hotkey.activity.invalidate();
+        }
         if let Some(failed) = model.poll() {
             fail(&events, failed.error.clone())?;
             if let Some(swap_failures) = &swap_failures {
@@ -418,10 +426,13 @@ pub fn run(
             let next_shortcuts = Shortcuts::from_config(&next_config);
             if next_shortcuts != shortcuts {
                 // The old hook goes first; one keyboard hook runs at a time.
+                // The activity survives the restart, so a pending
+                // continuation still sees the same input session.
+                let activity = hotkey.activity.clone();
                 drop(hotkey);
                 held_event = None;
                 shortcuts = next_shortcuts;
-                hotkey = shortcuts.start()?;
+                hotkey = shortcuts.start(activity)?;
                 toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
             }
             if next_config.while_dictating != while_dictating {
@@ -1210,9 +1221,9 @@ fn process_dictation_job(
             // Labs › YOLO mode, read as the output commits.
             sent = pasted.is_ok()
                 && !copy_only
-                && job.held_ms.is_some_and(|held_ms| {
-                    crate::dictation::yolo_mode::sends(held_ms, application.as_deref())
-                });
+                && job.by_shortcut
+                && !job.flavour.raw()
+                && crate::dictation::yolo_mode::sends(application.as_deref());
             let pasted = if sent { paster.press_return() } else { pasted };
             // A failed paste still keeps the text for Paste Last.
             *last_dictation

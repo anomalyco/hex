@@ -19,13 +19,15 @@ impl Feature {
 
     /// The summary the website lists. A Labs card's `summary` names the keys
     /// its own OS has (the special-keys lab's Windows build lists Insert
-    /// through Page Down), so the site's line for a lab on more than one OS
-    /// names each one's keys here, and `site/src/labs.json` is the same file on
-    /// every OS.
+    /// through Page Down), so a lab whose line depends on the OS is fixed to
+    /// one line here, and `site/src/labs.json` is the same file on every OS.
     const fn web_summary(self) -> &'static str {
         match self {
             Self::StandaloneSpecialKeys => {
                 "Use a special key alone as a shortcut: Insert, Home, End, Page Up, or Page Down on Windows, and Menu, Pause, or Scroll Lock on Linux"
+            }
+            Self::HoldThroughKeys => {
+                "If a shortcut is made only of Option, Command, Shift, Control, or Globe, with no letter or number key, pressing another key or clicking after the first second no longer ends the dictation; let go to finish"
             }
             _ => self.summary(),
         }

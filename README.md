@@ -21,7 +21,7 @@ it pastes.
   built-in cleanups, your own scripts, an optional OpenCode rewrite), with
   different steps per app or website
 - Vocabulary is one list of names Hex should know; Whisper and Qwen3-ASR read
-  it while transcribing, Parakeet models read it with Labs › Vocabulary biasing
+  it while transcribing, Parakeet models read it with Labs › Vocabulary help
   on, and the OpenCode rewrite uses it
 - Annotate records the screen while you draw and talk, on macOS, Linux and
   Windows (GNOME Wayland needs Labs › Annotate on GNOME)

@@ -2097,12 +2097,13 @@ impl LocalTime {
     }
 
     pub(super) fn clock(&self) -> String {
-        let hour = match self.hour % 12 {
-            0 => 12,
-            hour => hour,
-        };
-        let period = if self.hour < 12 { "AM" } else { "PM" };
-        format!("{hour}:{:02} {period}", self.minute)
+        crate::desktop::i18n::clock_time(self.hour, self.minute)
+    }
+
+    /// This time on English's 12-hour clock, `2:30 PM`, the form default
+    /// titles used before meeting times followed the interface language.
+    pub(super) fn twelve_hour_clock(&self) -> String {
+        crate::desktop::i18n::twelve_hour_clock(self.hour, self.minute)
     }
 
     /// `2026-10-30T14:05:00`, as the Trash records a deletion.

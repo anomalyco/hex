@@ -792,6 +792,38 @@ Check: `a_model_without_room_on_the_gpu_reloads_in_place_once` (swap state
 only). Not observed on a real 2 GB GPU. A second process (another `hex`
 command that loads a model itself) still loads its own copy.
 
+`recover.gpu-oom`: on Linux and Windows a GPU that fails a run out of memory
+(status 7) is not a driver fault, so it is not added to `gpu-failures.json`
+(#1165); the dictation engine still switched to the CPU and must say so
+(#1984).
+
+```ts
+GPU run fails out of memory -> the model reloads on the CPU and carries the failure
+  -> the engine publishes it for this process only     // never gpu-failures.json
+  -> General › Advanced › Speech engine names it: "Hex switched to the CPU
+     because {device} failed during transcription (out of memory). Restart
+     Hex to use the GPU again."
+  -> a later GPU load that works, or Hex restarting -> the note goes away
+     // ggml keeps the failed device for the process, so a restart is the
+     // reliable way back
+```
+Only the model the engine holds publishes the note: the local API's own
+model, model preparation, and a superseded model swap load beside it, and
+their out-of-memory failures are not dictation's.
+Source: `recover_on_cpu` and `out_of_memory` in
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs),
+`publish_out_of_memory` in [transcription/engine.rs](../../src/transcription/engine.rs),
+and `out_of_memory_failure`/`set_out_of_memory`/`out_of_memory_fallback` in
+[transcription/gpu_health.rs](../../src/transcription/gpu_health.rs); the row in
+[rune_ui/general.rs](../../src/rune_ui/general.rs).
+Check: `an_out_of_memory_fallback_lasts_until_a_gpu_load_works` (state only).
+Proof limit: not observed on a real device loss that surfaced as out of memory,
+and no test of the row itself; the copy names the recorded error, not its cause.
+The other copies' failures are kept out by which call sites publish, not by a
+test: reproducing one needs a GPU and a model.
+A load-time out of memory stays the [`recover.gpu-full`](#degrade-only-the-failing-dependency)
+path, which keeps retrying in place.
+
 `recover.command-pressure`: command recognition is best-effort; dictation
 audio is not.
 

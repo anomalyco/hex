@@ -30,6 +30,8 @@ mod transcriptions;
 pub use discovery::call_developer;
 use discovery::*;
 pub(crate) use discovery::{Discovered, Endpoint, discover, error_code};
+#[cfg(not(target_os = "macos"))]
+pub use discovery::{ExitWatch, watch_running};
 pub use discovery::{call_control, running_pid};
 use http::*;
 pub use processing::Processing;

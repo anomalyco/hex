@@ -49,17 +49,10 @@ impl Drop for Pending {
 
 /// Rules are matched using only the captured identity and the locally read URL and terminal
 /// folder. Folder resolution is separate: no session ID is invented for a repository.
-/// A page that names its session (read by the look) comes first: a site rule
-/// covering the whole host can't take it elsewhere.
+/// The publisher's session is evidence for a suggestion, never a saved rule.
 fn rule_live(router: &Router, loaded: &ScrawlBundle, live: &look::Live) -> look::Live {
     let config = router.config();
-    let mut clues: Vec<smart::Clue> = live
-        .clues
-        .iter()
-        .filter(|clue| clue.source == smart::Source::Signed)
-        .take(1)
-        .cloned()
-        .collect();
+    let mut clues = Vec::new();
     if let Some((key, target)) = live
         .url
         .as_deref()
@@ -201,7 +194,12 @@ impl Worker {
                     return;
                 }
                 look.router.run(|| {
-                    let rules = rule_live(&look.router, &loaded, &live);
+                    let mut rules = rule_live(&look.router, &loaded, &live);
+                    // A partial final read cannot unmatch a rule already
+                    // established locally for this same capture.
+                    if rules.clues.is_empty() {
+                        rules.clues = ruled.clues;
+                    }
                     let ruled = !rules.clues.is_empty();
                     // A saved rule is explicit. Background suggestions cannot override it,
                     // including a newly recognized spoken name.

@@ -185,7 +185,7 @@ pub(super) fn languages_label(def: &ModelDefinition) -> String {
 }
 
 /// Whether transcription reads the vocabulary: Whisper and Qwen3-ASR as
-/// their prompt, Parakeet only with Labs › Vocabulary biasing.
+/// their prompt, Parakeet only with Labs › Vocabulary help.
 pub(super) fn reads_vocabulary(ui: &Ui, def: &ModelDefinition) -> bool {
     match def.vocabulary_use() {
         VocabularyUse::Prompt => true,

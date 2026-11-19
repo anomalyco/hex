@@ -3,8 +3,8 @@
 //! every lab as a card under its group's collapsible header, and Turned on
 //! what's on. Each card shows its description and switch, and while on any
 //! settings the lab has of its own. A feature with its own pane (Meetings,
-//! Voice Filter, Playground) joins the main sidebar while on and is hidden
-//! while off.
+//! Voice Filter, Playground, Modes editor) joins the main sidebar while on
+//! and is hidden while off.
 
 mod browser_access;
 mod group;
@@ -15,14 +15,16 @@ mod store;
 mod voice_prompt;
 mod yolo_mode;
 
+use std::borrow::Cow;
+
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{
-    BOOK, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL, TIMER, WAVE,
+    BOOK, CALENDAR, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL,
+    TIMER, WAVE,
 };
-use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
@@ -34,11 +36,15 @@ pub(super) static LABS_ICON: Icon = Icon {
     body: r#"<path d="M6.25 2.5h3.5M6.75 2.5v4L3.2 12.3a.8.8 0 0 0 .7 1.2h8.2a.8.8 0 0 0 .7-1.2L9.25 6.5v-4M4.8 10h6.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>"#,
 };
 
-/// The main sidebar's panes, in order: General, Output, History, then the
-/// features turned on (Meetings and Voice Filter from Labs, Annotate in dev
-/// builds).
+/// The main sidebar's panes, in order: General, Output, the Modes editor
+/// while its lab is on, History, then the features turned on (Meetings and
+/// Voice Filter from Labs, Annotate in dev builds).
 pub(super) fn main_panes(ui: &Ui) -> Vec<Pane> {
-    let mut panes = vec![Pane::General, Pane::Output, Pane::History];
+    let mut panes = vec![Pane::General, Pane::Output];
+    if Pane::Modes.shown(ui) {
+        panes.push(Pane::Modes);
+    }
+    panes.push(Pane::History);
     #[cfg(hex_capture)]
     let optional = [
         Pane::Captures,
@@ -210,7 +216,7 @@ pub(super) struct Store {
     pub(super) tab: Tab,
     /// The chip selected: only this group's labs show.
     pub(super) group: Option<Group>,
-    /// Labs › Voice prompt's phrase while it's on: a draft, so invalid words
+    /// Labs › Rewrite by voice's phrase while it's on: a draft, so invalid words
     /// stay in its field instead of replacing the saved phrase.
     pub(super) phrase: TextEdit,
     /// Whether `phrase` started from the saved phrase.
@@ -434,7 +440,9 @@ struct Row {
     lab: Lab,
     icon: &'static Icon,
     title: &'static str,
-    about: &'static str,
+    /// The card's description: translated copy, or a translated template
+    /// filled with this build's audio formats.
+    about: Cow<'static, str>,
     /// A line computed from this computer's state, shown in addition to
     /// `about` (the Live text card naming the models that stream, or the Live
     /// typing card explaining this desktop has no input method it can use).
@@ -462,6 +470,30 @@ pub(super) fn offered(ui: &Ui, feature: Feature) -> bool {
             .any(|row| row.lab.id() == feature.name() && !row.locked)
 }
 
+/// Search only the cards the current store can reveal. This also covers
+/// Annotate's build-specific card without inventing a second feature gate.
+fn find_cards(ui: &Ui) -> impl Iterator<Item = Row> {
+    shown(ui).into_iter().filter(|row| !row.locked)
+}
+
+pub(super) fn search_entries(
+    ui: &Ui,
+) -> impl Iterator<Item = (Lab, &'static str, Cow<'static, str>, &'static str)> {
+    find_cards(ui).map(|row| (row.lab, row.title, row.about, group::name(row.group)))
+}
+
+pub(super) fn reveal_card(ui: &mut Ui, lab: Lab, tx: &mut Tx) {
+    reveal(
+        ui,
+        &LabsLink {
+            lab: Some(lab.id().into()),
+            ..Default::default()
+        },
+        tx,
+    );
+    tx.focus(row_key(lab), true);
+}
+
 fn rows(ui: &Ui) -> Vec<Row> {
     let caps = ui.platform.caps;
     let settings = &ui.settings;
@@ -472,7 +504,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             lab,
             icon: icon.unwrap_or_else(|| group::icon(group)),
             title: tr(feature.title()),
-            about: tr(feature.summary()),
+            about: tr(feature.summary()).into(),
             note: None,
             on: feature.on(settings),
             locked: false,
@@ -484,7 +516,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Some(_) => Row {
             on: false,
             locked: true,
-            about: super::managed_note(),
+            about: super::managed_note().into(),
             ..row(feature, icon)
         },
         None => row(feature, icon),
@@ -502,9 +534,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
             on: super::fun::running(ui),
             locked,
             about: if locked {
-                tr("On while the Hex Microphone driver is installed. Uninstall the driver in Voice Filter to turn it off.")
+                tr("On while the Hex Microphone driver is installed. Uninstall the driver in Voice Filter to turn it off.").into()
             } else {
-                voice_filter.about
+                voice_filter.about.clone()
             },
             ..voice_filter
         });
@@ -536,7 +568,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             });
         }
     }
-    rows.push(row(Feature::SettingsSearch, Some(SEARCH_ICON)));
     rows.push(row(Feature::Appearance, Some(&PANEL)));
     rows.push(row(Feature::ReleaseNotesLink, None));
     if caps.meetings {
@@ -545,6 +576,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
         // calendar read.
         if cfg!(target_os = "macos") {
             rows.push(row(Feature::CalendarMenu, Some(&CLOCK)));
+            // macOS's Meetings settings draw the Calendars row's bulk button.
+            rows.push(row(Feature::CalendarSelectAll, Some(&CALENDAR)));
         }
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
@@ -621,7 +654,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         }
     }
     // The ISO section key, left of 1, may be a shortcut with no modifier
-    // (Labs › Section key alone, Linux and macOS).
+    // (Labs › § key alone, Linux and macOS).
     if matches!(
         caps.os,
         super::platform::Os::Linux | super::platform::Os::Macos
@@ -668,8 +701,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::HistoryStats, None));
     rows.push(row(Feature::KeepRecordings, None));
     rows.push(row(Feature::CopyDictationAudio, None));
-    rows.push(row(Feature::HistoryMultiSelect, None));
     rows.push(row(Feature::OutputFixes, Some(&BOOK)));
+    // The Modes editor's card carries its pane.
+    rows.push(row(Feature::ModesEditor, Some(Pane::Modes.icon())));
     rows.push(row(Feature::VoicePrompt, None));
     // macOS's Accessibility reads the text element's caret and nearby text.
     if caps.os == super::platform::Os::Macos {
@@ -691,6 +725,20 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::KQuantModels, None));
     }
     rows.push(row(Feature::PickerDownloaded, None));
+    // The card names the kinds the drop target offers, unless an
+    // organization's lock already says why it can't be used.
+    let drop = row(Feature::DropTranscribe, Some(&WAVE));
+    rows.push(match Feature::DropTranscribe.managed() {
+        Some(_) => drop,
+        None => Row {
+            about: tr_fill(
+                "Drop a {} file on the Hex window to save its transcript as a text file next to it",
+                super::drop_transcribe::formats(),
+            )
+            .into(),
+            ..drop
+        },
+    });
     rows.push(row(Feature::ShellCompletions, None));
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
@@ -706,7 +754,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     } else {
         Row {
             locked: true,
-            about: tr("On while it is the dictation model. Choose another model to turn it off."),
+            about: tr("On while it is the dictation model. Choose another model to turn it off.")
+                .into(),
             ..ultra
         }
     });
@@ -735,9 +784,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(Row {
             locked,
             about: if locked {
-                super::managed_note()
+                super::managed_note().into()
             } else {
-                copy_zip.about
+                copy_zip.about.clone()
             },
             on: !locked && Feature::CopyCaptureZip.on(settings),
             ..copy_zip
@@ -748,9 +797,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
             icon: Pane::Annotate.icon(),
             title: tr("Annotate"),
             about: if locked {
-                super::managed_note()
+                super::managed_note().into()
             } else {
-                tr("Record your screen, draw on it, and talk over it with a shortcut")
+                tr("Record your screen, draw on it, and talk over it with a shortcut").into()
             },
             note: None,
             on: !locked && ui.settings.capture.enabled,
@@ -863,13 +912,12 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MicrophoneKeyAlone => "lab-microphone-key",
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::CopyDictationAudio => "lab-copy-dictation-audio",
-        Feature::HistoryMultiSelect => "lab-history-multi-select",
-        Feature::SettingsSearch => "lab-settings-search",
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::PauseMenu => "lab-pause-menu",
         Feature::CalendarMenu => "lab-calendar-menu",
+        Feature::CalendarSelectAll => "lab-calendar-select-all",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
@@ -894,6 +942,8 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CursorContext => "lab-cursor-context",
         Feature::StopPhrase => "lab-stop-phrase",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
+        Feature::ModesEditor => "lab-modes-editor",
+        Feature::DropTranscribe => "lab-drop-transcribe",
     }
 }
 
@@ -929,9 +979,8 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::AppModelSwitching => ui.open = None,
         // The card's duration menu closes when its lab does.
         Feature::KeepMicrophoneOpen => ui.open = None,
-        // Its menu and application picker close with it.
+        // Its application picker closes with it.
         Feature::YoloMode => {
-            ui.open = None;
             if ui.modes.picker_target == super::modes::PickerTarget::YoloMode {
                 ui.modes.application_picker_open = false;
             }
@@ -1030,6 +1079,8 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::StopPhrase) => Some(stop_phrase::body(ui, p)),
         Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
+        // Wayland reports no file drags, so its card offers the file dialog.
+        Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,

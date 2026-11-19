@@ -72,6 +72,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping
 │   │   capsule) and the System Audio Recording row once allowed
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
+│   │   ├── Labs › Select all calendars -> one Select all / Deselect all button
+│   │   │   beside the Calendars row // labs.calendar_bulk_select
 │   │   └── Labs › Upcoming meetings in menu bar -> the same meetings in the status menu // labs.calendar_menu
 │   └── Detected calls -> Stop when the call ends (macOS, off;
 │       │   meetings.stop_when_call_ends), then Ask / Always record / Never
@@ -256,9 +258,9 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     -> 2 s after the offer Rune reports the overlay unavailable -> logged
        "meeting recording offer could not show", and the window opens on
        Meetings saying so with Rune's reason; its Start recording records;
-       while Labs › Floating meeting capsules on GNOME is off, the note
+       while Labs › Call recording controls on GNOME is off, the note
        names it
-    ├── Labs › Floating meeting capsules on GNOME on (off by default, #1274),
+    ├── Labs › Call recording controls on GNOME on (off by default, #1274),
     │   layer-shell missing, this user's Xwayland already running (checked at
     │   each show; never started) -> offer and recording capsules float on
     │   XWayland: override-redirect, clicks on their buttons, never keyboard
@@ -284,9 +286,15 @@ error showed. Check: `pane_requests_reach_the_window_s_own_meetings` in
 a real Windows PC has not been observed.
 
 Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
-Copy section from the tray, dragging the recording capsule to another corner,
-the `hex meetings` and `hex mcp` commands (shared-control), and website names
-for browser calls. Verified: Linux and Windows x64 build and lint
+Copy section from the tray, the `hex meetings` and `hex mcp` commands
+(shared-control), and website names for browser calls. Dragging a capsule to
+another corner works on Windows, on X11 desktops, and on a capsule floated on
+XWayland (GNOME with Labs › Call recording controls on GNOME), though none of
+that has been tried by hand on a real Windows PC or X11 desktop; only a native
+Wayland capsule returns to the corner it started in
+(`primary_screen_size` in
+[rune_ui/meeting_capsules/screen.rs](../../src/rune_ui/meeting_capsules/screen.rs)).
+Verified: Linux and Windows x64 build and lint
 (`cargo clippy`, `cargo xwin clippy`); the single default-output PipeWire
 monitor capture and the pw-dump parsing were checked by hand on Arch/niri
 before #1801. Not verified: the multi-sink capture #1801 added has not been
@@ -691,7 +699,9 @@ Meetings > Settings > Calendar                       // meetings.calendar (macOS
     ├── Remind me before meetings -> on by default
     ├── Remind me -> At start / 1 / 2 / 5 min
     ├── Calendars -> All calendars, or "2 of 3 calendars"; each switched in the menu
-    └── Next 3 meetings: title, "Today · 2:30 PM", provider icon when it has a call link
+    │   └── Labs › Select all calendars: a Select all / Deselect all button beside it (off by default)
+    └── Next 3 meetings: title, "Today · 2:30 PM" ("Today · 14:30" outside
+        English), provider icon when it has a call link
 
 Meeting = not all-day, declined, free, or cancelled, AND has other attendees or a
           Zoom / Google Meet / Teams / Slack huddle / Webex link (URL, location, notes)
@@ -719,6 +729,15 @@ files from older builds stay off. Every calendar is included unless excluded.
 Hex never asks for calendar access at launch: only Connect calendar calls
 `requestFullAccessToEvents` (`NSCalendarsFullAccessUsageDescription`). With
 Meetings off there is no Calendar card, no EventKit read, and no reminder.
+
+Labs › Select all calendars (`calendar-select-all`, macOS, off by default) adds
+one small secondary button beside the Calendars select. While any calendar is
+left out it reads "Select all" and clears `excluded_calendars`, so every
+calendar is included; while every calendar is included it reads "Deselect all"
+and sets `excluded_calendars` to the IDs shown now. Because the setting stores
+exclusions, a calendar added later is still included. The button hides while
+there are no calendars, and each calendar's own switch in the menu stays as it
+is. Off, the Calendars row is exactly as before.
 
 The controller thread reads EventKit (one bounded query, 48 hours ahead, at most
 200 events) when the store's change notification bumps its counter or once a
@@ -769,7 +788,8 @@ Checks: `meetings_need_other_people_or_a_call_link`,
 `an_always_record_reminder_says_so_and_never_offers_record`,
 `the_reminder_counts_down_to_the_start`); and the Linux pane tests
 `the_calendar_asks_for_access_only_when_connect_is_pressed`,
-`a_connected_calendar_saves_reminders_and_lists_meetings`, and
+`a_connected_calendar_saves_reminders_and_lists_meetings`,
+`the_select_all_calendars_lab_saves_every_calendar_at_once`, and
 `denied_calendar_access_links_to_privacy_settings`; the answer checks
 `a_grant_is_full_access_even_while_the_status_is_stale` and
 `a_refusal_is_a_denial_unless_the_request_failed` in
@@ -858,6 +878,7 @@ changes.
 ```ts
 Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
   -> Title: named meeting OR "<App> call — 2:30 PM" OR "Meeting — 2:30 PM"
+     (times are 12-hour in English and 24-hour, "14:30", elsewhere)
   -> system.wav + microphone.wav, owner-only, Application Support/meetings/<id>
   -> No idle sleep; no dictation mute or media pause // meetings.record
   -> Menu bar: record symbol + elapsed time
@@ -999,7 +1020,10 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   verified in a native window. On Windows the window keeps the size
      │   it had while the capsule leaves.
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
-     │   its centre and saves recording_indicator_corner (window settings too)
+     │   its centre and saves recording_indicator_corner (window settings too;
+     │   macOS, Windows, Linux X11, and XWayland when GNOME floats it there,
+     │   though Windows and X11 have not been tried on a real machine; only a
+     │   native Wayland capsule returns to the corner it started in)
      ├── Copy new -> copies the turns not yet copied or pasted, through
      │   the click (see meetings.copy-through-now)
      │   ├── Shares Option-Control-V's cursor: either one advances both
@@ -1028,7 +1052,7 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
          observed on a real Mac)
   -> No timeout; nothing stops automatically
 
-Panel capsules move like the recording capsule (macOS; #1093, graduated from Labs) // meetings.panel-drag
+Panel capsules move like the recording capsule (#1093, graduated from Labs; only a native Wayland capsule still returns to its corner) // meetings.panel-drag
   The panel capsules: offer, reminder, left the call, the finished meeting,
   Recording automatically
   -> Each opens in the saved recording_indicator_corner (read as it shows)
@@ -1039,7 +1063,9 @@ Panel capsules move like the recording capsule (macOS; #1093, graduated from Lab
      │   where it was let go into that corner on the GLIDE spring (0.32 s, no
      │   bounce), carrying the throw's speed, and the corner is saved, so the
      │   recording capsule moves there too. A press mid-glide catches it
-     │   where it is. Reduce Motion, or no screen size -> it jumps there
+     │   where it is. Reduce Motion -> it jumps into the new corner; with no
+     │   screen to measure (a native Wayland capsule) -> it returns to the
+     │   corner it started in
      ├── Press on a button -> the button, as before
      └── Escape mid-drag -> back where it was, nothing saved
   -> The finished meeting opens in the corner its recording ended in
@@ -1892,7 +1918,8 @@ While recording, setting on, model available           // meetings.title.provisi
      (rolling chunks, echo-filtered)
   -> ≥ 90 s of speech (or ≥ 600 words; ≥ 60 words either way)
      -> waits (≤30 s) while dictation is busy
-     -> ONE title-only call over the transcript so far (≤5,000 chars, 30 s timeout)
+     -> ONE title-only call over the transcript so far (≤5,000 chars, 30 s
+        timeout); asks for the title in the language spoken in the transcript
   -> Recorder stores provisional_title in the manifest
      -> menu bar "Recording · <title>", Meetings pane list and detail
   -> Refreshed once when speech reaches 10 minutes; a failure retries a minute
@@ -1904,6 +1931,9 @@ While recording, setting on, model available           // meetings.title.provisi
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
   -> ONE call over a bounded excerpt, no map-reduce
+     ├── Language -> the transcript's own; the instructions say "You MUST
+     │   write the title and summary in the language spoken in the transcript
+     │   … never translate them", and never name a language
      ├── Vocabulary (#1154; graduated from Labs) -> "Names and terms that
      │   may appear: …" (≤30 vocabulary terms, read at each generation,
      │   Regenerate included) ahead of the calendar context; its length comes
@@ -1953,10 +1983,22 @@ Finished meeting panel -> the shown title; "Writing a title and summary with
   Apple Intelligence…" under it, then the summary (at most three lines)
 ```
 
+Language rule: the final notes instructions (`NOTES_INSTRUCTIONS` in
+[meeting/notes.rs](../../src/meeting/notes.rs)) and the provisional-title
+instructions (`TITLE_INSTRUCTIONS`) require the title and summary in the
+language spoken in the transcript, and say those instructions are in English,
+so an English prompt never pulls another language's meeting into English. The
+live chapter instructions carry the same rule, and the boundary pass is told
+the transcript's language never changes which L numbers it lists
+(checks: `prompts_keep_the_transcripts_language` and
+`chapter_prompts_keep_the_transcripts_language`).
+
 Title rule: the shown title is the user's title unless it is still the default
-`<App> call — 2:30 PM` / `Meeting — 2:30 PM`; then the final notes title, else
-the provisional title, else the default. Named or renamed meetings keep their
-name. By default the exported file keeps its name when the title changes, so
+`<App> call — 2:30 PM` / `Meeting — 2:30 PM` (12-hour in English, 24-hour such
+as `14:30` elsewhere; an old 12-hour default still reads as one in any
+language); then the final notes title, else the provisional title, else the
+default. Named or renamed meetings keep their name. By default the exported
+file keeps its name when the title changes, so
 links, open editors, and Reveal keep working. With Export › Descriptive meeting
 file names on (off by default), applying notes, refining chapters that change
 the title, or renaming the meeting renames the file in place to
@@ -1990,6 +2032,7 @@ FoundationModels bridge [apple_intelligence.swift](../../src/apple_intelligence.
 [build.rs](../../build.rs); the recorder loop in `record` in
 [meeting.rs](../../src/meeting.rs). Checks in `meeting::notes::tests` (fake
 model): `a_short_transcript_is_sent_whole_in_one_call`,
+`prompts_keep_the_transcripts_language`,
 `long_meetings_are_excerpted_from_the_opening_middle_and_ending`,
 `context_overflow_halves_the_excerpt_once_and_failures_stop`,
 `vocabulary_terms_lead_the_notes_prompt_and_share_its_budget`,
@@ -1998,9 +2041,10 @@ model): `a_short_transcript_is_sent_whole_in_one_call`,
 `generated_and_provisional_titles_replace_only_default_titles`,
 `older_notes_with_points_action_items_and_decisions_still_read`,
 `notes_are_inserted_above_the_transcript_and_regenerate_idempotently`, and
-`user_edits_outside_the_notes_block_are_preserved`; menu text in
-`meeting_menu_offers_one_action_per_state`. The recorder thread, manifest write,
-and menu/pane refresh during a real recording are unexercised.
+`user_edits_outside_the_notes_block_are_preserved`; chapter prompts in
+`meeting::chapters::tests`' `chapter_prompts_keep_the_transcripts_language`;
+menu text in `meeting_menu_offers_one_action_per_state`. The recorder thread,
+manifest write, and menu/pane refresh during a real recording are unexercised.
 
 Real model (debug CLI): `hex meeting summarize <file.md> [--excerpt-chars N]`
 times the provisional title at the point a recording would ask for it, then the
@@ -2295,6 +2339,11 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Titles and summaries have not run after a real recording in the app; the CLI
   path exercised the real model, and the provisional-title thread, its manifest
   write, and the menu/pane refresh are unexercised in a live recording.
+- The transcript-language rule in the notes and chapter prompts is prompt-level
+  only: it has not run on a real Mac against a non-English meeting, so whether
+  Apple Intelligence and a given OpenCode model honour it, and how they word a
+  title or summary whose script has no spaces or `.`/`!`/`?` sentence ends
+  (`clean_title`, `clean_summary`), are unmeasured.
 - Live chapters (Labs) have not run in a real recording: the worker,
   manifest writes, title updates, menu bar Copy Section, and the boundary pass
   after publication ran only in unit tests and the debug CLI over one synthetic
