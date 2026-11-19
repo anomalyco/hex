@@ -37,12 +37,13 @@ const MAX_ATTEMPTS: usize = 1_000;
 /// the shared pieces reader decodes and what the window's drop target, its
 /// "Transcribe a file…" dialog, and their copy all offer.
 pub const EXTENSIONS: &[&str] = &[
-    "wav", "mp3", "m4a", "mp4", "aiff", "aif", "caf", "flac", "ogg", "oga", "opus", "webm", "mkv",
+    "wav", "mp3", "aac", "m4a", "mp4", "mov", "aiff", "aif", "caf", "flac", "ogg", "oga", "opus",
+    "webm", "mkv",
 ];
 
 /// Those kinds as the copy names them, one name per kind (`aif` under AIFF,
 /// `oga` under OGG), for the drop hint, the refusal, and the Labs card.
-pub const FORMATS: &str = "WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV";
+pub const FORMATS: &str = "WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV";
 
 /// Why a dropped file could not become a transcript.
 #[derive(Debug)]
@@ -655,10 +656,10 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// A cancel that lands while the last piece runs stops the file before
-    /// anything is written, so a cancelled drop never leaves a transcript.
+    /// The check before the save reads the cancel flag once more, so a cancel
+    /// that lands while the final piece runs still stops the transcript.
     #[test]
-    fn a_cancel_after_the_last_piece_stops_the_save() {
+    fn still_wanted_refuses_a_cancelled_file() {
         let cancel = AtomicBool::new(false);
         assert!(still_wanted(&cancel).is_ok());
         cancel.store(true, Ordering::Release);
@@ -713,8 +714,10 @@ mod tests {
     const KINDS: &[(&str, &str, &str)] = &[
         ("wav", "WAV", "generated.wav"),
         ("mp3", "MP3", "sine.mp3"),
+        ("aac", "AAC", "sine-aac.aac"),
         ("m4a", "M4A", "sine-aac.m4a"),
         ("mp4", "MP4", "sine-video.mp4"),
+        ("mov", "MOV", "sine-video.mp4"),
         ("aiff", "AIFF", "sine.aiff"),
         ("aif", "AIFF", "sine.aiff"),
         ("caf", "CAF", "sine-aac.caf"),
@@ -740,8 +743,9 @@ mod tests {
             let upper = PathBuf::from(format!("talk.{}", extension.to_uppercase()));
             assert!(extension_accepted(&upper), "{extension}");
         }
-        // Raw AAC (ADTS) has no reader here, and nothing else off the list.
-        for refused in ["talk.aac", "talk.txt", "talk", "talk.mov", "talk.wav2"] {
+        // Extensions this build does not offer: nothing here is a container
+        // the shared pieces reader decodes.
+        for refused in ["talk.wma", "talk.txt", "talk", "talk.mid", "talk.wav2"] {
             assert!(!extension_accepted(Path::new(refused)), "{refused}");
         }
     }
@@ -773,7 +777,7 @@ mod tests {
                 "{extension} is offered but not accepted"
             );
         }
-        for refused in ["aac", "mov", "txt", "wav2"] {
+        for refused in ["wma", "txt", "mid", "wav2"] {
             assert!(!EXTENSIONS.contains(&refused), "{refused}");
         }
     }
@@ -834,7 +838,7 @@ mod tests {
     /// A container with no audio track says so, and a codec the reader can't
     /// decode is named, rather than both reading as an unreadable file.
     #[test]
-    fn a_missing_track_and_an_unknown_codec_say_what_is_wrong() {
+    fn a_file_without_audio_and_an_unknown_codec_say_what_is_wrong() {
         let video = fixture("rgbw.mp4");
         let error = Pieces::open(&video).unwrap_err();
         let mapped = file_error(&video, error);

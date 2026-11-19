@@ -360,13 +360,13 @@ fn a_file_of_unknown_length_says_transcribing_without_a_percentage() {
 fn a_file_hex_cannot_read_is_refused() {
     let (mut rt, started) = window(true);
     let at = landing(&rt);
-    // Raw AAC has no reader here, so the drop target refuses it.
-    let file = PathBuf::from("/recordings/talk.aac");
+    // WMA has no reader here, so the drop target refuses it.
+    let file = PathBuf::from("/recordings/talk.wma");
     rt.drag_files(vec![file.clone()], at);
     settle(&mut rt);
     assert!(
         texts(&rt).iter().any(|text| {
-            text == "Hex can transcribe WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV files"
+            text == "Hex can transcribe WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV files"
         }),
         "{:?}",
         texts(&rt)

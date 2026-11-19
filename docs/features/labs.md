@@ -191,8 +191,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // the_cli_prints_completion_scripts (linux.rs, main.rs, windows.rs);
 │                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
 │                                        // a sourced script in a real shell
-├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, Ogg,
-│                                        Opus, WebM, or Matroska file dropped anywhere on Hex's window queues
+├── Transcribe dropped audio no labs.drop_transcribe   (every OS) a WAV, MP3, AAC, M4A, MP4, MOV, AIFF,
+│                                        CAF, FLAC, Ogg, Opus, WebM, or Matroska file dropped anywhere on
+│                                        Hex's window queues
 │                                        behind any file already being transcribed, one at a time, each with the
 │                                        dictation model and language in use;
 │                                        it is read in ≤30 s pieces in this process and saved as `<stem>.txt` beside
@@ -223,7 +224,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // an_unwritable_folder_sends_the_transcript_to_downloads,
 │                                        // a_file_in_the_temp_folder_sends_the_transcript_to_downloads,
 │                                        // a_temp_folder_reached_through_a_symlink_still_sends_the_transcript_to_downloads,
-│                                        // a_cancel_after_the_last_piece_stops_the_save,
+│                                        // still_wanted_refuses_a_cancelled_file,
 │                                        // a_truncated_wav_is_refused_before_anything_is_transcribed,
 │                                        // a_checked_wav_still_reads_from_its_first_sample,
 │                                        // only_the_formats_this_build_reads_are_accepted,
@@ -231,7 +232,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // every_extension_on_offer_reads_its_own_fixture,
 │                                        // every_labs_line_names_the_formats_this_build_reads,
 │                                        // an_unsupported_file_is_refused_before_anything_loads,
-│                                        // a_missing_track_and_an_unknown_codec_say_what_is_wrong,
+│                                        // a_file_without_audio_and_an_unknown_codec_say_what_is_wrong,
 │                                        // the_bundled_mp3_decodes_to_sixteen_kilohertz_mono (transcription/file_transcript.rs);
 │                                        // drop_transcribe_is_its_own_switch_and_everywhere (labs.rs); no model
 │                                        // transcribed a dropped file, and nothing ran on Wayland (no file drags)
@@ -3654,10 +3655,11 @@ The drop target is the window root
 `on_drop_files` takes the files whose extension this build reads
 (`file_transcript::EXTENSIONS`), `on_drop_hover` shows the hint over the whole
 window while a file drag is on it, and a drag with nothing Hex reads says what
-it reads instead ("Hex can transcribe WAV, MP3, M4A, MP4, AIFF, CAF, FLAC,
-OGG, Opus, WebM, or MKV files") through `on_drop_rejected_hover`, and again as
-a toast if it is dropped. With the lab off the window sets no drop handler at
-all, so nothing of this draws or runs. A file's toast shows its name, a ring and percentage of
+it reads instead ("Hex can transcribe WAV, MP3, AAC, M4A, MP4, MOV, AIFF,
+CAF, FLAC, OGG, Opus, WebM, or MKV files") through `on_drop_rejected_hover`,
+and again as a toast if it is dropped. With the lab off the window sets no
+drop handler at all, so nothing of this draws or runs. A file's toast shows
+its name, a ring and percentage of
 the audio decoded (the backend's progress callback; a spinner and
 "Transcribing…" when the file's length is unknown), how many files wait
 behind it, and Cancel, which stops the running file, empties the queue, and
@@ -3678,7 +3680,9 @@ channel closes. Only then does the next queued file start, so a drop right
 after Cancel — or the lab turned off and on again — queues behind the old
 worker instead of starting a second one and a second `TranscriptionService`
 while the first still loads or runs. A file's own gate
-(`labs::drop_transcribe`) is checked again inside the backend when it starts.
+(`labs::drop_transcribe`) is checked again inside the backend when it starts;
+turning the lab off while a file runs cancels it from the window, but a worker
+that still saves writes its transcript without a toast saying so.
 
 The backend
 ([transcription/file_transcript.rs](../../src/transcription/file_transcript.rs))
@@ -3691,9 +3695,10 @@ whole once before the model loads, as `hex transcribe` does, so a truncated or
 corrupt file is refused up front, and compressed audio decodes once, as it
 transcribes, with damage found later reported where it is. The drop target and
 the card's dialog offer the same extensions on every OS, one per container the
-shared reader takes: `wav`, `mp3`, `m4a`/`mp4`, `aiff`/`aif`, `caf`, `flac`,
-`ogg`/`oga`, `opus` (an Ogg file), `webm`, and `mkv`. Every format is
-downmixed to mono, resampled to 16 kHz, cut at most every 30 s, and each
+shared reader takes: `wav`, `mp3`, `aac`, `m4a`/`mp4`/`mov`, `aiff`/`aif`,
+`caf`, `flac`, `ogg`/`oga`, `opus` (an Ogg file), `webm`, and `mkv`. Every
+format is downmixed to mono, resampled to 16 kHz, cut at most every 30 s, and
+each
 piece is sent to the service in order, which skips one the speech detector
 hears nothing in; the pieces' text joins with one space. A piece runs on the dictation engine's
 loaded copy when that copy is the model the file asks for and dictation stays
@@ -3710,7 +3715,8 @@ the model for the file instead. The whole transcript is written as
 OS temp folder or in an unwritable folder has its transcript written to
 Downloads; a writable source folder needs no Downloads at all. Cancelling
 stops between pieces, every 100 ms while one waits for its transcript, and
-once more before the transcript is saved, so a cancelled file writes nothing.
+once more before the transcript is saved, so a cancel before the final check
+writes nothing.
 The worker answers only after the piece already decoding or transcribing
 finishes, and after a cold load of the service's own model, so the next file
 starts only then. Progress is the fraction of the file decoded; a compressed
@@ -3743,7 +3749,7 @@ and `drop-running` in both appearances; `the_first_free_name_numbering_counts_up
 `an_unwritable_folder_sends_the_transcript_to_downloads`,
 `a_file_in_the_temp_folder_sends_the_transcript_to_downloads`,
 `a_temp_folder_reached_through_a_symlink_still_sends_the_transcript_to_downloads`,
-`a_cancel_after_the_last_piece_stops_the_save`,
+`still_wanted_refuses_a_cancelled_file`,
 `a_truncated_wav_is_refused_before_anything_is_transcribed`,
 `a_checked_wav_still_reads_from_its_first_sample`,
 `only_the_formats_this_build_reads_are_accepted`,
@@ -3751,7 +3757,7 @@ and `drop-running` in both appearances; `the_first_free_name_numbering_counts_up
 `every_extension_on_offer_reads_its_own_fixture`,
 `every_labs_line_names_the_formats_this_build_reads`,
 `an_unsupported_file_is_refused_before_anything_loads`,
-`a_missing_track_and_an_unknown_codec_say_what_is_wrong`, and
+`a_file_without_audio_and_an_unknown_codec_say_what_is_wrong`, and
 `the_bundled_mp3_decodes_to_sixteen_kilohertz_mono` in
 [file_transcript.rs](../../src/transcription/file_transcript.rs);
 `drop_transcribe_is_its_own_switch_and_everywhere` in

@@ -310,7 +310,7 @@ impl Feature {
                 "Edit each mode's apps, corrections and OpenCode rewrite in a Modes pane"
             }
             Self::DropTranscribe => {
-                "Drop a WAV, MP3, M4A, MP4, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it"
+                "Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it"
             }
         }
     }
