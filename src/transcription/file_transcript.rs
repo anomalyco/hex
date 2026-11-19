@@ -57,7 +57,7 @@ pub const FORMATS: &str = "WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, O
 pub enum FileTranscriptError {
     /// Labs › Transcribe dropped audio is off.
     Disabled,
-    /// The extension is not one this build reads.
+    /// The extension is not one this build offers.
     UnsupportedFormat { path: PathBuf },
     /// The file could not be opened, or its audio format is not supported,
     /// with the reason.
@@ -99,7 +99,7 @@ impl std::fmt::Display for FileTranscriptError {
             }
             Self::UnsupportedCodec { path, codec } => write!(
                 formatter,
-                "{} holds {codec} audio, which Hex cannot decode",
+                "{} holds audio in a codec Hex cannot decode ({codec})",
                 path.display()
             ),
             Self::NoAudioTrack { path } => {
@@ -901,7 +901,10 @@ mod tests {
             Path::new("/recordings/talk.mp4"),
             PieceError::UnsupportedCodec("AC-3".into()),
         );
-        assert!(codec.to_string().contains("holds AC-3 audio"), "{codec}");
+        assert!(
+            codec.to_string().contains("codec Hex cannot decode (AC-3)"),
+            "{codec}"
+        );
         assert!(
             matches!(&codec, FileTranscriptError::UnsupportedCodec { codec, .. } if codec == "AC-3")
         );

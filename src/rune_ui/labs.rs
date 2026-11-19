@@ -725,7 +725,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::KQuantModels, None));
     }
     rows.push(row(Feature::PickerDownloaded, None));
-    // The card names this build's formats: the drop target reads exactly them.
+    // The card names the kinds the drop target offers.
     rows.push(Row {
         about: tr_fill(
             "Drop a {} file on the Hex window to save its transcript as a text file next to it",
