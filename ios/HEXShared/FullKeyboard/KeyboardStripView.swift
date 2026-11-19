@@ -18,6 +18,11 @@ final class KeyboardStripView: UIView {
     }
     var onSelectSuggestion: ((KeyboardSuggestion) -> Void)?
     var onUndoDictation: (() -> Void)?
+    var onPaste: ((String) -> Void)? {
+        get { pasteReceiver.onPaste }
+        set { pasteReceiver.onPaste = newValue }
+    }
+    var onNextKeyboard: (() -> Void)?
 
     private let statusLabel = UILabel()
     private let undoChip = UIButton(type: .custom)
@@ -25,6 +30,12 @@ final class KeyboardStripView: UIView {
     private var currentSuggestions: [KeyboardSuggestion] = []
     private var showsUndo = false
     private var statusText: String?
+    private var clipboard: KeyboardClipboardOffer?
+    private let pasteReceiver = KeyboardPasteReceiver()
+    /// `UIPasteControl`'s configuration is immutable once created, so a palette change
+    /// replaces the control.
+    private var pasteControl = UIPasteControl(configuration: UIPasteControl.Configuration())
+    private let nextKeyboardChip = UIButton(type: .custom)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -51,7 +62,24 @@ final class KeyboardStripView: UIView {
         undoChip.configuration = chip
         undoChip.isHidden = true
         undoChip.addTarget(self, action: #selector(handleUndo), for: .touchUpInside)
+        pasteControl.isHidden = true
         addSubview(undoChip)
+
+        addSubview(pasteReceiver)
+        var next = UIButton.Configuration.plain()
+        next.image = UIImage(
+            systemName: "keyboard",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.5, weight: .medium)
+        )
+        next.imagePadding = 6
+        next.title = "Code from Messages"
+        next.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
+        next.background.cornerRadius = 15
+        nextKeyboardChip.configuration = next
+        nextKeyboardChip.accessibilityHint = "Switches to the next keyboard, where iOS offers codes from Messages and Mail"
+        nextKeyboardChip.isHidden = true
+        nextKeyboardChip.addTarget(self, action: #selector(handleNextKeyboard), for: .touchUpInside)
+        addSubview(nextKeyboardChip)
 
         for (index, button) in slotButtons.enumerated() {
             button.tag = index
@@ -65,15 +93,25 @@ final class KeyboardStripView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func update(suggestions: [KeyboardSuggestion], showsUndo: Bool, statusText: String?) {
-        let changed = suggestions != currentSuggestions || showsUndo != self.showsUndo || statusText != self.statusText
+    func update(
+        suggestions: [KeyboardSuggestion],
+        showsUndo: Bool,
+        statusText: String?,
+        clipboard: KeyboardClipboardOffer? = nil
+    ) {
+        let changed = suggestions != currentSuggestions || showsUndo != self.showsUndo
+            || statusText != self.statusText || clipboard != self.clipboard
         guard changed else { return }
         currentSuggestions = suggestions
         self.showsUndo = showsUndo
         self.statusText = statusText
+        self.clipboard = clipboard
 
         undoChip.isHidden = !showsUndo
-        if showsUndo {
+        let showsClipboard = showsClipboard
+        pasteControl.isHidden = !showsClipboard || clipboard == .code(canPaste: false)
+        nextKeyboardChip.isHidden = !showsClipboard || clipboard == .paste
+        if showsUndo || showsClipboard {
             statusLabel.isHidden = true
             slotButtons.forEach { $0.isHidden = true }
         } else if let statusText, suggestions.isEmpty {
@@ -95,8 +133,39 @@ final class KeyboardStripView: UIView {
         setNeedsDisplay()
     }
 
+    /// Clipboard chips replace the empty strip; suggestions and status win.
+    private var showsClipboard: Bool {
+        guard let clipboard, !showsUndo, statusText == nil else { return false }
+        if case .code = clipboard { return true }
+        return currentSuggestions.isEmpty
+    }
+
+    private func rebuildPasteControl() {
+        let configuration = UIPasteControl.Configuration()
+        configuration.displayMode = .iconAndLabel
+        configuration.cornerStyle = .capsule
+        configuration.baseForegroundColor = palette.textBase
+        configuration.baseBackgroundColor = palette.chipFill
+        let control = UIPasteControl(configuration: configuration)
+        control.target = pasteReceiver
+        control.isHidden = pasteControl.isHidden
+        control.frame = pasteControl.frame
+        pasteControl.removeFromSuperview()
+        pasteControl = control
+        addSubview(control)
+    }
+
+    @objc private func handleNextKeyboard() {
+        onNextKeyboard?()
+    }
+
     private func applyPalette() {
         statusLabel.textColor = palette.textMuted
+        rebuildPasteControl()
+        var next = nextKeyboardChip.configuration
+        next?.baseForegroundColor = palette.textMuted
+        next?.background.backgroundColor = palette.chipFill
+        nextKeyboardChip.configuration = next
         var chip = undoChip.configuration
         chip?.baseForegroundColor = palette.textMuted
         chip?.background.backgroundColor = palette.chipFill
@@ -123,6 +192,20 @@ final class KeyboardStripView: UIView {
             width: chipSize.width,
             height: chipH
         )
+        let pasteW: CGFloat = 96
+        let nextSize = nextKeyboardChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
+        let pair = !pasteControl.isHidden && !nextKeyboardChip.isHidden
+        let gap: CGFloat = 8
+        let total = pair ? pasteW + gap + nextSize.width : (pasteControl.isHidden ? nextSize.width : pasteW)
+        let startX = (bounds.width - total) / 2
+        let chipY = max(0, midY - chipH / 2)
+        pasteControl.frame = CGRect(x: startX, y: chipY, width: pasteW, height: chipH)
+        nextKeyboardChip.frame = CGRect(
+            x: pair ? startX + pasteW + gap : startX,
+            y: chipY,
+            width: nextSize.width,
+            height: chipH
+        )
         let slotW = bounds.width / 3
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
@@ -131,7 +214,7 @@ final class KeyboardStripView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        guard !showsUndo, statusLabel.isHidden, bounds.width > 60 else { return }
+        guard !showsUndo, !showsClipboard, statusLabel.isHidden, bounds.width > 60 else { return }
         // Hide the divider adjacent to a highlighted primary pill, matching Apple's strip.
         let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
         guard !primaryHighlighted else { return }

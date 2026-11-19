@@ -36,6 +36,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private var undoHideWork: DispatchWorkItem?
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     private let selectionHaptics = UISelectionFeedbackGenerator()
+    private let clipboard = KeyboardClipboardTracker()
 
     /// Exposed so unit tests can verify lazy allocation and teardown of the Metal recording panel.
     var hasAllocatedRecordingPanel: Bool { recordingPanel != nil }
@@ -61,6 +62,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self.engine.acceptSuggestion(suggestion)
         }
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
+        stripView.onPaste = { [weak self] text in self?.pasteFromClipboard(text) }
+        stripView.onNextKeyboard = { [weak self] in self?.hostController?.advanceToNextInputMode() }
 
         globeButton.accessibilityLabel = "Next keyboard"
         globeButton.isAccessibilityElement = true
@@ -340,8 +343,20 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         stripView.update(
             suggestions: engine.suggestions,
             showsUndo: lastDictation != nil,
-            statusText: status
+            statusText: status,
+            clipboard: clipboard.offer(
+                textContentType: engine.target.textContentType,
+                hasFullAccess: model.hasFullAccess
+            )
         )
+    }
+
+    private func pasteFromClipboard(_ text: String) {
+        keyFeedback()
+        clipboard.markPasted()
+        engine.target.insertText(text)
+        engine.textDidChange()
+        refreshStrip()
     }
 
     private func refreshRecordingPanel() {
