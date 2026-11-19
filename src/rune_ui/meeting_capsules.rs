@@ -1425,9 +1425,6 @@ fn panel_width(kind: &Kind) -> f32 {
     }
 }
 
-/// The panel capsule's width for `kind`, room for its title beside its
-/// buttons.
-
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc::{self, Receiver};
