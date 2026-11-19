@@ -2636,10 +2636,16 @@ the pump (`rune_hud::rehome`, `rune_hud::macos`):
   active Space. When a Space switch or a full-screen exit left it behind, Hex
   orders the panel out, clears the mask, sets the mask Rune intends (never the
   panel's read-back), and orders it back in. That reorders the panel but leaves
-  Rune's presence state and alpha alone. One stranding gets at most three
-  attempts, at least 150 ms apart, and the budget resets when the panel is seen
-  on the active Space or the HUD hides, so a repair that did not take cannot
-  loop.
+  Rune's presence state and alpha alone. The window server applies that
+  asynchronously, so an attempt counts only once a later tick confirms it:
+  seen on the active Space, it took; still elsewhere after its wait, it failed,
+  and that tick tries again. The waits double from 150 ms to at most 3 s
+  (150, 300, 600, 1200, 2400, 3000 ms), for at most eight attempts per
+  stranding, and the budget resets when the panel is seen on the active Space
+  or the HUD hides, so a repair that did not take cannot loop. The log line
+  comes from the confirming tick (on the active Space again after N attempts,
+  still on another Space with the next wait, or giving up), never from a read
+  right after the reorder.
 - Every change of the Dock icon's activation policy (the policy follows
   Settings; an open Settings window forces the icon on) marks the panel for one
   repair. A call that leaves the policy as it was, which is the usual case when

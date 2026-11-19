@@ -265,6 +265,9 @@ impl DictationIndicatorUi {
         };
         // A HUD on its way out stays visible until Rune applies the hide.
         let visible = self.hud.shown.load(Ordering::Acquire) && panel.isVisible();
+        // Read before the repair: the window server applies it later, and the
+        // pump's next ticks log whether it took.
+        let active_space = panel.isOnActiveSpace();
         match self.rehome.reassert(Instant::now(), visible) {
             rehome::Repair::None => {}
             rehome::Repair::Mask => apply_behavior(&panel),
@@ -273,7 +276,7 @@ impl DictationIndicatorUi {
         tracing::info!(
             window = number,
             visible,
-            active_space = panel.isOnActiveSpace(),
+            active_space,
             "re-asserted the dictation HUD's collection behaviors after a Dock icon change"
         );
     }
@@ -284,10 +287,12 @@ impl DictationIndicatorUi {
     /// that only as its panel shows (#1084). Clearing the mask and setting the
     /// intended one back makes the window server apply it again; the panel is
     /// ordered out and back in, so this reorders the panel but leaves Rune's
-    /// presence state and alpha alone. A stranding gets at most
-    /// [`rehome::MAX_REPAIRS`] attempts, [`rehome::REPAIR_SPACING`] apart,
-    /// reset when the panel is seen on the active Space or the HUD hides, so
-    /// a repair that did not take cannot loop.
+    /// presence state and alpha alone. The window server applies that later,
+    /// so an attempt is judged, and logged, only on a later tick: one that
+    /// still finds the panel elsewhere after [`rehome::wait`] counts it and
+    /// tries again with a longer wait, for at most [`rehome::MAX_REPAIRS`]
+    /// attempts, reset when the panel is seen on the active Space or the HUD
+    /// hides, so a repair that did not take cannot loop.
     fn rehome_on_active_space(&mut self, mtm: MainThreadMarker) {
         let Some((number, panel)) = self.panel(mtm) else {
             return;
@@ -300,15 +305,39 @@ impl DictationIndicatorUi {
         } else {
             rehome::Located::Elsewhere
         };
-        if self.rehome.decide(Instant::now(), located) != rehome::Repair::Rehome {
-            return;
+        let decision = self.rehome.decide(Instant::now(), located);
+        match decision.confirmed {
+            None if decision.repair == rehome::Repair::Rehome => tracing::info!(
+                window = number,
+                "the dictation HUD is on another Space; re-homing it"
+            ),
+            None => {}
+            Some(rehome::Confirmed::Repaired { attempts }) => tracing::info!(
+                window = number,
+                attempts,
+                "the dictation HUD is on the active Space again after re-homing"
+            ),
+            Some(rehome::Confirmed::Stranded {
+                attempts,
+                next: Some(next),
+            }) => tracing::info!(
+                window = number,
+                attempts,
+                next_try_ms = next.as_millis() as u64,
+                "the dictation HUD is still on another Space; re-homing it again"
+            ),
+            Some(rehome::Confirmed::Stranded {
+                attempts,
+                next: None,
+            }) => tracing::warn!(
+                window = number,
+                attempts,
+                "the dictation HUD is still on another Space; giving up until it shows again"
+            ),
         }
-        rehome_panel(&panel);
-        tracing::info!(
-            window = number,
-            active_space = panel.isOnActiveSpace(),
-            "re-homed the dictation HUD on the active Space"
-        );
+        if decision.repair == rehome::Repair::Rehome {
+            rehome_panel(&panel);
+        }
     }
 }
 
