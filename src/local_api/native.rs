@@ -96,6 +96,14 @@ const LAB_CHECK: Duration = Duration::from_millis(200);
 const REOPEN_WAIT: Duration = Duration::from_secs(5);
 /// The most native clients served at once; one more is told it is busy.
 const CLIENTS: usize = 8;
+/// How many clients past [`CLIENTS`] wait to be told so; more are dropped.
+const BUSY_QUEUE: usize = 4;
+/// How long a client past [`CLIENTS`] has to send its request before it is
+/// dropped unanswered.
+const BUSY_WAIT: Duration = Duration::from_secs(1);
+/// How long one read of a busy client waits, so [`BUSY_WAIT`] holds.
+#[cfg(unix)]
+const BUSY_POLL: Duration = Duration::from_millis(50);
 #[cfg(unix)]
 const CONNECTION_WAIT: Duration = Duration::from_millis(500);
 
@@ -187,9 +195,62 @@ impl Drop for Slot {
     }
 }
 
-/// The answer for a connection past [`CLIENTS`].
-fn busy() -> HttpResponse {
-    HttpResponse::code(503, "native-busy")
+/// Tells clients past [`CLIENTS`] `503 native-busy`, one at a time on its
+/// own thread, so the accept loop never waits on one: each gets
+/// [`BUSY_WAIT`] to send its request, which is read whole (so closing never
+/// discards what the client sent before it reads the answer), then the
+/// answer, then `close`. A full queue drops the connection.
+struct Busy<S> {
+    queue: std::sync::mpsc::SyncSender<S>,
+    worker: JoinHandle<()>,
+}
+
+impl<S: Read + Write + Send + 'static> Busy<S> {
+    fn start(close: fn(S)) -> std::io::Result<Self> {
+        let (queue, waiting) = std::sync::mpsc::sync_channel::<S>(BUSY_QUEUE);
+        let worker = std::thread::Builder::new()
+            .name("hex-native-busy".into())
+            .spawn(move || {
+                for mut stream in waiting {
+                    if !turn_away(&mut stream) {
+                        tracing::debug!("a native client past the limit sent no request in time");
+                    }
+                    close(stream);
+                }
+            })?;
+        Ok(Self { queue, worker })
+    }
+
+    fn turn_away(&self, stream: S) {
+        let _ = self.queue.try_send(stream);
+    }
+
+    fn stop(self) {
+        drop(self.queue);
+        if self.worker.join().is_err() {
+            tracing::error!("native busy responder panicked");
+        }
+    }
+}
+
+/// Reads one request, body included, within [`BUSY_WAIT`], then answers it
+/// busy; false when it didn't arrive in time.
+fn turn_away(stream: &mut (impl Read + Write)) -> bool {
+    let deadline = Instant::now() + BUSY_WAIT;
+    let never = AtomicBool::new(false);
+    let Ok(request) = super::http::read_request_until(stream, &never, deadline) else {
+        return false;
+    };
+    let mut body = request.body_prefix;
+    if let Some(length) = request.content_length {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let limit = super::record::MAX_BODY_BYTES;
+        if super::read_body_bounded(stream, length, &mut body, &never, limit, left).is_err() {
+            return false;
+        }
+    }
+    let busy = HttpResponse::code(503, "native-busy");
+    write_response(stream, busy, None).is_ok()
 }
 
 /// Serves one connection: no identity work unless the lab is still on,
@@ -273,13 +334,22 @@ fn serve(
 ) {
     use std::os::fd::AsRawFd;
     let served = Arc::new(AtomicUsize::new(0));
+    // Half-closes after the answer; the request was read whole, so the
+    // close never resets the connection before the client reads it.
+    let busy = Busy::start(|stream: std::os::unix::net::UnixStream| {
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+    });
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((mut stream, _)) => {
+            Ok((stream, _)) => {
                 let _ = stream.set_read_timeout(Some(CONNECTION_WAIT));
                 let _ = stream.set_write_timeout(Some(CONNECTION_WAIT));
                 let Some(slot) = Slot::take(&served) else {
-                    let _ = write_response(&mut stream, busy(), None);
+                    // A short read wait, so its deadline holds.
+                    let _ = stream.set_read_timeout(Some(BUSY_POLL));
+                    if let Ok(busy) = &busy {
+                        busy.turn_away(stream);
+                    }
                     continue;
                 };
                 let context = context.clone();
@@ -307,6 +377,9 @@ fn serve(
                 std::thread::sleep(ACCEPT_WAIT);
             }
         }
+    }
+    if let Ok(busy) = busy {
+        busy.stop();
     }
 }
 
