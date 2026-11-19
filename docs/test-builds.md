@@ -50,7 +50,9 @@ To go back, quit Hex Test, delete it, and open Hex.
 ## Windows (10 or 11, x64 or ARM64)
 
 The installer and executable are unsigned, so SmartScreen warns: choose **More
-info**, then **Run anyway**.
+info**, then **Run anyway**. Smart App Control is stricter: it blocks an
+unsigned setup engine, so turn it off to run a test build (release installers
+carry the signed engine).
 
 1. Quit Hex from its tray icon.
 2. Run `hex-setup-<version>-windows-<x64|arm64>.exe`. It replaces an installed Hex of
