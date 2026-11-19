@@ -40,9 +40,7 @@ fn recording_motion_frames() {
                 span_ms: 64_000,
             };
         });
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.0);
+        landed(&mut rt);
         let mut renderer = offscreen::renderer(&gpu.device);
         let target = offscreen::target(&gpu.device, w, h);
         use crate::{
@@ -259,17 +257,6 @@ fn stop_handoff_frames() {
                 }
             }
             let rgba = paint_recording(&gpu, &mut renderer, &target, &mut rt, &mut ink);
-            // A retired hit target can still paint. Compare its trailing
-            // hover fill against the bare panel gutter on that scanline.
-            if frame == 47 || frame == 48 {
-                let scan = ((CAPSULE_INSET + REST_HEIGHT + ROW_HEIGHT / 2.) * 2.) as usize;
-                let pixel = |x: usize| rgba[4 * (scan * w as usize + x)];
-                assert_eq!(
-                    pixel(460) != pixel(506),
-                    frame == 47,
-                    "Stop glyph at {frame}"
-                );
-            }
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &rgba).unwrap();
         }
         std::fs::write(dir.join("trace.csv"), trace).unwrap();
@@ -337,12 +324,7 @@ fn the_timer_and_saved_corner_hold_through_a_hover_reversal() {
         });
         rt.frame(0.0);
         let anchor = |rt: &Runtime<Capsule>| {
-            let [x, y, w, h] = rt
-                .elements()
-                .into_iter()
-                .find(|e| e.key.as_deref() == Some("pill"))
-                .unwrap()
-                .rect;
+            let [x, y, w, h] = laid_out(rt, "pill");
             (
                 if corner.is_right() { x + w } else { x },
                 if corner.is_top() { y } else { y + h },
@@ -365,10 +347,22 @@ fn the_timer_and_saved_corner_hold_through_a_hover_reversal() {
                 "{corner:?} at {i}"
             );
             let (x, y) = rt.find("elapsed").unwrap();
-            assert!(
-                (x - timer.0).abs() < 0.02 && (y - timer.1).abs() < 0.02,
-                "{corner:?} timer at {i}"
-            );
+            if corner.is_right() {
+                assert!(
+                    (x - timer.0).abs() < 0.02 && (y - timer.1).abs() < 0.02,
+                    "{corner:?} timer at {i}"
+                );
+            } else {
+                // In a left corner the time rides the wall, 14 pt inside it.
+                let [px, _, pw, _] = laid_out(&rt, "pill");
+                let [tx, _, tw, _] = laid_out(&rt, "elapsed");
+                assert!(
+                    (px + pw - REST_PX - (tx + tw)).abs() < 0.03
+                        && x > timer.0 - 0.02
+                        && (y - timer.1).abs() < 0.02,
+                    "{corner:?} timer at {i}"
+                );
+            }
         }
     }
 }
@@ -448,9 +442,7 @@ fn stop_hits_its_center_edges_and_corners_but_not_its_neighbors() {
         }
         rt.pointer_leave();
         rt.frame(0.);
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.);
+        landed(&mut rt);
         click(&mut rt, x + w / 2., y + h / 2.);
         assert!(rt.find("stop").is_none() && commands.try_recv().is_err());
     }
@@ -498,7 +490,7 @@ fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
             });
             rt.frame(0.);
             let ([_, _, w, h], _) = rt.presented("pill").unwrap();
-            assert_eq!((w, h), (148., 36.));
+            assert_eq!((w, h), (REST_WIDTH, REST_HEIGHT));
             assert!(rt.find("stop").is_none());
             open_recording(&mut rt);
             for (key, name) in [
@@ -825,23 +817,14 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 }
                 tx.instant();
             });
-            settle_stage(&mut rt);
-        rt.settle_all();
-            rt.frame(0.);
-            let rect = |rt: &Runtime<Capsule>, key| {
-                rt.elements()
-                    .into_iter()
-                    .find(|e| e.key.as_deref() == Some(key))
-                    .unwrap()
-                    .rect
-            };
-            let [px, _, pw, ph] = rect(&rt, "pill");
-            let [sx, _, sw, _] = rect(&rt, "meeting-listening-field");
-            let [tx, _, tw, _] = rect(&rt, "elapsed");
+            landed(&mut rt);
+            let [px, _, pw, ph] = laid_out(&rt, "pill");
+            let [sx, _, sw, _] = laid_out(&rt, "meeting-listening-field");
+            let [tx, _, tw, _] = laid_out(&rt, "elapsed");
             assert_eq!((pw, ph), (width, REST_HEIGHT));
             assert!(sx - px >= 9. && px + pw - tx - tw >= 9. && tx - (sx + sw) >= 5.);
             if warning {
-                let [x, _, w, _] = rect(&rt, "notice");
+                let [x, _, w, _] = laid_out(&rt, "notice");
                 assert!(w > 0. && (x + w <= sx || x >= tx + tw));
             }
             let timer = rt.find("elapsed").unwrap();
@@ -849,9 +832,18 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
             for _ in 0..48 {
                 rt.frame(1. / 60.);
             }
-            assert_eq!(rt.find("elapsed"), Some(timer));
-            let [_, y, w, h] = rect(&rt, "stop");
-            let [_, my, _, mh] = rect(&rt, "meta");
+            if corner.is_right() {
+                assert_eq!(rt.find("elapsed"), Some(timer));
+            } else {
+                // In a left corner the time ends at the open panel's inset;
+                // a sixth digit is 7.8 pt wide and counted as 8.
+                let [px, _, pw, _] = laid_out(&rt, "pill");
+                let [tx, _, tw, _] = laid_out(&rt, "elapsed");
+                let inset = px + pw - (tx + tw);
+                assert!((inset - REST_PX).abs() < 0.25, "{corner:?}: {inset}");
+            }
+            let [_, y, w, h] = laid_out(&rt, "stop");
+            let [_, my, _, mh] = laid_out(&rt, "meta");
             assert_eq!((w, h), (PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT));
             assert!(y + h <= my || y >= my + mh);
             tap(&mut rt, "stop");

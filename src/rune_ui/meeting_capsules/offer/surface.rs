@@ -21,35 +21,49 @@ pub(super) struct Presentation {
     last: Option<f64>,
     pub(super) icon: Option<rune::Pixels>,
     /// The offer Record was pressed on, until it has left the surface.
-    departure: Option<(OfferId, MeetingCandidate)>,
-    /// When Record was pressed, on the surface's clock.
-    begun: Option<f64>,
+    departure: Option<Departure>,
     /// The recording lives in the window its offer opened.
     inherited: bool,
     pub(super) hold_hover: bool,
     pub(super) pointer: Option<(f32, f32)>,
 }
 
+/// The offer a Record press is seeing out, on the surface's clock.
+struct Departure {
+    id: OfferId,
+    candidate: MeetingCandidate,
+    /// When Record was pressed, latched the first frame it was asked for.
+    begun: Option<f64>,
+}
+
 impl Presentation {
     pub(super) fn inherits_offer_window(&self) -> bool {
-        self.inherited || self.departure.is_some()
+        self.inherited
     }
     /// Record was pressed and the offer hasn't finished leaving.
     pub(super) fn departing(&self) -> bool {
         self.departure.is_some()
     }
     pub(super) fn begin(&mut self, id: OfferId, candidate: MeetingCandidate) {
-        self.departure = Some((id, candidate));
+        self.departure = Some(Departure {
+            id,
+            candidate,
+            begun: None,
+        });
         self.inherited = true;
         self.hold_hover = true;
     }
+    /// When Record was pressed, on the surface's clock.
     pub(super) fn begun(&mut self, now: f64) -> f64 {
-        *self.begun.get_or_insert(now)
+        let Some(departure) = self.departure.as_mut() else {
+            return now;
+        };
+        *departure.begun.get_or_insert(now)
     }
     #[cfg(test)]
     pub(super) fn backdate(&mut self, now: f64) {
-        if self.departure.is_some() {
-            self.begun = Some(now);
+        if let Some(departure) = self.departure.as_mut() {
+            departure.begun = Some(now);
         }
     }
     /// The offer and "Starting…" have left a recording's surface: the
@@ -274,11 +288,11 @@ pub(super) fn view(p: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandid
 }
 
 pub(super) fn transition(c: &Capsule, p: Paint, dark: Paint) -> Option<El> {
-    let (id, candidate) = c.presentation.departure.as_ref()?;
-    if !matches!(c.kind, Some(Kind::Offer(..) | Kind::Recording(_))) {
+    let departure = c.presentation.departure.as_ref()?;
+    if !matches!(c.drawn(), Some(Kind::Offer(..) | Kind::Recording(_))) {
         return None;
     }
-    Some(draw(p, dark, c, *id, candidate))
+    Some(draw(p, dark, c, departure.id, &departure.candidate))
 }
 
 fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandidate) -> El {
@@ -292,16 +306,11 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
     let offer = if c.stage.outline().is_some() {
         c.stage.presence(Layer::Offer)
     } else {
-        stage::Presence {
-            opacity: 1.0,
-            scale: 1.0,
-            blur: 0.0,
-        }
+        stage::Presence::flat(1.0)
     };
     let pending = c.stage.presence(Layer::Pending);
     let live = c.stage.presence(Layer::Meter);
-    let grid = |v: f32| (v * 64.).round() / 64.;
-    let (w, h) = (grid(o.w), grid(o.h));
+    let (w, h) = (stage::grid(o.w), stage::grid(o.h));
     let (right, top_corner) = (c.corner.is_right(), c.corner.is_top());
     let top = if top_corner {
         CAPSULE_INSET
@@ -372,23 +381,13 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
     } else {
         page
     };
-    let label = match &c.kind {
+    let label = match c.drawn() {
         Some(Kind::Recording(r)) => format!("{} · {}", tr("Recording"), r.title),
         _ if a.inherits_offer_window() => tr("Starting…").to_owned(),
         _ => title,
     };
     // What a moving edge crosses fades under it; at rest the veil is nothing.
-    let (veil_x, veil_y) = c.stage.veil();
-    let mut veil = rune::el()
-        .key("veil")
-        .absolute(0., 0.)
-        .size(w, h)
-        .clip_fade_linear(
-            if right { veil_x } else { 0. },
-            if top_corner { 0. } else { veil_y },
-            if right { 0. } else { veil_x },
-            if top_corner { veil_y } else { 0. },
-        );
+    let mut veil = panel::veil(c, w, h);
     if offer.shows() {
         veil = veil.child(page);
     }
@@ -412,20 +411,11 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         );
     }
     if live.shows()
-        && let Some(Kind::Recording(r)) = &c.kind
+        && let Some(Kind::Recording(r)) = c.drawn()
     {
-        // The recording's own header band, where it will draw it.
-        let (lx, ly) = from_corner(PANEL_WIDTH, REST_HEIGHT);
-        let band = row()
-            .key("live")
-            .absolute(lx, ly)
-            .size(PANEL_WIDTH, REST_HEIGHT)
-            .px(REST_PX)
-            .center_y()
-            .transition(Transition::none())
-            .opacity(live.opacity);
-        let band = if right { band.justify_end() } else { band };
-        veil = veil.child(band.child(panel::meter(dark, r)));
+        // The recording's own header, on the path it will draw it at, so
+        // the meter is one node from its first frame to the finished meeting.
+        veil = veil.child(panel::arriving_header(dark, c, r, w, h, live.opacity));
     }
     let shell = row()
         .key("pill")
@@ -441,6 +431,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
         // The stage steps every frame; nothing here eases a second time.
         .motion(Spring::NONE)
         .child(veil);
+    let shell = presence::anchored(c, shell);
     let radius = o.radius;
     // Regions are rectangles. Inscribe bands in the rounded body rather
     // than claiming the clear window, including its transparent corners.

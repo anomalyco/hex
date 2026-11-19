@@ -26,12 +26,25 @@ impl Capsule {
             });
             #[cfg(target_os = "windows")]
             if let Some(resize) = &self.resize {
-                resize((
-                    RECORDING_WINDOW.0,
-                    OPEN_HEADER + 3. * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD + 2. * CAPSULE_INSET,
-                ));
+                resize(panel::finalizing_window_size());
             }
         }
+    }
+
+    /// The controller accepted the recording: the offer's handoff ends and
+    /// the recording takes the surface it left.
+    pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
+        self.kind = Some(Kind::Recording(recording));
+        self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
+        self.live = Live::default();
+        self.hovered = false;
+        self.stopping = false;
+        self.expired = false;
+        self.throw.stop();
+        // Nothing here mounts with an entrance of its own: the surface
+        // carries the change.
+        tx.instant();
+        self.stir(tx);
     }
 
     pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
@@ -54,8 +67,7 @@ impl MeetingCapsules {
         ) && self.finishing.take().is_some()
         {
             self.generation.fetch_add(1, Ordering::SeqCst);
-            self.pill.handle.update(|c, _| c.kind = None);
-            self.pill.handle.hide();
+            self.pill.handle.update(|c, tx| c.dismiss(tx));
         }
         if let Some(id) = self.pill.apply(event, inherit) {
             self.finishing = Some(id);
@@ -68,12 +80,18 @@ impl MeetingCapsules {
         }
     }
 
-    pub(super) fn notes_progress(&self, id: &str) {
-        let handle = if self.finishing.as_deref() == Some(id) {
+    /// The capsule a finished meeting still owns: the recording's own
+    /// window while it is finishing there, else the panel.
+    pub(super) fn handle_for(&self, id: &str) -> &OverlayHandle<Capsule> {
+        if self.finishing.as_deref() == Some(id) {
             &self.pill.handle
         } else {
             &self.panel
-        };
+        }
+    }
+
+    pub(super) fn notes_progress(&self, id: &str) {
+        let handle = self.handle_for(id);
         let id = id.to_owned();
         handle.update_if(move |c, _| {
             let Some(Kind::Ready(m)) = &c.kind else {
@@ -127,34 +145,5 @@ impl Pill {
             self.tick(id.clone());
         }
         retain
-    }
-}
-
-impl MeetingCapsules {
-    pub(super) fn timeout(
-        &self,
-        panel: OverlayHandle<Capsule>,
-        generation: u64,
-        timeout: Duration,
-    ) {
-        let current = self.generation.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(timeout);
-            if current.load(Ordering::SeqCst) == generation {
-                panel.update(move |capsule, _| {
-                    // Checked again when applied: a newer capsule may
-                    // have been shown since.
-                    if current.load(Ordering::SeqCst) != generation {
-                        return;
-                    }
-                    // A ready panel waits for the pointer to leave it.
-                    if capsule.hovered && matches!(capsule.kind, Some(Kind::Ready(_))) {
-                        capsule.expired = true;
-                        return;
-                    }
-                    capsule.close();
-                });
-            }
-        });
     }
 }

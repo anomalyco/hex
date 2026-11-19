@@ -348,7 +348,11 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
           │   known. Otherwise a neutral call icon, never the hosting browser's.
           │   The same 24 pt slot keeps the title aligned as a local icon loads.
           ├── Record -> request this call once, without waiting for the animation
-          │   ├── The same surface contracts in its corner; “Starting…” while opening
+          │   ├── The same surface contracts in its corner, the offer fading out
+          │   │   under its moving edge. “Starting…” shows at the pill's resting
+          │   │   place, and only once a start has taken 180 ms; a quicker start
+          │   │   goes straight to the timer. Reduce Motion lands the pill and
+          │   │   fades the arrival
           │   ├── Only once capture starts -> live field + timer, or hide if the indicator is off
           │   ├── A pointer left over Record doesn't expand the pill or press Stop
           │   └── Withdrawal before acceptance, replacement, or failure ends the pending view;
@@ -913,26 +917,108 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   and fades its light without squeezing the rows. Checks:
      │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
+     │   ├── The pill is 151 × 36 pt, its field 78 pt wide (31 columns), with
+     │   │   the rows' 14 pt inset on both sides: the time's right edge is one
+     │   │   line at rest, open and finished (open and finished in a left corner)
+     │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
      ├── Hover -> the pill reveals four full-width actions beside the header:
      │   Stop nearest the meter, Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
+     │   ├── The field widens with the wall, from the rows' 14 pt inset to the
+     │   │   time: 179 pt, 69 columns at the same 2.6 pt pitch, three fewer
+     │   │   for each further digit on the time. It is one field: its free end
+     │   │   is the wall's motion every frame, in whole columns counted from
+     │   │   the held end, no dot is drawn outside its place, the dots that
+     │   │   stay keep their light, and a column that arrives is lit from the
+     │   │   voice's history. In a right corner it is held beside the time,
+     │   │   which stays put; in a left corner it is held at the wall and the
+     │   │   time rides the moving wall 14 pt inside it, so the open and
+     │   │   finished headers match the right corner's (✕ before the time). A
+     │   │   notice in the header keeps its place and its cut while the
+     │   │   field's end, or on the left the time, wipes over it, and has gone
+     │   │   by the time the field is halfway.
+     │   │   Checks: `the_field_widens_with_the_wall_one_whole_column_at_a_time`,
+     │   │   `a_left_corners_field_fills_the_header_and_the_time_rides_the_wall`,
+     │   │   `the_field_keeps_its_light_through_the_opening`,
+     │   │   `the_field_wipes_the_headers_notice_and_never_draws_over_it`
+     │   │   (offscreen Rune; the dots themselves only in
+     │   │   `hud_replay_frames` renders, not on a real Mac)
+     │   ├── Stop and the copies are 2 pt apart, as the raised copy is from
+     │   │   the next, so no two hover fills touch
+     │   │   (`rows_that_can_both_be_filled_are_one_gap_apart`)
+     │   ├── The width leads the height; the actions follow in order, each
+     │   │   only as far as the outline has uncovered it, and leave together.
+     │   │   A pointer that comes and goes mid-way turns the surface round
+     │   │   from where it is: its speed bends over a few frames, never
+     │   │   dropping in one. Stop takes a press only once at least half of
+     │   │   it shows
+     │   └── Checks: stage.rs unit tests; the replays in replay_fixture.rs
+     │       (`the_panel_opens_width_first_and_its_rows_follow_in_order`,
+     │       `an_interrupted_panel_turns_round_without_a_stop_or_a_jump`,
+     │       `reduced_motion_lands_the_surface_and_only_fades`). Offscreen
+     │       Rune with a synthetic pointer; not seen in a native window
      ├── Stop -> the icon, label and whitespace use the same 242 × 44 pt row
      │   and hover/focus bounds as the copies. The plain arrow stays put;
      │   dragging the meter band repositions, dragging a row does not.
-     │   A click queues one stop immediately. The pill stays open and says
-     │   “Stopping…” with its waveform and elapsed time until capture ends.
-     │   The worker closing its sources, not the click, switches the header to
-     │   “Transcribing…”. Publication brings back the copies and Close on the
+     │   A click queues one stop immediately. The pill stays open and the
+     │   same row says “Stopping…” in place, its icon and first letters
+     │   unmoved, with the waveform and elapsed time until capture ends.
+     │   The worker closing its sources, not the click, replaces that row
+     │   with “Transcribing…” and lets the waveform release and fade. That
+     │   title sits on the rows' icon line, 24 pt left of “Stopping…” on one
+     │   baseline, so it waits until Stop's row has all but gone: neither
+     │   moves and the two are never read together
+     │   (`stops_row_has_gone_before_the_heading_arrives_and_neither_moves`).
+     │   Publication brings back the copies and Close on the
      │   same surface; it does not wait for notes or a minimum animation time.
      │   Short titles keep the open recording header's height. Longer ones
      │   wrap at their final width (up to three lines). The timer keeps its
      │   baseline. Notes grow from the outer edge, past the copy rows, without
      │   moving a copy button away from the pointer.
      │   A recorder failure yields to the Meetings error instead of showing a
-     │   finished transcript. Check: `stop_handoff_frames` (offscreen Rune).
+     │   finished transcript. Checks: `stop_handoff_frames`,
+     │   `stop_says_stopping_in_place_and_the_field_cools`, and
+     │   `HEX_HUD_REPLAY=<dir> cargo test --bin hex hud_replay_frames` for
+     │   every frame of the whole path (offscreen Rune).
+     │   ├── A title or summary whose words change lets the old words fade
+     │   │   out before the new ones fade in, in the same line. Titles that
+     │   │   arrive while the old words are still going are skipped: only
+     │   │   the last is drawn, never two at once. Check:
+     │   │   `several_titles_in_quick_succession_show_one_at_a_time`
+     │   ├── Once capture has ended the time holds and the field only cools,
+     │   │   whatever the meters read. Check:
+     │   │   `after_capture_ends_the_time_holds_and_the_field_only_cools`
+     │   └── Not done: the length can change by a second, in one frame, when
+     │       the finished meeting's own length replaces the recording's; a
+     │       summary line's first words wipe on but its removal is one frame.
+     ├── Closing any capsule (✕, Not now, the offer's timeout, a refused
+     │   start, a withdrawn reminder or call-ended notice, the indicator
+     │   turned off) -> it is closed at once: nothing in it takes input and
+     │   no command can come from it. What it showed fades, softens and
+     │   shrinks 4% toward its saved corner over about a quarter of a second,
+     │   and its window hides only then. A surface refused mid-contraction
+     │   carries on contracting as it goes and never says “Starting…” on
+     │   the way out. A capsule shown from hidden arrives the same way in
+     │   reverse; one shown while the last is still leaving carries on from
+     │   the strength the surface has, with the new contents (it is not a
+     │   crossfade of two surfaces). Notes that arrive for a closed meeting
+     │   change nothing. Reduce Motion fades without shrinking or softening.
+     │   Checks: exits_tests.rs
+     │   (`not_now_and_a_timeout_let_the_offer_go_over_several_frames`,
+     │   `a_refused_start_goes_where_it_is_without_saying_starting`,
+     │   `closing_before_the_notes_arrive_keeps_what_it_showed_until_it_has_gone`,
+     │   `an_exit_interrupted_by_another_offer_turns_round_and_stays_shown`,
+     │   `what_is_leaving_takes_no_input`,
+     │   `the_other_capsules_arrive_and_leave_the_same_way` for the
+     │   reminder, the call-ended notice and the automatic-start notice,
+     │   `a_capsule_leaves_toward_whichever_corner_it_is_saved_in` at all
+     │   four corners). Offscreen Rune; the deferred
+     │   window hide, and click-through while a capsule leaves, are not
+     │   verified in a native window. On Windows the window keeps the size
+     │   it had while the capsule leaves.
      ├── Drag -> follows the pointer; release -> snaps to the corner nearest
      │   its centre and saves recording_indicator_corner (window settings too;
      │   macOS, Windows, Linux X11, and XWayland when GNOME floats it there,

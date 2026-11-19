@@ -96,6 +96,19 @@ pub struct Pose {
     pub clock: f32,
     /// 1 once the dictation is done, else 0.
     pub done: f32,
+    /// How far right of the plate's middle the dots' middle sits, pt: not 0
+    /// only while a field held by one end is between whole columns
+    /// ([`Scope::span`]).
+    pub shift: f32,
+}
+
+/// The end of the field that stays where it is as its width changes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Hold {
+    #[default]
+    Middle,
+    Left,
+    Right,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -394,6 +407,10 @@ pub struct Scope {
     reduce_motion: bool,
     columns: usize,
     rows: usize,
+    /// The end the dots keep their places from when the columns change.
+    hold: Hold,
+    /// [`Pose::shift`].
+    shift: f32,
     head: [Vec<f32>; 2],
     tail: [Vec<f32>; 2],
     dots: Vec<[f32; 2]>,
@@ -433,6 +450,8 @@ impl Scope {
             reduce_motion: false,
             columns: 0,
             rows: 0,
+            hold: Hold::Middle,
+            shift: 0.0,
             head: [Vec::new(), Vec::new()],
             tail: [Vec::new(), Vec::new()],
             dots: Vec::new(),
@@ -465,7 +484,45 @@ impl Scope {
 
     pub fn tune(&mut self, tuning: Tuning) {
         self.tuning = tuning.clamped();
+        self.hold = Hold::Middle;
+        self.shift = 0.0;
         self.resize();
+    }
+
+    /// Spreads the same field over `room` pt, holding its `hold` end where
+    /// it is: the plate is `room` wide at once, with no spring of its own,
+    /// and the dots are the whole columns that fit in it at the same
+    /// spacing, counted from the held end. Every dot that stays keeps its
+    /// place and its light, and a column that arrives is lit from the
+    /// voice's history in the same step, so a field that follows a moving
+    /// edge frame by frame is one field widening, never a second one
+    /// unfolding from its middle.
+    pub fn span(&mut self, room: f32, hold: Hold) {
+        let columns = self.tuning.columns_in(room, 0.0);
+        let tuning = Tuning {
+            columns,
+            width: room,
+            processing_width: room,
+            ..self.tuning
+        }
+        .clamped();
+        let room = tuning.width;
+        let lattice = (tuning.columns - 1.0) * tuning.spacing;
+        let shift = match hold {
+            Hold::Middle => 0.0,
+            Hold::Left => (lattice - room) / 2.0,
+            Hold::Right => (room - lattice) / 2.0,
+        };
+        if tuning == self.tuning && hold == self.hold && shift == self.shift {
+            return;
+        }
+        self.tuning = tuning;
+        self.hold = hold;
+        self.shift = shift;
+        self.width.jump(room);
+        self.resize();
+        // Draw the traces where they are now, without ageing the phosphor.
+        self.beam(0.0);
     }
 
     pub fn tuning(&self) -> Tuning {
@@ -484,13 +541,39 @@ impl Scope {
         if columns == self.columns && rows == self.rows {
             return;
         }
+        // A dot that is still there keeps its phosphor: the columns count
+        // from the held end and the rows from the middle.
+        let (was_columns, was_rows) = (self.columns as isize, self.rows as isize);
+        let across = match self.hold {
+            Hold::Left => 0,
+            Hold::Middle => (columns as isize - was_columns).div_euclid(2),
+            Hold::Right => columns as isize - was_columns,
+        };
+        let down = (rows as isize - was_rows).div_euclid(2);
+        let dots = columns * rows;
+        let kept = |old: &[f32]| {
+            let mut new = vec![0.0; dots];
+            for (n, value) in new.iter_mut().enumerate() {
+                let i = (n % columns) as isize - across;
+                let j = (n / columns) as isize - down;
+                if (0..was_columns).contains(&i) && (0..was_rows).contains(&j) {
+                    *value = old[(j * was_columns + i) as usize];
+                }
+            }
+            new
+        };
+        self.head = [kept(&self.head[0]), kept(&self.head[1])];
+        self.tail = [kept(&self.tail[0]), kept(&self.tail[1])];
+        let power: Vec<f32> = self.dots.iter().map(|dot| dot[0]).collect();
+        let fresh: Vec<f32> = self.dots.iter().map(|dot| dot[1]).collect();
+        self.dots = kept(&power)
+            .into_iter()
+            .zip(kept(&fresh))
+            .map(|(power, fresh)| [power, fresh])
+            .collect();
         self.columns = columns;
         self.rows = rows;
-        let dots = columns * rows;
         let samples = (columns - 1) * SAMPLES_PER_COLUMN + 1;
-        self.head = [vec![0.0; dots], vec![0.0; dots]];
-        self.tail = [vec![0.0; dots], vec![0.0; dots]];
-        self.dots = vec![[0.0; 2]; dots];
         self.ys = [vec![0.0; samples], vec![0.0; samples]];
         self.brightness = [vec![0.0; samples], vec![0.0; samples]];
     }
@@ -528,6 +611,7 @@ impl Scope {
                 self.elapsed
             },
             done: if self.stage == Stage::Done { 1.0 } else { 0.0 },
+            shift: self.shift,
         }
     }
 
@@ -815,7 +899,7 @@ impl Scope {
             let ys = &mut self.ys[k];
             let brightness = &mut self.brightness[k];
             for s in 0..samples {
-                let x = (s as f32 / sub as f32 - (columns as f32 - 1.0) / 2.0) * pitch;
+                let x = (s as f32 / sub as f32 - (columns as f32 - 1.0) / 2.0) * pitch + self.shift;
                 if x.abs() > half_width {
                     ys[s] = mid;
                     brightness[s] = 0.0;

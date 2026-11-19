@@ -164,11 +164,7 @@ impl Capsule {
         let Some(Kind::Offer(id, candidate)) = &self.kind else {
             return;
         };
-        if candidate.key == "preview" {
-            if self.send(ControllerCommand::Dismiss) {
-                self.close();
-            }
-        } else if self.send(ControllerCommand::Record(candidate.clone(), Some(*id))) {
+        if self.send(ControllerCommand::Record(candidate.clone(), Some(*id))) {
             self.presentation.begin(*id, candidate.clone());
             self.rearm_offer = None;
         } else {
@@ -176,19 +172,6 @@ impl Capsule {
         }
     }
 
-    pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
-        self.kind = Some(Kind::Recording(recording));
-        self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
-        self.live = Live::default();
-        self.hovered = false;
-        self.stopping = false;
-        self.expired = false;
-        self.throw.stop();
-        // Nothing here mounts with an entrance of its own: the surface
-        // carries the change.
-        tx.instant();
-        self.stir(tx);
-    }
     pub(super) fn set_offer_timer(&mut self, timer: Option<After>) {
         self.rearm_offer = timer;
         self.arm_offer_timeout();
@@ -223,9 +206,7 @@ impl Capsule {
             title = %candidate.title,
             "meeting recording offer timed out"
         );
-        if candidate.key != "preview" {
-            self.send(ControllerCommand::OfferTimedOut(*id));
-        }
+        self.send(ControllerCommand::OfferTimedOut(*id));
         self.close();
     }
 }

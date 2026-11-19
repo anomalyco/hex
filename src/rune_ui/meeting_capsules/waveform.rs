@@ -1,9 +1,13 @@
 //! The dictation HUD's listening field, drawn into the recording header. The
 //! capsule supplies the surface and timer; there is no HUD window.
+use super::panel;
 use super::{Capsule, Kind, meeting};
 use crate::dictation::indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
 use crate::rune_hud::spring::{REDUCED_FADE, Spec, Spring};
-use crate::rune_hud::{Painter, Target, dot_scope::Tuning};
+use crate::rune_hud::{
+    Painter, Target,
+    dot_scope::{Hold, Tuning},
+};
 use rune::compose::{Compositor, DeviceKey, Frame};
 use std::time::{Duration, Instant};
 
@@ -16,10 +20,11 @@ const COOL: Duration = Duration::from_millis(450);
 /// Dot scope's default -60 dBFS noise floor, in the capture meter's RMS units.
 const FLOOR: f32 = 0.001;
 
-pub(super) fn slot() -> rune::El {
+/// The field's place in the header, `width` wide.
+pub(super) fn slot(width: f32) -> rune::El {
     rune::el()
         .key(KEY)
-        .size(WIDTH, crate::rune_hud::dot_scope::PLATE_HEIGHT)
+        .size(width, crate::rune_hud::dot_scope::PLATE_HEIGHT)
         .transition(rune::Transition::none())
         .a11y_hidden()
 }
@@ -33,6 +38,8 @@ pub(super) struct Listening {
     cooling: Option<Instant>,
     fade: f32,
     reduced: bool,
+    /// How wide the field is drawn, and the end it is held by.
+    span: (f32, Hold),
 }
 
 impl Listening {
@@ -50,6 +57,15 @@ impl Listening {
             moment += light * (y * f.tuning.spacing).powi(2);
         }
         (peak, (moment / mass.max(1e-9)).sqrt())
+    }
+    /// The brightest dot as it is painted, its fade included.
+    #[cfg(test)]
+    pub(super) fn light(&self) -> f32 {
+        if self.drawn.is_some() {
+            self.probe().0 * self.fade
+        } else {
+            0.
+        }
     }
     pub(super) fn new(now: Instant) -> Self {
         // Same optical size, pitch, voice response and shader as dictation;
@@ -69,7 +85,46 @@ impl Listening {
             cooling: None,
             fade: 1.0,
             reduced: false,
+            span: (WIDTH, Hold::Right),
         }
+    }
+
+    /// Draws the field `room` wide from now on, held by its `hold` end: the
+    /// same field with more or fewer columns at its free end, in the frame
+    /// that asks. The open header and the notch island spread the same
+    /// scope; this one follows a wall, so it has no spring of its own.
+    pub(super) fn fit(&mut self, room: f32, hold: Hold) {
+        if self.span == (room, hold) {
+            return;
+        }
+        self.span = (room, hold);
+        self.model.span(room, hold);
+        // A parked field isn't sampled, and it widens all the same.
+        if self.drawn.is_some() {
+            let frame = self.model.frame();
+            self.draw(frame);
+        }
+    }
+
+    fn draw(&mut self, mut drawn: DotFrame) {
+        settle_field(&mut drawn, self.presence.x, self.reduced);
+        drawn.pose.opacity = 1.0;
+        self.drawn = Some(drawn);
+    }
+
+    /// How many columns are drawn, how far their middle sits from the
+    /// plate's, and each column's light from the left.
+    #[cfg(test)]
+    pub(super) fn columns(&self) -> (usize, f32, Vec<f32>) {
+        let f = self.drawn.as_ref().unwrap();
+        let light = (0..f.columns)
+            .map(|i| {
+                (0..f.rows)
+                    .map(|j| f32::from(f.dots[j * f.columns + i][0]) / 65535.)
+                    .sum()
+            })
+            .collect();
+        (f.columns, f.pose.shift, light)
     }
 
     /// After the last buffer fades to an unlit field, don't run the braid or redraw.
@@ -107,10 +162,8 @@ impl Listening {
             now,
             self.reduced,
         );
-        let mut drawn = self.model.step(now, dt, self.reduced);
-        settle_field(&mut drawn, self.presence.x, self.reduced);
-        drawn.pose.opacity = 1.0;
-        self.drawn = Some(drawn);
+        let drawn = self.model.step(now, dt, self.reduced);
+        self.draw(drawn);
         true
     }
 }
@@ -276,6 +329,8 @@ pub(super) fn feed(
     if !recording && !cooling {
         return None;
     }
+    // Before the sample, so the trace is drawn once, where the field now is.
+    fit(c);
     let wave = c.waveform.as_mut()?;
     let changed = wave.sample(now, if recording { levels() } else { [0.0; 2] });
     if cooling {
@@ -291,6 +346,21 @@ pub(super) fn feed(
     Some((changed, wave.presence.x > 0.0))
 }
 
+/// Gives the field the width the view laid its place out at this frame,
+/// held by the end that stays: beside the time on the right, at the
+/// anchored wall on the left.
+pub(super) fn fit(c: &mut Capsule) {
+    let room = panel::field_width(c);
+    let hold = if c.corner.is_right() {
+        Hold::Right
+    } else {
+        Hold::Left
+    };
+    if let Some(wave) = c.waveform.as_mut() {
+        wave.fit(room, hold);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Ink(Option<(DeviceKey, Painter)>);
 
@@ -303,6 +373,7 @@ impl Compositor<Capsule> for Ink {
         };
         let dev = f.device_key();
         let scale = f.rt.env.scale;
+        fit(&mut f.rt.state);
         let Some(wave) = f.rt.state.waveform.as_mut() else {
             return;
         };

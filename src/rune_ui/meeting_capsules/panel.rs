@@ -163,10 +163,7 @@ fn panel_row(
         )
         .children(hint);
     let row_el = if first {
-        row_el
-            .fill(p.k.c.layer_02)
-            .hover(p.k.c.hover)
-            .mb(FIRST_ROW_GAP)
+        row_el.fill(p.k.c.layer_02).hover(p.k.c.hover).mb(ROW_GAP)
     } else {
         row_el.hover(p.k.c.hover)
     };
@@ -263,22 +260,24 @@ fn panel_body(p: Paint, title: &str) -> El {
         .hit()
 }
 
+/// A line replaced in place leaves sooner than it arrives, even under
+/// Reduce Motion.
+const REDUCED_EXIT: f32 = 0.15;
+
 fn replace(c: &Capsule) -> Transition {
-    let (enter, exit) = if c.reduced.get() {
-        (0.18, 0.15)
-    } else {
-        (0.3, 0.25)
-    };
+    let reduced = c.reduced.get();
     // A whole line replaced in place softens; under Reduce Motion it only fades.
-    if c.reduced.get() {
+    let look = if reduced {
         Transition::opacity()
     } else {
         Transition::blur(2.0)
-    }
-    .springs(SpringPair::new(
-        Spring::new(enter, 0.),
-        Spring::new(exit, 0.),
-    ))
+    };
+    let (enter, exit) = if reduced {
+        (stage::REDUCED, Spring::new(REDUCED_EXIT, 0.))
+    } else {
+        (stage::ENTER, stage::EXIT)
+    };
+    look.springs(SpringPair::new(enter, exit))
 }
 
 /// The finished meeting stays where its pill was; other panels take the saved corner.
@@ -343,6 +342,9 @@ pub(super) fn finalizing(p: Paint, capsule: &Capsule, duration_ms: u64) -> El {
     )
 }
 
+/// The finished meeting's ✕, in its header.
+const CLOSE_WIDTH: f32 = 32.0;
+
 fn result(
     p: Paint,
     capsule: &Capsule,
@@ -352,25 +354,31 @@ fn result(
 ) -> El {
     let top = capsule.corner.is_top();
     let right = capsule.corner.is_right();
-    let label = handoff_label(p, capsule, &title, false);
+    // The words drawn follow the title a few frames behind: the old ones
+    // go before the new ones arrive.
+    let reduced = capsule.reduced.get();
+    let (words, strength, soft) = capsule.surface.title.line(title.clone(), reduced);
+    let label = title_label(p, capsule, &words)
+        .opacity(strength)
+        .opacity_motion(Anim::INSTANT)
+        .blur(soft)
+        .blur_motion(Anim::INSTANT);
+    let field = field_width(capsule);
     let clock = duration.map(|duration| {
         row()
             .key("meter")
             .h(REST_HEIGHT)
-            .gap(6.)
+            .gap(METER_GAP)
             .center_y()
             .transition(Transition::none())
-            // The field cools after capture ends; it never cuts. On the right
-            // it sits beside the time without moving it.
-            .children(match (capsule.waveform.is_some(), right) {
-                (true, true) => Some(waveform::slot().absolute(
-                    -(waveform::WIDTH + 6.),
+            // The field cools after capture ends; it never cuts. It sits
+            // beside the time without moving it.
+            .children(capsule.waveform.is_some().then(|| {
+                waveform::slot(field).absolute(
+                    -(field + METER_GAP),
                     (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
-                )),
-                (true, false) => Some(waveform::slot()),
-                (false, false) => Some(el().w(waveform::WIDTH)),
-                (false, true) => None,
-            })
+                )
+            }))
             .child(
                 text(meeting::format_duration(duration))
                     .key("elapsed")
@@ -380,21 +388,25 @@ fn result(
     });
     let close = row()
         .key("close-slot")
-        .w(32.)
+        .w(CLOSE_WIDTH)
         .h(REST_HEIGHT)
         .center()
         .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
     let meta = meter_band();
     let space = el().key("space").grow(1.);
-    let meta = if right {
-        meta.child(space).child(close).children(clock)
-    } else {
-        meta.children(clock).child(space).child(close)
+    // ✕ sits before the time in every corner. In a left corner the time
+    // stays after the field's free end, wherever the wall has left it.
+    let meta = match (right, clock) {
+        (false, Some(clock)) => {
+            let lead = el().key("field-room").w(field + METER_GAP - CLOSE_WIDTH);
+            meta.child(lead).child(close).child(clock).child(space)
+        }
+        (_, clock) => meta.child(space).child(close).children(clock),
     };
     // Stop leaves from where it was pressed while the title arrives.
     let stop = capsule.stage.presence(stage::Layer::Action(0));
-    let label = if stop.shows() {
-        let ghost = panel_row(
+    let ghost = stop.shows().then(|| {
+        panel_row(
             p,
             "stop",
             &icons::STOP,
@@ -407,21 +419,28 @@ fn result(
         )
         .absolute(PANEL_PAD, 0.)
         .w(PANEL_WIDTH - 2. * PANEL_PAD)
+        // The stage steps it; eased again it would outstay the title's wait.
+        .opacity(stop.opacity)
+        .opacity_motion(Anim::INSTANT)
         .blur(if capsule.reduced.get() {
             0.
         } else {
             2. * (1. - stop.opacity)
         })
+        .blur_motion(Anim::INSTANT)
         .inert()
-        .a11y_hidden();
-        col().key("caption-slot").w_full().child(label).child(ghost)
-    } else {
-        label
-    };
+        .a11y_hidden()
+    });
+    let label = stop_slot().child(label).children(ghost);
     let header = bands(top, meta, Some(label));
-    let summary = manifest.and_then(ready_summary).map(|(summary, written)| {
+    let summary = manifest.and_then(ready_summary).map(|now| {
+        let ((summary, written), strength, soft) = capsule.surface.summary.line(now, reduced);
         text(summary)
             .key("summary")
+            .opacity(strength)
+            .opacity_motion(Anim::INSTANT)
+            .blur(soft)
+            .blur_motion(Anim::INSTANT)
             // The words wipe on behind the growing edge, soft at their front.
             .transition(if capsule.reduced.get() {
                 replace(capsule)
@@ -448,17 +467,23 @@ fn result(
         .key("rows")
         .px(PANEL_PAD)
         .children(copy_rows(p, capsule, false));
+    // The raised copy is as far from the title's row as from the next copy.
     let rows = if top {
-        rows.pb(PANEL_PAD)
+        rows.pt(ROW_GAP).pb(PANEL_PAD)
     } else {
-        rows.pt(PANEL_PAD)
+        rows.pt(PANEL_PAD).pb(ROW_GAP)
     };
+    // The copies dim and return on their own spring, wherever the surface is.
     let rows = if manifest.is_none() {
         rows.disabled(true).opacity(0.48)
     } else {
         rows
-    };
-    let contents = col().key("panel-contents").w(PANEL_WIDTH);
+    }
+    .motion(RECORDING_OPEN);
+    let contents = col()
+        .key("panel-contents")
+        .w(PANEL_WIDTH)
+        .transition(Transition::none());
     // New notes grow from the free edge, not between the pointer and its
     // copy row. A bottom corner mirrors the bands, not their reading order.
     let contents = if top {
@@ -476,9 +501,8 @@ fn result(
         .flatten();
     let body = match arriving {
         Some(o) => {
-            let grid = |v: f32| (v * 64.0).round() / 64.0;
             let body = body
-                .size(grid(o.w), grid(o.h))
+                .size(stage::grid(o.w), stage::grid(o.h))
                 .radius(o.radius)
                 .clip_rounded(o.radius)
                 .motion(Spring::NONE);
@@ -495,27 +519,30 @@ fn result(
         }
         None => body.motion(RECORDING_OPEN),
     };
+    // The same nodes the recording drew, so nothing that stays is mounted twice.
     let body = body
-        .child(contents)
+        .child(
+            el().key("veil")
+                .transition(Transition::none())
+                .child(contents),
+        )
         .on_hover_change(|c: &mut Capsule, inside, _| c.set_hovered(inside));
-    in_corner(capsule, body)
+    in_corner(capsule, presence::anchored(capsule, body))
 }
 
 /// A fast worker can report every phase within a few frames. Keep one text
 /// run instead of leaving several fading titles in the same place. Only its
 /// slot moves: the words wrap at their destination width from the first frame.
-fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
+fn title_label(p: Paint, c: &Capsule, title: &str) -> El {
     let label = text(title.to_owned())
         .key("title")
         .w_full()
         .motion(Spring::NONE)
         .font(TextStyle::new(13., 600.).lh(20.))
-        .color(if stopping { p.muted() } else { p.text() });
-    let label = if stopping {
-        label.truncate_fade()
-    } else {
-        label.wrap_anywhere().max_lines(TITLE_LINES).a11y_hidden()
-    };
+        .color(p.text())
+        .wrap_anywhere()
+        .max_lines(TITLE_LINES)
+        .a11y_hidden();
     col()
         .key("caption")
         .min_w(0.)
@@ -523,11 +550,7 @@ fn handoff_label(p: Paint, c: &Capsule, title: &str, stopping: bool) -> El {
         .py(TITLE_INSET)
         .px(PANEL_PAD + ROW_PX)
         .justify_center()
-        .transition(if stopping {
-            Transition::none()
-        } else {
-            replace(c)
-        })
+        .transition(replace(c))
         .child(label)
 }
 
@@ -555,30 +578,92 @@ fn bands(top: bool, meta: El, action: Option<El>) -> El {
     }
 }
 
+/// The time's width after `minutes`: its 13 pt monospaced digits each
+/// occupy 8 pt at layout resolution.
+fn timer_width(minutes: u64) -> f32 {
+    let extra = minutes.max(1).ilog10().saturating_sub(1);
+    TIMER_WIDTH + extra as f32 * 8.
+}
+
 /// Only grow the compact header for a notice or another minute digit.
-/// Its 13 pt monospaced digits each occupy 8 pt at layout resolution.
 pub(super) fn rest_width(shown: &Recording) -> f32 {
     if recording_notice(shown).is_some() {
         return PANEL_WIDTH;
     }
     let minutes = shown.started.elapsed().as_secs() / 60;
-    let extra = minutes.max(1).ilog10().saturating_sub(1);
-    (REST_WIDTH + extra as f32 * 8.).min(PANEL_WIDTH)
+    (REST_WIDTH - TIMER_WIDTH + timer_width(minutes)).min(PANEL_WIDTH)
 }
 
-/// The recording: at rest only its levels and time; under the
-/// pointer it springs open into Stop and the copies, its header nearest the
-/// screen edge.
-pub(super) fn meter(p: Paint, shown: &Recording) -> El {
-    let elapsed = meeting::format_duration(shown.started.elapsed().as_millis() as u64);
+/// The minutes on the time the capsule draws.
+fn minutes_shown(capsule: &Capsule) -> u64 {
+    match capsule.drawn() {
+        Some(Kind::Recording(shown)) => shown.started.elapsed().as_secs() / 60,
+        Some(Kind::Finalizing { duration_ms }) => duration_ms / 60_000,
+        Some(Kind::Ready(manifest)) => manifest.duration_ms.unwrap_or(0) / 60_000,
+        _ => 0,
+    }
+}
+
+/// The header's room for the field in a surface `width` wide: from the
+/// rows' inset to the time. Another digit on the time takes three columns.
+fn field_room(capsule: &Capsule, width: f32) -> f32 {
+    width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule))
+}
+
+/// The soft edge the widening field wipes the header's notice with, pt, and
+/// how far across the header the field is when the notice has gone.
+const NOTICE_WIPE: f32 = 12.0;
+const NOTICE_GONE: f32 = 0.5;
+
+/// The fewest points the field is ever drawn across.
+const FIELD_LEAST: f32 = 40.0;
+
+/// How wide the listening field wants to be: its resting width, and the
+/// whole header once the panel is open.
+pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
+    let open = match capsule.drawn() {
+        Some(Kind::Recording(_)) => capsule.hovered || capsule.stopping,
+        Some(Kind::Finalizing { .. } | Kind::Ready(_)) => true,
+        _ => false,
+    };
+    if open {
+        field_room(capsule, PANEL_WIDTH).max(waveform::WIDTH)
+    } else {
+        waveform::WIDTH
+    }
+}
+
+/// How wide the listening field is this frame. It opens on the outline's
+/// own width spring and never takes more room than a wall still on its way
+/// leaves it, so what ends the header is the wall's motion, 14 pt inside
+/// it: the field's free end on the right, the time beyond it on the left.
+pub(super) fn field_width(capsule: &Capsule) -> f32 {
+    let Some(outline) = capsule.stage.outline() else {
+        return field_wanted(capsule);
+    };
+    // A digit that arrives on the time takes its room at once, before the
+    // pill has grown for it: the field gives up columns, never the inset.
+    stage::grid(capsule.stage.field())
+        .min(field_room(capsule, stage::grid(outline.w)))
+        .max(FIELD_LEAST)
+}
+
+/// The recording's meter: the field and the time it has run.
+pub(super) fn meter(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
+    // A recording that has left the surface stops counting as it goes.
+    let run = capsule
+        .surface
+        .clock()
+        .saturating_duration_since(shown.started);
+    let elapsed = meeting::format_duration(run.as_millis() as u64);
     row()
         .key("meter")
         .h(REST_HEIGHT)
-        .gap(6.)
+        .gap(METER_GAP)
         .center_y()
         // The same meter in every state: it never arrives a second time.
         .transition(Transition::none())
-        .child(waveform::slot())
+        .child(waveform::slot(field_width(capsule)))
         .child(
             text(elapsed)
                 .key("elapsed")
@@ -589,30 +674,45 @@ pub(super) fn meter(p: Paint, shown: &Recording) -> El {
 
 /// The open recording's height: its header, Stop, any notice and the copies.
 pub(super) fn open_height(shown: &Recording) -> f32 {
-    open_height_without_notice()
-        + if recording_notice(shown).is_some() {
-            NOTICE_HEIGHT
-        } else {
-            0.0
-        }
+    open_height_without_notice() + notice_height(shown)
+}
+
+/// The room the recording's notice line takes, when it says anything.
+fn notice_height(shown: &Recording) -> f32 {
+    if recording_notice(shown).is_some() {
+        NOTICE_HEIGHT
+    } else {
+        0.0
+    }
 }
 
 /// The open panel a finished meeting grows from.
 pub(super) fn open_height_without_notice() -> f32 {
-    OPEN_HEADER + 3.0 * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD
+    OPEN_HEADER + ROW_GAP + COPIES_HEIGHT + PANEL_PAD
+}
+
+/// Where Stop is while recording and where the title is afterwards: the same
+/// place, so Stop leaves from the row it was pressed in as the title arrives.
+fn stop_slot() -> El {
+    col()
+        .key("caption-slot")
+        .w_full()
+        .min_h(ROW_HEIGHT)
+        .transition(Transition::none())
 }
 
 /// How far short of the open panel's width its rows start to show.
-const UNCOVER: f32 = 48.0;
+const UNCOVER: f32 = 32.0;
 
 /// What a moving edge of the surface crosses fades under it: the sides away
 /// from the saved corner, by as much as the stage says they are moving.
-fn veil(capsule: &Capsule, width: f32, height: f32) -> El {
+pub(super) fn veil(capsule: &Capsule, width: f32, height: f32) -> El {
     let (x, y) = capsule.stage.veil();
     let (right, top) = (capsule.corner.is_right(), capsule.corner.is_top());
     el().key("veil")
         .absolute(0.0, 0.0)
         .size(width, height)
+        .transition(Transition::none())
         .clip_fade_linear(
             if right { x } else { 0.0 },
             if top { 0.0 } else { y },
@@ -625,26 +725,18 @@ impl Capsule {
     /// How much of action row `row` (Stop, then the three copies) shows.
     /// Whole wherever the surface isn't in motion.
     pub(super) fn action_presence(&self, row: usize) -> stage::Presence {
-        let (Some(o), Some(Kind::Recording(shown))) = (self.stage.outline(), &self.kind) else {
-            return stage::Presence {
-                opacity: 1.0,
-                scale: 1.0,
-                blur: 0.0,
-            };
+        let (Some(o), Some(Kind::Recording(shown))) = (self.stage.outline(), self.drawn()) else {
+            return stage::Presence::flat(1.0);
         };
         let mut presence = self.stage.presence(stage::Layer::Action(row));
         // A row shows only as far as the outline has uncovered it, so an
         // edge in flight never crosses words at full strength: across, as
         // the far side clears the row's start; along, as the edge passes it.
-        let notice = if recording_notice(shown).is_some() {
-            NOTICE_HEIGHT
-        } else {
-            0.0
-        };
+        let notice = notice_height(shown);
         let near = match row {
             0 => REST_HEIGHT,
-            1 => OPEN_HEADER + notice,
-            row => OPEN_HEADER + notice + FIRST_ROW_GAP + (row - 1) as f32 * ROW_HEIGHT,
+            1 => OPEN_HEADER + notice + ROW_GAP,
+            row => OPEN_HEADER + notice + 2.0 * ROW_GAP + (row - 1) as f32 * ROW_HEIGHT,
         };
         let smooth = |t: f32| {
             let t = t.clamp(0.0, 1.0);
@@ -656,6 +748,47 @@ impl Capsule {
     }
 }
 
+/// The resting recording's header inside a surface `width` by `height`
+/// that is still arriving from its offer: the nodes [`recording`] draws.
+pub(super) fn arriving_header(
+    p: Paint,
+    capsule: &Capsule,
+    shown: &Recording,
+    width: f32,
+    height: f32,
+    presence: f32,
+) -> El {
+    let (right, top) = (capsule.corner.is_right(), capsule.corner.is_top());
+    let panel_height = open_height(shown);
+    let meter = meter(p, capsule, shown).opacity(presence);
+    let spacer = el().key("space").grow(1.0);
+    let meta = row()
+        .key("meta")
+        .h(REST_HEIGHT)
+        .px(REST_PX)
+        .center_y()
+        .transition(Transition::none());
+    let meta = if right {
+        meta.child(spacer).child(meter)
+    } else {
+        meta.child(meter).child(spacer)
+    };
+    col()
+        .key("panel-contents")
+        .size(PANEL_WIDTH, panel_height)
+        .transition(Transition::none())
+        .absolute(
+            if right { width - PANEL_WIDTH } else { 0.0 },
+            if top { 0.0 } else { height - panel_height },
+        )
+        .child(
+            bands(top, meta, None).absolute(0., if top { 0. } else { panel_height - REST_HEIGHT }),
+        )
+}
+
+/// The recording: at rest only its levels and time; under the
+/// pointer it springs open into Stop and the copies, its header nearest the
+/// screen edge.
 pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let open = capsule.hovered || capsule.stopping;
     // Rows that are leaving stay drawn until they have gone.
@@ -676,8 +809,42 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     } else {
         1.0
     };
-    let meter = meter(p, shown).opacity(live);
-    let accessory = notice.filter(|_| !open).map(notice_text);
+    let meter = meter(p, capsule, shown).opacity(live);
+    // The open field takes the notice's place in the header. The words keep
+    // their place and their cut while the field's free end wipes over them,
+    // or in a left corner the time beyond it: they are never squeezed, and
+    // nothing is drawn on one.
+    let field = field_width(capsule);
+    let wide = field_room(capsule, PANEL_WIDTH);
+    let covered = if wide > waveform::WIDTH {
+        ((field - waveform::WIDTH) / (wide - waveform::WIDTH)).clamp(0., 1.)
+    } else {
+        f32::from(u8::from(open))
+    };
+    let accessory = notice.filter(|_| covered < 1.).map(|notice| {
+        let gone = (covered / NOTICE_GONE).min(1.);
+        let wipe = (field - waveform::WIDTH).min(NOTICE_WIPE);
+        let lane = row()
+            .key("notice-lane")
+            .size(wide - field, REST_HEIGHT)
+            .center_y()
+            .transition(Transition::none());
+        let words = notice_text(notice)
+            .w(wide - waveform::WIDTH)
+            .min_w(wide - waveform::WIDTH);
+        // In a left corner the words end at the inset, away from the time.
+        let (lane, words) = if right {
+            (lane.clip_fade(0., 0., wipe, 0.), words)
+        } else {
+            (
+                lane.justify_end().clip_fade(wipe, 0., 0., 0.),
+                words.align(rune::Align::End),
+            )
+        };
+        lane.opacity(1. - gone * gone * (3. - 2. * gone))
+            .opacity_motion(Anim::INSTANT)
+            .child(words)
+    });
     let stop = capsule.action_presence(0);
     let action = actions.then(|| {
         // Pressed, the same row says so in place: its glyph and first
@@ -701,12 +868,14 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
                 c.stir(tx);
             },
         )
-        .mx(PANEL_PAD);
-        if stopping || !open {
+        .absolute(PANEL_PAD, 0.)
+        .w(PANEL_WIDTH - 2. * PANEL_PAD);
+        let row = if stopping || !open {
             row.opacity(stop.opacity)
         } else {
             row
-        }
+        };
+        stop_slot().child(row)
     });
     let panel_height = open_height(shown);
     let (target_w, target_h, target_r) = if open {
@@ -715,15 +884,12 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         (rest_width(shown), REST_HEIGHT, REST_HEIGHT / 2.0)
     };
     // The stage owns the outline. Before its first step the pill is at rest.
-    let grid = |v: f32| (v * 64.0).round() / 64.0;
     let (width, height, radius) = capsule
         .stage
         .outline()
         .map_or((target_w, target_h, target_r), |o| {
-            (grid(o.w), grid(o.h), o.radius)
+            (stage::grid(o.w), stage::grid(o.h), o.radius)
         });
-    // The full-size layout exists before the first hover. Its origin cancels
-    // the moving clip's origin so neither the rows nor the meter ride its edge.
     let header = meter_band();
     let spacer = el().key("space").grow(1.0);
     let header = if right {
@@ -739,9 +905,12 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
             panel_height - if actions { OPEN_HEADER } else { REST_HEIGHT }
         },
     );
+    // The full-size layout exists before the first hover. Its origin cancels
+    // the moving clip's origin so neither the rows nor the meter ride its edge.
     let mut contents = col()
         .key("panel-contents")
         .size(PANEL_WIDTH, panel_height)
+        .transition(Transition::none())
         .absolute(
             if right { width - PANEL_WIDTH } else { 0.0 },
             if top { 0.0 } else { height - panel_height },
@@ -773,7 +942,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
             .absolute(
                 0.0,
                 if top {
-                    panel_height - (3.0 * ROW_HEIGHT + FIRST_ROW_GAP + PANEL_PAD)
+                    panel_height - (COPIES_HEIGHT + PANEL_PAD)
                 } else {
                     PANEL_PAD
                 },
@@ -819,7 +988,7 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     } else {
         body
     };
-    in_corner(capsule, body)
+    in_corner(capsule, presence::anchored(capsule, body))
 }
 
 /// `path` as one shell word.
@@ -880,43 +1049,48 @@ pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f
         }
         (
             RECORDING_WINDOW.0,
-            OPEN_HEADER
-                + 3. * ROW_HEIGHT
-                + FIRST_ROW_GAP
-                + PANEL_PAD
-                + 2. * CAPSULE_INSET
-                + if shown.and_then(recording_notice).is_some() {
-                    NOTICE_HEIGHT
-                } else {
-                    0.
-                },
+            open_height_without_notice() + 2. * CAPSULE_INSET + shown.map_or(0., notice_height),
         )
     }
     #[cfg(not(target_os = "windows"))]
     RECORDING_WINDOW
 }
 
-/// The ready panel's window: its header, a summary while there is one or one
-/// is being written, and the three copies.
+/// The finished meeting's window while it transcribes: the panel it grew
+/// from, without a notice. Elsewhere the window stays at its largest, and
+/// only the `.hit()` panel takes the pointer.
+pub(super) fn finalizing_window_size() -> (f32, f32) {
+    #[cfg(target_os = "windows")]
+    {
+        (
+            RECORDING_WINDOW.0,
+            open_height_without_notice() + 2. * CAPSULE_INSET,
+        )
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        RECORDING_WINDOW
+    }
+}
+
+/// Elsewhere the window stays at its largest and only the `.hit()` panel
+/// takes the pointer.
 #[cfg(not(target_os = "windows"))]
 pub(super) fn ready_window_size(_: &MeetingManifest) -> (f32, f32) {
     RECORDING_WINDOW
 }
 
+/// The ready panel's window: its header, a summary while there is one or one
+/// is being written, and the three copies.
 #[cfg(target_os = "windows")]
 pub(super) fn ready_window_size(manifest: &MeetingManifest) -> (f32, f32) {
     let summary = if ready_summary(manifest).is_some() {
-        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + FIRST_ROW_GAP
+        SUMMARY_LINE * SUMMARY_LINES as f32 + ROW_PX + ROW_GAP
     } else {
         0.0
     };
     (
         PANEL_WIDTH + 2.0 * CAPSULE_INSET,
-        RESULT_HEADER_MAX
-            + summary
-            + 3.0 * ROW_HEIGHT
-            + FIRST_ROW_GAP
-            + PANEL_PAD
-            + 2.0 * CAPSULE_INSET,
+        RESULT_HEADER_MAX + summary + ROW_GAP + COPIES_HEIGHT + PANEL_PAD + 2.0 * CAPSULE_INSET,
     )
 }

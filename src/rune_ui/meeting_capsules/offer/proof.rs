@@ -118,7 +118,7 @@ fn the_offer_keeps_its_corner_controls_and_clear_input_margin() {
                         60 => tap(&mut rt, "offer-cancel"),
                         _ => (),
                     }
-                    advance_offer(&mut rt, frame as f64 / 60.);
+                    advance_offer(&mut rt);
                     let els = rt.elements();
                     let get =
                         |key: &str| els.iter().find(|e| e.key.as_deref() == Some(key)).unwrap();
@@ -251,9 +251,7 @@ fn detected_offer_sheet() {
                     tx.instant()
                 });
                 rt.frame(0.);
-                settle_stage(&mut rt);
-        rt.settle_all();
-                rt.frame(0.);
+                landed(&mut rt);
                 let w = (size.0 * 2.0) as u32;
                 let h = (size.1 * 2.0) as u32;
                 let target = offscreen::target(&gpu.device, w, h);
@@ -265,7 +263,7 @@ fn detected_offer_sheet() {
                     } else if frame == 60 {
                         tap(&mut rt, "offer-cancel");
                     }
-                    advance_offer(&mut rt, frame as f64 / 60.0);
+                    advance_offer(&mut rt);
                     let bytes = offscreen::paint(&gpu, &mut renderer, &target, &mut rt);
                     rune::render::write_png(
                         &dir.join(format!("{lang}-{theme}-{slug}-{frame:03}.png")),
@@ -326,7 +324,7 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
                         rt.pointer_down(x, y);
                         rt.pointer_up(x, y);
                     }
-                    advance_offer(&mut rt, frame as f64 / 60.);
+                    advance_offer(&mut rt);
                     let elements = rt.elements();
                     let [x, y, w, h] = elements
                         .iter()
@@ -475,7 +473,7 @@ fn record_click_frames() {
                     Instant::now() - Duration::from_millis((frame - confirmed) * 1000 / 60);
             }
             rt.transparent = true;
-            advance_offer(&mut rt, frame as f64 / 60.);
+            advance_offer(&mut rt);
             let rect = rt
                 .elements()
                 .into_iter()
