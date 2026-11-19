@@ -15,8 +15,8 @@ and a code plus PKCE produces a token scoped to the caller's verified identity:
   ([Native identity](#native-identity)). A name it claims is never the
   identity.
 
-This is a prototype contract. It exists to prove the consent boundary, not to
-be a general local API. `connected-apps` (the Lab, Labs › Connected apps)
+This is a narrow consent contract, not a general local API.
+`connected-apps` (the Lab, Labs › Connected apps)
 stays off by default, and so does its Allow websites to use Hex. Labs ›
 Browser access to the local API is a separate developer feature (CORS for
 the full bearer-token API from the origins it lists) and plays no part in

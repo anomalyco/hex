@@ -2971,7 +2971,8 @@ allowed in the lab's card, calls
 `POST /connect/authorize` without the token, Hex's permission window (its own
 floating window on every OS, shown whether or not the main window is open, with
 both allows disabled for its first second; on X11 and Windows it takes clicks
-but no keys, and Wayland without layer-shell answers unavailable) names its verified
+but no keys, and Wayland without layer-shell answers unavailable, its Labs card
+disabled with a note saying so) names its verified
 origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
 upload token that spends itself on one plain `POST /transcriptions` from the
 same origin. Codes and tokens expire in two minutes, a Deny starts a 30 s
@@ -2980,8 +2981,7 @@ dismissed. `local_api` tests cover the whole exchange, origin binding, one-use
 codes and tokens, expiry, the scope refusals, and deny/timeout. The window's
 rendering proof is the `consent_window` snapshot test and one Xvfb (X11) run
 of the Linux app ([connect.md](../connect.md#what-is-not-proven)); no real
-browser page, click, or model transcription was run, and its copy is English
-only.
+browser page was run. Its copy is translated like the rest of the window.
 
 The recording slice adds `POST /record/pair|token` plus a revocable
 `X-Hex-Record-Grant`, and per-recording `start` (grant) then
@@ -3004,11 +3004,13 @@ Revoking in the Connected apps pane removes the permission across restarts.
 An unknown website gets no dialog; it is listed under Asking to connect for
 the person to Allow or Block, so with both switches on any website can ask
 to be let in. The permission window and the pane show a native app's icon
-and the name from its verified bundle (macOS), and a website's favicon when
+and the name Hex derived from verified data (its bundle on macOS, its desktop
+entry on Linux, its version info on Windows; marked "Name not verified" when
+no signature backs it), and a website's favicon when
 the page sent a valid PNG or ICO `data:` URL with its ask; Hex never fetches
 one.
 Allow Once records one session and saves nothing. See the contract for the
-loopback Origin trust boundary and why a changed native binary asks again.
+loopback Origin trust boundary and why a changed macOS binary asks again.
 `local_api` tests drive the whole exchange with a fake recording backend
 (never a microphone), including one prompt for repeated recordings, distinct
 sessions, revoke, the lease, deny, the one-session rule, and neither token's

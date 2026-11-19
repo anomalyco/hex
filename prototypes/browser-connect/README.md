@@ -1,6 +1,7 @@
 # Browser connect demo
 
-A single static page that exercises the contract in
+An example page, not part of Hex: a single static page that exercises the
+contract in
 [`docs/connect.md`](../../docs/connect.md): PKCE, the consent dialog, the
 one-use audio token and one WAV file, and a microphone recording that runs
 while the page checks in. It never reads Hex's discovery file or token.
