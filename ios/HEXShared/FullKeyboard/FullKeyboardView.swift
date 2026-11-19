@@ -62,7 +62,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self.engine.acceptSuggestion(suggestion)
         }
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
-        stripView.onPaste = { [weak self] text in self?.pasteFromClipboard(text) }
+        stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onNextKeyboard = { [weak self] in self?.hostController?.advanceToNextInputMode() }
 
         globeButton.accessibilityLabel = "Next keyboard"
@@ -357,7 +357,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         )
     }
 
-    private func pasteFromClipboard(_ text: String) {
+    private func pasteFromClipboard() {
+        let pasteboard = UIPasteboard.general
+        guard let text = pasteboard.string ?? pasteboard.url?.absoluteString, !text.isEmpty else { return }
         keyFeedback()
         clipboard.markPasted()
         engine.target.insertText(text)

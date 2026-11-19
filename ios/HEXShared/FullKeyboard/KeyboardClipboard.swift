@@ -1,8 +1,8 @@
 import UIKit
-import UniformTypeIdentifiers
 
-/// What the strip offers from the clipboard. Nothing here reads the clipboard's
-/// contents, so the keyboard never triggers iOS's paste prompt.
+/// What the strip offers from the clipboard. Deciding to offer reads only whether
+/// something is there (`hasStrings`), never its contents; the clipboard is read when the
+/// Paste chip is tapped.
 enum KeyboardClipboardOffer: Equatable {
     /// Something was copied recently and hasn't been pasted from the keyboard yet.
     case paste
@@ -62,46 +62,3 @@ struct KeyboardClipboardTracker {
     }
 }
 
-/// The target of the strip's system Paste button. `UIPasteControl` hands it the
-/// clipboard only when the person taps the button, without a prompt.
-@MainActor
-final class KeyboardPasteReceiver: UIView {
-    var onPaste: ((String) -> Void)?
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isHidden = true
-        pasteConfiguration = UIPasteConfiguration(acceptableTypeIdentifiers: [
-            UTType.utf8PlainText.identifier,
-            UTType.plainText.identifier,
-            UTType.url.identifier,
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func canPaste(_ itemProviders: [NSItemProvider]) -> Bool {
-        itemProviders.contains { $0.canLoadObject(ofClass: String.self) || $0.canLoadObject(ofClass: URL.self) }
-    }
-
-    override func paste(itemProviders: [NSItemProvider]) {
-        if let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: String.self) }) {
-            // Item providers call back off the main thread; keep these closures nonisolated.
-            _ = provider.loadObject(ofClass: String.self) { @Sendable [weak self] text, _ in
-                guard let text else { return }
-                Task { @MainActor in self?.deliver(text) }
-            }
-        } else if let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: URL.self) }) {
-            _ = provider.loadObject(ofClass: URL.self) { @Sendable [weak self] url, _ in
-                guard let url else { return }
-                Task { @MainActor in self?.deliver(url.absoluteString) }
-            }
-        }
-    }
-
-    private func deliver(_ text: String) {
-        guard !text.isEmpty else { return }
-        onPaste?(text)
-    }
-}
