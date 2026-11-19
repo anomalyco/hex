@@ -187,6 +187,7 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
                 shown.clone_from(chapters);
             }
         }
+        ControllerEvent::Stopping => {}
         ControllerEvent::Transcribing => *state = MeetingMenuState::Transcribing,
         ControllerEvent::Finished(manifest) => {
             tracing::info!(id = %manifest.id, "meeting transcript ready");
@@ -219,7 +220,7 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
         | ControllerEvent::Reminder { .. }
         | ControllerEvent::ReminderWithdrawn { .. }
         | ControllerEvent::CallEndedWithdrawn
-        | ControllerEvent::NotesStarted
+        | ControllerEvent::NotesProgress(_)
         | ControllerEvent::NotesFinished(_) => {}
     }
 }

@@ -790,6 +790,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Markdown not saved: {}", "Markdown не сохранён: {}"),
     ("Open", "Открыть"),
     ("Finalizing…", "Завершение…"),
+    ("Stopping…", "Остановка…"),
     ("Failed", "Ошибка"),
     ("Interrupted", "Прервано"),
     ("Search meetings", "Поиск встреч"),

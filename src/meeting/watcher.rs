@@ -27,6 +27,7 @@ use call_switch::{
 };
 
 mod call_switch;
+mod publication;
 
 pub(crate) enum ControllerCommand {
     Record(MeetingCandidate, Option<OfferId>),
@@ -90,6 +91,9 @@ pub(crate) enum ControllerEvent {
     SourceWarning {
         warning: Option<TrackWarning>,
     },
+    /// Stop requested; the capture worker may still be closing its sources.
+    Stopping,
+    /// Both sources have stopped. The worker is preparing the final transcript.
     Transcribing,
     /// `auto_stop` when the recording stops on its own after
     /// [`crate::meeting::detection::AUTO_STOP_GRACE`] (Stop when the
@@ -111,7 +115,7 @@ pub(crate) enum ControllerEvent {
     ImportFailed {
         error: String,
     },
-    NotesStarted,
+    NotesProgress(String),
     NotesFinished(Box<meeting::MeetingManifest>),
 }
 
@@ -138,12 +142,11 @@ struct ActiveRecording {
 }
 
 impl ActiveRecording {
-    /// Ends this recording and its call's snooze as a hand stop does: a call
-    /// app back after leaving it is a new call (Always record starts again).
+    /// Request a stop and end the snooze; the worker confirms when capture ends.
     fn end(&self, detector: &mut MeetingDetector, events: &SyncSender<ControllerEvent>) {
         if !self.stop.swap(true, Ordering::Relaxed) {
             detector.recording_stopped();
-            let _ = events.send(ControllerEvent::Transcribing);
+            let _ = events.send(ControllerEvent::Stopping);
         }
     }
 }
@@ -906,6 +909,7 @@ fn poll_recording(
                 }
                 meeting::RecordingUpdate::Transcribing => {
                     active.end(detector, events);
+                    let _ = events.send(ControllerEvent::Transcribing);
                 }
             }
         }
@@ -918,23 +922,19 @@ fn poll_recording(
         let active = recording
             .take()
             .ok_or_else(|| eyre!("recording disappeared"))?;
-        let event = match active.worker.join() {
-            Ok(Ok(manifest)) => {
-                if manifest.status == meeting::MeetingStatus::Complete && meeting::notes_wanted() {
-                    start_notes(manifest.id.clone(), events);
-                }
-                ControllerEvent::Finished(Box::new(manifest))
+        match active
+            .worker
+            .join()
+            .unwrap_or_else(|_| Err(eyre!("meeting recorder panicked")))
+        {
+            Ok(manifest) => publication::finished(manifest, events),
+            Err(error) => {
+                let _ = events.send(ControllerEvent::Failed {
+                    title: active.title,
+                    error: error.to_string(),
+                });
             }
-            Ok(Err(error)) => ControllerEvent::Failed {
-                title: active.title,
-                error: error.to_string(),
-            },
-            Err(_) => ControllerEvent::Failed {
-                title: active.title,
-                error: "meeting recorder panicked".into(),
-            },
-        };
-        let _ = events.send(event);
+        }
     }
 
     // Stopped and transcribing: detection waits, but whether the call app
@@ -1397,12 +1397,14 @@ fn detect_meeting(
 /// whether generation succeeds or fails.
 pub(super) fn start_notes(id: String, events: &SyncSender<ControllerEvent>) {
     let finished = events.clone();
-    if meeting::spawn_summary(id, move |result| {
-        if let Ok(manifest) = result {
-            let _ = finished.send(ControllerEvent::NotesFinished(Box::new(manifest)));
-        }
+    let pending = id.clone();
+    if meeting::spawn_summary(id.clone(), move |result| {
+        let _ = finished.send(match result {
+            Ok(manifest) => ControllerEvent::NotesFinished(Box::new(manifest)),
+            Err(_) => ControllerEvent::NotesProgress(pending),
+        });
     }) {
-        let _ = events.send(ControllerEvent::NotesStarted);
+        let _ = events.send(ControllerEvent::NotesProgress(id));
     }
 }
 
@@ -1580,6 +1582,35 @@ mod tests {
             reported_started: true,
             worker: thread::spawn(|| Err(eyre!("not recording"))),
         }
+    }
+
+    #[test]
+    fn stop_request_is_not_a_capture_stopped_acknowledgment() {
+        let (events, read) = mpsc::sync_channel(4);
+        let mut active = active_recording(None, false, None);
+        let (updates, worker) = mpsc::sync_channel(1);
+        let (finish, wait) = mpsc::channel();
+        active.worker = thread::spawn(move || {
+            wait.recv().unwrap();
+            Err(eyre!("fixture"))
+        });
+        active.updates = worker;
+        let mut detector = MeetingDetector::default();
+        active.end(&mut detector, &events);
+        active.end(&mut detector, &events);
+        assert!(active.stop.load(Ordering::Relaxed));
+        assert!(matches!(read.try_recv(), Ok(ControllerEvent::Stopping)));
+        assert!(read.try_recv().is_err());
+        updates
+            .send(meeting::RecordingUpdate::Transcribing)
+            .unwrap();
+        let mut active = Some(active);
+        let mut browser = BrowserWatch::new(ContextSnapshot::capture_for_meeting);
+        poll_recording(&mut active, &mut detector, &mut browser, &events).unwrap();
+        assert!(matches!(read.try_recv(), Ok(ControllerEvent::Transcribing)));
+        assert!(read.try_recv().is_err());
+        finish.send(()).unwrap();
+        assert!(active.unwrap().worker.join().unwrap().is_err());
     }
 
     #[test]

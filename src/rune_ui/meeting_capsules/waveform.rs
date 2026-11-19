@@ -8,9 +8,11 @@ use rune::compose::{Compositor, DeviceKey, Frame};
 use std::time::{Duration, Instant};
 
 const KEY: &str = "meeting-listening-field";
-const WIDTH: f32 = 78.0;
+pub(super) const WIDTH: f32 = 78.0;
 const ATTACK: Spec = Spec::new(0.16, 0.0);
 const RELEASE: Spec = Spec::new(0.55, 0.0);
+/// After capture ends the field lets go and fades over this long.
+const COOL: Duration = Duration::from_millis(450);
 /// Dot scope's default -60 dBFS noise floor, in the capture meter's RMS units.
 const FLOOR: f32 = 0.001;
 
@@ -18,6 +20,7 @@ pub(super) fn slot() -> rune::El {
     rune::el()
         .key(KEY)
         .size(WIDTH, crate::rune_hud::dot_scope::PLATE_HEIGHT)
+        .transition(rune::Transition::none())
         .a11y_hidden()
 }
 
@@ -26,6 +29,9 @@ pub(super) struct Listening {
     drawn: Option<DotFrame>,
     last: Instant,
     presence: Spring,
+    /// When capture ended: the field fades from then until it has gone.
+    cooling: Option<Instant>,
+    fade: f32,
     reduced: bool,
 }
 
@@ -60,6 +66,8 @@ impl Listening {
             drawn: None,
             last: now,
             presence: Spring::at(0.0),
+            cooling: None,
+            fade: 1.0,
             reduced: false,
         }
     }
@@ -246,19 +254,41 @@ fn either_track_lights_the_same_field_and_silence_parks_it() {
 }
 
 pub(super) fn poll(c: &mut Capsule, _: f64, tx: &mut rune::Tx) -> bool {
-    if !matches!(c.kind, Some(Kind::Recording(_))) {
-        return false;
-    }
-    let Some(wave) = c.waveform.as_mut() else {
+    let Some((changed, moving)) = feed(c, Instant::now(), meeting::track_levels) else {
         return false;
     };
-    let changed = wave.sample(Instant::now(), meeting::track_levels());
-    tx.wake_after(Duration::from_millis(if wave.presence.x > 0.0 {
-        16
-    } else {
-        50
-    }));
+    if c.waveform.is_some() {
+        tx.wake_after(Duration::from_millis(if moving { 16 } else { 50 }));
+    }
     changed
+}
+
+/// One sample of the field at `now`: whether what it draws changed, and
+/// whether it is still moving. Once capture has ended no level is read: the
+/// field releases as it does on a pause, then goes.
+pub(super) fn feed(
+    c: &mut Capsule,
+    now: Instant,
+    levels: impl FnOnce() -> [f32; 2],
+) -> Option<(bool, bool)> {
+    let recording = matches!(c.kind, Some(Kind::Recording(_)));
+    let cooling = matches!(c.kind, Some(Kind::Finalizing { .. } | Kind::Ready(_)));
+    if !recording && !cooling {
+        return None;
+    }
+    let wave = c.waveform.as_mut()?;
+    let changed = wave.sample(now, if recording { levels() } else { [0.0; 2] });
+    if cooling {
+        let since = *wave.cooling.get_or_insert(now);
+        let t = now.saturating_duration_since(since).as_secs_f32() / COOL.as_secs_f32();
+        if t >= 1.0 {
+            c.waveform = None;
+        } else {
+            wave.fade = 1.0 - t * t * (3.0 - 2.0 * t);
+        }
+        return Some((true, true));
+    }
+    Some((changed, wave.presence.x > 0.0))
 }
 
 #[derive(Default)]
@@ -306,7 +336,7 @@ impl Compositor<Capsule> for Ink {
         let painter = &self.0.as_ref().unwrap().1;
         // The field is composited after the UI, so it must inherit the
         // header's presented opacity explicitly during the offer handoff.
-        drawn.pose.opacity = opacity;
+        drawn.pose.opacity = opacity * wave.fade;
         let uniforms = painter.write(drawn, Default::default(), target, |buf, bytes| {
             f.queue.write_buffer(buf, 0, bytes)
         });

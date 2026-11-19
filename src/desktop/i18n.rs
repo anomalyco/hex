@@ -1114,6 +1114,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Markdown not saved: {}", ["Nie zapisano Markdown: {}", "未保存 Markdown：{}", "Markdown を保存できませんでした: {}", "Markdown nicht gespeichert: {}", "No se guardó el Markdown: {}", "Файл Markdown не збережено: {}"]),
     ("Open", ["Otwórz", "打开", "開く", "Öffnen", "Abrir", "Відкрити"]),
     ("Finalizing…", ["Kończenie…", "正在完成…", "仕上げ中…", "Wird abgeschlossen…", "Finalizando…", "Завершення…"]),
+    ("Stopping…", ["Zatrzymywanie…", "正在停止…", "停止中…", "Wird gestoppt…", "Deteniendo…", "Зупинення…"]),
     ("Interrupted", ["Przerwano", "已中断", "中断", "Unterbrochen", "Interrumpido", "Перервано"]),
     ("Search meetings", ["Szukaj spotkań", "搜索会议", "会議を検索", "Besprechungen suchen", "Buscar reuniones", "Пошук зустрічей"]),
     ("No meetings match.", ["Brak pasujących spotkań.", "没有匹配的会议。", "一致する会議はありません。", "Keine passenden Besprechungen.", "No hay reuniones que coincidan.", "Відповідних зустрічей немає."]),

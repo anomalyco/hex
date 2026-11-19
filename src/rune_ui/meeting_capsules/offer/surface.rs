@@ -4,6 +4,7 @@
 use super::*;
 use crate::calendar::CallProvider;
 use crate::meeting::detection::MeetingSource;
+use rune::Transition;
 
 const ICON: f32 = 24.0;
 const H: f32 = 28.0 + 2.0 * ACTIONS_INSET;
@@ -19,38 +20,45 @@ pub(super) struct Presentation {
     v: f32,
     last: Option<f64>,
     pub(super) icon: Option<rune::Pixels>,
+    /// The offer Record was pressed on, until it has left the surface.
     departure: Option<(OfferId, MeetingCandidate)>,
-    travel: Reveal,
-    live: Reveal,
+    /// When Record was pressed, on the surface's clock.
+    begun: Option<f64>,
+    /// The recording lives in the window its offer opened.
+    inherited: bool,
     pub(super) hold_hover: bool,
     pub(super) pointer: Option<(f32, f32)>,
 }
 
-#[derive(Default)]
-struct Reveal {
-    at: Option<f64>,
-    t: f32,
-}
-
-impl Reveal {
-    fn step(&mut self, now: f64, spring: Spring) -> bool {
-        if self.t == 1. {
-            return false;
-        }
-        let dt = (now - *self.at.get_or_insert(now)).max(0.) as f32;
-        let t = spring.sample(0., 0., 1., dt).0;
-        self.t = if t >= 0.9995 { 1. } else { t };
-        true
-    }
-}
-
 impl Presentation {
     pub(super) fn inherits_offer_window(&self) -> bool {
-        self.travel.at.is_some() || self.departure.is_some()
+        self.inherited || self.departure.is_some()
+    }
+    /// Record was pressed and the offer hasn't finished leaving.
+    pub(super) fn departing(&self) -> bool {
+        self.departure.is_some()
     }
     pub(super) fn begin(&mut self, id: OfferId, candidate: MeetingCandidate) {
         self.departure = Some((id, candidate));
+        self.inherited = true;
         self.hold_hover = true;
+    }
+    pub(super) fn begun(&mut self, now: f64) -> f64 {
+        *self.begun.get_or_insert(now)
+    }
+    #[cfg(test)]
+    pub(super) fn backdate(&mut self, now: f64) {
+        if self.departure.is_some() {
+            self.begun = Some(now);
+        }
+    }
+    /// The offer and "Starting…" have left a recording's surface: the
+    /// recording draws itself from here.
+    pub(super) fn arrived(&mut self, stage: &stage::Stage) {
+        use stage::Layer;
+        if !stage.presence(Layer::Offer).shows() && !stage.presence(Layer::Pending).shows() {
+            self.departure = None;
+        }
     }
     pub(super) fn blocks_hover(&mut self, inside: bool) -> bool {
         if !inside {
@@ -58,23 +66,36 @@ impl Presentation {
         }
         self.hold_hover
     }
-    pub(super) fn step_handoff(&mut self, live: bool, reduced: bool, now: f64) -> bool {
-        if self.departure.is_none() {
-            return false;
+    /// The offer's outline between its two pages.
+    pub(super) fn outline(&self, reduced: bool) -> stage::Outline {
+        let (_, _, width) = self.page(reduced);
+        stage::Outline {
+            w: width,
+            h: H,
+            radius: rune_theme_opencode::kit(true).radius.md + ACTIONS_INSET,
+            dark: 0.0,
         }
-        let moving = self.travel.step(
-            now,
-            if reduced {
-                Spring::new(0.16, 0.)
-            } else {
-                RECORDING_CLOSE
-            },
-        );
-        let lighting = live && self.live.step(now, Spring::new(0.18, 0.));
-        if self.travel.t == 1. && self.live.t == 1. {
-            self.departure = None;
-        }
-        moving || lighting
+    }
+    /// Which page shows, how much of it, and the shell's width around it.
+    fn page(&self, reduced: bool) -> (bool, f32, f32) {
+        let [ask, wide] = self.widths;
+        let split = if reduced { 0.5 } else { 0.69 };
+        let t = self.t;
+        let rules = t > split;
+        let alpha = (if rules {
+            (t - split) / (1.0 - split)
+        } else {
+            (split - t) / split
+        } * 1.45)
+            .min(1.0);
+        let fraction = if reduced {
+            if rules { 1.0 } else { 0.0 }
+        } else if wide < ask {
+            ((t - split) / (1.0 - split)).max(0.)
+        } else {
+            (t / split).min(1.)
+        };
+        (rules, alpha, ask + (wide - ask) * fraction)
     }
     pub(super) fn for_kind(kind: &Kind, open: bool) -> Self {
         let Kind::Offer(_, c) = kind else {
@@ -261,44 +282,46 @@ pub(super) fn transition(c: &Capsule, p: Paint, dark: Paint) -> Option<El> {
 }
 
 fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCandidate) -> El {
+    use stage::Layer;
     let a = &c.presentation;
-    let [ask, wide] = a.widths;
     let reduced = c.reduced.get();
-    let split = if reduced { 0.5 } else { 0.69 };
-    let t = a.t;
-    let rules = t > split;
+    let (rules, alpha, _) = a.page(reduced);
     let i = usize::from(rules);
-    let alpha = (if rules {
-        (t - split) / (1.0 - split)
+    // Before its first step the surface is the offer at rest.
+    let o = c.stage.outline().unwrap_or_else(|| a.outline(reduced));
+    let offer = if c.stage.outline().is_some() {
+        c.stage.presence(Layer::Offer)
     } else {
-        (split - t) / split
-    } * 1.45)
-        .min(1.0);
-    let fraction = if reduced {
-        if rules { 1.0 } else { 0.0 }
-    } else if wide < ask {
-        ((t - split) / (1.0 - split)).max(0.)
-    } else {
-        (t / split).min(1.)
+        stage::Presence {
+            opacity: 1.0,
+            scale: 1.0,
+            blur: 0.0,
+        }
     };
-    let from = ask + (wide - ask) * fraction;
-    let t = a.travel.t;
-    let g = if reduced { f32::from(t >= 0.5) } else { t };
-    let lerp = |from: f32, to: f32| from + (to - from) * g;
+    let pending = c.stage.presence(Layer::Pending);
+    let live = c.stage.presence(Layer::Meter);
     let grid = |v: f32| (v * 64.).round() / 64.;
-    let w = grid(lerp(from, REST_WIDTH));
-    let h = grid(lerp(H, REST_HEIGHT));
-    let top = if c.corner.is_top() {
+    let (w, h) = (grid(o.w), grid(o.h));
+    let (right, top_corner) = (c.corner.is_right(), c.corner.is_top());
+    let top = if top_corner {
         CAPSULE_INSET
     } else {
         a.window().1 - CAPSULE_INSET - h
     };
     let x = |width| {
-        if c.corner.is_right() {
+        if right {
             a.window().0 - CAPSULE_INSET - width
         } else {
             CAPSULE_INSET
         }
+    };
+    // Everything in the shell is laid out where it rests, measured from the
+    // saved corner: the outline moves over it and nothing rides its edges.
+    let from_corner = |width: f32, height: f32| {
+        (
+            if right { w - width } else { 0.0 },
+            if top_corner { 0.0 } else { h - height },
+        )
     };
     let (_, title, sub, actions) = offer::actions(p, id, candidate, rules);
     let lines = col()
@@ -320,9 +343,10 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
                 .font(p.k.ty.small)
                 .color(p.faint())
         }));
+    let (page_x, page_y) = from_corner(a.widths[i], H);
     let page = row()
         .key("page")
-        .absolute(x(a.widths[i]) - x(w), (h - H) / 2.)
+        .absolute(page_x, page_y)
         .w(a.widths[i])
         .h(H)
         .pl(START)
@@ -339,70 +363,85 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
                 .child(lines),
         )
         .child(row().key("actions").gap(8.0).children(actions))
-        .opacity(alpha * (1. - t * 3.).max(0.));
+        .transition(Transition::none())
+        .opacity(alpha * offer.opacity)
+        .scale(offer.scale)
+        .blur(offer.blur);
     let page = if a.inherits_offer_window() || rules != c.more_open || alpha < 0.2 {
         page.inert().a11y_hidden()
     } else {
         page
     };
-    let radius = lerp(panel_radius(p), REST_HEIGHT * 0.5);
     let label = match &c.kind {
         Some(Kind::Recording(r)) => format!("{} · {}", tr("Recording"), r.title),
         _ if a.inherits_offer_window() => tr("Starting…").to_owned(),
         _ => title,
     };
-    let mut shell = row()
+    // What a moving edge crosses fades under it; at rest the veil is nothing.
+    let (veil_x, veil_y) = c.stage.veil();
+    let mut veil = rune::el()
+        .key("veil")
+        .absolute(0., 0.)
+        .size(w, h)
+        .clip_fade_linear(
+            if right { veil_x } else { 0. },
+            if top_corner { 0. } else { veil_y },
+            if right { 0. } else { veil_x },
+            if top_corner { veil_y } else { 0. },
+        );
+    if offer.shows() {
+        veil = veil.child(page);
+    }
+    if pending.shows() {
+        let (px, py) = from_corner(REST_WIDTH, REST_HEIGHT);
+        veil = veil.child(
+            row()
+                .key("pending")
+                .absolute(px, py)
+                .size(REST_WIDTH, REST_HEIGHT)
+                .center()
+                .transition(Transition::none())
+                .opacity(pending.opacity)
+                .scale(pending.scale)
+                .blur(pending.blur)
+                .child(
+                    text(tr("Starting…"))
+                        .font(dark.k.ty.ui_medium)
+                        .color(dark.muted()),
+                ),
+        );
+    }
+    if live.shows()
+        && let Some(Kind::Recording(r)) = &c.kind
+    {
+        // The recording's own header band, where it will draw it.
+        let (lx, ly) = from_corner(PANEL_WIDTH, REST_HEIGHT);
+        let band = row()
+            .key("live")
+            .absolute(lx, ly)
+            .size(PANEL_WIDTH, REST_HEIGHT)
+            .px(REST_PX)
+            .center_y()
+            .transition(Transition::none())
+            .opacity(live.opacity);
+        let band = if right { band.justify_end() } else { band };
+        veil = veil.child(band.child(panel::meter(dark, r)));
+    }
+    let shell = row()
         .key("pill")
         .role("status")
         .label(label)
         .absolute(x(w), top)
         .w(w)
         .h(h)
-        .radius(radius)
-        .fill(p.k.c.bg_base.mix(dark.k.c.bg_base, t))
-        .border(p.hair, p.k.c.border_base.mix(dark.k.c.border_base, t))
-        .clip_rounded(radius);
-    if t < 1. / 3. {
-        shell = shell.child(page);
-    }
-    let enter = ((t - 0.33) / 0.67).clamp(0., 1.);
-    if enter > 0. {
-        let layer = |key, opacity| {
-            let layer = row()
-                .key(key)
-                .absolute(0., 0.)
-                .size(w, h)
-                .px(REST_PX)
-                .center_y()
-                .opacity(opacity);
-            if c.corner.is_right() {
-                layer.justify_end()
-            } else {
-                layer
-            }
-        };
-        let live = a.live.t;
-        if live < 1. {
-            shell = shell.child(
-                row()
-                    .key("pending")
-                    .absolute(0., 0.)
-                    .size(w, h)
-                    .center()
-                    .opacity(enter * (1. - live))
-                    .child(
-                        text(tr("Starting…"))
-                            .font(dark.k.ty.ui_medium)
-                            .color(dark.muted()),
-                    ),
-            );
-        }
-        if live > 0.
-            && let Some(Kind::Recording(r)) = &c.kind
-        {
-            shell = shell.child(layer("live", enter * live).child(panel::meter(dark, r)));
-        }
-    }
+        .radius(o.radius)
+        .fill(p.k.c.bg_base.mix(dark.k.c.bg_base, o.dark))
+        .border(p.hair, p.k.c.border_base.mix(dark.k.c.border_base, o.dark))
+        .clip_rounded(o.radius)
+        // The stage steps every frame; nothing here eases a second time.
+        .motion(Spring::NONE)
+        .child(veil);
+    let radius = o.radius;
     // Regions are rectangles. Inscribe bands in the rounded body rather
     // than claiming the clear window, including its transparent corners.
     let region = |y, h, inset| {
@@ -410,6 +449,7 @@ fn draw(p: Paint, dark: Paint, c: &Capsule, id: OfferId, candidate: &MeetingCand
             .absolute(x(w) + inset, top + y)
             .w(w - 2.0 * inset)
             .h(h)
+            .motion(Spring::NONE)
             .hit()
             .a11y_hidden()
     };
