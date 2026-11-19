@@ -347,7 +347,8 @@ pub(super) fn feed(
 }
 
 /// Gives the field the width the view laid its place out at this frame,
-/// held by the end beside the time.
+/// held by the end that stays: beside the time on the right, at the
+/// anchored wall on the left.
 pub(super) fn fit(c: &mut Capsule) {
     let room = panel::field_width(c);
     let hold = if c.corner.is_right() {

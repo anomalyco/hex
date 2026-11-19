@@ -347,10 +347,22 @@ fn the_timer_and_saved_corner_hold_through_a_hover_reversal() {
                 "{corner:?} at {i}"
             );
             let (x, y) = rt.find("elapsed").unwrap();
-            assert!(
-                (x - timer.0).abs() < 0.02 && (y - timer.1).abs() < 0.02,
-                "{corner:?} timer at {i}"
-            );
+            if corner.is_right() {
+                assert!(
+                    (x - timer.0).abs() < 0.02 && (y - timer.1).abs() < 0.02,
+                    "{corner:?} timer at {i}"
+                );
+            } else {
+                // In a left corner the time rides the wall, 14 pt inside it.
+                let [px, _, pw, _] = laid_out(&rt, "pill");
+                let [tx, _, tw, _] = laid_out(&rt, "elapsed");
+                assert!(
+                    (px + pw - REST_PX - (tx + tw)).abs() < 0.03
+                        && x > timer.0 - 0.02
+                        && (y - timer.1).abs() < 0.02,
+                    "{corner:?} timer at {i}"
+                );
+            }
         }
     }
 }
@@ -820,7 +832,16 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
             for _ in 0..48 {
                 rt.frame(1. / 60.);
             }
-            assert_eq!(rt.find("elapsed"), Some(timer));
+            if corner.is_right() {
+                assert_eq!(rt.find("elapsed"), Some(timer));
+            } else {
+                // In a left corner the time ends at the open panel's inset;
+                // a sixth digit is 7.8 pt wide and counted as 8.
+                let [px, _, pw, _] = laid_out(&rt, "pill");
+                let [tx, _, tw, _] = laid_out(&rt, "elapsed");
+                let inset = px + pw - (tx + tw);
+                assert!((inset - REST_PX).abs() < 0.25, "{corner:?}: {inset}");
+            }
             let [_, y, w, h] = laid_out(&rt, "stop");
             let [_, my, _, mh] = laid_out(&rt, "meta");
             assert_eq!((w, h), (PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT));

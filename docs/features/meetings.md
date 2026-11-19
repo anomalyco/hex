@@ -898,7 +898,7 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
      │   ├── The pill is 151 × 36 pt, its field 78 pt wide (31 columns), with
      │   │   the rows' 14 pt inset on both sides: the time's right edge is one
-     │   │   line at rest, open and finished
+     │   │   line at rest, open and finished (open and finished in a left corner)
      │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
@@ -906,17 +906,21 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   Stop nearest the meter, Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
-     │   ├── In a right corner the field widens with the wall, from the rows'
-     │   │   14 pt inset to the time: 179 pt, 69 columns at the same 2.6 pt
-     │   │   pitch, three fewer for each further digit on the time. It is one
-     │   │   field: its free end is the wall's motion every frame, in whole
-     │   │   columns counted from the time's side, no dot is drawn outside
-     │   │   its place, the dots that stay keep their light, and a column that
-     │   │   arrives is lit from the voice's history. A notice in the header
-     │   │   keeps its place and its cut while the field's end wipes over it,
-     │   │   and has gone by the time the field is halfway. In a left corner
-     │   │   the time is on the field's free side and the field stays 78 pt.
+     │   ├── The field widens with the wall, from the rows' 14 pt inset to the
+     │   │   time: 179 pt, 69 columns at the same 2.6 pt pitch, three fewer
+     │   │   for each further digit on the time. It is one field: its free end
+     │   │   is the wall's motion every frame, in whole columns counted from
+     │   │   the held end, no dot is drawn outside its place, the dots that
+     │   │   stay keep their light, and a column that arrives is lit from the
+     │   │   voice's history. In a right corner it is held beside the time,
+     │   │   which stays put; in a left corner it is held at the wall and the
+     │   │   time rides the moving wall 14 pt inside it, so the open and
+     │   │   finished headers match the right corner's (✕ before the time). A
+     │   │   notice in the header keeps its place and its cut while the
+     │   │   field's end, or on the left the time, wipes over it, and has gone
+     │   │   by the time the field is halfway.
      │   │   Checks: `the_field_widens_with_the_wall_one_whole_column_at_a_time`,
+     │   │   `a_left_corners_field_fills_the_header_and_the_time_rides_the_wall`,
      │   │   `the_field_keeps_its_light_through_the_opening`,
      │   │   `the_field_wipes_the_headers_notice_and_never_draws_over_it`
      │   │   (offscreen Rune; the dots themselves only in

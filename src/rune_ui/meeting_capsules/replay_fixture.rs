@@ -273,6 +273,43 @@ const REPLAYS: &[Replay] = &[
         enters: false,
         cues: &[(20, Cue::Move(432., 23.)), (90, Cue::Leave)],
     },
+    // A replay named "left…" is played in the top-left corner. The pointer
+    // opens and leaves the pill, then capture ends with the pill at rest.
+    Replay {
+        name: "left",
+        reduced: false,
+        frames: 220,
+        live: true,
+        enters: false,
+        cues: &[
+            (20, Cue::Move(68., 23.)),
+            (90, Cue::Leave),
+            (130, Cue::Stopped),
+            (170, Cue::Published),
+        ],
+    },
+    Replay {
+        name: "left-stop",
+        reduced: false,
+        frames: 160,
+        live: true,
+        enters: false,
+        cues: &[
+            (20, Cue::Move(68., 23.)),
+            (80, Cue::PressStop),
+            (90, Cue::Stopped),
+            (110, Cue::Published),
+            (120, Cue::Notes),
+        ],
+    },
+    Replay {
+        name: "left-notice",
+        reduced: false,
+        frames: 150,
+        live: true,
+        enters: false,
+        cues: &[(20, Cue::Move(68., 23.)), (90, Cue::Leave)],
+    },
     Replay {
         name: "reduced",
         reduced: true,
@@ -394,14 +431,21 @@ fn play(
     });
     if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
         match replay.name {
-            "notice" => shown.warning = Some(meeting::TrackWarning::DigitalSilence),
+            "notice" | "left-notice" => {
+                shown.warning = Some(meeting::TrackWarning::DigitalSilence)
+            }
             "hundred" => shown.started = Instant::now() - Duration::from_secs(6_005),
             _ => (),
         }
         settle_stage(&mut rt);
     }
-    rt.update(|c, tx| {
-        c.corner = MeetingIndicatorCorner::TopRight;
+    let corner = if replay.name.starts_with("left") {
+        MeetingIndicatorCorner::TopLeft
+    } else {
+        MeetingIndicatorCorner::TopRight
+    };
+    rt.update(move |c, tx| {
+        c.corner = corner;
         tx.instant();
     });
     rt.frame(0.);

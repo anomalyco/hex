@@ -43,17 +43,19 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
         let [px, _, pw, _] = laid_out(&rt, "pill");
         assert_eq!(pw, PANEL_WIDTH);
         let [tx, _, tw, _] = laid_out(&rt, "elapsed");
-        assert_eq!((tx, tw), rest, "{corner:?}: the time moved as the pill opened");
+        // On the right the time stays by the wall; on the left it rides the
+        // wall across with the field.
+        if corner.is_right() {
+            assert_eq!((tx, tw), rest, "{corner:?}: the time moved as the pill opened");
+        }
+        let open = (tx, tw);
         let [gx, _, _, _] = laid_out(&rt, "glyph");
         let [hx, _, hw, _] = laid_out(&rt, "hint");
         // The rows' icons and their trailing words are that far in too.
         assert_eq!((gx - px, px + pw - (hx + hw)), (inset, inset), "{corner:?} open");
-        if corner.is_right() {
-            assert_eq!(tx + tw, hx + hw, "{corner:?}: the time and the hint end apart");
-        } else {
-            let [fx, _, _, _] = laid_out(&rt, "meeting-listening-field");
-            assert_eq!(fx, gx, "{corner:?}: the field and the icons start apart");
-        }
+        assert_eq!(tx + tw, hx + hw, "{corner:?}: the time and the hint end apart");
+        let [fx, _, _, _] = laid_out(&rt, "meeting-listening-field");
+        assert_eq!(fx, gx, "{corner:?}: the field and the icons start apart");
 
         rt.update(|c, tx| {
             c.capture_stopped();
@@ -68,10 +70,8 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
         let [lx, _, lw, _] = laid_out(&rt, "title");
         assert_eq!((lx - px, px + pw - (lx + lw)), (inset, inset), "{corner:?} finished");
         let [tx, _, tw, _] = laid_out(&rt, "elapsed");
-        assert_eq!((tx, tw), rest, "{corner:?}: the time moved at Stop");
-        if corner.is_right() {
-            assert_eq!(tx + tw, lx + lw, "{corner:?}: the length and the title end apart");
-        }
+        assert_eq!((tx, tw), open, "{corner:?}: the time moved at Stop");
+        assert_eq!(tx + tw, lx + lw, "{corner:?}: the length and the title end apart");
     }
 }
 
@@ -177,6 +177,68 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
     };
     assert_eq!(columns("whole", 171, 250), (31, 69));
     assert_eq!(columns("hundred", 19, 85), (31, 66));
+}
+
+/// In a left corner the field kept its resting 78 pt in the open header and
+/// left 101 pt empty beside the time.
+#[test]
+fn a_left_corners_field_fills_the_header_and_the_time_rides_the_wall() {
+    let pitch = crate::rune_hud::dot_scope::Tuning::default().spacing;
+    let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH;
+    for name in ["left", "left-stop", "left-notice"] {
+        let shots = replayed(name);
+        let (mut widest, mut flights, mut was) = (0f32, 0, None::<f32>);
+        for (frame, shot) in shots.iter().enumerate() {
+            let (Some([px, _, pw, _]), Some([tx, _, tw, _])) = (shot.pill, shot.elapsed) else {
+                continue;
+            };
+            // It stays in the corner the pill rests in.
+            assert!((px - CAPSULE_INSET).abs() < 0.03, "{name} f{frame}: {px}");
+            let wall = px + pw;
+            // The time never passes the inset from a wall on its way, and
+            // never moves further in a frame than the wall can.
+            assert!(tx + tw < wall - REST_PX + 0.03, "{name} f{frame}: {tx} + {tw}, wall {wall}");
+            if let Some(tx_was) = was {
+                assert!((tx - tx_was).abs() < 24., "{name} f{frame}: {tx_was} → {tx}");
+            }
+            was = Some(tx);
+            // While the wall is between its rests the time is its motion,
+            // whether the pointer opened it or capture ended.
+            if pw > REST_WIDTH + 0.5 && pw < PANEL_WIDTH - 0.5 {
+                flights += 1;
+                assert!((wall - REST_PX - (tx + tw)).abs() < 0.03, "{name} f{frame}");
+            }
+            let Some([x, _, w, _]) = shot.field_at else {
+                continue;
+            };
+            widest = widest.max(w);
+            // The field starts at the rows' inset and ends beside the time.
+            assert!((x - px - REST_PX).abs() < 0.02, "{name} f{frame}: {} from the wall", x - px);
+            assert!((x + w + METER_GAP - tx).abs() < 0.02, "{name} f{frame}: {x} + {w}, time {tx}");
+            let (columns, shift, _) = shot.columns;
+            assert_eq!(columns, (w / pitch + 1e-3).floor() as usize + 1, "{name} f{frame}: {w}");
+            assert!(shift <= 0. && shift > -pitch / 2. - 1e-3, "{name} f{frame}: {shift}");
+            // The dots keep their places from the wall's side.
+            assert!((shot.first_dot().unwrap() - x).abs() < 0.02, "{name} f{frame}");
+            if let Some((lane, words, shown)) = shot.notice {
+                // What shows of a notice starts where the time ends, and its
+                // words stay where they were, ending at the inset.
+                assert!((lane[0] - (tx + tw)).abs() < 0.02, "{name} f{frame}: {lane:?}");
+                assert!((words[0] + words[2] - (wall - REST_PX)).abs() < 0.02, "{name} f{frame}");
+                assert!(w < 129. || shown < 0.01, "f{frame}: {shown} beside a field {w} wide");
+            }
+        }
+        assert!((widest - wide).abs() < 0.01, "{name}: {widest}");
+        assert!(name == "left-notice" || flights > 12, "{name}: {flights}");
+    }
+    // Stop pressed in the open panel: the time keeps its place to the end.
+    let shots = replayed("left-stop");
+    let held = shots[79].elapsed.unwrap()[0];
+    assert!(shots[79..].iter().all(|s| (s.elapsed.unwrap()[0] - held).abs() < 0.03));
+    let shots = replayed("left-notice");
+    assert!(shots[19].notice.is_some_and(|n| n.2 == 1.), "a notice at rest");
+    assert!(shots[60].notice.is_none(), "the notice under an open field");
+    assert!(shots.last().unwrap().notice.is_some_and(|n| n.2 == 1.));
 }
 
 /// The field restarted when its columns changed: every dot went dark and

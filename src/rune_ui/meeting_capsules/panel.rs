@@ -342,6 +342,9 @@ pub(super) fn finalizing(p: Paint, capsule: &Capsule, duration_ms: u64) -> El {
     )
 }
 
+/// The finished meeting's ✕, in its header.
+const CLOSE_WIDTH: f32 = 32.0;
+
 fn result(
     p: Paint,
     capsule: &Capsule,
@@ -360,6 +363,7 @@ fn result(
         .opacity_motion(Anim::INSTANT)
         .blur(soft)
         .blur_motion(Anim::INSTANT);
+    let field = field_width(capsule);
     let clock = duration.map(|duration| {
         row()
             .key("meter")
@@ -367,20 +371,14 @@ fn result(
             .gap(METER_GAP)
             .center_y()
             .transition(Transition::none())
-            // The field cools after capture ends; it never cuts. On the right
-            // it sits beside the time without moving it.
-            .children(match (capsule.waveform.is_some(), right) {
-                (true, true) => {
-                    let width = field_width(capsule);
-                    Some(waveform::slot(width).absolute(
-                        -(width + METER_GAP),
-                        (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
-                    ))
-                }
-                (true, false) => Some(waveform::slot(waveform::WIDTH)),
-                (false, false) => Some(el().w(waveform::WIDTH)),
-                (false, true) => None,
-            })
+            // The field cools after capture ends; it never cuts. It sits
+            // beside the time without moving it.
+            .children(capsule.waveform.is_some().then(|| {
+                waveform::slot(field).absolute(
+                    -(field + METER_GAP),
+                    (REST_HEIGHT - crate::rune_hud::dot_scope::PLATE_HEIGHT) / 2.,
+                )
+            }))
             .child(
                 text(meeting::format_duration(duration))
                     .key("elapsed")
@@ -390,16 +388,20 @@ fn result(
     });
     let close = row()
         .key("close-slot")
-        .w(32.)
+        .w(CLOSE_WIDTH)
         .h(REST_HEIGHT)
         .center()
         .children(manifest.map(|_| dismiss_button(p).transition(replace(capsule))));
     let meta = meter_band();
     let space = el().key("space").grow(1.);
-    let meta = if right {
-        meta.child(space).child(close).children(clock)
-    } else {
-        meta.children(clock).child(space).child(close)
+    // ✕ sits before the time in every corner. In a left corner the time
+    // stays after the field's free end, wherever the wall has left it.
+    let meta = match (right, clock) {
+        (false, Some(clock)) => {
+            let lead = el().key("field-room").w(field + METER_GAP - CLOSE_WIDTH);
+            meta.child(lead).child(close).child(clock).child(space)
+        }
+        (_, clock) => meta.child(space).child(close).children(clock),
     };
     // Stop leaves from where it was pressed while the title arrives.
     let stop = capsule.stage.presence(stage::Layer::Action(0));
@@ -617,15 +619,14 @@ const NOTICE_GONE: f32 = 0.5;
 const FIELD_LEAST: f32 = 40.0;
 
 /// How wide the listening field wants to be: its resting width, and the
-/// whole header once the panel is open. In a left corner the time sits on
-/// the field's free side, so there the field keeps its resting width.
+/// whole header once the panel is open.
 pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
     let open = match capsule.drawn() {
         Some(Kind::Recording(_)) => capsule.hovered || capsule.stopping,
         Some(Kind::Finalizing { .. } | Kind::Ready(_)) => true,
         _ => false,
     };
-    if open && capsule.corner.is_right() {
+    if open {
         field_room(capsule, PANEL_WIDTH).max(waveform::WIDTH)
     } else {
         waveform::WIDTH
@@ -633,15 +634,13 @@ pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
 }
 
 /// How wide the listening field is this frame. It opens on the outline's
-/// own width spring and never passes the inset from a wall still on its
-/// way, so its free end is the wall's motion, 14 pt inside it.
+/// own width spring and never takes more room than a wall still on its way
+/// leaves it, so what ends the header is the wall's motion, 14 pt inside
+/// it: the field's free end on the right, the time beyond it on the left.
 pub(super) fn field_width(capsule: &Capsule) -> f32 {
     let Some(outline) = capsule.stage.outline() else {
         return field_wanted(capsule);
     };
-    if !capsule.corner.is_right() {
-        return waveform::WIDTH;
-    }
     // A digit that arrives on the time takes its room at once, before the
     // pill has grown for it: the field gives up columns, never the inset.
     stage::grid(capsule.stage.field())
@@ -811,37 +810,41 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         1.0
     };
     let meter = meter(p, capsule, shown).opacity(live);
-    // On the right the open field takes the notice's place in the header.
-    // The words keep their place and their cut while the field's free end
-    // wipes over them: they are never squeezed, and no dot is drawn on one.
+    // The open field takes the notice's place in the header. The words keep
+    // their place and their cut while the field's free end wipes over them,
+    // or in a left corner the time beyond it: they are never squeezed, and
+    // nothing is drawn on one.
     let field = field_width(capsule);
     let wide = field_room(capsule, PANEL_WIDTH);
-    let covered = if right && wide > waveform::WIDTH {
+    let covered = if wide > waveform::WIDTH {
         ((field - waveform::WIDTH) / (wide - waveform::WIDTH)).clamp(0., 1.)
     } else {
         f32::from(u8::from(open))
     };
-    let accessory = notice
-        .filter(|_| covered < 1. && (right || !open))
-        .map(|notice| {
-            if !right {
-                return notice_text(notice);
-            }
-            let gone = (covered / NOTICE_GONE).min(1.);
-            row()
-                .key("notice-lane")
-                .size(wide - field, REST_HEIGHT)
-                .center_y()
-                .transition(Transition::none())
-                .clip_fade(0., 0., (field - waveform::WIDTH).min(NOTICE_WIPE), 0.)
-                .opacity(1. - gone * gone * (3. - 2. * gone))
-                .opacity_motion(Anim::INSTANT)
-                .child(
-                    notice_text(notice)
-                        .w(wide - waveform::WIDTH)
-                        .min_w(wide - waveform::WIDTH),
-                )
-        });
+    let accessory = notice.filter(|_| covered < 1.).map(|notice| {
+        let gone = (covered / NOTICE_GONE).min(1.);
+        let wipe = (field - waveform::WIDTH).min(NOTICE_WIPE);
+        let lane = row()
+            .key("notice-lane")
+            .size(wide - field, REST_HEIGHT)
+            .center_y()
+            .transition(Transition::none());
+        let words = notice_text(notice)
+            .w(wide - waveform::WIDTH)
+            .min_w(wide - waveform::WIDTH);
+        // In a left corner the words end at the inset, away from the time.
+        let (lane, words) = if right {
+            (lane.clip_fade(0., 0., wipe, 0.), words)
+        } else {
+            (
+                lane.justify_end().clip_fade(wipe, 0., 0., 0.),
+                words.align(rune::Align::End),
+            )
+        };
+        lane.opacity(1. - gone * gone * (3. - 2. * gone))
+            .opacity_motion(Anim::INSTANT)
+            .child(words)
+    });
     let stop = capsule.action_presence(0);
     let action = actions.then(|| {
         // Pressed, the same row says so in place: its glyph and first
