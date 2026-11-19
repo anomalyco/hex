@@ -49,6 +49,7 @@ fn settings_rows_follow_each_os() {
     assert!(present(&linux, "toggle-listening"));
     assert!(present(&linux, "enable-on-launch"));
     assert!(present(&linux, "launch-at-login"));
+    assert!(present(&linux, "speech-engine"));
     assert!(!present(&linux, "dock-icon"));
     assert!(!present(&linux, "meetings-enabled"));
 
@@ -69,11 +70,18 @@ fn settings_rows_follow_each_os() {
     ] {
         assert!(!present(&mac, key), "macOS General has no {key}");
     }
+    // macOS runs its models on Metal or Apple's speech engine: no Speech
+    // engine row, and no GPU fallback to explain.
+    assert!(
+        !present(&mac, "speech-engine"),
+        "macOS has no Speech engine row"
+    );
 
     let mut windows = runtime("windows-settings", true, TALL_SIZE);
     open_advanced(&mut windows, Pane::General);
     assert!(present(&windows, "launch-at-login"));
     assert!(present(&windows, "toggle-listening"));
+    assert!(present(&windows, "speech-engine"));
     assert!(!present(&windows, "dock-icon"));
     assert!(
         !present(&windows, "terminal-paste"),

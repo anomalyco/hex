@@ -35,6 +35,9 @@ pub struct LocalTranscriber {
     /// It loaded on the CPU because the GPU ran out of memory, as it does
     /// when another copy of a model already fills it (#1170).
     gpu_full: bool,
+    /// The GPU out-of-memory fallback it took mid-run, for the dictation
+    /// engine to publish in Settings (#1984). Not saved.
+    out_of_memory: Option<gpu_health::Failure>,
 }
 
 /// 1.5 s of silence: what loading runs to warm a model and time it.
@@ -402,6 +405,7 @@ impl LocalTranscriber {
             preference,
             warm_ms: 0,
             gpu_full: false,
+            out_of_memory: None,
         };
         let started = Instant::now();
         transcriber.warm_on_silence()?;
@@ -490,6 +494,12 @@ impl LocalTranscriber {
 
     pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
         &self.selection == selection
+    }
+
+    /// The out-of-memory fallback this model took, for the dictation engine
+    /// to publish in Settings (#1984). `None` on a GPU.
+    pub(crate) fn out_of_memory(&self) -> Option<&gpu_health::Failure> {
+        self.out_of_memory.as_ref()
     }
 
     /// Brings an idle model's weights back before audio arrives, as loading
@@ -633,18 +643,24 @@ impl LocalTranscriber {
 
     /// Reloads this model on the CPU after its GPU failed mid-run (a hang
     /// or reset comes back as an error, #856), remembering the GPU once the
-    /// CPU works.
+    /// CPU works. An out-of-memory failure is carried by the CPU model for
+    /// the dictation engine to show in Settings (#1984).
     fn recover_on_cpu(&mut self, error: &color_eyre::eyre::Report) -> Result<()> {
         tracing::warn!(
             error = format!("{error:#}"),
             "the GPU failed while transcribing; reloading the model on the CPU"
         );
         let gpu = self.gpu.take();
-        let cpu = Self::load_on(&self.selection, Backend::Cpu, None, self.preference)?;
-        if let Some(gpu) = &gpu
-            && !gpu_health::out_of_memory(error)
-        {
-            gpu_health::record(gpu, &format!("{error:#}"));
+        let mut cpu = Self::load_on(&self.selection, Backend::Cpu, None, self.preference)?;
+        if let Some(gpu) = &gpu {
+            if gpu_health::out_of_memory(error) {
+                cpu.out_of_memory = Some(gpu_health::out_of_memory_failure(
+                    gpu,
+                    &format!("{error:#}"),
+                ));
+            } else {
+                gpu_health::record(gpu, &format!("{error:#}"));
+            }
         }
         gpu_health::set_auto_on_cpu(self.preference == TranscriptionDevice::Auto);
         *self = cpu;

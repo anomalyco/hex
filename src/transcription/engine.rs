@@ -574,6 +574,11 @@ impl TranscriptionEngine {
                 .or_else(|| parked.clone()),
         ));
         let dictating = Arc::new(AtomicBool::new(false));
+        // The model the engine adopts speaks for dictation (#1984). A parked
+        // engine has no model, so it leaves the last word alone.
+        if let Some(model) = &model {
+            publish_out_of_memory(model);
+        }
         let worker = Worker {
             model,
             parked,
@@ -934,7 +939,18 @@ fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> R
 
 #[cfg(not(target_os = "macos"))]
 fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> Result<Model> {
-    Model::load(selection)
+    let model = Model::load(selection)?;
+    publish_out_of_memory(&model);
+    Ok(model)
+}
+
+/// Publishes why the engine's model runs on the CPU (#1984). Only the model
+/// the engine holds speaks for dictation: the local API's own model, model
+/// preparation, and a superseded model swap load beside it and never get
+/// here.
+fn publish_out_of_memory(_model: &Model) {
+    #[cfg(not(target_os = "macos"))]
+    crate::transcription::gpu_health::set_out_of_memory(_model.out_of_memory());
 }
 
 static SHARED: std::sync::Mutex<std::sync::Weak<TranscriptionEngine>> =
@@ -1152,7 +1168,11 @@ impl Worker {
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
-            // Any command may load or switch the model.
+            // Any command may load or switch the model. A parked engine has
+            // no model, so it leaves the last word alone.
+            if let Some(model) = self.model.as_ref() {
+                publish_out_of_memory(model);
+            }
             self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();

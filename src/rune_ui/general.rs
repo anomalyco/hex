@@ -1159,8 +1159,8 @@ pub(super) fn disclosure_toggle(ui: &Ui, p: Paint, pane: Pane, label: &str) -> E
         )
 }
 
-/// Where the speech model runs (#856): Auto, GPU or CPU, and why Auto
-/// stays on the CPU after a GPU failed.
+/// Where the speech model runs (#856): Auto, GPU or CPU, and why this
+/// process runs on the CPU after a GPU failed.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
     use crate::app_settings::TranscriptionDevice;
@@ -1204,16 +1204,30 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
     // Launched on CPU, Hex loaded no GPU driver (#1253).
     let restart_note = (ui.live() && crate::transcription::local_transcriber::gpu_after_restart())
         .then(|| tr("Turns on when Hex restarts").to_owned());
-    let note = vulkan_note.or(restart_note).or_else(|| failed.map(|failure| {
-        tr_named(
-            if failure.slow {
-                "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
-            } else {
-                "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again."
-            },
-            &[("device", failure.device.as_str())],
-        )
-    }));
+    // This process fell back after the GPU ran out of memory (#1984). The
+    // record is not saved, so it goes away when a GPU loads again or Hex
+    // restarts.
+    let out_of_memory_note = (ui.live() && device != TranscriptionDevice::Cpu)
+        .then(crate::transcription::gpu_health::out_of_memory_fallback)
+        .flatten()
+        .map(|failure| {
+            tr_named(
+                "Hex switched to the CPU because {device} failed during transcription (out of memory). Restart Hex to use the GPU again.",
+                &[("device", failure.device.as_str())],
+            )
+        });
+    let note = vulkan_note.or(restart_note).or(out_of_memory_note).or_else(|| {
+        failed.map(|failure| {
+            tr_named(
+                if failure.slow {
+                    "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
+                } else {
+                    "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again."
+                },
+                &[("device", failure.device.as_str())],
+            )
+        })
+    });
     icon_row(
         p,
         "speech-engine",
