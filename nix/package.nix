@@ -50,6 +50,14 @@ let
       wayland
       libxkbcommon
       fontconfig
+      # The X11 window and its XWayland overlay dlopen their libraries, so no
+      # DT_NEEDED entry finds them: x11rb's `dl-libxcb` loads libxcb.so.1, and
+      # winit's X11 backend loads libX11.so.6, libXcursor.so.1, libXi.so.6 and
+      # libX11-xcb.so.1 (in libx11), plus libxkbcommon-x11 (in libxkbcommon).
+      libxcb
+      libx11
+      libxcursor
+      libxi
       # Linux Annotate dlopens libpipewire-0.3, libva and libva-drm. libva finds VA-API
       # drivers through its built-in /run/opengl-driver path or LIBVA_DRIVERS_PATH.
       pipewire
