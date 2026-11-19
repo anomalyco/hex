@@ -299,8 +299,22 @@ impl Bound {
             // socket left by a crashed run is stale.
             let _ = fs::remove_file(path);
         }
-        let listener = std::os::unix::net::UnixListener::bind(path)?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        // Bind and restrict a fresh name, then move it into place: a client
+        // that sees `path` always finds an owner-only socket that is already
+        // listening, never one between `bind` and `listen`.
+        let fresh = path.with_file_name(format!(
+            ".{}.{}",
+            path.file_name().and_then(|name| name.to_str()).unwrap_or("record.sock"),
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&fresh);
+        let listener = std::os::unix::net::UnixListener::bind(&fresh)?;
+        let placed = fs::set_permissions(&fresh, fs::Permissions::from_mode(0o600))
+            .and_then(|()| fs::rename(&fresh, path));
+        if let Err(error) = placed {
+            let _ = fs::remove_file(&fresh);
+            return Err(error);
+        }
         listener.set_nonblocking(true)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker = std::thread::Builder::new()
