@@ -282,6 +282,16 @@ const PATHS: &[(&str, &str)] = &[
         "mac-voice-filter-driver-missing",
         "Window/Voice Filter/Driver missing",
     ),
+    ("connected-apps", "Window/Connected apps/Connected apps"),
+    (
+        "connected-apps-lists",
+        "Window/Connected apps/Websites unfolded",
+    ),
+    (
+        "connected-apps-websites-off",
+        "Window/Connected apps/Websites off",
+    ),
+    ("connected-apps-empty", "Window/Connected apps/Empty"),
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
     ("mac-labs", "Window/General/Labs"),
     ("mac-labs-link", "Window/General/Labs link"),

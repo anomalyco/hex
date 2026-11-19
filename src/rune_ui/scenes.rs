@@ -1421,6 +1421,20 @@ fn connected_apps_fixture(ui: &mut Ui) {
                 icon: None,
             },
         },
+        // An unsigned Linux program, named by its desktop entry.
+        PermissionView {
+            id: 5,
+            capability: PermissionCapability::MicrophoneRecording,
+            recipient: Recipient::Native {
+                identifier: "/usr/local/bin/record-once".into(),
+                cdhash: String::new(),
+                verification: Verification::Executable {
+                    path: "/usr/local/bin/record-once".into(),
+                },
+                name: Some("Record Once".into()),
+                icon: None,
+            },
+        },
     ];
     view.grants = vec![RecordGrant {
         durable: false,

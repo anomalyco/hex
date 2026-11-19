@@ -1342,6 +1342,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Revoking ends a recording it is running. It can pair again, with a new ask.", "Отзыв завершает идущую запись. Приложение может подключиться снова — Hex спросит ещё раз."),
     ("Allowed once", "Разрешено один раз"),
     ("Always allowed", "Всегда разрешено"),
+    ("Name not verified", "Имя не проверено"),
     ("App", "Приложение"),
     ("Asking to connect", "Просят подключиться"),
     ("Microphone recording", "Запись с микрофона"),

@@ -127,15 +127,49 @@ impl Recipient {
         }
     }
 
-    /// The name Hex derived for a native app, else its identifier; a page's
-    /// origin (never its claimed name).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The name Hex derived for a native app, else its executable's file
+    /// name, else its identifier; a page's origin (never its claimed name).
     pub(crate) fn display_name(&self) -> &str {
         match self {
             Self::Web { origin, .. } => origin,
             Self::Native {
-                name, identifier, ..
-            } => name.as_deref().unwrap_or(identifier),
+                name: Some(name), ..
+            } => name,
+            Self::Native {
+                verification: Verification::Executable { path },
+                identifier,
+                ..
+            } => path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(identifier),
+            Self::Native { identifier, .. } => identifier,
+        }
+    }
+
+    /// Whether the name Hex shows for a native app rests on nothing the OS
+    /// signed: a desktop entry, or an unsigned file's version info. A signed
+    /// bundle's or image's name, and a title that is only the program's file
+    /// name or the identifier, are not flagged.
+    pub(crate) fn name_unverified(&self) -> bool {
+        matches!(
+            self,
+            Self::Native {
+                name: Some(_),
+                verification: Verification::Executable { .. } | Verification::Sandbox { .. },
+                ..
+            }
+        )
+    }
+
+    /// A native app's identifier (a bundle id, sandbox app id, or program
+    /// path) when [`Self::display_name`] isn't already it, so each shows once.
+    pub(crate) fn identity_line(&self) -> Option<&str> {
+        match self {
+            Self::Native { identifier, .. } if identifier != self.display_name() => {
+                Some(identifier)
+            }
+            _ => None,
         }
     }
 
@@ -224,7 +258,51 @@ mod tests {
             client_name: Some("Notes".into()),
             icon: None,
         };
+        assert_eq!(app.identity_line(), Some("com.example.notes"));
         assert_eq!(page.display_name(), "https://notes.example");
+        assert_eq!(page.identity_line(), None);
+        // A program known only by its path is titled by its file name, and
+        // the path shows once, under it.
+        let program = Recipient::Native {
+            identifier: "/opt/notes/bin/notes".into(),
+            cdhash: String::new(),
+            verification: Verification::Executable {
+                path: "/opt/notes/bin/notes".into(),
+            },
+            name: None,
+            icon: None,
+        };
+        assert_eq!(program.display_name(), "notes");
+        assert_eq!(program.identity_line(), Some("/opt/notes/bin/notes"));
+        assert!(!program.name_unverified());
+        assert!(!app.name_unverified(), "a signed bundle's name");
+        assert!(!page.name_unverified());
+        let named = |verification| Recipient::Native {
+            identifier: "org.example.Notes".into(),
+            cdhash: String::new(),
+            verification,
+            name: Some("Notes".into()),
+            icon: None,
+        };
+        assert!(
+            named(Verification::Executable {
+                path: "/opt/notes".into()
+            })
+            .name_unverified()
+        );
+        assert!(
+            named(Verification::Sandbox {
+                kind: SandboxKind::Flatpak,
+                app_id: "org.example.Notes".into(),
+            })
+            .name_unverified()
+        );
+        assert!(
+            !named(Verification::WindowsSignature {
+                publisher: "Example Ltd".into(),
+            })
+            .name_unverified()
+        );
         assert_eq!(page.verification(), None);
         assert_eq!(page.icon(), None);
     }

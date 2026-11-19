@@ -1339,6 +1339,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Revoking ends a recording it is running. It can pair again, with a new ask.", "Revogar encerra uma gravação em andamento. O app pode ser emparelhado de novo, com uma nova pergunta."),
     ("Allowed once", "Permitido uma vez"),
     ("Always allowed", "Sempre permitido"),
+    ("Name not verified", "Nome não verificado"),
     ("App", "App"),
     ("Asking to connect", "Pedindo para conectar"),
     ("Microphone recording", "Gravação do microfone"),

@@ -130,6 +130,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Revoking ends a recording it is running. It can pair again, with a new ask.", ["Odebranie uprawnienia kończy uruchomione nagranie. Aplikacja może sparować się ponownie, z nowym pytaniem.", "撤销会结束它正在进行的录制。它可以再次配对，并会重新询问。", "取り消すと実行中の録音は終了します。再度ペア設定するときは、もう一度確認します。", "Widerrufen beendet eine laufende Aufnahme. Die App kann sich mit einer neuen Nachfrage erneut verbinden.", "Revocar termina una grabación en curso. Puede vincularse de nuevo, con una nueva pregunta.", "Скасування завершує поточний запис. Програма може з’єднатися знову, з новим запитом."]),
     ("Allowed once", ["Dozwolone raz", "允许一次", "1 回だけ許可", "Einmal erlaubt", "Permitido una vez", "Дозволено один раз"]),
     ("Always allowed", ["Zawsze dozwolone", "始终允许", "常に許可", "Immer erlaubt", "Siempre permitido", "Завжди дозволено"]),
+    ("Name not verified", ["Nazwa niezweryfikowana", "名称未经验证", "名前は未確認", "Name nicht verifiziert", "Nombre no verificado", "Назву не перевірено"]),
     ("App", ["Aplikacja", "应用", "アプリ", "App", "App", "Програма"]),
     ("Asking to connect", ["Prośby o połączenie", "请求连接", "接続をリクエスト中", "Möchten sich verbinden", "Piden conectarse", "Просять під’єднатися"]),
     ("Microphone recording", ["Nagrywanie z mikrofonu", "麦克风录音", "マイク録音", "Mikrofonaufnahme", "Grabación con micrófono", "Запис із мікрофона"]),

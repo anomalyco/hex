@@ -231,12 +231,14 @@ The identity card names who is asking, by what Hex verified:
 ```ts
 native app -> its icon, the name Hex derived from verified data (macOS bundle,
               Linux desktop entry, Windows version info; see Native identity),
-              its identifier under it, then how it was verified:
+              else a program's file name, else its identifier; the identifier
+              (bundle id, app id, or full program path) under it unless it is
+              already the name; then how it was verified, never repeating it:
               macOS signature   -> "Code signature verified · team K7Z4Q2M8A1" (or "· no team")
               Windows signature -> "Signed by {publisher}"
-              Flatpak / Snap    -> "Flatpak app {app id}" / "Snap app {app id}"
-              only a path       -> "Not signed · {program path}" (warning icon)
-              no name or icon   -> its identifier, and the app glyph
+              Flatpak / Snap    -> "Flatpak app" / "Snap app"
+              only a path       -> "Not signed" (warning icon)
+              no icon           -> the app glyph
 website    -> its favicon on the tile (if it sent a valid one, else the globe),
               its address, "Address reported by your browser", and the name it
               gave itself as "Calls itself “…” · not verified"
