@@ -725,14 +725,19 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::KQuantModels, None));
     }
     rows.push(row(Feature::PickerDownloaded, None));
-    // The card names the kinds the drop target offers.
-    rows.push(Row {
-        about: tr_fill(
-            "Drop a {} file on the Hex window to save its transcript as a text file next to it",
-            super::drop_transcribe::formats(),
-        )
-        .into(),
-        ..row(Feature::DropTranscribe, Some(&WAVE))
+    // The card names the kinds the drop target offers, unless an
+    // organization's lock already says why it can't be used.
+    let drop = row(Feature::DropTranscribe, Some(&WAVE));
+    rows.push(match Feature::DropTranscribe.managed() {
+        Some(_) => drop,
+        None => Row {
+            about: tr_fill(
+                "Drop a {} file on the Hex window to save its transcript as a text file next to it",
+                super::drop_transcribe::formats(),
+            )
+            .into(),
+            ..drop
+        },
     });
     rows.push(row(Feature::ShellCompletions, None));
     rows.push(row(Feature::ApiProcessing, None));

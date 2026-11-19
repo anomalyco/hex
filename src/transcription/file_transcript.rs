@@ -69,8 +69,10 @@ pub enum FileTranscriptError {
     NoAudioTrack { path: PathBuf },
     /// The file holds no audio at all.
     NoAudio { path: PathBuf },
-    /// The file is truncated or changed while Hex read it.
-    Corrupt { path: PathBuf },
+    /// The file is truncated or changed while Hex read it, with where that
+    /// was found when the reader knew (a compressed file that stopped
+    /// decoding partway).
+    Corrupt { path: PathBuf, at_ms: Option<u64> },
     /// The file holds no speech at all.
     NoSpeech { path: PathBuf },
     /// The selected model is not installed or cannot run here.
@@ -108,7 +110,16 @@ impl std::fmt::Display for FileTranscriptError {
             Self::NoAudio { path } => {
                 write!(formatter, "{} has no audio", path.display())
             }
-            Self::Corrupt { path } => {
+            Self::Corrupt {
+                path,
+                at_ms: Some(at_ms),
+            } => write!(
+                formatter,
+                "{} is damaged at {}",
+                path.display(),
+                clock(*at_ms)
+            ),
+            Self::Corrupt { path, at_ms: None } => {
                 write!(formatter, "{} is truncated or corrupt", path.display())
             }
             Self::NoSpeech { path } => {
@@ -155,7 +166,8 @@ pub fn transcribe_audio_file(
     // A saved file is read whole once before a model loads, as
     // `hex transcribe` does, so a truncated WAV is refused rather than
     // failing after minutes of transcription. Compressed audio decodes once,
-    // as it transcribes, and damage found later names where it is.
+    // as it transcribes, and damage found later names the position where it
+    // is (`12:34` into the file).
     pieces
         .validate()
         .map_err(|error| file_error(source, error))?;
@@ -261,8 +273,13 @@ fn transcribe_piece(
         samples,
         duration_ms,
     };
+    // This service is fresh for this file, so nothing else can hold its
+    // audio slot: a refusal here is a bug, not a busy service.
     let Some(admission) = handle.admit_audio() else {
-        return Err(transcription_failed("Another transcription is running"));
+        debug_assert!(false, "a file's fresh service refused its first clip");
+        return Err(transcription_failed(
+            "Hex's transcription service refused the file's first clip",
+        ));
     };
     let job = handle
         .transcribe(selection.clone(), clip, admission, TimestampLevel::None)
@@ -318,9 +335,14 @@ fn file_error(path: &Path, error: PieceError) -> FileTranscriptError {
         PieceError::Empty => FileTranscriptError::NoAudio {
             path: path.to_path_buf(),
         },
-        PieceError::Incomplete | PieceError::Changed { .. } | PieceError::Damaged { .. } => {
+        PieceError::Incomplete => FileTranscriptError::Corrupt {
+            path: path.to_path_buf(),
+            at_ms: None,
+        },
+        PieceError::Changed { at_ms } | PieceError::Damaged { at_ms } => {
             FileTranscriptError::Corrupt {
                 path: path.to_path_buf(),
+                at_ms: Some(at_ms),
             }
         }
         PieceError::UnsupportedCodec(codec) => FileTranscriptError::UnsupportedCodec {
@@ -342,6 +364,22 @@ fn file_error(path: &Path, error: PieceError) -> FileTranscriptError {
             path: path.to_path_buf(),
             reason: audio_reason(&error).into(),
         },
+    }
+}
+
+/// A position in a file as `m:ss`, or `h:mm:ss` past an hour, for a message
+/// that names where damage was found.
+fn clock(ms: u64) -> String {
+    let seconds = ms / 1_000;
+    if seconds >= 3_600 {
+        format!(
+            "{}:{:02}:{:02}",
+            seconds / 3_600,
+            seconds / 60 % 60,
+            seconds % 60
+        )
+    } else {
+        format!("{}:{:02}", seconds / 60, seconds % 60)
     }
 }
 
@@ -716,6 +754,24 @@ mod tests {
             FileTranscriptError::Corrupt { .. }
         ));
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Damage the reader finds partway through names where it is, so a long
+    /// file's message points at the part that failed; a WAV the up-front read
+    /// refused has no position to name.
+    #[test]
+    fn damage_found_partway_says_where_it_is() {
+        let path = Path::new("talk.m4a");
+        let damaged = file_error(path, PieceError::Damaged { at_ms: 754_000 });
+        assert_eq!(damaged.to_string(), "talk.m4a is damaged at 12:34");
+        let changed = file_error(path, PieceError::Changed { at_ms: 3_723_000 });
+        assert_eq!(changed.to_string(), "talk.m4a is damaged at 1:02:03");
+        let incomplete = file_error(path, PieceError::Incomplete);
+        assert!(matches!(
+            incomplete,
+            FileTranscriptError::Corrupt { at_ms: None, .. }
+        ));
+        assert_eq!(incomplete.to_string(), "talk.m4a is truncated or corrupt");
     }
 
     /// The up-front check rewinds the WAV, so the reader the transcription

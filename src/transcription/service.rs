@@ -719,8 +719,11 @@ mod tests {
 
     /// A file worker or API client woken by its result admits its next clip
     /// right away, so the slot is already free when the result arrives. The
-    /// job is cancelled before the worker can read it, so it answers
-    /// `Cancelled` without loading a model.
+    /// response is a rendezvous channel and the test does not receive until
+    /// the slot reads free, so a send that still holds the admission blocks
+    /// with no one to answer it and this fails every time. The job is
+    /// cancelled before the worker can read it, so it answers `Cancelled`
+    /// without loading a model.
     #[test]
     fn a_jobs_result_arrives_only_after_its_slot_is_free() {
         let (commands, receiver) = mpsc::sync_channel(COMMAND_CAPACITY);
@@ -730,7 +733,10 @@ mod tests {
         };
         let admission = handle.admit_audio().expect("the slot starts free");
         let canceled = Arc::new(AtomicBool::new(true));
-        let (response, result) = mpsc::sync_channel(1);
+        // A rendezvous channel: the worker's send returns only once this test
+        // receives, so a send before the admission drops would keep the slot
+        // busy here for as long as this test waits.
+        let (response, result) = mpsc::sync_channel(0);
         handle
             .submit(Command::Transcribe {
                 selection: TranscriptionSelection::default(),
@@ -746,6 +752,19 @@ mod tests {
             .unwrap();
         let worker = thread::spawn(move || run(receiver));
         let job = TranscriptionJob { canceled, result };
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let next = loop {
+            if let Some(next) = handle.admit_audio() {
+                break next;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the client can admit its next clip before the result arrives"
+            );
+            thread::sleep(Duration::from_millis(1));
+        };
+        drop(next);
 
         let outcome = job
             .wait_timeout(Duration::from_secs(10))

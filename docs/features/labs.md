@@ -3693,9 +3693,10 @@ the shared pieces reader
 ([transcription/pieces.rs](../../src/transcription/pieces.rs)): a WAV is read
 whole once before the model loads, as `hex transcribe` does, so a truncated or
 corrupt file is refused up front, and compressed audio decodes once, as it
-transcribes, with damage found later reported where it is. The drop target and
-the card's dialog offer the same common extensions on every OS, one set per
-container the shared reader takes, which detects the format from the file's
+transcribes, with damage found later named where it is (`12:34` into the
+file). The drop target and the card's dialog offer the same common
+extensions on every OS, one set per container the shared reader takes, which
+detects the format from the file's
 contents rather than the name: `wav`/`wave`, `mp3`, `aac`, `m4a`/`m4b`,
 `mp4`/`m4v`/`3gp`, `mov`, `aiff`/`aif`/`aifc`, `caf`, `flac`, `ogg`/`oga`,
 `opus` (an Ogg file), `webm`/`weba`, and `mkv`/`mka`. Every
