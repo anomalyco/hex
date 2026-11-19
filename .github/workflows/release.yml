@@ -4,10 +4,10 @@ name: Release
 # exact commit to the Anomaly release service (docs/releasing.md,
 # docs/plans/release-service.md), split the way OpenCode's release is:
 #
-# - build jobs (Build desktop, build-macos, Windows installers, the AUR and
-#   Homebrew staging) run repository code: cargo, build.rs, makepkg,
-#   brew. They have no environment, no secrets, and no id-token, and they
-#   produce unsigned files.
+# - build jobs (Build desktop, build-macos, the Windows setup engine, Windows
+#   installers, the AUR and Homebrew staging) run repository code: cargo,
+#   build.rs, makepkg, brew. They have no environment, no secrets, and no
+#   id-token, and they produce unsigned files.
 # - sign and publish jobs run in the release environment. They check out only
 #   .github/release/ and run only those scripts and SHA-pinned actions, on
 #   artifacts they treat as data: they never build, install dependencies, or
@@ -235,6 +235,28 @@ jobs:
           name: build-macos-arm64
           path: ${{ runner.temp }}/macos
 
+  # Setup runs from a copy of its engine that it extracts to %TEMP%, and the
+  # uninstaller it writes is another copy of it, so Smart App Control blocks
+  # both when they are unsigned ("Unable to execute file in the temporary
+  # directory", error 4551). The compiler needs credentials to sign that
+  # engine, so it has none: this job compiles once with SignedUninstaller=yes
+  # and keeps the unsigned uninst-*.e32 ISCC asks to have signed, and
+  # sign-windows-engine signs it for the installers job to embed. Runs only
+  # when Windows is signed, because an unsigned run has no engine pass at all.
+  # Repository code: a build, like the installers.
+  setup-engine:
+    needs: [plan, build, sign-windows]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' && needs.sign-windows.result == 'success'
+      && needs.sign-windows.outputs.signed == 'true' }}
+    uses: ./.github/workflows/windows-setup-engine.yml
+    with:
+      sha: ${{ github.sha }}
+      version: ${{ needs.plan.outputs.release-version }}
+      pattern: build-windows-*
+      digests: build-windows-x86_64=${{ needs.build.outputs.windows-x64-digest }} build-windows-aarch64=${{ needs.build.outputs.windows-arm64-digest }}
+      artifact-name: windows-setup-engine
+
   # ---- Sign: release environment; only .github/release/ is checked out -------
 
   # Signs Hex.app inside-out with the Developer ID, notarizes and staples it,
@@ -436,17 +458,96 @@ jobs:
           name: sign-windows
           path: ${{ runner.temp }}/work
 
+  # Authenticode-signs the setup engine setup-engine extracted, so the
+  # installers job embeds a signed engine. Runs only when Windows is signed:
+  # without the Azure values nothing Windows is signed at all.
+  sign-windows-engine:
+    needs: [plan, sign-windows, setup-engine]
+    if: >-
+      ${{ !cancelled() && needs.sign-windows.result == 'success'
+      && needs.sign-windows.outputs.signed == 'true' && needs.setup-engine.result == 'success' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env: *windows-sign-env
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - *azure-credentials
+      - name: Download
+        uses: ./.github/release/download
+        with:
+          pattern: windows-setup-engine
+          digests: windows-setup-engine=${{ needs.setup-engine.outputs.digest }}
+      - name: Gather the setup engine
+        run: |
+          temp=$(cygpath -u "$RUNNER_TEMP")
+          mkdir -p "$temp/work"
+          shopt -s nullglob
+          engines=("$temp"/in/windows-setup-engine/uninst-*.e32)
+          [ ${#engines[@]} -gt 0 ] || { echo "::error::No setup engine in windows-setup-engine."; exit 1; }
+          cp "${engines[@]}" "$temp/work/"
+      - *azure-login
+      # The same action and settings as *azure-sign, for the setup engine's
+      # extension: a YAML anchor cannot change one value of a shared step, and
+      # signing the installers must not touch the engine files they embed.
+      - name: Sign the setup engine
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ env.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files-folder: ${{ runner.temp }}\work
+          files-folder-filter: e32
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Hex
+          description-url: https://github.com/anomalyco/hex
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          # Fetch the signing tools fresh: the Actions cache is shared with
+          # build jobs that run repository code, so a restored entry could be
+          # a poisoned module run here, in the release environment.
+          cache-dependencies: false
+      - name: Check the signatures
+        shell: pwsh
+        run: .github/release/verify-authenticode.ps1 -Folders "$env:RUNNER_TEMP/work" -Extensions .e32
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: sign-windows-engine
+          path: ${{ runner.temp }}/work
+
   # Setup.exe around the signed executables (unsigned ones when Windows is not
-  # signed), tested on native x64 and ARM64 runners. Repository code: a build.
+  # signed), embedding the signed setup engine, tested on native x64 and ARM64
+  # runners. Repository code: a build.
   installers:
-    needs: [plan, build, sign-windows]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sign-windows.result == 'success' }}
+    needs: [plan, build, sign-windows, sign-windows-engine]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' && needs.sign-windows.result == 'success'
+      && (needs.sign-windows.outputs.signed != 'true' || needs.sign-windows-engine.result == 'success') }}
     uses: ./.github/workflows/windows-installers.yml
     with:
       sha: ${{ github.sha }}
       version: ${{ needs.plan.outputs.release-version }}
       pattern: ${{ needs.sign-windows.outputs.signed == 'true' && 'sign-windows' || 'build-windows-*' }}
       digests: ${{ needs.sign-windows.outputs.signed == 'true' && format('sign-windows={0}', needs.sign-windows.outputs.digest) || format('build-windows-x86_64={0} build-windows-aarch64={1}', needs.build.outputs.windows-x64-digest, needs.build.outputs.windows-arm64-digest) }}
+      signed-engine: ${{ needs.sign-windows.outputs.signed == 'true' }}
+      engine-artifact-name: ${{ needs.sign-windows.outputs.signed == 'true' && 'sign-windows-engine' || '' }}
+      engine-digest: ${{ needs.sign-windows-engine.outputs.digest }}
       artifact-name: build-windows-installers
 
   sign-windows-installers:

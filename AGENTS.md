@@ -1845,12 +1845,13 @@ on the released commit only after every platform published, then creates the
 GitHub release with the built-in `GITHUB_TOKEN`, so a failed run leaves no
 tag; `v*` tags are unrestricted because nothing triggers on them. Like OpenCode's release, build jobs (Linux x64 and ARM64 on
 Ubuntu 24.04 runners with their `.deb` and `.rpm`, Windows x64 and ARM64 through `.github/workflows/build-desktop.yml`,
-macOS as an ad-hoc signed `HEX_RELEASE_UNSIGNED=1` app, installers through
-`windows-installers.yml`, AUR and Homebrew staging) run repository code with
+macOS as an ad-hoc signed `HEX_RELEASE_UNSIGNED=1` app, the Windows setup engine through
+`windows-setup-engine.yml`, installers through `windows-installers.yml`, AUR and Homebrew staging) run repository code with
 no environment, secret, or id-token; sign and publish jobs run in `release`,
 check out only `.github/release/`, and run only those scripts and SHA-pinned
 actions on artifacts treated as data (macOS Developer ID signing,
-notarization, and stapling; Azure Authenticode; the release service through
+notarization, and stapling; Azure Authenticode of the executables, the setup
+engine, and the installers; the release service through
 OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
 whose digest its job reports and every consumer checks. Deploy
 (`.github/workflows/deploy.yml`) follows the same split: its build job has no
@@ -1896,7 +1897,13 @@ it silently on x64 and ARM64 runners (`scripts/test-windows-installer.ps1`).
 Release's `sign-windows` job Authenticode-signs both `hex.exe` through Azure
 Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp), the installers
 are built around the signed bytes, and `sign-windows-installers` signs them
-(`.github/release/verify-authenticode.ps1` checks both). Compile jobs and test
+(`.github/release/verify-authenticode.ps1` checks both). The setup engine is
+signed in three steps, and only when Windows is signed: `setup-engine`
+compiles pass 1 and keeps the unsigned engine ISCC asks to be signed,
+`sign-windows-engine` signs it, and `installers` compiles pass 2 with the
+signed engine. Setup runs from a copy of that engine it extracts to `%TEMP%`,
+so an unsigned engine is what Windows 11 Smart App Control blocks (error
+4551). Compile jobs and test
 builds never hold signing credentials; until the Azure values exist in
 `release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
 

@@ -99,8 +99,11 @@ Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
 │   ├── x64 without a Vulkan 1.2 driver -> installs; speech on the CPU + Settings note (#1240)
 │   ├── another version installed (e.g. self-updated) -> install this one over it
+│   ├── the setup engine is signed -> Smart App Control runs the copy extracted to %TEMP%
+│   │   (unsigned, it blocks setup: "Unable to execute file in the temporary directory", error 4551)
 │   └── finish -> Open Hex -> the first run downloads a model
 └── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
+    └── the installed uninstaller is that same signed engine
 
 Install on Linux                          // setup.linux-installer
 └── curl … | sh -> signed feed -> verified artifact -> launcher + hex.service
@@ -130,8 +133,11 @@ frame. These checks do not exercise real speakers or a physical phone.
 
 The Windows installer is silently installed, reinstalled, installed over
 another version, and uninstalled on x64 and ARM64 runners by
-[test-windows-installer.ps1](../../scripts/test-windows-installer.ps1); no
-interactive install, SmartScreen prompt, or first launch on a real PC has been
+[test-windows-installer.ps1](../../scripts/test-windows-installer.ps1); with
+`-SignedEngine` it also checks that the installed uninstaller (the same engine
+bytes Setup extracts to `%TEMP%`) has a valid, timestamped Authenticode
+signature, and Release runs it that way. No interactive install, Smart App
+Control decision, SmartScreen prompt, or first launch on a real PC has been
 observed. The Linux library diagnosis has no automated check. The site's
 platform states were captured once in headless Chromium with `?platform=`.
 

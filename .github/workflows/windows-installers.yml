@@ -8,6 +8,12 @@ name: Windows installers
 # unsigned ones. Repository code runs here, so there is no environment, no
 # secret, and no id-token; artifacts are checked against the digests their
 # jobs reported (.github/release/verify-artifacts.sh).
+#
+# With `signed-engine`, this is the second pass: the compiler embeds the signed
+# setup engine in the artifact `engine-artifact-name` (windows-setup-engine.yml
+# built it, the release environment signed it), so the installed uninstaller
+# and the copy Setup extracts to %TEMP% carry the release signature, and the
+# tests assert it (scripts/test-windows-installer.ps1 -SignedEngine).
 on:
   workflow_call:
     inputs:
@@ -29,6 +35,18 @@ on:
         description: The installers' artifact
         required: true
         type: string
+      signed-engine:
+        description: Embed the signed setup engine in the artifact engine-artifact-name
+        type: boolean
+        default: false
+      engine-artifact-name:
+        description: The signed setup engine's artifact (with signed-engine)
+        type: string
+        default: ""
+      engine-digest:
+        description: Its digest, reported by the job that signed it (with signed-engine)
+        type: string
+        default: ""
       retention-days:
         type: number
         default: 0
@@ -46,6 +64,8 @@ jobs:
     timeout-minutes: 30
     env:
       HEX_VERSION: ${{ inputs.version }}
+      SIGNED_ENGINE: ${{ inputs.signed-engine }}
+      ENGINE_ARTIFACT: ${{ inputs.engine-artifact-name }}
     outputs:
       digest: ${{ steps.upload.outputs.digest }}
     steps:
@@ -55,19 +75,35 @@ jobs:
           persist-credentials: false
       - uses: ./.github/release/download
         with:
-          pattern: ${{ inputs.pattern }}
-          digests: ${{ inputs.digests }}
+          # One download checks everything the job uses, including the signed
+          # setup engine when there is one.
+          pattern: ${{ inputs.signed-engine && format('{{{0},{1}}}', inputs.pattern, inputs.engine-artifact-name) || inputs.pattern }}
+          digests: ${{ inputs.digests }}${{ inputs.signed-engine && format(' {0}={1}', inputs.engine-artifact-name, inputs.engine-digest) || '' }}
       - name: Build the installers around the executables
         shell: pwsh
         run: |
           $out = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/installers"
+          $engine = $null
+          if ($env:SIGNED_ENGINE -eq 'true') {
+            $engine = Join-Path "$env:RUNNER_TEMP/in" $env:ENGINE_ARTIFACT
+            $found = @(Get-ChildItem -LiteralPath $engine -File | Where-Object { $_.Name -like 'uninst-*.e32' })
+            if ($found.Count -eq 0) { throw "No signed uninst-*.e32 in $engine." }
+          }
           foreach ($arch in 'x86_64', 'aarch64') {
             $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
             $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.exe")
             if ($exe.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.exe, found $($exe.Count)." }
             $console = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.com")
             if ($console.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.com, found $($console.Count)." }
-            scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Console $console[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out
+            $arguments = @{
+              Executable = $exe[0].FullName
+              Console = $console[0].FullName
+              Version = $env:HEX_VERSION
+              Arch = $arch
+              OutDir = $out
+            }
+            if ($engine) { $arguments.SignedEngineDir = $engine }
+            scripts/build-windows-installer.ps1 @arguments
           }
           Get-ChildItem $out | Where-Object { $_.Name -notlike 'hex-setup-*.exe' } | Remove-Item -Recurse -Force
       - id: upload
@@ -92,6 +128,7 @@ jobs:
             runner: windows-11-arm
     env:
       HEX_VERSION: ${{ inputs.version }}
+      SIGNED_ENGINE: ${{ inputs.signed-engine }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,7 +144,9 @@ jobs:
           $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
           $console = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-${{ matrix.label }}.com")[0].FullName
           $setup = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
-          scripts/test-windows-installer.ps1 -Installer $setup -Executable $exe -Console $console -Version $env:HEX_VERSION
+          $arguments = @{ Installer = $setup; Executable = $exe; Console = $console; Version = $env:HEX_VERSION }
+          if ($env:SIGNED_ENGINE -eq 'true') { $arguments.SignedEngine = $true }
+          scripts/test-windows-installer.ps1 @arguments
       - name: Upload installer logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
