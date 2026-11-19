@@ -23,8 +23,8 @@ A page's fetch -> POST /connect/authorize            // no bearer token
 ├── Origin not listed, or missing -> 403 origin-not-allowed (no dialog)
 ├── No JSON body, or not S256 -> 400 invalid-request
 ├── A dialog is already open -> 409 consent-busy
-├── Listed origin -> Hex's window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
-│   ├── Deny, Escape, scrim, or 60 s with no answer -> 403, no code
+├── Listed origin -> Hex's permission window: "Allow this page to transcribe audio?" [Deny] [Allow Once] [Always Allow]
+│   ├── Deny, Return, Escape, or 60 s with no answer -> 403, no code
 │   │   └── Deny also starts a 30 s cooldown for that origin (429 consent-cooldown)
 │   └── Allow Once or Always Allow -> 200 { code, expiresInMs, origin, scope, state }
 ├── POST /connect/token { code, codeVerifier }
@@ -137,8 +137,8 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
   after 60 s.
 - The browser offers no server-side proof that its request followed a click
   (`navigator.userActivation` never leaves the page), so the native dialog is
-  the gate it can enforce: nothing is allowed without a press, Escape and the
-  scrim deny, and a denied page waits 30 s before it may ask again. A page
+  the gate it can enforce: nothing is allowed without a press (and none in the
+  window's first second), Return and Escape deny, and a denied page waits 30 s before it may ask again. A page
   cannot reach the POST without a CORS preflight for `application/json`.
 
 ## Limits
@@ -156,11 +156,35 @@ The response is the route's normal JSON (`transcript`, `durationMs`).
 An HTTP worker blocks while the dialog is open (up to a minute); the local API
 has four, so a page cannot starve the app by asking repeatedly.
 
+### The permission window (macOS)
+
+Both asks show in Hex's permission window: a floating window of its own, not
+a dialog inside Hex's main window. It appears whether the main window is
+open, closed, or Hex is only in the menu bar, and never opens or raises the
+main window. It sits centred on the screen under the pointer, above other
+apps' windows, takes the keyboard while shown without activating Hex (so the
+app in front keeps focus after), and holds no GPU surface while hidden.
+
+```ts
+ask starts          -> the window shows, Deny focused; Allow Once and Always Allow disabled for 1 s
+Return / Escape     -> Deny (also during that second)
+Deny                -> always answers
+allow during the 1 s -> nothing
+an answer, a 60 s timeout, or the ask otherwise ending -> the window hides at once
+```
+
+There is no scrim and nothing outside the dialog to click. One ask at a time,
+as before. Windows and Linux don't serve these asks yet, as before.
+
 ## What is not proven
 
-The dialog is rendered by Hex's own offscreen snapshot tooling
-(`hex app -- --snap … --scene browser-connect`); a real browser page, a real
-click, and a real model transcription from a page were not exercised. Copy is
+The permission window's view is rendered offscreen by an ignored test
+(`HEX_CONSENT_SNAPS=<folder> cargo test --bin hex -- --ignored
+rune_ui::consent_window::tests::snapshots`), and its state, guard, keys, and
+answers are tested headless. The native window itself (its placement, level,
+key focus, and focus returning to the app in front) was not shown on a real
+screen in a test; a real browser page, a real click, and a real model
+transcription from a page were not exercised. Copy is
 English only. The origin check trusts the browser's `Origin` header, which is
 the same trust the CORS gate already places in it; a malicious local process
 can claim a listed origin to *ask*, but not silently reuse its saved permission.
@@ -189,10 +213,10 @@ Native client (record.sock)        Web page (loopback + Origin)
              ├── native peer identity unreadable -> 403 identity-unverified
              ├── already paired -> 409 already-paired (no dialog)
              ├── another dialog is open -> 409 consent-busy
-             ├── Hex window: "Allow microphone recording?"
+             ├── Hex's permission window: "Allow microphone recording?"
              │     recipient, team note, and that pairing starts nothing
              │     [Deny] [Allow Once] [Always Allow]
-             │   ├── Deny / Escape / scrim / 60 s -> 403, no code
+             │   ├── Deny / Return / Escape / 60 s -> 403, no code
              │   │     Deny also cools that recipient down for 30 s
              │   └── Allow -> 200 { code, expiresInMs, scope: "record:pair", state }
              ├── POST /record/token { code, codeVerifier }
@@ -340,7 +364,7 @@ capture loop lost is cancelled. One ignored test runs the real 10 s lease for
 125 s, past the old two-minute cap. On macOS, one test connects to the real `record.sock`, reads the
 peer's audit token, pairs, records twice through the fake backend, and revokes;
 it skips (with a printed note) when the test binary has no signing identity.
-The dialog, the live card, and the Labs › Browser access revoke rows are
-rendered by `hex app -- --snap` scenes (`record-consent`, `record-active`,
-`mac-labs-browser-access`); nothing was recorded from a real microphone, no
+The live card and the Labs › Browser access revoke rows are rendered by
+`hex app -- --snap` scenes (`record-active`, `mac-labs-browser-access`), and
+the permission window by the ignored snapshot test above; nothing was recorded from a real microphone, no
 OS grant was approved, and no real browser page or Electron process was run.

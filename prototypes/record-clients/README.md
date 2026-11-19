@@ -15,8 +15,8 @@ trusted or read.
   run it; it uses `HEX_RECORD_SOCKET` or the default path and does the same
   pair → record twice → revoke sequence.
 
-Both record once for **Allow Once**, or twice then revoke for **Always Allow**. **Deny**, Escape, the
-scrim, or letting the dialog time out fails the pairing without recording.
+Both record once for **Allow Once**, or twice then revoke for **Always Allow**. **Deny**, Return,
+Escape, or letting the dialog time out fails the pairing without recording.
 Pairing starts nothing; each `POST /record/start` under the grant opens a
 fresh session that runs for as long as the client checks in
 (`POST /record/heartbeat` every `leaseMs / 3`; the demos record five seconds,

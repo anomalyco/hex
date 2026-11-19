@@ -102,8 +102,6 @@ pub(crate) struct Published {
     pub(crate) update_notes: Option<crate::desktop::host::UpdateNotes>,
     pub(crate) settings: AppSettings,
     preparation: crate::transcription::preparation::PreparationStatus,
-    /// A web page's one-transcription ask, while its dialog waits.
-    pub(crate) consent: Option<crate::local_api::Prompt>,
     /// A consented recording Hex's window can stop or cancel.
     pub(crate) record: Option<crate::local_api::RecordView>,
     /// Clients paired to start recordings, which the window can revoke.
@@ -122,8 +120,6 @@ struct Shared {
     /// When this run began, in the event log's wall-clock ms, captured before
     /// the listener thread starts.
     started_at: u64,
-    /// The window's side of a web page's one-transcription ask.
-    consent: Option<Arc<consent::Desk>>,
     /// The consented-recording sessions the window can stop or cancel.
     record: Option<Arc<crate::local_api::RecordSessions>>,
 }
@@ -465,7 +461,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let shared = Arc::new(Shared {
         event_path: event_path.clone(),
         started_at,
-        consent: Some(consent.clone()),
         record: Some(record),
         ..Shared::default()
     });
@@ -559,6 +554,18 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             move |id| show(&window, Destination::Meetings(Some(id))),
         )
     };
+    // Hex's permission window: its own floating window, so an ask shows
+    // whether the main window is open or not and never raises it.
+    let consent_window = {
+        let desk = consent.clone();
+        crate::rune_ui::consent_window::install(
+            &mut app,
+            Arc::new(move |id, answer| {
+                desk.answer(id, answer);
+            }),
+        )
+    };
+    consent.watch(consent_window);
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     #[cfg(hex_capture)]

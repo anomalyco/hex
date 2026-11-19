@@ -246,26 +246,6 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         output::trust_fixture(ui);
     }),
-    // Pairing a verified native client to start recordings; pairing alone
-    // starts nothing.
-    ("record-consent", |ui| {
-        *ui = mac_fixture();
-        ui.settings.labs.api_browser_access = true;
-        crate::labs::apply(&ui.settings.labs);
-        let prompt = crate::local_api::Prompt {
-            id: 11,
-            intent: crate::local_api::Intent::Record,
-            recipient: crate::local_api::Recipient::Native {
-                identifier: "com.example.fieldnotes".into(),
-                cdhash: "fixture-digest".into(),
-                team: Some("K7Z4Q2M8A1".into()),
-            },
-        };
-        ui.consent = Some(prompt.clone());
-        if let Some(view) = &mut ui.view {
-            view.consent = Some(prompt);
-        }
-    }),
     // The live recording card over General.
     ("record-active", |ui| {
         *ui = mac_fixture();
@@ -282,24 +262,6 @@ pub(super) const SCENES: &[Scene] = &[
                 elapsed_ms: 754_000,
                 remaining_ms: 0,
             });
-        }
-    }),
-    // A web page's one-transcription ask: the consent dialog over General.
-    ("browser-connect", |ui| {
-        *ui = mac_fixture();
-        ui.settings.labs.api_browser_access = true;
-        crate::labs::apply(&ui.settings.labs);
-        let prompt = crate::local_api::Prompt {
-            id: 7,
-            intent: crate::local_api::Intent::Transcribe,
-            recipient: crate::local_api::Recipient::Web {
-                origin: "https://notes.example".into(),
-                client_name: Some("Field Notes".into()),
-            },
-        };
-        ui.consent = Some(prompt.clone());
-        if let Some(view) = &mut ui.view {
-            view.consent = Some(prompt);
         }
     }),
     ("output-empty", |ui| {
@@ -1346,7 +1308,6 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         update_notes: None,
         update_blocked: None,
         editing: false,
-        consent: None,
         record: None,
         permissions: Vec::new(),
         grants: Vec::new(),

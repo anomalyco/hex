@@ -30,13 +30,6 @@ pub(crate) enum HostRequest {
     /// other one, through the same installed-only preparation as a picker
     /// choice.
     SwapModel,
-    /// The window answered a web page's ask; macOS only.
-    AnswerConsent {
-        #[allow(dead_code)]
-        id: u64,
-        #[allow(dead_code)]
-        answer: crate::local_api::Answer,
-    },
     /// The window stopped or cancelled a consented recording; macOS only.
     RecordControl {
         #[allow(dead_code)]

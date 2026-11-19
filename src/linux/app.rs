@@ -297,8 +297,7 @@ impl HostHandle {
                     }
                     Ok(())
                 }
-                HostRequest::AnswerConsent { .. }
-                | HostRequest::RecordControl { .. }
+                HostRequest::RecordControl { .. }
                 | HostRequest::RevokePermission { .. }
                 | HostRequest::RevokeRecordGrant { .. } => Ok(()),
             }

@@ -11,9 +11,9 @@
 
 mod activity;
 mod calls;
-mod browser_connect;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
+pub(crate) mod consent_window;
 mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
@@ -587,8 +587,6 @@ struct ServiceView {
     update_blocked: Option<&'static str>,
     /// The service is recording or saving a shortcut.
     editing: bool,
-    /// A web page's one-transcription ask, while its dialog waits (macOS).
-    consent: Option<crate::local_api::Prompt>,
     /// A consented recording Hex's window can stop or cancel (macOS).
     record: Option<crate::local_api::RecordView>,
     /// Clients paired to start recordings, which the window can revoke
@@ -746,11 +744,6 @@ pub(crate) struct Ui {
     /// The person asked for an update check (the footer or the menu bar),
     /// so the footer says how it went.
     update_asked: bool,
-    /// A web page's one-transcription ask while its dialog shows.
-    consent: Option<crate::local_api::Prompt>,
-    /// The ask already answered, so the host's next publication cannot show
-    /// the same dialog again.
-    consent_done: Option<u64>,
     /// The recording session the window last brought itself forward for.
     pub(super) record_seen: Option<u64>,
 }
@@ -883,8 +876,6 @@ impl Ui {
             saved: 0,
             quit_requested: false,
             update_asked: false,
-            consent: None,
-            consent_done: None,
             record_seen: None,
             window: None,
             tick_at: 0.0,
@@ -1302,7 +1293,6 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if let rune::Key::Command(digit @ '1'..='9') = event.key
         && !event.mods.alt
         && ui.modal.is_none()
-        && ui.consent.is_none()
         && ui.tour.is_none()
     {
         let index = digit as usize - '1' as usize;
@@ -1320,11 +1310,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     {
         return true;
     }
-    if ui.consent.is_some() {
-        // Escape on a page's ask is Deny, never a silent close.
-        browser_connect::answer(ui, crate::local_api::Answer::Deny);
-        true
-    } else if let Some(modal) = ui.modal {
+    if let Some(modal) = ui.modal {
         // A row's open menu inside Calls or Auto-send rules closes before the sheet itself.
         let inner_menu = modal == Modal::Calls && matches!(ui.open, Some(Menu::Call(_)));
         #[cfg(hex_capture)]
@@ -1507,9 +1493,6 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     // The lab, the selected meeting's status, or its notes can take the
     // selection away between frames.
     changed |= meetings::settle_selection(ui);
-    // A web page asking for one transcription takes the window: its dialog
-    // is answered, never timed out by a pane switch.
-    changed |= browser_connect::poll(ui);
     changed |= record_panel::poll(ui);
     let preparing = ui
         .view
@@ -1646,10 +1629,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     if let Some(panel) = record_panel::panel(ui, p) {
         layer.push(panel);
-    }
-    // A page's ask is the topmost dialog: nothing Hex draws may hide it.
-    if let Some(modal) = browser_connect::modal(ui, p) {
-        layer.extend(modal);
     }
     find_popover::layer(ui, p, &mut layer);
     // A file drag shows over everything else in the window, the first run

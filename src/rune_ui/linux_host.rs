@@ -155,7 +155,6 @@ impl Backend {
                 update_notes: desktop.update_notes,
                 update_blocked: None,
                 editing,
-                consent: None,
                 record: None,
                 permissions: Vec::new(),
                 grants: Vec::new(),

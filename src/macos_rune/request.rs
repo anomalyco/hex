@@ -35,11 +35,6 @@ pub(crate) enum Request {
     /// Snapshot from the main-thread TIS observer, not a shortcut event.
     InputSourceChanged(Option<String>),
     CancelModel,
-    /// The window answered a web page's one-transcription ask.
-    AnswerConsent {
-        id: u64,
-        answer: crate::local_api::Answer,
-    },
     /// The window stopped (`stop`) or cancelled a consented recording.
     RecordControl {
         id: u64,

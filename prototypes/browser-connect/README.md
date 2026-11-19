@@ -20,8 +20,8 @@ while the page checks in. It never reads Hex's discovery file or token.
    python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/Library/Application Support/hex/local-api.json")))["port"])'
    ```
 
-4. Choose a WAV file and press **Ask Hex for one transcription**. Hex opens its
-   window with **Deny**, **Allow Once**, and **Always Allow**, unless this
+4. Choose a WAV file and press **Ask Hex for one transcription**. Hex shows its
+   permission window with **Deny**, **Allow Once**, and **Always Allow**, unless this
    page already has permission. Either approval lets the page transcribe the
    selected file. Always Allow saves a proof in this origin's local storage;
    if you clear site data, revoke the permission in Labs before pairing again.
@@ -31,5 +31,5 @@ while the page checks in. It never reads Hex's discovery file or token.
    sends `POST /record/heartbeat` every few seconds; close the tab and Hex
    stops the microphone within 10 s.
 
-A Deny (or Escape, or the scrim) cancels: the page gets `403 consent-denied`,
+A Deny (or Return, or Escape) cancels: the page gets `403 consent-denied`,
 and the origin waits 30 seconds before it may prompt again.

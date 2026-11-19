@@ -57,7 +57,6 @@ pub(super) fn run_runtime(
         activity,
         last_completed_at,
         started_at: shared.started_at,
-        consent: shared.consent.clone(),
         record: shared.record.clone(),
     };
     let mut settings_checked = Instant::now();
@@ -148,8 +147,6 @@ pub(super) struct Runtime {
     /// When this runtime started, in the event log's wall-clock ms. Failures
     /// older than this belong to the previous session.
     pub(super) started_at: u64,
-    /// The window's side of a web page's one-transcription ask.
-    pub(super) consent: Option<Arc<super::consent::Desk>>,
     /// Consented recordings the window can stop or cancel.
     pub(super) record: Option<Arc<crate::local_api::RecordSessions>>,
 }
@@ -192,11 +189,6 @@ impl Runtime {
                 self.preparation.cancel();
             }
             Request::SwapModel => self.swap_model(),
-            Request::AnswerConsent { id, answer } => {
-                if let Some(desk) = &self.consent {
-                    desk.answer(id, answer);
-                }
-            }
             Request::RecordControl { id, stop } => {
                 if let Some(record) = &self.record {
                     if stop {
@@ -521,7 +513,6 @@ impl Runtime {
             update_notes: UPDATER.get().and_then(crate::updater::Updater::notes),
             settings: self.settings.clone(),
             preparation,
-            consent: self.consent.as_ref().and_then(|desk| desk.prompt()),
             record: self.record.as_ref().and_then(|record| record.view()),
             permissions: self
                 .record
