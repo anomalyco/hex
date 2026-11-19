@@ -17,9 +17,7 @@ fn recording_in(corner: MeetingIndicatorCorner) -> Runtime<Capsule> {
         c.live.entries = call();
         tx.instant();
     });
-    settle_stage(&mut rt);
-    rt.settle_all();
-    rt.frame(0.);
+    landed(&mut rt);
     rt
 }
 
@@ -65,9 +63,7 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
             c.published(m);
             tx.instant();
         });
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.);
+        landed(&mut rt);
         let [px, _, pw, _] = laid_out(&rt, "pill");
         let [lx, _, lw, _] = laid_out(&rt, "title");
         assert_eq!((lx - px, px + pw - (lx + lw)), (inset, inset), "{corner:?} finished");
@@ -117,7 +113,7 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
     let wide = PANEL_WIDTH - 2. * REST_PX - METER_GAP - TIMER_WIDTH;
     assert_eq!((waveform::WIDTH, wide), (78., 179.));
     for name in ["whole", "interrupted", "close", "hundred", "notice", "reduced"] {
-        let shots = play(replay(name), |_, _, _| {});
+        let shots = replayed(name);
         let (mut widest, mut flights) = (0f32, 0);
         for (frame, pair) in shots.windows(2).enumerate() {
             let (was, shot) = (&pair[0], &pair[1]);
@@ -176,7 +172,7 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
     }
     // Another digit on the time costs the open field three columns.
     let columns = |name, rest: usize, open: usize| {
-        let shots = play(replay(name), |_, _, _| {});
+        let shots = replayed(name);
         (shots[rest].columns.0, shots[open].columns.0)
     };
     assert_eq!(columns("whole", 171, 250), (31, 69));
@@ -187,7 +183,7 @@ fn the_field_widens_with_the_wall_one_whole_column_at_a_time() {
 /// the trace unfolded again from the middle.
 #[test]
 fn the_field_keeps_its_light_through_the_opening() {
-    let shots = play(replay("whole"), |_, _, _| {});
+    let shots = replayed("whole");
     // The pointer arrives at 172 over two people talking.
     let lit = |shot: &Shot| shot.columns.2.iter().sum::<f32>();
     let resting = |shot: &Shot| shot.columns.2.iter().rev().take(31).sum::<f32>();
@@ -222,7 +218,7 @@ fn the_field_keeps_its_light_through_the_opening() {
 /// and coming back the words were cut again at every width on the way.
 #[test]
 fn the_field_wipes_the_headers_notice_and_never_draws_over_it() {
-    let shots = play(replay("notice"), |_, _, _| {});
+    let shots = replayed("notice");
     let rest = shots[19].notice.expect("a notice at rest");
     assert_eq!(rest.2, 1.);
     let (mut wiped, mut back) = (0, 0);
@@ -253,7 +249,7 @@ fn the_field_wipes_the_headers_notice_and_never_draws_over_it() {
 #[test]
 fn stops_row_has_gone_before_the_heading_arrives_and_neither_moves() {
     for name in ["whole", "interrupted", "close", "titles"] {
-        let shots = play(replay(name), |_, _, _| {});
+        let shots = replayed(name);
         let (mut label, mut heading, mut seen) = (None, None, 0);
         for (frame, shot) in shots.iter().enumerate() {
             if !matches!(shot.phase, "stopping" | "transcribing" | "published" | "summary") {

@@ -38,7 +38,7 @@ fn leaves(shots: &[Shot], from: usize) -> usize {
 /// now, of the timeout, of a refusal and of ✕.
 #[test]
 fn not_now_and_a_timeout_let_the_offer_go_over_several_frames() {
-    let shots = play(replay("not-now"), |_, _, _| {});
+    let shots = replayed("not-now");
     anchored(&shots);
     // It arrives in place: faint and a little small about its corner, then
     // whole, and never moves its anchored edges.
@@ -54,12 +54,12 @@ fn not_now_and_a_timeout_let_the_offer_go_over_several_frames() {
     // It shrinks toward its corner as it goes.
     assert!(shots[gone - 2].pill.unwrap()[2] < shots[39].pill.unwrap()[2]);
 
-    let shots = play(replay("timeout"), |_, _, _| {});
+    let shots = replayed("timeout");
     anchored(&shots);
     leaves(&shots, 24);
 
     // Reduce Motion: no travel and no scale, a short fade.
-    let shots = play(replay("not-now-reduced"), |_, _, _| {});
+    let shots = replayed("not-now-reduced");
     anchored(&shots);
     let gone = leaves(&shots, 40);
     let rest = shots[39].pill.unwrap();
@@ -73,7 +73,7 @@ fn not_now_and_a_timeout_let_the_offer_go_over_several_frames() {
 #[test]
 fn the_other_capsules_arrive_and_leave_the_same_way() {
     for name in ["reminder", "call-ended", "auto-started"] {
-        let shots = play(replay(name), |_, _, _| {});
+        let shots = replayed(name);
         assert!(shots[0].surface > 0.0 && shots[0].surface < 0.3, "{name}");
         assert!(
             shots[..30]
@@ -155,7 +155,7 @@ fn a_capsule_leaves_toward_whichever_corner_it_is_saved_in() {
 fn a_refused_start_goes_where_it_is_without_saying_starting() {
     // Refused while the offer is still contracting: the outline carries on
     // at the speed it had, and "Starting…" is never said on the way out.
-    let shots = play(replay("refused-early"), |_, _, _| {});
+    let shots = replayed("refused-early");
     anchored(&shots);
     let gone = leaves(&shots, 30);
     assert!(shots.iter().all(|s| s.presence[1] == 0.0 && s.pending.is_none()));
@@ -168,7 +168,7 @@ fn a_refused_start_goes_where_it_is_without_saying_starting() {
     assert!(widths[5] - widths[7] > 4.0, "the outline froze when it was refused");
 
     // Refused once "Starting…" shows: the words go with the surface.
-    let shots = play(replay("failure"), |_, _, _| {});
+    let shots = replayed("failure");
     anchored(&shots);
     let gone = leaves(&shots, 54);
     assert!(shots[54].presence[1] > 0.9 && shots[gone - 3].pending.is_some());
@@ -263,7 +263,7 @@ fn several_titles_in_quick_succession_show_one_at_a_time() {
 #[test]
 fn an_exit_interrupted_by_another_offer_turns_round_and_stays_shown() {
     for (name, closed, offered) in [("not-now-then-offer", 24, 30), ("refused-then-offer", 30, 34)] {
-        let shots = play(replay(name), |_, _, _| {});
+        let shots = replayed(name);
         anchored(&shots);
         assert_eq!(shots[closed].phase, "leaving", "{name}");
         let dip = shots[offered - 1].surface;
@@ -285,7 +285,7 @@ fn an_exit_interrupted_by_another_offer_turns_round_and_stays_shown() {
         assert_eq!(shots.last().unwrap().surface, 1.0, "{name}");
     }
     // The offer that came back is a whole offer: Record starts a recording.
-    let shots = play(replay("not-now-then-offer"), |_, _, _| {});
+    let shots = replayed("not-now-then-offer");
     assert_eq!(shots.last().unwrap().phase, "recording");
 }
 
@@ -323,7 +323,7 @@ fn what_is_leaving_takes_no_input() {
 #[test]
 fn after_capture_ends_the_time_holds_and_the_field_only_cools() {
     for (name, stopped) in [("interrupted", 80), ("whole", 425), ("close", 40)] {
-        let shots = play(replay(name), |_, _, _| {});
+        let shots = replayed(name);
         // The replay's meters stay loud to the end.
         assert!(replay_levels(replay(name), stopped + 20)[0] > 0.0);
         assert!(shots[stopped - 1].light > 0.2, "{name}: the field was lit");

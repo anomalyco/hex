@@ -1636,21 +1636,28 @@ mod tests {
     /// clock the native overlay polls, on the original surface.
     fn navigate_offer(rt: &mut Runtime<Capsule>, key: &str) {
         tap(rt, key);
-        for i in 0..60 {
-            advance_offer(rt, i as f64 / 60.0);
+        for _ in 0..60 {
+            advance_offer(rt);
         }
     }
 
-    fn advance_offer(rt: &mut Runtime<Capsule>, _: f64) {
+    fn advance_offer(rt: &mut Runtime<Capsule>) {
         rt.frame(1.0 / 60.0);
     }
 
-    /// Lands the hand-stepped surface, as `settle_all` lands Rune's tracks.
+    /// Lands everything in flight, as `settle_all` lands Rune's tracks.
     fn settle_stage(rt: &mut Runtime<Capsule>) {
         rt.update(|c, tx| {
             let now = tx.clock();
             c.settle_stage(now);
         });
+    }
+
+    /// The runtime's surface, stage and Rune's tracks all at rest.
+    fn landed(rt: &mut Runtime<Capsule>) {
+        settle_stage(rt);
+        rt.settle_all();
+        rt.frame(0.);
     }
 
     #[test]
@@ -2064,9 +2071,7 @@ mod tests {
                 span_ms: 4 * 60_000 + 59_000,
             };
         });
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.0);
+        landed(&mut rt);
         // At rest, the meter and time, no actions.
         assert!(rt.find("copy-new").is_none());
         assert!(rt.find("stop").is_none());
@@ -2700,9 +2705,7 @@ mod tests {
         let kind = call_ended();
         assert_eq!(panel_width(&kind), CALL_ENDED.0);
         let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.0);
+        landed(&mut rt);
         let title = rt
             .elements()
             .into_iter()

@@ -40,9 +40,7 @@ fn recording_motion_frames() {
                 span_ms: 64_000,
             };
         });
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.0);
+        landed(&mut rt);
         let mut renderer = offscreen::renderer(&gpu.device);
         let target = offscreen::target(&gpu.device, w, h);
         use crate::{
@@ -326,12 +324,7 @@ fn the_timer_and_saved_corner_hold_through_a_hover_reversal() {
         });
         rt.frame(0.0);
         let anchor = |rt: &Runtime<Capsule>| {
-            let [x, y, w, h] = rt
-                .elements()
-                .into_iter()
-                .find(|e| e.key.as_deref() == Some("pill"))
-                .unwrap()
-                .rect;
+            let [x, y, w, h] = laid_out(rt, "pill");
             (
                 if corner.is_right() { x + w } else { x },
                 if corner.is_top() { y } else { y + h },
@@ -437,9 +430,7 @@ fn stop_hits_its_center_edges_and_corners_but_not_its_neighbors() {
         }
         rt.pointer_leave();
         rt.frame(0.);
-        settle_stage(&mut rt);
-        rt.settle_all();
-        rt.frame(0.);
+        landed(&mut rt);
         click(&mut rt, x + w / 2., y + h / 2.);
         assert!(rt.find("stop").is_none() && commands.try_recv().is_err());
     }
@@ -814,23 +805,14 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 }
                 tx.instant();
             });
-            settle_stage(&mut rt);
-        rt.settle_all();
-            rt.frame(0.);
-            let rect = |rt: &Runtime<Capsule>, key| {
-                rt.elements()
-                    .into_iter()
-                    .find(|e| e.key.as_deref() == Some(key))
-                    .unwrap()
-                    .rect
-            };
-            let [px, _, pw, ph] = rect(&rt, "pill");
-            let [sx, _, sw, _] = rect(&rt, "meeting-listening-field");
-            let [tx, _, tw, _] = rect(&rt, "elapsed");
+            landed(&mut rt);
+            let [px, _, pw, ph] = laid_out(&rt, "pill");
+            let [sx, _, sw, _] = laid_out(&rt, "meeting-listening-field");
+            let [tx, _, tw, _] = laid_out(&rt, "elapsed");
             assert_eq!((pw, ph), (width, REST_HEIGHT));
             assert!(sx - px >= 9. && px + pw - tx - tw >= 9. && tx - (sx + sw) >= 5.);
             if warning {
-                let [x, _, w, _] = rect(&rt, "notice");
+                let [x, _, w, _] = laid_out(&rt, "notice");
                 assert!(w > 0. && (x + w <= sx || x >= tx + tw));
             }
             let timer = rt.find("elapsed").unwrap();
@@ -839,8 +821,8 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
                 rt.frame(1. / 60.);
             }
             assert_eq!(rt.find("elapsed"), Some(timer));
-            let [_, y, w, h] = rect(&rt, "stop");
-            let [_, my, _, mh] = rect(&rt, "meta");
+            let [_, y, w, h] = laid_out(&rt, "stop");
+            let [_, my, _, mh] = laid_out(&rt, "meta");
             assert_eq!((w, h), (PANEL_WIDTH - 2. * PANEL_PAD, ROW_HEIGHT));
             assert!(y + h <= my || y >= my + mh);
             tap(&mut rt, "stop");

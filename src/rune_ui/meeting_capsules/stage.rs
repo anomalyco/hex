@@ -596,13 +596,22 @@ mod tests {
         }
     }
 
+    /// The pill at rest, and the open panel it is stepped between.
+    fn resting() -> Target {
+        target(148.0, 36.0)
+    }
+
+    fn opened() -> Target {
+        target(252.0, 227.0)
+    }
+
     #[test]
     fn a_surface_appears_at_rest_and_moves_only_when_its_target_does() {
         let mut stage = Stage::default();
-        assert_eq!(stage.step(&target(148.0, 36.0), false, 0.0), Stepped::Moved);
+        assert_eq!(stage.step(&resting(), false, 0.0), Stepped::Moved);
         assert_eq!(stage.outline().unwrap().w, 148.0);
         assert_eq!(stage.presence(Layer::Meter).opacity, 1.0);
-        assert_eq!(stage.step(&target(148.0, 36.0), false, 1.0 / 60.0), Stepped::Still);
+        assert_eq!(stage.step(&resting(), false, 1.0 / 60.0), Stepped::Still);
         assert!(stage.resting());
         assert_eq!(stage.veil(), (0.0, 0.0));
     }
@@ -612,7 +621,7 @@ mod tests {
     #[test]
     fn a_reversal_keeps_its_speed_and_the_width_leads() {
         let mut stage = Stage::default();
-        let (rest, open) = (target(148.0, 36.0), target(252.0, 227.0));
+        let (rest, open) = (resting(), opened());
         stage.step(&rest, false, 0.0);
         let mut now = 0.0;
         let mut frame = |stage: &mut Stage, to: &Target| {
@@ -703,8 +712,8 @@ mod tests {
     #[test]
     fn a_moving_edge_fades_what_it_crosses_and_a_resting_one_cuts_nothing() {
         let mut stage = Stage::default();
-        stage.step(&target(148.0, 36.0), false, 0.0);
-        let open = target(252.0, 227.0);
+        stage.step(&resting(), false, 0.0);
+        let open = opened();
         let mut peak = (0.0f32, 0.0f32);
         let mut last = (0.0, 0.0);
         for frame in 1..=90 {
@@ -722,10 +731,10 @@ mod tests {
     #[test]
     fn actions_arrive_in_order_and_leave_together() {
         let mut stage = Stage::default();
-        stage.step(&target(148.0, 36.0), false, 0.0);
+        stage.step(&resting(), false, 0.0);
         let open = Target {
             actions: Some(0.0),
-            ..target(252.0, 227.0)
+            ..opened()
         };
         for frame in 1..=6 {
             stage.step(&open, false, frame as f64 / 60.0);
@@ -735,7 +744,7 @@ mod tests {
             .collect();
         assert!(shown.windows(2).all(|p| p[0] > p[1]), "{shown:?}");
         assert!(stage.presence(Layer::Action(0)).blur == 0.0);
-        let closed = target(148.0, 36.0);
+        let closed = resting();
         for frame in 7..=60 {
             stage.step(&closed, false, frame as f64 / 60.0);
         }
@@ -754,13 +763,13 @@ mod tests {
         let pending = Target {
             pending: Some(0.18),
             meter: false,
-            ..target(148.0, 36.0)
+            ..resting()
         };
         for frame in 1..=3 {
             assert_eq!(stage.step(&pending, false, frame as f64 / 60.0), Stepped::Moved);
             assert!(!stage.presence(Layer::Pending).shows());
         }
-        let live = target(148.0, 36.0);
+        let live = resting();
         for frame in 4..=90 {
             stage.step(&live, false, frame as f64 / 60.0);
             assert!(!stage.presence(Layer::Pending).shows());
@@ -772,10 +781,10 @@ mod tests {
     #[test]
     fn reduced_motion_lands_the_outline_and_keeps_a_short_fade() {
         let mut stage = Stage::default();
-        stage.step(&target(148.0, 36.0), true, 0.0);
+        stage.step(&resting(), true, 0.0);
         let open = Target {
             actions: Some(0.0),
-            ..target(252.0, 227.0)
+            ..opened()
         };
         assert_eq!(stage.step(&open, true, 1.0 / 60.0), Stepped::Moved);
         assert_eq!(stage.outline().unwrap().w, 252.0);
@@ -787,7 +796,7 @@ mod tests {
         }
         assert_eq!(stage.presence(Layer::Action(ACTIONS - 1)).opacity, 1.0);
         // Leaving, nothing lingers to be cut by an outline that has landed.
-        stage.step(&target(148.0, 36.0), true, 41.0 / 60.0);
+        stage.step(&resting(), true, 41.0 / 60.0);
         assert!((0..ACTIONS).all(|row| !stage.presence(Layer::Action(row)).shows()));
         assert_eq!(stage.outline().unwrap().w, 148.0);
     }

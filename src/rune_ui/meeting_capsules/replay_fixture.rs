@@ -714,6 +714,11 @@ fn replay(name: &str) -> &'static Replay {
     REPLAYS.iter().find(|r| r.name == name).unwrap()
 }
 
+/// A replay run for its trace's claims alone, with nothing watching live.
+fn replayed(name: &str) -> Vec<Shot> {
+    play(replay(name), |_, _, _| {})
+}
+
 /// The right and top edges of the surface never leave the saved corner.
 fn anchored(shots: &[Shot]) {
     for (frame, shot) in shots.iter().enumerate() {
@@ -733,7 +738,7 @@ fn anchored(shots: &[Shot]) {
 /// for a start that took three frames.
 #[test]
 fn starting_keeps_its_place_and_a_quick_start_never_says_it() {
-    let shots = play(replay("delayed"), |_, _, _| {});
+    let shots = replayed("delayed");
     anchored(&shots);
     // Its centre: it arrives a little small, about that point.
     let seen: Vec<(f32, f32)> = shots
@@ -755,7 +760,7 @@ fn starting_keeps_its_place_and_a_quick_start_never_says_it() {
     assert_eq!((last.presence[1], last.presence[2]), (0.0, 1.0));
     assert_eq!(last.pill.map(|r| (r[2], r[3])), Some((REST_WIDTH, REST_HEIGHT)));
 
-    let shots = play(replay("fast"), |_, _, _| {});
+    let shots = replayed("fast");
     anchored(&shots);
     assert!(shots.iter().all(|s| s.presence[1] == 0.0 && s.pending.is_none()));
     // The offer contracts straight into the live pill, never growing back.
@@ -768,7 +773,7 @@ fn starting_keeps_its_place_and_a_quick_start_never_says_it() {
 /// row whole in the first frame, cut by the moving edges.
 #[test]
 fn the_panel_opens_width_first_and_its_rows_follow_in_order() {
-    let shots = play(replay("whole"), |_, _, _| {});
+    let shots = replayed("whole");
     anchored(&shots);
     let open = &shots[172..232];
     let (mut led, mut ordered) = (0, 0);
@@ -799,7 +804,7 @@ fn the_panel_opens_width_first_and_its_rows_follow_in_order() {
 /// label 17 pt to restyle it. Then the field was cut the frame capture ended.
 #[test]
 fn stop_says_stopping_in_place_and_the_field_cools() {
-    let shots = play(replay("whole"), |_, _, _| {});
+    let shots = replayed("whole");
     let (before, after) = (&shots[403], &shots[404]);
     assert_eq!((before.phase, after.phase), ("recording", "stopping"));
     assert_eq!(before.glyph, after.glyph);
@@ -841,7 +846,7 @@ fn stop_says_stopping_in_place_and_the_field_cools() {
 /// where it is, at the speed it has; nothing restarts from rest.
 #[test]
 fn an_interrupted_panel_turns_round_without_a_stop_or_a_jump() {
-    let shots = play(replay("interrupted"), |_, _, _| {});
+    let shots = replayed("interrupted");
     anchored(&shots);
     let sizes: Vec<(f32, f32)> = shots
         .iter()
@@ -879,7 +884,7 @@ fn an_interrupted_panel_turns_round_without_a_stop_or_a_jump() {
 
 #[test]
 fn reduced_motion_lands_the_surface_and_only_fades() {
-    let shots = play(replay("reduced"), |_, _, _| {});
+    let shots = replayed("reduced");
     anchored(&shots);
     for (frame, pair) in shots.windows(2).enumerate() {
         assert_eq!(pair[1].veil, (0., 0.));
