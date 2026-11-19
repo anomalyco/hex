@@ -216,3 +216,43 @@ fn the_field_keeps_its_light_through_the_opening() {
     assert!(arrived > 6, "{arrived}");
     assert_eq!(shots[231].columns.0, 69);
 }
+
+/// "Stopping…" dissolved on the label line while "Transcribing…" arrived on
+/// the icon line, 24 pt to its left on one baseline: together they read as
+/// one word slipping left.
+#[test]
+fn stops_row_has_gone_before_the_heading_arrives_and_neither_moves() {
+    for name in ["whole", "interrupted", "close", "titles"] {
+        let shots = play(replay(name), |_, _, _| {});
+        let (mut label, mut heading, mut seen) = (None, None, 0);
+        for (frame, shot) in shots.iter().enumerate() {
+            if !matches!(shot.phase, "stopping" | "transcribing" | "published" | "summary") {
+                continue;
+            }
+            let stop = match &shot.label {
+                Some((rect, _)) => {
+                    let x = *label.get_or_insert(rect[0]);
+                    assert!((rect[0] - x).abs() < 0.02, "{name} f{frame}: the label moved");
+                    shot.shown.2
+                }
+                None => 0.,
+            };
+            if let Some(rect) = shot.title_at {
+                let x = *heading.get_or_insert(rect[0]);
+                assert!((rect[0] - x).abs() < 0.02, "{name} f{frame}: the heading moved");
+            }
+            // Whichever is arriving waits until the other no longer reads.
+            assert!(
+                stop.min(shot.title_shown) < 0.13,
+                "{name} f{frame}: Stop at {stop} under a heading at {}",
+                shot.title_shown
+            );
+            seen += usize::from(shot.title_shown > 0.9);
+        }
+        // Two lines 24 pt apart, and no word ever crosses between them.
+        let (label, heading) = (label.unwrap(), heading.unwrap());
+        assert!((label - heading - 24.).abs() < 0.02, "{name}: {label} and {heading}");
+        // "close" dismisses the meeting a few frames after its title lands.
+        assert!(seen > if name == "close" { 2 } else { 20 }, "{name}: {seen}");
+    }
+}

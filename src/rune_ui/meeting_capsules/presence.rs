@@ -18,6 +18,8 @@ const BLUR: f32 = 3.0;
 const LINE_BLUR: f32 = 2.0;
 /// Words this faint no longer show.
 const GONE: f32 = 0.02;
+/// Stop's row has left enough for the title to start arriving in its place.
+const CLEARED: f32 = 0.12;
 
 #[derive(Default)]
 pub(super) struct Surface {
@@ -129,6 +131,13 @@ impl<T: PartialEq + Clone> Roll<T> {
         moving
     }
 
+    /// Keeps the line empty for `wanted`: its words arrive once what stood
+    /// in their place has gone.
+    fn wait(&mut self, wanted: T) {
+        self.shown = Some(wanted);
+        self.track = Track::at(0.0);
+    }
+
     #[cfg(test)]
     fn settle(&mut self) {
         self.shown = None;
@@ -203,6 +212,13 @@ impl Capsule {
             ),
             _ => (None, None),
         };
+        // "Stopping…" sits on the rows' label line and the title on their
+        // icon line, 24 pt to its left on one baseline. Dissolved together
+        // they read as one word slipping left, so the title waits for Stop's
+        // row to have gone: neither moves, and they are never seen together.
+        let waits = !reduced
+            && title.is_some()
+            && self.stage.presence(stage::Layer::Action(0)).opacity > CLEARED;
         let s = &mut self.surface;
         if !shown && s.ghost.is_none() {
             s.track = Track::at(0.0);
@@ -232,7 +248,13 @@ impl Capsule {
         };
         // Below one part in a hundred nothing shows: the window can go.
         let mut moving = s.track.step(wanted, spring, dt, 0.01);
-        moving |= s.title.step(title, reduced, dt);
+        match title {
+            Some(title) if waits => {
+                s.title.wait(title);
+                moving = true;
+            }
+            title => moving |= s.title.step(title, reduced, dt),
+        }
         moving |= s.summary.step(summary, reduced, dt);
         if !shown && s.track == Track::at(0.0) {
             // Gone: nothing is drawn, and only now does the window hide.

@@ -216,7 +216,8 @@ fn several_titles_in_quick_succession_show_one_at_a_time() {
         let Some(title) = now.title.as_deref() else {
             panic!("f{}: no title", frame + 1);
         };
-        if drawn.last() != Some(&title) {
+        // Words that wait for Stop's row to leave aren't drawn yet.
+        if drawn.last() != Some(&title) && now.title_shown > 0.02 {
             drawn.push(title);
         }
         if was.title != now.title && was.title.is_some() {
@@ -241,12 +242,14 @@ fn several_titles_in_quick_succession_show_one_at_a_time() {
             );
         }
     }
-    // Published at 46, notes at 50 and a retitle at 54 all arrive while
-    // "Transcribing…" is leaving: only the last of them is ever drawn.
+    // Published at 46, notes at 50 and a retitle at 54 all arrive within
+    // frames of Stop's row leaving the line. "Transcribing…" is never drawn:
+    // it was still waiting for that row. The published title starts to
+    // arrive and gives way; the notes' first title is never drawn.
     assert_eq!(
         drawn,
         [
-            "Transcribing…",
+            "Design sync",
             "Lantern soak test and festival demo",
             "Lantern design sync"
         ]

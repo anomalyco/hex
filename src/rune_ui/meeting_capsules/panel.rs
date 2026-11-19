@@ -415,12 +415,15 @@ fn result(
         )
         .absolute(PANEL_PAD, 0.)
         .w(PANEL_WIDTH - 2. * PANEL_PAD)
+        // The stage steps it; eased again it would outstay the title's wait.
         .opacity(stop.opacity)
+        .opacity_motion(Anim::INSTANT)
         .blur(if capsule.reduced.get() {
             0.
         } else {
             2. * (1. - stop.opacity)
         })
+        .blur_motion(Anim::INSTANT)
         .inert()
         .a11y_hidden()
     });
