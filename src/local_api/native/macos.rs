@@ -1,6 +1,12 @@
 //! macOS peer identity: the audit token `LOCAL_PEERTOKEN` reports for the
-//! socket peer, and the signing identifier and team `Security.framework`
-//! resolves for that token.
+//! socket peer (whose user must be Hex's), and the signing identifier and
+//! team `Security.framework` resolves for that token.
+//!
+//! Only a signature that satisfies `anchor apple generic` (Developer ID,
+//! the App Store, or Apple) counts as verified (`MacSignature`). Anything
+//! else valid, an ad-hoc signature included, is named like an unsigned
+//! program elsewhere: by its path (`Executable`), still bound to its
+//! code-directory hash.
 
 use std::ffi::{CStr, c_char, c_void};
 use std::os::fd::RawFd;
@@ -14,6 +20,8 @@ type CFStringRef = *const c_void;
 type CFDataRef = *const c_void;
 type SecCodeRef = *mut c_void;
 type SecStaticCodeRef = *const c_void;
+type SecRequirementRef = *mut c_void;
+type CFURLRef = *const c_void;
 
 const SOL_LOCAL: libc::c_int = 0;
 /// `LOCAL_PEERTOKEN` (Darwin's `<sys/un.h>`): the peer's audit token.
@@ -35,6 +43,12 @@ unsafe extern "C" {
         code: *mut SecCodeRef,
     ) -> i32;
     fn SecCodeCopyStaticCode(code: SecCodeRef, flags: u32, out: *mut SecStaticCodeRef) -> i32;
+    fn SecRequirementCreateWithString(
+        text: CFStringRef,
+        flags: u32,
+        requirement: *mut SecRequirementRef,
+    ) -> i32;
+    fn SecCodeCopyPath(code: SecStaticCodeRef, flags: u32, path: *mut CFURLRef) -> i32;
     fn SecCodeCopySigningInformation(
         code: SecStaticCodeRef,
         flags: u32,
@@ -65,12 +79,27 @@ unsafe extern "C" {
         encoding: u32,
     ) -> bool;
     fn CFRelease(value: CFTypeRef);
+    fn CFStringCreateWithCString(
+        alloc: CFTypeRef,
+        text: *const c_char,
+        encoding: u32,
+    ) -> CFStringRef;
+    fn CFURLGetFileSystemRepresentation(
+        url: CFURLRef,
+        resolve_against_base: bool,
+        buffer: *mut u8,
+        length: isize,
+    ) -> bool;
 }
 
 /// The peer behind `fd`: its audit token and the signing identity the
 /// system reports for that token. `None` when the token or identity can't be
 /// read, in which case the native flow refuses rather than guessing.
 pub(super) fn identify(fd: RawFd) -> Option<(PeerId, Identity)> {
+    if !same_user(fd) {
+        tracing::debug!("a native client of another user was refused");
+        return None;
+    }
     let token = peer_audit_token(fd)?;
     let peer = PeerId([
         u32::from_ne_bytes(token[0..4].try_into().ok()?),
@@ -84,6 +113,15 @@ pub(super) fn identify(fd: RawFd) -> Option<(PeerId, Identity)> {
     ]);
     let identity = signing_identity(&token)?;
     Some((peer, identity))
+}
+
+/// Whether the peer's effective user is Hex's, beyond the socket's mode.
+fn same_user(fd: RawFd) -> bool {
+    let (mut uid, mut gid) = (0, 0);
+    // SAFETY: `fd` is the accepted socket; both out-pointers are live.
+    let read = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } == 0;
+    // SAFETY: geteuid has no preconditions.
+    read && uid == unsafe { libc::geteuid() }
 }
 
 fn peer_audit_token(fd: RawFd) -> Option<[u8; 32]> {
@@ -165,10 +203,17 @@ unsafe fn signing_identity_of(code: SecCodeRef) -> Option<Identity> {
                 }
                 let bytes = std::slice::from_raw_parts(CFDataGetBytePtr(digest), len as usize);
                 let cdhash = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                let anchored = anchored(code);
+                let path = if anchored {
+                    None
+                } else {
+                    Some(code_path(stat)?)
+                };
+                let (identifier, verification) = verified(identifier, team, path);
                 Some(Identity {
                     identifier,
                     cdhash,
-                    verification: Verification::MacSignature { team },
+                    verification,
                     name: None,
                     icon: None,
                 })
@@ -181,6 +226,70 @@ unsafe fn signing_identity_of(code: SecCodeRef) -> Option<Identity> {
         }
         CFRelease(stat);
         identity
+    }
+}
+
+/// The grant key and how the OS vouches for it: an anchored signature by
+/// its signing identifier and team, anything else by its `path`.
+fn verified(
+    identifier: String,
+    team: Option<String>,
+    path: Option<std::path::PathBuf>,
+) -> (String, Verification) {
+    match path {
+        None => (identifier, Verification::MacSignature { team }),
+        Some(path) => (
+            path.to_string_lossy().into_owned(),
+            Verification::Executable { path },
+        ),
+    }
+}
+
+/// Whether `code` satisfies `anchor apple generic`: Developer ID, the App
+/// Store, or Apple's own signature.
+unsafe fn anchored(code: SecCodeRef) -> bool {
+    // SAFETY: the requirement and its text are created and released here.
+    unsafe {
+        let text = CFStringCreateWithCString(
+            std::ptr::null(),
+            c"anchor apple generic".as_ptr(),
+            CF_STRING_ENCODING_UTF8,
+        );
+        if text.is_null() {
+            return false;
+        }
+        let mut requirement: SecRequirementRef = std::ptr::null_mut();
+        let created = SecRequirementCreateWithString(text, 0, &mut requirement) == 0
+            && !requirement.is_null();
+        let anchored = created && SecCodeCheckValidity(code, 0, requirement) == 0;
+        if !requirement.is_null() {
+            CFRelease(requirement);
+        }
+        CFRelease(text);
+        anchored
+    }
+}
+
+/// The file `code` was loaded from: its bundle, or a bare executable.
+unsafe fn code_path(code: SecStaticCodeRef) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    // SAFETY: the URL is created by Security and released here; `buffer`
+    // is writable for its length.
+    unsafe {
+        let mut url: CFURLRef = std::ptr::null();
+        if SecCodeCopyPath(code, 0, &mut url) != 0 || url.is_null() {
+            return None;
+        }
+        let mut buffer = [0_u8; 4096];
+        let copied =
+            CFURLGetFileSystemRepresentation(url, true, buffer.as_mut_ptr(), buffer.len() as isize);
+        CFRelease(url);
+        if !copied {
+            return None;
+        }
+        let path = CStr::from_ptr(buffer.as_ptr().cast()).to_bytes();
+        let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(path));
+        path.is_absolute().then_some(path)
     }
 }
 
@@ -206,4 +315,58 @@ unsafe fn cf_string(value: CFTypeRef) -> Option<String> {
             .to_string_lossy()
             .into_owned()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Only an anchored signature names an app by its signing identity; an
+    /// ad-hoc or otherwise unanchored one is named by its path, like an
+    /// unsigned program elsewhere, never as verified.
+    #[test]
+    fn only_an_anchored_signature_is_verified() {
+        let anchored = verified("com.example.notes".into(), Some("ABCDE12345".into()), None);
+        assert_eq!(
+            anchored,
+            (
+                "com.example.notes".to_owned(),
+                Verification::MacSignature {
+                    team: Some("ABCDE12345".into())
+                }
+            )
+        );
+        let ad_hoc = verified("us.zoom.xos".into(), None, Some("/tmp/Zoom.app".into()));
+        assert_eq!(
+            ad_hoc,
+            (
+                "/tmp/Zoom.app".to_owned(),
+                Verification::Executable {
+                    path: "/tmp/Zoom.app".into()
+                }
+            )
+        );
+    }
+
+    /// This test binary, built by cargo, is at most ad-hoc signed: never
+    /// anchored.
+    #[test]
+    fn this_test_binary_is_not_anchored() {
+        let mut code: SecCodeRef = std::ptr::null_mut();
+        // SAFETY: Hex's own process as a guest of the system host.
+        let status = unsafe { SecCodeCopySelf(0, &mut code) };
+        if status != 0 || code.is_null() {
+            return;
+        }
+        // SAFETY: `code` is valid until released.
+        unsafe {
+            assert!(!anchored(code));
+            CFRelease(code);
+        }
+    }
+
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        fn SecCodeCopySelf(flags: u32, code: *mut SecCodeRef) -> i32;
+    }
 }

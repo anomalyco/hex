@@ -4238,8 +4238,8 @@ mod tests {
         let prompt = gate.last_prompt().unwrap();
         assert!(matches!(prompt.recipient, Recipient::Native { .. }));
         assert_eq!(prompt.intent, Intent::Record);
-        // Off macOS this unsigned test binary is named by its executable.
-        #[cfg(not(target_os = "macos"))]
+        // This unsigned (on macOS at most ad-hoc signed, so unanchored)
+        // test binary is named by its executable.
         {
             let Some(Verification::Executable { path }) = prompt.recipient.verification() else {
                 panic!("{:?}", prompt.recipient);

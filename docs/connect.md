@@ -243,7 +243,8 @@ native app -> its icon, the name Hex derived from verified data (macOS bundle,
               else a program's file name, else its identifier; the identifier
               (bundle id, app id, or full program path) under it unless it is
               already the name; then how it was verified, never repeating it:
-              macOS signature   -> "Code signature verified · team K7Z4Q2M8A1" (or "· no team")
+              macOS signature   -> "Code signature verified · team K7Z4Q2M8A1" (or "· no team"),
+                                   only for `anchor apple generic` (Developer ID, App Store, Apple)
               Windows signature -> "Signed by {publisher}"
               Flatpak / Snap    -> "Flatpak app" / "Snap app"
               only a path       -> "Not signed" (warning icon)
@@ -371,9 +372,9 @@ another process cannot spend them even if it learns the token.
 | | macOS | Linux | Windows |
 | --- | --- | --- | --- |
 | Channel | `record.sock` in Hex's data folder, mode `0600` | `record.sock` in Hex's private data folder (`0700`, socket `0600`) | `\\.\pipe\anomaly.hex.record.<random>`, named in `record.pipe` in Hex's data folder; DACL for Hex's user only, `PIPE_REJECT_REMOTE_CLIENTS` |
-| Peer | `LOCAL_PEERTOKEN` audit token | `SO_PEERCRED`; same uid as Hex; pinned by `SO_PEERPIDFD` (Linux 6.5+) and its `/proc/<pid>/stat` start time before and after | `GetNamedPipeClientProcessId`, opened at once; started before the connection; token user is Hex's |
-| Identity | `SecCodeCopySigningInformation`: signing identifier and team | Flatpak `[Application] name` in `/proc/<pid>/root/.flatpak-info`; else an enforced Snap AppArmor label `snap.<snap>.<app>`; else `/proc/<pid>/exe` (absolute, not deleted) | `WinVerifyTrust` on the image, no revocation check and cache-only URL retrieval (Hex never reaches the network): the signer's subject CN; else the image path |
-| Grant key | identifier, team and code-directory hash | the sandbox app id, else the executable path | publisher and image file name (an update keeps it), else the full path |
+| Peer | `LOCAL_PEERTOKEN` audit token; `getpeereid` user is Hex's | `SO_PEERCRED`; same uid as Hex; pinned by `SO_PEERPIDFD` (Linux 6.5+) and its `/proc/<pid>/stat` start time before and after | `GetNamedPipeClientProcessId`, opened at once; started before the connection; token user is Hex's |
+| Identity | `SecCodeCopySigningInformation`: signing identifier and team, when the signature satisfies `anchor apple generic`; an ad-hoc or otherwise unanchored signature is named by its path, like an unsigned program elsewhere | Flatpak `[Application] name` in `/proc/<pid>/root/.flatpak-info`; else an enforced Snap AppArmor label `snap.<snap>.<app>`; else `/proc/<pid>/exe` (absolute, not deleted) | `WinVerifyTrust` on the image, no revocation check and cache-only URL retrieval (Hex never reaches the network): the signer's subject CN; else the image path |
+| Grant key | identifier (or, unanchored, the path), team and code-directory hash | the sandbox app id, else the executable path | publisher and image file name (an update keeps it), else the full path |
 | Name and icon | the verified bundle (above) | the desktop entry the identity points to (`<app id>.desktop`, `<snap>_<app>.desktop`, or the entry whose `TryExec`/`Exec` program is that executable): its `Name`, and its `Icon` from the hicolor theme or pixmaps | the image's `FileDescription` (else `ProductName`) and first icon |
 
 The name and icon are display only, looked up off the request thread, cached,
