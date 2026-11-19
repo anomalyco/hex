@@ -2065,8 +2065,11 @@ Linux beta                               // not macOS feature parity
 │   │   (kernel + Vulkan driver libraries), then another GPU, then the CPU;
 │   │   the row says which GPU stopped responding
 │   ├── A GPU load, prewarm or run that fails with a device error (hang,
-│   │   reset, lost device, out of memory) -> reloads on the CPU; once the CPU
-│   │   works, that GPU is recorded
+│   │   reset, lost device) -> reloads on the CPU; once the CPU works, that
+│   │   GPU is recorded
+│   ├── A run that fails out of memory (status 7) -> reloads on the CPU and is
+│   │   not recorded (another copy can fill the GPU, #1165); the dictation
+│   │   model says so in the row until a GPU load works or Hex restarts (#1984)
 │   ├── An integrated GPU whose warm 1.5 s run takes over 300 ms -> Auto times
 │   │   the CPU too and keeps the faster; a slower GPU is recorded (slow), so
 │   │   later loads go straight to the CPU (#484: UHD 620, Iris Plus 655)
@@ -2403,6 +2406,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Transcription GPU -> ggml's Vulkan, discrete before integrated, CPU last;
 │   a failed GPU load retries on the CPU; the GPU record and Settings ›
 │   Speech engine work as on Linux (#856)
+│   ├── A run that fails out of memory -> CPU for this process, said in
+│   │   Speech engine until Hex restarts (#1984; not run on Windows)
 │   └── A launch that crashed starting the GPU (gpu-start.pending left in the
 │       data folder, same version) -> CPU only, warned in process.log, until
 │       Hex updates or the file is deleted (#662; not run on Windows)

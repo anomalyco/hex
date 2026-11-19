@@ -175,7 +175,11 @@ substitute for source inspection or a second roadmap.
   (`transcription_device`: Auto/GPU/CPU) says; a GPU device error reloads
   on the CPU mid-run.
 - `transcription/gpu_health`: GPUs that failed while transcribing, remembered
-  per device and driver in `gpu-failures.json` (#856), which Auto skips.
+  per device and driver in `gpu-failures.json` (#856), which Auto skips; an
+  out-of-memory run of the dictation engine's model is remembered for this
+  process only, because another copy of a model can fill a GPU (#1165), and
+  Settings › Speech engine says so until a GPU load works or Hex restarts
+  (#1984). Only the engine's model publishes it.
 - `transcription/engine`: the thread that owns the loaded model on every OS and
   runs every inference in order: live streams fed during capture, their finish,
   whole-clip runs, and (macOS) model loads and switches. The capture owns its

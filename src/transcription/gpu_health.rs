@@ -99,16 +99,21 @@ pub(crate) fn record_slow(device: &Device, reason: &str) {
     remember(device, reason, true);
 }
 
-fn remember(device: &Device, reason: &str, slow: bool) {
-    let failure = Failure {
-        device: device_key(device),
+/// What to remember or show about `device` failing for `reason` now.
+fn snapshot(device: String, reason: &str, slow: bool) -> Failure {
+    Failure {
+        device,
         driver: driver(),
         reason: reason.chars().take(400).collect(),
         at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs()),
         slow,
-    };
+    }
+}
+
+fn remember(device: &Device, reason: &str, slow: bool) {
+    let failure = snapshot(device_key(device), reason, slow);
     if slow {
         tracing::info!(
             device = failure.device,
@@ -171,6 +176,54 @@ pub(crate) fn current() -> Option<Failure> {
             .find(|failure| failure.driver == driver)
             .cloned()
     })
+}
+
+/// The dictation engine's model switched to the CPU after a GPU ran out of
+/// memory while transcribing. Only the engine publishes it, so another copy
+/// in this process (the local API's own model, model preparation, or a
+/// superseded model swap) cannot speak for dictation. It is never written to
+/// `gpu-failures.json`: another copy of a model can fill a GPU (#1165), and
+/// ggml keeps the failed device for the process, so a later GPU load or a
+/// restart is what gets the GPU back.
+static OUT_OF_MEMORY: Mutex<Option<Failure>> = Mutex::new(None);
+
+/// What to remember about `device` running out of memory while transcribing,
+/// for the model to carry to the engine.
+pub(crate) fn out_of_memory_failure(device: &Device, reason: &str) -> Failure {
+    snapshot(device_key(device), reason, false)
+}
+
+/// Records what the dictation engine's model says: the out-of-memory
+/// fallback it took, or `None` once it runs on a GPU again.
+pub(crate) fn set_out_of_memory(fallback: Option<&Failure>) {
+    let mut current = OUT_OF_MEMORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if current.as_ref() == fallback {
+        return;
+    }
+    let had = current.is_some();
+    *current = fallback.cloned();
+    match &*current {
+        Some(failure) => tracing::warn!(
+            device = failure.device,
+            reason = failure.reason,
+            "the GPU ran out of memory while transcribing; the dictation engine uses the CPU until a GPU load works or Hex restarts"
+        ),
+        None if had => tracing::info!(
+            "the dictation engine loaded the model on a GPU again; forgetting the out-of-memory fallback"
+        ),
+        None => {}
+    }
+}
+
+/// The dictation engine's out-of-memory fallback, which keeps this process on
+/// the CPU now, for Settings. Never a record read from disk.
+pub(crate) fn out_of_memory_fallback() -> Option<Failure> {
+    OUT_OF_MEMORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 /// The GPUs ggml can run on, best first: discrete before integrated.
@@ -335,6 +388,28 @@ mod tests {
         // remembered (#966): Settings names no failure.
         set_auto_on_cpu(false);
         assert_eq!(current(), None);
+    }
+
+    #[test]
+    fn an_out_of_memory_fallback_lasts_until_a_gpu_load_works() {
+        // Not `gpu-failures.json`: the engine publishes its model's fallback
+        // and a later GPU load clears it.
+        let failure = Failure {
+            device: "Test GPU (gpu, 0000-0000)".into(),
+            driver: driver(),
+            reason: "out of memory".into(),
+            at: 0,
+            slow: false,
+        };
+        set_out_of_memory(None);
+        assert!(out_of_memory_fallback().is_none());
+        set_out_of_memory(Some(&failure));
+        assert_eq!(out_of_memory_fallback(), Some(failure.clone()));
+        // Publishing the same fallback again changes nothing.
+        set_out_of_memory(Some(&failure));
+        assert_eq!(out_of_memory_fallback(), Some(failure));
+        set_out_of_memory(None);
+        assert!(out_of_memory_fallback().is_none());
     }
 
     #[cfg(target_os = "linux")]
