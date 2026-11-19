@@ -67,7 +67,8 @@ mod throw;
 mod waveform;
 
 use panel::{
-    agent_prompt, hex_command, ready, ready_window_size, recording, recording_window_size,
+    agent_prompt, finalizing_window_size, hex_command, ready, ready_window_size, recording,
+    recording_window_size,
 };
 
 /// The offer, call ended, and ready capsules.
@@ -544,7 +545,7 @@ impl Capsule {
             return self.presentation.window();
         }
         match &self.kind {
-            Some(Kind::Finalizing { .. }) => RECORDING_WINDOW,
+            Some(Kind::Finalizing { .. }) => finalizing_window_size(),
             Some(Kind::Recording(shown)) => recording_window_size(self.open(), Some(shown)),
             Some(Kind::Ready(manifest)) => ready_window_size(manifest),
             Some(Kind::Offer(..)) => self.presentation.window(),
@@ -2059,6 +2060,19 @@ mod tests {
         settle_stage(rt);
         rt.settle_all();
         rt.frame(0.0);
+    }
+
+    /// A stopped capture snaps by the window it was resized to, not the
+    /// largest one: `capture_stopped` and the drag's `window_size` read
+    /// one size.
+    #[test]
+    fn a_stopped_capture_snaps_by_the_window_it_was_resized_to() {
+        let (mut rt, _, _) = runtime(live_recording("finalizing-size"), false, true, RECORDING);
+        rt.update(|capsule, _| capsule.capture_stopped());
+        rt.update(|capsule, _| {
+            assert!(matches!(capsule.kind, Some(Kind::Finalizing { .. })));
+            assert_eq!(capsule.window_size(), finalizing_window_size());
+        });
     }
 
     #[test]

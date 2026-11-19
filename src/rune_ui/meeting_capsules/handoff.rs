@@ -26,10 +26,7 @@ impl Capsule {
             });
             #[cfg(target_os = "windows")]
             if let Some(resize) = &self.resize {
-                resize((
-                    RECORDING_WINDOW.0,
-                    panel::open_height_without_notice() + 2. * CAPSULE_INSET,
-                ));
+                resize(panel::finalizing_window_size());
             }
         }
     }
@@ -150,4 +147,3 @@ impl Pill {
         retain
     }
 }
-

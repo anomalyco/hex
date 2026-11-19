@@ -766,7 +766,10 @@ mod tests {
             ..resting()
         };
         for frame in 1..=3 {
-            assert_eq!(stage.step(&pending, false, frame as f64 / 60.0), Stepped::Moved);
+            assert_eq!(
+                stage.step(&pending, false, frame as f64 / 60.0),
+                Stepped::Moved
+            );
             assert!(!stage.presence(Layer::Pending).shows());
         }
         let live = resting();

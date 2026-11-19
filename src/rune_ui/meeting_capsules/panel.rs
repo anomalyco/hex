@@ -1053,6 +1053,23 @@ pub(super) fn recording_window_size(open: bool, shown: Option<&Recording>) -> (f
     RECORDING_WINDOW
 }
 
+/// The finished meeting's window while it transcribes: the panel it grew
+/// from, without a notice. Elsewhere the window stays at its largest, and
+/// only the `.hit()` panel takes the pointer.
+pub(super) fn finalizing_window_size() -> (f32, f32) {
+    #[cfg(target_os = "windows")]
+    {
+        (
+            RECORDING_WINDOW.0,
+            open_height_without_notice() + 2. * CAPSULE_INSET,
+        )
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        RECORDING_WINDOW
+    }
+}
+
 /// Elsewhere the window stays at its largest and only the `.hit()` panel
 /// takes the pointer.
 #[cfg(not(target_os = "windows"))]
