@@ -613,6 +613,11 @@ fn field_room(capsule: &Capsule, width: f32) -> f32 {
     width - 2. * REST_PX - METER_GAP - timer_width(minutes_shown(capsule))
 }
 
+/// The soft edge the widening field wipes the header's notice with, pt, and
+/// how far across the header the field is when the notice has gone.
+const NOTICE_WIPE: f32 = 12.0;
+const NOTICE_GONE: f32 = 0.5;
+
 /// The fewest points the field is ever drawn across.
 const FIELD_LEAST: f32 = 40.0;
 
@@ -815,7 +820,37 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
         1.0
     };
     let meter = meter(p, capsule, shown).opacity(live);
-    let accessory = notice.filter(|_| !open).map(notice_text);
+    // On the right the open field takes the notice's place in the header.
+    // The words keep their place and their cut while the field's free end
+    // wipes over them: they are never squeezed, and no dot is drawn on one.
+    let field = field_width(capsule);
+    let wide = field_room(capsule, PANEL_WIDTH);
+    let covered = if right && wide > waveform::WIDTH {
+        ((field - waveform::WIDTH) / (wide - waveform::WIDTH)).clamp(0., 1.)
+    } else {
+        f32::from(u8::from(open))
+    };
+    let accessory = notice
+        .filter(|_| covered < 1. && (right || !open))
+        .map(|notice| {
+            if !right {
+                return notice_text(notice);
+            }
+            let gone = (covered / NOTICE_GONE).min(1.);
+            row()
+                .key("notice-lane")
+                .size(wide - field, REST_HEIGHT)
+                .center_y()
+                .transition(Transition::none())
+                .clip_fade(0., 0., (field - waveform::WIDTH).min(NOTICE_WIPE), 0.)
+                .opacity(1. - gone * gone * (3. - 2. * gone))
+                .opacity_motion(Anim::INSTANT)
+                .child(
+                    notice_text(notice)
+                        .w(wide - waveform::WIDTH)
+                        .min_w(wide - waveform::WIDTH),
+                )
+        });
     let stop = capsule.action_presence(0);
     let action = actions.then(|| {
         // Pressed, the same row says so in place: its glyph and first

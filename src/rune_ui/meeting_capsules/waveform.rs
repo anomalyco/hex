@@ -329,6 +329,8 @@ pub(super) fn feed(
     if !recording && !cooling {
         return None;
     }
+    // Before the sample, so the trace is drawn once, where the field now is.
+    fit(c);
     let wave = c.waveform.as_mut()?;
     let changed = wave.sample(now, if recording { levels() } else { [0.0; 2] });
     if cooling {

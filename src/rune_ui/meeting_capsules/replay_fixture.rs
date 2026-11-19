@@ -295,6 +295,11 @@ const REPLAYS: &[Replay] = &[
     },
 ];
 
+thread_local! {
+    /// The levels the next frame's poll hears, and when.
+    static FEED: Cell<Option<(Instant, [f32; 2])>> = const { Cell::new(None) };
+}
+
 /// Two people talking, with one pause in the long replay so the field is
 /// seen going quiet and coming back.
 fn replay_levels(replay: &Replay, frame: usize) -> [f32; 2] {
@@ -339,6 +344,9 @@ struct Shot {
     /// own, and each column's light from the left.
     field_at: Option<[f32; 4]>,
     columns: (usize, f32, Vec<f32>),
+    /// The header's notice: the place it shows through, and its words'
+    /// place and strength.
+    notice: Option<([f32; 4], [f32; 4], f32)>,
     /// How many times the capsule has asked for its window to hide.
     hidden: u64,
 }
@@ -377,6 +385,13 @@ fn play(
     let (mut rt, commands, _) = runtime(kind, false, dark, size);
     rt.transparent = true;
     rt.set_system_reduced_motion(replay.reduced);
+    rt.poll = Some(|c: &mut Capsule, now, tx: &mut Tx| {
+        let moved = c.step_stage(now, tx);
+        if let Some((at, levels)) = FEED.take() {
+            waveform::feed(c, at, || levels);
+        }
+        moved
+    });
     if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
         match replay.name {
             "notice" => shown.warning = Some(meeting::TrackWarning::DigitalSilence),
@@ -545,7 +560,8 @@ fn play(
                 }
             });
         }
-        waveform::feed(&mut rt.state, at(frame), || replay_levels(replay, frame));
+        // As the overlay polls: the surface steps, then the field samples.
+        FEED.set(Some((at(frame), replay_levels(replay, frame))));
         rt.frame(1. / 60.);
         // As the compositor does before it paints.
         waveform::fit(&mut rt.state);
@@ -652,6 +668,14 @@ fn play(
                 .and_then(|e| e.text),
             light: c.waveform.as_ref().map_or(0., |wave| wave.light()),
             field_at: rect("meeting-listening-field"),
+            notice: rt.presented("notice-lane").map(|(lane, shown)| {
+                let words = rt
+                    .elements()
+                    .into_iter()
+                    .find(|e| e.key.as_deref() == Some("notice") && e.rect[1] < lane[1] + lane[3])
+                    .unwrap();
+                (lane, words.rect, shown)
+            }),
             columns: c
                 .waveform
                 .as_ref()
@@ -918,7 +942,7 @@ fn hud_replay_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &pixels).unwrap();
         });
         let mut trace = String::from(
-            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light,field_x,field_w,columns,shift,first_dot_x,light_resting_columns,light_new_columns,title_x\n",
+            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light,field_x,field_w,columns,shift,first_dot_x,light_resting_columns,light_new_columns,title_x,notice_right,notice_opacity\n",
         );
         for (frame, s) in shots.iter().enumerate() {
             let [x, y, pw, ph] = s.pill.unwrap_or_default();
@@ -926,7 +950,7 @@ fn hud_replay_frames() {
             let at = |r: Option<[f32; 4]>, i: usize| r.map_or(String::new(), |r| r[i].to_string());
             writeln!(
                 trace,
-                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 s.phase,
                 s.velocity.0,
                 s.velocity.1,
@@ -962,6 +986,10 @@ fn hud_replay_frames() {
                 s.columns.2.iter().rev().take(31).sum::<f32>(),
                 s.columns.2.iter().rev().skip(31).sum::<f32>(),
                 at(s.title_at, 0),
+                s.notice
+                    .map_or(String::new(), |(lane, _, _)| (lane[0] + lane[2]).to_string()),
+                s.notice
+                    .map_or(String::new(), |(_, _, shown)| shown.to_string()),
             )
             .unwrap();
         }

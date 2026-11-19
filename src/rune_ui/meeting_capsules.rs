@@ -1198,8 +1198,10 @@ fn dismiss_button(p: Paint) -> El {
 /// The overlay's frame hook: steps the surface, and a glide into its corner,
 /// a frame at a time until they rest, and keeps a recording's waveform fed.
 fn poll(capsule: &mut Capsule, now: f64, tx: &mut Tx) -> bool {
-    let mut changed = waveform::poll(capsule, now, tx);
-    changed |= capsule.step_stage(now, tx);
+    // The surface first: the field is drawn once a frame, at the width the
+    // wall has just reached.
+    let mut changed = capsule.step_stage(now, tx);
+    changed |= waveform::poll(capsule, now, tx);
     if !capsule.throw.gliding() {
         return changed;
     }

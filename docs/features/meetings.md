@@ -896,12 +896,34 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   and fades its light without squeezing the rows. Checks:
      │   │   `a_pause_gathers_the_light_before_extinguishing_it`,
      │   │   `either_track_can_interrupt_the_release_in_place` (synthetic levels)
+     │   ├── The pill is 151 × 36 pt, its field 78 pt wide (31 columns), with
+     │   │   the rows' 14 pt inset on both sides: the time's right edge is one
+     │   │   line at rest, open and finished
+     │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
      ├── Hover -> the pill reveals four full-width actions beside the header:
      │   Stop nearest the meter, Copy new, Copy all, Copy agent prompt; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
+     │   ├── In a right corner the field widens with the wall, from the rows'
+     │   │   14 pt inset to the time: 179 pt, 69 columns at the same 2.6 pt
+     │   │   pitch, three fewer for each further digit on the time. It is one
+     │   │   field: its free end is the wall's motion every frame, in whole
+     │   │   columns counted from the time's side, no dot is drawn outside
+     │   │   its place, the dots that stay keep their light, and a column that
+     │   │   arrives is lit from the voice's history. A notice in the header
+     │   │   keeps its place and its cut while the field's end wipes over it,
+     │   │   and has gone by the time the field is halfway. In a left corner
+     │   │   the time is on the field's free side and the field stays 78 pt.
+     │   │   Checks: `the_field_widens_with_the_wall_one_whole_column_at_a_time`,
+     │   │   `the_field_keeps_its_light_through_the_opening`,
+     │   │   `the_field_wipes_the_headers_notice_and_never_draws_over_it`
+     │   │   (offscreen Rune; the dots themselves only in
+     │   │   `hud_replay_frames` renders, not on a real Mac)
+     │   ├── Stop and the copies are 2 pt apart, as the raised copy is from
+     │   │   the next, so no two hover fills touch
+     │   │   (`rows_that_can_both_be_filled_are_one_gap_apart`)
      │   ├── The width leads the height; the actions follow in order, each
      │   │   only as far as the outline has uncovered it, and leave together.
      │   │   A pointer that comes and goes mid-way turns the surface round
@@ -920,7 +942,11 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   same row says “Stopping…” in place, its icon and first letters
      │   unmoved, with the waveform and elapsed time until capture ends.
      │   The worker closing its sources, not the click, replaces that row
-     │   with “Transcribing…” and lets the waveform release and fade.
+     │   with “Transcribing…” and lets the waveform release and fade. That
+     │   title sits on the rows' icon line, 24 pt left of “Stopping…” on one
+     │   baseline, so it waits until Stop's row has all but gone: neither
+     │   moves and the two are never read together
+     │   (`stops_row_has_gone_before_the_heading_arrives_and_neither_moves`).
      │   Publication brings back the copies and Close on the
      │   same surface; it does not wait for notes or a minimum animation time.
      │   Short titles keep the open recording header's height. Longer ones

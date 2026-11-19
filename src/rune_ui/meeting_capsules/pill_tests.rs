@@ -217,6 +217,36 @@ fn the_field_keeps_its_light_through_the_opening() {
     assert_eq!(shots[231].columns.0, 69);
 }
 
+/// With a notice the resting pill is already the panel's width. The field
+/// widened across the notice while it was still fading, dots over words,
+/// and coming back the words were cut again at every width on the way.
+#[test]
+fn the_field_wipes_the_headers_notice_and_never_draws_over_it() {
+    let shots = play(replay("notice"), |_, _, _| {});
+    let rest = shots[19].notice.expect("a notice at rest");
+    assert_eq!(rest.2, 1.);
+    let (mut wiped, mut back) = (0, 0);
+    for (frame, shot) in shots.iter().enumerate().skip(19) {
+        let [x, _, w, _] = shot.field_at.unwrap();
+        let Some((lane, words, shown)) = shot.notice else {
+            // Gone only once the field is across the header.
+            assert!(w > 178.9, "f{frame}: no notice beside a field {w} wide");
+            continue;
+        };
+        // What shows of it ends where the field begins.
+        assert!((lane[0] + lane[2] - x).abs() < 0.02, "f{frame}: {lane:?} and a field at {x}");
+        // Its words stay where they were, cut where they were.
+        assert_eq!((words[0], words[2]), (rest.1[0], rest.1[2]), "f{frame}");
+        // It has gone by the time the field is halfway across.
+        assert!(w < 129. || shown < 0.01, "f{frame}: {shown} beside a field {w} wide");
+        wiped += usize::from(frame < 90 && shown > 0.05 && shown < 0.95);
+        back += usize::from(frame >= 90 && shown > 0.05 && shown < 0.95);
+    }
+    assert!(wiped > 2 && back > 2, "{wiped} frames going, {back} coming back");
+    let last = shots.last().unwrap();
+    assert_eq!(last.notice.map(|n| (n.0, n.2)), Some((rest.0, 1.)));
+}
+
 /// "Stopping…" dissolved on the label line while "Transcribing…" arrived on
 /// the icon line, 24 pt to its left on one baseline: together they read as
 /// one word slipping left.
