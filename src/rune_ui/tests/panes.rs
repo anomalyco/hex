@@ -3836,7 +3836,10 @@ fn connected_apps_says_when_the_desktop_cannot_show_its_window() {
     rt.state.lab_store.search = rune::TextEdit::new("Connected apps".to_owned());
     refresh(&mut rt);
     tap(&mut rt, "lab-connected-apps");
-    assert!(!rt.state.settings.labs.connected_apps, "the switch stays off");
+    assert!(
+        !rt.state.settings.labs.connected_apps,
+        "the switch stays off"
+    );
     let says = |rt: &rune::Runtime<Ui>| {
         texts(rt)
             .iter()

@@ -4071,12 +4071,17 @@ mod tests {
         assert!(prompt.recipient.claimed_name().is_none());
     }
 
-    /// One HTTP exchange over the native recording socket.
-    #[cfg(unix)]
+    /// One HTTP exchange over the native recording socket (on Windows, the
+    /// pipe `socket` names).
     fn native_request(socket: &Path, request: &str) -> (u16, String) {
-        use std::os::unix::net::UnixStream;
-        let mut stream = UnixStream::connect(socket).unwrap();
-        stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+        #[cfg(unix)]
+        let mut stream = {
+            let stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+            stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+            stream
+        };
+        #[cfg(windows)]
+        let mut stream = native::tests::connect(socket);
         stream.write_all(request.as_bytes()).unwrap();
         let mut response = String::new();
         let _ = stream.read_to_string(&mut response);
@@ -4088,11 +4093,15 @@ mod tests {
         (status, response)
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_native_socket_client_pairs_then_records_twice_under_its_identity() {
         let directory = temp_directory();
-        let socket = directory.join("record.sock");
+        // On Windows, the file naming the pipe.
+        let socket = directory.join(if cfg!(windows) {
+            "record.pipe"
+        } else {
+            "record.sock"
+        });
         let gate = ScriptedGate::new(Answer::Always);
         let recording = FakeRecording::with_text("native words");
         let sessions = Arc::new(record::Sessions::with_timings(
@@ -4106,7 +4115,7 @@ mod tests {
             record_timings(),
         ));
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
-        let api = start_unpublished(
+        let mut api = start_unpublished(
             events,
             LocalApiOptions {
                 cors: Cors::gated(Vec::new),
@@ -4141,6 +4150,20 @@ mod tests {
         let prompt = gate.last_prompt().unwrap();
         assert!(matches!(prompt.recipient, Recipient::Native { .. }));
         assert_eq!(prompt.intent, Intent::Record);
+        // Off macOS this unsigned test binary is named by its executable.
+        #[cfg(not(target_os = "macos"))]
+        {
+            let Some(Verification::Executable { path }) = prompt.recipient.verification() else {
+                panic!("{:?}", prompt.recipient);
+            };
+            assert!(same_file::is_same_file(path, std::env::current_exe().unwrap()).unwrap());
+        }
+        #[cfg(windows)]
+        assert!(
+            fs::read_to_string(&socket)
+                .unwrap()
+                .starts_with(r"\\.\pipe\anomaly.hex.record.")
+        );
         // The claimed name never becomes the identity.
         assert!(prompt.recipient.claimed_name().is_none());
         assert_eq!(recording.starts(), 0);
@@ -4211,6 +4234,10 @@ mod tests {
         assert_eq!(status, 204, "{response}");
         let (status, _) = native_request(&socket, &grant_request(record::START_PATH));
         assert_eq!(status, 401);
+
+        // Shut down, Hex takes its socket (or the pipe's name) away.
+        api.shutdown();
+        assert!(!socket.exists());
     }
 
     #[test]
