@@ -13,8 +13,8 @@ https://anoma.ly/release/hex/              the service (its dev stage, dev.anoma
    └─ release.targets
       ├─ macos-arm64          Hex.zip         ditto zip, root Hex.app (updater)
       ├─ macos-arm64-dmg      Hex.dmg         notarized DMG (download page)
-      ├─ windows-x64          hex.exe         bare executable (updater)
-      ├─ windows-x64-cli      hex.com         console entry point beside hex.exe (updater)
+      ├─ windows-x64          hex.exe         bare executable, installed as hex-voice.exe (updater)
+      ├─ windows-x64-cli      hex.com         console entry point beside hex-voice.exe (updater)
       ├─ windows-x64-setup    HexSetup.exe    Inno Setup installer (download page)
       ├─ windows-arm64        hex.exe
       ├─ windows-arm64-cli    hex.com

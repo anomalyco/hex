@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $support = Join-Path $env:APPDATA 'hex'
-$installed = Join-Path $support "versions\$Version\hex.exe"
+$installed = Join-Path $support "versions\$Version\hex-voice.exe"
 $installedConsole = Join-Path $support "versions\$Version\hex.com"
 $bin = Join-Path $support 'bin'
 $pointer = Join-Path $support 'current-version'
@@ -44,8 +44,9 @@ if (Test-Path $support) { throw "$support already exists; run this only on a cle
 $expected = (Get-FileHash -Algorithm SHA256 $Executable).Hash
 
 Check ((Run-Setup 'install') -eq 0) 'silent install exits 0'
-Check (Test-Path $installed) "hex.exe is at versions\$Version"
-Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'installed hex.exe matches the release bytes'
+Check (Test-Path $installed) "hex-voice.exe is at versions\$Version"
+Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'installed hex-voice.exe matches the release bytes'
+Check (-not (Test-Path (Join-Path $support "versions\$Version\hex.exe"))) 'the installer does not name the executable hex.exe, which Discord matches to a game'
 Check ((Get-Content $pointer -Raw).Trim() -eq $Version) "current-version names $Version"
 $installReceipt = Get-Content $receipt -Raw | ConvertFrom-Json
 Check ($installReceipt.app -eq 'hex' -and $installReceipt.artifact -eq 'desktop' -and $installReceipt.channel -eq 'stable' -and $installReceipt.method -eq 'direct') 'install.json marks a direct install of hex desktop stable'
@@ -76,14 +77,14 @@ function Path-Has([string]$folder) {
 # Starts without a Vulkan loader too (#1240), which some runners lack.
 if ($Console) {
     $expectedConsole = (Get-FileHash -Algorithm SHA256 $Console).Hash
-    Check (Test-Path $installedConsole) "hex.com is beside hex.exe at versions\$Version"
+    Check (Test-Path $installedConsole) "hex.com is beside hex-voice.exe at versions\$Version"
     Check ((Get-FileHash -Algorithm SHA256 $installedConsole).Hash -eq $expectedConsole) 'installed hex.com matches the release bytes'
     Check ((Get-FileHash -Algorithm SHA256 (Join-Path $bin 'hex.com')).Hash -eq $expectedConsole) 'bin\hex.com matches the release bytes'
     Check (Path-Has $bin) 'bin is on the user''s PATH'
     # hex.com is a console program, so PowerShell waits for it, prints or
     # captures its output, and sets $LASTEXITCODE, as for any other command.
     $reported = (& $installedConsole --version) -split '\s+' | Select-Object -Last 1
-    Check ($reported -eq $Version) "installed hex.com runs hex.exe, which reports $Version"
+    Check ($reported -eq $Version) "installed hex.com runs hex-voice.exe, which reports $Version"
     # A new terminal: the user's PATH, where `hex` resolves to bin\hex.com.
     $env:Path = "$(User-Path);$([Environment]::GetEnvironmentVariable('Path', 'Machine'))"
     $command = Get-Command hex -CommandType Application | Select-Object -First 1
@@ -96,11 +97,11 @@ if ($Console) {
     Check ($null -ne (($status | Out-String) | ConvertFrom-Json)) '``hex status --json`` printed JSON'
     Write-Output "  (hex status --json took $([int]((Get-Date) - $started).TotalMilliseconds) ms)"
 } else {
-    # A release before hex.com: its hex.exe was a console program.
+    # A release before hex.com: its GUI executable was a console program.
     $out = Join-Path $logs 'version.txt'
     Start-Process $installed -ArgumentList '--version' -Wait -NoNewWindow -RedirectStandardOutput $out
     $reported = (Get-Content $out -Raw).Trim() -split '\s+' | Select-Object -Last 1
-    Check ($reported -eq $Version) "installed hex.exe reports $Version"
+    Check ($reported -eq $Version) "installed hex-voice.exe reports $Version"
 }
 
 # A Launch at login value outside the managed layout is the user's.
@@ -123,7 +124,7 @@ Check ((Get-Content $pointer -Raw).Trim() -eq $Version) 'current-version names t
 Check ((Run-Value) -eq "`"$installed`" app --hidden") "Launch at login now starts versions\$Version ($(Run-Value))"
 
 # Simulate what a self-update and Launch at login leave behind.
-$updated = Join-Path $support 'versions\99.0.0\hex.exe'
+$updated = Join-Path $support 'versions\99.0.0\hex-voice.exe'
 New-Item -ItemType Directory -Force (Split-Path $updated) | Out-Null
 Copy-Item $installed $updated
 if ($Console) {

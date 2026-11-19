@@ -1,14 +1,18 @@
 ; Per-user Windows installer for Hex. It installs exactly the managed layout
-; that .github/release/install-windows.ps1 creates and src/windows_updater.rs updates:
+; that .github/release/install-windows.ps1 creates and src/updater/windows.rs updates:
 ;
-;   %APPDATA%\hex\versions\<version>\hex.exe
+;   %APPDATA%\hex\versions\<version>\hex-voice.exe
 ;   %APPDATA%\hex\versions\<version>\hex.com  (the console entry point)
 ;   %APPDATA%\hex\bin\hex.com  (on the user's PATH)
 ;   %APPDATA%\hex\current-version
 ;   %APPDATA%\hex\install.json  (the direct-install receipt)
 ;   Start Menu\Programs\Hex.lnk  (description "Hex managed install")
 ;
-; so the app keeps updating itself from the release service afterwards. The
+; The GUI executable is hex-voice.exe, not hex.exe, because Discord's game
+; detection matches a running hex.exe to HEX: Shards of Fate (#445); a terminal
+; still runs `hex`, which resolves to hex.com. Releases before the rename are
+; moved to hex-voice.exe on their first launch (src/updater/windows.rs), so
+; the app keeps updating itself from the release service afterwards. The
 ; uninstaller lives outside versions\ because the updater prunes old version
 ; directories. Settings, logs, history, and models stay on uninstall, as with
 ; install-windows.ps1 -Uninstall.
@@ -75,7 +79,7 @@ ChangesEnvironment=yes
 MinVersion=10.0
 
 [Files]
-Source: "{#Executable}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "hex.exe"; Flags: ignoreversion
+Source: "{#Executable}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "hex-voice.exe"; Flags: ignoreversion
 #ifdef Console
 Source: "{#Console}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "hex.com"; Flags: ignoreversion
 Source: "{#Console}"; DestDir: "{app}\bin"; DestName: "hex.com"; Flags: ignoreversion
@@ -83,10 +87,10 @@ Source: "{#Console}"; DestDir: "{app}\bin"; DestName: "hex.com"; Flags: ignoreve
 Source: "..\..\resources\windows\hex.ico"; DestDir: "{app}\uninstall"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\Hex"; Filename: "{app}\versions\{#AppVersion}\hex.exe"; Parameters: "app"; WorkingDir: "{app}\versions\{#AppVersion}"; Comment: "Hex managed install"
+Name: "{userprograms}\Hex"; Filename: "{app}\versions\{#AppVersion}\hex-voice.exe"; Parameters: "app"; WorkingDir: "{app}\versions\{#AppVersion}"; Comment: "Hex managed install"
 
 [Run]
-Filename: "{app}\versions\{#AppVersion}\hex.exe"; Parameters: "app"; Description: "Open Hex"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\versions\{#AppVersion}\hex-voice.exe"; Parameters: "app"; Description: "Open Hex"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\versions"
@@ -114,7 +118,7 @@ begin
   Bin := ExpandConstant('{app}\bin\');
   StringChangeEx(Bin, '''', '''''', True);
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process hex -ErrorAction SilentlyContinue | ' +
+    '-NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process hex,hex-voice -ErrorAction SilentlyContinue | ' +
     'Where-Object { $_.Path -and ($_.Path.StartsWith(''' + Versions + ''', [StringComparison]::OrdinalIgnoreCase) -or ' +
     '$_.Path.StartsWith(''' + Bin + ''', [StringComparison]::OrdinalIgnoreCase)) } | ' +
     'Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500"',
@@ -174,7 +178,7 @@ begin
 end;
 
 { Puts bin, where hex.com lives, on the user's PATH, so a terminal runs `hex`
-  as the console program that waits for hex.exe. }
+  as the console program that waits for the app. }
 procedure AddBinToPath();
 var
   Path, Bin: String;

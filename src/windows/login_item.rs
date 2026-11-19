@@ -142,8 +142,8 @@ mod tests {
     #[test]
     fn startup_command_quotes_paths_with_spaces() {
         assert_eq!(
-            startup_command(Path::new(r"C:\Program Files\Hex\hex.exe")),
-            r#""C:\Program Files\Hex\hex.exe" app --hidden"#
+            startup_command(Path::new(r"C:\Program Files\Hex\hex-voice.exe")),
+            r#""C:\Program Files\Hex\hex-voice.exe" app --hidden"#
         );
     }
 

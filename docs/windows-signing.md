@@ -16,7 +16,7 @@ build (build-desktop.yml; x64 and ARM64 runners)   // compiles; no environment o
 sign-windows (release env, .github/release only)
 ├── verify the artifacts' digests
 ├── azure/login (OIDC, no client secret)
-├── artifact-signing-action: both hex.exe     // SHA-256, RFC 3161 timestamp
+├── artifact-signing-action: both Windows executables     // SHA-256, RFC 3161 timestamp
 └── verify-authenticode.ps1                   // every exe Valid + timestamped
 installers (windows-installers.yml)            // no secrets
 ├── build-windows-installer.ps1 x64 + arm64   // Inno embeds the signed bytes
@@ -34,9 +34,9 @@ publish                                       // stable requires the signatures
 - The Inno Setup uninstaller (`hex\uninstall\unins000.exe`) is
   written at install time and is not signed. It is created locally with no
   Mark of the Web, so SmartScreen does not check it.
-- Self-updates download `hex.exe` through Hex itself, so SmartScreen is not
-  involved there either. The manifest's SHA-256 and the Authenticode check
-  protect it.
+- Self-updates download the Windows executable through Hex itself, so
+  SmartScreen is not involved there either. The manifest's SHA-256 and the
+  Authenticode check protect it.
 
 ## Configuration
 

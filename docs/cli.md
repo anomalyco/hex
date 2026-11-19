@@ -19,7 +19,7 @@ playground stories (`window story`) outside macOS and the local `model`
 tools on macOS.
 
 On Windows a terminal runs `hex` as `hex.com`, a console program that runs
-the app's `hex.exe` and waits for it, so commands print, return their exit
+the app's `hex-voice.exe` and waits for it, so commands print, return their exit
 code, and can be captured like any other (`docs/windows.md`).
 
 The read-only `hex history` and `hex meetings list|show|chapters|search` commands, and
