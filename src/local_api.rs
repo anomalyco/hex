@@ -2917,6 +2917,8 @@ mod tests {
         renews: AtomicU64,
         /// The capture loop lost the recording (microphone gone).
         lost: AtomicBool,
+        /// Finishing fails (the capture loop busy, or a timeout).
+        finish_fails: AtomicBool,
         text: Mutex<String>,
     }
 
@@ -2967,6 +2969,9 @@ mod tests {
         fn finish(&self, started: &record::Started) -> Result<record::Transcript, String> {
             assert_eq!(started.id, 42);
             self.finishes.fetch_add(1, Ordering::AcqRel);
+            if self.finish_fails.load(Ordering::Acquire) {
+                return Err("service-capture-busy".into());
+            }
             Ok(record::Transcript {
                 text: self.text.lock().unwrap().clone(),
                 duration_ms: 1234,
@@ -4238,6 +4243,84 @@ mod tests {
         // Shut down, Hex takes its socket (or the pipe's name) away.
         api.shutdown();
         assert!(!socket.exists());
+    }
+
+    /// Sessions that always allow `https://app.example`, with `grace`, and
+    /// a grant (Always) for it with one recording started.
+    fn recording_session(
+        recording: &Arc<FakeRecording>,
+        grace: Duration,
+    ) -> (Arc<record::Sessions>, record::Channel, String, String) {
+        let sessions = Arc::new(record::Sessions::with_timings(
+            connected(),
+            Some(ScriptedGate::new(Answer::Always)),
+            recording.clone(),
+            allowing(
+                Permissions::new(Some(temp_directory().join("permissions.json"))),
+                &app_origin(),
+            ),
+            record::Timings {
+                grace,
+                ..record_timings()
+            },
+        ));
+        let channel = record::Channel::Web("https://app.example".into());
+        let body = format!(r#"{{"codeChallenge":"{CHALLENGE}"}}"#);
+        let paired = sessions.pair(channel.clone(), body.as_bytes());
+        let code = serde_json::from_slice::<serde_json::Value>(&paired.body).unwrap()["code"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let exchange = format!(r#"{{"code":"{code}","codeVerifier":"{VERIFIER}"}}"#);
+        let minted: serde_json::Value =
+            serde_json::from_slice(&sessions.exchange(channel.clone(), exchange.as_bytes()).body)
+                .unwrap();
+        let grant = minted["grantToken"].as_str().unwrap().to_owned();
+        let started = sessions.start(&grant, &channel);
+        assert_eq!(started.status, 201);
+        let session =
+            serde_json::from_slice::<serde_json::Value>(&started.body).unwrap()["sessionToken"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        (sessions, channel, grant, session)
+    }
+
+    /// Stopped from Hex's window and never collected, a recording is
+    /// discarded after the grace, as a lapsed lease's is, and frees the one
+    /// session for the next start.
+    #[test]
+    fn a_recording_stopped_in_the_window_expires_without_a_finish() {
+        let recording = FakeRecording::with_text("window words");
+        let (sessions, channel, grant, session) =
+            recording_session(&recording, Duration::from_millis(50));
+        let id = sessions.view().unwrap().id;
+        assert!(sessions.stop(id));
+        assert_eq!(sessions.start(&grant, &channel).status, 409);
+        let deadline = Instant::now() + TEST_WAIT;
+        while sessions.view().is_some() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(sessions.view().is_none(), "the stopped recording expired");
+        assert_eq!(sessions.finish(&session, &channel).status, 409);
+        assert_eq!(sessions.start(&grant, &channel).status, 201);
+    }
+
+    /// A finish that fails ends the recording like a failed Stop: cancelled,
+    /// cleared, and no longer holding the session another start needs.
+    #[test]
+    fn a_failed_finish_ends_the_recording() {
+        let recording = FakeRecording::with_text("lost words");
+        recording.finish_fails.store(true, Ordering::Release);
+        let (sessions, channel, grant, session) =
+            recording_session(&recording, Duration::from_secs(60));
+        let finished = sessions.finish(&session, &channel);
+        assert_eq!(finished.status, 500);
+        assert_eq!(recording.cancels(), 1);
+        assert!(sessions.view().is_none());
+        assert_eq!(sessions.finish(&session, &channel).status, 409);
+        recording.finish_fails.store(false, Ordering::Release);
+        assert_eq!(sessions.start(&grant, &channel).status, 201);
     }
 
     #[test]
