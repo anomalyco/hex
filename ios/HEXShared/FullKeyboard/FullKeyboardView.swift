@@ -168,7 +168,19 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation)
+        KeyboardLayout.height(for: orientation) + recordingLift
+    }
+
+    /// While dictating, the keyboard grows this much taller so the recording bar has room;
+    /// the keys stay where they were on screen.
+    static let recordingLiftHeight: CGFloat = 16
+    private var recordingLift: CGFloat = 0
+    /// Asks the host to apply `preferredHeight` now (the keyboard extension resizes itself).
+    var onPreferredHeightChange: (() -> Void)?
+
+    /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
+    private var appliedLift: CGFloat {
+        max(0, min(recordingLift, bounds.height - KeyboardLayout.height(for: orientation)))
     }
 
     // MARK: - Host events
@@ -328,20 +340,22 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.typingLog?.commitGeometry()
         let layout = engine.layout
 
-        plane.frame = bounds
-        callout.frame = bounds
-        accentCallout.frame = bounds
-        stripView.frame = layout.stripFrame
+        let lift = appliedLift
+        let content = CGRect(x: 0, y: lift, width: bounds.width, height: bounds.height - lift)
+        plane.frame = content
+        callout.frame = content
+        accentCallout.frame = content
+        stripView.frame = layout.stripFrame.offsetBy(dx: 0, dy: lift)
 
         hexKey.cornerRadius = layout.metrics.cornerRadius
         if let hex = layout.key(.hex) {
             hexKey.inStrip = hex.row < 0
-            hexKey.frame = hex.hitFrame
+            hexKey.frame = hex.hitFrame.offsetBy(dx: 0, dy: lift)
             hexKey.keycapFrame = hex.frame.offsetBy(dx: -hex.hitFrame.minX, dy: -hex.hitFrame.minY)
         }
         if let globe = layout.key(.globe) {
             globeButton.isHidden = false
-            globeButton.frame = globe.hitFrame
+            globeButton.frame = globe.hitFrame.offsetBy(dx: 0, dy: lift)
         } else {
             globeButton.isHidden = true
         }
@@ -483,6 +497,15 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private func setRecording(_ recording: Bool) {
         showsRecording = recording
         dismissStyleMenu()
+        // The bar it shrinks back from is measured before the keyboard drops its lift.
+        let closingFrames = recording ? nil : morphFrames()
+        let lift = recording ? Self.recordingLiftHeight : 0
+        if lift != recordingLift {
+            recordingLift = lift
+            onPreferredHeightChange?()
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
         if recording {
             plane.cancelAllTouches()
             hideUndo()
@@ -504,7 +527,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             }
         } else if let panel = recordingPanel {
             panel.scope.phase = .hidden
-            if let (mark, bar) = morphFrames(), window != nil {
+            if let (_, bar) = closingFrames, let (mark, _) = morphFrames(), window != nil {
                 runMorph(from: bar, to: mark, appearing: false)
             }
             fade(in: [stripView, hexKey], out: [panel]) { [weak self, weak panel] in
@@ -519,7 +542,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// Where the recording panel sits: the suggestion strip's full width, so the keys stay.
     private var recordingPanelFrame: CGRect {
         let m = engine.layout.metrics
-        return CGRect(x: 0, y: m.stripTop, width: bounds.width, height: m.stripHeight)
+        return CGRect(x: 0, y: m.stripTop, width: bounds.width, height: m.stripHeight + appliedLift)
     }
 
     /// The Hex mark's frame in the strip and the full-width bar it grows into, or nil when
@@ -528,13 +551,15 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let layout = engine.layout
         guard let hex = layout.key(.hex), hex.row < 0 else { return nil }
         let m = layout.metrics
+        let lift = appliedLift
+        let mark = hex.frame.offsetBy(dx: 0, dy: lift)
         let bar = CGRect(
             x: layout.horizontalInset + m.side,
-            y: hex.frame.minY,
+            y: 6,
             width: bounds.width - 2 * (layout.horizontalInset + m.side),
-            height: hex.frame.height
+            height: m.stripHeight + lift - 12
         )
-        return (hex.frame, bar)
+        return (mark, bar)
     }
 
     private func runMorph(from start: CGRect, to end: CGRect, appearing: Bool) {

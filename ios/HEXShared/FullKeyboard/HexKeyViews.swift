@@ -158,6 +158,7 @@ final class HexKeyRecordingPanel: UIView {
     private let well = UIView()
     private let cancelButton = PanelKeyButton()
     private let doneButton = PanelKeyButton()
+    private let doneSpinner = UIActivityIndicatorView(style: .medium)
     private var isTranscribing = false
     /// Width of one modifier key, so ✕ lines up with 123 + space's start.
     var sideKeyWidth: CGFloat = 50 { didSet { setNeedsLayout() } }
@@ -166,7 +167,7 @@ final class HexKeyRecordingPanel: UIView {
 
     init(loudness: @escaping () -> Float) {
         var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 5)
-        tuning.height = 32
+        tuning.height = 44
         // Cap drawables at 2 inside the keyboard extension to save ~2.2 MB of IOSurface RAM.
         scope = DotScopeHostView(tuning: tuning, maximumDrawableCount: 2)
         super.init(frame: .zero)
@@ -176,13 +177,13 @@ final class HexKeyRecordingPanel: UIView {
         scope.useDemoVoice = ProcessInfo.processInfo.arguments.contains("--snap-state")
 
         dot.layer.cornerRadius = 3.5
-        clockLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        clockLabel.font = .monospacedDigitSystemFont(ofSize: 17, weight: .medium)
         styleButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
         styleButton.semanticContentAttribute = .forceRightToLeft
         styleButton.addTarget(self, action: #selector(cycleStyle), for: .touchUpInside)
         styleButton.accessibilityHint = "Changes the dictation style"
 
-        well.layer.cornerRadius = 16
+        well.layer.cornerRadius = 20
         well.layer.cornerCurve = .continuous
         well.clipsToBounds = true
         well.addSubview(scope)
@@ -195,7 +196,10 @@ final class HexKeyRecordingPanel: UIView {
         doneButton.accessibilityLabel = "Done"
         doneButton.addTarget(self, action: #selector(done), for: .touchUpInside)
 
-        for view in [dot, clockLabel, styleButton, well, cancelButton, doneButton] {
+        doneSpinner.hidesWhenStopped = true
+        doneSpinner.color = palette.textMuted
+        doneSpinner.isUserInteractionEnabled = false
+        for view in [dot, clockLabel, styleButton, well, cancelButton, doneButton, doneSpinner] {
             addSubview(view)
         }
         applyPalette()
@@ -213,11 +217,15 @@ final class HexKeyRecordingPanel: UIView {
         isTranscribing = phase == .processing
         scope.phase = phase
         dot.isHidden = isTranscribing
-        clockLabel.text = isTranscribing ? "Transcribing" : clock
+        // One status, in one place: the clock becomes "Transcribing…" and Done waits with a
+        // spinner instead of a second label.
+        clockLabel.text = isTranscribing ? "Transcribing…" : clock
         clockLabel.textColor = isTranscribing ? palette.textMuted : palette.textBase
-        doneButton.title = isTranscribing ? "Inserting…" : "Done"
+        doneButton.title = isTranscribing ? nil : "Done"
         doneButton.isPrimary = !isTranscribing
         doneButton.isEnabled = !isTranscribing
+        doneButton.accessibilityLabel = isTranscribing ? "Transcribing" : "Done"
+        if isTranscribing { doneSpinner.startAnimating() } else { doneSpinner.stopAnimating() }
         let config = UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
         styleButton.setImage(
             UIImage(systemName: "chevron.down", withConfiguration: config)?
@@ -237,13 +245,14 @@ final class HexKeyRecordingPanel: UIView {
         scope.isDark = palette.isDark
         cancelButton.palette = palette
         doneButton.palette = palette
+        doneSpinner.color = palette.textMuted
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         let innerLeft = horizontalInset + metrics.side
         let innerRight = bounds.width - horizontalInset - metrics.side
-        let rowH = max(28, bounds.height - 8)
+        let rowH = max(28, bounds.height - 12)
         let rowY = (bounds.height - rowH) / 2
         var x = innerLeft + 4
         if !dot.isHidden {
@@ -254,11 +263,12 @@ final class HexKeyRecordingPanel: UIView {
         clockLabel.frame = CGRect(x: x, y: 0, width: clockLabel.bounds.width, height: bounds.height)
         x = clockLabel.frame.maxX + 8
 
-        let doneW: CGFloat = isTranscribing ? 92 : 64
+        let doneW: CGFloat = 72
         doneButton.cornerRadius = rowH / 2
         cancelButton.cornerRadius = rowH / 2
         doneButton.frame = CGRect(x: innerRight - doneW, y: rowY, width: doneW, height: rowH)
         cancelButton.frame = CGRect(x: doneButton.frame.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
+        doneSpinner.center = CGPoint(x: doneButton.frame.midX, y: doneButton.frame.midY)
 
         // No room for the style chip in the strip; the Hex key's menu sets the style.
         styleButton.isHidden = true
