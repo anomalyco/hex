@@ -75,6 +75,9 @@ final class FullKeyboardEngine {
     static let accentSlop: CGFloat = 10
     static let trackpadActivationDistance: CGFloat = 10
     static let trackpadPointsPerCharacter: CGFloat = 7.5
+    /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
+    /// letting go then types no space.
+    static let trackpadHoldDelay: TimeInterval = 0.4
     /// A finger on the strip's lower half this soon after a key went down or came up (or
     /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
     static let stripTouchGuard: TimeInterval = 0.25
@@ -505,14 +508,7 @@ final class FullKeyboardEngine {
         // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret.
         if touch.key.kind == .space {
             if !touch.isTrackpad, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
-                touch.isTrackpad = true
-                touch.trackpadAnchorX = point.x
-                lastSpaceAt = nil
-                autocorrect.clearPendingUndo()
-                touches[id] = touch
-                typingLog?.ui("trackpad_start", [TypingLogField("id", .int(id))])
-                onSelectionStep?()
-                onChange?()
+                startTrackpad(&touch, id: id, anchorX: point.x, hold: false)
                 return
             }
             if touch.isTrackpad {
@@ -549,6 +545,27 @@ final class FullKeyboardEngine {
             return
         }
         touches[id] = touch
+    }
+
+    /// The space bar held `trackpadHoldDelay` without sliding: the trackpad starts where the
+    /// finger is, as Apple's does, so letting go types no space (a press held to move the
+    /// cursor used to type one beside the space already there).
+    func holdSpace(forTouch id: Int) {
+        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad else { return }
+        startTrackpad(&touch, id: id, anchorX: touch.point.x, hold: true)
+    }
+
+    private func startTrackpad(_ touch: inout ActiveTouch, id: Int, anchorX: CGFloat, hold: Bool) {
+        touch.isTrackpad = true
+        touch.trackpadAnchorX = anchorX
+        lastSpaceAt = nil
+        autocorrect.clearPendingUndo()
+        touches[id] = touch
+        var fields = [TypingLogField("id", .int(id))]
+        if hold { fields.append(TypingLogField("hold", .bool(true))) }
+        typingLog?.ui("trackpad_start", fields)
+        onSelectionStep?()
+        onChange?()
     }
 
     func touchEnded(id: Int, at point: CGPoint) {

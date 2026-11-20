@@ -548,6 +548,41 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(view.hitTest(aimedHigh, with: nil) === view.plane, "the strip's again after a pause")
     }
 
+    /// Holding the space bar still starts the trackpad, as Apple's does, so letting go types
+    /// nothing: a hold meant to move the cursor typed a space beside the one already there.
+    func testHoldingSpaceStillStartsTheTrackpadAndTypesNoSpace() {
+        type("hello ")
+        let space = point(.space)
+        engine.touchBegan(id: 1, at: space)
+        engine.holdSpace(forTouch: 1)
+        XCTAssertTrue(engine.isTrackpadActive)
+        engine.touchEnded(id: 1, at: space)
+        XCTAssertEqual(target.text, "hello ")
+
+        engine.touchBegan(id: 2, at: space)
+        engine.holdSpace(forTouch: 2)
+        let left = CGPoint(x: space.x - 2 * FullKeyboardEngine.trackpadPointsPerCharacter - 1, y: space.y)
+        engine.touchMoved(id: 2, to: left)
+        engine.touchEnded(id: 2, at: left)
+        XCTAssertEqual(target.text, "hello ")
+        XCTAssertEqual(target.cursorIndex, 4, "sliding after the hold moves the cursor")
+    }
+
+    func testTheSpaceBarsHoldTimerStartsTheTrackpad() {
+        type("hi ")
+        let plane = KeyboardKeyPlaneView(engine: engine)
+        let sample = TypingLogTouchSample(point: point(.space), timestamp: 0)
+        plane.began(id: 1, sample: sample)
+        plane.ended(id: 1, sample: sample)
+        XCTAssertEqual(target.text, "hi  ", "a tap types a space")
+
+        plane.began(id: 2, sample: sample)
+        RunLoop.main.run(until: Date().addingTimeInterval(FullKeyboardEngine.trackpadHoldDelay + 0.15))
+        XCTAssertTrue(engine.isTrackpadActive)
+        plane.ended(id: 2, sample: sample)
+        XCTAssertEqual(target.text, "hi  ", "a hold types none")
+    }
+
     // MARK: - Haptics in every layout
 
     /// Key haptics come from the same calls whatever the layout (a TestFlight tester felt

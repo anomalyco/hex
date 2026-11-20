@@ -470,7 +470,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   the simulator never delayed them).
 - **Spaces (full keyboard):** A suggestion (a word, what you typed, or an emoji)
   types its own space, so a space pressed right after it is swallowed, as on Apple's
-  keyboard; it still counts towards double-space for a period.
+  keyboard; it still counts towards double-space for a period. Holding the space bar
+  still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
+  space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once.
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of

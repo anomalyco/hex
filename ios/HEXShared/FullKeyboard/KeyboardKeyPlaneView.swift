@@ -25,6 +25,7 @@ final class KeyboardKeyPlaneView: UIView {
     private var deleteStartedAt: TimeInterval = 0
     /// Hold delete and slide left to delete word by word (`DeleteWordSwipe`).
     private(set) var deleteSwipe: DeleteWordSwipe?
+    /// Each held key's pending hold: a letter's accents, or the space bar's trackpad.
     private var accentHoldWork: [Int: DispatchWorkItem] = [:]
 
     init(engine: FullKeyboardEngine) {
@@ -243,6 +244,7 @@ final class KeyboardKeyPlaneView: UIView {
                 deleteSwipe = DeleteWordSwipe(engine: engine, touchID: id, startX: sample.point.x)
             }
             if case .character = kind { armAccentTimer(for: id) }
+            if kind == .space { armTrackpadHold(for: id) }
         }
     }
 
@@ -312,6 +314,19 @@ final class KeyboardKeyPlaneView: UIView {
         }
         accentHoldWork[id] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + FullKeyboardEngine.accentHoldDelay, execute: work)
+    }
+
+    private func armTrackpadHold(for id: Int) {
+        cancelAccentTimer(for: id)
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.accentHoldWork.removeValue(forKey: id)
+                self.engine.holdSpace(forTouch: id)
+            }
+        }
+        accentHoldWork[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + FullKeyboardEngine.trackpadHoldDelay, execute: work)
     }
 
     private func cancelAccentTimer(for id: Int) {
