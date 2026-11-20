@@ -67,6 +67,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidAppear(animated)
         warmFullKeyboardLexiconIfNeeded()
         listDictationLanguagesIfNeeded()
+        prepareLocalDictationIfNeeded()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -630,6 +631,18 @@ final class KeyboardViewController: UIInputViewController {
                 pressedAt: self.takeHexKeyPress()
             )
         } : nil
+    }
+
+    /// Loads in-keyboard dictation's capture page once the keyboard has shown, so the Hex key
+    /// only waits for the microphone. Only with Full Access, which dictation needs, and not
+    /// while a warm Hex session takes the Hex key instead; `prepare` checks memory.
+    private func prepareLocalDictationIfNeeded() {
+        guard hasFullAccess, viewModel.onLocalDictateTap != nil, !viewModel.isWarmAvailable else { return }
+        // A turn after the keyboard's first frame, so making the web view never delays it.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isShown, !self.viewModel.isWarmAvailable else { return }
+            self.localDictation.prepare(in: self.view)
+        }
     }
 
     // MARK: - Dictation language

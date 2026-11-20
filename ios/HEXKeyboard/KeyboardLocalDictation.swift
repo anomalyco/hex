@@ -101,6 +101,43 @@ final class KeyboardLocalDictation {
         }
     }
 
+    /// Makes the capture web view and loads its page before the first dictation, so the Hex
+    /// key only has the microphone left to open. Nothing here asks for the microphone or the
+    /// audio session, so no orange dot shows until a dictation starts. Skipped while short of
+    /// the memory a first dictation needs (it would open Hex instead) and without the
+    /// microphone allowed (it would fail).
+    func prepare(in host: UIView) {
+        guard Self.isSupported, capture == nil, !isActive else { return }
+        let headroom = os_proc_available_memory()
+        guard headroom == 0 || headroom >= Self.startHeadroomNeeded else { return }
+        guard AVAudioApplication.shared.recordPermission == .granted || KeyboardBridge().appMicrophoneAllowed else { return }
+        let started = Date()
+        let capture = KeyboardWebCapture(host: host)
+        capture.onEvent = { [weak self] event in self?.handlePrepared(event, since: started) }
+        self.capture = capture
+        KeyboardProbeLog.shared.write("capture prepared in \(Int(Date().timeIntervalSince(started) * 1000)) ms \(KeyboardProbeLog.memory())")
+    }
+
+    /// The prepared page, before any dictation uses it.
+    private func handlePrepared(_ event: KeyboardWebCapture.Event, since started: Date) {
+        switch event {
+        case .loaded:
+            KeyboardProbeLog.shared.write("capture page loaded in \(Int(Date().timeIntervalSince(started) * 1000)) ms \(KeyboardProbeLog.memory())")
+        case .processTerminated:
+            dropEndedCapture()
+        default:
+            break
+        }
+    }
+
+    /// The web view's content process ended: the next start makes a new one, and this one
+    /// leaves the keyboard's view once WebKit's callback has returned.
+    private func dropEndedCapture() {
+        let ended = capture
+        capture = nil
+        Task { @MainActor in ended?.tearDown() }
+    }
+
     /// The keyboard extension itself may not record (audiomxd: "it is an extension and
     /// doesn't have entitlements to record audio"), so capture runs in WebKit's media
     /// process through getUserMedia, attributed to Hex's microphone permission.
@@ -198,13 +235,18 @@ final class KeyboardLocalDictation {
                 detail: "Web capture: \(message)"
             )
         case .processTerminated:
-            pcmFile = nil
             // The next start needs a new web view; this one leaves the keyboard's view too,
-            // once WebKit's callback has returned, instead of staying behind with its page.
-            let ended = capture
-            capture = nil
-            Task { @MainActor in ended?.tearDown() }
+            // instead of staying behind with its page.
+            dropEndedCapture()
+            // Only a recording loses anything: a later dictation's page may end while idle.
+            guard case .recording(let current, _) = phase, current == jobID else {
+                KeyboardProbeLog.shared.write("capture process ended while idle")
+                return
+            }
+            pcmFile = nil
             fail(UserFacingError.Context.microphone.fallback, detail: "WebKit capture process ended")
+        case .loaded:
+            break
         }
     }
 
@@ -457,6 +499,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         case started(sampleRate: Double, device: String, steps: CaptureSteps)
         case samples(Data, peak: Float)
         case stopped
+        case loaded
         case failed(String)
         case processTerminated
     }
@@ -517,6 +560,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoaded = true
         loadedAt = Date().timeIntervalSince1970
+        onEvent?(.loaded)
         if startWhenLoaded {
             startWhenLoaded = false
             start(preferBuiltIn: preferBuiltIn)
