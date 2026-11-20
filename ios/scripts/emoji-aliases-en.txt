@@ -1,0 +1,340 @@
+# Hex's own chat words for emoji: written for Hex, not Unicode data.
+# word<TAB>emoji, best first
+lol	😂 🤣 😆
+lmao	🤣 😂 💀
+rofl	🤣 😂
+haha	😂 😄 😆
+hahaha	😂 🤣
+hehe	😁 😆
+funny	😂 🤣 😆
+hilarious	😂 🤣 💀
+joke	😂 😜
+dead	💀 😂
+omg	😱 😮 🤯
+wow	😮 🤩 😲
+whoa	😮 😲
+yay	🥳 🎉 🙌
+woohoo	🥳 🎉 🙌
+hooray	🎉 🥳 🙌
+congrats	🎉 🥳 👏 🍾
+congratulations	🎉 🥳 👏 🍾
+bravo	👏 🎉
+proud	🥹 👏 🙌 💪
+celebrate	🎉 🥳 🍾 🎊
+party	🎉 🥳 🎊 🪩
+birthday	🎂 🎉 🥳 🎁 🎈
+bday	🎂 🎉 🥳 🎁
+anniversary	💍 🥂 ❤️ 🎉
+wedding	💒 💍 👰 🤵 🥂
+married	💍 💒 👰 🤵
+engaged	💍 💕 🥂
+love	❤️ 😍 🥰 😘
+luv	❤️ 🥰
+xoxo	😘 💋 ❤️
+kiss	😘 💋 😚
+hug	🤗 🫂
+hugs	🤗 🫂 ❤️
+miss	🥺 😢 💕
+cute	🥰 😍 🥹 💕
+adorable	🥰 😍 🥹
+beautiful	😍 🤩 ✨
+gorgeous	😍 🤩 ✨
+pretty	😍 ✨ 💅
+sweet	🥰 🍬 😊
+thanks	🙏 😊 ❤️
+thank	🙏 😊 ❤️
+thx	🙏 😊
+ty	🙏 😊
+grateful	🙏 🥹 ❤️
+please	🙏 🥺
+pls	🙏 🥺
+plz	🙏 🥺
+sorry	😔 🙏 😅 😬
+oops	😅 🙈 😬
+apologies	🙏 😔
+sad	😢 😔 😞
+crying	😭 😢
+cry	😭 😢
+upset	😞 😢 😤
+angry	😡 😠 🤬
+mad	😡 😠 😤
+annoyed	😒 🙄 😤
+ugh	😩 🙄 😒
+frustrated	😤 😩 😫
+stressed	😫 😩 😰
+tired	😴 🥱 😩
+exhausted	😩 😫 😴
+sleepy	😴 🥱 💤
+sleep	😴 💤 🛌
+nap	😴 💤 🛌
+bored	🥱 😑 😐
+sick	🤒 🤧 😷 🤢
+ill	🤒 😷
+flu	🤒 🤧 😷
+cold	🥶 ❄️ 🤧
+hot	🥵 🔥 ☀️
+scared	😱 😨 😰
+nervous	😬 😰 😅
+worried	😟 😰 😬
+excited	🤩 🥳 🎉 😆
+happy	😊 😄 😁
+glad	😊 🙂
+fun	🥳 😄 🎉
+awesome	🙌 🔥 🤩 👏
+amazing	🤩 😍 🔥 ✨
+great	👍 🙌 😄
+nice	👍 😎 🙂
+cool	😎 👍 🆒
+perfect	👌 💯 ✨
+yes	👍 ✅ 🙌
+yep	👍 ✅
+yeah	👍 🙌
+ok	👌 👍
+okay	👌 👍
+sure	👍 👌
+agree	👍 💯
+deal	🤝 👍
+no	🙅 ❌ 👎
+nope	🙅 ❌ 😅
+fire	🔥
+lit	🔥 🥳
+goat	🐐 🔥
+hello	👋 😊
+hi	👋 😊
+hey	👋 😊
+bye	👋 😘
+goodbye	👋 😢
+morning	☀️ ☕ 🌅
+night	🌙 😴 🌃
+tonight	🌙 🌃
+goodnight	🌙 😴 💤
+gn	🌙 😴 💤
+gm	☀️ ☕ 🌅
+weekend	🎉 😎 🛋️
+friday	🎉 🥳 🍻
+monday	😩 ☕ 🙄
+work	💼 💻 😩
+office	💼 🏢 💻
+meeting	📅 💼 🗓️
+deadline	⏰ 😬 📅
+late	⏰ 🏃 😬
+hurry	🏃 ⏰ 💨
+soon	⏳ 🔜
+wait	⏳ 🙏
+traffic	🚗 🚦 😩
+drive	🚗 🛣️
+flight	✈️ 🛫
+plane	✈️
+landed	🛬 ✈️
+airport	✈️ 🛫 🧳
+travel	✈️ 🧳 🌍 🗺️
+trip	✈️ 🧳 🗺️
+vacation	🏖️ ✈️ 🌴 ☀️
+holiday	🏖️ ✈️ 🎄 🎉
+beach	🏖️ 🌊 ☀️ 🏝️
+pool	🏊 ☀️ 💦
+swim	🏊 🌊
+summer	☀️ 🏖️ 😎
+winter	❄️ ⛄ 🥶
+snow	❄️ ☃️ 🌨️
+rain	🌧️ ☔ ☂️
+raining	🌧️ ☔ ☂️
+sunny	☀️ 😎 🌞
+weather	🌤️ ☀️ 🌧️
+storm	⛈️ 🌩️ 🌪️
+food	🍽️ 😋 🍔
+hungry	😋 🍽️ 🤤
+yummy	😋 🤤
+delicious	😋 🤤 👌
+tasty	😋 🤤
+dinner	🍽️ 🍝 😋
+lunch	🥪 🍽️ 🥗
+breakfast	🍳 🥞 ☕
+brunch	🥞 🥂 🍳
+cook	🧑‍🍳 🍳 🥘
+cooking	🧑‍🍳 🍳 🥘
+bake	🧁 🍪 🥖
+baking	🧁 🍪 🍰
+coffee	☕
+tea	🍵 ☕
+beer	🍺 🍻
+beers	🍻 🍺
+drinks	🍹 🥂 🍻
+wine	🍷 🥂
+cheers	🥂 🍻
+champagne	🍾 🥂
+cocktail	🍸 🍹
+icecream	🍦 🍨
+dessert	🍰 🍨 🧁
+cookies	🍪
+game	🎮 🏆 ⚽
+games	🎮 🎲
+gaming	🎮 🕹️
+match	⚽ 🏆 🎾
+won	🏆 🎉 🥇
+win	🏆 🥇 🎉
+winner	🏆 🥇
+lost	😞 😢 💔
+lose	😞 😢
+team	🙌 🤝 💪
+gym	💪 🏋️
+workout	💪 🏋️ 🔥
+run	🏃 👟
+running	🏃 👟 💨
+marathon	🏃 🏅 🎽
+hike	⛰️ 🥾 🌲
+hiking	⛰️ 🥾 🌲
+yoga	🧘 🙏
+music	🎶 🎵 🎧
+song	🎵 🎶 🎤
+concert	🎤 🎸 🎶 🤘
+dance	💃 🕺 🪩
+dancing	💃 🕺 🪩
+movie	🎬 🍿 🎥
+movies	🎬 🍿
+film	🎬 🎥 🍿
+tv	📺 🍿
+show	📺 🍿 🎭
+book	📚 📖
+books	📚 📖
+reading	📖 📚 🤓
+study	📚 ✏️ 🤓
+studying	📚 ✏️ 🤓
+exam	📝 📚 😬
+test	📝 ✏️ 😬
+school	🏫 📚 🎒
+class	🏫 📚 ✏️
+homework	📚 ✏️ 😩
+graduation	🎓 🥳 🎉
+graduated	🎓 🥳 🎉
+job	💼 🎉 💪
+interview	💼 🤞 👔
+money	💰 💸 🤑
+paid	💸 💰 ✅
+rich	🤑 💰
+shopping	🛍️ 💳
+gift	🎁
+gifts	🎁 🎄
+present	🎁
+christmas	🎄 🎅 🎁
+xmas	🎄 🎅 🎁
+halloween	🎃 👻 🦇
+easter	🐣 🐰 🥚
+thanksgiving	🦃 🥧 🍂
+fireworks	🎆 🎇
+new year	🎆 🥂 🎉 🍾
+valentine	❤️ 💘 🌹
+valentines	❤️ 💘 🌹
+flowers	💐 🌸 🌷
+baby	👶 🍼 🥰
+pregnant	🤰 👶 🍼
+mom	👩 ❤️ 💐
+mum	👩 ❤️ 💐
+dad	👨 ❤️
+family	👪 ❤️ 🏡
+kids	🧒 👧 👦
+home	🏡 🏠 🛋️
+moving	📦 🏠 🚚
+dog	🐶 🐕
+puppy	🐶 🐕 🥰
+cat	🐱 🐈
+kitty	🐱 🐈
+pet	🐾 🐶 🐱
+phone	📱 📞
+call	📞 📱
+text	💬 📱
+email	📧 ✉️
+laptop	💻
+wifi	📶 🛜 😩
+battery	🔋 🪫
+idea	💡 🤔
+think	🤔 💭
+thinking	🤔 💭
+hmm	🤔 🧐
+confused	😕 🤔 😵‍💫
+shocked	😱 😮 😳
+embarrassed	😳 🙈 😅
+awkward	😬 😅 🙈
+secret	🤫 🙊
+crazy	🤪 😜 🤯
+mindblown	🤯
+wink	😉
+smile	😊 😄
+laugh	😂 😆
+laughing	😂 🤣
+eyes	👀
+look	👀
+time	⏰ ⌛
+done	✅ 🙌
+finished	✅ 🎉 🙌
+check	✅ ✔️
+important	❗ ⚠️ 📌
+hope	🤞 🙏
+luck	🍀 🤞
+lucky	🍀 🤞 ✨
+pray	🙏
+prayers	🙏 ❤️
+rip	🙏 💔 🕊️
+peace	✌️ 🕊️ ☮️
+strong	💪
+power	💪 ⚡
+energy	⚡ 💪
+magic	✨ 🪄
+stars	⭐ ✨ 🌟
+nature	🌿 🌲 🍃
+plants	🪴 🌱 🌿
+garden	🌻 🌱 🪴
+camping	🏕️ ⛺ 🔥
+fishing	🎣 🐟
+boat	⛵ 🚤 🌊
+bike	🚲 🚴
+walk	🚶 🌳
+city	🏙️ 🌆
+paris	🇫🇷 🗼 🥐
+london	🇬🇧 💂
+nyc	🗽 🏙️
+launch	🚀 🎉
+ship	🚀 📦
+shipped	🚀 📦 🎉
+code	💻 🧑‍💻
+coding	💻 🧑‍💻 ⌨️
+ai	🤖 ✨
+doctor	🧑‍⚕️ 🩺 🏥
+hospital	🏥 🚑 🩺
+medicine	💊 🩹
+covid	😷 🦠
+vaccine	💉
+hurt	🤕 😣 🩹
+pain	😣 🤕
+broken	💔 🤕
+heartbroken	💔 😢 😭
+jealous	😒 😤 💚
+chill	😎 😌 🧊
+relax	😌 🧘 🛀
+spa	🧖 💆 🛀
+shower	🚿 🛁
+bath	🛁 🛀
+haircut	💇 ✂️
+makeup	💄 💅 💋
+nails	💅
+dress	👗 💃
+shoes	👟 👠
+selfie	🤳 📸
+photo	📸 📷
+pics	📸 🤳
+art	🎨 🖌️
+draw	✏️ 🎨
+write	✍️ 📝
+writing	✍️ 📝 📓
+news	📰 🗞️
+mail	📬 ✉️
+package	📦 🚚
+delivery	🚚 📦
+alarm	⏰ 🚨
+emergency	🚨 🆘
+police	🚓 👮 🚨
+fight	🥊 😤 👊
+victory	✌️ 🏆 🎉
+goal	⚽ 🥅 🎯
+facts	💯 👏
+true	💯 ✅
