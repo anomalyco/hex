@@ -55,7 +55,6 @@ struct FullKeyboardPalette: Equatable {
     var actionFill: UIColor { Self.rgb(0x007AFF) }
     var actionPressedFill: UIColor { Self.rgb(0x0062CC) }
     var warmCore: UIColor { Self.rgb(0xFF9500) }
-    var recordingDot: UIColor { Self.rgb(0xE54D42) }
 
     static let cornerRadius: CGFloat = 8.5
 }

@@ -113,10 +113,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.refreshFromModel() }
             .store(in: &subscriptions)
-        model.clock.$recordingText
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refreshRecordingPanel() }
-            .store(in: &subscriptions)
 
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitVerticalSizeClass.self]) { (view: FullKeyboardView, _) in
             view.applyAppearance()
@@ -489,7 +485,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         guard let panel = recordingPanel, showsRecording else { return }
         panel.update(
             phase: model.stagePhase == .transcribing ? .processing : .recording,
-            clock: model.clock.recordingText,
             style: model.style
         )
     }
