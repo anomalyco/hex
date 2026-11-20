@@ -45,7 +45,7 @@ struct DictationSettingsPage: View {
 
                 SettingsToggleRow(
                     title: "Clean up what I say",
-                    detail: "Drops ums, repeats and corrections",
+                    detail: "Drops ums, repeats and corrected words",
                     isOn: $cleanupTagger
                 )
 
@@ -238,7 +238,7 @@ struct PrivacySettingsPage: View {
                 // dictation bar inserts.
                 SettingsToggleRow(
                     title: "Learn how I type",
-                    detail: "Taps and fixes, never what you write",
+                    detail: "Learns from taps and the words you fix",
                     isOn: $learnTyping
                 )
 
@@ -257,7 +257,7 @@ struct PrivacySettingsPage: View {
                 // Apart from Learn how I type: this keeps everything, to export and train on.
                 SettingsToggleRow(
                     title: "Record typing logs",
-                    detail: "Saves every tap for 14 days to export",
+                    detail: "Off by default. Stays on this iPhone to export",
                     isOn: $typingLogs
                 )
 
