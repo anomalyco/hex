@@ -1,6 +1,6 @@
 # Android typing benchmark
 
-**On the same iOS R1 word models and synthetic taps, Android now has 136 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
+**On the same iOS R1 word models and synthetic taps, Android with its default suggestion filter has 135 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
 
 ## Same-model results
 
@@ -11,7 +11,12 @@ Each language has 2,000 held-out synthetic Tatoeba sentences. English has 13,870
 | Raw hit keys | 4,689 | 33.8068% | 160 | 5,343 | 40.1699% | 94 |
 | Phase 3 Android | 1,461 | 10.5335% | 983 | 1,338 | 10.0594% | 1,086 |
 | iOS R1, same HXTM, no offsets | 1,163 | 8.3850% | 1,154 | 1,387 | 10.4278% | 1,064 |
-| **Phase 4 Android** | **1,027** | **7.4045%** | **1,249** | **1,374** | **10.3301%** | **1,070** |
+| Phase 4 Android | 1,027 | 7.4045% | 1,249 | 1,374 | 10.3301% | 1,070 |
+| **Android, default suggestion filter** | **1,028** | **7.4117%** | **1,248** | **1,374** | **10.3301%** | **1,070** |
+
+The before/after replay used the installed APKs on the same Studio API 35 emulator:
+one additional English error out of 13,870 reference words (+0.0072 percentage points)
+and no change across 13,301 Spanish reference words.
 
 The installed APK ran on the Studio’s Android 15/API 35 ARM64 emulator (4 vCPUs, 4 GiB guest RAM). It received the original 402-point iOS key geometry, hit-key sequence, coordinates and separators. Letters request suggestions and spaces request replacements and predictions, exactly as in the Android IME. English and Spanish HXTM files are byte-identical across platforms. The iOS reference is the recorded `output-r1-decoder-{en,es}.json` output, before calibration. The earlier iOS prototype’s 6.71% English WER used a **different** model; it is not the comparison target. [Phase 3 measurements](metrics.tsv) · [historical iOS aggregate, including calibration](ios-shared.tsv) · [Phase 4 replay counts and latency](phase4.tsv).
 
@@ -63,6 +68,22 @@ The [shared iOS builder](build-typing-model.py), SHA-256 `cba009fe227632d9f8d176
 - [NB N-gram 2026](https://data.norge.no/nb/datasets/f2eebe8b-bd83-34e4-bcf3-c0c5e37a77f8/n-grammer-fra-nasjonalbiblioteket-2026): the National Library of Norway’s counts are **CC0 1.0**. The [Norsk ordbank – Bokmål 2005, February 2022](https://data.norge.no/en/datasets/f0db926d-a154-3a12-82b8-6573b57f6dbb/norsk-ordbank-norwegian-bokmal-2005) spelling filter is separately **CC BY 4.0**.
 - [SCOWL](https://wordlist.aspell.net/) permits commercial redistribution subject to its [included notices](../../app/src/main/assets/licenses/scowl.txt). The English literal-validity list contains 45,303 unique spellings absent from the frequency model (440,142 bytes). It is built from the same public SCOWL archive, not from benchmark outputs or personal data. It cannot supply scored candidates or word probabilities.
 - [RLA-ES es_ES/es_MX sources](https://github.com/LibreOffice/dictionaries/tree/762abe74008b94b2ff06db6f4024b59a8254c467/es) use their **MPL 1.1** option. [APK credits, source links and modification notices](../../app/src/main/assets/licenses/credits.txt) · [full licence texts](../../app/src/main/assets/licenses/).
+
+The separate [never-suggest list](../../app/src/main/assets/typing/never-suggest.tsv) is
+adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13),
+**CC BY 4.0**. Hex reviewed the English, Spanish, German and Norwegian lists for keyboard use:
+
+- Keep identity slurs always suppressed. Common profanity and obscene slang are opt-in.
+  Add common missing forms explicitly, including plurals, verb inflections and spelling
+  variants. Match whole words; *assume* and *fuchsia* remain eligible completions.
+- Keep ordinary anatomy and health terms available: *anus, clitoris, fecal, genitals,
+  nipple, penis, rectum, semen, vagina, vulva*. Also omit ordinary senses such as
+  *escort, fingering, hardcore, scat, snatch, suck* and neutral sexuality or reporting
+  terms such as *sex, sexuality, rape*. Search-site phrases such as *jelly donut* or
+  *tied up* do not become keyboard bans. Retained two-word expressions match as pairs.
+- Apply each language's list to its own layout, plus unambiguous shared loanwords.
+  Spanish *negro* (black), German *dick* (thick), and Bokmål *fag* (subject) remain
+  available. An unscored listed spelling is protected when typed just like a model word.
 
 ## Reproduce on the Studio
 

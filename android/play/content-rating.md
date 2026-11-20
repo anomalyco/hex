@@ -1,12 +1,12 @@
 # Content rating answers
 
-IARC draft for Hex keyboard. Select **All other app types** (a keyboard utility). Use the publisher’s monitored ratings contact for IARC correspondence. Play and the regional authorities assign the rating; none has been obtained.
+IARC draft for Hex keyboard. Select **All other app types** (a keyboard utility). Use the publisher’s monitored ratings contact for IARC correspondence. Play and the regional authorities assign the rating.
 
 | Questionnaire topic | Draft answer for this build |
 | --- | --- |
 | Violence, fear, blood, gore or depictions of harm | No. |
 | Sexual content or nudity | No. |
-| Profanity or strong language accessible in packaged content | **Yes, in typing suggestions.** The bundled English prediction dictionary includes strong language. The keyboard can complete a word from what the user types. There is no scripted dialogue or editorial feed. |
+| Profanity or strong language accessible in packaged content | **Yes, if explicitly enabled.** Suggest swear words is off by default. Enabling it permits listed profanity in completions, predictions and autocorrect on all four layouts. Listed slurs are never offered. A user can still type their own words. There is no scripted dialogue or editorial feed. |
 | Drugs, alcohol or tobacco use depicted or promoted | No. |
 | Gambling, simulated gambling, contests, prizes or cash redemption | No. |
 | Hate content, discriminatory themes, criminal instructions | No authored content of this kind. |

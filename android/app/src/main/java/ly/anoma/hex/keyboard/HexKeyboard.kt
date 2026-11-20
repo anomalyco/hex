@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.Manifest
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.os.SystemClock
@@ -29,6 +30,12 @@ class HexKeyboard : InputMethodService() {
     internal val layoutLanguage get() = feedback.layout ?: preferences.spoken
     private val models = HashMap<String, SpatialDecoder>()
     private var word: TypingWord? = null
+    private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) word?.let {
+            it.suggestSwearWords = feedback.suggestSwearWords
+            showSuggestions(it)
+        }
+    }
     private var ordinaryField = false
     private var prefix = ""
     private var expectedCaret = -1
@@ -47,6 +54,7 @@ class HexKeyboard : InputMethodService() {
     override fun onCreate() {
         setTheme(R.style.HexIme)
         super.onCreate()
+        getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
         capture = MicCapture(LocalSpeech(applicationContext),
             update = { phase, note -> keys?.status(phase, note ?: idleHint()) },
             meter = { keys?.setLevel(it) }, insert = ::commitSpeech)
@@ -140,15 +148,24 @@ class HexKeyboard : InputMethodService() {
         val active = word
         if (ordinaryField && keepWord && active != null && active.decoder.model.language == language && active.spatial == feedback.spatial &&
             active.token.isNotEmpty() && endsWith(prefix + active.token)) {
-            showPlane(); keys?.suggestions(active.suggestions()); return
+            showPlane(); showSuggestions(active); return
         }
         resetTyping()
         word = if (ordinaryField) {
-            try { TypingWord(models.getOrPut(language) { SpatialDecoder(TypingModel.asset(assets, language)) }, feedback.spatial) }
-            catch (_: java.io.IOException) { null } // The editor can still type if its asset cannot be mapped.
+            try {
+                TypingWord(models.getOrPut(language) { SpatialDecoder(TypingModel.asset(assets, language)) }, feedback.spatial)
+                    .also { it.suggestSwearWords = feedback.suggestSwearWords }
+            } catch (_: java.io.IOException) { null } // The editor can still type if its assets cannot be read.
         } else null
         showPlane()
-        val w = word
+        showSuggestions(word)
+    }
+    private fun showSuggestions(w: TypingWord?) {
+        if (w != null && w.token.isNotEmpty()) {
+            val choices = w.suggestions()
+            keys?.suggestions(choices, literal = w.literalChip(choices))
+            return
+        }
         val b = if (w != null && !symbols && selStart == selEnd) before() else null
         keys?.suggestions(if (w != null && b != null && TypingWord.boundary(b.lastOrNull()) && canEndWord()) w.predictions(b) else emptyList())
     }
@@ -175,7 +192,7 @@ class HexKeyboard : InputMethodService() {
         expectedCaret = if (start >= 0) start + text.length else -1
         if (ic.commitText(text, 1)) {
             if (explicit) w.explicit(text) else w.letter(text, x, y, grid)
-            keys?.suggestions(w.suggestions())
+            showSuggestions(w)
         } else resetTyping()
         inputDone()
     }
@@ -225,7 +242,7 @@ class HexKeyboard : InputMethodService() {
             feedback.undo(last.language, last.original, last.replacement)
             prefix = last.prefix; word?.restored(last.original, prefix)
             if (expectedCaret >= 0) expectedCaret += last.original.length - last.replacement.length - 1
-            keys?.suggestions(listOf(last.original)); return
+            keys?.suggestions(emptyList(), literal = last.original); return
         }
         val w = word
         val track = w != null && w.token.isNotEmpty() && endsWith(prefix + w.token)
@@ -236,7 +253,7 @@ class HexKeyboard : InputMethodService() {
             if (!ic.deleteSurroundingTextInCodePoints(1, 0)) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
             if (track) { w!!.pop(); if (expectedCaret >= 0) expectedCaret-- } else resetTyping()
         }
-        keys?.suggestions(if (w != null && w.token.isNotEmpty()) w.suggestions() else emptyList())
+        if (w != null && w.token.isNotEmpty()) showSuggestions(w) else keys?.suggestions(emptyList())
     }
     internal fun enter() {
         resetTyping(); keys?.suggestions(emptyList())
@@ -287,5 +304,8 @@ class HexKeyboard : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
-    override fun onDestroy() { keys?.cancelGestures(); keys = null; capture.close(); super.onDestroy() }
+    override fun onDestroy() {
+        getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
+        keys?.cancelGestures(); keys = null; capture.close(); super.onDestroy()
+    }
 }

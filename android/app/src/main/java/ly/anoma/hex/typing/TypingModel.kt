@@ -3,13 +3,15 @@ package ly.anoma.hex.typing
 import android.content.res.AssetManager
 import java.io.File
 import java.io.FileInputStream
+import java.io.Reader
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 
 /** HXTM v3: sorted letter-code spellings, quantized unigram costs and CSR bigram rows.
  * All large tables stay in the read-only file mapping, including when mapped inside the APK. */
-internal class TypingModel private constructor(private val data: ByteBuffer, val language: String, private val validWords: ByteBuffer?) {
+internal class TypingModel private constructor(private val data: ByteBuffer, val language: String,
+                                              private val validWords: ByteBuffer?, list: Reader) {
     private fun u8(pos: Int) = data.get(pos).toInt() and 255
     private fun int(pos: Int) = data.getInt(pos)
     val words = int(8)
@@ -90,17 +92,20 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         }
         return if (a < b) (a.toLong() shl 32) or b.toLong() else 0
     }
-    fun nextWords(previous: Int): List<String> {
-        if (previous < 0) return completions("").map { text(it) }
+    val neverSuggest = NeverSuggest(this, list)
+    fun context(spelling: String) = neverSuggest.context(spelling, index(spelling))
+    fun nextWords(previous: Int, swears: Boolean): List<String> {
+        if (previous < 0) return completions("", swears, previous).map { text(it) }
         val best = ArrayList<Int>(4)
         for (at in int(rows + 4 * previous) until int(rows + 4 * (previous + 1))) {
+            if (neverSuggest.blocks(int(seconds + 4 * at), swears, previous)) continue
             val cost = u8(bi + at)
             val i = best.indexOfFirst { u8(bi + it) > cost }
             if (i >= 0) best.add(i, at) else if (best.size < 3) best.add(at)
             if (best.size > 3) best.removeAt(3)
         }
         val result = best.mapTo(ArrayList()) { text(int(seconds + 4 * it)) }
-        if (result.size < 3) for (i in completions("")) { val w = text(i); if (w !in result) result.add(w); if (result.size == 3) break }
+        if (result.size < 3) for (i in completions("", swears, previous)) { val w = text(i); if (w !in result) result.add(w); if (result.size == 3) break }
         return result
     }
     private fun range(prefix: String): Long {
@@ -138,13 +143,19 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         return if (r != 0L && length(a) == word.length) a else -1
     }
     // Common prefixes get reused on consecutive words. No corpus-sized heap trie.
-    private val prefixCache = object : LinkedHashMap<String, IntArray>(96, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, IntArray>?) = size > 96
+    private data class Prefix(val text: String, val swears: Boolean, val context: Int)
+    private val prefixCache = object : LinkedHashMap<Prefix, IntArray>(96, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<Prefix, IntArray>?) = size > 96
     }
-    fun completions(prefix: String): IntArray = prefixCache.getOrPut(prefix) {
-        val r = range(prefix)
+    fun completions(prefix: String, swears: Boolean, previous: Int): IntArray {
+        val key = Prefix(prefix, swears, neverSuggest.restrictedContext(previous))
+        return prefixCache.getOrPut(key) { rankCompletions(key) }
+    }
+    private fun rankCompletions(key: Prefix): IntArray {
+        val r = range(key.text)
         val best = IntArray(3) { -1 }
         for (word in (r ushr 32).toInt() until r.toInt()) {
+            if (neverSuggest.blocks(word, key.swears, key.context)) continue
             val f = frequencyCost(word)
             for (i in best.indices) {
                 if (best[i] == -1 || f < frequencyCost(best[i])) {
@@ -153,28 +164,33 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
                 }
             }
         }
-        best
+        val count = best.indexOf(-1)
+        return if (count < 0) best else best.copyOf(count)
     }
     companion object {
         private fun mapped(channel: FileChannel, offset: Long, size: Long): ByteBuffer {
             require(size in 1L..32_000_000L)
             return channel.map(FileChannel.MapMode.READ_ONLY, offset, size).order(ByteOrder.LITTLE_ENDIAN)
         }
-        private fun open(model: ByteBuffer, language: String, valid: ByteBuffer?): TypingModel {
+        private fun open(model: ByteBuffer, language: String, valid: ByteBuffer?, list: Reader): TypingModel {
             require(model.limit() >= 36 && model.getInt(20) in 1..250)
             require(valid == null || valid.get(valid.limit() - 1) == 10.toByte())
-            return TypingModel(model, language, valid)
+            return TypingModel(model, language, valid, list)
         }
         fun asset(assets: AssetManager, language: String): TypingModel {
             fun read(name: String) = assets.openFd("typing/" + name).use { fd ->
                 FileInputStream(fd.fileDescriptor).use { mapped(it.channel, fd.startOffset, fd.declaredLength) }
             }
-            return open(read(language + ".hextm"), language, if (language == "en") read("en.valid") else null)
+            return assets.open("typing/never-suggest.tsv").bufferedReader().use { list ->
+                open(read(language + ".hextm"), language, if (language == "en") read("en.valid") else null, list)
+            }
         }
         fun file(file: File, language: String): TypingModel {
             fun read(f: File) = FileInputStream(f).use { mapped(it.channel, 0, f.length()) }
             val valid = File(file.parentFile, "en.valid")
-            return open(read(file), language, if (language == "en") read(valid) else null)
+            return File(file.parentFile, "never-suggest.tsv").bufferedReader().use { list ->
+                open(read(file), language, if (language == "en") read(valid) else null, list)
+            }
         }
     }
 }

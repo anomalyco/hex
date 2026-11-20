@@ -68,6 +68,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val translate = remember(revision) { speech.translation }
     val clean = remember(revision) { speech.clean }
     val autocorrect = remember(revision) { typing.autocorrect }
+    val swearWords = remember(revision) { typing.suggestSwearWords }
     val spatial = remember(revision) { typing.spatial }
     val popups = remember(revision) { typing.popups }
     val haptics = remember(revision) { typing.haptics }
@@ -159,6 +160,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry("Keyboard layout", if (selectedLayout == null) "Follows dictation · " + automatic.label else null,
                                 selectedLayout?.label ?: "Automatic", { open(Page.Layout) })
                             Rule(); Toggle("Autocorrect", "Fix typos when you press space", autocorrect) { typing.autocorrect = it }
+                            Rule(); Toggle("Suggest swear words", "Slurs are never suggested", swearWords) { typing.suggestSwearWords = it }
                             Rule(); Toggle("Key pop-ups", "Show the letter above your finger", popups) { typing.popups = it }
                             Rule(); Toggle("Haptics", "A light tap when you press a key", haptics) { typing.haptics = it }
                         }

@@ -14,6 +14,7 @@ adb push "$work/replay-dex.jar" "$dev/replay.jar" >/dev/null
 adb shell chmod 444 "$dev/replay.jar"
 apk=$(adb shell pm path ly.anoma.hex | tr -d '\r' | sed 's/^package://')
 adb push app/src/main/assets/typing/en.valid "$dev/en.valid" >/dev/null
+adb push app/src/main/assets/typing/never-suggest.tsv "$dev/never-suggest.tsv" >/dev/null
 for lang in en es; do
     adb push "app/src/main/assets/typing/$lang.hextm" "$dev/$lang.hextm" >/dev/null
     adb push "$T/bench/$lang.jsonl" "$dev/$lang.jsonl" >/dev/null
