@@ -64,6 +64,22 @@ The [shared iOS builder](build-typing-model.py), SHA-256 `cba009fe227632d9f8d176
 - [SCOWL](https://wordlist.aspell.net/) permits commercial redistribution subject to its [included notices](../../app/src/main/assets/licenses/scowl.txt). The English literal-validity list contains 45,303 unique spellings absent from the frequency model (440,142 bytes). It is built from the same public SCOWL archive, not from benchmark outputs or personal data. It cannot supply scored candidates or word probabilities.
 - [RLA-ES es_ES/es_MX sources](https://github.com/LibreOffice/dictionaries/tree/762abe74008b94b2ff06db6f4024b59a8254c467/es) use their **MPL 1.1** option. [APK credits, source links and modification notices](../../app/src/main/assets/licenses/credits.txt) · [full licence texts](../../app/src/main/assets/licenses/).
 
+The separate [never-suggest list](../../app/src/main/assets/typing/never-suggest.tsv) is
+adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13),
+**CC BY 4.0**. Hex reviewed the English, Spanish, German and Norwegian lists for keyboard use:
+
+- Keep identity slurs always suppressed. Common profanity and obscene slang are opt-in.
+  Add common missing forms explicitly, including plurals, verb inflections and spelling
+  variants. Match whole words; *assume* and *fuchsia* remain eligible completions.
+- Keep ordinary anatomy and health terms available: *anus, clitoris, fecal, genitals,
+  nipple, penis, rectum, semen, vagina, vulva*. Also omit ordinary senses such as
+  *escort, fingering, hardcore, scat, snatch, suck* and neutral sexuality or reporting
+  terms such as *sex, sexuality, rape*. Search-site phrases such as *jelly donut* or
+  *tied up* do not become keyboard bans. Retained two-word expressions match as pairs.
+- Apply each language's list to its own layout, plus unambiguous shared loanwords.
+  Spanish *negro* (black), German *dick* (thick), and Bokmål *fag* (subject) remain
+  available. An unscored listed spelling is protected when typed just like a model word.
+
 ## Reproduce on the Studio
 
 1. Export only the allowlisted synthetic IDs **where the iOS inputs already reside**. The exporter accepts `test-0…1999` (English) or `es-test-0…1999` (Spanish), empty context, no logged flag, and key-aligned finite x/y pairs. It exports only ID, intended text, synthetic hit keys/taps and the matching uncalibrated iOS output. Never transfer the mixed source, labels or personal offsets.
