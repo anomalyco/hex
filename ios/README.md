@@ -87,6 +87,13 @@ it on-device with Apple Speech, downloading the speech assets on first use
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
     insertion spacing and repeating backspace.
+  - **Mid-sentence dictation:** when the text before the cursor doesn't end a
+    sentence (`.` `!` `?` `…` or a line break), the keyboard lowercases the
+    dictation's first word, except "I" and its contractions, acronyms, words
+    with inner capitals, and words the dictation language's `UITextChecker`
+    dictionary doesn't know in lowercase (likely names). German keeps the case,
+    since its dictionary takes nouns in lowercase; so does a language with no
+    dictionary on the iPhone (`TranscriptFormatter.insertionText`).
   - **Full keyboard Hex key (Experiments › Full keyboard):** A tap, or a
     still hold of 0.35 s, starts dictation: in a warm session, else inside
     the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving

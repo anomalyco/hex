@@ -82,6 +82,18 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         spellCheckCandidates.first { available.contains($0) }
     }
 
+    /// The `UITextChecker` dictionary for a dictation language ("nb-NO", "fr-FR", "es-419"),
+    /// or nil when the iPhone has none for it.
+    static func spellCheckLanguage(forDictation identifier: String, available: [String]) -> String? {
+        if let code = matching(identifier)?.spellCheckLanguage(available: available) {
+            return code
+        }
+        let underscored = identifier.replacingOccurrences(of: "-", with: "_")
+        let base = underscored.split(separator: "_").first.map(String.init) ?? underscored
+        return [underscored, base].first { available.contains($0) }
+            ?? available.first { $0.hasPrefix(base + "_") }
+    }
+
     /// Whether the built-in English contractions and typo list apply.
     var usesEnglishFixes: Bool { self == .english }
 

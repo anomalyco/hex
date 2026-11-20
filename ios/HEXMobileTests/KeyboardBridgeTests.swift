@@ -154,6 +154,70 @@ final class KeyboardBridgeTests: XCTestCase {
         )
     }
 
+    func testDictationContinuingASentenceStartsLowercase() {
+        let words: Set<String> = ["that's", "the", "self", "a", "don't"]
+        func insert(_ text: String, after before: String?) -> String {
+            TranscriptFormatter.insertionText(for: text, beforeContext: before, afterContext: nil, isWord: words.contains)
+        }
+        XCTAssertEqual(insert("That's great.", after: "I think"), " that's great.")
+        XCTAssertEqual(insert("The plan works.", after: "and so "), "the plan works.")
+        XCTAssertEqual(insert("Self-driving cars.", after: "I like"), " self-driving cars.")
+        XCTAssertEqual(insert("A dog.", after: "We saw"), " a dog.")
+
+        // A sentence start keeps its capital.
+        for before in [nil, "", "   ", "Hello.", "Hello. ", "Really?", "Yes!", "Wait…", "Line one\n", "He said \"stop.\" "] {
+            XCTAssertTrue(TranscriptFormatter.startsSentence(after: before), String(describing: before))
+            XCTAssertEqual(insert("The end.", after: before).trimmingCharacters(in: .whitespaces), "The end.")
+        }
+        XCTAssertFalse(TranscriptFormatter.startsSentence(after: "Note: "))
+        XCTAssertFalse(TranscriptFormatter.startsSentence(after: "see (this)"))
+
+        // I, its contractions, acronyms, inner capitals and names keep theirs.
+        XCTAssertEqual(insert("I think so.", after: "and"), " I think so.")
+        XCTAssertEqual(insert("I'm here.", after: "and"), " I'm here.")
+        XCTAssertEqual(insert("I’ll go.", after: "and"), " I’ll go.")
+        XCTAssertEqual(insert("NASA launched it.", after: "and"), " NASA launched it.")
+        XCTAssertEqual(insert("McDonald's is open.", after: "and"), " McDonald's is open.")
+        XCTAssertEqual(insert("Sarah said so.", after: "and"), " Sarah said so.", "not a word in lowercase: a name")
+        XCTAssertEqual(insert("iPhone works.", after: "my"), " iPhone works.")
+
+        // Without a dictionary the case is left alone.
+        XCTAssertEqual(
+            TranscriptFormatter.insertionText(for: "That's it.", beforeContext: "and", afterContext: nil),
+            " That's it."
+        )
+    }
+
+    func testDictationSpacingNeverDoublesOrSplitsAnOpeningMark() {
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: " world", beforeContext: "Hello ", afterContext: nil), "world")
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: " world", beforeContext: "Hello", afterContext: nil), " world")
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: "world", beforeContext: "Hello\t", afterContext: nil), "world")
+        for opening in ["(", "[", "\"", "“", "‘", "«", "¿", "¡"] {
+            XCTAssertEqual(
+                TranscriptFormatter.insertionText(for: "Hola", beforeContext: "Dijo " + opening, afterContext: nil),
+                "Hola",
+                opening
+            )
+        }
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: ", right", beforeContext: "Okay", afterContext: nil), ", right")
+    }
+
+    func testDictationDictionaryFollowsTheDictationLanguage() {
+        let available = ["en_US", "nb", "de_DE", "fr_FR", "es"]
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "nb-NO", available: available), "nb")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "de-DE", available: available), "de_DE")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "es-419", available: available), "es")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "fr-CA", available: available), "fr_FR")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "en-GB", available: available), "en_US")
+        XCTAssertNil(KeyboardLanguage.spellCheckLanguage(forDictation: "he-IL", available: available))
+
+        // German capitalizes every noun, and its dictionary takes them in lowercase too.
+        XCTAssertFalse(TranscriptFormatter.lowercasesContinuations(in: "de-DE"))
+        XCTAssertFalse(TranscriptFormatter.lowercasesContinuations(in: "de_CH"))
+        XCTAssertTrue(TranscriptFormatter.lowercasesContinuations(in: "en-US"))
+        XCTAssertTrue(TranscriptFormatter.lowercasesContinuations(in: "nb-NO"))
+    }
+
     func testAppIntentMetadataContainsNoApplePlatformNames() throws {
         var texts = [
             String(localized: DictateWithHexIntent.title),

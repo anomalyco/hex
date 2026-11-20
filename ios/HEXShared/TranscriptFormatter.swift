@@ -63,22 +63,29 @@ nonisolated enum TranscriptFormatter {
         }
     }
 
-    /// Joins dictated text cleanly with existing text around the insertion cursor.
+    /// Joins dictated text cleanly with existing text around the insertion cursor: one space
+    /// between it and a word before it, and, mid-sentence, a lowercase first word
+    /// (`continuingSentence`). `isWord` says whether a lowercase word is in the dictation
+    /// language's dictionary; nil leaves the case alone.
     static func insertionText(
         for formatted: String,
         beforeContext: String?,
-        afterContext: String?
+        afterContext: String?,
+        isWord: ((String) -> Bool)? = nil
     ) -> String {
         guard !formatted.isEmpty else { return "" }
         var output = formatted
 
-        if let before = beforeContext, let lastChar = before.last {
-            let needsLeadingSpace = !lastChar.isWhitespace
-                && lastChar != "("
-                && lastChar != "["
-                && lastChar != "{"
-                && lastChar != "\""
-                && lastChar != "“"
+        if let isWord, !startsSentence(after: beforeContext) {
+            output = continuingSentence(output, isWord: isWord)
+        }
+
+        if beforeContext?.last?.isWhitespace ?? true {
+            // Never a second space after the one already there.
+            output = String(output.drop { $0 == " " || $0 == "\t" })
+        } else if let lastChar = beforeContext?.last {
+            let needsLeadingSpace = !"([{\"“‘«¿¡".contains(lastChar)
+                && !output.hasPrefix(" ")
                 && !output.hasPrefix("\n")
                 && !isClosingPunctuation(output.first)
             if needsLeadingSpace {
@@ -97,6 +104,40 @@ nonisolated enum TranscriptFormatter {
         }
 
         return output
+    }
+
+    /// Whether text typed before the cursor leaves the next words at a sentence start: none
+    /// (or only spaces), a line break, or `.` `!` `?` `…` (closing quotes or brackets
+    /// after them count too).
+    static func startsSentence(after before: String?) -> Bool {
+        guard let before else { return true }
+        for character in before.reversed() {
+            if character.isNewline { return true }
+            if character.isWhitespace || "\"”’')]»".contains(character) { continue }
+            return ".!?…。".contains(character)
+        }
+        return true
+    }
+
+    /// German and Luxembourgish capitalize every noun, and their dictionaries accept nouns in
+    /// lowercase, so a dictation there keeps its case rather than lose a noun's capital.
+    static func lowercasesContinuations(in language: String) -> Bool {
+        let code = Locale(identifier: language).language.languageCode?.identifier ?? language
+        return code != "de" && code != "lb"
+    }
+
+    /// Lowercases the first letter of words that continue a sentence, as typing would. Keeps
+    /// "I" and its contractions, acronyms ("NASA"), words with capitals inside ("McDonald's"),
+    /// and words whose lowercase form `isWord` doesn't know, which are likely names.
+    static func continuingSentence(_ text: String, isWord: (String) -> Bool) -> String {
+        guard let first = text.first, first.isUppercase else { return text }
+        let word = String(text.prefix { $0.isLetter || $0 == "'" || $0 == "’" })
+        if word == "I" || word.hasPrefix("I'") || word.hasPrefix("I’") { return text }
+        let letters = word.filter(\.isLetter)
+        if letters.count >= 2, letters == letters.uppercased() { return text }
+        if letters.dropFirst().contains(where: \.isUppercase) { return text }
+        guard isWord(word.lowercased()) else { return text }
+        return first.lowercased() + text.dropFirst()
     }
 
     private static func isClosingPunctuation(_ character: Character?) -> Bool {
