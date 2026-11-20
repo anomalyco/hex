@@ -100,6 +100,14 @@ it on-device with Apple Speech, downloading the speech assets on first use
     more than 10 pt first opens the style and **Return to** menu; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
+  - **Push to talk:** Holding still for 0.35 s on the full keyboard's Hex key
+    or the dictation bar's **Dictate** starts dictation at once with a light
+    haptic (Experiments › Haptics), and lifting the finger finishes it as
+    **Done** does; a quick tap still starts it and **Done** finishes it. On
+    the Hex key, sliding more than 10 pt before the hold fires opens the menu
+    instead, and once dictation has started, moving the finger changes
+    nothing. Push to talk needs dictation in the keyboard (a warm session or
+    in-keyboard dictation); a hold that opens Hex is only a tap.
   - **Apple Intelligence cleanup (Experiments › Clean up with Apple
     Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly

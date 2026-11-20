@@ -211,7 +211,8 @@ Taps that aren't text: `action`:
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
   (`style`, `from`: `hex_menu` or `recording_panel`), `return_app` (`app`),
   `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),
-  `dictation_stop`, `dictation_cancel`;
+  `dictation_stop` (`from: hex_key_release` when lifting a push-to-talk hold
+  ends it), `dictation_cancel`;
 - `next_keyboard` (strip chip), `globe`, `undo_dictation` (`applied: false` when
   the text had changed), `touches_cancelled` (`count`).
 

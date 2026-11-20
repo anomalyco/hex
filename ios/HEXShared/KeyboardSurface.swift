@@ -570,6 +570,14 @@ struct KeyboardSurfaceView: View {
     /// the live scope mounted at rest.
     var defersDotScopeUntilActive = false
 
+    /// Push to talk on the well: the press, on the Hex key's state machine.
+    @State private var hold = HexKeyGesture()
+    @State private var holdTimer: Task<Void, Never>?
+    @State private var pressBegan = false
+    /// This press's hold started the dictation, so the Dictate button's tap action skips it.
+    @State private var holdTookPress = false
+    @GestureState private var isPressingWell = false
+
     private static let wellHeight: CGFloat = 44
     private static let controlHeight: CGFloat = 34
     private static let wellInset: CGFloat = 5
@@ -993,6 +1001,7 @@ struct KeyboardSurfaceView: View {
 
             // Single permanently mounted idle trigger (never swapped across 3 Button branches).
             Button {
+                guard !holdTookPress else { return }
                 model.onKeyFeedback?()
                 handleIdleStageTap()
             } label: {
@@ -1015,6 +1024,7 @@ struct KeyboardSurfaceView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(spec.title)
+            .accessibilityHint(canHoldToTalk ? "Hold to talk, release to finish" : "")
             .hexControlReveal(
                 showIdleTrigger,
                 reduceMotion: reduceMotion,
@@ -1025,6 +1035,63 @@ struct KeyboardSurfaceView: View {
         }
         .frame(height: Self.wellHeight)
         .clipShape(Capsule())
+        // On the well, not the Dictate button: the button stops taking touches once recording shows.
+        .simultaneousGesture(pushToTalk)
+        .onChange(of: isPressingWell) { _, pressing in
+            guard !pressing else { return }
+            // A cancelled press never reaches onEnded; an ended one already reset.
+            DispatchQueue.main.async {
+                guard pressBegan else { return }
+                holdTimer?.cancel()
+                hold.cancel()
+                pressBegan = false
+            }
+        }
+    }
+
+    /// The well dictates in the keyboard (a warm session or in-keyboard dictation), so a
+    /// hold there can be push to talk; opening Hex or setup stays a tap.
+    private var canHoldToTalk: Bool {
+        guard model.hasFullAccess, model.stagePhase == .idle || model.stagePhase == .failed else { return false }
+        return (model.isWarmAvailable && model.stagePhase != .failed) || model.onLocalDictateTap != nil
+    }
+
+    /// Hold still on Dictate for `HexKeyGesture.holdDuration`: dictation starts with a light
+    /// tap, and lifting the finger finishes it as Done does. A quick tap keeps tap to start.
+    private var pushToTalk: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($isPressingWell) { _, pressing, _ in pressing = true }
+            .onChanged { value in
+                guard pressBegan else {
+                    pressBegan = true
+                    holdTookPress = false
+                    guard canHoldToTalk else { return }
+                    hold.touchDown(at: value.startLocation)
+                    holdTimer?.cancel()
+                    holdTimer = Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(HexKeyGesture.holdDuration))
+                        guard !Task.isCancelled, hold.holdElapsed() == .hold else { return }
+                        holdTookPress = true
+                        model.onKeyFeedback?()
+                        handleIdleStageTap()
+                    }
+                    return
+                }
+                if hold.touchMoved(to: value.location) == .openMenu {
+                    // Moved away: not a hold.
+                    holdTimer?.cancel()
+                }
+            }
+            .onEnded { _ in
+                holdTimer?.cancel()
+                holdTimer = nil
+                pressBegan = false
+                if hold.touchUp() == .release {
+                    model.onStopTap?()
+                    // After the button's own touch-up action, which this press must not repeat.
+                    DispatchQueue.main.async { holdTookPress = false }
+                }
+            }
     }
 
     private func handleIdleStageTap() {

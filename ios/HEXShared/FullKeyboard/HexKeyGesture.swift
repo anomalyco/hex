@@ -1,10 +1,11 @@
 import CoreGraphics
 import Foundation
 
-/// The full keyboard's Hex key as a pure state machine. A tap, or a still hold of
-/// `holdDuration`, dictates; moving more than `slop` before either opens the style menu,
-/// and the release picks the row under the finger. Once the hold fires, moves and the
-/// release are ignored.
+/// The full keyboard's Hex key as a pure state machine, also the dictation bar's push to
+/// talk. A tap dictates (Done finishes it); a still hold of `holdDuration` dictates while
+/// held, and releasing finishes it (push to talk). Moving more than `slop` before either
+/// opens the style menu, and the release picks the row under the finger. Once the hold
+/// fires, moves are ignored.
 nonisolated struct HexKeyGesture: Equatable, Sendable {
     static let holdDuration: TimeInterval = 0.35
     static let slop: CGFloat = 10
@@ -23,6 +24,8 @@ nonisolated struct HexKeyGesture: Equatable, Sendable {
         case openMenu
         case dragMenu
         case releaseMenu
+        /// The finger lifted after a hold: finish the dictation it started.
+        case release
     }
 
     private(set) var state: State = .idle
@@ -57,7 +60,8 @@ nonisolated struct HexKeyGesture: Equatable, Sendable {
         let output: Output = switch state {
         case .menu: .releaseMenu
         case .pressing: .tap
-        case .idle, .fired: .ignored
+        case .fired: .release
+        case .idle: .ignored
         }
         state = .idle
         return output
