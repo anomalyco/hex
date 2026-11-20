@@ -50,7 +50,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     setup** button (`hex-dictation://keyboard/setup`), which opens the app's
     setup sheet. Home's status line counts the setup steps left ("Finish
     setup · 1 step ›", else "Ready") and opens the same sheet: live status for
-    the keyboard, Full Access, the microphone, and the speech model, a field to
+    the keyboard, Full Access, the microphone ("For dictation" with
+    **Continue**, which iOS's prompt follows, until it's asked; never a button
+    that says Allow, per App Review 5.1.1(iv)), and the speech model, a field to
     switch to Hex in while Full Access is unconfirmed, and **Open Settings**
     (Hex's page in Settings) while the keyboard isn't ready. Full Access shows
     as on once the keyboard has run with it (`keyboard.fullAccessSeenAt`): iOS
@@ -215,7 +217,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
-    and apart from Learn how I type. For testing and training prediction and
+    and apart from Learn how I type. Its description says what it records, and
+    turning it on asks first in a dialog (App Review 2.5.14): each tap and the
+    text you type or dictate with Hex, including the text around the cursor,
+    for 14 days, on this iPhone, to export or delete, never password, code or
+    card fields. **Turn On** turns it on; **Cancel** leaves it off. Turning it
+    off doesn't ask. For testing and training prediction and
     per-user touch models: the keyboard writes every touch on Hex's keys (raw
     position, radius, `UITouch` timestamp, the key it resolved to), every layout
     with each key's frame and touch target, what each key did to the text
@@ -232,8 +239,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
 - **Settings (`ContentView`, `SettingsPages.swift`):** Home fits one screen: the
   Hex header, one status line ("Ready" with a check, or "Finish setup · 1 step ›"),
   Dictate, and four rows that each open a short page, then **Keyboard settings**
-  (Hex's page in iOS Settings) and **Run setup again**. Each row has a one-line
-  description at most. The pages:
+  (Hex's page in iOS Settings) and **Run setup again**, and last **Privacy
+  policy**, **Support** and **Acknowledgements**. Privacy policy (App Review
+  5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
+  `https://dev.anoma.ly/hex` until the production site serves
+  `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
   - **Dictation:** Style, Dictation language, Translate what I say, Clean up
     what I say, Custom vocabulary (its list below the switch), Keep mic warm,
     and Always use iPhone microphone.
@@ -249,10 +259,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     with Apple Intelligence.
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
-  added, Full Access not confirmed yet), `setup-sheet`, and
+  added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
+  (before iOS has asked for the microphone), and
   `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
   its page's switches to the App Group: off by default, on with `-on`.
-  `-end` starts the page scrolled to the bottom.
+  `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
+  opens Record typing logs' consent dialog.
 - **Dictation language (Settings › Dictation › Dictation language, iOS 26+):** Automatic by
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone

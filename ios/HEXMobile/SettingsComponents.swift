@@ -216,9 +216,11 @@ struct SettingsSegments<Item: Hashable>: View {
 /// Simulator scenes for the home screen and its pages (`--snap-state <name>`):
 ///
 /// - `settings-home`: home, everything ready. `setup`: home, keyboard added but Full Access
-///   not confirmed yet. `setup-sheet`: the same, with the setup sheet open.
+///   not confirmed yet. `setup-sheet`: the same, with the setup sheet open;
+///   `setup-sheet-microphone`: the sheet before iOS has asked for the microphone.
 /// - `settings-<page>` opens a page (`dictation`, `keyboard`, `privacy`, `experiments`) with
 ///   every switch at its default; `-on` turns the switches on, `-end` starts scrolled to the end.
+///   `settings-privacy-confirm` opens Record typing logs' consent dialog.
 ///
 /// `KeyboardSetupMonitor.refresh` and `DictationController` supply the matching state.
 enum SettingsSnapshotFixture {
@@ -226,7 +228,7 @@ enum SettingsSnapshotFixture {
         let args = ProcessInfo.processInfo.arguments
         guard let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count else { return nil }
         let value = args[idx + 1]
-        return value.hasPrefix("settings-") || value == "setup-sheet" ? value : nil
+        return value.hasPrefix("settings-") || value.hasPrefix("setup-sheet") ? value : nil
     }()
 
     static var initialPath: [SettingsPage] {
@@ -236,7 +238,12 @@ enum SettingsSnapshotFixture {
     }
 
     static var showsSetupSheet: Bool {
-        scene == "setup-sheet"
+        scene?.hasPrefix("setup-sheet") == true
+    }
+
+    /// `settings-privacy-confirm`: Record typing logs' consent dialog, open.
+    static var confirmsTypingLogs: Bool {
+        scene?.hasSuffix("-confirm") == true
     }
 
     static var scrollsToEnd: Bool {

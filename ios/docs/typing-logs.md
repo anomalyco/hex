@@ -1,11 +1,12 @@
 # Typing logs (Record typing logs)
 
-Experiments › **Record typing logs** (off by default, App Group key
+Settings › Privacy › Advanced › **Record typing logs** (off by default, asks for
+consent in a dialog before it turns on, App Group key
 `experiments.typingLogs`) makes Hex's keyboard write raw logs of everything it
 sees: every touch with its position and timing, the key it pressed, what that
 did to the text, the text around the cursor, and dictations. They are for
 testing and training keyboard prediction and per-user touch models on a Mac.
-Nothing is sent anywhere; Experiments › Typing logs shares a day's file (or
+Nothing is sent anywhere; Privacy › Advanced › Typing logs shares a day's file (or
 all of them) through the share sheet, for example by AirDrop.
 
 It is separate from Learn how I type, which keeps only word pairs and per-key
