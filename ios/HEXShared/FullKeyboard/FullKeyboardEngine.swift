@@ -127,6 +127,9 @@ final class FullKeyboardEngine {
         touches.values.contains(where: \.isTrackpad)
     }
 
+    /// Settings › Key pop-ups. Off: pressed keys only darken, as with iOS's Character Preview off.
+    var showsKeyPopups = true
+
     /// The key whose balloon shows: the newest character still held (hidden while an accent menu is up).
     var previewKey: KeyboardKey? {
         guard activeAccentMenu == nil else { return nil }
