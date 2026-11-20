@@ -12,6 +12,7 @@ struct FullKeyboardSettings {
         static let fullKeyboard = "experiments.fullKeyboard"
         static let autocorrect = "settings.keyboardAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
+        static let haptics = "settings.keyboardHaptics"
     }
 
     private let defaults: UserDefaults?
@@ -36,6 +37,12 @@ struct FullKeyboardSettings {
     var keyPopups: Bool {
         get { defaults?.object(forKey: Key.keyPopups) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.keyPopups) }
+    }
+
+    /// A light tap under your finger for each key press. On by default.
+    var haptics: Bool {
+        get { defaults?.object(forKey: Key.haptics) as? Bool ?? true }
+        nonmutating set { defaults?.set(newValue, forKey: Key.haptics) }
     }
 
     /// Simulator scenes pass `--experiment-full-keyboard` to turn the experiment on.

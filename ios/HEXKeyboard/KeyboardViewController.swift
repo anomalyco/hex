@@ -208,6 +208,7 @@ final class KeyboardViewController: UIInputViewController {
             settings: [
                 TypingLogField("autocorrect", .bool(FullKeyboardSettings().autocorrect)),
                 TypingLogField("key_popups", .bool(FullKeyboardSettings().keyPopups)),
+                TypingLogField("haptics", .bool(FullKeyboardSettings().haptics)),
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),
                 TypingLogField("cleanupTagger", .bool(CleanupTaggerSettings().isEnabled)),
                 TypingLogField("hexKeyPlacement", .string(HexKeyPlacement.current.rawValue)),
@@ -391,7 +392,9 @@ final class KeyboardViewController: UIInputViewController {
                 target: DocumentProxyTextTarget { [weak self] in self?.textDocumentProxy }
             )
             keyboard.hostController = self
-            keyboard.allowsHaptics = { [weak self] in self?.hasFullAccess ?? false }
+            keyboard.allowsHaptics = { [weak self] in
+                (self?.hasFullAccess ?? false) && FullKeyboardSettings().haptics
+            }
             keyboard.onTextEdit = { [weak self] in self?.observeDictationEdits(fromKeys: true) }
             keyboard.onUndoDictation = { [weak self] in
                 self?.dictationEdits.didUndo()
