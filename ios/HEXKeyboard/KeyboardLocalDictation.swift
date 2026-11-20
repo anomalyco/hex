@@ -193,8 +193,9 @@ final class KeyboardLocalDictation {
                 let heard = try await KeyboardSpeech.transcribe(url, hints: hints)
                 try? FileManager.default.removeItem(at: url)
                 let corrected = DictationCorrections.apply(fixes, to: heard)
-                let translated = await DictationTranslator.translateIfEnabled(corrected)
-                let text = translated ?? corrected
+                let cleaned = await CleanupTagger.cleanIfEnabled(corrected, style: KeyboardBridge().style)
+                let translated = await DictationTranslator.translateIfEnabled(cleaned)
+                let text = translated ?? cleaned
                 KeyboardProbeLog.shared.write("transcribed in \(String(format: "%.2f", Date().timeIntervalSince(started))) s: \(text.count) chars \(KeyboardProbeLog.memory())")
                 guard let self, !Task.isCancelled else { return }
                 // A translation's words can't be compared with what was heard, so it isn't learned from.

@@ -160,6 +160,7 @@ final class KeyboardViewController: UIInputViewController {
         if KeyboardLocalDictation.isSupported {
             viewModel.onLocalDictateTap = { [weak self] in
                 guard let self else { return }
+                CleanupTagger.prepareIfEnabled(style: self.bridge.style)
                 self.localDictation.start(in: self.view, allowBluetoothMic: self.bridge.allowBluetoothMic)
             }
         }

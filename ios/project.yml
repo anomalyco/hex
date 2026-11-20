@@ -101,6 +101,7 @@ targets:
       base:
         APPLICATION_EXTENSION_API_ONLY: YES
         CODE_SIGN_ENTITLEMENTS: HEXKeyboard/HEXKeyboard.entitlements
+        COREML_CODEGEN_LANGUAGE: None
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO

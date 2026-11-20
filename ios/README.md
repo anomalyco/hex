@@ -75,6 +75,26 @@ it on-device with Apple Speech, downloading the speech assets on first use
     misheard words and spoken self-corrections, within a 2 s budget. A
     timeout, error, empty or implausible output keeps the raw transcript, and
     the toggle is disabled with a reason when Apple Intelligence is unusable.
+  - **Clean up what I say (Experiments › Clean up what I say):** Off by
+    default. For every style but `Verbatim`, Hex's dictation cleanup tagger
+    labels each spoken word KEEP or DELETE on the iPhone and drops ums,
+    repeats, and the words a spoken correction replaces ("3pm, actually 4pm"
+    becomes "4pm"); a word goes only above P(DELETE) 0.98.
+    `CleanupReconstruction`, a port of the tagger's `reconstruct.js`, then
+    repairs the commas and capitals next to a deletion. It never adds,
+    reorders, or changes words. It runs after transcription and learned fixes
+    (in the app also after custom vocabulary), before Apple Intelligence
+    cleanup, translation, and formatting, in in-keyboard dictation and in the
+    app. The tagger is a BERT L-4/H-512 token classifier fine-tuned from
+    Google's Apache-2.0 `bert_uncased_L-4_H-512_A-8` on generated examples,
+    shipped as an int8 Core ML model (28.5 MB) with its WordPiece vocabulary
+    once, in `HEXKeyboard.appex` (`HEXKeyboard/CleanupTagger/`). The app loads
+    it from there. `CleanupTokenizer` matches Hugging Face's `BertTokenizer`,
+    including its Unicode 8.0 character classes. The model loads on the Neural
+    Engine or CPU when a dictation starts recording with the experiment on,
+    stays loaded, and is freed on a memory warning. Cleanup gets 150 ms; a
+    timeout, an error, or a result with no words left keeps the transcript as
+    heard.
   - **Custom vocabulary (Experiments › Custom vocabulary):** Off by default.
     A local list of up to 100 names and phrases, applied to every engine. After
     transcription, matching words are rewritten to the listed spelling across
@@ -151,9 +171,15 @@ Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2
 
 ```sh
 cd ios
+scripts/fetch-cleanup-model.sh   # the cleanup tagger's Core ML model, kept out of git
 xcodegen generate
 xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>"
 ```
+
+The cleanup tagger's model (`HEXKeyboard/CleanupTagger/HexCleanupTagger.mlpackage`,
+25 MB) is a GitHub release asset (`ios-model-cleanup-tagger-1`), not a git file.
+`fetch-cleanup-model.sh` downloads it and checks its SHA-256; Xcode Cloud runs it
+from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
 
 ## Simulator vs. Physical iPhone Proof Limits
 
@@ -183,6 +209,21 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   `textDidChange` after the keyboard's own edits, varies by app and is
   unverified on a physical iPhone; when the context is cut short or missing,
   the dictation is settled on where it was last seen or not learned from.
+- **Clean up what I say:** `CleanupTaggerTests` check, in the simulator
+  (CPU only), the tokenizer against Hugging Face on 1,891 words,
+  reconstruction against `reconstruct.js` on 670 cases, and the model on the
+  137 hand-written sentences at 0.98. Its labels match the fp32 checkpoint's
+  on all 1,128 words, and 136 of 137 outputs match the ONNX int8 pipeline.
+  The other sentence differs on two words within 0.01 of the threshold,
+  which ONNX's int8 activations keep and the checkpoint deletes. In the
+  simulator the model loads in about 150 ms, cleans a sentence in about
+  3 ms (p95 under 8 ms), and adds about 3 MB to the process footprint,
+  because the CPU leaves the int8 weights memory-mapped from the bundle. The
+  simulator's GPU path took 0.8 s to load and added 30 MB, so Hex doesn't use
+  the GPU. Neural Engine load time, latency, and the keyboard extension's
+  footprint next to Apple Speech are unmeasured on an iPhone;
+  `keyboard-capture-probe.log` records the footprint around each in-keyboard
+  dictation.
 - **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
   compiles or tests the iOS targets, so these checks run only in a local
   `xcodebuild test`.
