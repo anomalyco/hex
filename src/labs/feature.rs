@@ -9,6 +9,7 @@ pub enum Feature {
     VoiceFilter,
     Playground,
     LiveText,
+    FasterLiveText,
     FailureNotices,
     LiveTyping,
     LiveChapters,
@@ -89,11 +90,12 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 81] = [
+    pub const ALL: [Self; 82] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
         Self::LiveText,
+        Self::FasterLiveText,
         Self::FailureNotices,
         Self::LiveTyping,
         Self::LiveChapters,

@@ -15,6 +15,21 @@ const MAX_KEYS: u64 = 1 << 20;
 const MAX_TENSORS: u64 = 1 << 20;
 const MAX_STRING: u64 = 1 << 24;
 const MAX_ARRAY: u64 = 1 << 26;
+/// The longest int32 array kept, such as a Parakeet model's chunk menus.
+const MAX_MENU: u64 = 4_096;
+/// The Parakeet keys a buffered stream's frame size comes from. Only these
+/// scalars are kept: the header of a speech model is mostly tokenizer data.
+const STREAM_SCALARS: [&str; 3] = [
+    "stt.parakeet.encoder.subsampling_factor",
+    "stt.frontend.hop_length",
+    "stt.frontend.sample_rate",
+];
+/// The Parakeet keys its chunk menus come from, and the only int32 arrays
+/// kept.
+const STREAM_MENUS: [&str; 2] = [
+    "stt.parakeet.encoder.att_chunk_chunk_choices",
+    "stt.parakeet.encoder.att_chunk_right_choices",
+];
 const MAX_DIMS: u32 = 8;
 const DEFAULT_ALIGNMENT: u64 = 32;
 
@@ -78,6 +93,12 @@ pub(crate) struct GgufHeader {
     pub(crate) strings: BTreeMap<String, String>,
     pub(crate) bools: BTreeMap<String, bool>,
     pub(crate) string_arrays: BTreeMap<String, Vec<String>>,
+    /// The Parakeet scalars a buffered stream's frame size comes from
+    /// (`STREAM_SCALARS`); empty for a model without them.
+    pub(crate) u32s: BTreeMap<String, u32>,
+    /// The Parakeet chunk menus (`STREAM_MENUS`), in encoder frames; empty
+    /// for a model without them, such as a cache-aware one.
+    pub(crate) int32_arrays: BTreeMap<String, Vec<i32>>,
     /// Tensor count per ggml type id.
     pub(crate) tensor_types: BTreeMap<u32, usize>,
     /// Where the tensor data ends: the file must be at least this long.
@@ -172,8 +193,14 @@ impl<R: Read + Seek> Reader<R> {
                     let value = self.u8()? != 0;
                     header.bools.insert(key, value);
                 }
-                4 if key == "general.alignment" => {
-                    alignment = u64::from(self.u32()?);
+                4 => {
+                    let value = self.u32()?;
+                    if key == "general.alignment" {
+                        alignment = u64::from(value);
+                    }
+                    if STREAM_SCALARS.contains(&key.as_str()) {
+                        header.u32s.insert(key, value);
+                    }
                 }
                 9 => {
                     let item = self.u32()?;
@@ -187,6 +214,16 @@ impl<R: Read + Seek> Reader<R> {
                             values.push(self.string()?);
                         }
                         header.string_arrays.insert(key, values);
+                    } else if item == 5 && count <= MAX_MENU && STREAM_MENUS.contains(&key.as_str())
+                    {
+                        // A streaming model's chunk menus are a handful of
+                        // frames; anything longer is not one, so it is
+                        // skipped rather than held in memory.
+                        let mut values = Vec::new();
+                        for _ in 0..count {
+                            values.push(self.i32()?);
+                        }
+                        header.int32_arrays.insert(key, values);
                     } else {
                         for _ in 0..count {
                             self.skip_value(item)?;
@@ -285,6 +322,10 @@ impl<R: Read + Seek> Reader<R> {
         Ok(u32::from_le_bytes(self.array()?))
     }
 
+    fn i32(&mut self) -> Result<i32> {
+        Ok(i32::from_le_bytes(self.array()?))
+    }
+
     fn u64(&mut self) -> Result<u64> {
         Ok(u64::from_le_bytes(self.array()?))
     }
@@ -337,6 +378,36 @@ pub(crate) mod tests {
         bools: &[(&str, bool)],
         tensors: &[(&str, u32, u64)],
     ) -> Vec<u8> {
+        gguf_with(&GgufParts {
+            strings,
+            arrays,
+            bools,
+            tensors,
+            ..GgufParts::default()
+        })
+    }
+
+    /// The metadata a streaming model carries that the reader keeps for its
+    /// chunk menus: integer scalars and int32 arrays.
+    #[derive(Default)]
+    pub(crate) struct GgufParts<'a> {
+        pub(crate) strings: &'a [(&'a str, &'a str)],
+        pub(crate) arrays: &'a [(&'a str, &'a [&'a str])],
+        pub(crate) bools: &'a [(&'a str, bool)],
+        pub(crate) tensors: &'a [(&'a str, u32, u64)],
+        pub(crate) u32s: &'a [(&'a str, u32)],
+        pub(crate) int32_arrays: &'a [(&'a str, &'a [i32])],
+    }
+
+    pub(crate) fn gguf_with(parts: &GgufParts<'_>) -> Vec<u8> {
+        let GgufParts {
+            strings,
+            arrays,
+            bools,
+            tensors,
+            u32s,
+            int32_arrays,
+        } = *parts;
         fn string(out: &mut Vec<u8>, text: &str) {
             out.extend((text.len() as u64).to_le_bytes());
             out.extend(text.as_bytes());
@@ -345,7 +416,8 @@ pub(crate) mod tests {
         out.extend(MAGIC);
         out.extend(3_u32.to_le_bytes());
         out.extend((tensors.len() as u64).to_le_bytes());
-        out.extend(((strings.len() + arrays.len() + bools.len() + 1) as u64).to_le_bytes());
+        let keys = strings.len() + arrays.len() + bools.len() + u32s.len() + int32_arrays.len() + 1;
+        out.extend((keys as u64).to_le_bytes());
         // An unread u64 value the reader has to skip.
         string(&mut out, "general.file_type");
         out.extend(10_u32.to_le_bytes());
@@ -368,6 +440,20 @@ pub(crate) mod tests {
             string(&mut out, key);
             out.extend(7_u32.to_le_bytes());
             out.push(u8::from(*value));
+        }
+        for (key, value) in u32s {
+            string(&mut out, key);
+            out.extend(4_u32.to_le_bytes());
+            out.extend(value.to_le_bytes());
+        }
+        for (key, values) in int32_arrays {
+            string(&mut out, key);
+            out.extend(9_u32.to_le_bytes());
+            out.extend(5_u32.to_le_bytes());
+            out.extend((values.len() as u64).to_le_bytes());
+            for value in *values {
+                out.extend(value.to_le_bytes());
+            }
         }
         let mut offset = 0_u64;
         for (name, kind, elements) in tensors {
@@ -421,6 +507,41 @@ pub(crate) mod tests {
                 .is_empty()
         );
         assert!(!header.uses_k_quants());
+    }
+
+    /// A streaming model's frame size is three integer keys, and its chunk
+    /// menus are int32 arrays; the reader keeps both without the weights.
+    #[test]
+    fn a_streaming_models_frame_size_and_chunk_menus_are_read() {
+        let header = read_bytes(gguf_with(&GgufParts {
+            u32s: &[
+                ("stt.parakeet.encoder.subsampling_factor", 8),
+                ("stt.frontend.hop_length", 160),
+                ("stt.frontend.sample_rate", 16_000),
+            ],
+            int32_arrays: &[
+                ("stt.parakeet.encoder.att_chunk_left_choices", &[70]),
+                (
+                    "stt.parakeet.encoder.att_chunk_chunk_choices",
+                    &[1, 2, 7, 13],
+                ),
+                (
+                    "stt.parakeet.encoder.att_chunk_right_choices",
+                    &[0, 1, 2, 3, 4, 7, 13],
+                ),
+            ],
+            ..GgufParts::default()
+        }))
+        .unwrap();
+        assert_eq!(header.u32s["stt.frontend.hop_length"], 160);
+        assert_eq!(
+            header.int32_arrays["stt.parakeet.encoder.att_chunk_chunk_choices"],
+            [1, 2, 7, 13]
+        );
+        assert_eq!(
+            header.int32_arrays["stt.parakeet.encoder.att_chunk_right_choices"],
+            [0, 1, 2, 3, 4, 7, 13]
+        );
     }
 
     #[test]

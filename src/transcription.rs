@@ -31,6 +31,7 @@ pub(crate) mod preparation;
 pub(crate) mod service;
 pub(crate) mod speech_detector;
 pub(crate) mod stream;
+pub(crate) mod stream_tuning;
 pub(crate) mod subtitle_credits;
 pub(crate) mod transcript;
 
@@ -240,6 +241,14 @@ impl WarmTranscriber {
         match &self.active {
             Some(Transcriber::Gguf(model)) => model.stream_options(),
             _ => None,
+        }
+    }
+
+    /// Re-probes the live stream when Labs › Faster live text or an env
+    /// override changed, so the next capture streams with it.
+    pub(crate) fn refresh_stream(&mut self) {
+        if let Some(Transcriber::Gguf(model)) = &mut self.active {
+            model.refresh_stream();
         }
     }
 

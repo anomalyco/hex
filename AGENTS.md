@@ -168,7 +168,13 @@ substitute for source inspection or a second roadmap.
 - `transcription/gguf_session`: the `transcribe.cpp` session owner shared by `parakeet` and
   `transcription/local_transcriber`; it recreates the native session around each run (and
   each live stream) so inference scratch stays bounded, and owns chunked
-  long-audio transcription.
+  long-audio transcription. `transcription/stream_tuning` owns the stream
+  geometry it probes: `HEX_STREAM_CHUNK_MS`/`HEX_STREAM_RIGHT_MS`, else Labs ›
+  Faster live text's tuple chosen from the model's GGUF chunk menus, else the
+  model's default. Only a probe that passed the GPU and capability gates may
+  be re-probed, a change is adopted while nothing records, a failed re-probe
+  keeps the geometry in hand, and a tuple the model's menu rejects falls back
+  to the default instead of disabling streaming.
 - `transcription/speech_detector`: the optional Silero voice activity detector, loaded once on
   the CPU and downloaded in the background, that keeps speechless dictation
   captures and meeting chunks away from the transcription models.

@@ -288,6 +288,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: provisional words beside the HUD while dictating",
     ),
     key(
+        "labs.faster_live_text",
+        Kind::Bool,
+        "Labs: live words with a shorter lookahead, so they appear sooner at a little more GPU work",
+    ),
+    key(
         "labs.failure_notices",
         Kind::Bool,
         "Labs: when a dictation fails, show why for a few seconds beside the HUD",

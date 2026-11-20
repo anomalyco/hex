@@ -14,6 +14,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use crate::transcription::models::{
     AUTO_LANGUAGE, ModelDefinition, ModelRuntime, TranscriptionSelection,
 };
+use crate::transcription::stream_tuning::{StreamCache, StreamMenus, StreamTuning};
 use crate::transcription::transcript::TimestampLevel;
 
 /// 8 s of audio reaches every stream window shape a dictation can use (the
@@ -171,6 +172,17 @@ pub(crate) struct OfflineGgufSession {
     /// The file's architecture, read once: Whisper trims its near-silent
     /// edges before a run.
     architecture: String,
+    /// What this model streams with, and the tuning it was probed for. Its
+    /// tuning stays unset until a probe ran past this session's gates.
+    streaming: StreamCache,
+    /// The Parakeet chunk menus the file carries, read when a tuning needs
+    /// them; `None` until then, and when a model has none.
+    stream_menus: Option<StreamMenus>,
+    /// Whether `stream_menus` was read, so a lab turned on later reads the
+    /// header lazily instead of on every load.
+    stream_menus_read: bool,
+    /// The model file's path, kept for that lazy read.
+    stream_path: Option<std::path::PathBuf>,
 }
 
 impl OfflineGgufSession {
@@ -194,6 +206,10 @@ impl OfflineGgufSession {
             last_run: None,
             vocabulary,
             architecture,
+            streaming: StreamCache::default(),
+            stream_menus: None,
+            stream_menus_read: false,
+            stream_path: None,
         })
     }
 
@@ -244,20 +260,21 @@ impl OfflineGgufSession {
     /// Streams only on a GPU (Metal, Vulkan): a CPU stream re-encodes each
     /// overlapping window and would cost several times the offline compute.
     /// The probe also prewarms the stream graph (see
-    /// [`STREAM_PREWARM_SAMPLES`]). Without an extension
-    /// Parakeet buffers with its largest left, chunk, and right context
-    /// (Unified English: 5.6 s, 1.04 s, 1.04 s), its most accurate and least
-    /// compute-intensive setting. `HEX_STREAMING=0` keeps the model offline
-    /// and `HEX_STREAMING=1` streams on any device (diagnostics and CI);
-    /// `HEX_STREAM_CHUNK_MS` overrides the chunk and right context.
-    pub(crate) fn probe_stream(
-        &mut self,
-        options: &transcribe_cpp::RunOptions,
-        architecture: &str,
-    ) -> Option<transcribe_cpp::StreamOptions> {
+    /// [`STREAM_PREWARM_SAMPLES`]). Without an extension, or with one the
+    /// model's menu rejects, Parakeet buffers with its largest left, chunk,
+    /// and right context (Unified English: 5.6 s, 1.04 s, 1.04 s), its most
+    /// accurate and least compute-intensive setting. `HEX_STREAMING=0` keeps
+    /// the model offline and `HEX_STREAMING=1` streams on any device
+    /// (diagnostics and CI); `HEX_STREAM_CHUNK_MS` and `HEX_STREAM_RIGHT_MS`
+    /// override the geometry, and Labs › Faster live text picks a shorter
+    /// tuple from the model's own menus.
+    ///
+    /// Passing these gates is what lets [`Self::refresh_stream`] re-probe
+    /// later: a session that fails one never streams at all.
+    pub(crate) fn probe_stream(&mut self, options: &transcribe_cpp::RunOptions, model_path: &Path) {
         use transcribe_cpp::DeviceType;
         let forced = match std::env::var("HEX_STREAMING").as_deref() {
-            Ok("0") => return None,
+            Ok("0") => return,
             Ok("1") => true,
             _ => false,
         };
@@ -266,52 +283,123 @@ impl OfflineGgufSession {
             .capabilities()
             .is_ok_and(|capabilities| capabilities.supports_streaming)
         {
-            return None;
+            return;
         }
-        let device_type = self.model.device().ok()?.device_type;
-        if !forced && !matches!(device_type, DeviceType::Gpu | DeviceType::Igpu) {
-            return None;
-        }
-        let chunk_ms = std::env::var("HEX_STREAM_CHUNK_MS")
-            .ok()
-            .and_then(|value| value.parse::<i32>().ok());
-        let stream_options = transcribe_cpp::StreamOptions {
-            family: (architecture == "parakeet" && chunk_ms.is_some()).then_some(
-                transcribe_cpp::StreamExtension::ParakeetBuffered(
-                    transcribe_cpp::ParakeetBufferedStreamOptions {
-                        left_ms: None,
-                        chunk_ms,
-                        right_ms: chunk_ms,
-                    },
-                ),
-            ),
-            ..Default::default()
+        let Some(device_type) = self.model.device().ok().map(|device| device.device_type) else {
+            return;
         };
+        if !forced && !matches!(device_type, DeviceType::Gpu | DeviceType::Igpu) {
+            return;
+        }
+        let tuning = self.tuning();
+        if self.architecture == "parakeet" {
+            self.stream_path = Some(model_path.to_path_buf());
+        }
+        if tuning.needs_menus() {
+            self.read_menus();
+        }
         let started = std::time::Instant::now();
-        let probe = self.with_stream(
+        let stream = self.probe_best(options, tuning);
+        self.streaming.record(tuning, stream);
+        if self.streaming.stream().is_some() {
+            tracing::info!(
+                ?device_type,
+                ?tuning,
+                menus = self.stream_menus.is_some(),
+                prewarm_ms = started.elapsed().as_millis(),
+                "streaming transcription is available"
+            );
+        }
+    }
+
+    /// The stream geometry this model streams with, as the last probe found
+    /// it.
+    pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
+        self.streaming.stream()
+    }
+
+    /// The tuning this model streams with: only a Parakeet buffered model has
+    /// geometry to tune.
+    fn tuning(&self) -> StreamTuning {
+        StreamTuning::for_model(self.architecture == "parakeet", StreamTuning::current())
+    }
+
+    /// Reads the model's chunk menus once, when a tuning needs them: a load
+    /// with the lab off never opens the header for them.
+    fn read_menus(&mut self) {
+        if self.stream_menus_read {
+            return;
+        }
+        self.stream_menus_read = true;
+        self.stream_menus = self.stream_path.as_deref().and_then(StreamMenus::read);
+    }
+
+    /// Re-probes while nothing records, when this process's tuning changed
+    /// since the last probe, so Labs › Faster live text applies to a later
+    /// capture without a restart. A session whose gated probe never ran, or
+    /// never passed, does nothing here.
+    pub(crate) fn refresh_stream(&mut self, options: &transcribe_cpp::RunOptions) {
+        let tuning = self.tuning();
+        if !self.streaming.wants(tuning) {
+            return;
+        }
+        if tuning.needs_menus() {
+            self.read_menus();
+        }
+        let probed = self.probe_best(options, tuning);
+        if !self.streaming.record(tuning, probed) {
+            tracing::warn!(
+                ?tuning,
+                "this stream geometry could not stream here; keeping the geometry in hand"
+            );
+        }
+    }
+
+    /// Probes the tuning's geometry, and the model's own default when that
+    /// geometry cannot stream here: an off-menu env value or a tuple the
+    /// model never trained for warns and keeps streaming, rather than
+    /// turning it off.
+    fn probe_best(
+        &mut self,
+        options: &transcribe_cpp::RunOptions,
+        tuning: StreamTuning,
+    ) -> Option<transcribe_cpp::StreamOptions> {
+        let requested = tuning.options(self.stream_menus.as_ref());
+        let mut probe = self.probe_silence(options, &requested);
+        let mut geometry = requested;
+        if probe.is_err() && geometry.family.is_some() {
+            tracing::warn!(
+                ?tuning,
+                "this stream geometry is outside the model's menu; using its default"
+            );
+            geometry = transcribe_cpp::StreamOptions::default();
+            probe = self.probe_silence(options, &geometry);
+        }
+        match probe {
+            Ok(()) => Some(geometry),
+            Err(error) => {
+                tracing::warn!(%error, "model advertises streaming but could not stream");
+                None
+            }
+        }
+    }
+
+    /// Runs [`STREAM_PREWARM_SAMPLES`] of silence through one stream, which
+    /// prewarms the stream graph too.
+    fn probe_silence(
+        &mut self,
+        options: &transcribe_cpp::RunOptions,
+        stream_options: &transcribe_cpp::StreamOptions,
+    ) -> transcribe_cpp::Result<()> {
+        self.with_stream(
             options,
-            &stream_options,
+            stream_options,
             &transcribe_cpp::CancelToken::new(),
             |stream| {
                 stream.feed(&vec![0.0; STREAM_PREWARM_SAMPLES])?;
                 stream.finalize().map(|_| ())
             },
-        );
-        match probe {
-            Ok(Ok(())) => {
-                tracing::info!(
-                    ?device_type,
-                    chunk_ms,
-                    prewarm_ms = started.elapsed().as_millis(),
-                    "streaming transcription is available"
-                );
-                Some(stream_options)
-            }
-            Ok(Err(error)) | Err(error) => {
-                tracing::warn!(%error, "model advertises streaming but could not stream");
-                None
-            }
-        }
+        )?
     }
 
     /// Runs `drive` against one live stream on this session, then rotates the

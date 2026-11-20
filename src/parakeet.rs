@@ -30,7 +30,6 @@ pub struct Parakeet {
     name: String,
     selection: Option<TranscriptionSelection>,
     max_audio_samples: Option<usize>,
-    stream: Option<transcribe_cpp::StreamOptions>,
     _weights: procwatch::Lease,
 }
 
@@ -1283,11 +1282,7 @@ impl Parakeet {
         let mut parakeet = Self::load_from(&path, true, Some(selection))?;
         parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
-        let architecture = match definition.runtime {
-            crate::transcription::models::ModelRuntime::Gguf(artifact) => artifact.architecture,
-            crate::transcription::models::ModelRuntime::AppleSpeech => "",
-        };
-        parakeet.stream = parakeet.session.probe_stream(&stream_run, architecture);
+        parakeet.session.probe_stream(&stream_run, &path);
         Ok(parakeet)
     }
 
@@ -1304,7 +1299,15 @@ impl Parakeet {
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
-        self.stream.as_ref()
+        self.session.stream_options()
+    }
+
+    /// Re-probes the live stream when Labs › Faster live text or an env
+    /// override changed, so a later capture streams with it. Streams decode
+    /// with [`Self::stream_run_options`], as the load-time probe does.
+    pub(crate) fn refresh_stream(&mut self) {
+        let options = self.stream_run_options();
+        self.session.refresh_stream(&options);
     }
 
     pub(crate) fn with_stream<R>(
@@ -1407,7 +1410,6 @@ impl Parakeet {
                 &architecture,
                 capabilities.max_audio_ms,
             ),
-            stream: None,
             _weights: MODEL_WEIGHTS.track(weights_bytes),
         })
     }
@@ -1967,16 +1969,12 @@ mod tests {
         use crate::transcription::{Transcriber, WarmTranscriber};
 
         let selection = TranscriptionSelection::default();
-        let mut model = Parakeet::load_from(
-            &PathBuf::from(std::env::var("HEX_STREAM_MODEL").unwrap()),
-            false,
-            Some(&selection),
-        )
-        .unwrap();
-        model.stream = model
+        let path = PathBuf::from(std::env::var("HEX_STREAM_MODEL").unwrap());
+        let mut model = Parakeet::load_from(&path, false, Some(&selection)).unwrap();
+        model
             .session
-            .probe_stream(&model.stream_run_options(), "parakeet");
-        assert!(model.stream.is_some(), "Metal must stream");
+            .probe_stream(&model.stream_run_options(), &path);
+        assert!(model.stream_options().is_some(), "Metal must stream");
         let engine = TranscriptionEngine::start(WarmTranscriber::serving(Transcriber::Gguf(
             Box::new(model),
         )))

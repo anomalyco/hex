@@ -22,7 +22,6 @@ pub struct LocalTranscriber {
     options: RunOptions,
     device_label: String,
     max_audio_samples: Option<usize>,
-    stream: Option<transcribe_cpp::StreamOptions>,
     /// The finest timestamps the model gives, for a capture's or a
     /// meeting's word times.
     finest_timestamps: TimestampKind,
@@ -392,7 +391,6 @@ impl LocalTranscriber {
                 &architecture,
                 capabilities.max_audio_ms,
             ),
-            stream: None,
             finest_timestamps: match capabilities.max_timestamp_kind {
                 TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
                 kind => kind,
@@ -413,9 +411,9 @@ impl LocalTranscriber {
             prewarm_ms = started.elapsed().as_millis(),
             "prewarmed local transcription model"
         );
-        transcriber.stream = transcriber
+        transcriber
             .session
-            .probe_stream(&transcriber.options, &architecture);
+            .probe_stream(&transcriber.options, &path);
         // Warm now, so this times the device rather than its first run's
         // shader compiles.
         let started = Instant::now();
@@ -455,7 +453,13 @@ impl LocalTranscriber {
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
-        self.stream.as_ref()
+        self.session.stream_options()
+    }
+
+    /// Re-probes the live stream when Labs › Faster live text or an env
+    /// override changed, so the next capture streams with it.
+    pub(crate) fn refresh_stream(&mut self) {
+        self.session.refresh_stream(&self.options);
     }
 
     /// Silence a live stream of this model hears before it finalizes, the

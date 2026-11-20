@@ -2860,7 +2860,7 @@ fn a_lone_lab_card_keeps_half_the_row() {
     // A chip's group can come out even as labs are added and removed, so the
     // lone card is a search that matches exactly one.
     tap(&mut rt, "chip-all");
-    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("failure notices".to_string()));
     settle(&mut rt);
     let lone: Vec<f32> = rt
         .elements()

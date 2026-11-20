@@ -9,6 +9,12 @@ pub fn live_text() -> bool {
     on(LIVE_TEXT)
 }
 
+/// A shorter lookahead for live text, so its words appear sooner (Parakeet
+/// buffered streaming; read as each live stream opens).
+pub fn faster_live_text() -> bool {
+    on(FASTER_LIVE_TEXT) && Feature::FasterLiveText.on_this_os()
+}
+
 /// A failed dictation's explanation beside the HUD (read as each failure
 /// reaches the HUD).
 pub fn failure_notices() -> bool {
