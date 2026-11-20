@@ -12,6 +12,7 @@ nonisolated struct LanguageSettings {
         static let keyboardLayout = "settings.keyboardLayout"
         static let speechModuleFailed = "settings.dictationLanguage.speechModuleFailed"
         static let unavailable = "settings.dictationLanguage.unavailable"
+        static let keyboardNeedsHex = "settings.dictationLanguage.keyboardNeedsHex"
     }
 
     static let maxRecent = 5
@@ -79,6 +80,27 @@ nonisolated struct LanguageSettings {
         isMarked(identifier, key: Key.speechModuleFailed, now: now)
     }
 
+    /// How long the keyboard hands dictation to Hex after it couldn't get a model itself.
+    static let keyboardNeedsHexDuration: TimeInterval = 24 * 60 * 60
+
+    /// In-keyboard dictation couldn't get its speech model ready (an asset released or
+    /// removed since Hex downloaded it, a download the keyboard couldn't finish), so the Hex
+    /// key opens Hex, which downloads it in the foreground. Until a model installs
+    /// (`SpeechModelInstall`), a language is chosen, or a day passes.
+    func markKeyboardNeedsHex(at now: Date = Date()) {
+        defaults?.set(now.timeIntervalSince1970, forKey: Key.keyboardNeedsHex)
+    }
+
+    func keyboardNeedsHex(now: Date = Date()) -> Bool {
+        guard let at = defaults?.object(forKey: Key.keyboardNeedsHex) as? Double else { return false }
+        return now.timeIntervalSince1970 - at < Self.keyboardNeedsHexDuration
+    }
+
+    func clearKeyboardNeedsHex() {
+        guard defaults?.object(forKey: Key.keyboardNeedsHex) != nil else { return }
+        defaults?.removeObject(forKey: Key.keyboardNeedsHex)
+    }
+
     /// Neither module's model for this language (BCP 47) would install while online, so
     /// Automatic passes over it for a while. An explicit choice still tries it.
     func markUnavailable(_ identifier: String, at now: Date = Date()) {
@@ -113,6 +135,7 @@ nonisolated struct LanguageSettings {
     /// A choice made in Hex or the keyboard: the setting, and the front of the recents.
     func chooseDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
+        clearKeyboardNeedsHex()
         if let identifier {
             recentDictationLanguages = [identifier] + recentDictationLanguages.filter { $0 != identifier }
         }
@@ -170,7 +193,10 @@ nonisolated enum SpeechLanguagePicker {
     /// Norwegian from `DictationTranscriber` rather than English from `SpeechTranscriber`.
     /// `speech` and `dictation` return each module's equivalent locale, or nil. Automatic
     /// passes over a language `skip` names (one whose model wouldn't install here), so it
-    /// lands on the next working one; an explicit choice is tried as it is.
+    /// lands on the next working one; an explicit choice is tried as it is. When every
+    /// language either module has was set aside (an English-only iPhone whose English model
+    /// failed once), Automatic tries the first of them again: nil means neither module has
+    /// any of them, never that Hex gave up on the only one there is.
     static func pick(
         explicit: String?,
         candidates: [String],
@@ -187,17 +213,22 @@ nonisolated enum SpeechLanguagePicker {
                 return SpeechLanguage(locale: found, module: .dictation)
             }
         }
+        var setAside: SpeechLanguage?
         for identifier in candidates {
             let candidate = Locale(identifier: identifier)
             if let found = await speech(candidate) {
-                if skip(found) { continue }
-                return SpeechLanguage(locale: found, module: .speech)
+                let language = SpeechLanguage(locale: found, module: .speech)
+                guard skip(found) else { return language }
+                setAside = setAside ?? language
+                continue
             }
-            if let found = await dictation(candidate), !skip(found) {
-                return SpeechLanguage(locale: found, module: .dictation)
+            if let found = await dictation(candidate) {
+                let language = SpeechLanguage(locale: found, module: .dictation)
+                guard skip(found) else { return language }
+                setAside = setAside ?? language
             }
         }
-        return nil
+        return setAside
     }
 
     /// The same language and, when both name one, the same region.

@@ -1152,16 +1152,19 @@ final class SpeechLanguagePickerTests: XCTestCase {
         }
     }
 
+    /// `speechTranscriber` false: `SpeechTranscriber.isAvailable` is false (iPhone 11, SE 2nd
+    /// generation), so only `DictationTranscriber` has languages.
     private func pick(
         explicit: String? = nil,
         preferred: [String],
         current: String = "en_US",
-        setAside: Set<String> = []
+        setAside: Set<String> = [],
+        speechTranscriber: Bool = true
     ) async -> SpeechLanguage? {
         await SpeechLanguagePicker.pick(
             explicit: explicit,
             candidates: SpeechLanguagePicker.automaticCandidates(preferred: preferred, current: current),
-            speech: lookup(speechLocales),
+            speech: speechTranscriber ? lookup(speechLocales) : { _ in nil },
             dictation: lookup(dictationLocales),
             skip: { setAside.contains($0.identifier(.bcp47)) }
         )
@@ -1215,6 +1218,42 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(automatic?.identifier, "en-US")
         let chosen = await pick(explicit: "nb-NO", preferred: ["nb-NO", "en-US"], setAside: ["nb-NO"])
         XCTAssertEqual(chosen?.identifier, "nb-NO", "an explicit choice is tried and says why it fails")
+    }
+
+    func testAnEnglishOnlyIPhoneStillDictatesEnglishAfterItsModelFailedOnce() async {
+        // TestFlight build 31, iPhone SE (3rd generation), iOS 26.6.1: English's model didn't
+        // install once, so it was set aside, and with no other language to move to Automatic
+        // picked nothing: "Apple Speech doesn't have your language on this iPhone." It tries
+        // English again instead.
+        let english = await pick(preferred: ["en-US"], setAside: ["en-US"])
+        XCTAssertEqual(english?.identifier, "en-US")
+        XCTAssertEqual(english?.module, .speech)
+        let british = await pick(preferred: ["en-GB"], current: "en_GB", setAside: ["en-GB", "en-US"])
+        XCTAssertEqual(british?.identifier, "en-GB", "the iPhone's own English, not the last resort")
+        let norwegian = await pick(preferred: ["nb-NO", "en-US"], current: "nb_NO", setAside: ["nb-NO", "en-US"])
+        XCTAssertEqual(norwegian?.identifier, "nb-NO", "everything set aside: the first preferred again")
+    }
+
+    func testAnIPhoneWithoutSpeechTranscriberDictatesEnglishWithDictationTranscriber() async {
+        // 4 GB iPhones without SpeechTranscriber, in the app and in the keyboard alike, whatever
+        // English the iPhone names, a keyboard's region-only locale, or English set aside.
+        let cases: [(preferred: [String], current: String, setAside: Set<String>, expected: String)] = [
+            (["en-US"], "en_US", [], "en-US"),
+            (["en-GB"], "en_GB", [], "en-GB"),
+            (["en-IN"], "_IN", [], "en-US"),
+            ([], "_US", [], "en-US"),
+            (["en-US"], "en_US", ["en-US"], "en-US"),
+        ]
+        for item in cases {
+            let picked = await pick(
+                preferred: item.preferred,
+                current: item.current,
+                setAside: item.setAside,
+                speechTranscriber: false
+            )
+            XCTAssertEqual(picked?.identifier, item.expected, "\(item.preferred) \(item.current)")
+            XCTAssertEqual(picked?.module, .dictation)
+        }
     }
 
     func testSetAsideLanguagesComeBackAfterThreeDays() throws {
@@ -1395,6 +1434,62 @@ final class SpeechModelInstallTests: XCTestCase {
         assets.downloads = [.speech: .hangs]
         let installed = try await run(assets)
         XCTAssertEqual(installed.module, .dictation)
+    }
+
+    func testTheKeyboardHandsAModelItCantGetToHexInsteadOfSayingTheLanguageIsMissing() {
+        // English released or removed since Hex downloaded it, and the keyboard's own install
+        // failing: Apple has English, so the keyboard sends people to Hex to download it.
+        let cases: [Error] = [
+            SpeechModelUnavailable(language: "en-US", reason: .notOnThisIPhone),
+            SpeechModelUnavailable(language: "en-US", reason: .downloadFailed),
+            StallWatch.Stalled(),
+            NSError(domain: "SFSpeechErrorDomain", code: 13, userInfo: [NSLocalizedDescriptionKey: "Too many asset locales allocated"]),
+        ]
+        for error in cases {
+            settings.clearKeyboardNeedsHex()
+            let shown = SpeechModelNeedsHex.keyboardError(for: error, language: "en-US", settings: settings)
+            XCTAssertEqual(shown as? SpeechModelNeedsHex, SpeechModelNeedsHex(language: "en-US"), "\(error)")
+            XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Open Hex to download English.")
+            XCTAssertTrue(settings.keyboardNeedsHex(), "the Hex key opens Hex, which downloads it")
+        }
+    }
+
+    func testTheKeyboardKeepsAMoveToAnotherLanguageAndACancel() {
+        let switched = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
+        let offer = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US", automatic: false)
+        for error in [switched, offer] {
+            let shown = SpeechModelNeedsHex.keyboardError(for: error, language: "ru-RU", settings: settings)
+            XCTAssertEqual(shown as? SpeechModelUnavailable, error, "the next dictation works without Hex")
+        }
+        XCTAssertTrue(SpeechModelNeedsHex.keyboardError(for: CancellationError(), language: "en-US", settings: settings) is CancellationError)
+        XCTAssertFalse(settings.keyboardNeedsHex())
+    }
+
+    func testAModelInPlaceEndsTheKeyboardsHandoffAndAFailureKeepsIt() async throws {
+        settings.markKeyboardNeedsHex()
+        let failing = FakeAssets()
+        failing.downloads = [.speech: .fails, .dictation: .fails]
+        _ = try? await run(failing)
+        XCTAssertTrue(settings.keyboardNeedsHex())
+
+        _ = try await run(FakeAssets())
+        XCTAssertFalse(settings.keyboardNeedsHex(), "downloaded, by Hex or the keyboard")
+
+        settings.markKeyboardNeedsHex()
+        let installed = FakeAssets()
+        installed.status[.speech] = .installed
+        _ = try await run(installed)
+        XCTAssertFalse(settings.keyboardNeedsHex(), "already installed")
+    }
+
+    func testTheKeyboardsHandoffEndsAfterADayOrWhenALanguageIsChosen() {
+        let marked = Date(timeIntervalSince1970: 1_000_000)
+        settings.markKeyboardNeedsHex(at: marked)
+        XCTAssertTrue(settings.keyboardNeedsHex(now: marked.addingTimeInterval(3_600)))
+        XCTAssertFalse(settings.keyboardNeedsHex(now: marked.addingTimeInterval(LanguageSettings.keyboardNeedsHexDuration + 1)))
+        settings.markKeyboardNeedsHex()
+        settings.chooseDictationLanguage("es-ES")
+        XCTAssertFalse(settings.keyboardNeedsHex(), "another language is the keyboard's to try")
     }
 }
 

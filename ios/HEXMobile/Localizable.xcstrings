@@ -1499,6 +1499,16 @@
         }
       }
     },
+    "Open Hex to download %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Hex 下载%@语音。"
+          }
+        }
+      }
+    },
     "Open Hex, then try again." : {
       "localizations" : {
         "zh-Hans" : {

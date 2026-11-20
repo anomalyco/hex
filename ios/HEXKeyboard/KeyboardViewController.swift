@@ -607,6 +607,8 @@ final class KeyboardViewController: UIInputViewController {
     /// screen, and iOS ends a keyboard that passes its limit (older iPhones, many apps open).
     /// While the keyboard is short of it, `onLocalDictateTap` is nil, so Dictate and the Hex
     /// key take the cold start that opens Hex, as before iOS 26 (a hold stays a tap there).
+    /// The same while the keyboard couldn't get its speech model ("Open Hex to download
+    /// English."): Hex downloads it, and the keyboard dictates again once it installs.
     /// Without Full Access it is nil too, and the Hex key says dictation needs Full Access.
     private func syncLocalDictationAvailability(access: Bool) {
         guard KeyboardLocalDictation.isSupported else { return }
@@ -615,13 +617,16 @@ final class KeyboardViewController: UIInputViewController {
             localDictationAvailable = nil
             return
         }
-        let available = localDictation.isActive || localDictation.hasMemoryToStart
+        let needsHex = !localDictation.isActive && LanguageSettings().keyboardNeedsHex()
+        let available = localDictation.isActive || (!needsHex && localDictation.hasMemoryToStart)
         guard available != localDictationAvailable else { return }
         // Noted at most every 5 s, as the footprint can hover at the line.
         let now = Date().timeIntervalSince1970
         if localDictationAvailable != nil || !available, now - lastAvailabilityNote >= 5 {
             lastAvailabilityNote = now
-            let change = available ? "memory back, dictating in the keyboard" : "short of memory, Dictate opens Hex"
+            let change = available
+                ? "dictating in the keyboard"
+                : needsHex ? "speech model missing here, Dictate opens Hex" : "short of memory, Dictate opens Hex"
             KeyboardProbeLog.shared.write("\(change) \(KeyboardProbeLog.memory())")
         }
         localDictationAvailable = available

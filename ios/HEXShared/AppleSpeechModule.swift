@@ -51,6 +51,15 @@ nonisolated enum AppleSpeechLanguages {
         )
     }
 
+    /// Whether neither module lists a single language here: Speech not answering (in a
+    /// keyboard, say), which isn't Speech lacking the iPhone's language.
+    static func listsNone() async -> Bool {
+        if SpeechTranscriber.isAvailable, !(await SpeechTranscriber.supportedLocales).isEmpty {
+            return false
+        }
+        return (await DictationTranscriber.supportedLocales).isEmpty
+    }
+
     /// Every language either module transcribes, sorted by name. Records the list for the
     /// keyboard's language switch.
     static func options(
