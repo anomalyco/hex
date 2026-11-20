@@ -83,28 +83,29 @@ struct ExperimentsCard: View {
                         FullKeyboardSettings().keyPopups = enabled
                     }
 
-                    Divider()
-                        .overlay(HexTheme.borderWeak)
-                        .padding(.leading, 16)
-
-                    Toggle(isOn: $haptics) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Haptics")
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(HexTheme.textBase)
-                            Text("A light tap under your finger as you type")
-                                .font(.system(size: 12))
-                                .foregroundStyle(HexTheme.textMuted)
-                        }
-                    }
-                    .tint(HexTheme.success)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .onChange(of: haptics) { _, enabled in
-                        FullKeyboardSettings().haptics = enabled
-                    }
-
                     KeyboardLayoutRow()
+                }
+
+                Divider()
+                    .overlay(HexTheme.borderWeak)
+                    .padding(.leading, 16)
+
+                // Both keyboards: the full keyboard's keys and the dictation bar's.
+                Toggle(isOn: $haptics) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Haptics")
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(HexTheme.textBase)
+                        Text("A light tap under your finger as you press Hex's keys")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+                .tint(HexTheme.success)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .onChange(of: haptics) { _, enabled in
+                    FullKeyboardSettings().haptics = enabled
                 }
 
                 Divider()

@@ -86,6 +86,9 @@ final class KeyboardViewModel: ObservableObject {
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
     var onOpenURL: ((URL) -> Void)?
+    /// The dictation bar's light haptic for each press; the keyboard allows it with Full
+    /// Access and Experiments › Haptics, as the full keyboard's keys.
+    var onKeyFeedback: (() -> Void)?
     weak var inputViewController: UIInputViewController?
 
     var selectedReturnApp: HostApp? {
@@ -625,6 +628,7 @@ struct KeyboardSurfaceView: View {
     private func defaultTopBar(palette p: KeyboardChromePalette) -> some View {
         HStack(spacing: 8) {
             Button {
+                model.onKeyFeedback?()
                 if model.hasFullAccess, !model.isWarmAvailable, let local = model.onLocalDictateTap {
                     local()
                 } else {
@@ -661,6 +665,7 @@ struct KeyboardSurfaceView: View {
             ForEach(DictationStyle.allCases, id: \.self) { candidate in
                 let active = candidate == model.style
                 Button {
+                    model.onKeyFeedback?()
                     model.onStyleSelected?(candidate)
                     model.setActiveTray(.none, reduceMotion: reduceMotion)
                 } label: {
@@ -751,6 +756,7 @@ struct KeyboardSurfaceView: View {
             .hexTrayReveal(showWarmStatus, reduceMotion: reduceMotion, offsetY: 2)
 
             Button {
+                model.onKeyFeedback?()
                 model.setActiveTray(.returnApp, reduceMotion: reduceMotion)
             } label: {
                 HStack(spacing: 4) {
@@ -772,6 +778,7 @@ struct KeyboardSurfaceView: View {
 
     private func styleTrigger(palette p: KeyboardChromePalette) -> some View {
         Button {
+            model.onKeyFeedback?()
             model.setActiveTray(.style, reduceMotion: reduceMotion)
         } label: {
             HStack(spacing: 4) {
@@ -793,6 +800,7 @@ struct KeyboardSurfaceView: View {
     private func languageTrigger(palette p: KeyboardChromePalette) -> some View {
         let label = model.languageLabel ?? "Automatic"
         return Button {
+            model.onKeyFeedback?()
             model.setActiveTray(.language, reduceMotion: reduceMotion)
         } label: {
             HStack(spacing: 4) {
@@ -836,6 +844,7 @@ struct KeyboardSurfaceView: View {
     private func languageChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {
         let active = model.dictationLanguage == id
         return Button {
+            model.onKeyFeedback?()
             model.onLanguageSelected?(id)
             model.setActiveTray(.none, reduceMotion: reduceMotion)
         } label: {
@@ -853,6 +862,7 @@ struct KeyboardSurfaceView: View {
     private func returnChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {
         let active = model.returnAppID == id
         return Button {
+            model.onKeyFeedback?()
             model.onReturnAppSelected?(id)
             model.setActiveTray(.none, reduceMotion: reduceMotion)
         } label: {
@@ -868,6 +878,7 @@ struct KeyboardSurfaceView: View {
 
     private func closeTrayButton(palette p: KeyboardChromePalette) -> some View {
         Button {
+            model.onKeyFeedback?()
             model.setActiveTray(.none, reduceMotion: reduceMotion)
         } label: {
             Image(systemName: "xmark")
@@ -934,6 +945,7 @@ struct KeyboardSurfaceView: View {
             // Recording peer controls (`✕` and `Done`), always mounted so enter/exit springs stay continuous.
             HStack(spacing: 8) {
                 Button {
+                    model.onKeyFeedback?()
                     model.onCancelTap?()
                 } label: {
                     Image(systemName: "xmark")
@@ -957,6 +969,7 @@ struct KeyboardSurfaceView: View {
                 Spacer(minLength: 0)
 
                 Button {
+                    model.onKeyFeedback?()
                     model.onStopTap?()
                 } label: {
                     Text("Done")
@@ -980,6 +993,7 @@ struct KeyboardSurfaceView: View {
 
             // Single permanently mounted idle trigger (never swapped across 3 Button branches).
             Button {
+                model.onKeyFeedback?()
                 handleIdleStageTap()
             } label: {
                 HStack(spacing: 0) {
@@ -1043,6 +1057,7 @@ struct KeyboardSurfaceView: View {
             }
 
             Button {
+                model.onKeyFeedback?()
                 model.onSpace?()
             } label: {
                 Text("space")
@@ -1055,10 +1070,12 @@ struct KeyboardSurfaceView: View {
             .buttonStyle(KeyboardKeyButtonStyle(palette: p))
 
             RepeatDeleteKey(palette: p) {
+                model.onKeyFeedback?()
                 model.onDelete?()
             }
 
             Button {
+                model.onKeyFeedback?()
                 model.onReturn?()
             } label: {
                 Image(systemName: "return")

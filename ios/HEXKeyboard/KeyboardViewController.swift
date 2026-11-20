@@ -27,6 +27,13 @@ final class KeyboardViewController: UIInputViewController {
     private let logDictationEdits = DictationEditTracker()
     private var pendingHostContext: DispatchWorkItem?
     private var isShown = false
+    /// The dictation bar's key haptic; the full keyboard has its own generator.
+    private lazy var barHaptics = UIImpactFeedbackGenerator(style: .light)
+
+    /// Haptics need Full Access, and Experiments › Haptics covers both keyboards.
+    private var allowsKeyHaptics: Bool {
+        hasFullAccess && FullKeyboardSettings().haptics
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -296,6 +303,11 @@ final class KeyboardViewController: UIInputViewController {
             TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
         }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
+        viewModel.onKeyFeedback = { [weak self] in
+            guard let self, self.allowsKeyHaptics else { return }
+            self.barHaptics.impactOccurred(intensity: 0.65)
+            self.barHaptics.prepare()
+        }
         viewModel.onStopTap = { [weak self] in
             guard let self else { return }
             if self.localDictation.isActive {
@@ -410,7 +422,7 @@ final class KeyboardViewController: UIInputViewController {
             )
             keyboard.hostController = self
             keyboard.allowsHaptics = { [weak self] in
-                (self?.hasFullAccess ?? false) && FullKeyboardSettings().haptics
+                self?.allowsKeyHaptics ?? false
             }
             keyboard.onTextEdit = { [weak self] in self?.observeDictationEdits(fromKeys: true) }
             keyboard.onUndoDictation = { [weak self] in
