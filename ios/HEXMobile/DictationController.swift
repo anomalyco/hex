@@ -1322,7 +1322,7 @@ final class DictationController {
         controller.isModelReady = true
 
         switch scene {
-        case "setup":
+        case "setup", _ where scene.hasPrefix("onboarding-"):
             controller.phase = .ready
             controller.warmDuration = .fifteenMinutes
             controller.keyboardSessionEnabled = false
