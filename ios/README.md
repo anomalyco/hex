@@ -13,7 +13,12 @@ dictation, iOS 26+): iOS refuses to record from a keyboard extension
 directly, so it captures through `getUserMedia` in a hidden `WKWebView`
 under Hex's microphone permission, writes a temporary WAV, and transcribes
 it on-device with Apple Speech, downloading the speech assets on first use
-(`HEXKeyboard/KeyboardLocalDictation.swift`). iOS ends a keyboard that passes
+(`HEXKeyboard/KeyboardLocalDictation.swift`). With Full Access, the web view
+and its page load as the keyboard shows (unless memory is already short), without
+the microphone, so no orange dot shows until you dictate; the full keyboard's
+Hex key then starts capture as the finger lands, before the touch is a tap or
+a hold, and a slide to the style menu or a cancelled touch drops it with
+nothing transcribed (its orange dot shows for that moment). iOS ends a keyboard that passes
 its memory limit (about 60–90 MB depending on the model), so while less is left
 than starting needs (`os_proc_available_memory`: 32 MB for the first
 dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key
@@ -125,8 +130,10 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     dictionary on the iPhone (`TranscriptFormatter.insertionText`).
   - **Full keyboard Hex key (Settings › Keyboard › Full, the default):** A tap, or a
     still hold of 0.35 s, starts dictation: in a warm session, else inside
-    the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving
-    more than 10 pt first opens the style menu; releasing over a row picks it, and releasing elsewhere leaves
+    the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex.
+    In-keyboard dictation listens from touch-down, so a tap's or hold's first
+    words are kept; moving
+    more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
   - **Push to talk:** Holding still for 0.35 s on the full keyboard's Hex key
@@ -523,6 +530,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
   changes have not been reproduced on hardware; the meter recovery tests inject
   that condition through `ActiveAudioCapture`.
+- **In-keyboard dictation's start time:** The simulator's WebKit captures from a
+  mock microphone, and on a Mac without a microphone the warm session's
+  recorder can't start, so how long a real microphone takes to open
+  (getUserMedia, the audio session, the recorder) shows only on an iPhone, in
+  the probe log's `first audio` and `warm start` lines.
 - **Apple Speech hint:** Custom vocabulary's contextual strings are best effort
   and unverified on a physical iPhone. Apple documents contextual strings only
   for `DictationTranscriber`; Hex sets them on both modules, and Parakeet's
