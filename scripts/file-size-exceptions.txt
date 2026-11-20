@@ -7,7 +7,6 @@ crates/capture/src/phone.rs 2450
 crates/capture/src/render.rs 1800
 crates/router/src/routing/jev.rs 2300
 crates/router/src/routing/router.rs 2400
-ios/HEXMobile/DictationController.swift 1540
 ios/HEXShared/DotScope.swift 1850
 src/capture_host.rs 3100
 src/meeting/query.rs 2450
