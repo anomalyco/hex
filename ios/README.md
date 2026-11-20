@@ -119,7 +119,17 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     becomes "4pm"); a word goes only above P(DELETE) 0.98.
     `CleanupReconstruction`, a port of the tagger's `reconstruct.js`, then
     repairs the commas and capitals next to a deletion. It never adds,
-    reorders, or changes words. It runs after transcription and learned fixes
+    reorders, or changes words. The tagger only knows English (run on
+    Spanish it dropped negations: "Te digo que no puedo ir" became "Te
+    puedo ir"), so Spanish, German and Norwegian get word rules instead
+    (`SpokenCleanupRules`): a filler between commas goes ("este", "o sea"),
+    and a correction marker set off by commas ("digo", "perdón", "no",
+    "mejor dicho"; "nein", "ich meine"; "nei", "nei vent", "jeg mener")
+    drops the words it replaces, counted back to the nearest earlier word
+    that matches the repair's first word or is of its kind (a number,
+    weekday, month, or today and tomorrow): "a las 3, digo, a las 4" becomes
+    "a las 4". With no such word the sentence stays as said, and other
+    languages stay as heard. It runs after transcription and learned fixes
     (in the app also after custom vocabulary), before Apple Intelligence
     cleanup, translation, and formatting, in in-keyboard dictation and in the
     app. The tagger is a BERT L-4/H-512 token classifier fine-tuned from
@@ -213,10 +223,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   An iPhone without `SpeechTranscriber` keeps English on Parakeet, as before.
   The setup card's Speech model row names the language ("Norwegian Bokmål ·
   Apple"). Steps that only know English follow the language: Clean up what I
-  say (an English tagger) skips other languages; Clean up with Apple
+  say (an English tagger) uses word rules in Spanish, German and Norwegian and
+  skips other languages; Clean up with Apple
   Intelligence runs only when the on-device model supports the language; the
   styles trim English fillers (um, uh, er, ah) only in English, Nordic ones (eh,
-  ehm, øh, hm) in Norwegian, Danish and Swedish, and none elsewhere (Norwegian
+  ehm, øh, hm) in Norwegian, Danish and Swedish, Spanish ones (eh, em, mmm) in
+  Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
   "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
   language rather than a guess. Custom vocabulary works in any language.
 - **Switching the dictation language in the keyboard (iOS 26+, Full Access):**

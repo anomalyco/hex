@@ -147,7 +147,9 @@ nonisolated enum TranscriptFormatter {
 
     /// The hesitation sounds a style trims, per language. English "er" is a word in
     /// Norwegian, Danish, Swedish ("er" = is) and German, and "um" is one in Portuguese, so
-    /// each language trims only its own; a language without a list trims nothing.
+    /// each language trims only its own; a language without a list trims nothing. Spanish
+    /// trims "eh", "em" and "mmm" (never "e", which is "and"), German "äh", "ähm" and "öhm"
+    /// (never "eh", which is "anyway").
     static func fillerPattern(for language: String?) -> String? {
         let code = language.flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
         switch code {
@@ -155,6 +157,10 @@ nonisolated enum TranscriptFormatter {
             return "um+|uh+|er+|ah+"
         case "nb", "nn", "no", "da", "sv":
             return "e+h+m*|ø+h+m*|ö+h+m*|hm+"
+        case "es":
+            return "e+h+m*|e+m+|m{2,}|hm+"
+        case "de":
+            return "ä+h+m*|ö+h+m*|hm+"
         default:
             return nil
         }
@@ -241,7 +247,7 @@ nonisolated enum TranscriptFormatter {
                 capitalizeNext = false
             } else if ".!?".contains(ch) || ch == "\n" {
                 capitalizeNext = true
-            } else if !ch.isWhitespace && ch != "\"" && ch != "“" && ch != "(" {
+            } else if !ch.isWhitespace && !"\"“(¿¡".contains(ch) {
                 capitalizeNext = false
             }
         }
