@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import os
 import UIKit
 
 /// The Clean up what I say experiment's switch in the shared App Group.
@@ -27,10 +28,10 @@ nonisolated struct CleanupTaggerSettings {
 /// `CleanupReconstruction` joins what is kept. It runs on this iPhone only.
 ///
 /// The model and vocabulary ship once, inside the keyboard extension; the app reads them
-/// from its embedded `HEXKeyboard.appex`. The model loads when a dictation starts
+/// from its embedded `HEXKeyboard.appex`. The model loads when a dictation stops
 /// recording with the experiment on (`prepareIfEnabled`), so the load (about 150 ms on the
-/// CPU in the simulator) is over before the transcript arrives, stays loaded while the
-/// process lives, and is released on a memory warning.
+/// CPU in the simulator) overlaps transcription, stays loaded while the process lives, and
+/// is released on a memory warning. The keyboard skips it when it is short of memory.
 nonisolated final class CleanupTagger: @unchecked Sendable {
     static let shared = CleanupTagger()
 
@@ -52,7 +53,15 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     enum TaggerError: Error {
         case missingResource(String)
         case badOutput
+        case lowMemory
     }
+
+    /// Whether this process is the keyboard extension, which iOS ends the moment it passes
+    /// its memory limit (the keyboard vanishes and the system keyboard takes over).
+    static let isKeyboardExtension = Bundle.main.bundlePath.hasSuffix(".appex")
+    /// Memory the keyboard must have left before it loads the model; with less, dictation
+    /// inserts the transcript as heard rather than risk iOS ending the keyboard.
+    static let keyboardHeadroomNeeded = 80 * 1_048_576
 
     private struct Loaded {
         let model: MLModel
@@ -65,10 +74,11 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     private var loaded: Loaded?
     private var memoryWarningObserver: NSObjectProtocol?
 
-    /// The Neural Engine where there is one, else the CPU. Not the GPU: in the simulator its
-    /// Metal pipeline took 0.8 s to load and added 30 MB to the footprint, while the CPU path
-    /// loads in 0.15 s and adds 3 MB, keeping the int8 weights memory-mapped.
-    init(computeUnits: MLComputeUnits = .cpuAndNeuralEngine) {
+    /// The app may use the Neural Engine; the keyboard extension runs on the CPU only, which
+    /// keeps the int8 weights memory-mapped (about 3 MB added) instead of compiling a Neural
+    /// Engine copy while the microphone and speech recognizer are already open. Not the GPU:
+    /// in the simulator its Metal pipeline took 0.8 s to load and added 30 MB.
+    init(computeUnits: MLComputeUnits = CleanupTagger.isKeyboardExtension ? .cpuOnly : .cpuAndNeuralEngine) {
         self.computeUnits = computeUnits
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
@@ -152,8 +162,8 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         return await tagger.clean(text, within: timeBudget)
     }
 
-    /// Starts loading the model when a dictation begins recording, so cleanup is ready by
-    /// the time the transcript is. Does nothing while the experiment is off or for Verbatim.
+    /// Starts loading the model when a dictation stops recording, while it transcribes, so
+    /// cleanup is ready by the time the transcript is. Does nothing while the experiment is off or for Verbatim.
     static func prepareIfEnabled(
         style: DictationStyle,
         settings: CleanupTaggerSettings = CleanupTaggerSettings(),
@@ -190,6 +200,13 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         }
         guard let vocabularyURL = Self.resourceURL(Self.vocabularyName, withExtension: "txt") else {
             throw TaggerError.missingResource(Self.vocabularyName)
+        }
+        if Self.isKeyboardExtension {
+            // 0 means iOS didn't say (the simulator); only a known shortfall skips cleanup.
+            let headroom = os_proc_available_memory()
+            if headroom > 0, headroom < Self.keyboardHeadroomNeeded {
+                throw TaggerError.lowMemory
+            }
         }
         let tokenizer = try CleanupTokenizer(vocabulary: String(contentsOf: vocabularyURL, encoding: .utf8))
         let configuration = MLModelConfiguration()
