@@ -171,9 +171,15 @@ Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2
 
 ```sh
 cd ios
+scripts/fetch-cleanup-model.sh   # the cleanup tagger's Core ML model, kept out of git
 xcodegen generate
 xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>"
 ```
+
+The cleanup tagger's model (`HEXKeyboard/CleanupTagger/HexCleanupTagger.mlpackage`,
+25 MB) is a GitHub release asset (`ios-model-cleanup-tagger-1`), not a git file.
+`fetch-cleanup-model.sh` downloads it and checks its SHA-256; Xcode Cloud runs it
+from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
 
 ## Simulator vs. Physical iPhone Proof Limits
 

@@ -8,6 +8,7 @@ else
   cd "$(dirname "$0")/.."
 fi
 command -v xcodegen >/dev/null || brew install xcodegen
+scripts/fetch-cleanup-model.sh
 xcodegen generate
 pins=HEXMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 mkdir -p "$pins"
