@@ -127,9 +127,16 @@ final class SystemAudioManager: AudioManaging {
         stopKeepalive()
         try configureAudioSession(allowBluetooth: allowBluetooth)
 
+        // Changing the session (Always use iPhone microphone, or a route change) can move the
+        // hardware to another sample rate. An engine built before that keeps the old input
+        // format, and installTap raises an Objective-C exception Swift can't catch, so build a
+        // fresh engine for the current route and tap with the format the hardware reports.
+        engine = AVAudioEngine()
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0,
+              input.outputFormat(forBus: 0).sampleRate == format.sampleRate
+        else {
             throw CocoaError(.coderInvalidValue)
         }
 
