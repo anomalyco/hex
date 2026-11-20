@@ -28,12 +28,21 @@ final class KeyboardSetupMonitor {
     func refresh() {
         let args = ProcessInfo.processInfo.arguments
         if let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count {
-            let snapScene = args[idx + 1]
-            if snapScene == "setup" {
+            switch args[idx + 1] {
+            case "setup", "onboarding-try", "onboarding-try-off":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .granted
-            } else {
+            case "onboarding-welcome", "onboarding-allow":
+                keyboardAdded = true
+                fullAccessOn = false
+                microphone = .undetermined
+            case "onboarding-tour":
+                let elapsed = OnboardingFixture.Tour.elapsed
+                keyboardAdded = elapsed >= OnboardingFixture.Tour.keyboardAdded
+                fullAccessOn = elapsed >= OnboardingFixture.Tour.fullAccess
+                microphone = elapsed >= OnboardingFixture.Tour.microphoneAllowed ? .granted : .undetermined
+            default:
                 keyboardAdded = true
                 fullAccessOn = true
                 microphone = .granted
