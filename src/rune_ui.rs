@@ -464,28 +464,8 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
 }
 
 #[cfg(all(target_os = "macos", hex_capture))]
-pub(crate) fn show_all_history(ui: &mut Ui, tx: &mut Tx) {
-    history::unified::show_all(ui);
-    show(ui, Destination::History, tx);
-}
-
-/// What this OS's Hex can do, by capability name, for `hex status` and the
-/// settings `hex settings` can change here.
-pub(crate) fn capabilities() -> std::collections::BTreeMap<String, bool> {
-    platform::Capabilities::current()
-        .fields()
-        .into_iter()
-        .map(|(name, on)| (name.to_owned(), on))
-        .collect()
-}
-
-/// Whether this OS's Hex has the capability `name` ([`capabilities`]).
-pub(crate) fn capability(name: &str) -> bool {
-    platform::Capabilities::current()
-        .fields()
-        .into_iter()
-        .any(|(field, on)| field == name && on)
-}
+pub(crate) use history::unified::show_all_history;
+pub(crate) use platform::{capabilities, capability};
 
 /// `hex onboarding reset`: replays the first run in the window now; the
 /// window also shows why it couldn't.

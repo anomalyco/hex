@@ -3220,6 +3220,28 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 
 ## Features
 
+- Paste Last picker: tapping Paste Last pastes the newest ready dictation or
+  finished annotation, and holding it (⌥⇧V) opens a picker of recent rows, or
+  all of History; History then lists dictations, annotations, screenshots and
+  recordings together with one search and a type filter (macOS; Dev-audience,
+  off by default). Its switch is `labs.paste_last_picker`, and the gate,
+  `labs::paste_last_picker()`, is where the work starts: the picker and its
+  gesture, History's unified list and the rows it reads, and the words a
+  deliberate cancel keeps. Off, Paste Last and History behave exactly as
+  before. Checks: `paste_last_picker_is_its_own_switch_and_macos_only` in
+  [labs.rs](../../src/labs.rs); the picker's `paste::browse`,
+  `paste::recent`, `paste::gesture` and `paste::capture` tests; History's
+  `history::` tests; `one_history_filters_and_searches_the_real_owners_without_enlarging_paste_last`
+  in [history/unified/proof.rs](../../src/rune_ui/history/unified/proof.rs);
+  and `a_held_shortcut_browses_real_rows_and_clicks_choose_the_original_item`
+  in [paste_picker/proof.rs](../../src/rune_ui/paste_picker/proof.rs), a native
+  Mac proof that needs a login session and an explicit `--ignored` run. The
+  unified History exists only in macOS builds, so its `--snap` scenes
+  (`mac-history`, `mac-history-capture`, `mac-history-filtered`,
+  `mac-history-types`, `mac-history-search`, `mac-history-search-empty`,
+  `mac-history-empty`) render on a Mac and have no Linux golden. Not yet
+  observed: a real held shortcut in a desktop login, a receiving app's paste
+  of every row kind, and the picker over a real display.
 - Live chapters: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-labs)). Its own switch is

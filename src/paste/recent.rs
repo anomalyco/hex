@@ -56,16 +56,11 @@ impl Target {
     }
 }
 
-/// Developer launch override, like HEX_EXPERIMENTAL_MIC. Never a new
-/// preference, global binding, stable-build feature or managed-Labs bypass.
+/// Labs › Paste Last picker (macOS): the picker, unified History, and the
+/// words a deliberate cancel keeps. Off, every one of those is exactly as it
+/// was before the lab.
 pub(crate) fn enabled() -> bool {
-    static ENABLED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
-        crate::dev_build::is_dev_build()
-            && std::env::var_os("HEX_EXPERIMENTAL_PASTE_LAST").as_deref()
-                == Some(std::ffi::OsStr::new("1"))
-            && !crate::policy::Policy::current().locks(crate::policy::Lock::Labs)
-    });
-    *ENABLED
+    crate::labs::paste_last_picker()
 }
 
 pub(crate) fn current_rows(history: &History) -> Vec<Row> {

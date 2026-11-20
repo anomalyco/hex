@@ -199,7 +199,7 @@ fn walkthrough(recover: bool) {
     ui.history = HistoryPane::shared(Some(h.clone()));
     ui.history.unified.enabled = true;
     ui.history.unified.receipts = receipts;
-    ui.history.reload();
+    ui.history.reload(false);
     ui.captures = captures::CapturesPane::fixture_empty();
     ui.captures.entries = entries;
     let scope = Scope::new(&root, Some(7));
@@ -240,7 +240,7 @@ fn walkthrough(recover: bool) {
     press(&mut rt, "history-search");
     rt.paste("older dictation");
     settle(&mut rt);
-    rt.state.history.reload();
+    rt.state.history.reload(false);
     settle(&mut rt);
     assert_eq!(rows(&rt.state).len(), 1);
     assert!(rt.find("history-entry1").is_some());

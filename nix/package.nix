@@ -88,6 +88,7 @@ let
     };
     "rune-0.0.1" = {
       rev = "c853811c8e0e60a632eaa2e72992f871225737ef";
+      hash = "sha256-0yJb+UFu47T2pgDIi9B9IAxbCWNu0/OMVG5uGNF6lyI=";
     };
     "transcribe-cpp-sys-0.4.1" = {
       rev = "295c7e601ee5a25da0d1f169c996aee839d49943";

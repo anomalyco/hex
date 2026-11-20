@@ -39,7 +39,7 @@ pub(super) struct HistoryPane {
     pub(super) unified: unified::Pane,
     store: Option<History>,
     pub(super) entries: Vec<HistoryEntry>,
-    search: TextEdit,
+    pub(super) search: TextEdit,
     /// The query the entries were loaded for.
     searched: String,
     /// The store's revision the entries were loaded at; `None` before the
@@ -740,7 +740,7 @@ fn delete(ui: &mut Ui, id: u64) {
 pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
     #[cfg(all(target_os = "macos", hex_capture))]
     if ui.history.unified.enabled {
-        return unified::view(ui, p, layer);
+        return unified::view(ui, p, cx, layer);
     }
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);

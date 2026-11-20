@@ -15,6 +15,10 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Sent to", "Enviado para"),
+    ("Nothing here yet", "Ainda não há nada aqui"),
+    ("Dictations, annotations, and captures show here.", "Os ditados, as anotações e as capturas aparecem aqui."),
+    ("Move to Trash…", "Mover para o Lixo…"),
     ("Find a setting or lab", "Buscar um ajuste ou recurso do Labs"),
     ("No matching settings or labs", "Nenhum ajuste ou recurso do Labs encontrado"),
     ("The keys you press to dictate", "As teclas que você pressiona para ditar"),
@@ -142,6 +146,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Skip long pauses", "Pular pausas longas"),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "No modo alternar, segure o atalho para ditar até soltar; um toque curto continua iniciando e parando"),
     ("Copy recent dictations", "Copiar ditados recentes"),
+    ("Paste Last picker", "Seletor Colar último"),
+    ("Tap Paste Last to paste the newest dictation or annotation; hold it to pick another", "Toque em Colar último para colar o ditado ou a anotação mais recente; mantenha pressionado para escolher outro"),
     ("Copy one of your last five dictations from the menu bar, under Paste Last Dictation", "Copie um dos seus últimos cinco ditados pela barra de menus, abaixo de Colar último ditado"),
     ("Record your screen, draw on it, and talk over it", "Grave a tela, desenhe sobre ela e fale enquanto isso"),
     ("Live text", "Texto ao vivo"),
@@ -511,7 +517,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Paste last", "Colar último item"),
     ("Show all History", "Mostrar todo o histórico"),
     ("All types", "Todos os tipos"),
-    ("Dictations", "Ditados"),
     ("Screen recordings", "Gravações de tela"),
     ("Type", "Tipo"),
     ("No matching items", "Nenhum item correspondente"),

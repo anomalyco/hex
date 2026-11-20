@@ -25,6 +25,7 @@ use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonit
 
 #[cfg(hex_capture)]
 pub(crate) mod cancelled_words;
+mod capture_actions;
 mod context_watch;
 mod events;
 mod guards;
@@ -34,6 +35,7 @@ mod output;
 mod paste_picker;
 mod stop_phrase;
 
+use capture_actions::{control_dictation, handle_hotkey_action, paste_last};
 use context_watch::ContextWatch;
 use events::handle_dictation_event;
 use guards::{
@@ -1302,7 +1304,6 @@ fn cancel_programmatic_capture(
     Ok(())
 }
 
-
 fn fail_capture(
     message: String,
     worker: &DictationWorker,
@@ -1862,7 +1863,7 @@ mod tests {
 
     #[test]
     fn control_stops_reply_from_what_the_finish_did() {
-        let code = |finished| match finish_reply(finished, "ok") {
+        let code = |finished| match capture_actions::finish_reply(finished, "ok") {
             ControlReply::Done { changed: true, .. } => "done".to_owned(),
             ControlReply::Error { code, .. } => code,
             reply => panic!("unexpected {reply:?}"),

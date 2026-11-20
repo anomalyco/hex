@@ -736,13 +736,16 @@ options), `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys`
 (cross-compiled only). Proof limits: no physical shortcut press on any OS, no
 real Wayland grant or X11 grab run, and no Windows hook run.
 
-### Paste Last After A Failed Paste (every OS)
+### Paste Last Picker (Labs, macOS)
 
-On macOS development builds, launching the **app** with
-`HEX_EXPERIMENTAL_PASTE_LAST=1` opts its existing rebindable shortcut, menu
-and `hex paste-last` into mixed output. No new binding or preference row.
-Stable builds and managed DisableLabs don't opt in. Without the experiment,
-Paste Last still pastes a dictation. Windows and Linux are unchanged.
+Labs › Paste Last picker (`labs.paste_last_picker`; macOS, Dev-audience and off
+by default) opts the existing rebindable Paste Last shortcut, menu row and
+`hex paste-last` into mixed output. No new binding or preference row. A stable
+build never lists, accepts, or runs it, and `DisableLabs` holds it off. With it
+off, Paste Last pastes the newest dictation exactly as before; Windows and
+Linux are unchanged. The gate, `crate::labs::paste_last_picker()`, is where the
+work starts: the picker and its gesture, History's unified list and the rows it
+reads, and the cancel path's word writer.
 
 ```ts
 Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation
@@ -754,8 +757,8 @@ Hold 300 ms on the Mac event tap → up to eight recent items, without taking fo
 └── Escape or changed focus → close without touching the clipboard
 ```
 
-The same Mac preview puts dictations, annotations, screenshots and screen
-recordings in **History**. All types is the default. Search works inside the
+With it on, the Mac History puts dictations, annotations, screenshots and
+screen recordings in one list. All types is the default. Search works inside the
 selected type and beyond the eight picker rows. Capture files keep their
 editor, copy, reveal, drag and Trash actions. Clear dictation history affects
 the dictation owner only. A shared-library bundle can be visible without

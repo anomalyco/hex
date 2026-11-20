@@ -123,7 +123,7 @@ impl Paster {
         target: &super::recent::Target,
     ) -> Result<()> {
         let revision = self.activity.revision();
-        self.continuation = None;
+        self.continuation.clear();
         self.prepared_clipboard = None;
         insert(
             &self.clipboard,

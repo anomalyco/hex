@@ -129,6 +129,66 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture_empty();
         ui.pane = Pane::History;
     }),
+    // Labs › Paste Last picker (macOS): dictations, annotations, screenshots
+    // and recordings in one History, with its type filter, its search, and
+    // its empty states. The unified pane has no golden: it exists only in
+    // macOS builds, and goldens render on Linux.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history", |ui| {
+        unified_history(ui);
+        // The words a deliberate cancel kept: History-only, never pasted.
+        ui.history.entries[2].cancelled = true;
+    }),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-filtered", |ui| {
+        unified_history(ui);
+        ui.history
+            .unified
+            .set_filter(history::unified::Filter::Annotations);
+    }),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-types", |ui| {
+        unified_history(ui);
+        ui.open = Some(Menu::Pick("history-type"));
+    }),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-capture", |ui| {
+        unified_history(ui);
+        ui.history.selected = None;
+        ui.history.selection.clear();
+        ui.history.unified.picked = Some(std::path::PathBuf::from(
+            "/Users/alex/Library/Application Support/Scrawl/captures/1.scrawl",
+        ));
+    }),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-empty", |ui| {
+        unified_history(ui);
+        ui.history.entries.clear();
+        ui.captures.entries.clear();
+    }),
+    // A search with matches, as the store and the captures' own words
+    // answer it.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-search", |ui| {
+        unified_history(ui);
+        ui.history.search = rune::TextEdit::new("deploy".to_string());
+        ui.history.entries.retain(|e| {
+            e.final_text.to_lowercase().contains("deploy")
+                || e.application.as_deref() == Some("Slack")
+        });
+        ui.captures.entries.clear();
+    }),
+    // A search with nothing to show: the list keeps its field and says so,
+    // and no card stays open.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-search-empty", |ui| {
+        unified_history(ui);
+        ui.history.search = rune::TextEdit::new("quarterly budget".to_string());
+        ui.history.selected = None;
+        ui.history.selection.clear();
+        ui.history.entries.clear();
+        ui.captures.entries.clear();
+    }),
     ("output", |ui| {
         *ui = portal_fixture();
         output::fixture(ui);
@@ -903,6 +963,21 @@ fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlVi
     adjust(&mut view);
     ui.platform.scrawl = Some(view);
     ui.pane = Pane::Annotate;
+}
+
+/// Labs › Paste Last picker (macOS): the mixed History over fixture
+/// dictations and captures, as the pane draws it.
+#[cfg(all(target_os = "macos", hex_capture))]
+fn unified_history(ui: &mut Ui) {
+    *ui = mac_fixture();
+    ui.settings.capture.enabled = true;
+    ui.settings.labs.screenshots = true;
+    ui.settings.labs.paste_last_picker = true;
+    ui.history = history::HistoryPane::fixture();
+    ui.history.unified.enabled = true;
+    ui.history.reload(ui.settings.labs.history_stats);
+    ui.captures = captures::CapturesPane::fixture();
+    ui.pane = Pane::History;
 }
 
 pub(super) fn mac_fixture() -> Ui {

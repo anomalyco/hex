@@ -15,6 +15,10 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Sent to", "Отправлено в"),
+    ("Nothing here yet", "Здесь пока ничего нет"),
+    ("Dictations, annotations, and captures show here.", "Здесь появляются диктовки, аннотации и снимки."),
+    ("Move to Trash…", "Переместить в корзину…"),
     ("Find a setting or lab", "Найти настройку или функцию Labs"),
     ("No matching settings or labs", "Нет подходящих настроек или функций Labs"),
     ("The keys you press to dictate", "Клавиши для диктовки"),
@@ -136,6 +140,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Skip long pauses", "Пропускать длинные паузы"),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "В режиме переключения удерживайте сочетание клавиш, чтобы диктовать, пока не отпустите; короткое нажатие по-прежнему запускает и останавливает"),
     ("Copy recent dictations", "Копирование последних диктовок"),
+    ("Paste Last picker", "Выбор в «Вставить последний»"),
+    ("Tap Paste Last to paste the newest dictation or annotation; hold it to pick another", "Коснитесь «Вставить последний», чтобы вставить последнее диктуемое или аннотацию; удерживайте, чтобы выбрать другое"),
     ("Copy one of your last five dictations from the menu bar, under Paste Last Dictation", "Копируйте одну из пяти последних диктовок в строке меню, в разделе «Вставить последнюю диктовку»"),
     ("Stop when the call ends", "Останавливать по окончании звонка"),
     ("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet", "Останавливает запись, которую Hex начал сам, через 30 с после того, как приложение звонка освободит микрофон и затихнет"),
@@ -505,7 +511,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Paste last", "Вставить последний элемент"),
     ("Show all History", "Показать всю историю"),
     ("All types", "Все типы"),
-    ("Dictations", "Диктовки"),
     ("Screen recordings", "Записи экрана"),
     ("Type", "Тип"),
     ("No matching items", "Нет подходящих элементов"),

@@ -627,6 +627,12 @@ pub(super) const KEYS: &[Key] = &[
          as a text file next to it",
     ),
     key(
+        "labs.paste_last_picker",
+        Kind::Bool,
+        "Labs: holding Paste Last opens a picker of recent dictations and annotations, and History \
+         lists dictations, annotations, screenshots, and recordings together (macOS)",
+    ),
+    key(
         "labs.api_processing",
         Kind::Bool,
         "Labs: apps using Hex's local API can ask for transcripts with Global mode's corrections, \

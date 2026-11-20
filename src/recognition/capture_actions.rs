@@ -180,7 +180,10 @@ pub(super) fn finish_hotkey_dictation(
 /// the live stream opens now. `tone_owed` plays the start tone for a capture
 /// that's already open; one still opening the microphone plays it on
 /// `ReadyIntentional`.
-pub(super) fn make_control_capture_intentional(input: &DictationAudio, tone_owed: bool) -> Result<()> {
+pub(super) fn make_control_capture_intentional(
+    input: &DictationAudio,
+    tone_owed: bool,
+) -> Result<()> {
     if input.mark_intentional()? && tone_owed {
         feedback::play(Tone::DictationStart);
     }

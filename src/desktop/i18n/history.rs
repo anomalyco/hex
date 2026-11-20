@@ -6,7 +6,20 @@
 /// Spanish, Ukrainian.
 #[rustfmt::skip]
 pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Sent to", ["Wysłano do", "已发送到", "送信先", "Gesendet an", "Enviado a", "Надіслано до"]),
+    ("Nothing here yet", ["Jeszcze nic tu nie ma", "这里还没有内容", "まだ何もありません", "Noch nichts hier", "Aún no hay nada aquí", "Тут ще нічого немає"]),
+    ("Dictations, annotations, and captures show here.", ["Tutaj pojawiają się dyktowania, adnotacje i zrzuty ekranu.", "听写、标注和截图会显示在这里。", "音声入力、注釈、キャプチャがここに表示されます。", "Diktate, Anmerkungen und Aufnahmen erscheinen hier.", "Los dictados, las anotaciones y las capturas aparecen aquí.", "Тут з’являються диктування, анотації та знімки."]),
+    ("Move to Trash…", ["Przenieś do kosza…", "移到废纸篓…", "ゴミ箱に入れる…", "In den Papierkorb legen…", "Trasladar a la papelera…", "Перемістити в смітник…"]),
+    ("Paste last", ["Wklej ostatni element", "粘贴最近一项", "最新の項目を貼り付け", "Letztes Element einfügen", "Pegar último elemento", "Вставити останній елемент"]),
+    ("Annotations", ["Adnotacje", "标注", "注釈", "Annotationen", "Anotaciones", "Анотації"]),
+    ("Show all History", ["Pokaż całą historię", "显示所有历史记录", "すべての履歴を表示", "Gesamten Verlauf anzeigen", "Mostrar todo el historial", "Показати всю історію"]),
+    ("All types", ["Wszystkie typy", "所有类型", "すべての種類", "Alle Typen", "Todos los tipos", "Усі типи"]),
     ("Dictations", ["Dyktowania", "听写", "音声入力", "Diktate", "Dictados", "Диктування"]),
+    ("Screen recordings", ["Nagrania ekranu", "屏幕录像", "画面収録", "Bildschirmaufnahmen", "Grabaciones de pantalla", "Записи екрана"]),
+    ("Type", ["Typ", "类型", "種類", "Typ", "Tipo", "Тип"]),
+    ("No matching items", ["Brak pasujących elementów", "没有匹配项", "一致する項目はありません", "Keine passenden Einträge", "No hay elementos coincidentes", "Немає відповідних елементів"]),
+    ("Clear dictation history", ["Wyczyść historię dyktowania", "清除听写历史记录", "音声入力履歴を消去", "Diktatverlauf löschen", "Borrar historial de dictados", "Очистити історію диктування"]),
+    ("Clear dictation history…", ["Wyczyść historię dyktowania…", "清除听写历史记录…", "音声入力履歴を消去…", "Diktatverlauf löschen…", "Borrar historial de dictados…", "Очистити історію диктування…"]),
     ("Words", ["Słowa", "字词", "単語", "Wörter", "Palabras", "Слова"]),
     ("Words per minute", ["Słowa na minutę", "每分钟字词", "毎分の単語数", "Wörter pro Minute", "Palabras por minuto", "Слів за хвилину"]),
     ("Daily streak", ["Seria dni", "连续天数", "連続日数", "Tage in Folge", "Días seguidos", "Днів поспіль"]),

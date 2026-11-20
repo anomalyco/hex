@@ -289,7 +289,9 @@ impl Paster {
                     "this app requires typing; Paste Last cannot type line breaks"
                 ));
             }
-            Some(typing) if focused() => self.type_into_frontmost(&text, joinable, typing, focused)?,
+            Some(typing) if focused() => {
+                self.type_into_frontmost(&text, joinable, typing, focused)?
+            }
             Some(_) => return Err(eyre!("paste target changed")),
             None => self.paste_through_clipboard(&text, joinable, focused)?,
         }

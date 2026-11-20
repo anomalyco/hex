@@ -207,6 +207,9 @@ pub struct LabsSettings {
     /// MKV file dropped on the window is transcribed and saved as a text file
     /// beside it.
     pub drop_transcribe: bool,
+    /// Holding Paste Last opens a picker of recent dictations and
+    /// annotations, and History lists them together (macOS).
+    pub paste_last_picker: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -421,6 +424,7 @@ impl Default for LabsSettings {
             yolo_mode: false,
             yolo_mode_apps: Vec::new(),
             drop_transcribe: false,
+            paste_last_picker: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,

@@ -10,7 +10,8 @@
 
 use color_eyre::Result;
 
-use super::{ContextWatch, DictationSink, Hotkeys, finish_hotkey_dictation};
+use super::capture_actions::finish_hotkey_dictation;
+use super::{ContextWatch, DictationSink, Hotkeys};
 use crate::desktop::events::EventLog;
 use crate::dictation::audio::DictationAudio;
 use crate::parakeet::DictationWorker;

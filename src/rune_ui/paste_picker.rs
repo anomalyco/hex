@@ -94,7 +94,9 @@ pub(super) fn card<S: 'static>(
     pick: impl Fn(&mut S, Id) + Copy + 'static,
 ) -> El {
     let c = &p.k.c;
-    let mut list = col().key("paste-rows").padding(4.).gap(2.);
+    // The header's 16 pt inset, so its title and every row's kind share one
+    // left edge; rows fill from 8 so the highlight keeps its room.
+    let mut list = col().key("paste-rows").padding(8.).gap(2.);
     for (i, item) in rows.iter().enumerate() {
         let kind = match &item.id {
             Id::Dictation(_) => tr("Dictation"),
@@ -112,7 +114,7 @@ pub(super) fn card<S: 'static>(
             .role("button")
             .label(format!("{kind}: {}", item.preview))
             .focusable(false)
-            .px(12.)
+            .px(8.)
             .py(6.)
             .gap(3.)
             .radius(p.k.radius.md)

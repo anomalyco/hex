@@ -83,10 +83,11 @@ pub enum Feature {
     HoldThroughKeys,
     ModesEditor,
     DropTranscribe,
+    PasteLastPicker,
 }
 
 impl Feature {
-    pub const ALL: [Self; 78] = [
+    pub const ALL: [Self; 79] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -165,5 +166,6 @@ impl Feature {
         Self::HoldThroughKeys,
         Self::ModesEditor,
         Self::DropTranscribe,
+        Self::PasteLastPicker,
     ];
 }

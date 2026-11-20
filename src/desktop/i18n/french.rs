@@ -15,6 +15,10 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Sent to", "Envoyé à"),
+    ("Nothing here yet", "Rien ici pour l’instant"),
+    ("Dictations, annotations, and captures show here.", "Les dictées, les annotations et les captures apparaissent ici."),
+    ("Move to Trash…", "Placer dans la corbeille…"),
     ("Find a setting or lab", "Rechercher un réglage ou une fonction Labs"),
     ("No matching settings or labs", "Aucun réglage ni aucune fonction Labs ne correspond"),
     ("The keys you press to dictate", "Les touches utilisées pour dicter"),
@@ -139,6 +143,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Skip long pauses", "Sauter les longues pauses"),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "En mode bascule, maintenez le raccourci pour dicter jusqu'à ce que vous le relâchiez ; un appui bref démarre et arrête toujours"),
     ("Copy recent dictations", "Copier les dictées récentes"),
+    ("Paste Last picker", "Sélecteur Coller le dernier"),
+    ("Tap Paste Last to paste the newest dictation or annotation; hold it to pick another", "Touchez Coller le dernier pour coller la dictée ou l’annotation la plus récente ; maintenez pour en choisir une autre"),
     ("Copy one of your last five dictations from the menu bar, under Paste Last Dictation", "Copiez l'une de vos cinq dernières dictées depuis la barre des menus, sous Coller la dernière dictée"),
     ("Stop when the call ends", "Arrêter à la fin de l'appel"),
     ("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet", "Arrête un enregistrement lancé automatiquement par Hex 30 s après que l'app d'appel a libéré le micro et s'est tue"),
@@ -508,7 +514,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Paste last", "Coller le dernier élément"),
     ("Show all History", "Afficher tout l’historique"),
     ("All types", "Tous les types"),
-    ("Dictations", "Dictées"),
     ("Screen recordings", "Enregistrements d’écran"),
     ("Type", "Type"),
     ("No matching items", "Aucun élément correspondant"),

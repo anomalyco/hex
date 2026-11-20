@@ -27,9 +27,9 @@ pub(crate) mod paste_source;
 pub mod playback;
 pub mod recordings;
 pub mod stats;
-pub mod usage;
 #[cfg(all(target_os = "macos", hex_capture))]
 pub(crate) mod timeline;
+pub mod usage;
 pub mod versions;
 
 pub use recordings::Recording;
@@ -420,7 +420,7 @@ impl HistoryStore {
         self.record_result(draft, now_ms, false)
     }
 
-     fn record_result(
+    fn record_result(
         &mut self,
         draft: HistoryDraft,
         now_ms: u64,
