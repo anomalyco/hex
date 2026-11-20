@@ -67,6 +67,19 @@ struct SettingsCard<Content: View>: View {
     }
 }
 
+/// A small label above a card, such as Privacy's "Advanced".
+struct SettingsSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(HexTheme.textMuted)
+            .padding(.leading, 16)
+            .padding(.top, 12)
+    }
+}
+
 struct SettingsDivider: View {
     var leading: CGFloat = 16
 

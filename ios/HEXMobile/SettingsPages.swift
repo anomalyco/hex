@@ -5,9 +5,7 @@ struct DictationSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var dictation: DictationController
     @State private var cleanupTagger = CleanupTaggerSettings().isEnabled
-    @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
-    @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
 
     var body: some View {
         SettingsPageScaffold(title: "Dictation") {
@@ -50,15 +48,6 @@ struct DictationSettingsPage: View {
                     detail: "Drops ums, repeats and corrections",
                     isOn: $cleanupTagger
                 )
-
-                SettingsDivider()
-
-                SettingsToggleRow(
-                    title: "Clean up with Apple Intelligence",
-                    detail: cleanupAvailability.reason ?? "Fixes misheard words on device",
-                    isOn: $appleIntelligenceCleanup
-                )
-                .disabled(!cleanupAvailability.isAvailable)
 
                 SettingsDivider()
 
@@ -110,17 +99,12 @@ struct DictationSettingsPage: View {
         .onChange(of: cleanupTagger) { _, enabled in
             CleanupTaggerSettings().isEnabled = enabled
         }
-        .onChange(of: appleIntelligenceCleanup) { _, enabled in
-            AppleIntelligenceCleanupSettings().isEnabled = enabled
-        }
         .onChange(of: customVocabulary) { _, enabled in
             CustomVocabularySettings().isEnabled = enabled
         }
         .onAppear {
             cleanupTagger = CleanupTaggerSettings().isEnabled
-            appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
-            cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         }
     }
 }
@@ -206,10 +190,13 @@ struct KeyboardSettingsPage: View {
     }
 }
 
-/// Settings › Privacy: what Hex keeps about how you type, all of it on this iPhone.
+/// Settings › Privacy: what Hex keeps about how you type, all of it on this iPhone, and
+/// under Advanced the typing logs you can record to export.
 struct PrivacySettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var learnTyping = TypingJournalSettings().isEnabled
+    @State private var typingLogs = TypingLogSettings().isEnabled
+    @State private var showTypingLogs = false
 
     var body: some View {
         SettingsPageScaffold(title: "Privacy") {
@@ -240,33 +227,10 @@ struct PrivacySettingsPage: View {
                         .padding(.vertical, 12)
                 }
             }
-        }
-        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: learnTyping)
-        .onChange(of: learnTyping) { _, enabled in
-            TypingJournalSettings().isEnabled = enabled
-        }
-        .onAppear {
-            learnTyping = TypingJournalSettings().isEnabled
-        }
-    }
-}
 
-/// Settings › Experiments: unfinished features, off until turned on. They live in the App
-/// Group so the keyboard reads them too.
-struct ExperimentsSettingsPage: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var emoji = FullKeyboardSettings().emoji
-    @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
-    @State private var typingLogs = TypingLogSettings().isEnabled
-    @State private var showTypingLogs = false
+            SettingsSectionHeader(title: "Advanced")
 
-    var body: some View {
-        SettingsPageScaffold(title: "Experiments") {
             SettingsCard {
-                EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
-
-                SettingsDivider()
-
                 // Apart from Learn how I type: this keeps everything, to export and train on.
                 SettingsToggleRow(
                     title: "Record typing logs",
@@ -285,18 +249,57 @@ struct ExperimentsSettingsPage: View {
                 }
             }
         }
-        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: emoji)
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: learnTyping)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: typingLogs)
         .sheet(isPresented: $showTypingLogs) {
             TypingLogsView()
+        }
+        .onChange(of: learnTyping) { _, enabled in
+            TypingJournalSettings().isEnabled = enabled
         }
         .onChange(of: typingLogs) { _, enabled in
             TypingLogSettings().isEnabled = enabled
         }
         .onAppear {
+            learnTyping = TypingJournalSettings().isEnabled
+            typingLogs = TypingLogSettings().isEnabled
+        }
+    }
+}
+
+/// Settings › Experiments: unfinished features, off until turned on. They live in the App
+/// Group so the keyboard reads them too.
+struct ExperimentsSettingsPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var emoji = FullKeyboardSettings().emoji
+    @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
+    @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
+    @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+
+    var body: some View {
+        SettingsPageScaffold(title: "Experiments") {
+            SettingsCard {
+                EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Clean up with Apple Intelligence",
+                    detail: cleanupAvailability.reason ?? "Fixes misheard words on device",
+                    isOn: $appleIntelligenceCleanup
+                )
+                .disabled(!cleanupAvailability.isAvailable)
+            }
+        }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: emoji)
+        .onChange(of: appleIntelligenceCleanup) { _, enabled in
+            AppleIntelligenceCleanupSettings().isEnabled = enabled
+        }
+        .onAppear {
             emoji = FullKeyboardSettings().emoji
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
-            typingLogs = TypingLogSettings().isEnabled
+            appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
+            cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         }
     }
 }
