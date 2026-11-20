@@ -521,6 +521,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
+    #[cfg(hex_capture)]
+    crate::rune_ui::paste_picker::install(&mut app);
     // The capture capsule, picker, and ink.
     #[cfg(hex_capture)]
     let capture_overlays =
@@ -819,6 +821,14 @@ fn show_update_check(window: &rune::AppHandle<Ui>) {
 /// Opens the window in front, from the main thread.
 pub(crate) fn bring_window_forward() {
     with_window(bring_forward);
+}
+
+#[cfg(hex_capture)]
+pub(crate) fn open_paste_history() {
+    with_window(|window| {
+        window.update(crate::rune_ui::show_all_history);
+        bring_forward(window);
+    });
 }
 
 fn bring_forward(window: &rune::AppHandle<Ui>) {

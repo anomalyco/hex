@@ -53,6 +53,8 @@ mod onboarding;
 mod onboarding_kit;
 mod output;
 mod paste_access;
+#[cfg(all(hex_capture, target_os = "macos"))]
+pub(crate) mod paste_picker;
 mod picker;
 mod platform;
 mod platform_settings;
@@ -461,23 +463,9 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     }
 }
 
-/// What this OS's Hex can do, by capability name, for `hex status` and the
-/// settings `hex settings` can change here.
-pub(crate) fn capabilities() -> std::collections::BTreeMap<String, bool> {
-    platform::Capabilities::current()
-        .fields()
-        .into_iter()
-        .map(|(name, on)| (name.to_owned(), on))
-        .collect()
-}
-
-/// Whether this OS's Hex has the capability `name` ([`capabilities`]).
-pub(crate) fn capability(name: &str) -> bool {
-    platform::Capabilities::current()
-        .fields()
-        .into_iter()
-        .any(|(field, on)| field == name && on)
-}
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) use history::unified::show_all_history;
+pub(crate) use platform::{capabilities, capability};
 
 /// `hex onboarding reset`: replays the first run in the window now; the
 /// window also shows why it couldn't.
@@ -1216,6 +1204,8 @@ impl Ui {
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
+        #[cfg(all(target_os = "macos", hex_capture))]
+        let pane = history::unified::destination(self, pane);
         let labs = std::mem::take(&mut self.labs_open);
         if self.pane == pane && !labs {
             return;
@@ -1397,6 +1387,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     );
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
+    #[cfg(all(target_os = "macos", hex_capture))]
+    {
+        changed |= history::unified::poll(ui);
+    }
     if ui.pane == Pane::Output && !ui.labs_open {
         changed |= output::poll(ui, clock, tx);
     }

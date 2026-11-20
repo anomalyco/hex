@@ -736,7 +736,75 @@ options), `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys`
 (cross-compiled only). Proof limits: no physical shortcut press on any OS, no
 real Wayland grant or X11 grab run, and no Windows hook run.
 
-### Paste Last After A Failed Paste (every OS)
+### Paste Last Picker (Labs, macOS)
+
+Labs › Paste Last picker (`labs.paste_last_picker`; macOS, Dev-audience and off
+by default) opts the existing rebindable Paste Last shortcut, menu row and
+`hex paste-last` into mixed output. No new binding or preference row. A stable
+build never lists, accepts, or runs it, and `DisableLabs` holds it off. With it
+off, Paste Last pastes the newest dictation exactly as before; Windows and
+Linux are unchanged. The gate, `crate::labs::paste_last_picker()`, is where the
+work starts: the picker and its gesture, History's unified list and the rows it
+reads, and the cancel path's word writer.
+
+```ts
+Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation
+Hold 300 ms on the Mac event tap → up to eight recent items, without taking focus
+├── Initially select what tap would paste; with only Cancelled rows select nothing
+├── Show all History → open the searchable archive, not a paste
+├── Click a row → recheck that item and paste it once into the original field
+├── Arrow keys → move selection; Enter or release the chord modifiers → choose
+└── Escape or changed focus → close without touching the clipboard
+```
+
+With it on, the Mac History puts dictations, annotations, screenshots and
+screen recordings in one list. All types is the default. Search works inside the
+selected type and beyond the eight picker rows. Capture files keep their
+editor, copy, reveal, drag and Trash actions. Clear dictation history affects
+the dictation owner only. A shared-library bundle can be visible without
+being eligible for global paste; that needs the Hex writer's ready receipt.
+
+```ts
+Physical cancel of an intentional shortcut dictation → stop at the key timestamp, no tail
+├── Already-spoken samples → installed local detector + local model → nonempty words only
+│   └── Retention permits it → Dictation · Cancelled (no recording or output)
+└── Off, no speech, missing detector/model, or Clear during inference → no saved result
+CLI cancel, discard, system cancel, quit → no recovery
+```
+
+[Isolated Mac proof](../../tests/fixtures/paste-picker/one-history.sh): synthesize a
+phrase to a file, send the hold and Escape decisions and device chunks through
+the audio owner, run Silero and Parakeet, then press the type menu and search
+in the real Rune window rendered offscreen. It uses neither a microphone nor
+a pasteboard. This is not a native event-tap or receiving-app replay.
+
+Rows are ordered by completion time for this picker; a paste does not
+promote its item. Secure Input and invocations without usable release or
+overlay support take the immediate path. If Hex can't identify the original
+external field, it refuses. Multiline text in a target requiring simulated
+typing is refused rather than sending a Return. Global paste does not invoke
+Annotate's explicit Paste, Send or Undo.
+
+The [mixed selection check](../../src/paste/recent.rs) opens a temporary
+History file and a shared capture folder. The first row and the tap select the
+same ready item; a newer incomplete folder does not hide it. An unmarked
+bundle is never taken as Hex output. Removing a selected bundle makes its ID
+unavailable, rather than silently pasting the next item. Failed insertion
+recovery in this projection has one RAM slot, cleared with History and never
+written to the file. The Mac output worker now uses this slot for unretained
+output when it has a History owner. With no History owner, the existing
+listener-local fallback still works. These checks don't drive a global key.
+
+The [ownership tests](../../src/paste/capture/tests.rs) run the capture
+transaction without WindowServer. The [private-board Rune test](../../src/rune_ui/paste_picker/proof.rs)
+requires a GUI login and an explicit `--ignored` run. A separate disposable
+macOS GUI run used virtual hardware input, the actual listener and a second
+[AppKit receiver](../../tests/fixtures/paste-picker/Receiver.m). It received
+the newest capture as PNG then summary, the clicked older dictation, and the
+original URL on ordinary ⌘V. Escape left the pasteboard change count alone.
+Changing fields or copying after the PNG stopped the summary. TextEdit's
+RTF conversion sheet can legitimately cause such a partial paste; no retry.
+This does not establish delivery in arbitrary apps or native Secure Input.
 
 A paste that fails (another app changed the clipboard while Hex saved it, or a
 format couldn't be read) still makes that dictation Paste Last's, unless its

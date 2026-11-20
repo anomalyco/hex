@@ -26,6 +26,8 @@ mod audio;
 mod heatmap;
 mod selection;
 mod stats;
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(super) mod unified;
 
 pub(super) use self::audio::AudioCopy;
 use self::audio::copy_audio;
@@ -33,9 +35,11 @@ pub(super) use self::stats::close_stats;
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
+    #[cfg(all(target_os = "macos", hex_capture))]
+    pub(super) unified: unified::Pane,
     store: Option<History>,
     pub(super) entries: Vec<HistoryEntry>,
-    search: TextEdit,
+    pub(super) search: TextEdit,
     /// The query the entries were loaded for.
     searched: String,
     /// The store's revision the entries were loaded at; `None` before the
@@ -120,6 +124,8 @@ impl HistoryPane {
     /// The host's store; `None` when it could not open one.
     pub(super) fn shared(store: Option<History>) -> Self {
         Self {
+            #[cfg(all(target_os = "macos", hex_capture))]
+            unified: unified::Pane::live(),
             error: store
                 .is_none()
                 .then(|| tr("History could not be loaded.").to_string()),
@@ -305,6 +311,7 @@ impl HistoryPane {
         let entry =
             |id: u64, minutes: u64, kind, raw: &str, final_text: &str, app: Option<&str>| {
                 HistoryEntry {
+                    cancelled: false,
                     id,
                     timestamp_ms: now - minutes * 60_000 - 30_000,
                     kind,
@@ -731,6 +738,10 @@ fn delete(ui: &mut Ui, id: u64) {
 
 /// The header's retention menu and the list + detail body.
 pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
+    #[cfg(all(target_os = "macos", hex_capture))]
+    if ui.history.unified.enabled {
+        return unified::view(ui, p, cx, layer);
+    }
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
     let mut notices = Vec::new();
@@ -831,12 +842,22 @@ fn kept_label(retention: HistoryRetention) -> String {
 /// where that lab shows, and Clear all history… last. Once Clear all is
 /// chosen, the menu gives way to its confirmation until it is answered.
 fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
+    let (confirm_clear, offer_clear) = (tr("Clear all history"), tr("Clear all history…"));
+    #[cfg(all(target_os = "macos", hex_capture))]
+    let (confirm_clear, offer_clear) = if ui.history.unified.enabled {
+        (
+            tr("Clear dictation history"),
+            tr("Clear dictation history…"),
+        )
+    } else {
+        (confirm_clear, offer_clear)
+    };
     if ui.history.clear_armed {
         return vec![
             button(
                 p,
                 "history-confirm-clear",
-                tr("Clear all history"),
+                confirm_clear,
                 ButtonKind::Danger,
                 |ui: &mut Ui, _| clear(ui),
             ),
@@ -898,7 +919,7 @@ fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
         && ui.history.searched.trim().is_empty()
         && !ui.history.has_usage();
     menu = menu.separator().item(
-        MenuItem::new(tr("Clear all history…"))
+        MenuItem::new(offer_clear)
             .danger(true)
             .disabled(nothing)
             .on_select(|ui: &mut Ui| {

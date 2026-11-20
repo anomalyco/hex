@@ -460,6 +460,17 @@ pub fn yolo_mode_apps() -> Option<Vec<String>> {
         .clone()
 }
 
+/// Labs › Paste Last picker: holding Paste Last opens a picker of recent
+/// dictations and annotations, and History lists them together (macOS; read
+/// where the picker, History's unified list, and the cancel-path words start).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn paste_last_picker() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    PASTE_LAST_PICKER.load(Ordering::Acquire) && Feature::PasteLastPicker.on_this_os()
+}
+
 /// Labs › Transcribe dropped audio: a file with one of this build's
 /// extensions, dropped on the window, is transcribed in this process and saved
 /// as a text file beside it (read as each drop starts, and by the window's

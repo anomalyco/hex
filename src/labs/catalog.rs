@@ -13,7 +13,7 @@ impl Feature {
             // Developer tools: the story browser, and the virtual microphone
             // (a stable build keeps only its Uninstall while the driver is
             // installed).
-            Self::VoiceFilter | Self::Playground => Audience::Dev,
+            Self::VoiceFilter | Self::Playground | Self::PasteLastPicker => Audience::Dev,
             Self::Meetings
             | Self::LiveText
             | Self::FailureNotices
@@ -165,6 +165,7 @@ impl Feature {
             Self::StopPhrase | Self::HoldThroughKeys => 20261116,
             Self::ModesEditor => 20261118,
             Self::CalendarSelectAll => 20261118,
+            Self::PasteLastPicker => 20261119,
         }
     }
 
@@ -274,7 +275,8 @@ impl Feature {
             | Self::CursorContext
             | Self::MoreDictationShortcuts
             | Self::CalendarMenu
-            | Self::CalendarSelectAll => MACOS,
+            | Self::CalendarSelectAll
+            | Self::PasteLastPicker => MACOS,
             Self::CleanUpWithAppleIntelligence => MACOS,
             Self::CopyOnly => MACOS_WINDOWS,
             Self::HoldThroughKeys => MACOS_WINDOWS,
@@ -402,6 +404,7 @@ impl Feature {
             Self::StopPhrase => "stop-phrase",
             Self::HoldThroughKeys => "hold-through-keys",
             Self::ModesEditor => "modes-editor",
+            Self::PasteLastPicker => "paste-last-picker",
         }
     }
 
@@ -476,6 +479,7 @@ impl Feature {
             Self::VoicePrompt => "labs.voice_prompt",
             Self::CopyCaptureZip => "labs.copy_capture_zip",
             Self::DropTranscribe => "labs.drop_transcribe",
+            Self::PasteLastPicker => "labs.paste_last_picker",
             Self::ShellCompletions => "labs.shell_completions",
             Self::YoloMode => "labs.yolo_mode",
             Self::CursorContext => "labs.cursor_context",

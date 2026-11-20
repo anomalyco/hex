@@ -54,6 +54,29 @@ pub(crate) fn contains_speech(samples: &[f32]) -> Option<bool> {
     }
 }
 
+/// Recovery never starts a download, and fails closed without a detector.
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) fn installed_speech(samples: &[f32]) -> bool {
+    #[cfg(test)]
+    {
+        if let Some(verdict) = OVERRIDE.with(|v| v.get()) {
+            return verdict;
+        }
+    }
+    let mut state = lock_state();
+    if matches!(*state, State::Unloaded)
+        && let Ok(path) = transcription_models::speech_detector_path()
+        && path.is_file()
+        && let Ok(session) = load(&path)
+    {
+        *state = State::Loaded(session);
+    }
+    match &mut *state {
+        State::Loaded(s) => segments(s, samples).is_ok_and(|v| !v.is_empty()),
+        _ => false,
+    }
+}
+
 /// First and last speech sample of 16 kHz mono `samples`, or `None` when the
 /// detector is not available or hears no speech. The bounds are Silero's own
 /// segments, which already carry its `speech_pad_ms`.

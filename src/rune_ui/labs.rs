@@ -701,6 +701,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::HistoryStats, None));
     rows.push(row(Feature::KeepRecordings, None));
     rows.push(row(Feature::CopyDictationAudio, None));
+    // The picker is a Mac gesture and History; elsewhere neither exists.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(Feature::PasteLastPicker, None));
+    }
     rows.push(row(Feature::OutputFixes, Some(&BOOK)));
     // The Modes editor's card carries its pane.
     rows.push(row(Feature::ModesEditor, Some(Pane::Modes.icon())));
@@ -912,6 +916,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MicrophoneKeyAlone => "lab-microphone-key",
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::CopyDictationAudio => "lab-copy-dictation-audio",
+        Feature::PasteLastPicker => "lab-paste-last-picker",
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",

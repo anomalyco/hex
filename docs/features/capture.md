@@ -1337,3 +1337,13 @@ clipboard handoff populated) via `hex capture replay`, an `⌥⇧R` tap, and a
 display sleep/wake, and rejected a 16 s request with
 `SCStreamErrorDomain -3812`. The menu-bar screen-recording indicator stays lit
 for the entire lifetime of the rolling buffer.
+# Paste Last provenance on macOS
+
+A successful Annotate finish marks its own bundle with `.hex-annotate-v1`
+(owner-only identity and ready time, no words or images). Failed, cancelled,
+and Screenshots recordings do not publish this mark. Existing ambiguous
+bundles, including captures made by standalone Scrawl, are not backfilled
+from a folder name. They remain available through their existing actions.
+The [Mac picker](dictation.md#paste-last-picker-labs-macos) (Labs › Paste Last
+picker) reads the mark; failure to write it does not fail the capture or affect
+its send.

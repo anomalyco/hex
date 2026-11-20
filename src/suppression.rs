@@ -902,6 +902,41 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
             ListSwallow::No
         };
     }
+    if *taken & bit != 0 {
+        return ListSwallow::Only;
+    }
+    if crate::paste::browse::active() && !crate::app_settings::shortcuts_suspended() {
+        use crate::paste::browse::{self, Nav};
+        let flags = unsafe { CGEventGetFlags(event) };
+        let bindings = crate::app_settings::runtime_hotkeys();
+        let trigger = bindings
+            .paste_last
+            .is_some_and(|key| key.matches_key_press(code, flags));
+        let other_shortcut = !trigger
+            && bindings
+                .all()
+                .iter()
+                .flatten()
+                .any(|key| key.matches_key_press(code, flags));
+        let nav = match code {
+            53 => Some(Nav::Cancel),
+            _ if other_shortcut => None,
+            125 | 48 => Some(Nav::Next),
+            126 => Some(Nav::Previous),
+            36 | 76 => Some(Nav::Commit),
+            _ if trigger && browse::open() => Some(Nav::Next),
+            _ => None,
+        };
+        if let Some(nav) = nav
+            && browse::nav(nav)
+        {
+            *taken |= bit;
+            return ListSwallow::Only;
+        }
+        if !trigger {
+            browse::nav(Nav::Cancel);
+        }
+    }
     let suggesting = suggesting();
     if !list_takes_keys(
         crate::app_settings::capture_on(),

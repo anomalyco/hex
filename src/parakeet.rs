@@ -174,6 +174,11 @@ struct CompletedTranscript {
 
 enum OutputJob {
     PreparePaste,
+    #[cfg(hex_capture)]
+    Recent {
+        sequence: u64,
+        request: crate::paste::recent::Request,
+    },
     Completed {
         job_id: DictationJobId,
         control: Arc<JobControl>,
@@ -190,6 +195,8 @@ impl OutputJob {
     fn sequence(&self) -> u64 {
         match self {
             Self::PreparePaste => u64::MAX,
+            #[cfg(hex_capture)]
+            Self::Recent { sequence, .. } => *sequence,
             Self::Completed { job_id, .. } => job_id.0,
             Self::Paste { sequence, .. } => *sequence,
         }
@@ -388,6 +395,14 @@ impl DictationWorker {
         state.started_by_shortcut = by_shortcut;
     }
 
+    #[cfg(hex_capture)]
+    pub(crate) fn started_by_shortcut(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .started_by_shortcut
+    }
+
     /// Hands the clip to the engine at once, so its live stream finishes
     /// before any later capture begins one; the job then waits in order.
     pub fn transcribe(
@@ -532,6 +547,14 @@ impl DictationWorker {
     }
 
     pub fn paste_last(&self) -> Result<(), &'static str> {
+        #[cfg(hex_capture)]
+        if crate::paste::recent::enabled() {
+            return self.paste_recent(crate::paste::recent::Request {
+                id: None,
+                target: crate::paste::recent::Target::capture()
+                    .ok_or("could not confirm the paste target")?,
+            });
+        }
         self.submit_paste(PasteKind::LastTranscript)
     }
 
@@ -540,12 +563,24 @@ impl DictationWorker {
     }
 
     fn submit_paste(&self, kind: PasteKind) -> Result<(), &'static str> {
+        self.enqueue_paste(|sequence| OutputJob::Paste { sequence, kind })
+    }
+
+    #[cfg(hex_capture)]
+    pub(crate) fn paste_recent(
+        &self,
+        request: crate::paste::recent::Request,
+    ) -> Result<(), &'static str> {
+        self.enqueue_paste(|sequence| OutputJob::Recent { sequence, request })
+    }
+
+    fn enqueue_paste(&self, job: impl FnOnce(u64) -> OutputJob) -> Result<(), &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let sequence = state.next_output_sequence()?;
         self.output_jobs
             .as_ref()
             .ok_or("dictation worker is unavailable")?
-            .try_send(OutputJob::Paste { sequence, kind })
+            .try_send(job(sequence))
             .map(|()| {
                 state.next_sequence += 1;
                 state.pending_pastes += 1;
@@ -604,12 +639,21 @@ fn run_output_worker(
             continue;
         }
         for job in ordered.push(job) {
-            let event = finish_output(
-                job,
-                &mut |text, mode| paster.paste(text, mode),
-                &mut last_transcript,
-                history.as_ref(),
-            );
+            let event = match job {
+                #[cfg(hex_capture)]
+                OutputJob::Recent { request, .. } => WorkerEvent::Pasted {
+                    kind: PasteKind::LastTranscript,
+                    result: request
+                        .insert(&mut paster, history.as_ref())
+                        .map_err(|e| e.to_string()),
+                },
+                job => finish_output(
+                    job,
+                    &mut |text, mode| paster.paste(text, mode),
+                    &mut last_transcript,
+                    history.as_ref(),
+                ),
+            };
             let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
             match &event {
                 WorkerEvent::Completed { job_id, .. } => {
@@ -1041,6 +1085,8 @@ fn finish_output(
 ) -> WorkerEvent {
     match job {
         OutputJob::PreparePaste => unreachable!("paste preparation bypasses ordered output"),
+        #[cfg(hex_capture)]
+        OutputJob::Recent { .. } => unreachable!("a recent paste uses its own insertion adapter"),
         OutputJob::Completed {
             job_id,
             control,
@@ -1096,7 +1142,7 @@ fn finish_output(
                                 && let Err(error) =
                                     crate::paste::return_to_app::bring_to_front(completed.return_to)
                             {
-                                *last_transcript = Some(completed.text.clone());
+                                recover_output(history, last_transcript, completed.text);
                                 tracing::warn!(
                                     %error,
                                     "a dictation found another app in front and couldn't return to its own"
@@ -1108,7 +1154,7 @@ fn finish_output(
                             // for Paste last dictation, as above, so the
                             // dictation isn't lost.
                             if let Err(error) = paste(&completed.text, mode) {
-                                *last_transcript = Some(completed.text.clone());
+                                recover_output(history, last_transcript, completed.text);
                                 return Err(error.to_string());
                             }
                             if let Some(gate) = send_gate {
@@ -1119,17 +1165,17 @@ fn finish_output(
                         | TranscriptionTarget::Print
                         | TranscriptionTarget::RawPrint => {}
                     }
-                    if matches!(
+                    let reusable = matches!(
                         target,
                         TranscriptionTarget::Paste
                             | TranscriptionTarget::CopyOnlyPaste
                             | TranscriptionTarget::RawCopyOnlyPaste
                             | TranscriptionTarget::RawPaste
-                    ) {
-                        *last_transcript = Some(completed.text.clone());
-                    }
-                    if let Some(history) = history {
-                        record_history(history, target, sent, &mut completed);
+                    );
+                    let recorded = history.and_then(|h| record_history(h, target, sent, &mut completed));
+                    if reusable {
+                        if recorded.is_some() { *last_transcript = Some(completed.text.clone()); }
+                        else { recover_output(history, last_transcript, completed.text.clone()); }
                     }
                 }
                 tracing::info!(
@@ -1165,11 +1211,12 @@ fn finish_output(
         OutputJob::Paste { kind, .. } => {
             let result = match kind {
                 PasteKind::LastTranscript => last_transcript
-                    .as_deref()
+                    .clone()
+                    .or_else(|| history.and_then(History::recovered_output))
                     .ok_or_else(|| "no previous transcript is available".to_string())
                     .and_then(|text| {
-                        paste(text, PasteMode::Continue).map_err(|error| error.to_string())?;
-                        Ok(text.to_string())
+                        paste(&text, PasteMode::Continue).map_err(|error| error.to_string())?;
+                        Ok(text)
                     }),
                 PasteKind::MeetingDelta => {
                     paste_meeting_delta(paste).map_err(|error| error.to_string())
@@ -1207,37 +1254,8 @@ fn send_unless_escaped(
     }
 }
 
-/// Record one successfully pasted result. History failures must never fail
-/// the paste that already happened.
-fn record_history(
-    history: &History,
-    target: TranscriptionTarget,
-    sent: bool,
-    completed: &mut CompletedTranscript,
-) {
-    let kind = match target {
-        TranscriptionTarget::Paste if sent => HistoryKind::Send,
-        TranscriptionTarget::Paste | TranscriptionTarget::CopyOnlyPaste => HistoryKind::Dictation,
-        TranscriptionTarget::RawPaste | TranscriptionTarget::RawCopyOnlyPaste => HistoryKind::Raw,
-        TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
-        TranscriptionTarget::Service => return,
-    };
-    let draft = HistoryDraft {
-        kind,
-        raw_text: completed.raw.clone(),
-        final_text: completed.text.clone(),
-        application: completed.application.clone(),
-        processing: completed.processing.clone(),
-        audio_ms: completed.timings.audio_ms,
-        inference_ms: completed.timings.inference_ms as u64,
-        total_ms: completed.timings.total_started.elapsed().as_millis() as u64,
-        recording: completed.recording.take(),
-        model: crate::history::dictation_model(),
-    };
-    if let Err(error) = history.record(draft) {
-        tracing::warn!(%error, "could not record dictation history");
-    }
-}
+mod output_history;
+use output_history::{record_history, recover_output};
 
 fn paste_meeting_delta(paste: &mut impl FnMut(&str, PasteMode) -> Result<()>) -> Result<String> {
     meeting::consume_active_or_latest_delta(|text| paste(text, PasteMode::Standalone))

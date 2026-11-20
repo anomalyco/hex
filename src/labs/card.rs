@@ -86,6 +86,7 @@ impl Feature {
             Self::HoldThroughKeys => "Hold through other keys",
             Self::ModesEditor => "Modes editor",
             Self::DropTranscribe => "Transcribe dropped audio",
+            Self::PasteLastPicker => "Paste Last picker",
         }
     }
 
@@ -311,6 +312,9 @@ impl Feature {
             }
             Self::DropTranscribe => {
                 "Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it"
+            }
+            Self::PasteLastPicker => {
+                "Tap Paste Last to paste the newest dictation or annotation; hold it to pick another"
             }
         }
     }

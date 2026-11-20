@@ -1,3 +1,11 @@
+#[cfg(hex_capture)]
+pub(crate) mod browse;
+#[cfg(hex_capture)]
+pub(crate) mod capture;
+#[cfg(hex_capture)]
+pub(crate) mod gesture;
+#[cfg(hex_capture)]
+pub(crate) mod recent;
 pub(crate) mod return_to_app;
 
 use std::ffi::{c_char, c_void};
@@ -243,6 +251,22 @@ impl Paster {
         if matches!(mode, PasteMode::Return) {
             return keyboard::post_return();
         }
+        self.insert_text(text, mode, None)
+    }
+
+    /// A selected dictation is text only. The picker has no route, Return,
+    /// or copy-only mode, and it never activates another app.
+    #[cfg(hex_capture)]
+    fn insert_recent_text(&mut self, text: &str, target: &recent::Target) -> Result<()> {
+        self.insert_text(text, PasteMode::Continue, Some(&|| target.unchanged()))
+    }
+
+    fn insert_text(
+        &mut self,
+        text: &str,
+        mode: PasteMode,
+        target: Option<&dyn Fn() -> bool>,
+    ) -> Result<()> {
         let revision = self.activity.revision();
         let joinable = !matches!(mode, PasteMode::Standalone);
         let text = self
@@ -256,9 +280,20 @@ impl Paster {
                     text.to_string()
                 }
             });
+        // Paste Last rechecks the app and field it captured, so a new focus
+        // never receives an older dictation or capture.
+        let focused = || target.is_none_or(|check| check());
         match typing_for_frontmost() {
-            Some(typing) => self.type_into_frontmost(&text, joinable, typing)?,
-            None => self.paste_through_clipboard(&text, joinable)?,
+            Some(_) if target.is_some() && text.contains(['\r', '\n']) => {
+                return Err(eyre!(
+                    "this app requires typing; Paste Last cannot type line breaks"
+                ));
+            }
+            Some(typing) if focused() => {
+                self.type_into_frontmost(&text, joinable, typing, focused)?
+            }
+            Some(_) => return Err(eyre!("paste target changed")),
+            None => self.paste_through_clipboard(&text, joinable, focused)?,
         }
         self.continuation.record(revision, joinable, text);
         Ok(())
@@ -268,7 +303,13 @@ impl Paster {
     /// for the apps [`typing_for_frontmost`] names. Nothing is captured for a
     /// restore; Labs › Keep dictation on clipboard still leaves the text on
     /// the clipboard after typing.
-    fn type_into_frontmost(&mut self, text: &str, joinable: bool, typing: Typing) -> Result<()> {
+    fn type_into_frontmost(
+        &mut self,
+        text: &str,
+        joinable: bool,
+        typing: Typing,
+        focused: impl Fn() -> bool,
+    ) -> Result<()> {
         // Standalone text starts its own sentence, never a continuation of
         // the dictation before it.
         if !joinable {
@@ -286,7 +327,7 @@ impl Paster {
                 // app never land there, and stopping keeps the text for Paste
                 // last dictation instead of pasting it a second time.
                 keyboard::type_text_paced(text, || {
-                    let in_front = remote_desktop_client_in_front();
+                    let in_front = remote_desktop_client_in_front() && focused();
                     if !in_front {
                         tracing::warn!("stopped typing into Windows App: another app is in front");
                     }
@@ -319,7 +360,12 @@ impl Paster {
         write_clipboard_text(&self.clipboard, text, false)
     }
 
-    fn paste_through_clipboard(&mut self, text: &str, joinable: bool) -> Result<()> {
+    fn paste_through_clipboard(
+        &mut self,
+        text: &str,
+        joinable: bool,
+        focused: impl Fn() -> bool,
+    ) -> Result<()> {
         let generation = {
             let mut restore = self
                 .clipboard_restore
@@ -344,6 +390,9 @@ impl Paster {
                 );
                 snapshot
             };
+            if !focused() {
+                return Err(eyre!("paste target changed"));
+            }
             if self.clipboard.changeCount() != previous_change_count {
                 return Err(eyre!("clipboard changed while Hex was preserving it"));
             }
@@ -372,7 +421,13 @@ impl Paster {
 
         let clipboard_restore = self.clipboard_restore.clone();
         complete_paste(
-            || keyboard::post_command('v'),
+            || {
+                if focused() {
+                    keyboard::post_command('v')
+                } else {
+                    Err(eyre!("paste target changed"))
+                }
+            },
             move || {
                 let Some(generation) = generation else {
                     return;

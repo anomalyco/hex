@@ -513,6 +513,17 @@ impl DictationClip {
     pub fn into_transcription_samples(self) -> Vec<f32> {
         self.samples
     }
+
+    /// A cancel keeps neither warm pre-roll nor a live stream that may have
+    /// heard beyond the physical key event. Never hand it to normal output.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    fn into_cancel_samples(mut self) -> Vec<f32> {
+        self.samples
+            .truncate(self.samples.len().saturating_sub(self.tail_samples));
+        self.samples
+            .drain(..self.press_samples.min(self.samples.len()));
+        self.samples
+    }
 }
 
 /// The level gate over one release: the fixed cutoff is met outright, or the

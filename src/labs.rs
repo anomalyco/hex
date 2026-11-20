@@ -195,6 +195,7 @@ impl Feature {
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
             Self::ModesEditor => settings.labs.modes_editor,
+            Self::PasteLastPicker => settings.labs.paste_last_picker,
         }
     }
 
@@ -281,6 +282,7 @@ impl Feature {
             &mut labs.more_dictation_shortcuts,
             &mut labs.copy_dictation_audio,
             &mut labs.modes_editor,
+            &mut labs.paste_last_picker,
         ]
     }
 
@@ -373,6 +375,7 @@ impl Feature {
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
             Self::ModesEditor => settings.labs.modes_editor = on,
+            Self::PasteLastPicker => settings.labs.paste_last_picker = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -549,6 +552,11 @@ static CLEAN_UP: AtomicBool = AtomicBool::new(false);
 /// written by [`state`] and [`apply`].
 static MICROPHONE_KEY: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Paste Last picker's switch, set beside [`STATE`] like
+/// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static PASTE_LAST_PICKER: AtomicBool = AtomicBool::new(false);
+
 /// The origins Labs › Browser access to the local API allows, set beside
 /// [`API_BROWSER_ACCESS`]: only normalized `scheme://host[:port]` origins,
 /// and empty while the lab is off.
@@ -594,6 +602,7 @@ fn state() -> u64 {
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
+                PASTE_LAST_PICKER.store(paste_last_picker_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
                 store_stop_phrase_text(&saved.stop_phrase_text);
@@ -717,6 +726,14 @@ fn microphone_key_enabled(settings: &LabsSettings) -> bool {
         && Feature::MicrophoneKeyAlone.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Paste Last picker in this build, before
+/// its managed lock; the state word has no bit for it.
+fn paste_last_picker_enabled(settings: &LabsSettings) -> bool {
+    settings.paste_last_picker
+        && Feature::PasteLastPicker.shipped()
+        && Feature::PasteLastPicker.managed().is_none()
+}
+
 /// Whether `settings` turn on Labs › Browser access to the local API in this
 /// build, before its managed lock; the state word has no bit for it.
 fn api_browser_access_enabled(settings: &LabsSettings) -> bool {
@@ -798,6 +815,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
+    PASTE_LAST_PICKER.store(paste_last_picker_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
@@ -1920,6 +1938,30 @@ mod tests {
         assert_eq!(Feature::KQuantModels.group(), Group::Models);
         assert_eq!(Feature::KQuantModels.settings_key(), "labs.k_quant_models");
         assert_eq!(Feature::KQuantModels.name(), "k-quant-models");
+    }
+
+    #[test]
+    fn paste_last_picker_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!paste_last_picker_enabled(&labs));
+        labs.paste_last_picker = true;
+        labs.unload_idle_minutes = 24 * 60;
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::PasteLastPicker.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::PasteLastPicker.added(), 20261119);
+        assert_eq!(Feature::PasteLastPicker.audience(), Audience::Dev);
+        assert_eq!(Feature::PasteLastPicker.group(), Group::History);
+        assert_eq!(
+            Feature::PasteLastPicker.settings_key(),
+            "labs.paste_last_picker"
+        );
+        assert_eq!(Feature::PasteLastPicker.name(), "paste-last-picker");
     }
 
     #[test]

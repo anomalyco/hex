@@ -70,6 +70,8 @@ use scrawl_capture::transcribe::Transcriber;
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
+#[cfg(target_os = "macos")]
+pub(crate) mod paste_source;
 mod permissions;
 mod replay;
 mod routing;
@@ -3318,6 +3320,10 @@ fn finish_captures(
                         .map(|error| format!("{error:#}"))
                 };
                 let route = look.as_ref().map(|_| CaptureRoute::looking());
+                #[cfg(target_os = "macos")]
+                if let Err(error) = paste_source::mark_ready(&bundle, crate::history::now_ms()) {
+                    tracing::warn!(%error, "capture written without Paste Last provenance");
+                }
                 lock(outcomes).settle_with(
                     bundle.clone(),
                     Stage::Done,
@@ -4309,6 +4315,11 @@ mod tests {
 
         let last = wait_for_last(&mut host, &audio, &bundle, true);
         assert_eq!(last.stage, "done");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            paste_source::Scope::new(&dir, Some(7)).rows(1, crate::history::now_ms())[0].2,
+            "hello there"
+        );
         assert_eq!(last.words, Some(2));
         let snapshot = lock(&host.outcomes).snapshot();
         assert!(snapshot.recording.is_none() && snapshot.finishing.is_empty());

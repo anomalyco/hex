@@ -117,6 +117,7 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
     ));
     const DAY: u64 = 86_400_000;
     let entry = |id: u64, age_days: u64, raw: &str, final_text: &str| HistoryEntry {
+        cancelled: false,
         id,
         timestamp_ms: NOW - age_days * DAY,
         kind: HistoryKind::Dictation,

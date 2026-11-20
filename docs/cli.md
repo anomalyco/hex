@@ -161,6 +161,11 @@ same.
 with `busy` while anything records or a shortcut gesture is in progress. The
 menu bar's Paste Last Dictation does nothing in that case.
 
+On a Mac with [Labs › Paste Last picker](features/dictation.md#paste-last-picker-labs-macos)
+on, the same command immediately pastes the newest eligible dictation or
+Annotate capture. It does not open a picker or send the capture anywhere. Its
+reply acknowledges queue admission, not receipt by the focused app.
+
 `typed-text` (Linux) runs the same job as Labs › Transform typed text's
 shortcut, for desktops without the shortcuts portal. It needs a listening Hex
 and the lab on (`disabled` when it is off), and refuses while Terminal paste
