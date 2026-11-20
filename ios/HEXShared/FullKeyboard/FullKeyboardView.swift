@@ -347,7 +347,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
 
         if let panel = recordingPanel {
-            panel.frame = bounds
+            panel.frame = recordingPanelFrame
             panel.horizontalInset = layout.horizontalInset
             panel.metrics = layout.metrics
             panel.sideKeyWidth = layout.letterWidth * KeyboardLayout.modifierWidthRatio
@@ -488,32 +488,38 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             hideUndo()
             let panel = recordingPanel ?? makeRecordingPanel()
             panel.palette = palette
-            panel.frame = bounds
+            panel.frame = recordingPanelFrame
             refreshRecordingPanel()
             panel.isHidden = false
             if let (mark, bar) = morphFrames(), window != nil {
                 // The mark grows into a capsule and runs across the strip, then the panel takes over.
                 runMorph(from: mark, to: bar, appearing: true)
-                fade(in: [], out: [stripView, plane, hexKey, globeButton, callout, accentCallout])
+                fade(in: [], out: [stripView, hexKey])
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self, weak panel] in
                     guard let self, self.showsRecording, let panel else { return }
                     self.fade(in: [panel], out: [self.morph])
                 }
             } else {
-                fade(in: [panel], out: [stripView, plane, hexKey, globeButton, callout, accentCallout])
+                fade(in: [panel], out: [stripView, hexKey])
             }
         } else if let panel = recordingPanel {
             panel.scope.phase = .hidden
             if let (mark, bar) = morphFrames(), window != nil {
                 runMorph(from: bar, to: mark, appearing: false)
             }
-            fade(in: [stripView, plane, hexKey, globeButton, callout], out: [panel]) { [weak self, weak panel] in
+            fade(in: [stripView, hexKey], out: [panel]) { [weak self, weak panel] in
                 guard let self, !self.showsRecording, let panel, panel === self.recordingPanel else { return }
                 panel.tearDown()
                 panel.removeFromSuperview()
                 self.recordingPanel = nil
             }
         }
+    }
+
+    /// Where the recording panel sits: the suggestion strip's full width, so the keys stay.
+    private var recordingPanelFrame: CGRect {
+        let m = engine.layout.metrics
+        return CGRect(x: 0, y: m.stripTop, width: bounds.width, height: m.stripHeight)
     }
 
     /// The Hex mark's frame in the strip and the full-width bar it grows into, or nil when
