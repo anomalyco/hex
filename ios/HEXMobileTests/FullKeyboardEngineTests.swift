@@ -369,13 +369,15 @@ final class FullKeyboardEngineTests: XCTestCase {
                 asked += 1
                 return true
             }
-            for (id, kind) in [KeyKind.character("a"), .space, .delete].enumerated() {
+            // Russian has no Latin letters: press its own а and hold its own е.
+            let cyrillic = language == .russian
+            for (id, kind) in [KeyKind.character(cyrillic ? "а" : "a"), .space, .delete].enumerated() {
                 let key = view.engine.layout.key(kind)!
                 let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
                 view.plane.began(id: id + 10, sample: sample)
                 view.plane.ended(id: id + 10, sample: sample)
             }
-            view.debugHoldAccent("e", selectIndex: 1)
+            view.debugHoldAccent(cyrillic ? "е" : "e", selectIndex: 1)
             counts[language] = asked
         }
         XCTAssertGreaterThanOrEqual(counts[.english] ?? 0, 4, "three keys and an accent step")
