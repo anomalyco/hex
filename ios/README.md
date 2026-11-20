@@ -24,12 +24,14 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
 - **One-tap keyboard dictation (`HEXKeyboard`):**
   - **First run (`HEXMobile/Onboarding.swift`):** Three pages. **Welcome**
     says what Hex is. **Set up Hex** is a checklist that updates every second:
-    Hex Keyboard, Allow Full Access, the microphone (**Allow** asks for it;
-    **Open Settings** once it's denied), and the speech model's download, with
-    one **Open Settings** button (Hex's page, with Keyboards inside) and the
-    steps to take there. Continue needs the keyboard added (or unverifiable)
-    and the microphone; Full Access still reads Not checked, and the model
-    keeps downloading. **Try the keyboard** focuses a field: once the keyboard
+    Hex Keyboard, Allow Full Access, the microphone (iOS asks for it when the
+    Keyboard row's **Open Settings** or **Continue** is tapped, never from a
+    button of Hex's that says Allow, per App Review 5.1.1(iv); **Open Settings**
+    once it's denied), and the speech model's download, with one **Open
+    Settings** button (Hex's page, with Keyboards inside) and the steps to take
+    there. Continue needs the keyboard added (or unverifiable), not the
+    microphone, so declining it never blocks the app; Full Access still reads
+    Not checked, and the model keeps downloading. **Try the keyboard** focuses a field: once the keyboard
     has reported Full Access and text is in the field, it shows success and
     **Done** enters the app. If Full Access hasn't appeared 4 s after a
     keyboard switch or new text, it says Full Access looks off, with **Open
