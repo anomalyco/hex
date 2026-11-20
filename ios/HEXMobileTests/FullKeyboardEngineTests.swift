@@ -105,6 +105,83 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.layout.layer, .letters)
     }
 
+    /// As on Apple's keyboard, the key under the finger shows its pop-up the whole slide.
+    func testHoldNumbersPreviewsTheKeyUnderTheFinger() {
+        down(1, .layerSwitch(.numbers))
+        XCTAssertNil(engine.previewKey, "123 itself has no pop-up")
+        engine.touchMoved(id: 1, to: point(.character("5")))
+        XCTAssertEqual(engine.previewKey?.kind, .character("5"))
+        XCTAssertTrue(engine.pressedKinds.contains(.character("5")), "with Key pop-ups off it darkens")
+        engine.touchMoved(id: 1, to: point(.character("6")))
+        XCTAssertEqual(engine.previewKey?.kind, .character("6"))
+        engine.touchMoved(id: 1, to: point(.space))
+        XCTAssertNil(engine.previewKey, "no pop-up over a key that isn't a character")
+        engine.touchMoved(id: 1, to: CGPoint(x: point(.character("6")).x, y: engine.layout.touchAreaFrame.minY - 40))
+        XCTAssertNil(engine.previewKey, "none off the keys")
+        engine.touchMoved(id: 1, to: point(.character("(")))
+        XCTAssertEqual(engine.previewKey?.kind, .character("("))
+        engine.touchEnded(id: 1, at: point(.character("(")))
+        XCTAssertNil(engine.previewKey)
+        XCTAssertEqual(target.text, "(")
+        XCTAssertEqual(engine.layout.layer, .letters)
+    }
+
+    func testLiftingBackOnTheNumbersKeyOrOffTheKeysTypesNothing() {
+        down(1, .layerSwitch(.numbers))
+        engine.touchMoved(id: 1, to: point(.character("5")))
+        let abc = point(.layerSwitch(.letters))
+        engine.touchMoved(id: 1, to: abc)
+        XCTAssertNil(engine.previewKey)
+        engine.touchEnded(id: 1, at: abc)
+        XCTAssertEqual(target.text, "")
+        XCTAssertEqual(engine.layout.layer, .letters, "a slide taken back goes back to the letters")
+
+        down(2, .layerSwitch(.numbers))
+        engine.touchMoved(id: 2, to: point(.character("5")))
+        let above = CGPoint(x: point(.character("5")).x, y: engine.layout.touchAreaFrame.minY - 40)
+        engine.touchMoved(id: 2, to: above)
+        engine.touchEnded(id: 2, at: above)
+        XCTAssertEqual(target.text, "")
+        XCTAssertEqual(engine.layout.layer, .numbers, "off the keys the numbers stay, as on Apple's keyboard")
+
+        tap(.layerSwitch(.letters))
+        tap(.layerSwitch(.numbers))
+        XCTAssertEqual(engine.layout.layer, .numbers, "a tap of 123 still stays on the numbers")
+        XCTAssertEqual(target.text, "")
+    }
+
+    func testHoldSymbolsSlideToASymbolAndLetGo() {
+        tap(.layerSwitch(.numbers))
+        down(1, .layerSwitch(.symbols))
+        XCTAssertEqual(engine.layout.layer, .symbols)
+        engine.touchMoved(id: 1, to: point(.character("%")))
+        XCTAssertEqual(engine.previewKey?.kind, .character("%"))
+        engine.touchEnded(id: 1, at: point(.character("%")))
+        XCTAssertEqual(target.text, "%")
+        XCTAssertEqual(engine.layout.layer, .numbers, "back to the page it came from")
+    }
+
+    func testHoldShiftSlideToALetterTypesACapital() {
+        down(1, .shift)
+        engine.touchMoved(id: 1, to: point(.character("h")))
+        XCTAssertEqual(engine.previewKey?.kind, .character("h"))
+        XCTAssertEqual(engine.previewKey.map(engine.displayLabel(for:)), "H")
+        engine.touchEnded(id: 1, at: point(.character("h")))
+        XCTAssertEqual(target.text, "H")
+        XCTAssertEqual(engine.shift.state, .off)
+        tap(.character("i"))
+        XCTAssertEqual(target.text, "Hi")
+
+        // Slid off and back onto shift: a tap of shift, nothing typed.
+        down(2, .shift)
+        engine.touchMoved(id: 2, to: point(.character("z")))
+        engine.touchMoved(id: 2, to: point(.shift))
+        XCTAssertNil(engine.previewKey)
+        engine.touchEnded(id: 2, at: point(.shift))
+        XCTAssertEqual(target.text, "Hi")
+        XCTAssertEqual(engine.shift.state, .on)
+    }
+
     func testNumbersStayUntilSpace() {
         tap(.layerSwitch(.numbers))
         XCTAssertEqual(engine.layout.layer, .numbers)
@@ -991,6 +1068,28 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(plane.engine.isSwiping)
         plane.ended(id: 2, sample: sample(CGPoint(x: cell.midX, y: e.midY)))
         XCTAssertEqual(field.text, "theg" + menu.options[2])
+    }
+
+    /// Holding 123 or shift and sliding across keys is never a swipe, however far it goes.
+    func testA123OrShiftSlideNeverStartsASwipe() throws {
+        let (field, plane) = try swipeKeyboard()
+        func centre(_ kind: KeyKind) -> CGPoint {
+            let key = plane.engine.layout.key(kind)!.frame
+            return CGPoint(x: key.midX, y: key.midY)
+        }
+        plane.began(id: 1, sample: sample(centre(.layerSwitch(.numbers))))
+        for digit in "1234567" { plane.moved(id: 1, sample: sample(centre(.character(String(digit))))) }
+        XCTAssertFalse(plane.engine.isSwiping)
+        XCTAssertEqual(plane.engine.previewKey?.kind, .character("7"))
+        plane.ended(id: 1, sample: sample(centre(.character("7"))))
+        XCTAssertEqual(field.text, "7")
+        XCTAssertEqual(plane.engine.layout.layer, .letters)
+
+        plane.began(id: 2, sample: sample(centre(.shift)))
+        for letter in "asdfgh" { plane.moved(id: 2, sample: sample(centre(.character(String(letter))))) }
+        XCTAssertFalse(plane.engine.isSwiping)
+        plane.ended(id: 2, sample: sample(centre(.character("h"))))
+        XCTAssertEqual(field.text, "7H")
     }
 
     func testDeleteAndTheSpaceBarNeverStartASwipe() throws {
