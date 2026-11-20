@@ -448,7 +448,13 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   split down the middle, the outer keys reach the screen's edges, and row 1 also
   takes the strip's bottom 4 pt below its pills (`KeyboardLayout.stripTouchBand`),
   so a tap just above a keycap types it rather than picking a suggestion (Apple's
-  keys reach about 8 pt above theirs, measured in the simulator). Taps are not
+  keys reach about 8 pt above theirs, measured in the simulator). While you type (a
+  key is down, or one went down or came up in the last 0.25 s) the strip's whole
+  lower half goes to the row-1 key below the finger
+  (`FullKeyboardEngine.takesStripTouch`): Record typing logs showed every strip
+  pick that soon after a key was an e aimed high landing on the left slot, which
+  kept "th" and typed a space where "the" was meant; nobody reads a new suggestion
+  and taps it that fast. Taps are not
   shifted: moving every logged tap up by 2 to 8 pt landed no more of them on the
   meant key, and Apple's row borders sit within about 2 pt of the gaps' middles
   when nothing is typed. While autocorrect is on in a text field that allows it,
@@ -462,6 +468,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   gestures: Record typing logs showed them reaching the keys about 80 ms later
   than others on an iPhone (whether this removes it is unverified on hardware;
   the simulator never delayed them).
+- **Spaces (full keyboard):** A suggestion (a word, what you typed, or an emoji)
+  types its own space, so a space pressed right after it is swallowed, as on Apple's
+  keyboard; it still counts towards double-space for a period. Holding the space bar
+  still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
+  space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once.
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of

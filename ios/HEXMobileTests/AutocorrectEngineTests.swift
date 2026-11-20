@@ -457,6 +457,27 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Zorbix zorbix ", "a slip in a name from Contacts, and the name typed right")
     }
 
+    /// "th", then the e aimed high 80 ms later, landing on the strip's lower half under its
+    /// left slot. Record typing logs showed that picked what was typed and a space ("th  "),
+    /// and kept "th" from being corrected for the rest of the session. The keys take the
+    /// tap now, on row 1's top edge, and Spatial autocorrect keeps the "the" it spells.
+    func testSpatialAutocorrectReadsAnETappedHighOnTheStripAsThe() throws {
+        try useDecoder()
+        typeTaps("on")
+        for letter in ["t", "h"] {
+            let key = engine.layout.key(.character(letter))!.frame
+            engine.touchBegan(id: 1, at: CGPoint(x: key.midX, y: key.midY))
+            engine.touchEnded(id: 1, at: CGPoint(x: key.midX, y: key.midY))
+            now += 0.1
+        }
+        let e = engine.layout.key(.character("e"))!.frame
+        let aimedHigh = CGPoint(x: e.midX, y: engine.layout.stripFrame.maxY - 6)
+        XCTAssertTrue(engine.takesStripTouch(at: aimedHigh))
+        tap(at: aimedHigh)
+        tap(.space)
+        XCTAssertEqual(target.text, "on the ")
+    }
+
     // MARK: - Offensive words
 
     func testTheBundledListMarksSlursAndSwearWordsAndLeavesAnatomyAlone() {

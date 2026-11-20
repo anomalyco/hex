@@ -75,6 +75,12 @@ final class FullKeyboardEngine {
     static let accentSlop: CGFloat = 10
     static let trackpadActivationDistance: CGFloat = 10
     static let trackpadPointsPerCharacter: CGFloat = 7.5
+    /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
+    /// letting go then types no space.
+    static let trackpadHoldDelay: TimeInterval = 0.4
+    /// A finger on the strip's lower half this soon after a key went down or came up (or
+    /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
+    static let stripTouchGuard: TimeInterval = 0.25
 
     private(set) var shift = ShiftStateMachine()
     private(set) var layerState = KeyboardLayerState()
@@ -83,6 +89,11 @@ final class FullKeyboardEngine {
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
     private var lastSpaceAt: TimeInterval?
+    /// The text before the cursor just after a suggestion typed its word and a space. A space
+    /// typed next, while the text is still that, is swallowed, as on Apple's keyboard.
+    private var suggestionSpaceBefore: String?
+    /// When a key last went down or came up, for `takesStripTouch(at:)`.
+    private var lastKeyTouchAt: TimeInterval?
 
     /// Where each letter of the word being typed was tapped (nil for one that came another
     /// way, such as an accent), for Spatial autocorrect.
@@ -209,6 +220,7 @@ final class FullKeyboardEngine {
         }
         shift.reset()
         lastSpaceAt = nil
+        suggestionSpaceBefore = nil
         tokenTaps.removeAll()
         autocorrect.clearPendingUndo()
         cancelAllTouches()
@@ -220,6 +232,10 @@ final class FullKeyboardEngine {
     /// Call after the text or the cursor changed outside these keys.
     func textDidChange() {
         lastSpaceAt = nil
+        // Hosts that report the keys' own edits leave the text as the suggestion left it.
+        if target.documentContextBeforeInput != suggestionSpaceBefore {
+            suggestionSpaceBefore = nil
+        }
         tokenTaps.removeAll()
         autocorrect.clearPendingUndo()
         refreshAutoCapitalization()
@@ -290,6 +306,7 @@ final class FullKeyboardEngine {
         }
         autocorrect.clearPendingUndo()
         insert(suggestion.replacement + " ", source: nil)
+        suggestionSpaceBefore = target.documentContextBeforeInput
         typingLog?.context("suggestion")
     }
 
@@ -305,6 +322,7 @@ final class FullKeyboardEngine {
     /// The key a touch going down at `point` presses: the one under it, or a neighbouring
     /// letter within `letterReach` points that is enough likelier to come next in the word.
     func key(at point: CGPoint) -> KeyboardKey? {
+        let point = pointOnKeys(point)
         guard let key = layout.hitTest(point) else { return nil }
         guard key.character != nil, let model = letterOdds, layerState.layer == .letters,
               field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
@@ -360,6 +378,28 @@ final class FullKeyboardEngine {
         return mass
     }
 
+    /// Whether a finger going down at `point`, in the strip above the keys, belongs to the
+    /// keys: in the strip's lower half while you type (a key is down, or one went down or came
+    /// up within `stripTouchGuard`) it is a row-1 key aimed high, not a pick. Nobody reads a
+    /// new suggestion and taps it that fast; Record typing logs showed such picks were the e
+    /// below the left slot, which kept "th" and typed a space where "the" was meant.
+    func takesStripTouch(at point: CGPoint) -> Bool {
+        let strip = layout.stripFrame
+        guard point.y < layout.touchAreaFrame.minY, point.y >= strip.midY,
+              point.x >= strip.minX, point.x < strip.maxX else { return false }
+        if !touches.isEmpty { return true }
+        guard let last = lastKeyTouchAt else { return false }
+        let elapsed = clock() - last
+        return elapsed >= 0 && elapsed < Self.stripTouchGuard
+    }
+
+    /// `point`, or for one above the keys (a strip touch `takesStripTouch(at:)` gave them)
+    /// the same spot on row 1's top edge.
+    private func pointOnKeys(_ point: CGPoint) -> CGPoint {
+        let top = layout.touchAreaFrame.minY
+        return point.y < top ? CGPoint(x: point.x, y: top) : point
+    }
+
     private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
         let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
         let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
@@ -367,7 +407,9 @@ final class FullKeyboardEngine {
     }
 
     func touchBegan(id: Int, at point: CGPoint) {
+        let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
+        lastKeyTouchAt = clock()
         // Rollover: a new key going down commits any character or accent picker still held.
         for other in touchOrder {
             guard var touch = touches[other], touch.key.character != nil, !touch.committed else { continue }
@@ -466,14 +508,7 @@ final class FullKeyboardEngine {
         // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret.
         if touch.key.kind == .space {
             if !touch.isTrackpad, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
-                touch.isTrackpad = true
-                touch.trackpadAnchorX = point.x
-                lastSpaceAt = nil
-                autocorrect.clearPendingUndo()
-                touches[id] = touch
-                typingLog?.ui("trackpad_start", [TypingLogField("id", .int(id))])
-                onSelectionStep?()
-                onChange?()
+                startTrackpad(&touch, id: id, anchorX: point.x, hold: false)
                 return
             }
             if touch.isTrackpad {
@@ -485,6 +520,7 @@ final class FullKeyboardEngine {
                     touches[id] = touch
                     typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
                     tokenTaps.removeAll()
+                    suggestionSpaceBefore = nil
                     target.adjustTextPosition(byCharacterOffset: rawSteps)
                     onSelectionStep?()
                     refreshAutoCapitalization()
@@ -511,9 +547,31 @@ final class FullKeyboardEngine {
         touches[id] = touch
     }
 
+    /// The space bar held `trackpadHoldDelay` without sliding: the trackpad starts where the
+    /// finger is, as Apple's does, so letting go types no space (a press held to move the
+    /// cursor used to type one beside the space already there).
+    func holdSpace(forTouch id: Int) {
+        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad else { return }
+        startTrackpad(&touch, id: id, anchorX: touch.point.x, hold: true)
+    }
+
+    private func startTrackpad(_ touch: inout ActiveTouch, id: Int, anchorX: CGFloat, hold: Bool) {
+        touch.isTrackpad = true
+        touch.trackpadAnchorX = anchorX
+        lastSpaceAt = nil
+        autocorrect.clearPendingUndo()
+        touches[id] = touch
+        var fields = [TypingLogField("id", .int(id))]
+        if hold { fields.append(TypingLogField("hold", .bool(true))) }
+        typingLog?.ui("trackpad_start", fields)
+        onSelectionStep?()
+        onChange?()
+    }
+
     func touchEnded(id: Int, at point: CGPoint) {
         guard var touch = touches.removeValue(forKey: id) else { return }
         touchOrder.removeAll { $0 == id }
+        lastKeyTouchAt = clock()
         touch.point = point
 
         if activeAccentTouchID == id, let menu = activeAccentMenu {
@@ -736,6 +794,20 @@ final class FullKeyboardEngine {
 
     private func typeSpace() {
         let now = clock()
+        if let before = suggestionSpaceBefore {
+            suggestionSpaceBefore = nil
+            if before.last == " ", before == target.documentContextBeforeInput {
+                // The suggestion typed this space already. It still counts as one, so a quick
+                // second press types ". ".
+                typingLog?.edit("space_swallowed", [TypingLogField("after", .string("suggestion"))])
+                lastSpaceAt = now
+                tokenTaps.removeAll()
+                layerState.didInsert(" ")
+                rebuildLayoutIfNeeded()
+                onChange?()
+                return
+            }
+        }
         if DoubleSpacePeriod.shouldReplace(before: target.documentContextBeforeInput, lastSpaceAt: lastSpaceAt, now: now) {
             autocorrect.clearPendingUndo()
             typingLog?.edit("double_space_period", [
@@ -814,6 +886,7 @@ final class FullKeyboardEngine {
     }
 
     private func didEdit() {
+        suggestionSpaceBefore = nil
         refreshAutoCapitalization()
         refreshSuggestions()
         onEdit?()

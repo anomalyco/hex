@@ -421,6 +421,168 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.layout.layer, .numbers)
     }
 
+    // MARK: - One space per space press
+
+    private func suggestion(_ text: String, _ kind: KeyboardSuggestion.Kind = .secondary) -> KeyboardSuggestion {
+        KeyboardSuggestion(displayText: kind == .keepLiteral ? "“\(text)”" : text, replacement: text, kind: kind)
+    }
+
+    /// A suggestion types its word and a space, so a space pressed right after it (a pick,
+    /// then space out of habit) is swallowed, as on Apple's keyboard. Record typing logs
+    /// showed every double space came from this: a word, what was typed, or an emoji picked,
+    /// then space.
+    func testASpaceRightAfterASuggestionIsSwallowed() {
+        type("prett")
+        engine.acceptSuggestion(suggestion("pretty"))
+        XCTAssertEqual(target.text, "pretty ")
+        now += 0.15
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty ", "one space, not two")
+        type("good")
+        XCTAssertEqual(target.text, "pretty good")
+
+        type(" is th")
+        engine.acceptSuggestion(suggestion("th", .keepLiteral))
+        now += 0.15
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty good is th ", "what you typed, kept from the left slot")
+
+        engine.acceptSuggestion(suggestion("😡", .emoji))
+        now += 0.7
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty good is th 😡 ", "an emoji for the word before")
+        now += 0.7
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty good is th 😡  ", "a second press is a space you asked for")
+    }
+
+    func testTheSwallowedSpaceStillCountsTowardsAPeriod() {
+        type("prett")
+        engine.acceptSuggestion(suggestion("pretty"))
+        now += 0.1
+        tap(.space)
+        now += 0.2
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty. ")
+    }
+
+    func testASpaceAfterTheCursorMovedIsTyped() {
+        type("prett")
+        engine.acceptSuggestion(suggestion("pretty"))
+        target.adjustTextPosition(byCharacterOffset: -7)
+        engine.textDidChange()
+        tap(.space)
+        XCTAssertEqual(target.text, " pretty ")
+
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let keys = FullKeyboardEngine(target: field, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        keys.width = 393
+        keys.configureForField()
+        let p = keys.layout.key(.character("p"))!.frame
+        keys.touchBegan(id: 1, at: CGPoint(x: p.midX, y: p.midY))
+        keys.touchEnded(id: 1, at: CGPoint(x: p.midX, y: p.midY))
+        keys.acceptSuggestion(suggestion("pretty"))
+        keys.textDidChange()
+        let space = keys.layout.key(.space)!.frame
+        keys.touchBegan(id: 2, at: CGPoint(x: space.midX, y: space.midY))
+        keys.touchEnded(id: 2, at: CGPoint(x: space.midX, y: space.midY))
+        XCTAssertEqual(field.text, "pretty ", "a host that reports the keys' own edit leaves it swallowed")
+    }
+
+    /// "th", then the e aimed a few points high 80 ms later, on the strip's lower half under
+    /// its left slot. Record typing logs showed that tap picked "th" and a space, so "the"
+    /// came out "th" and the space after it doubled. While you type, the keys take it.
+    func testATapOnTheStripsLowerHalfWhileTypingTypesTheKeyBelow() {
+        type("on t")
+        tap(.character("h"))
+        let e = engine.layout.key(.character("e"))!
+        let strip = engine.layout.stripFrame
+        let aimedHigh = CGPoint(x: e.frame.midX, y: strip.maxY - 6)
+        XCTAssertLessThan(aimedHigh.y, engine.layout.touchAreaFrame.minY, "on the strip, above the keys' touch area")
+        now += 0.08
+        XCTAssertTrue(engine.takesStripTouch(at: aimedHigh))
+        XCTAssertFalse(engine.takesStripTouch(at: CGPoint(x: aimedHigh.x, y: strip.minY + 6)), "the upper half stays the strip's")
+        XCTAssertEqual(engine.key(at: aimedHigh)?.kind, .character("e"))
+        engine.touchBegan(id: 9, at: aimedHigh)
+        engine.touchEnded(id: 9, at: aimedHigh)
+        XCTAssertEqual(target.text, "on the")
+        now += 0.1
+        tap(.space)
+        XCTAssertEqual(target.text, "on the ")
+
+        now += 0.3
+        XCTAssertFalse(engine.takesStripTouch(at: aimedHigh), "after a pause a pick is a pick")
+        down(1, .character("a"))
+        XCTAssertTrue(engine.takesStripTouch(at: aimedHigh), "while a key is down")
+        up(1, .character("a"))
+    }
+
+    /// The same through the view: the key plane lies over the strip and claims its lower half
+    /// while you type, so the suggestions never see the touch.
+    func testTheKeysTakeTheStripsLowerHalfWhileTyping() {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        var clock: TimeInterval = 50
+        view.engine.clock = { clock }
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        let layout = view.engine.layout
+        let e = layout.key(.character("e"))!
+        let aimedHigh = CGPoint(x: e.frame.midX, y: layout.stripFrame.maxY - 6)
+        XCTAssertFalse(view.hitTest(aimedHigh, with: nil) === view.plane, "the strip's, before typing")
+
+        for (id, letter) in ["t", "h"].enumerated() {
+            let key = layout.key(.character(letter))!
+            let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
+            view.plane.began(id: id + 1, sample: sample)
+            view.plane.ended(id: id + 1, sample: sample)
+            clock += 0.1
+        }
+        XCTAssertTrue(view.hitTest(aimedHigh, with: nil) === view.plane)
+        let sample = TypingLogTouchSample(point: aimedHigh, timestamp: 0)
+        view.plane.began(id: 3, sample: sample)
+        view.plane.ended(id: 3, sample: sample)
+        XCTAssertEqual(target.text, "the")
+
+        clock += 1
+        XCTAssertFalse(view.hitTest(aimedHigh, with: nil) === view.plane, "the strip's again after a pause")
+    }
+
+    /// Holding the space bar still starts the trackpad, as Apple's does, so letting go types
+    /// nothing: a hold meant to move the cursor typed a space beside the one already there.
+    func testHoldingSpaceStillStartsTheTrackpadAndTypesNoSpace() {
+        type("hello ")
+        let space = point(.space)
+        engine.touchBegan(id: 1, at: space)
+        engine.holdSpace(forTouch: 1)
+        XCTAssertTrue(engine.isTrackpadActive)
+        engine.touchEnded(id: 1, at: space)
+        XCTAssertEqual(target.text, "hello ")
+
+        engine.touchBegan(id: 2, at: space)
+        engine.holdSpace(forTouch: 2)
+        let left = CGPoint(x: space.x - 2 * FullKeyboardEngine.trackpadPointsPerCharacter - 1, y: space.y)
+        engine.touchMoved(id: 2, to: left)
+        engine.touchEnded(id: 2, at: left)
+        XCTAssertEqual(target.text, "hello ")
+        XCTAssertEqual(target.cursorIndex, 4, "sliding after the hold moves the cursor")
+    }
+
+    func testTheSpaceBarsHoldTimerStartsTheTrackpad() {
+        type("hi ")
+        let plane = KeyboardKeyPlaneView(engine: engine)
+        let sample = TypingLogTouchSample(point: point(.space), timestamp: 0)
+        plane.began(id: 1, sample: sample)
+        plane.ended(id: 1, sample: sample)
+        XCTAssertEqual(target.text, "hi  ", "a tap types a space")
+
+        plane.began(id: 2, sample: sample)
+        RunLoop.main.run(until: Date().addingTimeInterval(FullKeyboardEngine.trackpadHoldDelay + 0.15))
+        XCTAssertTrue(engine.isTrackpadActive)
+        plane.ended(id: 2, sample: sample)
+        XCTAssertEqual(target.text, "hi  ", "a hold types none")
+    }
+
     // MARK: - Haptics in every layout
 
     /// Key haptics come from the same calls whatever the layout (a TestFlight tester felt

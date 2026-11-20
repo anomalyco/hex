@@ -149,10 +149,12 @@ One finger sample on the keys (not the strip, whose buttons log `ui`/`edit`).
   on: sliding across character keys moves it; any other key keeps the key it
   went down on. `null` when the finger went down outside every key.
 - `under`: the key under the raw point when it differs from `key` (`null`:
-  outside every key, on `ended`/`cancelled`). On `began` it appears only when
-  the next-letter odds moved the press to a neighbouring letter; otherwise the
-  engine uses the hit frames as logged, so `key` on `began` is the key under
-  the point.
+  outside every key, on `began`/`ended`/`cancelled`). On `began` it appears
+  only when the next-letter odds moved the press to a neighbouring letter, or
+  (`null`) when a finger on the strip's lower half while typing went to the row-1
+  key below it (`FullKeyboardEngine.takesStripTouch`; `y` is then above the
+  keys); otherwise the engine uses the hit frames as logged, so `key` on
+  `began` is the key under the point.
 - `moved` is throttled: a sample is written once the finger has moved at least
   2 pt and 8 ms since the last line for it, or when it slides onto another key.
 
@@ -177,6 +179,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 | `autocorrect_undo` | `deleted` (the correction and its space), `inserted` (what was typed): one backspace right after a correction undid it. |
 | `suggestion` | `slot` (0 left, 1 centre, 2 right), `text` (as shown), `deleted` (the word being typed), `inserted` (the replacement + space), `candidates` (as in `candidates`) |
 | `double_space_period` | `deleted`: `" "`, `inserted`: `". "` |
+| `space_swallowed` | `after`: `suggestion`. A space right after a suggestion typed its own changed nothing. |
 | `return` | `inserted`: `"\n"`, `returnKeyType`, `send` (the key said Send); `ignored: true` and no `inserted` when the key was disabled (empty field) |
 | `paste` | `inserted`: the strip's Paste chip |
 | `undo_dictation` | `deleted` (the dictation), or `deletedCount` when the host showed only its end |
@@ -210,7 +213,8 @@ Taps that aren't text: `action`:
 
 - `accent_open` (`id`, `key`, `options`), `accent_pick` (`id`, `index`, `chosen`,
   `rollover` when another key committed it), `accent_cancel`;
-- `trackpad_start` (`id`), `trackpad_end` (`id`, `offset`: total characters);
+- `trackpad_start` (`id`; `hold: true` when holding space still for 0.4 s
+  started it), `trackpad_end` (`id`, `offset`: total characters);
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
   (`style`, `from`: `hex_menu` or `recording_panel`),
   `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),
