@@ -167,6 +167,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
 
         engine.autocorrect.isEnabled = FullKeyboardSettings().autocorrect
+        engine.autocorrect.allowsSwearing = FullKeyboardSettings().suggestSwearWords
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         refreshEmojiKey()
         syncSpatialAutocorrect()
@@ -296,6 +297,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
             engine.autocorrect.isEnabled = wantsAutocorrect
+            engine.refreshSuggestions()
+        }
+        let wantsSwearing = FullKeyboardSettings().suggestSwearWords
+        if engine.autocorrect.allowsSwearing != wantsSwearing {
+            engine.autocorrect.allowsSwearing = wantsSwearing
             engine.refreshSuggestions()
         }
         syncSpatialAutocorrect()

@@ -18,6 +18,7 @@ struct FullKeyboardSettings {
         static let spatialAutocorrect = "experiments.spatialAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
+        static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
     }
 
@@ -49,6 +50,13 @@ struct FullKeyboardSettings {
     var spatialAutocorrect: Bool {
         get { defaults?.bool(forKey: Key.spatialAutocorrect) ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.spatialAutocorrect) }
+    }
+
+    /// Suggestions and autocorrect may offer swear words (`OffensiveWords`); slurs never.
+    /// Off by default, like Apple's keyboard.
+    var suggestSwearWords: Bool {
+        get { defaults?.bool(forKey: Key.suggestSwearWords) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.suggestSwearWords) }
     }
 
     /// The enlarged letter that pops up over a pressed key. On by default.

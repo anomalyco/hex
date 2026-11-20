@@ -258,6 +258,7 @@ enum SettingsSnapshotFixture {
         let keyboard = FullKeyboardSettings()
         keyboard.isEnabled = on
         keyboard.autocorrect = true
+        keyboard.suggestSwearWords = on
         keyboard.keyPopups = true
         keyboard.haptics = true
         keyboard.emoji = on

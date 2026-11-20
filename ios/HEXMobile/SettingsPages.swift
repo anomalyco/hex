@@ -124,11 +124,13 @@ private enum KeyboardChoice: CaseIterable {
 }
 
 /// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
-/// chosen), and haptics, which the dictation bar uses too.
+/// chosen; Suggest swear words off by default, as Apple's keyboard never offers them), and
+/// haptics, which the dictation bar uses too.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
     @State private var autocorrect = FullKeyboardSettings().autocorrect
+    @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
     @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var haptics = FullKeyboardSettings().haptics
     @State private var practiceText = ""
@@ -160,6 +162,14 @@ struct KeyboardSettingsPage: View {
                         title: String(localized: "Autocorrect"),
                         detail: String(localized: "Fixes typos when you press space"),
                         isOn: $autocorrect
+                    )
+
+                    SettingsDivider()
+
+                    SettingsToggleRow(
+                        title: String(localized: "Suggest swear words"),
+                        detail: String(localized: "Slurs are never suggested"),
+                        isOn: $suggestSwearWords
                     )
 
                     SettingsDivider()
@@ -198,6 +208,9 @@ struct KeyboardSettingsPage: View {
         .onChange(of: autocorrect) { _, enabled in
             FullKeyboardSettings().autocorrect = enabled
         }
+        .onChange(of: suggestSwearWords) { _, enabled in
+            FullKeyboardSettings().suggestSwearWords = enabled
+        }
         .onChange(of: keyPopups) { _, enabled in
             FullKeyboardSettings().keyPopups = enabled
         }
@@ -207,6 +220,7 @@ struct KeyboardSettingsPage: View {
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autocorrect = FullKeyboardSettings().autocorrect
+            suggestSwearWords = FullKeyboardSettings().suggestSwearWords
             keyPopups = FullKeyboardSettings().keyPopups
             haptics = FullKeyboardSettings().haptics
         }

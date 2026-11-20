@@ -252,6 +252,18 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
+  - **Offensive words (Settings › Keyboard › Suggest swear words):** like Apple's
+    keyboard, the strip and autocorrect never offer slurs, and offer swear words only
+    with Suggest swear words on (off by default; App Store rating 4+). The list
+    (`HEXShared/FullKeyboard/never-suggest.tsv`: layout, `slur` or `swear`, spelling or
+    two-word expression; `*` lines apply to every layout) is LDNOOBW as curated for Hex
+    for Android, entry for entry the same as `android/app/src/main/assets/typing/never-suggest.tsv`
+    (see Acknowledgements below); change both together. `OffensiveWords` is checked when a
+    suggestion is looked up: `UITextChecker`'s guesses and completions, learned fixes, and
+    Spatial autocorrect's readings (`TypingDecoder.NeverSuggest`, so the models still score
+    them as words). An expression is blocked only as the pair ("blow job"), never its words
+    alone. A listed word typed in full is never corrected; your own `UILexicon` words
+    (Contacts names, text replacements) are always offered.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. Its description says what it records, and
     turning it on asks first in a dialog (App Review 2.5.14): each tap and the
@@ -517,6 +529,13 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   "as is" without express or implied warranty. SCOWL's inflections come from WordNet 1.6,
   Copyright 1997 by Princeton University, all rights reserved, provided "as is" without
   warranties (the full notice is in the app); its other sources are public domain.
+- **LDNOOBW:** The keyboard's suggestion filter uses the
+  [List of Dirty, Naughty, Obscene, and Otherwise Bad Words](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13)
+  (LDNOOBW), © 2012–2020 Shutterstock, Inc., and contributors: its English, Spanish,
+  German and Norwegian lists, licensed under
+  [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
+  Hex lowercased and classified the entries, omitted ordinary, medical and search-only
+  terms, and added common slurs, inflections and spelling variants.
 - **RLA-ES:** Spanish words are checked against RLA-ES, the Spanish spelling dictionaries
   for LibreOffice by Santiago Bosio and contributors (Spain and Mexico), used under the
   [Mozilla Public License 1.1](https://www.mozilla.org/en-US/MPL/1.1/)
