@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Settings › Dictation language: Automatic, the first iPhone language Apple Speech
 /// transcribes, or any language `SpeechTranscriber` or `DictationTranscriber` has. Shown
@@ -69,6 +70,67 @@ struct DictationLanguageRow: View {
         guard let id = dictation.dictationLanguage else { return "Automatic" }
         return SpeechLanguagePicker.shortNames(for: options.map(\.id))[id]
             ?? SpeechLanguagePicker.displayName(for: id)
+    }
+}
+
+/// Experiments › Full keyboard › Keyboard layout: Automatic (the dictation language's
+/// layout), English, Norsk, Español, or Deutsch.
+struct KeyboardLayoutRow: View {
+    @State private var setting = LanguageSettings().keyboardLayout
+
+    private var automatic: KeyboardLanguage {
+        KeyboardLanguage.automatic(
+            dictationLanguage: LanguageSettings().effectiveDictationLanguage,
+            inputModes: UITextInputMode.activeInputModes.compactMap(\.primaryLanguage),
+            preferredLanguages: Locale.preferredLanguages
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+                .overlay(HexTheme.borderWeak)
+                .padding(.leading, 16)
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Keyboard layout")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(HexTheme.textBase)
+                    if setting == nil {
+                        Text("\(automatic.displayName), like your dictation language")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+                Spacer(minLength: 8)
+                Menu {
+                    choice(nil, title: "Automatic")
+                    Divider()
+                    ForEach(KeyboardLanguage.allCases, id: \.self) { language in
+                        choice(language, title: language.displayName)
+                    }
+                } label: {
+                    LanguageMenuValue(value: setting?.displayName ?? "Automatic")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .onAppear { setting = LanguageSettings().keyboardLayout }
+    }
+
+    private func choice(_ language: KeyboardLanguage?, title: String) -> some View {
+        Button {
+            setting = language
+            LanguageSettings().keyboardLayout = language
+        } label: {
+            if setting == language {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 }
 

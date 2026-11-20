@@ -262,6 +262,26 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.plane.spaceLabel, "without Full Access the keyboard can't dictate")
     }
 
+    func testTypesOnTheNorwegianLayout() {
+        engine.language = .norwegian
+        XCTAssertNotNil(engine.layout.key(.character("å")))
+        XCTAssertEqual(engine.autocorrect.language, .norwegian)
+        tap(.shift)
+        tap(.character("ø"))
+        tap(.character("l"))
+        XCTAssertEqual(target.text, "Øl")
+
+        let o = engine.layout.key(.character("ø"))!
+        engine.touchBegan(id: 7, at: CGPoint(x: o.frame.midX, y: o.frame.midY))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        XCTAssertEqual(Set(engine.activeAccentMenu?.options ?? []), ["ø", "ö"])
+        engine.touchCancelled(id: 7)
+
+        engine.language = .german
+        XCTAssertNil(engine.layout.key(.character("å")))
+        XCTAssertNotNil(engine.layout.key(.character("ü")))
+    }
+
     func testEmailFieldShowsAtAndDot() {
         target.keyboardType = .emailAddress
         engine.configureForField()

@@ -24,8 +24,10 @@ nonisolated enum AccentCatalog {
         "/": ["/", "\\"],
     ]
 
-    static func options(for base: String, uppercase: Bool) -> [String]? {
-        guard let list = table[base.lowercased()] else { return nil }
+    /// The accents for a held key; `language` may replace a key's list (`KeyboardLanguage.accentOverrides`).
+    static func options(for base: String, uppercase: Bool, language: KeyboardLanguage = .english) -> [String]? {
+        let key = base.lowercased()
+        guard let list = language.accentOverrides[key] ?? table[key] else { return nil }
         guard uppercase else { return list }
         return list.map { option in
             // German sharp s capitalizes to SS or ẞ; standard `.uppercased()` matches system expectations.

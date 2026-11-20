@@ -151,6 +151,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     let field: KeyboardFieldKind
     let showsGlobe: Bool
     let horizontalInset: CGFloat
+    let language: KeyboardLanguage
     let metrics: KeyboardMetrics
     let keys: [KeyboardKey]
 
@@ -160,7 +161,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         layer: KeyboardLayer = .letters,
         field: KeyboardFieldKind = .text,
         showsGlobe: Bool = false,
-        horizontalInset: CGFloat = 0
+        horizontalInset: CGFloat = 0,
+        language: KeyboardLanguage = .english
     ) {
         self.width = width
         self.orientation = orientation
@@ -168,6 +170,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.field = field
         self.showsGlobe = showsGlobe
         self.horizontalInset = max(0, horizontalInset)
+        self.language = language
         let innerWidth = width - 2 * self.horizontalInset
         let metrics = KeyboardMetrics.for(orientation, innerWidth: innerWidth)
         self.metrics = metrics
@@ -177,7 +180,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             layer: layer,
             field: field,
             showsGlobe: showsGlobe,
-            inset: self.horizontalInset
+            inset: self.horizontalInset,
+            language: language
         )
     }
 
@@ -201,8 +205,20 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         CGRect(x: 0, y: metrics.stripArea, width: width, height: metrics.keysArea)
     }
 
+    /// A letter key's width on a 10-key row. Shift, delete and the bottom row are sized
+    /// from it in every language, as Apple's are.
     var letterWidth: CGFloat {
         Self.letterWidth(innerWidth: width - 2 * horizontalInset, metrics: metrics)
+    }
+
+    /// The width of this page's character keys: `letterWidth`, or narrower where a row
+    /// holds 11 keys (Norwegian letters).
+    var characterWidth: CGFloat {
+        Self.letterWidth(
+            innerWidth: width - 2 * horizontalInset,
+            metrics: metrics,
+            columns: Self.columns(Self.characterRows(for: layer, language: language))
+        )
     }
 
     var showsBalloons: Bool { orientation == .portrait }
@@ -236,15 +252,20 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
 
     // MARK: - Building
 
-    static func letterWidth(innerWidth: CGFloat, metrics: KeyboardMetrics) -> CGFloat {
-        (innerWidth - 2 * metrics.side - 9 * metrics.gap) / 10
+    static func letterWidth(innerWidth: CGFloat, metrics: KeyboardMetrics, columns: Int = 10) -> CGFloat {
+        (innerWidth - 2 * metrics.side - CGFloat(columns - 1) * metrics.gap) / CGFloat(columns)
     }
 
-    static func characterRows(for layer: KeyboardLayer) -> [[String]] {
+    /// Keys across the widest of rows 1 and 2, never fewer than 10.
+    static func columns(_ rows: [[String]]) -> Int {
+        max(10, rows.prefix(2).map(\.count).max() ?? 10)
+    }
+
+    static func characterRows(for layer: KeyboardLayer, language: KeyboardLanguage = .english) -> [[String]] {
         let punctuation = [".", ",", "?", "!", "'"]
         switch layer {
         case .letters:
-            return ["qwertyuiop", "asdfghjkl", "zxcvbnm"].map { $0.map(String.init) }
+            return language.letterRows
         case .numbers:
             return [
                 "1234567890".map(String.init),
@@ -266,12 +287,16 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         layer: KeyboardLayer,
         field: KeyboardFieldKind,
         showsGlobe: Bool,
-        inset: CGFloat
+        inset: CGFloat,
+        language: KeyboardLanguage
     ) -> [KeyboardKey] {
         let innerWidth = width - 2 * inset
-        let lw = letterWidth(innerWidth: innerWidth, metrics: m)
-        let modW = lw * modifierWidthRatio
-        let rows = characterRows(for: layer)
+        let rows = characterRows(for: layer, language: language)
+        // Modifiers and the bottom row keep the 10-key sizes; an 11-key layout narrows only
+        // its character keys, and row 3's letters sit centred between shift and delete.
+        let referenceW = letterWidth(innerWidth: innerWidth, metrics: m)
+        let lw = letterWidth(innerWidth: innerWidth, metrics: m, columns: columns(rows))
+        let modW = referenceW * modifierWidthRatio
         let left = inset + m.side
         let right = width - inset - m.side
 
@@ -327,8 +352,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
 
         // Row 4: 123/ABC, globe?, space, field extras (@ . / . /), Hex, return.
         let isCompactBottomRow = showsGlobe || field != .text
-        let switchW = isCompactBottomRow ? modW : lw * bottomSwitchWidthRatio
-        let returnW = isCompactBottomRow ? (lw * compactReturnWidthRatio) : (lw * returnWidthRatio + m.gap)
+        let switchW = isCompactBottomRow ? modW : referenceW * bottomSwitchWidthRatio
+        let returnW = isCompactBottomRow ? (referenceW * compactReturnWidthRatio) : (referenceW * returnWidthRatio + m.gap)
         var leading: [(KeyKind, CGFloat, String)] = [
             layer == .letters
                 ? (.layerSwitch(.numbers), switchW, "123")
@@ -346,11 +371,11 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         case .text:
             break
         case .url:
-            trailing.append((.character("."), lw, "."))
-            trailing.append((.character("/"), lw, "/"))
+            trailing.append((.character("."), referenceW, "."))
+            trailing.append((.character("/"), referenceW, "/"))
         case .email:
-            trailing.append((.character("@"), lw, "@"))
-            trailing.append((.character("."), lw, "."))
+            trailing.append((.character("@"), referenceW, "@"))
+            trailing.append((.character("."), referenceW, "."))
         }
         if placement == .rightOfSpace {
             trailing.append((.hex, modW, "hex"))

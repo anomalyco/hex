@@ -220,6 +220,24 @@ it on-device with Apple Speech, downloading the speech assets on first use
   in-keyboard dictation uses it at once; a warm Hex session follows it within
   100 ms and prepares the language between dictations, and a handoff or the
   Action Button picks it up before recording.
+- **Keyboard layouts (Experiments › Full keyboard › Keyboard layout):** English,
+  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2) and
+  Deutsch (QWERTZ with `ü`, `ö ä`), as Apple's iOS keyboards lay them out
+  (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
+  Automatic follows the dictation language (Hebrew and other languages without a
+  layout get English); before any dictation language is known, the first iPhone
+  keyboard, then preferred language, that has a layout. Rows of 11 keys narrow
+  only the letters: shift, delete and the bottom row keep their English sizes,
+  and row 3's letters sit centred between shift and delete. Long-press accents
+  drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
+  Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º), and
+  German keeps ß on a held S. Autocorrect and suggestions use the layout's
+  `UITextChecker` dictionary (`nb`, `es`, `de`); where the iPhone has none
+  they stay off except your own text replacements, and the English contractions
+  and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
+  the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
+  The 123 and #+= pages are English's in every language, and the accent lists
+  come from Apple's layouts as remembered, not checked against a device.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -292,6 +310,13 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   and Hebrew without punctuation under every preset (the short-form presets
   returned nothing), so Polished only capitalizes and ends the sentence.
   Unverified on a physical iPhone.
+- **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
+  widths, hit frames (tiling the key area with no gaps or overlaps), balloons
+  and accent menus at 320–440 pt and in landscape; `AutocorrectEngineTests` and
+  `FullKeyboardEngineTests` check typing, dictionaries and English-only fixes.
+  Whether the simulator or an iPhone has a `UITextChecker` dictionary for
+  `nb` decides Norwegian autocorrect; how good those corrections are is
+  unmeasured.
 - **Learn how I type:** Dictation edit inference (span location, word diff,
   outcomes, the learning threshold, and applying fixes) is covered by unit
   tests only. How much `documentContextBeforeInput` and

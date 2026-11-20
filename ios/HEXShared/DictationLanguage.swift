@@ -1,6 +1,7 @@
 import Foundation
 
-/// Settings › Dictation language, in the App Group so the keyboard reads it and can switch it.
+/// Settings › Dictation language and Experiments › Full keyboard › Keyboard layout, in the
+/// App Group so the keyboard reads them and can switch the language.
 nonisolated struct LanguageSettings {
     private enum Key {
         static let dictation = "settings.dictationLanguage"
@@ -8,6 +9,7 @@ nonisolated struct LanguageSettings {
         static let automaticDictation = "settings.dictationLanguage.automatic"
         static let recent = "settings.dictationLanguage.recent"
         static let supported = "settings.dictationLanguage.supported"
+        static let keyboardLayout = "settings.keyboardLayout"
     }
 
     static let maxRecent = 5
@@ -50,9 +52,16 @@ nonisolated struct LanguageSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.supported) }
     }
 
-    /// The language dictation is set to or last ran in, when known.
+    /// The full keyboard's letters, or nil for Automatic (follow the dictation language).
+    var keyboardLayout: KeyboardLanguage? {
+        get { defaults?.string(forKey: Key.keyboardLayout).flatMap(KeyboardLanguage.init(rawValue:)) }
+        nonmutating set { defaults?.set(newValue?.rawValue, forKey: Key.keyboardLayout) }
+    }
+
+    /// The language dictation uses, when known: the one set, else what Automatic picks,
+    /// else the last one it ran in.
     var effectiveDictationLanguage: String? {
-        dictationLanguage ?? resolvedDictationLanguage
+        dictationLanguage ?? automaticDictationLanguage ?? resolvedDictationLanguage
     }
 
     /// A choice made in Hex or the keyboard: the setting, and the front of the recents.

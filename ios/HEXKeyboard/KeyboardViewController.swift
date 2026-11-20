@@ -213,6 +213,7 @@ final class KeyboardViewController: UIInputViewController {
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),
                 TypingLogField("cleanupTagger", .bool(CleanupTaggerSettings().isEnabled)),
                 TypingLogField("hexKeyPlacement", .string(HexKeyPlacement.current.rawValue)),
+                TypingLogField("keyboardLayout", .string(fullKeyboard?.engine.language.rawValue ?? "")),
                 TypingLogField("dictationLanguage", .string(LanguageSettings().dictationLanguage ?? "automatic")),
                 TypingLogField("style", .string(bridge.style.rawValue)),
             ]

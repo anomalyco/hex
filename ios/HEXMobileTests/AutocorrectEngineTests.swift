@@ -178,6 +178,39 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "abcdef", to: "abxyef"), "two substitutions are rejected")
     }
 
+    func testALayoutWithoutADictionaryNeverCorrectsIntoEnglish() {
+        engine.autocorrect.loadLexiconEntries([("omw", "On my way!")])
+        engine.autocorrect.setLanguage(.norwegian, available: ["en_US", "en"])
+        XCTAssertFalse(engine.autocorrect.hasDictionary)
+        typeWord("teh")
+        XCTAssertTrue(engine.suggestions.isEmpty, "no English suggestions for Norwegian")
+        tap(.space)
+        XCTAssertEqual(target.text, "teh ")
+        typeWord("omw")
+        tap(.space)
+        XCTAssertEqual(target.text, "teh On my way! ", "your own text replacements still apply")
+    }
+
+    func testEnglishFixesStayOffInOtherLanguages() {
+        engine.autocorrect.setLanguage(.norwegian, available: ["nb", "en_US"])
+        XCTAssertTrue(engine.autocorrect.hasDictionary)
+        typeWord("i")
+        tap(.space)
+        XCTAssertEqual(target.text, "i ", "Norwegian \"i\" means \"in\"")
+        engine.autocorrect.setLanguage(.english, available: ["en_US"])
+        typeWord("i")
+        tap(.space)
+        XCTAssertEqual(target.text, "i I ")
+    }
+
+    func testAdjacencyFollowsTheLayout() {
+        // German swaps Y and Z: on QWERTZ, Z sits beside T.
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("z", "t", language: .german))
+        XCTAssertFalse(AutocorrectEngine.areAdjacentKeys("z", "t", language: .english))
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ø", "l", language: .norwegian))
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ñ", "l", language: .spanish))
+    }
+
     func testTurningAutocorrectSettingOffKeepsSuggestionsWithoutAutoReplacing() {
         engine.autocorrect.isEnabled = false
         typeWord("dont")

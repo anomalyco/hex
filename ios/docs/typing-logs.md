@@ -81,8 +81,8 @@ The keyboard appeared (`trigger`: `appear`), the field changed while it showed
   four preferred), `keyboardLanguage` (the keyboard's `primaryLanguage`),
   `inputMode` (the field's input mode language), `fullAccess`.
 - `settings`: `autocorrect` (Hex's), `key_popups`, `haptics`, `learnHowIType`, `cleanupTagger`,
-  `hexKeyPlacement`, `dictationLanguage` (BCP 47, or `automatic`), `style`
-  (dictation style).
+  `hexKeyPlacement`, `dictationLanguage` (BCP 47, or `automatic`), `keyboardLayout`
+  (`en`/`nb`/`es`/`de`, empty for the dictation bar), `style` (dictation style).
 
 A `context` line follows at once with the text already in the field.
 
@@ -112,13 +112,15 @@ Written when the key layout or shift changes, and when a session starts.
   (view size or safe area only), `layer_key` (123/#+=/ABC pressed),
   `layer_auto` (space or return went back to letters), `layer_slide` (hold 123,
   slide, let go), `shift_key`, `typed` (a one-shot shift turned off), `auto`
-  (auto-capitalization), `cancel`.
+  (auto-capitalization), `cancel`, `language` (the keyboard layout changed).
 - `layer` (`letters`/`numbers`/`symbols`), `shift` (`off`/`on`/`locked`),
   `shiftHeld` (only when true), `field` (`text`/`url`/`email`), `orientation`,
   `width`, `height` (the keys' layout), `view` `[w, h]`, `safeArea`,
-  `horizontalInset` (landscape), `globe`, `hexPlacement`.
+  `horizontalInset` (landscape), `globe`, `hexPlacement`, `language`
+  (`en`/`nb`/`es`/`de`).
 - The first time a hash appears in a day's file the line also has:
-  - `letterWidth`, `metrics` (`side`, `gap`, `rowGap`, `keyHeight`,
+  - `letterWidth` (a 10-key row's; 11-key Norwegian and German letters are
+    narrower, see `keys`), `metrics` (`side`, `gap`, `rowGap`, `keyHeight`,
     `stripHeight`, `keysBottom`, `cornerRadius`),
   - `strip`: the suggestion strip's rect, and `slots`: its three suggestion
     slots (left, centre, right),
