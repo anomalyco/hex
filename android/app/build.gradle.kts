@@ -66,7 +66,7 @@ android {
         version = "3.22.1"
     }
     buildFeatures { compose = true }
-    androidResources { noCompress += "bin" }
+    androidResources { noCompress += listOf("bin", "hextm") }
     sourceSets["main"].assets.srcDir(modelAssets)
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -84,7 +84,22 @@ val verifyInter by tasks.registering {
             == "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf") { "Inter v4.1 checksum mismatch" }
     }
 }
-tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter) }
+// Pin the licensed HXTM files. An older prototype word-pair list cannot slip into an APK.
+val verifyTypingModels by tasks.registering {
+    val dir = file("src/main/assets/typing")
+    val names = listOf("en.hextm", "es.hextm")
+    val manifest = dir.resolve("SHA256SUMS")
+    inputs.files(names.map(dir::resolve) + manifest)
+    doLast {
+        val entries = manifest.readLines().map { it.trim().split(Regex("\\s+")) }.associate { it.last() to it.first() }
+        check(entries.keys == names.toSet())
+        for (name in names) {
+            val actual = MessageDigest.getInstance("SHA-256").digest(dir.resolve(name).readBytes()).joinToString("") { "%02x".format(it) }
+            check(entries[name] == actual) { "Unverified typing model: $name" }
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
 
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")

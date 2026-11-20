@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
+import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -19,6 +21,8 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import ly.anoma.hex.R
+import ly.anoma.hex.typing.KeyGrid
+import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.useInter
 import ly.anoma.hex.speech.SpeechPhase
 import kotlin.math.abs
@@ -33,6 +37,13 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     private val key = color(R.color.key)
     private val modifier = color(R.color.modifier)
     private val keyHeight = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 40 else 50)
+    private val suggestions = LinearLayout(context)
+    private var offered = emptyList<String>()
+    private var idle = true
+    private val letters = LinkedHashMap<Char, Cap>()
+    private val feedback = LetterFeedback(this)
+    private var grid: KeyGrid? = null
+    private var pendingAccents: Runnable? = null
     private val statusText = TextView(context)
     private val scope = Scope(context)
     private val menuKey = TextView(context)
@@ -85,6 +96,17 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         strip.addView(statusText, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        for (i in 0..2) {
+            if (i > 0) suggestions.addView(View(context).apply { setBackgroundColor(modifier) }, LayoutParams(dp(1), dp(18)))
+            suggestions.addView(TextView(context).apply {
+                useInter(500); gravity = Gravity.CENTER; setTextColor(ink); textSize = 15f
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END; isFocusable = true
+                setPadding(dp(3), 0, dp(3), 0)
+                setOnClickListener { offered.getOrNull(i)?.let(ime::pickSuggestion) }
+            }, LayoutParams(0, -1, 1f))
+        }
+        suggestions.gravity = Gravity.CENTER_VERTICAL
+        strip.addView(suggestions, LayoutParams(0, -1, 1f))
         menuKey.apply {
             useInter(550); gravity = Gravity.CENTER; textSize = 14f; setTextColor(ink)
             setOnClickListener { if (menu.visibility == VISIBLE) closeMenu() else openMenu() }
@@ -147,16 +169,18 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
 
     // The Hex key stays mounted across every state change: its original finger-up ends the hold.
     fun layoutKeys(symbols: Boolean, more: Boolean, shifted: Boolean, locked: Boolean, action: String?) {
+        clearCallout(); grid = null; letters.clear()
         plane.removeAllViews()
+        val spanish = !symbols && ime.preferences.spoken.code == "es"
         val lines = when {
-            !symbols -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+            !symbols -> listOf("qwertyuiop", if (spanish) "asdfghjklñ" else "asdfghjkl", "zxcvbnm")
             more -> listOf("~`|•√π÷×¶∆", "£¢€¥^°={}", "[]<>_\"*")
             else -> listOf("1234567890", "@#$%&-+()", "!,?'/;:")
         }
         for ((index, line) in lines.withIndex()) {
             val row = LinearLayout(context)
             plane.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, keyHeight))
-            if (index == 1) row.addView(View(context), LayoutParams(0, 1, .5f))
+            if (index == 1 && !spanish) row.addView(View(context), LayoutParams(0, 1, .5f))
             if (index == 2) {
                 if (symbols) cap(row, 1.5f, if (more) "123" else "=\\<", "More symbols", modifier, 15f, ime::shift)
                 else icon(row, 1.5f, R.drawable.ic_shift, if (locked) "Caps lock" else "Shift",
@@ -164,9 +188,49 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
             }
             for (c in line) {
                 val text = if (!symbols && shifted) c.uppercaseChar().toString() else c.toString()
-                cap(row, 1f, text, text) { ime.type(text) }
+                var touch: KeyPoint? = null
+                val k = cap(row, 1f, text, text) {
+                    val g = if (symbols) null else geometry()
+                    val p = touch ?: g?.centres?.get(c)
+                    if (g != null && p != null) ime.letter(text, p.x, p.y, g) else ime.type(text)
+                }
+                if (!symbols) letters[c] = k
+                val accents = if (symbols) emptyList() else LetterFeedback.options(text.single(), ime.preferences.spoken.code)
+                if (accents.isNotEmpty()) k.setOnLongClickListener {
+                    openMenu(); menu.accents(accents) { accent -> closeMenu(); ime.type(accent) }; true
+                }
+                k.setOnTouchListener { v, e ->
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            clearCallout(); v.isPressed = true
+                            touch = KeyPoint((v.left + e.x).toDouble(), (row.top + e.y).toDouble())
+                            if (ime.feedback.popups && ime.previewAllowed) feedback.present(k, listOf(text))
+                            if (accents.isNotEmpty()) {
+                                pendingAccents = Runnable { if (v.isPressed) feedback.present(k, accents) }
+                                postDelayed(pendingAccents!!, 400L)
+                            }
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            if (feedback.choosing) feedback.move(plane.left + row.left + v.left + e.x)
+                            else if (e.x < -slop || e.x > v.width + slop || e.y < -slop || e.y > v.height + slop) {
+                                clearCallout(); v.isPressed = false
+                            }
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            val selected = if (feedback.choosing) feedback.selected() else null
+                            val pressed = v.isPressed; v.isPressed = false; clearCallout()
+                            if (pressed && selected != null && selected != text) {
+                                val g = geometry(); val p = touch
+                                if (g != null && p != null) ime.letter(selected, p.x, p.y, g, explicit = true) else ime.type(selected)
+                            } else if (pressed) v.performClick()
+                            touch = null
+                        }
+                        MotionEvent.ACTION_CANCEL -> { v.isPressed = false; clearCallout(); touch = null }
+                    }
+                    true
+                }
             }
-            if (index == 1) row.addView(View(context), LayoutParams(0, 1, .5f))
+            if (index == 1 && !spanish) row.addView(View(context), LayoutParams(0, 1, .5f))
             if (index == 2) {
                 deleteKey = icon(row, 1.5f, R.drawable.ic_delete, "Delete", modifier, ime::delete).also { k ->
                     k.setOnTouchListener { v, e ->
@@ -196,6 +260,40 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
         enterKey.contentDescription = action ?: "Return"
     }
 
+    private fun geometry(): KeyGrid? {
+        grid?.let { return it }
+        val q = letters['q'] ?: return null; val w = letters['w'] ?: return null
+        if (q.width == 0 || w.left == q.left) return null
+        val centres = letters.mapValues { (_, cap) -> KeyPoint(cap.left + cap.width / 2.0, (cap.parent as View).top + cap.height / 2.0) }
+        return KeyGrid(centres, centres.getValue('w').x - centres.getValue('q').x,
+            centres.getValue('a').y - centres.getValue('q').y).also { grid = it }
+    }
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        if (changed) grid = null
+    }
+    private fun clearCallout() {
+        pendingAccents?.let(::removeCallbacks); pendingAccents = null; feedback.clear()
+    }
+    fun suggestions(words: List<String>) {
+        offered = words
+        for (i in 0..2) {
+            val cell = suggestions.getChildAt(i * 2) as TextView
+            val s = words.getOrNull(i).orEmpty()
+            cell.text = s; cell.contentDescription = if (s.isEmpty()) null else "Suggest " + s
+            cell.isEnabled = s.isNotEmpty()
+        }
+        updateStrip()
+    }
+    private fun updateStrip() {
+        val choosing = ::menu.isInitialized && menu.visibility == VISIBLE
+        val show = idle && !choosing && offered.isNotEmpty()
+        suggestions.visibility = if (show) VISIBLE else GONE
+        statusText.visibility = if (idle && !show) VISIBLE else GONE
+        menuKey.text = when { choosing -> "Done"; show -> "⋯"; else -> "Hex menu  ›" }
+        menuKey.contentDescription = if (choosing) "Done" else "Hex menu"
+        menuKey.minimumWidth = dp(44)
+    }
     private fun shape(fill: Int, radius: Int) = GradientDrawable().apply {
         setColor(fill); cornerRadius = dp(radius).toFloat()
     }
@@ -220,12 +318,12 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     private fun openMenu() {
         if (scope.visibility == VISIBLE) return
         plane.visibility = GONE; bottom.visibility = GONE; menu.visibility = VISIBLE
-        statusText.isClickable = true; menuKey.text = "Done"; menu.home()
+        statusText.isClickable = true; menu.home(); updateStrip()
     }
     fun closeMenu() {
         if (!::menu.isInitialized || menu.visibility != VISIBLE) return
         menu.visibility = GONE; plane.visibility = VISIBLE; bottom.visibility = VISIBLE
-        statusText.isClickable = false; menuKey.text = "Hex menu  ›"; statusText.text = hint; refreshSpace()
+        statusText.isClickable = false; menuKey.text = "Hex menu  ›"; statusText.text = hint; refreshSpace(); ime.configureTyping(keepWord = true); updateStrip()
     }
     private fun refreshSpace() {
         val next = ime.preferences.options(ime.nextEnglish)
@@ -234,7 +332,7 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     }
     fun status(phase: SpeechPhase, hint: String) {
         this.hint = hint
-        val idle = phase == SpeechPhase.Idle
+        idle = phase == SpeechPhase.Idle
         val processing = phase == SpeechPhase.Transcribing
         if (!idle) closeMenu()
         statusText.visibility = if (idle) VISIBLE else GONE
@@ -249,9 +347,11 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
         if (idle || phase == SpeechPhase.Opening) scope.clear()
         // Keep the snapshotted paste language visible until this dictation has finished.
         if (idle) refreshSpace()
+        updateStrip()
     }
     fun setLevel(value: Float) = scope.push(value)
     fun cancelGestures() {
+        clearCallout()
         removeCallbacks(hold); removeCallbacks(repeatDelete)
         held = false; tracking = false; deleting = false
         if (::hexKey.isInitialized) hexKey.isPressed = false
@@ -275,6 +375,25 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
             face.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             face.background = paints
             addView(face, FrameLayout.LayoutParams(-1, -1))
+        }
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && ime.feedback.haptics &&
+                Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0)
+                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            return super.dispatchTouchEvent(event)
+        }
+        // View normally posts its click after UP. Letter gestures commit on UP itself;
+        // posting space or shift behind the next letter can reorder fast input.
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (!isEnabled) return false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> isPressed = true
+                MotionEvent.ACTION_MOVE -> if (event.x < -slop || event.x > width + slop ||
+                    event.y < -slop || event.y > height + slop) isPressed = false
+                MotionEvent.ACTION_UP -> { val click = isPressed; isPressed = false; if (click) performClick() }
+                MotionEvent.ACTION_CANCEL -> isPressed = false
+            }
+            return true
         }
         override fun getAccessibilityClassName() = "android.widget.Button"
     }

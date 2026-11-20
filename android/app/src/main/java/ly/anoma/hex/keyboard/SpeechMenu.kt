@@ -20,6 +20,10 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
     init { addView(body); isFillViewport = true }
     private fun dp(n: Int) = (resources.displayMetrics.density * n).roundToInt()
     fun home() = show("Hex menu")
+    fun accents(values: List<String>, pick: (String) -> Unit) {
+        page = "Accents"; title(page); body.removeAllViews(); scrollTo(0, 0)
+        values.forEach { s -> row(s, "") { pick(s) } }
+    }
     fun back() { if (page == "Hex menu") close() else home() }
 
     private fun show(next: String) {
@@ -32,10 +36,16 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                     row("Next dictation", (if (ime.nextEnglish != false) "Paste in English" else "Paste as spoken") + "  ›") {
                         show("Next dictation")
                     }
+                row("Typing feedback", "›") { show("Typing feedback") }
                 row("Clean up what I say", if (prefs.clean) "On" else "Off") { prefs.clean = !prefs.clean; home() }
                 row("Translate what I say", if (prefs.translation) "On" else "Off") {
                     prefs.translation = !prefs.translation; ime.nextEnglish = null; home()
                 }
+            }
+            "Typing feedback" -> {
+                val f = ime.feedback
+                row("Key pop-ups", if (f.popups) "On" else "Off") { f.popups = !f.popups; show(next) }
+                row("Key haptics", if (f.haptics) "On" else "Off") { f.haptics = !f.haptics; show(next) }
             }
             "Style" -> Style.entries.forEach { value -> row(value.name, if (prefs.style == value) "✓" else "") {
                 prefs.style = value; home()
