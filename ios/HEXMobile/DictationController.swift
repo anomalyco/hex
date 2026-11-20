@@ -311,8 +311,19 @@ final class DictationController {
     func setDictationLanguage(_ identifier: String?) {
         let normalized = (identifier?.isEmpty == true) ? nil : identifier
         guard normalized != dictationLanguage else { return }
-        dictationLanguage = normalized
-        languageSettings.dictationLanguage = normalized
+        languageSettings.chooseDictationLanguage(normalized)
+        applyDictationLanguage(normalized)
+    }
+
+    /// Picks up a language the keyboard switched to in the App Group.
+    func followDictationLanguageSetting() {
+        let stored = languageSettings.dictationLanguage
+        guard stored != dictationLanguage else { return }
+        applyDictationLanguage(stored)
+    }
+
+    private func applyDictationLanguage(_ identifier: String?) {
+        dictationLanguage = identifier
         switch phase {
         case .recording, .transcribing, .requestingPermission:
             pendingLanguagePreparation = true
@@ -459,6 +470,8 @@ final class DictationController {
         if case .setup = request {
             return
         }
+        // A language picked in the keyboard: prepare it before the handoff records.
+        followDictationLanguageSetting()
         if let customOpener = urlOpener {
             defaultURLOpener = customOpener
         }
@@ -1068,6 +1081,8 @@ final class DictationController {
 
                 // Never expire an in-flight recording or accepted transcription mid-work.
                 if self.phase != .recording && self.phase != .transcribing {
+                    // The keyboard's language switch writes the App Group; follow it.
+                    self.followDictationLanguageSetting()
                     let remaining = self.keyboardSessionExpiresAt - self.now()
                     if remaining <= 0 {
                         self.endWarmSession()
@@ -1319,8 +1334,11 @@ final class DictationController {
                 }
                 return transcript
             }
+            followDictationLanguageSetting()
             if phase == .modelRequired || isFailedPhase {
                 prepareModel()
+            }
+            if phase == .preparingModel {
                 try? await waitUntilReady(timeoutSeconds: 10)
             }
             guard phase == .ready else { return nil }

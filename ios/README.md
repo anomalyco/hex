@@ -206,6 +206,20 @@ it on-device with Apple Speech, downloading the speech assets on first use
   ehm, øh, hm) in Norwegian, Danish and Swedish, and none elsewhere (Norwegian
   "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
   language rather than a guess. Custom vocabulary works in any language.
+- **Switching the dictation language in the keyboard (iOS 26+, Full Access):**
+  the dictation bar shows the language beside the style ("Norsk ⌄") and opens a
+  tray of chips; the full keyboard's Hex key menu has a Language row with its
+  own page, and the space bar names the language faintly ("English", "Norsk").
+  Both offer Automatic plus up to five languages: the one set, the ones picked
+  lately (`settings.dictationLanguage.recent`), then the iPhone's preferred
+  languages, each matched to one Apple Speech has (`DictationLanguageSwitch`;
+  the keyboard lists Apple's languages once per process and caches them in
+  `settings.dictationLanguage.supported`). Names are each language's own
+  ("Español", "Deutsch", "עברית"), with a region code only where two share a
+  language. A pick writes the same App Group setting as Hex's menu, so
+  in-keyboard dictation uses it at once; a warm Hex session follows it within
+  100 ms and prepares the language between dictations, and a handoff or the
+  Action Button picks it up before recording.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an

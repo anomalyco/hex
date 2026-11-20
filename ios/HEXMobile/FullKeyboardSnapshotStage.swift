@@ -123,6 +123,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
             model.configureFixture(snapshot: warm, now: now)
         }
 
+        DictationLanguageFixture.apply(to: model)
         let view = FullKeyboardView(model: model, target: context.coordinator.target)
         view.appearanceOverride = darkKeyboard
         view.orientationOverride = .portrait
@@ -154,6 +155,8 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.didInsertDictation("should be home by 7:30. Start without me.")
             case "style":
                 view.debugShowStyleMenu()
+            case "languages":
+                view.debugShowStyleMenu(page: .languages)
             case "morph":
                 // Loops idle → recording → idle so the strip morph can be screen-recorded.
                 func cycle(_ start: TimeInterval) {

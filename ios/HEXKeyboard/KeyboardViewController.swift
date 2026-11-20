@@ -52,6 +52,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         warmFullKeyboardLexiconIfNeeded()
+        listDictationLanguagesIfNeeded()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -212,6 +213,7 @@ final class KeyboardViewController: UIInputViewController {
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),
                 TypingLogField("cleanupTagger", .bool(CleanupTaggerSettings().isEnabled)),
                 TypingLogField("hexKeyPlacement", .string(HexKeyPlacement.current.rawValue)),
+                TypingLogField("dictationLanguage", .string(LanguageSettings().dictationLanguage ?? "automatic")),
                 TypingLogField("style", .string(bridge.style.rawValue)),
             ]
         )
@@ -324,6 +326,11 @@ final class KeyboardViewController: UIInputViewController {
                 self.viewModel.style = style
             }
             self.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
+        }
+        viewModel.onLanguageSelected = { [weak self] language in
+            LanguageSettings().chooseDictationLanguage(language)
+            self?.languageSignature = nil
+            self?.syncLanguageState()
         }
         viewModel.onReturnAppSelected = { [weak self] appID in
             guard let self else { return }
@@ -538,6 +545,7 @@ final class KeyboardViewController: UIInputViewController {
         if viewModel.quickReturnApps != quickReturnApps {
             viewModel.quickReturnApps = quickReturnApps
         }
+        syncLanguageState()
 
         viewModel.applyBridgeState(
             hasFullAccess: true,
@@ -552,6 +560,50 @@ final class KeyboardViewController: UIInputViewController {
 
         refreshColdStartURL(now: now, force: false)
         schedulePoll(force: false)
+    }
+
+    // MARK: - Dictation language
+
+    /// What `syncLanguageState` last read, so the 25 Hz poll only works out the choices on a change.
+    private var languageSignature: String?
+    /// Apple Speech's languages are listed once per keyboard process.
+    private static var didListDictationLanguages = false
+
+    /// Settings › Dictation language, what Automatic picks, and the switch's choices, from
+    /// the App Group (iOS 26, where dictation is Apple Speech).
+    private func syncLanguageState() {
+        guard KeyboardLocalDictation.isSupported else { return }
+        let settings = LanguageSettings()
+        let explicit = settings.dictationLanguage
+        let automatic = settings.automaticDictationLanguage
+        let recent = settings.recentDictationLanguages
+        let supported = settings.supportedDictationLanguages
+        let signature = [explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)"]
+            .joined(separator: "|")
+        guard signature != languageSignature else { return }
+        languageSignature = signature
+        let choices = DictationLanguageSwitch.choices(
+            current: explicit,
+            recent: recent,
+            preferred: Locale.preferredLanguages,
+            supported: supported
+        )
+        if viewModel.dictationLanguage != explicit { viewModel.dictationLanguage = explicit }
+        if viewModel.automaticLanguage != automatic { viewModel.automaticLanguage = automatic }
+        if viewModel.languageChoices != choices { viewModel.languageChoices = choices }
+    }
+
+    /// Asks Apple Speech which languages it has and what Automatic picks, so the switch can
+    /// offer them before Hex has listed them.
+    private func listDictationLanguagesIfNeeded() {
+        guard #available(iOS 26.0, *), hasFullAccess, !Self.didListDictationLanguages else { return }
+        Self.didListDictationLanguages = true
+        Task { [weak self] in
+            _ = await AppleSpeechLanguages.options()
+            _ = await AppleSpeechLanguages.automatic()
+            self?.languageSignature = nil
+            self?.syncLanguageState()
+        }
     }
 
     private func refreshColdStartURL(now: TimeInterval, force: Bool) {

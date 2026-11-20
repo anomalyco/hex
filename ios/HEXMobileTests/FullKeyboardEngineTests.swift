@@ -241,6 +241,27 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(view.hasAllocatedRecordingPanel, "Metal scope torn down once recording ends")
     }
 
+    func testSpaceBarNamesTheDictationLanguage() {
+        let model = KeyboardViewModel()
+        let view = FullKeyboardView(model: model, target: target)
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+        view.layoutIfNeeded()
+        XCTAssertNil(view.plane.spaceLabel, "no label until the language is known")
+
+        model.automaticLanguage = "en-US"
+        model.languageChoices = ["nb-NO", "en-US"]
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+
+        model.dictationLanguage = "nb-NO"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(view.plane.spaceLabel, "Norsk")
+
+        model.hasFullAccess = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertNil(view.plane.spaceLabel, "without Full Access the keyboard can't dictate")
+    }
+
     func testEmailFieldShowsAtAndDot() {
         target.keyboardType = .emailAddress
         engine.configureForField()

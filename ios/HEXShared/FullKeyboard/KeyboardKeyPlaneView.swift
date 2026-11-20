@@ -11,6 +11,8 @@ final class KeyboardKeyPlaneView: UIView {
     var returnSymbol: String? = "return" { didSet { if returnSymbol != oldValue { setNeedsDisplay() } } }
     var returnIsAction = false { didSet { if returnIsAction != oldValue { setNeedsDisplay() } } }
     var returnIsEnabled = true { didSet { if returnIsEnabled != oldValue { setNeedsDisplay() } } }
+    /// The dictation language's name, drawn faintly on the space bar ("English", "Norsk").
+    var spaceLabel: String? { didSet { if spaceLabel != oldValue { setNeedsDisplay() } } }
     /// Called on every key going down, for clicks and haptics.
     var onKeyDown: ((KeyKind) -> Void)?
     /// Called when long-press accents open.
@@ -83,6 +85,13 @@ final class KeyboardKeyPlaneView: UIView {
             case .space:
                 let fill = pressed.contains(.space) ? palette.keyPressedFill : palette.keyFill
                 context.fillKeycap(key.frame, fill: fill, radius: radius)
+                guard !hideGlyphs, let spaceLabel else { continue }
+                drawText(
+                    spaceLabel,
+                    in: key.frame,
+                    font: .systemFont(ofSize: isLandscape ? 13 : 14.5, weight: .regular),
+                    color: palette.textMuted
+                )
             case .returnKey:
                 let isPressed = pressed.contains(.returnKey) && returnIsEnabled
                 let activeAction = returnIsAction && returnIsEnabled && !hideGlyphs

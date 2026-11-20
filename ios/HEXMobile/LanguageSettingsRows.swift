@@ -55,6 +55,8 @@ struct DictationLanguageRow: View {
                 .frame(minHeight: 48)
             }
             .task {
+                // The keyboard may have switched the language while Hex was away.
+                dictation.followDictationLanguageSetting()
                 options = await AppleSpeechLanguages.options()
                 automaticName = await AppleSpeechLanguages.automatic().map {
                     SpeechLanguagePicker.displayName(for: $0.identifier)

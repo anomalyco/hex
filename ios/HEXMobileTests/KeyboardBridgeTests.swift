@@ -261,3 +261,66 @@ final class KeyboardBridgeTests: XCTestCase {
         )
     }
 }
+
+/// The keyboard's quick dictation-language switch.
+final class DictationLanguageSwitchTests: XCTestCase {
+    private let supported = ["en-US", "en-GB", "es-ES", "es-MX", "de-DE", "nb-NO", "he-IL", "fr-FR"]
+
+    func testOffersTheCurrentThenRecentThenPreferredLanguages() {
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(
+                current: "de-DE",
+                recent: ["he-IL", "de-DE"],
+                preferred: ["nb-NO", "en-US"],
+                supported: supported
+            ),
+            ["de-DE", "he-IL", "nb-NO", "en-US"]
+        )
+    }
+
+    func testMatchesPreferredLanguagesToOnesAppleTranscribes() {
+        let choices = DictationLanguageSwitch.choices(
+            current: nil,
+            recent: [],
+            preferred: ["nn-NO", "es-419", "es", "en-AU", "tlh", "fr-CA", "en-GB", "de-AT"],
+            supported: supported
+        )
+        // Nynorsk is Bokmål; "es-419" and "es" find Spain's Spanish; Klingon has none.
+        XCTAssertEqual(choices, ["nb-NO", "es-ES", "en-US", "fr-FR", "en-GB"])
+        XCTAssertEqual(choices.count, DictationLanguageSwitch.maxChoices)
+    }
+
+    func testWithoutAListEveryLanguageIsOffered() {
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(current: nil, recent: [], preferred: ["nb_NO", "en"], supported: []),
+            ["nb-NO", "en"]
+        )
+    }
+
+    func testNamesEachLanguageInItself() {
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "nb-NO"), "Norsk")
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "en-US"), "English")
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "es-ES"), "Español")
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "de-DE"), "Deutsch")
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "he-IL"), "עברית")
+        XCTAssertEqual(
+            DictationLanguageSwitch.nativeNames(for: ["en-US", "en-GB", "nb-NO"]),
+            ["en-US": "English (US)", "en-GB": "English (GB)", "nb-NO": "Norsk"]
+        )
+    }
+
+    func testAChoiceMovesToTheFrontOfTheRecents() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        for id in ["nb-NO", "es-ES", "de-DE", "he-IL", "fr-FR", "en-GB", "es-ES"] {
+            settings.chooseDictationLanguage(id)
+        }
+        XCTAssertEqual(settings.dictationLanguage, "es-ES")
+        XCTAssertEqual(settings.recentDictationLanguages, ["es-ES", "en-GB", "fr-FR", "he-IL", "de-DE"])
+        settings.chooseDictationLanguage(nil)
+        XCTAssertNil(settings.dictationLanguage, "Automatic")
+        XCTAssertEqual(settings.recentDictationLanguages.first, "es-ES", "Automatic isn't a recent")
+    }
+}

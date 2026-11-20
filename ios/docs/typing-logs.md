@@ -81,7 +81,8 @@ The keyboard appeared (`trigger`: `appear`), the field changed while it showed
   four preferred), `keyboardLanguage` (the keyboard's `primaryLanguage`),
   `inputMode` (the field's input mode language), `fullAccess`.
 - `settings`: `autocorrect` (Hex's), `key_popups`, `haptics`, `learnHowIType`, `cleanupTagger`,
-  `hexKeyPlacement`, `style` (dictation style).
+  `hexKeyPlacement`, `dictationLanguage` (BCP 47, or `automatic`), `style`
+  (dictation style).
 
 A `context` line follows at once with the text already in the field.
 
@@ -207,6 +208,7 @@ Taps that aren't text: `action`:
 - `trackpad_start` (`id`), `trackpad_end` (`id`, `offset`: total characters);
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
   (`style`, `from`: `hex_menu` or `recording_panel`), `return_app` (`app`),
+  `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),
   `dictation_stop`, `dictation_cancel`;
 - `next_keyboard` (strip chip), `globe`, `undo_dictation` (`applied: false` when
   the text had changed), `touches_cancelled` (`count`).

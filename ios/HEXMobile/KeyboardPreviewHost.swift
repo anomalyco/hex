@@ -66,6 +66,7 @@ struct KeyboardSnapshotStage: View {
     private func configureScene() {
         let now: TimeInterval = 10_000
         viewModel.needsGlobeKey = true
+        DictationLanguageFixture.apply(to: viewModel)
 
         switch scene {
         case "keyboard-cold":
@@ -132,9 +133,40 @@ struct KeyboardSnapshotStage: View {
                 activeTray: .style
             )
 
+        case "keyboard-language":
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .ready,
+                    heartbeat: now - 0.1,
+                    expiresAt: now + 14 * 60
+                ),
+                now: now,
+                style: .polished,
+                activeTray: .language
+            )
+
         default:
             break
         }
+    }
+}
+
+/// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one,
+/// otherwise Automatic, which resolves to English.
+enum DictationLanguageFixture {
+    static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
+
+    static var explicit: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: "--dictation-language"), idx + 1 < args.count else { return nil }
+        return args[idx + 1]
+    }
+
+    @MainActor
+    static func apply(to model: KeyboardViewModel) {
+        model.languageChoices = choices
+        model.dictationLanguage = explicit
+        model.automaticLanguage = "en-US"
     }
 }
 

@@ -374,12 +374,20 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             setRecording(recording)
         }
         refreshRecordingPanel()
+        plane.spaceLabel = model.hasFullAccess ? model.languageLabel : nil
         if let menu = styleMenu {
             menu.style = model.style
             menu.returnAppID = model.returnAppID
             menu.quickReturnApps = model.quickReturnApps
+            applyLanguages(to: menu)
         }
         refreshStrip()
+    }
+
+    private func applyLanguages(to menu: HexStyleMenuView) {
+        menu.dictationLanguage = model.dictationLanguage
+        menu.automaticLanguage = model.automaticLanguage
+        menu.languageChoices = model.showsLanguageSwitch ? model.languageChoices : []
     }
 
     private func refreshStrip() {
@@ -643,7 +651,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.style = model.style
         menu.returnAppID = model.returnAppID
         menu.quickReturnApps = model.quickReturnApps
+        applyLanguages(to: menu)
         menu.onHoverChanged = { [weak self] in self?.selectionFeedback() }
+        menu.onLanguage = { [weak self] language in
+            self?.typingLog?.ui("dictation_language", [TypingLogField("language", .string(language ?? "automatic"))])
+            self?.model.onLanguageSelected?(language)
+            self?.dismissStyleMenu()
+        }
         menu.onStyle = { [weak self] style in
             self?.typingLog?.ui("style", [
                 TypingLogField("style", .string(style.rawValue)),
@@ -669,9 +683,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         styleMenu = nil
     }
 
-    /// Fixtures: open the menu without a long press.
-    func debugShowStyleMenu() {
+    /// Fixtures: open the menu without a long press, optionally on another page.
+    func debugShowStyleMenu(page: HexStyleMenuView.Page = .styles) {
         showStyleMenu()
+        styleMenu?.show(page: page)
     }
 
     private func undoDictation() {

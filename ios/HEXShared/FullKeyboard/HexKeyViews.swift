@@ -330,14 +330,20 @@ final class PanelKeyButton: UIControl {
 /// Holding the Hex key: dictation styles, then "Return to" for the app Hex goes back to.
 @MainActor
 final class HexStyleMenuView: UIView {
-    enum Page { case styles, returnApps }
+    enum Page { case styles, returnApps, languages }
 
     var palette = FullKeyboardPalette(isDark: false) { didSet { rebuild() } }
     var style: DictationStyle = .polished { didSet { rebuild() } }
     var returnAppID: String? { didSet { rebuild() } }
     var quickReturnApps: [HostApp] = HostAppCatalog.quickChips { didSet { if quickReturnApps != oldValue { rebuild() } } }
+    /// Settings › Dictation language (nil for Automatic), what Automatic resolves to, and the
+    /// quick choices; with no choices the menu has no Language row.
+    var dictationLanguage: String? { didSet { if dictationLanguage != oldValue { rebuild() } } }
+    var automaticLanguage: String? { didSet { if automaticLanguage != oldValue { rebuild() } } }
+    var languageChoices: [String] = [] { didSet { if languageChoices != oldValue { rebuild() } } }
     var onStyle: ((DictationStyle) -> Void)?
     var onReturnApp: ((String?) -> Void)?
+    var onLanguage: ((String?) -> Void)?
     var onDismiss: (() -> Void)?
     var onHoverChanged: (() -> Void)?
     /// The Hex key's keycap, in this view's coordinates; the panel opens above it.
@@ -418,8 +424,14 @@ final class HexStyleMenuView: UIView {
                     self?.onStyle?(option)
                 })
             }
+            if !languageChoices.isEmpty {
+                let current = (dictationLanguage ?? automaticLanguage).map(DictationLanguageSwitch.nativeName(for:))
+                rows.append(makeRow(title: "Language", detail: current ?? "Automatic", chevron: true, selected: false, showsTopDivider: true) { [weak self] in
+                    self?.show(page: .languages)
+                })
+            }
             let appName = HostAppCatalog.app(for: returnAppID)?.name ?? "None"
-            rows.append(makeRow(title: "Return to", detail: appName, chevron: true, selected: false, showsTopDivider: true) { [weak self] in
+            rows.append(makeRow(title: "Return to", detail: appName, chevron: true, selected: false, showsTopDivider: languageChoices.isEmpty) { [weak self] in
                 self?.show(page: .returnApps)
             })
         case .returnApps:
@@ -433,6 +445,17 @@ final class HexStyleMenuView: UIView {
             for app in apps {
                 rows.append(makeRow(title: app.name, selected: app.id == returnAppID) { [weak self] in
                     self?.onReturnApp?(app.id)
+                })
+            }
+        case .languages:
+            let automatic = automaticLanguage.map(DictationLanguageSwitch.nativeName(for:))
+            rows.append(makeRow(title: "Automatic", detail: automatic, selected: dictationLanguage == nil) { [weak self] in
+                self?.onLanguage?(nil)
+            })
+            let names = DictationLanguageSwitch.nativeNames(for: languageChoices)
+            for id in languageChoices {
+                rows.append(makeRow(title: names[id] ?? id, selected: id == dictationLanguage) { [weak self] in
+                    self?.onLanguage?(id)
                 })
             }
         }

@@ -1,11 +1,16 @@
 import Foundation
 
-/// Settings › Dictation language, in the App Group so the keyboard reads it.
+/// Settings › Dictation language, in the App Group so the keyboard reads it and can switch it.
 nonisolated struct LanguageSettings {
     private enum Key {
         static let dictation = "settings.dictationLanguage"
         static let resolvedDictation = "settings.dictationLanguage.resolved"
+        static let automaticDictation = "settings.dictationLanguage.automatic"
+        static let recent = "settings.dictationLanguage.recent"
+        static let supported = "settings.dictationLanguage.supported"
     }
+
+    static let maxRecent = 5
 
     private let defaults: UserDefaults?
 
@@ -26,9 +31,36 @@ nonisolated struct LanguageSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.resolvedDictation) }
     }
 
+    /// What Automatic picks on this iPhone, when the app or keyboard last worked it out.
+    var automaticDictationLanguage: String? {
+        get { defaults?.string(forKey: Key.automaticDictation) }
+        nonmutating set { defaults?.set(newValue, forKey: Key.automaticDictation) }
+    }
+
+    /// Languages picked lately, newest first, for the keyboard's quick switch.
+    var recentDictationLanguages: [String] {
+        get { defaults?.stringArray(forKey: Key.recent) ?? [] }
+        nonmutating set { defaults?.set(Array(newValue.prefix(Self.maxRecent)), forKey: Key.recent) }
+    }
+
+    /// Every language Apple Speech transcribes here (BCP 47), as last listed, so the
+    /// keyboard can offer only those without asking Speech.
+    var supportedDictationLanguages: [String] {
+        get { defaults?.stringArray(forKey: Key.supported) ?? [] }
+        nonmutating set { defaults?.set(newValue, forKey: Key.supported) }
+    }
+
     /// The language dictation is set to or last ran in, when known.
     var effectiveDictationLanguage: String? {
         dictationLanguage ?? resolvedDictationLanguage
+    }
+
+    /// A choice made in Hex or the keyboard: the setting, and the front of the recents.
+    func chooseDictationLanguage(_ identifier: String?) {
+        dictationLanguage = identifier
+        if let identifier {
+            recentDictationLanguages = [identifier] + recentDictationLanguages.filter { $0 != identifier }
+        }
     }
 }
 

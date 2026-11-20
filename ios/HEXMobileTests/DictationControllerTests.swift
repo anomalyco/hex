@@ -848,6 +848,17 @@ final class DictationControllerTests: XCTestCase {
         try await settle()
         XCTAssertNil(languages.dictationLanguage)
         XCTAssertEqual(preparations, 4)
+
+        // The keyboard's switch writes the App Group; Hex follows without writing it back.
+        languages.dictationLanguage = "he-IL"
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(controller.dictationLanguage, "he-IL")
+        XCTAssertEqual(preparations, 5)
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 5, "no change, no preparation")
+        XCTAssertEqual(languages.recentDictationLanguages, ["de-DE", "nb-NO"], "picks in Hex are recents")
     }
 
     private func settle() async throws {

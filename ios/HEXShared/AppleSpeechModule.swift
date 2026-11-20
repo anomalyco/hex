@@ -9,16 +9,25 @@ nonisolated enum AppleSpeechLanguages {
     /// The language dictation uses: Settings › Dictation language, else Automatic. Records
     /// the result in the App Group for the keyboard layout and translation.
     static func resolve(settings: LanguageSettings = LanguageSettings()) async -> SpeechLanguage? {
-        let picked = await pick(explicit: settings.dictationLanguage)
+        let explicit = settings.dictationLanguage
+        let picked = await pick(explicit: explicit)
         if let picked, settings.resolvedDictationLanguage != picked.identifier {
             settings.resolvedDictationLanguage = picked.identifier
+        }
+        if explicit == nil, let picked, settings.automaticDictationLanguage != picked.identifier {
+            settings.automaticDictationLanguage = picked.identifier
         }
         return picked
     }
 
-    /// What Automatic picks on this iPhone, whatever the setting says.
-    static func automatic() async -> SpeechLanguage? {
-        await pick(explicit: nil)
+    /// What Automatic picks on this iPhone, whatever the setting says. Records it for the
+    /// keyboard's language switch.
+    static func automatic(settings: LanguageSettings = LanguageSettings()) async -> SpeechLanguage? {
+        let picked = await pick(explicit: nil)
+        if let picked, settings.automaticDictationLanguage != picked.identifier {
+            settings.automaticDictationLanguage = picked.identifier
+        }
+        return picked
     }
 
     private static func pick(explicit: String?) async -> SpeechLanguage? {
@@ -38,8 +47,12 @@ nonisolated enum AppleSpeechLanguages {
         )
     }
 
-    /// Every language either module transcribes, sorted by name.
-    static func options(display: Locale = .current) async -> [SpeechLanguageOption] {
+    /// Every language either module transcribes, sorted by name. Records the list for the
+    /// keyboard's language switch.
+    static func options(
+        display: Locale = .current,
+        settings: LanguageSettings = LanguageSettings()
+    ) async -> [SpeechLanguageOption] {
         var identifiers: [String] = []
         var seen = Set<String>()
         let speech = SpeechTranscriber.isAvailable ? await SpeechTranscriber.supportedLocales : []
@@ -48,6 +61,9 @@ nonisolated enum AppleSpeechLanguages {
             if seen.insert(identifier).inserted {
                 identifiers.append(identifier)
             }
+        }
+        if !identifiers.isEmpty, settings.supportedDictationLanguages != identifiers {
+            settings.supportedDictationLanguages = identifiers
         }
         return identifiers
             .map { SpeechLanguageOption(id: $0, name: SpeechLanguagePicker.displayName(for: $0, in: display)) }
