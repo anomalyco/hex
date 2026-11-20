@@ -32,6 +32,7 @@ use crate::dictation::text_replacements::TextReplacement;
 use crate::personal_commands::{HostState, StatusSnapshot, StatusTransformation};
 use transformations::transformations;
 
+mod neutral_voice;
 mod transformations;
 
 const LIST_WIDTH: f32 = 240.0;
@@ -1289,7 +1290,11 @@ fn processing(
             None,
             tr("OpenCode transformation"),
         );
-        return section(p, "processing", tr("Processing"), vec![row]);
+        let mut rows = vec![row];
+        if let Some(neutral) = neutral_voice::row(ui, p) {
+            rows.push(neutral);
+        }
+        return section(p, "processing", tr("Processing"), rows);
     }
     let enabled = current.post_processing.enabled;
     let can_toggle = enabled || ui.models.available();
@@ -1315,6 +1320,11 @@ fn processing(
         reason,
         toggle,
     )];
+    // Labs › Neutral voice replaces the rewrite for this mode, so the row sits
+    // beside the rewrite toggle rather than inside it.
+    if let Some(neutral) = neutral_voice::row(ui, p) {
+        rows.push(neutral);
+    }
     if enabled {
         rows.extend(models::rows(ui, p, Target::Mode(selection), layer));
         rows.push(setting_row(

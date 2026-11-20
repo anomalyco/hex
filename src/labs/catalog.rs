@@ -35,6 +35,7 @@ impl Feature {
             | Self::SpokenFormatting
             | Self::FillerWords
             | Self::CleanUpWithAppleIntelligence
+            | Self::NeutralVoice
             | Self::SecondDictationShortcut
             | Self::TerminalPasteShortcut
             | Self::SmartSpacing
@@ -166,6 +167,7 @@ impl Feature {
             Self::ModesEditor => 20261118,
             Self::CalendarSelectAll => 20261118,
             Self::PasteLastPicker => 20261119,
+            Self::NeutralVoice => 20261120,
         }
     }
 
@@ -278,6 +280,7 @@ impl Feature {
             | Self::CalendarSelectAll
             | Self::PasteLastPicker => MACOS,
             Self::CleanUpWithAppleIntelligence => MACOS,
+            Self::NeutralVoice => MACOS,
             Self::CopyOnly => MACOS_WINDOWS,
             Self::HoldThroughKeys => MACOS_WINDOWS,
             Self::ReturnToApp => MACOS,
@@ -349,6 +352,7 @@ impl Feature {
             Self::SpokenFormatting => "spoken-formatting",
             Self::FillerWords => "filler-words",
             Self::CleanUpWithAppleIntelligence => "clean-up-apple-intelligence",
+            Self::NeutralVoice => "neutral-voice",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
             Self::TerminalPasteShortcut => "terminal-paste-shortcut",
             Self::SmartSpacing => "smart-spacing",
@@ -434,6 +438,7 @@ impl Feature {
             Self::SpokenFormatting => "labs.spoken_formatting",
             Self::FillerWords => "labs.filler_words",
             Self::CleanUpWithAppleIntelligence => "labs.clean_up_with_apple_intelligence",
+            Self::NeutralVoice => "labs.neutral_voice",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
             Self::TerminalPasteShortcut => "labs.terminal_paste_shortcut",
             Self::SmartSpacing => "labs.smart_spacing",

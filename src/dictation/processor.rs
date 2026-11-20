@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::desktop::opencode_service::Service;
 use crate::dictation::context::{ContextSelector, ContextSnapshot};
+use crate::dictation::numbers::numbers_only;
 use crate::dictation::text_replacements::ReplacementSet;
 use crate::dictation::vocabulary::VocabularyEntry;
 
@@ -80,6 +81,9 @@ pub struct Profile {
     /// The mode's speech model and language while it matches the foreground
     /// app (Labs › Switch model with app).
     speech: Option<crate::app_settings::KeyboardModelChoice>,
+    /// Rewrite this mode's dictations into plain, neutral wording on this Mac
+    /// (Labs › Neutral voice, macOS).
+    neutral_voice: bool,
 }
 
 impl Profile {
@@ -94,6 +98,7 @@ impl Profile {
             transformations: Vec::new(),
             vocabulary: Vec::new(),
             speech: None,
+            neutral_voice: false,
         }
     }
 
@@ -159,14 +164,16 @@ impl Profile {
         } else {
             &mode.name
         };
-        Self::configured(
+        let mut profile = Self::configured(
             name,
             ReplacementSet::new(&mode.replacements),
             mode.transformations.clone(),
             &mode.post_processing,
         )
         .vocabulary(mode.vocabulary.clone())
-        .speech(mode.speech.clone())
+        .speech(mode.speech.clone());
+        profile.neutral_voice = mode.neutral_voice;
+        profile
     }
 
     /// Builds a runtime profile from persisted settings. A malformed model key
@@ -405,10 +412,12 @@ impl Profiles {
 
     pub fn processes(&self, context: &ContextSnapshot) -> bool {
         let profile = self.select(context);
-        // A cleanup-only dictation still shows the HUD's processing stage.
+        // A cleanup-only or neutral-only dictation still shows the HUD's
+        // processing stage.
         profile.ai_enabled
             || !profile.transformations.is_empty()
             || crate::dictation::apple_cleanup::runs_here()
+            || (profile.neutral_voice && crate::dictation::neutral_voice::runs_here())
     }
 
     fn corrected(
@@ -500,6 +509,23 @@ impl Profiles {
             source,
             DictationLabs::current(),
         );
+        // A transcript of numbers alone has nothing to rewrite; a model only
+        // turns it into digits and re-punctuates it (#949). The neutral pass
+        // and Labs › Clean up with Apple Intelligence skip those too.
+        let numbers_only = numbers_only(&corrected);
+        // Labs › Neutral voice replaces both the rewrite and the cleanup for
+        // an opted-in mode, and outranks the voice prompt too, so a privacy
+        // dictation never reaches OpenCode.
+        if let Some(processed) = crate::dictation::neutral_voice::processed(
+            &corrected,
+            numbers_only,
+            cancelled,
+            profile.neutral_voice,
+            source,
+            &profile.transformations,
+        ) {
+            return processed;
+        }
         // Labs › Rewrite by voice: heard speech may carry a spoken instruction
         // that replaces the mode's rewrite with one request of its own.
         if source == Source::Dictation
@@ -509,11 +535,6 @@ impl Profiles {
         {
             return voice_prompt_processed(profile, &instruction, &corrected, context, cancelled);
         }
-        // A transcript of numbers alone has nothing to rewrite; a model only
-        // turns it into digits and re-punctuates it (#949). Labs › Clean up
-        // with Apple Intelligence skips those too, so the count is read
-        // whether or not this mode rewrites.
-        let numbers_only = numbers_only(&corrected);
         if profile.ai_enabled && numbers_only {
             tracing::info!(
                 profile = profile.name,
@@ -720,64 +741,6 @@ fn voice_prompt_fallback(
         Instruction::Write { .. } => corrected.to_owned(),
         Instruction::Nothing => String::new(),
     }
-}
-
-/// Whether a transcript says nothing but numbers: digits or English number
-/// words, with punctuation between them.
-fn numbers_only(transcript: &str) -> bool {
-    const WORDS: &[&str] = &[
-        "zero",
-        "one",
-        "two",
-        "three",
-        "four",
-        "five",
-        "six",
-        "seven",
-        "eight",
-        "nine",
-        "ten",
-        "eleven",
-        "twelve",
-        "thirteen",
-        "fourteen",
-        "fifteen",
-        "sixteen",
-        "seventeen",
-        "eighteen",
-        "nineteen",
-        "twenty",
-        "thirty",
-        "forty",
-        "fifty",
-        "sixty",
-        "seventy",
-        "eighty",
-        "ninety",
-        "hundred",
-        "thousand",
-        "million",
-        "billion",
-    ];
-    /// Words that join numbers but are not numbers themselves.
-    const JOINERS: &[&str] = &["and", "point", "minus", "negative"];
-    let mut any_number = false;
-    for token in transcript.split(|c: char| c.is_whitespace() || c == '-') {
-        let word = token.trim_matches(|c: char| !c.is_alphanumeric());
-        if word.is_empty() {
-            continue;
-        }
-        if word
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '.' || c == ',')
-            || WORDS.iter().any(|w| word.eq_ignore_ascii_case(w))
-        {
-            any_number = true;
-        } else if !JOINERS.iter().any(|w| word.eq_ignore_ascii_case(w)) {
-            return false;
-        }
-    }
-    any_number
 }
 
 /// One generation's text and the model that wrote it, when Hex named one
@@ -2121,6 +2084,30 @@ mod tests {
         );
         assert_eq!(processed.text, "one two three four five");
         assert!(processed.observation.is_none());
+    }
+
+    /// Only a mode that opts in carries Labs › Neutral voice into its
+    /// profile; every other mode behaves as before.
+    #[test]
+    fn only_a_mode_that_asks_for_neutral_voice_carries_it() {
+        use crate::app_settings::{DictationMode, DictationProcessingSettings};
+        let profiles = Profiles::from_settings(&DictationProcessingSettings {
+            modes: vec![
+                DictationMode {
+                    applications: vec!["Notes".into()],
+                    ..Default::default()
+                },
+                DictationMode {
+                    applications: vec!["Slack".into()],
+                    neutral_voice: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        assert!(!profiles.select(&context("Notes", None)).neutral_voice);
+        assert!(profiles.select(&context("Slack", None)).neutral_voice);
+        assert!(!profiles.select(&context("Zed", None)).neutral_voice);
     }
 
     #[test]

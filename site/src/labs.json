@@ -252,6 +252,17 @@
       "title": "Clean up with Apple Intelligence"
     },
     {
+      "added": "2026-11-20",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "neutral-voice",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show",
+      "title": "Neutral voice"
+    },
+    {
       "added": "2026-10-31",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",

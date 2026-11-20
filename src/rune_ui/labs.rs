@@ -697,6 +697,17 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 ..clean_up
             },
         });
+        // The same local model, in the modes that opt in, instead of the
+        // OpenCode rewrite.
+        let neutral = row(Feature::NeutralVoice, Some(&SPARKLES));
+        rows.push(match Feature::NeutralVoice.managed() {
+            Some(_) => neutral,
+            None => Row {
+                locked: !ui.platform.notes.is_available() && !neutral.on,
+                note: super::platform_settings::clean_up_note(ui.platform.notes),
+                ..neutral
+            },
+        });
     }
     rows.push(row(Feature::HistoryStats, None));
     rows.push(row(Feature::KeepRecordings, None));
@@ -892,6 +903,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::SpokenFormatting => "lab-spoken-formatting",
         Feature::FillerWords => "lab-filler-words",
         Feature::CleanUpWithAppleIntelligence => "lab-clean-up",
+        Feature::NeutralVoice => "lab-neutral-voice",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",

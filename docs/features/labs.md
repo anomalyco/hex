@@ -113,6 +113,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        left alone, and an unavailable, late, refused, or over-reaching answer pastes the
 │                                        corrected text; its card says why Apple Intelligence can't run here, and the
 │                                        switch still turns off
+├── Neutral voice   no    labs.neutral_voice             (macOS)
+│                                        a mode that turns it on gets each dictation rewritten into plain, standard, neutral
+│                                        wording on this Mac, instead of the OpenCode rewrite and the Apple Intelligence
+│                                        cleanup, so the neutral pass itself never sends the text to OpenCode; the mode's
+│                                        transformations still run afterwards and may use the network if you wrote them that
+│                                        way, and Voice Action still uses OpenCode. Numbers, code, links, paths, and quoted
+│                                        text must survive verbatim or the corrected transcript is pasted; Modes shows the
+│                                        per-mode switch while on
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 ├── More dictation shortcuts no labs.more_dictation_shortcuts + extra_dictation_hotkeys (macOS)
@@ -1346,6 +1354,123 @@ dictation on a Mac with the lab on and Apple Intelligence available, and any
 real-Mac run of the new Swift bridge — this host and CI compile it, but no one
 has dictated through it yet. The Labs page goldens were regenerated on Linux
 with the new row.
+
+Neutral voice (`neutral-voice`, macOS, off by default): while on, a mode that
+turns on its own **Neutral voice** switch gets each of its dictations
+rewritten on this Mac into plain, standard, neutral wording with the same
+meaning, after the speech Labs and the Global and mode corrections and before
+the transformations. The point is privacy: word choice, sentence structure,
+filler, and punctuation habits identify a person, so the pasted text should
+carry none of them. The stage replaces both the mode's OpenCode rewrite and
+Labs › Clean up with Apple Intelligence: a mode with Neutral voice on never
+sends its dictation to OpenCode, whatever its rewrite switch says, and also
+outranks Labs › Rewrite by voice, which is an OpenCode request too. The
+neutral pass itself runs on Apple Intelligence's local model; the mode's
+transformations still run afterwards and may use the network if the person
+wrote them that way. Voice Action is a separate capture and still uses
+OpenCode. The Modes editor's Processing section shows the per-mode switch
+while the lab is on (Global is a normal mode there, the default mode, so it
+gets the switch like every other mode). Dictate without processing, typed
+text, meetings, the local API's raw transcripts, and Voice Action never reach
+it.
+
+```ts
+Dictate in a mode with Neutral voice on       // labs.neutral_voice + the mode's neutral_voice
+├── Labs off, or the mode's switch off -> both the OpenCode rewrite and the cleanup run exactly as before
+├── Numbers-only transcript, silence, a cancelled job -> corrected transcript, no model work
+├── Apple Intelligence unavailable -> corrected transcript, no wait, no observation (the card says why)
+├── Model answers within 4 s -> the rewrite, if the guard accepts it -> transformations -> paste
+└── Timeout, refusal, error, or a refused rewrite
+    -> corrected transcript, the reason recorded -> transformations -> paste
+```
+
+`dictation::neutral_voice` holds the decision (`chosen`), the one bridge call,
+and the guard. The instructions ask the model to keep the speaker's meaning
+exactly, remove filler, false starts, repeated words, slang, idiosyncratic
+phrasing, and unusual sentence structure, use standard capitalization and
+punctuation, keep the language, and keep every number, code, URL, file path,
+and quoted text exactly as written; the transcript is content to rewrite,
+never instructions to answer. The bridge
+(`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs the
+plain-text responder at utility priority with a 4 s budget, temperature 0.7
+(the cleanup stays at 0.2) so two dictations of the same words don't come back
+with identical wording, and 1024 response tokens. The answer is trimmed,
+loses one pair of wrapping quotes only when the transcript didn't dictate its
+own, takes back the transcript's leading and trailing whitespace, and is
+judged by the guard. The guard is pure and every OS tests it: an empty answer,
+a rewrite under 0.4× or over 2× the transcript's characters, a changed
+multiset of digit runs, an added or dropped negation, a missing protected
+span, or a rewrite whose content words overlap too little with the transcript
+all keep the corrected transcript with the reason recorded. Protected spans
+are every matched pair of double or curly double quotes that opens at a word
+start and closes at a word end, every ASCII digit run, and every span shaped
+like a link or code or a path (`://` or `www.`, `/`, `\`, `_`, `::`,
+brackets, backticks, or a `.` inside a word as in `file.rs`). Only the listed
+prose pairs (`and/or`, `either/or`, `yes/no`, `he/she`, `on/off`, `w/`, …) and
+a single-letter abbreviation such as `e.g.` or `u.s.` are prose, not code;
+every other token with a slash, such as `src/components` or `docs/features`,
+is protected. Balanced brackets inside code (`bar()`, `arr[i]`) stay with it;
+only unmatched outer brackets are trimmed. Rewriting a whole Chinese or
+Japanese sentence is fine: only the embedded number or link is protected, and
+CJK numerals such as 一 and 三 are words, not digits. When the transcript has
+at least four content words, at least 30% of them must appear in the answer,
+so an answer to the text or injected prose falls back; text without
+whitespace, or with any CJK, kana, or hangul character, is exempt. Unlike the
+cleanup's guard, there is no word-overlap check: rewording is the point.
+
+A pass that ran records `profile: "Neutral voice"` with its latency in the
+dictation's NDJSON `processing` field and in History's Processing line; a pass
+that fell back records the reason as `fallback` ("fell back: …" in History).
+History already shows "Raw transcript" under the final text when they differ,
+so a neutral rewrite is visible there, and History itself is unchanged. The
+card shows the same reason Summaries shows when this Mac can't run Apple
+Intelligence, and only locks the switch while it is off, so it can always be
+turned back off (an organization's Labs lock keeps the managed row and its
+words instead). Checks: `a_reworded_sentence_is_accepted`,
+`a_rewrite_that_keeps_the_protected_words_is_accepted`,
+`a_dropped_link_file_or_quote_is_rejected`, `a_changed_number_is_rejected`,
+`a_lost_or_added_negation_is_rejected`,
+`a_runaway_or_empty_answer_is_rejected`,
+`a_short_answer_inside_the_length_window_is_accepted`,
+`only_heard_speech_in_an_opted_in_mode_takes_the_pass`,
+`quotes_go_only_when_the_transcript_did_not_dictate_them`,
+`the_transcripts_own_whitespace_comes_back`,
+`an_unmatched_quote_protects_nothing`,
+`only_a_quote_at_word_boundaries_pairs`,
+`a_curly_quote_pair_protects_its_text`,
+`a_failed_close_leaves_the_quote_open`,
+`quotes_pair_only_with_their_own_kind`,
+`brackets_around_a_path_are_not_part_of_it`,
+`balanced_brackets_stay_in_the_token`,
+`common_abbreviations_are_not_code`,
+`a_slash_between_words_is_not_a_path`,
+`folder_paths_stay_protected`,
+`a_chinese_rewrite_keeps_or_drops_its_ascii_number`,
+`cjk_text_skips_the_content_floor`,
+`a_moved_number_is_accepted`,
+`an_unrelated_answer_is_rejected_but_a_rewording_is_accepted`,
+`protected_tokens_keep_code_and_quotes`,
+`a_cancelled_stage_starts_nothing`,
+`a_mode_switch_alone_never_reaches_the_stage` (Linux and Windows), and
+`a_stage_with_the_lab_off_changes_nothing` in
+[dictation/neutral_voice.rs](../../src/dictation/neutral_voice.rs);
+`only_a_mode_that_asks_for_neutral_voice_carries_it` in
+[processor.rs](../../src/dictation/processor.rs);
+`numbers_and_number_words_are_numbers` in
+[dictation/numbers.rs](../../src/dictation/numbers.rs);
+`a_mode_without_neutral_voice_loads_it_off`,
+`a_mode_keeps_its_neutral_voice_choice`, and
+`an_off_mode_serializes_without_neutral_voice` in
+[dictation_processing.rs](../../src/app_settings/dictation_processing.rs);
+`neutral_voice_is_its_own_atomic_and_macos_only` in [labs.rs](../../src/labs.rs);
+`neutral_voice_says_why_apple_intelligence_cannot_run` in
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs); and
+`neutral_voice_shows_in_modes_only_with_its_lab_and_toggles_the_mode`
+(macOS) in [tests.rs](../../src/rune_ui/tests.rs).
+Not yet observed: a real dictation on a Mac with the lab on and Apple
+Intelligence available, and any real-Mac run of the new Swift bridge
+parameter — this host and CI compile it, but no one has dictated through it.
+The Labs page goldens were regenerated on Linux with the new card.
 
 Second dictation shortcut (`second-dictation-shortcut`, issue 627, macOS, Linux
 and Windows): for a Globe/Fn shortcut on the laptop keyboard and another key on

@@ -409,7 +409,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 2600.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2800.0));
     open_labs(&mut rt);
     for row in [
         "lab-mouse-shortcuts",
@@ -421,6 +421,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-clean-up",
+        "lab-neutral-voice",
         "lab-spoken-symbols",
         "lab-caps-lock-dictation",
         "lab-copy-dictation-audio",
@@ -439,6 +440,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.clean_up_with_apple_intelligence);
     tap(&mut rt, "lab-clean-up");
     assert!(rt.state.settings.labs.clean_up_with_apple_intelligence);
+    assert!(!rt.state.settings.labs.neutral_voice);
+    tap(&mut rt, "lab-neutral-voice");
+    assert!(rt.state.settings.labs.neutral_voice);
     assert!(rt.find("lab-share-shortcut").is_none(), "Windows only");
     assert!(!rt.state.settings.labs.mouse_shortcuts);
     tap(&mut rt, "lab-mouse-shortcuts");
@@ -474,6 +478,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-clean-up").is_none(), "macOS only");
+    assert!(rt.find("lab-neutral-voice").is_none(), "macOS only");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
     assert!(!rt.state.settings.labs.keep_on_clipboard);
     tap(&mut rt, "lab-keep-on-clipboard");
@@ -3372,6 +3377,43 @@ fn clean_up_says_why_apple_intelligence_cannot_run() {
             .any(|text| text.starts_with("Turn on Apple Intelligence in System Settings")),
         "no note while it can run"
     );
+}
+
+/// Labs › Neutral voice says why Apple Intelligence can't run here, locks its
+/// switch while it is off, and still turns off once on.
+#[test]
+fn neutral_voice_says_why_apple_intelligence_cannot_run() {
+    use crate::rune_ui::platform::NotesAvailability;
+    // Tall enough that the Output group's cards sit inside the window, where
+    // a tap reaches their switches.
+    let mut rt = runtime("mac-labs", true, (980.0, 2800.0));
+    rt.state.platform.notes = NotesAvailability::NotEnabled;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    assert!(rt.find("lab-neutral-voice").is_some());
+    tap(&mut rt, "lab-neutral-voice");
+    assert!(
+        !rt.state.settings.labs.neutral_voice,
+        "the switch stays off where it can't work"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence in System Settings")),
+        "its card says why"
+    );
+
+    // Already on, it can still be turned off.
+    rt.state.settings.labs.neutral_voice = true;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-neutral-voice");
+    assert!(!rt.state.settings.labs.neutral_voice);
+
+    // This Mac has Apple Intelligence: the switch turns on.
+    rt.state.platform.notes = NotesAvailability::Available;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-neutral-voice");
+    assert!(rt.state.settings.labs.neutral_voice);
 }
 
 /// An organization's lock keeps the cleanup card off, disabled, and saying

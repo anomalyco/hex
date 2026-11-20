@@ -103,12 +103,15 @@ private func respond<Content: Generable>(
     }
 }
 
-/// One plain-text pass: a cleaned transcript, with no guided structure. The
-/// answer is the model's own words, so a caller judges it before using it.
+/// One plain-text pass: a cleaned or restyled transcript, with no guided
+/// structure. The answer is the model's own words, so a caller judges it
+/// before using it. `temperature` lets a caller ask for more variation than
+/// the cleanup's 0.2.
 @available(macOS 26.0, *)
 private func respondText(
     instructions: String,
     prompt: String,
+    temperature: Double,
     maximumResponseTokens: Int
 ) async throws -> String {
     let model = SystemLanguageModel(
@@ -119,7 +122,7 @@ private func respondText(
     do {
         return try await session.respond(
             to: prompt,
-            options: GenerationOptions(temperature: 0.2, maximumResponseTokens: maximumResponseTokens)
+            options: GenerationOptions(temperature: temperature, maximumResponseTokens: maximumResponseTokens)
         ).content
     } catch LanguageModelSession.GenerationError.exceededContextWindowSize(let context) {
         throw BridgeError("\(contextWindowMarker) \(context.debugDescription)")
@@ -374,6 +377,7 @@ public func hexAppleIntelligenceChapterLines(
 public func hexAppleIntelligenceText(
     _ instructions: UnsafePointer<CChar>?,
     _ prompt: UnsafePointer<CChar>?,
+    _ temperature: Double,
     _ timeoutMs: UInt64,
     _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> UnsafeMutablePointer<CChar>? {
@@ -386,6 +390,7 @@ public func hexAppleIntelligenceText(
         let text = try await respondText(
             instructions: instructions,
             prompt: prompt,
+            temperature: temperature,
             maximumResponseTokens: 1024
         )
         return BridgeText(text: text)

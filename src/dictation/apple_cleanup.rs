@@ -120,11 +120,16 @@ pub(crate) fn runs_here() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn observation(latency_ms: u64, fallback: Option<String>) -> ProcessingObservation {
+pub(crate) fn observation(
+    profile: &str,
+    latency_ms: u64,
+    fallback: Option<String>,
+) -> ProcessingObservation {
     ProcessingObservation {
-        profile: PROFILE.into(),
+        profile: profile.into(),
         latency_ms,
-        // Apple Intelligence cleans the text on this Mac; no OpenCode model runs.
+        // Apple Intelligence cleans or rewrites the text on this Mac; no
+        // OpenCode model runs.
         model: None,
         fallback,
     }
@@ -134,7 +139,7 @@ fn observation(latency_ms: u64, fallback: Option<String>) -> ProcessingObservati
 #[cfg(target_os = "macos")]
 fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
     let started = Instant::now();
-    let outcome = crate::apple_intelligence::generate_text(INSTRUCTIONS, text, TIME_BUDGET);
+    let outcome = crate::apple_intelligence::generate_text(INSTRUCTIONS, text, 0.2, TIME_BUDGET);
     let latency_ms = started.elapsed().as_millis() as u64;
     match outcome {
         Ok(answer) => {
@@ -145,10 +150,15 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
                     reason = "the cleaned text changed too much",
                     "dictation cleanup fell back to the corrected transcript"
                 );
-                return fallback(text, latency_ms, "the cleaned text changed too much");
+                return fallback(
+                    PROFILE,
+                    text,
+                    latency_ms,
+                    "the cleaned text changed too much",
+                );
             }
             tracing::info!(latency_ms, "dictation cleanup completed");
-            (cleaned, Some(observation(latency_ms, None)))
+            (cleaned, Some(observation(PROFILE, latency_ms, None)))
         }
         Err(error) => {
             tracing::warn!(
@@ -156,7 +166,7 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
                 latency_ms,
                 "dictation cleanup fell back to the corrected transcript"
             );
-            fallback(text, latency_ms, &error.to_string())
+            fallback(PROFILE, text, latency_ms, &error.to_string())
         }
     }
 }
@@ -169,23 +179,28 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
 
 /// The corrected transcript, with why the model's answer was not used.
 #[cfg(target_os = "macos")]
-fn fallback(text: &str, latency_ms: u64, reason: &str) -> (String, Option<ProcessingObservation>) {
+pub(crate) fn fallback(
+    profile: &str,
+    text: &str,
+    latency_ms: u64,
+    reason: &str,
+) -> (String, Option<ProcessingObservation>) {
     (
         text.to_owned(),
-        Some(observation(latency_ms, Some(reason.to_owned()))),
+        Some(observation(profile, latency_ms, Some(reason.to_owned()))),
     )
 }
 
 /// Why Apple Intelligence can't run now, or `None` when it can. The answer is
 /// the cached one, so an unavailable Mac costs this stage no wait at all.
 #[cfg(target_os = "macos")]
-fn unavailable_reason() -> Option<&'static str> {
+pub(crate) fn unavailable_reason() -> Option<&'static str> {
     let availability = crate::apple_intelligence::availability();
     (!availability.is_available()).then(|| availability.description())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn unavailable_reason() -> Option<&'static str> {
+pub(crate) fn unavailable_reason() -> Option<&'static str> {
     Some("Apple Intelligence needs a Mac")
 }
 
@@ -194,7 +209,7 @@ fn unavailable_reason() -> Option<&'static str> {
 /// of what the person said), and one pair of wrapping quotes goes only when
 /// the transcript didn't dictate its own, since spoken formatting's
 /// "quote … unquote" becomes a quoted transcript.
-fn tidy(answer: &str, input: &str) -> String {
+pub(crate) fn tidy(answer: &str, input: &str) -> String {
     let trimmed = answer.trim();
     let unwrapped = if wrapped_in_quotes(input) {
         trimmed
@@ -233,7 +248,7 @@ fn wrapped_in_quotes(text: &str) -> bool {
 
 /// The words that never lose their place, in the spelling the word splitter
 /// gives them (the iOS cleaner's list, including its contractions).
-const NEGATIONS: &[&str] = &[
+pub(crate) const NEGATIONS: &[&str] = &[
     "not",
     "no",
     "never",
@@ -347,7 +362,7 @@ const CJK_DIGITS: &[char] = &[
     '万', '萬', '亿', '億', '兆',
 ];
 
-fn words(text: &str) -> Vec<String> {
+pub(crate) fn words(text: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     for character in text.to_lowercase().chars() {
