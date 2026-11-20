@@ -9,10 +9,15 @@ use super::super::Ui;
 use super::super::controls::{Paint, toggle_row};
 use super::{mode, update_mode};
 use crate::desktop::i18n::tr;
+use crate::labs::Feature;
 
-/// The row while the lab is on, macOS has it, and a mode is selected.
+/// The row while the lab is on, macOS has it, and no organization's lock
+/// holds it off.
 pub(super) fn row(ui: &Ui, p: Paint) -> Option<El> {
-    if !crate::labs::neutral_voice() {
+    if !Feature::NeutralVoice.on_this_os()
+        || !Feature::NeutralVoice.on(&ui.settings)
+        || Feature::NeutralVoice.managed().is_some()
+    {
         return None;
     }
     let enabled = mode(&ui.settings, ui.modes.selected)?.neutral_voice;
@@ -20,7 +25,9 @@ pub(super) fn row(ui: &Ui, p: Paint) -> Option<El> {
         p,
         "neutral-voice",
         tr("Neutral voice"),
-        None,
+        Some(tr(
+            "Rewrites on this Mac instead of the OpenCode transformation.",
+        )),
         enabled,
         |ui: &mut Ui| {
             let Some(current) = mode(&ui.settings, ui.modes.selected) else {

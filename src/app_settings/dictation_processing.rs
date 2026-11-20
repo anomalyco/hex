@@ -46,7 +46,7 @@ pub struct DictationMode {
     pub vocabulary: Vec<VocabularyEntry>,
     /// Rewrite this mode's dictations into plain, neutral wording on this Mac
     /// (Labs › Neutral voice, macOS). Off for every existing mode.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub neutral_voice: bool,
 }
 
@@ -96,5 +96,13 @@ mod tests {
         assert!(mode.neutral_voice);
         let saved = serde_json::to_value(&mode).unwrap();
         assert_eq!(saved["neutral_voice"], true);
+    }
+
+    /// An off mode writes no key, so an existing settings file isn't
+    /// rewritten with `"neutral_voice": false`.
+    #[test]
+    fn an_off_mode_serializes_without_neutral_voice() {
+        let saved = serde_json::to_value(DictationMode::default()).unwrap();
+        assert!(saved.get("neutral_voice").is_none());
     }
 }

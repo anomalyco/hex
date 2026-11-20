@@ -179,6 +179,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Remove filler words such as um and uh from dictations, without an AI model", "Supprime des dictées les mots de remplissage comme « um » et « uh », sans modèle d'IA"),
     ("Clean up with Apple Intelligence", "Nettoyer avec Apple Intelligence"),
     ("Neutral voice", "Voix neutre"),
+    ("Rewrites on this Mac instead of the OpenCode transformation.", "Réécrit sur ce Mac au lieu de la transformation OpenCode."),
     ("Rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show", "Réécrit les dictées des modes choisis en une formulation simple et neutre sur ce Mac, pour que votre style d'écriture ne se voie pas"),
     ("Sort and filter models", "Trier et filtrer les modèles"),
     ("By recommendation", "Par recommandation"),

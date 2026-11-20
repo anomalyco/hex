@@ -233,7 +233,7 @@ fn wrapped_in_quotes(text: &str) -> bool {
 
 /// The words that never lose their place, in the spelling the word splitter
 /// gives them (the iOS cleaner's list, including its contractions).
-const NEGATIONS: &[&str] = &[
+pub(crate) const NEGATIONS: &[&str] = &[
     "not",
     "no",
     "never",
@@ -333,7 +333,7 @@ fn ratio(shared: usize, total: usize) -> f64 {
     shared as f64 / total as f64
 }
 
-fn digits(text: &str) -> Vec<char> {
+pub(crate) fn digits(text: &str) -> Vec<char> {
     text.chars()
         .filter(|character| character.is_numeric() || CJK_DIGITS.contains(character))
         .collect()
@@ -347,7 +347,7 @@ const CJK_DIGITS: &[char] = &[
     '万', '萬', '亿', '億', '兆',
 ];
 
-fn words(text: &str) -> Vec<String> {
+pub(crate) fn words(text: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     for character in text.to_lowercase().chars() {
@@ -367,7 +367,7 @@ fn words(text: &str) -> Vec<String> {
     result
 }
 
-fn trim_apostrophes(word: String) -> String {
+pub(crate) fn trim_apostrophes(word: String) -> String {
     let mut word = word;
     while word.ends_with('\'') {
         word.pop();

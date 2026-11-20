@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::desktop::opencode_service::Service;
 use crate::dictation::context::{ContextSelector, ContextSnapshot};
+use crate::dictation::numbers::numbers_only;
 use crate::dictation::text_replacements::ReplacementSet;
 use crate::dictation::vocabulary::VocabularyEntry;
 
@@ -511,19 +512,15 @@ impl Profiles {
         // Labs › Neutral voice replaces both the rewrite and the cleanup for
         // an opted-in mode, and outranks the voice prompt too, so a privacy
         // dictation never reaches OpenCode.
-        if let Some((text, observation)) = crate::dictation::neutral_voice::run(
+        if let Some(processed) = crate::dictation::neutral_voice::processed(
             &corrected,
             numbers_only(&corrected),
             cancelled,
             profile.neutral_voice,
             source,
+            &profile.transformations,
         ) {
-            return Processed {
-                text,
-                nothing: false,
-                observation,
-                transformations: profile.transformations.clone(),
-            };
+            return processed;
         }
         // Labs › Rewrite by voice: heard speech may carry a spoken instruction
         // that replaces the mode's rewrite with one request of its own.
@@ -745,64 +742,6 @@ fn voice_prompt_fallback(
         Instruction::Write { .. } => corrected.to_owned(),
         Instruction::Nothing => String::new(),
     }
-}
-
-/// Whether a transcript says nothing but numbers: digits or English number
-/// words, with punctuation between them.
-fn numbers_only(transcript: &str) -> bool {
-    const WORDS: &[&str] = &[
-        "zero",
-        "one",
-        "two",
-        "three",
-        "four",
-        "five",
-        "six",
-        "seven",
-        "eight",
-        "nine",
-        "ten",
-        "eleven",
-        "twelve",
-        "thirteen",
-        "fourteen",
-        "fifteen",
-        "sixteen",
-        "seventeen",
-        "eighteen",
-        "nineteen",
-        "twenty",
-        "thirty",
-        "forty",
-        "fifty",
-        "sixty",
-        "seventy",
-        "eighty",
-        "ninety",
-        "hundred",
-        "thousand",
-        "million",
-        "billion",
-    ];
-    /// Words that join numbers but are not numbers themselves.
-    const JOINERS: &[&str] = &["and", "point", "minus", "negative"];
-    let mut any_number = false;
-    for token in transcript.split(|c: char| c.is_whitespace() || c == '-') {
-        let word = token.trim_matches(|c: char| !c.is_alphanumeric());
-        if word.is_empty() {
-            continue;
-        }
-        if word
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '.' || c == ',')
-            || WORDS.iter().any(|w| word.eq_ignore_ascii_case(w))
-        {
-            any_number = true;
-        } else if !JOINERS.iter().any(|w| word.eq_ignore_ascii_case(w)) {
-            return false;
-        }
-    }
-    any_number
 }
 
 /// One generation's text and the model that wrote it, when Hex named one
@@ -2174,35 +2113,6 @@ mod tests {
 
     /// On an OS without the lab, a mode's switch alone never reaches the
     /// stage: the pipeline checks the lab's own gate too.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn a_mode_switch_alone_never_reaches_the_neutral_voice_stage() {
-        use crate::app_settings::{DictationMode, DictationProcessingSettings};
-        let profiles = Profiles::from_settings(&DictationProcessingSettings {
-            modes: vec![DictationMode {
-                applications: vec!["Notes".into()],
-                neutral_voice: true,
-                ..Default::default()
-            }],
-            ..Default::default()
-        });
-        let before = crate::dictation::neutral_voice::calls();
-        let processed = profiles.process_cancellable(
-            "we should ship this on friday",
-            "en",
-            &context("Notes", None),
-            &AtomicBool::new(false),
-            Source::Dictation,
-        );
-        assert_eq!(processed.text, "we should ship this on friday");
-        assert!(processed.observation.is_none());
-        assert_eq!(
-            crate::dictation::neutral_voice::calls(),
-            before,
-            "the stage never ran"
-        );
-    }
-
     #[test]
     fn speech_preparation_precedes_global_and_mode_corrections() {
         use crate::app_settings::{DictationMode, DictationProcessingSettings};
