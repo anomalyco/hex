@@ -16,6 +16,8 @@ final class HexKeyControl: UIControl {
 
     /// The finger landed on the key, with when (wall clock, from the touch's own timestamp).
     var onPress: ((TimeInterval) -> Void)?
+    /// The press became a slide (the menu) or was cancelled before it was a tap or a hold.
+    var onPressAbandoned: (() -> Void)?
     /// A tap or still hold: dictate, or open Hex.
     var onHold: (() -> Void)?
     /// The finger lifted after a still hold: push to talk's finish.
@@ -79,6 +81,7 @@ final class HexKeyControl: UIControl {
         case .openMenu:
             stopTimer()
             isHighlighted = false
+            onPressAbandoned?()
             onMenuOpen?(point)
         case .dragMenu:
             onMenuDrag?(point)
@@ -106,7 +109,9 @@ final class HexKeyControl: UIControl {
     override func cancelTracking(with event: UIEvent?) {
         stopTimer()
         isHighlighted = false
-        gesture.cancel()
+        if gesture.cancel() == .abandon {
+            onPressAbandoned?()
+        }
     }
 
     private func holdElapsed() {

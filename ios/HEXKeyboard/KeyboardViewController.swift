@@ -75,6 +75,7 @@ final class KeyboardViewController: UIInputViewController {
         if dictationEdits.isTracking { dictationEdits.finish(editContext) }
         TypingJournal.sharedIfEnabled()?.save()
         isShown = false
+        localDictation.discard(reason: "keyboard hidden")
         endTypingLogSession(reason: "disappear", settleDictation: editContext)
         pollTimer?.invalidate()
         pollTimer = nil
@@ -322,7 +323,8 @@ final class KeyboardViewController: UIInputViewController {
             TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
         }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
-        viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressedAt = at }
+        viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressed(at: at) }
+        viewModel.onHexKeyAbandon = { [weak self] in self?.localDictation.discard() }
         viewModel.onKeyFeedback = { [weak self] in
             guard let self, self.allowsKeyHaptics else { return }
             self.barHaptics.impactOccurred(intensity: 0.65)
@@ -758,6 +760,17 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// In-keyboard dictation starts listening as the finger lands on the Hex key, not when the
+    /// touch has become a tap (on lifting) or a hold (0.35 s): both keep that capture, and a
+    /// slide to the menu or a cancelled touch drops it (`onHexKeyAbandon`). The same checks as
+    /// the Hex key's own choice of in-keyboard dictation; a warm Hex session records instead.
+    private func hexKeyPressed(at time: TimeInterval) {
+        hexKeyPressedAt = time
+        guard viewModel.hasFullAccess, !viewModel.isWarmAvailable, viewModel.onLocalDictateTap != nil,
+              viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
+        localDictation.arm(in: view, allowBluetoothMic: bridge.allowBluetoothMic, pressedAt: time)
+    }
+
     /// The touch-down that led to this start, if it was the Hex key's in the last 2 s.
     private func takeHexKeyPress() -> TimeInterval? {
         defer { hexKeyPressedAt = nil }
@@ -768,6 +781,8 @@ final class KeyboardViewController: UIInputViewController {
     private func startWarmDictation() {
         let now = Date().timeIntervalSince1970
         guard viewModel.hasFullAccess, viewModel.currentSnapshot.isAvailable(at: now) else { return }
+        // A warm session that came up since touch-down records instead.
+        localDictation.discard(reason: "warm session")
         let jobID = UUID().uuidString
         warmStartTimeline = WarmStartTimeline(jobID: jobID, pressedAt: takeHexKeyPress() ?? now, sentAt: now)
         viewModel.setPendingCommand(
