@@ -1173,10 +1173,11 @@ impl Worker {
             if let Some(model) = self.model.as_ref() {
                 publish_out_of_memory(model);
             }
-            // Now that nothing records (a stream has just ended, or an
-            // offline run has), adopt a Labs › Faster live text change so
-            // a later capture streams with it.
-            self.refresh_stream();
+            // Only when the engine is quiet: a queued Begin, deferred work,
+            // or a recording must never wait behind the probe.
+            if next.is_empty() && !recording() {
+                self.refresh_stream();
+            }
             self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();
@@ -1195,7 +1196,9 @@ impl Worker {
                     Err(RecvTimeoutError::Timeout) => {
                         // An idle tick, so a toggle change while nothing
                         // records reaches the model before a capture opens.
-                        self.refresh_stream();
+                        if !recording() {
+                            self.refresh_stream();
+                        }
                         continue;
                     }
                     Err(RecvTimeoutError::Disconnected) => return None,
@@ -1209,9 +1212,11 @@ impl Worker {
                 Ok(command) => return Some(command),
                 Err(RecvTimeoutError::Disconnected) => return None,
                 Err(RecvTimeoutError::Timeout) => {
-                    self.refresh_stream();
-                    if self.idle_since.elapsed() >= after && !recording() {
-                        self.park();
+                    if !recording() {
+                        self.refresh_stream();
+                        if self.idle_since.elapsed() >= after {
+                            self.park();
+                        }
                     }
                 }
             }
