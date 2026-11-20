@@ -115,19 +115,27 @@ fn with_wsl(
 ) -> Result<Service, Missing> {
     #[cfg(target_os = "windows")]
     if crate::labs::opencode_in_wsl() {
-        let budget = if found.is_ok() {
-            Some(budget.map_or(wsl::WSL_LOOKUP_CAP, |budget| {
-                budget.min(wsl::WSL_LOOKUP_CAP)
-            }))
-        } else {
-            budget
-        };
+        let budget = wsl_budget(found.is_ok(), budget);
         return prefer_wsl(found, wsl::discover(budget, cancelled));
     } else {
         wsl::clear_cache();
     }
     let _ = (budget, cancelled);
     found
+}
+
+/// The wait a WSL lookup gets: the caller's own budget when Windows found
+/// nothing, else what is left of it capped at [`wsl::WSL_LOOKUP_CAP`], so a
+/// cold WSL can't hold a rewrite or Annotate's send past the cap.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wsl_budget(windows_found: bool, budget: Option<Duration>) -> Option<Duration> {
+    if windows_found {
+        Some(budget.map_or(wsl::WSL_LOOKUP_CAP, |budget| {
+            budget.min(wsl::WSL_LOOKUP_CAP)
+        }))
+    } else {
+        budget
+    }
 }
 
 /// Whether `found` or the WSL search names the service to use: a WSL
@@ -1137,6 +1145,16 @@ pub(crate) mod tests {
             "the Windows service is used when WSL answers nothing"
         );
         assert_eq!(
+            prefer_wsl(Ok(service.clone()), Err(Missing::Outdated)),
+            Ok(service.clone()),
+            "a working Windows service is used over a WSL update notice"
+        );
+        assert_eq!(
+            prefer_wsl(Err(Missing::NotRunning), Ok(wsl())),
+            Ok(wsl()),
+            "a WSL service is used when Windows has nothing"
+        );
+        assert_eq!(
             prefer_wsl(Err(Missing::Outdated), Ok(wsl())),
             Ok(wsl()),
             "a working WSL service is used over a Windows update notice"
@@ -1154,6 +1172,35 @@ pub(crate) mod tests {
         assert_eq!(
             prefer_wsl(Err(Missing::NotRunning), Err(Missing::NotRunning)),
             Err(Missing::NotRunning)
+        );
+    }
+
+    #[test]
+    fn a_wsl_lookup_is_capped_only_when_windows_already_answered() {
+        assert_eq!(
+            wsl_budget(true, None),
+            Some(wsl::WSL_LOOKUP_CAP),
+            "a Windows service leaves the WSL wait at the cap"
+        );
+        assert_eq!(
+            wsl_budget(true, Some(Duration::from_secs(10))),
+            Some(wsl::WSL_LOOKUP_CAP),
+            "a longer caller budget is still capped"
+        );
+        assert_eq!(
+            wsl_budget(true, Some(Duration::from_secs(1))),
+            Some(Duration::from_secs(1)),
+            "a shorter caller budget wins"
+        );
+        assert_eq!(
+            wsl_budget(false, None),
+            None,
+            "with no Windows service the caller's own budget applies"
+        );
+        assert_eq!(
+            wsl_budget(false, Some(Duration::from_secs(10))),
+            Some(Duration::from_secs(10)),
+            "with no Windows service the caller's deadline stands"
         );
     }
 

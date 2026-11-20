@@ -40,14 +40,16 @@ running service (`src/desktop/opencode_service.rs`):
   is read on every lookup; a remembered home is reused only while its
   `DistributionName` and `DefaultUid` still match, otherwise the home is
   rebuilt from that distribution's `/etc/passwd` (at most 1 MiB, and only the
-  default distribution; opening it can start the WSL VM too). One lookup
-  runs at a time on a shared helper thread with a fixed 3 s discover budget.
-  When Windows already confirmed a service, the WSL lookup is capped at that
-  3 s (or the caller's smaller remaining budget), so a cold distribution can't
-  hold a rewrite or Annotate's send. Its starter waits for its own remaining
-  deadline or Escape; a joiner waits at most the smaller of its own budget and
-  the cap minus the lookup's age, and returns "OpenCode isn't running" at once
-  once that lookup is older than the cap. A timeout or cancel never aborts the
+  default distribution). With the lab on, every lookup also looks in WSL even
+  when a Windows service is healthy, waiting up to 3 s for it, and that read
+  can start the WSL VM. One lookup runs at a time on a shared helper thread
+  with a fixed 3 s discover budget; when Windows already confirmed a service,
+  the WSL lookup is capped at that 3 s (or the caller's smaller remaining
+  budget), so a cold distribution can't hold a rewrite or Annotate's send. Its
+  starter waits for its own remaining deadline or Escape; a joiner waits at
+  most the smaller of its own budget and the cap minus the lookup's age, and
+  returns "OpenCode isn't running" at once once that lookup is older than the
+  cap. A timeout or cancel never aborts the
   shared lookup. A lookup that used its full cap without finding a service
   pauses new lookups for 10 s. The cached home is dropped when its state
   directory can't be read, when the default distribution or uid changes, and
