@@ -15,7 +15,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -27,7 +26,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -39,9 +37,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
-import kotlin.math.exp
-import kotlin.math.sin
+import androidx.compose.ui.text.style.TextAlign
+import ly.anoma.hex.speech.ModelStore
 
 private data class Setup(val mic: Boolean = false, val enabled: Boolean = false, val chosen: Boolean = false,
                          val micNeedsSettings: Boolean = false) {
@@ -65,12 +62,14 @@ class MainActivity : ComponentActivity() {
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
         refresh()
+        ModelStore.refresh(this)
         setContent {
             HexTheme {
                 BackHandler(page in 1..2) { go(page - 1) }
                 SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
-                    choose = { imm.showInputMethodPicker() })
+                    choose = { imm.showInputMethodPicker() }, model = ModelStore.state.collectAsState().value,
+                    download = { ModelStore.download(this) })
             }
         }
     }
@@ -104,14 +103,14 @@ private fun HexTheme(content: @Composable () -> Unit) {
     val ink = colorResource(R.color.ink)
     val page = colorResource(R.color.page)
     val scheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-    MaterialTheme(colorScheme = scheme.copy(primary = ink, onPrimary = page, surface = page,
+    MaterialTheme(typography = hexTypography, colorScheme = scheme.copy(primary = ink, onPrimary = page, surface = page,
         background = page, onSurface = ink, onBackground = ink, onSurfaceVariant = colorResource(R.color.quiet),
         surfaceVariant = colorResource(R.color.sheet), outline = colorResource(R.color.rule)), content = content)
 }
 
 @Composable
 private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> Unit,
-                        enable: () -> Unit, choose: () -> Unit) {
+                        enable: () -> Unit, choose: () -> Unit, model: ModelStore.State, download: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     var text by remember(page) { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -134,10 +133,7 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                     verticalArrangement = if (page == 0) Arrangement.Center else Arrangement.Top) {
                     when (page) {
                         0 -> {
-                            WelcomeScope()
-                            Spacer(Modifier.height(28.dp))
-                            Heading("Talk instead of type.")
-                            Detail("Dictate right in your keyboard. Hex is free, works offline and lets your music keep playing.")
+                            Welcome()
                         }
                         1 -> {
                             Spacer(Modifier.height(26.dp))
@@ -155,6 +151,8 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                                     else -> "Turn on Hex in Settings"
                                 }, setup.chosen, if (setup.enabled) "Choose" else "Enable",
                                     if (setup.enabled) choose else enable)
+                                HorizontalDivider(color = colors.outline)
+                                ModelRow(model, download)
                             }
                         }
                         2 -> {
@@ -179,6 +177,8 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                             Heading(if (setup.ready) "Your keyboard is ready." else "Set up your keyboard.")
                             Detail(if (setup.ready) "Hold the Hex key anywhere you type." else "Check your keyboard and microphone in setup.")
                             Spacer(Modifier.height(18.dp))
+                            ModelRow(model, download)
+                            Text("Swipe up on the Hex key for styles and translation.", style = MaterialTheme.typography.bodyMedium)
                             TextButton(onClick = { go(0) }) { Text("Run setup again") }
                         }
                     }
@@ -190,7 +190,7 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                 } else {
                     Button(onClick = {
                         when (page) {
-                            0 -> go(1)
+                            0 -> { download(); go(1) }
                             1 -> go(2)
                             2 -> { keyboard?.hide(); go(3) }
                             else -> go(if (setup.ready) 2 else 1)
@@ -228,24 +228,44 @@ private fun SetupRow(title: String, note: String, ready: Boolean, action: String
     }
 }
 
-// A flat illustration of the Hex key and the dot scope, rather than a pretend recording.
-@Composable private fun WelcomeScope() {
+@Composable private fun Welcome() {
     val colors = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().height(112.dp).background(colors.surfaceVariant, RoundedCornerShape(18.dp))
-        .padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(56.dp).background(colors.primary, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-            Icon(painterResource(R.drawable.hex_mark), null, Modifier.size(34.dp), tint = colors.onPrimary)
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(painterResource(R.drawable.hex_mark), "Hex", Modifier.size(64.dp))
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.height(28.dp).background(colors.surfaceVariant, RoundedCornerShape(50))
+            .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(painterResource(R.drawable.ic_lock), null, Modifier.size(13.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("100% on device", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.width(20.dp))
-        Canvas(Modifier.weight(1f).height(64.dp)) {
-            val dx = size.width / 36
-            val dy = size.height / 10
-            for (x in 0..35) {
-                val t = x / 35.0
-                val wave = 3.7 * exp(-13.0 * (t - .52) * (t - .52)) * sin(t * 17)
-                for (y in -4..4) drawCircle(if (abs(y - wave) <= .56) colors.primary else colors.outline,
-                    radius = 1.05.dp.toPx(), center = Offset((x + .5f) * dx, size.height / 2 + y * dy))
+        Spacer(Modifier.height(16.dp))
+        Text("Talk instead of type,\nin any app.", fontSize = 28.sp, lineHeight = 32.sp,
+            letterSpacing = (-0.4).sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(12.dp))
+        Text("Hex uses the internet only to download its speech model (190 MB). Your voice and words stay on this device.",
+            modifier = Modifier.widthIn(max = 320.dp), color = colors.onSurfaceVariant,
+            textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable private fun ModelRow(state: ModelStore.State, download: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 54.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("Speech model", fontWeight = FontWeight.Medium)
+                Text(when (state) {
+                    ModelStore.State.Ready -> "Whisper small is ready"
+                    ModelStore.State.Available -> "Tiny works offline"
+                    ModelStore.State.Retry -> "Download interrupted. Tiny works offline."
+                    is ModelStore.State.Loading -> "Downloading · " + state.percent + "%"
+                }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            if (state == ModelStore.State.Retry || state == ModelStore.State.Available) {
+                TextButton(onClick = download) { Text(if (state == ModelStore.State.Retry) "Retry" else "Download") }
             }
         }
+        if (state is ModelStore.State.Loading) LinearProgressIndicator(progress = { state.percent / 100f },
+            modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.outline)
     }
 }

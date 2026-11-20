@@ -9,6 +9,5 @@
     <color name="key">#32363D</color>
     <color name="modifier">#434952</color>
     <color name="pressed">#585F69</color>
-    <color name="record">#FF9A67</color>
     <color name="launcher_background">#191C20</color>
 </resources>

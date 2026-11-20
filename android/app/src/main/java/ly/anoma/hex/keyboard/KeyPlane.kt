@@ -5,7 +5,6 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
@@ -17,8 +16,10 @@ import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import ly.anoma.hex.R
+import ly.anoma.hex.useInter
 import ly.anoma.hex.speech.SpeechPhase
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -34,7 +35,14 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     private val keyHeight = dp(if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 40 else 50)
     private val statusText = TextView(context)
     private val scope = Scope(context)
-    private val cancelKey = TextView(context)
+    private val menuKey = TextView(context)
+    private lateinit var cancelKey: FrameLayout
+    private lateinit var doneKey: FrameLayout
+    private lateinit var check: ImageView
+    private val spinner = ProgressBar(context, null, 0, android.R.style.Widget_Material_ProgressBar_Small)
+    private lateinit var menu: SpeechMenu
+    private lateinit var spaceKey: Cap
+    private var hint = "Hold Hex to talk"
     private val plane = LinearLayout(context)
     private val bottom = LinearLayout(context)
     private lateinit var modeKey: Cap
@@ -73,24 +81,37 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
             setPadding(dp(10), 0, dp(8), 0)
         }
         statusText.apply {
-            setTextColor(quiet); textSize = 14f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            useInter(500); setTextColor(quiet); textSize = 14f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         strip.addView(statusText, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        strip.addView(scope, LayoutParams(dp(74), dp(28)))
-        cancelKey.apply {
-            text = "Cancel"; gravity = Gravity.CENTER; textSize = 14f; setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD); setOnClickListener { ime.cancelSpeech() }
+        menuKey.apply {
+            useInter(550); gravity = Gravity.CENTER; textSize = 14f; setTextColor(ink)
+            setOnClickListener { if (menu.visibility == VISIBLE) closeMenu() else openMenu() }
+            setPadding(dp(8), 0, dp(8), 0); isFocusable = true
         }
-        strip.addView(cancelKey, LayoutParams(dp(65), LayoutParams.MATCH_PARENT))
+        strip.addView(menuKey, LayoutParams(LayoutParams.WRAP_CONTENT, -1))
+        scope.background = shape(color(R.color.sheet), 18)
+        scope.clipToOutline = true
+        strip.addView(scope, LayoutParams(0, dp(32), 1f).apply { marginEnd = dp(4) })
+        cancelKey = panelButton(strip, "Cancel dictation", modifier, R.drawable.ic_cancel, ime::cancelSpeech)
+        doneKey = panelButton(strip, "Finish dictation", key, R.drawable.ic_check, ime::finishSpeech)
+        check = doneKey.getChildAt(1) as ImageView
+        spinner.indeterminateTintList = ColorStateList.valueOf(ink)
+        spinner.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        doneKey.addView(spinner, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
         addView(strip, LayoutParams(LayoutParams.MATCH_PARENT, dp(44)))
         plane.orientation = VERTICAL
         addView(plane, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(bottom, LayoutParams(LayoutParams.MATCH_PARENT, keyHeight))
+        menu = SpeechMenu(context, ime, { statusText.text = it }, ::closeMenu).apply { visibility = GONE }
+        addView(menu, LayoutParams(-1, keyHeight * 4))
+        statusText.setOnClickListener { if (menu.visibility == VISIBLE) menu.back() }
         modeKey = cap(bottom, 1.45f, "?123", "Numbers and symbols", modifier, 16f, ime::mode)
         icon(bottom, 1.05f, R.drawable.ic_globe, "Next keyboard", modifier, ime::nextIme)
         hexKey = icon(bottom, 1.35f, R.drawable.hex_mark, "Hex dictation", ink, ime::toggleSpeech,
             tint = color(R.color.page), size = 26)
+        hexKey.setOnLongClickListener { openMenu(); true }
         hexKey.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -98,7 +119,9 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
                     postDelayed(hold, 350)
                 }
                 MotionEvent.ACTION_MOVE -> if (!held && (abs(originX - e.x) > slop || abs(originY - e.y) > slop)) {
-                    removeCallbacks(hold); tracking = false; v.isPressed = false
+                    removeCallbacks(hold)
+                    if (tracking && originY - e.y > slop && abs(originX - e.x) < dp(36)) openMenu()
+                    tracking = false; v.isPressed = false
                 }
                 MotionEvent.ACTION_UP -> {
                     removeCallbacks(hold); v.isPressed = false
@@ -112,7 +135,8 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
             }
             true
         }
-        cap(bottom, 3.5f, "English", "Space", key, 14f) { ime.type(" ") }.label?.setTextColor(quiet)
+        spaceKey = cap(bottom, 3.5f, "English", "Space", key, 14f) { ime.type(" ") }
+        spaceKey.label?.setTextColor(quiet)
         cap(bottom, 1f, ".", "Period", key) { ime.type(".") }
         enterKey = cap(bottom, 1.65f, "", "Return", modifier, 17f, ime::enter)
         enterIcon.setImageResource(R.drawable.ic_enter)
@@ -172,16 +196,59 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
         enterKey.contentDescription = action ?: "Return"
     }
 
-    fun status(phase: SpeechPhase, hint: String) {
-        statusText.text = when (phase) {
-            SpeechPhase.Idle -> hint
-            SpeechPhase.Opening -> "Opening microphone…"
-            SpeechPhase.Listening -> "Listening"
-            SpeechPhase.Transcribing -> "Transcribing…"
+    private fun shape(fill: Int, radius: Int) = GradientDrawable().apply {
+        setColor(fill); cornerRadius = dp(radius).toFloat()
+    }
+    private fun panelButton(row: LinearLayout, label: String, fill: Int, icon: Int, action: () -> Unit): FrameLayout {
+        val target = FrameLayout(context).apply {
+            contentDescription = label; isFocusable = true; setOnClickListener { action() }
+            val face = View(context).apply {
+                isDuplicateParentStateEnabled = true
+                background = StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_pressed), shape(color(R.color.pressed), 16))
+                    addState(intArrayOf(), shape(fill, 16))
+                }
+            }
+            addView(face, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
+            addView(ImageView(context).apply {
+                setImageResource(icon); imageTintList = ColorStateList.valueOf(ink)
+            }, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
         }
-        statusText.setTextColor(if (phase == SpeechPhase.Listening) color(R.color.record) else quiet)
-        cancelKey.visibility = if (phase == SpeechPhase.Idle) View.GONE else View.VISIBLE
-        scope.reset(phase == SpeechPhase.Listening)
+        row.addView(target, LayoutParams(dp(44), dp(44)))
+        return target
+    }
+    private fun openMenu() {
+        if (scope.visibility == VISIBLE) return
+        plane.visibility = GONE; bottom.visibility = GONE; menu.visibility = VISIBLE
+        statusText.isClickable = true; menuKey.text = "Done"; menu.home()
+    }
+    fun closeMenu() {
+        if (!::menu.isInitialized || menu.visibility != VISIBLE) return
+        menu.visibility = GONE; plane.visibility = VISIBLE; bottom.visibility = VISIBLE
+        statusText.isClickable = false; menuKey.text = "Hex menu  ›"; statusText.text = hint; refreshSpace()
+    }
+    private fun refreshSpace() {
+        val next = ime.preferences.options(ime.nextEnglish)
+        spaceKey.label?.text = next.spoken.label + if (next.translate) " → English" else ""
+        spaceKey.label?.textSize = if (next.translate) 12f else 14f
+    }
+    fun status(phase: SpeechPhase, hint: String) {
+        this.hint = hint
+        val idle = phase == SpeechPhase.Idle
+        val processing = phase == SpeechPhase.Transcribing
+        if (!idle) closeMenu()
+        statusText.visibility = if (idle) VISIBLE else GONE
+        menuKey.visibility = if (idle) VISIBLE else GONE
+        if (menu.visibility != VISIBLE) { statusText.isClickable = false; menuKey.text = "Hex menu  ›"; statusText.text = hint }
+        for (v in listOf(scope, cancelKey, doneKey)) v.visibility = if (idle) GONE else VISIBLE
+        spinner.visibility = if (processing) VISIBLE else GONE
+        check.visibility = if (processing) GONE else VISIBLE
+        doneKey.isEnabled = !processing
+        doneKey.contentDescription = if (processing) "Transcribing" else "Finish dictation"
+        scope.contentDescription = if (processing) "Transcribing" else "Recording"
+        if (idle || phase == SpeechPhase.Opening) scope.clear()
+        // Keep the snapshotted paste language visible until this dictation has finished.
+        if (idle) refreshSpace()
     }
     fun setLevel(value: Float) = scope.push(value)
     fun cancelGestures() {
@@ -216,7 +283,8 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
                     sp: Float = 21f, click: () -> Unit): Cap {
         val c = Cap(fill, desc, click)
         c.label = TextView(context).apply {
-            text = s; textSize = sp; gravity = Gravity.CENTER; includeFontPadding = false
+            text = s; textSize = sp; useInter(if (sp >= 20f) 450 else 500)
+            gravity = Gravity.CENTER; includeFontPadding = false
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setTextColor(ink)
             c.face.addView(this, FrameLayout.LayoutParams(-1, -1))
         }
@@ -235,23 +303,28 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     }
 
     private inner class Scope(context: Context) : View(context) {
-        private val levels = FloatArray(18)
+        private val levels = FloatArray(66)
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var active = false
-        fun reset(listening: Boolean) { active = listening; levels.fill(0f); invalidate() }
+        private var tick = 0
+        fun clear() { tick = 0; levels.fill(0f); invalidate() }
         fun push(rms: Float) {
             levels.copyInto(levels, 0, 1, levels.size)
-            levels[levels.lastIndex] = (sqrt(rms.coerceAtLeast(0f)) * 2f).coerceIn(0f, 1f)
-            invalidate()
+            levels[levels.lastIndex] = (sqrt(rms.coerceAtLeast(0f)) * 3.2f).coerceIn(0f, 1f)
+            tick++; invalidate()
         }
         override fun onDraw(canvas: Canvas) {
-            paint.color = if (active) color(R.color.record) else quiet
-            paint.alpha = if (active) 255 else 120
-            val step = width.toFloat() / levels.size
-            val dy = height / 8f
-            for (i in levels.indices) {
-                val extent = (levels[i] * 3f).roundToInt()
-                for (j in -extent..extent) canvas.drawCircle((i + .5f) * step, height * .5f + j * dy, dp(1).toFloat(), paint)
+            val step = resources.displayMetrics.density * 5f
+            val columns = (width / step).toInt().coerceAtLeast(1)
+            val radius = resources.displayMetrics.density * .95f
+            paint.color = ink
+            for (x in 0 until columns) {
+                val level = levels[(x * levels.size / columns).coerceAtMost(levels.lastIndex)]
+                val wave = level * kotlin.math.sin((x + tick) * .55f) * 2.65f
+                for (y in -3..3) {
+                    val edge = (1f - abs(y - wave)).coerceIn(0f, 1f)
+                    paint.alpha = (26 + 220 * edge).toInt()
+                    canvas.drawCircle((x + .5f) * width / columns, height / 2f + y * step * .72f, radius, paint)
+                }
             }
         }
     }

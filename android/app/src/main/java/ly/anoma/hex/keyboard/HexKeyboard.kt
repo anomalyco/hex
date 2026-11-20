@@ -10,12 +10,16 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import ly.anoma.hex.R
+import ly.anoma.hex.speech.LocalSpeech
+import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.SpeechPhase
 
 class HexKeyboard : InputMethodService() {
     private var keys: KeyPlane? = null
     private lateinit var capture: MicCapture
+    internal val preferences by lazy { SpeechPreferences(this) }
+    internal var nextEnglish: Boolean? = null
     private var shifted = false
     private var locked = false
     private var symbols = false
@@ -28,7 +32,7 @@ class HexKeyboard : InputMethodService() {
     override fun onCreate() {
         setTheme(R.style.HexIme)
         super.onCreate()
-        capture = MicCapture(assets,
+        capture = MicCapture(LocalSpeech(applicationContext),
             update = { phase, note -> keys?.status(phase, note ?: idleHint()) },
             meter = { keys?.setLevel(it) }, insert = ::commitSpeech)
     }
@@ -37,6 +41,7 @@ class HexKeyboard : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        nextEnglish = null
         capture.cancel() // Even a different field in the same app must not receive an old result.
         val kind = attribute.inputType and InputType.TYPE_MASK_CLASS
         val variation = attribute.inputType and InputType.TYPE_MASK_VARIATION
@@ -131,7 +136,8 @@ class HexKeyboard : InputMethodService() {
             keys?.status(capture.phase, idleHint())
             return false
         }
-        capture.start()
+        capture.start(preferences.options(nextEnglish))
+        nextEnglish = null
         return true
     }
     internal fun toggleSpeech() = when (capture.phase) {
@@ -149,7 +155,7 @@ class HexKeyboard : InputMethodService() {
         val result = insertion(text, ic.getTextBeforeCursor(1, 0)?.lastOrNull(), ic.getTextAfterCursor(1, 0)?.firstOrNull())
         if (result.isNotEmpty()) ic.commitText(result, 1)
     }
-    private fun leaveEditor() { keys?.cancelGestures(); capture.cancel() }
+    private fun leaveEditor() { keys?.closeMenu(); keys?.cancelGestures(); nextEnglish = null; capture.cancel() }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }

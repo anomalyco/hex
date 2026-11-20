@@ -1,7 +1,6 @@
 package ly.anoma.hex.speech
 
 import android.annotation.SuppressLint
-import android.content.res.AssetManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -16,12 +15,12 @@ internal enum class SpeechPhase { Idle, Opening, Listening, Transcribing }
 // The IME calls start/finish/cancel on the main thread. All audio and inference live on
 // one worker. Every posted result belongs to its original ticket, including failures.
 internal class MicCapture(
-    private val assets: AssetManager,
+    private val recognizer: Recognizer,
     private val update: (SpeechPhase, String?) -> Unit,
     private val meter: (Float) -> Unit,
     private val insert: (String) -> Unit,
 ) {
-    private class Ticket {
+    private class Ticket(val options: SpeechOptions) {
         @Volatile var finish = false
         @Volatile var cancelled = false
     }
@@ -31,9 +30,9 @@ internal class MicCapture(
     var phase = SpeechPhase.Idle
         private set
 
-    fun start() {
+    fun start(options: SpeechOptions) {
         if (active != null) return
-        val ticket = Ticket()
+        val ticket = Ticket(options)
         active = ticket
         publish(SpeechPhase.Opening)
         worker.execute {
@@ -126,8 +125,10 @@ internal class MicCapture(
             return
         }
         main.post { if (active === ticket && phase != SpeechPhase.Transcribing) publish(SpeechPhase.Transcribing) }
-        val bytes = Whisper.decode(assets, pcm, maxOf(count, rate + rate / 10), Runtime.getRuntime().availableProcessors())
-        when (val text = bytes?.decodeToString()?.trim()) {
+        val options = ticket.options
+        val raw = recognizer.decode(pcm, maxOf(count, rate + rate / 10), options.spoken.code, options.translate)
+        if (ticket.cancelled) return
+        when (val text = raw?.let { SpokenText.format(it, options) }) {
             null -> complete(ticket, "Couldn’t transcribe. Try again.")
             "" -> complete(ticket, "No speech heard")
             else -> complete(ticket, text = text)

@@ -75,7 +75,16 @@ android {
 }
 
 kotlin.compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
-tasks.named("preBuild").configure { dependsOn(prepareSpeechModel) }
+// Unmodified InterVariable.ttf from rsms/inter v4.1, stored locally for offline builds.
+val verifyInter by tasks.registering {
+    val font = file("src/main/res/font/inter_variable.ttf")
+    inputs.file(font)
+    doLast {
+        check(MessageDigest.getInstance("SHA-256").digest(font.readBytes()).joinToString("") { "%02x".format(it) }
+            == "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf") { "Inter v4.1 checksum mismatch" }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter) }
 
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
