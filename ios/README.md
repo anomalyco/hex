@@ -565,7 +565,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   and its first dictation reaches 27.3–27.9 MB (about 7 MB). Later dictations
   add 1–5 MB. The 32 and 24 MB thresholds rest on that plus the Metal scope's
   GPU memory, not on an iPhone's; `keyboard-capture-probe.log` records each
-  step's footprint, peak and headroom.
+  step's footprint, peak and headroom, and keeps only its newest 256 KB once it
+  passes 512 KB.
 - **Without Full Access:** Verified in the simulator with the keyboard in a
   real hosted field (`--snap-state hosted-keyboard`) and Full Access off: a
   fresh install mounts the full keyboard and offers no in-keyboard dictation;
