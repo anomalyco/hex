@@ -29,7 +29,7 @@ pub(crate) struct BrowserPages {
 }
 
 impl BrowserPages {
-    fn push_url(&mut self, url: Option<String>) {
+    pub(crate) fn push_url(&mut self, url: Option<String>) {
         if let Some(url) = url.filter(|url| !url.is_empty())
             && !self.urls.contains(&url)
         {
@@ -37,7 +37,7 @@ impl BrowserPages {
         }
     }
 
-    fn push_title(&mut self, title: Option<String>) {
+    pub(crate) fn push_title(&mut self, title: Option<String>) {
         if let Some(title) = title
             .map(|title| title.trim().to_string())
             .filter(|title| !title.is_empty())

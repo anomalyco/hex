@@ -4,11 +4,6 @@
 
 use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GW_OWNER, GWL_EXSTYLE, GetWindow, GetWindowLongPtrW, GetWindowTextLengthW,
-    IsWindowVisible, WS_EX_TOOLWINDOW,
-};
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 
@@ -166,26 +161,10 @@ fn registered_executables() -> Vec<PathBuf> {
     paths
 }
 
-/// Executables behind visible, titled, unowned top-level windows: the
-/// applications in the taskbar right now.
+/// Executables behind the taskbar's windows: the applications open right now.
 fn windowed_executables() -> Vec<PathBuf> {
-    unsafe extern "system" fn collect(window: HWND, windows: LPARAM) -> i32 {
-        let windows = unsafe { &mut *(windows as *mut Vec<HWND>) };
-        windows.push(window);
-        1
-    }
-    let mut windows: Vec<HWND> = Vec::new();
-    unsafe {
-        EnumWindows(Some(collect), (&raw mut windows) as LPARAM);
-    }
-    windows
+    crate::windows::context::taskbar_windows()
         .into_iter()
-        .filter(|&window| unsafe {
-            IsWindowVisible(window) != 0
-                && GetWindowTextLengthW(window) > 0
-                && GetWindow(window, GW_OWNER).is_null()
-                && GetWindowLongPtrW(window, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW == 0
-        })
         .filter_map(crate::windows::input::window_process_path)
         .collect()
 }

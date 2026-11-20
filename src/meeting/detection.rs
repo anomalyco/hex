@@ -8,6 +8,7 @@ use url::Url;
 use crate::app_settings::{
     KNOWN_MEETING_PROVIDERS, MORE_MEETING_PROVIDERS, MeetingPolicy, MeetingProviderChoice,
 };
+use crate::dictation::browser_page::BrowserPages;
 use crate::dictation::context::ContextSnapshot;
 use crate::microphone_activity::ActiveMicrophoneApplication;
 
@@ -1286,6 +1287,34 @@ fn opaque_key(source: MeetingSource, identity: &str) -> String {
     format!("meeting-{:016x}", hasher.finish())
 }
 
+/// The page that names the call a browser shows, from every page its windows
+/// expose: the first address that names a call, else the first address, and a
+/// title that names a call outranks another window's address. Windows makes
+/// this choice over its browsers' UI Automation pages; macOS makes the same
+/// one over its Accessibility pages.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+pub fn call_page(pages: &BrowserPages) -> (Option<Url>, Option<String>) {
+    let (url, title) = crate::dictation::browser_page::choose(
+        pages,
+        |url| web_url(url).is_some_and(|url| names_call(&url)),
+        title_names_call,
+    );
+    let title_names_call = title.as_deref().is_some_and(title_names_call);
+    let url = url
+        .as_deref()
+        .and_then(web_url)
+        .filter(|url| names_call(url) || !title_names_call);
+    (url, title)
+}
+
+/// An http(s) page address.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+fn web_url(url: &str) -> Option<Url> {
+    Url::parse(url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
+}
+
 /// Whether a page address is a call this detection knows: a Google Meet
 /// call or another known call site.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -2255,6 +2284,69 @@ mod tests {
         )
         .unwrap();
         assert!(watch.run(Some(&other), &[], 25_000).is_empty());
+    }
+
+    #[test]
+    fn a_windows_chrome_on_a_meet_page_is_a_meet_call() {
+        let chrome = ActiveMicrophoneApplication {
+            pid: 1234,
+            bundle_id: "chrome.exe".into(),
+            name: "chrome".into(),
+        };
+        let call = candidate_from_microphone(
+            &chrome,
+            &context(
+                "chrome",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - Design sync - Google Chrome",
+            ),
+        )
+        .unwrap();
+        assert_eq!(call.source, MeetingSource::GoogleMeet);
+        assert_eq!(call.site.as_deref(), Some("meet.google.com"));
+        assert_eq!(call.recording_start().app.as_deref(), Some("Google Meet"));
+    }
+
+    #[test]
+    fn a_call_s_address_is_chosen_before_another_window_s_page() {
+        let mut pages = BrowserPages::default();
+        pages.push_title(Some("Inbox - Google Chrome".into()));
+        pages.push_title(Some("Meet - abc-defg-hij - Google Chrome".into()));
+        pages.push_url(Some("https://mail.google.com/mail/u/0/".into()));
+        pages.push_url(Some("https://meet.google.com/abc-defg-hij".into()));
+        let (url, title) = call_page(&pages);
+        assert_eq!(
+            url.as_ref().map(Url::as_str),
+            Some("https://meet.google.com/abc-defg-hij")
+        );
+        assert_eq!(
+            title.as_deref(),
+            Some("Meet - abc-defg-hij - Google Chrome")
+        );
+    }
+
+    #[test]
+    fn a_call_s_title_drops_another_window_s_address() {
+        let mut pages = BrowserPages::default();
+        pages.push_title(Some("Meet - Design sync - Google Chrome".into()));
+        pages.push_url(Some("https://mail.google.com/".into()));
+        let (url, title) = call_page(&pages);
+        assert_eq!(url, None);
+        assert_eq!(title.as_deref(), Some("Meet - Design sync - Google Chrome"));
+    }
+
+    #[test]
+    fn a_browser_with_no_call_page_keeps_its_first_page() {
+        let mut pages = BrowserPages::default();
+        pages.push_title(Some("Docs".into()));
+        pages.push_url(Some("https://docs.example.com/".into()));
+        let (url, title) = call_page(&pages);
+        assert_eq!(
+            url.as_ref().map(Url::as_str),
+            Some("https://docs.example.com/")
+        );
+        assert_eq!(title.as_deref(), Some("Docs"));
+        assert_eq!(call_page(&BrowserPages::default()), (None, None));
     }
 
     fn meet_in_brave(url: &str, title: &str) -> MeetingCandidate {

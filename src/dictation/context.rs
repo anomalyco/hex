@@ -400,7 +400,12 @@ impl ContextSnapshot {
         Ok(snapshot_of(&front, page))
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    pub fn capture_for_meeting(canonical_bundle_id: &str) -> Result<Self> {
+        crate::windows::context::capture_for_meeting(canonical_bundle_id)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     pub fn capture_for_meeting(_canonical_bundle_id: &str) -> Result<Self> {
         Ok(Self::default())
     }
