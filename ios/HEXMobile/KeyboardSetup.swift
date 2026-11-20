@@ -63,6 +63,14 @@ struct KeyboardSetupCard: View {
     @Environment(\.openURL) private var openURL
     @Bindable var dictation: DictationController
     let monitor: KeyboardSetupMonitor
+    @State private var checkText = ""
+    @FocusState private var checkFocused: Bool
+
+    /// iOS only tells Hex about Full Access from inside its keyboard, so until the keyboard
+    /// has run once with it, the app can't tell "on" from "off".
+    private var needsKeyboardCheck: Bool {
+        monitor.keyboardAdded != false && !monitor.fullAccessOn
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -79,7 +87,7 @@ struct KeyboardSetupCard: View {
                 divider
                 row(
                     title: "Allow Full Access",
-                    status: monitor.fullAccessOn ? "On" : "Off",
+                    status: monitor.fullAccessOn ? "On" : needsKeyboardCheck ? "Not checked" : "Off",
                     done: monitor.fullAccessOn
                 )
                 divider
@@ -98,6 +106,22 @@ struct KeyboardSetupCard: View {
                     status: modelStatus,
                     done: dictation.isModelReady
                 )
+            }
+
+            if needsKeyboardCheck {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Already turned it on? Tap the field and switch to Hex with \(Image(systemName: "globe")). Hex can only check Full Access from its keyboard.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField("Tap here, then switch to Hex", text: $checkText)
+                        .font(.system(size: 15))
+                        .foregroundStyle(HexTheme.textBase)
+                        .focused($checkFocused)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 40)
+                        .background(Color.white.opacity(0.06), in: Capsule())
+                }
             }
 
             if !monitor.keyboardReady || monitor.microphone == .denied {
@@ -121,6 +145,9 @@ struct KeyboardSetupCard: View {
         }
         .padding(16)
         .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
+        .onChange(of: monitor.fullAccessOn) { _, on in
+            if on { checkFocused = false }
+        }
     }
 
     private var keyboardStatus: String {
