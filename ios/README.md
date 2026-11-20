@@ -450,7 +450,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   fix ("teh" → "the" while French types), and when both can, the language of the last words
   only one dictionary knows wins, else the clearly cheaper slip, else the keyboard's own;
   the strip shows both languages' fixes and completions. In the simulator the English
-  keyboard alone changed 34 of 77 common French words and the French keyboard alone 28 of
+  keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
   80 English words; with both chosen, none.
 - **Keyboard layouts (each language's letters):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
