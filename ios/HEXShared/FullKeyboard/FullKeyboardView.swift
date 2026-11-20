@@ -374,7 +374,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     private func applyAppearance() {
         let isDark = appearanceOverride
-            ?? FullKeyboardPalette.isDark(appearance: engine.target.keyboardAppearance, traits: traitCollection)
+            ?? FullKeyboardPalette.isDark(traits: traitCollection)
         let next = FullKeyboardPalette(isDark: isDark)
         backgroundColor = drawsBackdrop ? next.backdrop : .clear
         stripView.inSystemPlatter = !drawsBackdrop
