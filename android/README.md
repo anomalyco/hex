@@ -21,6 +21,16 @@ Swipe up on the Hex key or tap **Hex menu**. Choose the spoken language (English
 
 **Translate what I say** is also off by default. With Español and translation enabled, **Next dictation** offers **Paste in English** or **Paste as spoken**. The choice is captured when recording begins; after a one-off spoken-language insertion, the next dictation returns to English. Translation is multilingual Whisper’s native speech-to-English task, not a second text model or online SDK. The tested Spanish WAV inserted both “El café todavía está caliente.” and “The coffee is still hot.” offline.
 
+## Typing assistance
+
+English and Español share the iOS keyboard’s **HXTM v3** files. Both are bundled, uncompressed and memory-mapped from the APK. Start typing to see three frequency-ranked candidates; tap one to insert it. After a space the strip predicts the next word from the word-pair counts. Spanish has a dedicated ñ key. German, Norwegian, passwords, addresses, and editors that disable suggestions use literal typing.
+
+On space, the Kotlin decoder compares each tap with the measured key centres and combines those distances with the previous word’s probability. It can recover a missing space. A known spelling requires a higher confidence margin than a nonword. Immediately press **Delete** to restore exactly what you typed, without the space. Undo the same replacement twice and Hex keeps that spelling in later sessions. Only rejection counts keyed by hashes are saved locally; there is no typing journal.
+
+**Hex menu → Typing feedback** controls key pop-ups and key haptics independently. Both default on; Hex follows system keyboard vibration. Hold a letter, slide to an accent, and release. Turning off pop-ups leaves the deliberate accent picker available.
+
+[Typing benchmark, source data and licences](benchmark/typing/README.md)
+
 ## How it works
 
 - **App:** Kotlin and Jetpack Compose. Welcome → microphone permission and Android’s keyboard settings/picker → a real practice field. Setup reads live system state; it remembers the page, not the words.
@@ -45,4 +55,4 @@ adb shell am start -n ly.anoma.hex/.MainActivity
 
 On the headless Studio, start an ARM64 AVD with `-audio none -grpc 8566 -grpc-use-token`. [inject.py](benchmark/inject.py) uses the matching emulator discovery record and streams paced mono PCM16 into the guest microphone. Generate the bindings from the SDK emulator’s `lib/emulator_controller.proto` with `grpcio-tools`, then put them on `PYTHONPATH`. No recording or transcript is injected directly into the application.
 
-**Scope:** Android 12+ (min API 31), target 35, ARM64, one QWERTY key layout and four dictation languages. The Studio exercised download, offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing. Physical handset accuracy, deadlines, thermal behavior and Bluetooth routing remain unmeasured.
+**Scope:** Android 12+ (min API 31), target 35, ARM64, English and Spanish QWERTY typing models and four dictation languages. The Studio exercised download, offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing. Physical handset accuracy, deadlines, thermal behavior and Bluetooth routing remain unmeasured.
