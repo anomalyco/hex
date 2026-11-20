@@ -79,7 +79,8 @@ extension KeyboardSetupMonitor {
     }
 }
 
-/// Home's one status line: "Hex is ready", or "Finish setup · 1 step" opening the sheet.
+/// Home's one status line under the Hex header: "Ready", or "Finish setup · 1 step" opening
+/// the sheet.
 struct SetupStatusRow: View {
     let stepsLeft: Int
     let action: () -> Void
@@ -102,7 +103,7 @@ struct SetupStatusRow: View {
 
                 HStack(spacing: 5) {
                     if stepsLeft == 0 {
-                        Text("Hex is ready")
+                        Text("Ready")
                             .foregroundStyle(HexTheme.textMuted)
                     } else {
                         Text("Finish setup")
