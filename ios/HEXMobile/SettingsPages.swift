@@ -109,8 +109,22 @@ struct DictationSettingsPage: View {
     }
 }
 
-/// Settings › Keyboard: the full keyboard and its rows (only while it's on), and haptics,
-/// which the dictation bar uses too.
+/// Which keyboard Hex shows: the full keyboard (letters, with a Hex key to dictate) or the
+/// dictation bar. Stored as `FullKeyboardSettings.isEnabled`.
+private enum KeyboardChoice: CaseIterable {
+    case full
+    case dictationBar
+
+    var label: String {
+        switch self {
+        case .full: "Full"
+        case .dictationBar: "Dictation bar"
+        }
+    }
+}
+
+/// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
+/// chosen), and haptics, which the dictation bar uses too.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
@@ -122,11 +136,20 @@ struct KeyboardSettingsPage: View {
     var body: some View {
         SettingsPageScaffold(title: "Keyboard") {
             SettingsCard {
-                SettingsToggleRow(
-                    title: "Full keyboard",
-                    detail: "Type with Hex, with a Hex key to dictate",
-                    isOn: $fullKeyboard
-                )
+                HStack(spacing: 12) {
+                    SettingsRowLabel(title: "Keyboard")
+                    Spacer(minLength: 8)
+                    SettingsSegments(
+                        items: KeyboardChoice.allCases,
+                        selected: fullKeyboard ? .full : .dictationBar,
+                        label: \.label,
+                        onSelect: { choice in
+                            fullKeyboard = choice == .full
+                        }
+                    )
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 50)
 
                 if fullKeyboard {
                     KeyboardLayoutRow()
