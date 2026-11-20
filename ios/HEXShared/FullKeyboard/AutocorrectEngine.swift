@@ -464,9 +464,12 @@ final class AutocorrectEngine {
         if let shortcut = lexiconShortcuts[lower] {
             return shortcut
         }
-        // An offensive word typed in full is a word you meant: never corrected into another,
-        // whether or not it may be suggested.
-        if offensiveWords.contains(lower) { return nil }
+        // A word that may not be offered, typed in full, is a word you meant: never corrected
+        // into another (as on Android: blocked by the current setting, or after its expression's
+        // first word).
+        if offensiveWords.blocks(lower, allowSwearing: allowsSwearing, after: Self.previousWord(beforeInput ?? "", token: token)) {
+            return nil
+        }
         // A typo you fixed the same way at least twice (Learn how I type), unless what you
         // typed is a real word: then it is only suggested.
         if let learned = learning.typos[lower], mayOffer(learned, replacing: token), !checker.isWordValid(token) {

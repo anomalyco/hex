@@ -47,11 +47,6 @@ nonisolated struct OffensiveWords: Equatable, Sendable {
         entries[word.lowercased()]
     }
 
-    /// Whether `word` is on the list at all: typed in full, it is never corrected.
-    func contains(_ word: String) -> Bool {
-        kind(of: word) != nil
-    }
-
     /// Whether `candidate` (a word, or words split by spaces or hyphens) may not be offered:
     /// it, one of its words, or an expression it makes (with `previous`, the word before it),
     /// is a slur, or a swear word while `allowSwearing` is off. An expression's words alone

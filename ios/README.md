@@ -262,7 +262,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     suggestion is looked up: `UITextChecker`'s guesses and completions, learned fixes, and
     Spatial autocorrect's readings (`TypingDecoder.NeverSuggest`, so the models still score
     them as words). An expression is blocked only as the pair ("blow job"), never its words
-    alone. A listed word typed in full is never corrected; your own `UILexicon` words
+    alone. A word it may not offer, typed in full, is never corrected (as on Android); your own `UILexicon` words
     (Contacts names, text replacements) are always offered.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. Its description says what it records, and

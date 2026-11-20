@@ -531,6 +531,9 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(autocorrect, "Nigger"))
         XCTAssertFalse(autocorrect.suggestions(beforeInput: "fuck", field: .text, autocorrectionType: .default)
             .contains(where: \.willAutoReplace))
+        autocorrect.allowsSwearing = true
+        XCTAssertEqual(fix(autocorrect, "fuck"), "duck", "with swear words on, it's an ordinary word, as on Android")
+        XCTAssertNil(fix(autocorrect, "Nigger"), "a slur typed in full still stays")
     }
 
     func testYourOwnContactsAndReplacementsAreStillOffered() {
@@ -549,7 +552,7 @@ final class AutocorrectEngineTests: XCTestCase {
                       "nig", "nigg", "niggr", "niggee", "fagg", "faggit", "kik", "spi", "coo", "pus", "pussu", "ass", "asshol"] {
             let guesses = checker.guesses(for: typed)
             let completions = checker.completions(for: typed)
-            let flagged = (guesses + completions).filter { words.contains($0) }
+            let flagged = (guesses + completions).filter { words.kind(of: $0) != nil }
             print("UITextChecker \(typed): valid=\(checker.isWordValid(typed)) guesses=\(guesses.prefix(6)) completions=\(completions.prefix(6)) offensive=\(flagged)")
             for allow in [false, true] {
                 engine.autocorrect.allowsSwearing = allow
