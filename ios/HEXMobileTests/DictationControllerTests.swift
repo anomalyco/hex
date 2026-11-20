@@ -1,4 +1,5 @@
 import AVFAudio
+import Speech
 import UIKit
 import XCTest
 @testable import HEX
@@ -1667,7 +1668,16 @@ final class AppleSpeechClipTests: XCTestCase {
             .filter { $0.hasSuffix(".wav") }
             .sorted()
         XCTAssertFalse(clips.isEmpty)
-        var report: [String] = []
+        // Run it with Speech Recognition turned off too (`simctl privacy <udid> revoke
+        // speech-recognition`): Apple Speech never needs it.
+        let access = switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: "allowed"
+        case .denied: "denied"
+        case .restricted: "restricted"
+        case .notDetermined: "not asked"
+        @unknown default: "unknown"
+        }
+        var report = ["Speech Recognition access: \(access)"]
         for clip in clips {
             let identifier = String(clip.dropLast(4))
             let suite = "hex.tests.\(UUID().uuidString)"
@@ -1681,7 +1691,7 @@ final class AppleSpeechClipTests: XCTestCase {
                 report.append("\(identifier): unsupported by SpeechTranscriber and DictationTranscriber")
                 continue
             }
-            let transcriber = AppleSpeechTranscriber(language: language, requestsAuthorization: false)
+            let transcriber = AppleSpeechTranscriber(language: language)
             do {
                 try await transcriber.prepare { _ in }
                 let text = try await transcriber.transcribe(URL(fileURLWithPath: folder).appendingPathComponent(clip))

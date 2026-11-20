@@ -22,7 +22,10 @@ nothing transcribed (its orange dot shows for that moment). iOS ends a keyboard 
 its memory limit (about 60–90 MB depending on the model), so while less is left
 than starting needs (`os_proc_available_memory`: 32 MB for the first
 dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key
-open Hex instead, as before iOS 26. Audio never leaves the iPhone.
+open Hex instead, as before iOS 26. Audio never leaves the iPhone. Hex never asks
+for Speech Recognition access: that permission covers `SFSpeechRecognizer`, which Hex
+doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard alike
+(a TestFlight tester who turned it off dictated, iOS 27.0.1, build 51).
 
 ## Capabilities
 
@@ -584,6 +587,13 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
   the keyboard switches between two or more languages (Keyboard languages, above).
+- **Slides from 123, #+= and shift (full keyboard):** As on Apple's keyboard, holding 123
+  (or ABC, or #+=) shows its page, and sliding shows the pop-up of the key under the
+  finger (or darkens it with Key pop-ups off); letting go types that key and goes back to
+  the page it came from. Letting go back on the page key types nothing and goes back too;
+  off the keys it types nothing and the page stays. Holding shift and sliding to a letter
+  shows and types its capital. None of them is a swipe, and a slid-to key opens no
+  accent menu (Apple's does after a hold).
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of

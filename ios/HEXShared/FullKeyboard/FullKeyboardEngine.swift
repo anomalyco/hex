@@ -61,6 +61,12 @@ final class FullKeyboardEngine {
         var committed: Bool
         /// The page a 123/ABC press came from; releasing over a character returns there.
         var returnLayer: KeyboardLayer?
+        /// A 123, #+= or shift press slid onto this character key: it shows the key's pop-up,
+        /// and letting go types it (`slideTarget`), as on Apple's keyboard.
+        var slideKey: KeyboardKey?
+        /// True once such a press slid onto a character key, so letting go back on the page
+        /// key is a slide taken back rather than a tap.
+        var hasSlid = false
         /// True once a spacebar press crosses `trackpadActivationDistance`.
         var isTrackpad = false
         /// True once a spacebar press slides before its hold (`holdSpace`) while it switches
@@ -213,11 +219,14 @@ final class FullKeyboardEngine {
     /// Settings › Key pop-ups. Off: pressed keys only darken, as with iOS's Character Preview off.
     var showsKeyPopups = true
 
-    /// The key whose balloon shows: the newest character still held (hidden while an accent menu is up).
+    /// The key whose balloon shows: the newest character still held, or the one a 123, #+= or
+    /// shift press slid onto (hidden while an accent menu is up).
     var previewKey: KeyboardKey? {
         guard activeAccentMenu == nil else { return nil }
         for id in touchOrder.reversed() {
-            if let touch = touches[id], touch.key.character != nil, !touch.committed {
+            guard let touch = touches[id] else { continue }
+            if let slid = touch.slideKey { return slid }
+            if touch.key.character != nil, !touch.committed {
                 return touch.key
             }
         }
@@ -225,7 +234,7 @@ final class FullKeyboardEngine {
     }
 
     var pressedKinds: Set<KeyKind> {
-        Set(touches.values.map(\.key.kind))
+        Set(touches.values.flatMap { touch in [touch.key.kind] + (touch.slideKey.map { [$0.kind] } ?? []) })
     }
 
     func displayLabel(for key: KeyboardKey) -> String {
@@ -584,7 +593,23 @@ final class FullKeyboardEngine {
             }
         }
 
-        // 3. Sliding across character keys updates the active key and re-anchors the hold timer.
+        // 3. Holding 123, #+= or shift and sliding: the character key under the finger shows its
+        // pop-up; over any other key, or off the keys, none does. Never a swipe: swipes start on
+        // letters only.
+        if Self.slidesToType(touch) {
+            let next = slideTarget(for: touch, at: point)
+            if next?.kind != touch.slideKey?.kind {
+                touch.slideKey = next
+                if next != nil { touch.hasSlid = true }
+                touches[id] = touch
+                onChange?()
+                return
+            }
+            touches[id] = touch
+            return
+        }
+
+        // 4. Sliding across character keys updates the active key and re-anchors the hold timer.
         // A letter the next-letter odds claimed keeps the touch while it stays within reach.
         if touch.key.character != nil, !touch.committed,
            let under = layout.hitTest(point), under.character != nil, under.kind != touch.key.kind,
@@ -650,6 +675,10 @@ final class FullKeyboardEngine {
                 commitCharacter(touch.key, at: touch.startPoint)
             }
         case .shift:
+            // Hold shift, slide to a letter, let go: a capital, as on Apple's keyboard.
+            if let under = slideTarget(for: touch, at: point) {
+                commitCharacter(under, at: point)
+            }
             shift.shiftUp()
             logState("shift_key")
         case .space:
@@ -687,16 +716,21 @@ final class FullKeyboardEngine {
             insert("\n", source: nil)
             typingLog?.context("return")
         case .layerSwitch:
-            // Hold 123, slide to a key, let go: type it and go back.
-            if let returnLayer = touch.returnLayer,
-               let under = layout.hitTest(point),
-               let character = under.character,
-               under.kind != touch.key.kind {
-                autocorrect.clearPendingUndo()
-                insert(character, source: "slide")
-                layerState.switchTo(returnLayer)
-                rebuildLayout(cause: "layer_slide")
-                refreshAutoCapitalization()
+            // Hold 123, slide to a key, let go: type it and go back. Back on the page key after
+            // a slide: nothing, and back too. Off the keys: nothing, and the page stays.
+            if let returnLayer = touch.returnLayer {
+                if let under = slideTarget(for: touch, at: point), let character = under.character {
+                    autocorrect.clearPendingUndo()
+                    insert(character, source: "slide")
+                    layerState.switchTo(returnLayer)
+                    rebuildLayout(cause: "layer_slide")
+                    refreshAutoCapitalization()
+                } else if touch.hasSlid, layout.hitTest(point)?.kind == .layerSwitch(returnLayer) {
+                    layerState.switchTo(returnLayer)
+                    if returnLayer == .letters { shift.reset() }
+                    rebuildLayout(cause: "layer_slide_back")
+                    if returnLayer == .letters { refreshAutoCapitalization() }
+                }
             }
         case .emoji:
             onEmojiKey?()
@@ -704,6 +738,20 @@ final class FullKeyboardEngine {
             break
         }
         onChange?()
+    }
+
+    /// A press that types the character key it slides onto: 123, ABC and #+= (with a page to
+    /// go back to), and shift.
+    private static func slidesToType(_ touch: ActiveTouch) -> Bool {
+        touch.returnLayer != nil || touch.key.kind == .shift
+    }
+
+    /// The character key under `point` that such a press types on letting go, or nil over
+    /// any other key or off the keys.
+    private func slideTarget(for touch: ActiveTouch, at point: CGPoint) -> KeyboardKey? {
+        guard Self.slidesToType(touch), let under = layout.hitTest(point),
+              under.character != nil, under.kind != touch.key.kind else { return nil }
+        return under
     }
 
     /// A language swipe's direction, or nil when it was too short or more up than along.
