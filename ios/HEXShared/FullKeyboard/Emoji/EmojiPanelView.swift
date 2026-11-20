@@ -49,6 +49,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// A hairline between the suggestion row and the grid.
     private let rowSeparator = UIView()
     private var toneEntry: Int?
+    /// An emoji without skin tones held down: typed when the finger lifts over it.
+    private var heldEntry: (entry: Int, frame: CGRect)?
     private var layoutKey: GridGeometry?
     private var sectionStarts: [CGFloat] = []
     private var deleteTimer: Timer?
@@ -329,7 +331,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     }
 
     func collectionView(_ collectionView: UICollectionView, didHighlightItemAt indexPath: IndexPath) {
-        onKeyDown?()
+        // No click here: a swipe through the grid starts on a cell too.
         guard showsKeyPopups, let frame = cellFrame(indexPath) else { return }
         let entry = sections[indexPath.section].entries[indexPath.item]
         callout.show(balloon(over: frame), label: display(for: entry))
@@ -341,6 +343,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
+        onKeyDown?()
         let entry = sections[indexPath.section].entries[indexPath.item]
         onInsert?(display(for: entry), entry, "grid")
     }
@@ -418,8 +421,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
             let entry = sections[indexPath.section].entries[indexPath.item]
             let item = library.entries[entry]
             guard item.hasTones else {
-                // Without tones a hold types it, as a tap would.
-                onInsert?(display(for: entry), entry, "grid")
+                // Without tones a hold is a slow tap: typed if the finger lifts over it.
+                heldEntry = (entry, frame)
+                if showsKeyPopups { callout.show(balloon(over: frame), label: display(for: entry)) }
                 return
             }
             showTones(for: entry, over: frame)
@@ -432,10 +436,21 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
                 onSelectionStep?()
             }
         case .ended:
+            callout.show(nil, label: "")
+            if let held = heldEntry {
+                heldEntry = nil
+                if held.frame.insetBy(dx: -4, dy: -4).contains(point) {
+                    onKeyDown?()
+                    onInsert?(display(for: held.entry), held.entry, "grid")
+                }
+                return
+            }
             guard let menu = tonePicker.menu, let entry = toneEntry else { return }
             let chosen = menu.options[menu.index(for: point.x)]
             pickTone(chosen, for: entry)
         default:
+            callout.show(nil, label: "")
+            heldEntry = nil
             tonePicker.show(nil)
             toneEntry = nil
         }
