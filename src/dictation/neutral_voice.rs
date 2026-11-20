@@ -128,6 +128,7 @@ pub(crate) fn stage(
     rewrite(text)
 }
 
+/// One on-device pass, with the time budget the bridge enforces.
 #[cfg(target_os = "macos")]
 fn rewrite(text: &str) -> (String, Option<ProcessingObservation>) {
     let started = Instant::now();
@@ -299,34 +300,43 @@ fn protected_tokens(text: &str) -> Vec<String> {
 }
 
 /// The spans between matched double or curly double quotes, where a quote
-/// opens at a word start and closes at a word end. CJK characters count as
-/// word characters on either side, so `他说“船明天开”` pairs too.
+/// opens at a word start and closes at a word end. A straight quote pairs
+/// only with a straight quote and `“` only with `”`, a failed candidate close
+/// leaves the open span pending, and CJK characters count as word characters
+/// on either side, so `他说“船明天开”` pairs too.
 fn quoted_spans(text: &str) -> Vec<&str> {
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum Quote {
+        Straight,
+        Curly,
+    }
+
     let mut spans = Vec::new();
-    let mut open: Option<usize> = None;
+    let mut open: Option<(usize, Quote)> = None;
     for (index, character) in text.char_indices() {
         match character {
-            '"' => {
-                if open.is_none() {
-                    if opens_a_quote(text, index) {
-                        open = Some(index + 1);
-                    }
-                } else if let Some(start) = open.take()
-                    && closes_a_quote(text, index)
-                {
+            '"' => match open {
+                Some((start, Quote::Straight)) if closes_a_quote(text, index) => {
                     spans.push(&text[start..index]);
+                    open = None;
                 }
-            }
+                Some(_) => {}
+                None if opens_a_quote(text, index) => {
+                    open = Some((index + 1, Quote::Straight));
+                }
+                None => {}
+            },
             '\u{201c}' => {
                 if open.is_none() && opens_a_quote(text, index) {
-                    open = Some(index + character.len_utf8());
+                    open = Some((index + character.len_utf8(), Quote::Curly));
                 }
             }
             '\u{201d}' => {
-                if let Some(start) = open.take()
+                if let Some((start, Quote::Curly)) = open
                     && closes_a_quote(text, index)
                 {
                     spans.push(&text[start..index]);
+                    open = None;
                 }
             }
             _ => {}
@@ -416,15 +426,19 @@ fn compound_runs(text: &str) -> Vec<&str> {
 }
 
 /// A sentence's own brackets around a token are not part of it, while
-/// brackets inside one (`foo()`, `arr[i]`) are.
+/// brackets inside one (`foo()`, `arr[i]`) are. Leading brackets are outer
+/// punctuation; a trailing bracket goes only while it has no opening partner,
+/// so `(bar())` keeps `bar()` and `file.rs)` becomes `file.rs`.
 fn trim_code_token(run: &str) -> &str {
     let core = run.trim_matches(['"', '\'', ',', ';', ':', '!', '?', '.']);
-    let core = core.trim_start_matches(['(', '[']);
-    if core.contains('(') {
-        core
-    } else {
-        core.trim_end_matches([')', ']'])
+    let mut core = core.trim_start_matches(['(', '[']);
+    while core.ends_with(')') && core.matches(')').count() > core.matches('(').count() {
+        core = &core[..core.len() - 1];
     }
+    while core.ends_with(']') && core.matches(']').count() > core.matches('[').count() {
+        core = &core[..core.len() - 1];
+    }
+    core
 }
 
 /// Whether `token` must survive a rewrite verbatim: something that reads as
@@ -435,18 +449,32 @@ fn looks_like_code(token: &str) -> bool {
         || token.contains(['\\', '_', '`'])
         || token.contains("::")
         || token.contains(['(', ')', '[', ']'])
-        || (token.contains('/') && !plain_slash(token))
+        || (token.contains('/') && !prose_pair(token))
         || (dotted_word(token) && !single_letter_abbreviation(token))
 }
 
-/// Whether every `/` in `token` separates two plain alphabetic words, as in
-/// `and/or` or `yes/no`, so the token is not a path.
-fn plain_slash(token: &str) -> bool {
-    token.contains('/')
-        && token
-            .chars()
-            .all(|character| character == '/' || character.is_ascii_alphabetic())
-        && token.split('/').all(|part| !part.is_empty())
+/// The few prose pairs written with a slash that are not paths; every other
+/// token with a `/` stays protected, so `src/components` and `docs/features`
+/// survive a rewrite.
+const PROSE_PAIRS: &[&str] = &[
+    "and/or",
+    "either/or",
+    "yes/no",
+    "he/she",
+    "his/her",
+    "him/her",
+    "on/off",
+    "true/false",
+    "w/",
+    "w/o",
+    "s/he",
+];
+
+/// Whether `token` is one of the prose pairs above, ignoring case.
+fn prose_pair(token: &str) -> bool {
+    PROSE_PAIRS
+        .iter()
+        .any(|pair| token.eq_ignore_ascii_case(pair))
 }
 
 /// Whether `token` is a common abbreviation of single letters and dots, such
@@ -585,6 +613,24 @@ mod tests {
             protected_tokens("他说\u{201c}船明天开\u{201d}然后走了"),
             ["船明天开"]
         );
+    }
+
+    /// A candidate close that isn't at a word end leaves the span pending for
+    /// the next real close.
+    #[test]
+    fn a_failed_close_leaves_the_quote_open() {
+        assert_eq!(
+            quoted_spans("a \"ship it\"and \"leave\" now"),
+            ["ship it\"and \"leave"]
+        );
+    }
+
+    /// A straight quote pairs only with a straight quote and `“` only with
+    /// `”`.
+    #[test]
+    fn quotes_pair_only_with_their_own_kind() {
+        assert!(quoted_spans("he said \"ship it\u{201d} now").is_empty());
+        assert!(quoted_spans("he said \u{201c}ship it\" now").is_empty());
     }
 
     /// A Chinese or Japanese sentence is one whitespace-free run: only its
@@ -729,6 +775,14 @@ mod tests {
         ));
     }
 
+    /// Balanced brackets inside code stay with it; only unmatched outer
+    /// brackets are trimmed.
+    #[test]
+    fn balanced_brackets_stay_in_the_token() {
+        assert_eq!(protected_tokens("(bar())"), ["bar()"]);
+        assert_eq!(protected_tokens("arr[i] at 5"), ["arr[i]", "5"]);
+    }
+
     /// Common single-letter abbreviations are prose, not file names.
     #[test]
     fn common_abbreviations_are_not_code() {
@@ -741,11 +795,12 @@ mod tests {
         ));
     }
 
-    /// A slash joining two plain words is not a path.
+    /// A slash joining two plain words is not a path, but a folder path is.
     #[test]
     fn a_slash_between_words_is_not_a_path() {
         assert!(protected_tokens("and/or").is_empty());
         assert!(protected_tokens("yes/no").is_empty());
+        assert!(protected_tokens("w/").is_empty());
         assert!(is_acceptable(
             "use and/or for those cases",
             "Use and/or for those cases."
@@ -754,6 +809,15 @@ mod tests {
             "open /etc/hosts now",
             "Open the hosts file now."
         ));
+    }
+
+    /// Folder paths stay protected: only the listed prose pairs are prose.
+    #[test]
+    fn folder_paths_stay_protected() {
+        for path in ["src/components", "docs/features", "packages/web"] {
+            assert_eq!(protected_tokens(path), [path]);
+            assert!(!is_acceptable(&format!("open {path} now"), "Open it now."));
+        }
     }
 
     /// A cancelled dictation starts no model work: the words go back as they

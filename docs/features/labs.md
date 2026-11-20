@@ -1405,15 +1405,18 @@ all keep the corrected transcript with the reason recorded. Protected spans
 are every matched pair of double or curly double quotes that opens at a word
 start and closes at a word end, every ASCII digit run, and every span shaped
 like a link or code or a path (`://` or `www.`, `/`, `\`, `_`, `::`,
-brackets, backticks, or a `.` inside a word as in `file.rs`). A slash between
-two plain words (`and/or`, `yes/no`) and a single-letter abbreviation such as
-`e.g.` or `u.s.` are prose, not code. Rewriting a whole Chinese or Japanese
-sentence is fine: only the embedded number or link is protected, and CJK
-numerals such as 一 and 三 are words, not digits. When the transcript has at
-least four content words, at least 30% of them must appear in the answer, so
-an answer to the text or injected prose falls back; text without whitespace,
-or with any CJK, kana, or hangul character, is exempt. Unlike the cleanup's
-guard, there is no word-overlap check: rewording is the point.
+brackets, backticks, or a `.` inside a word as in `file.rs`). Only the listed
+prose pairs (`and/or`, `either/or`, `yes/no`, `he/she`, `on/off`, `w/`, …) and
+a single-letter abbreviation such as `e.g.` or `u.s.` are prose, not code;
+every other token with a slash, such as `src/components` or `docs/features`,
+is protected. Balanced brackets inside code (`bar()`, `arr[i]`) stay with it;
+only unmatched outer brackets are trimmed. Rewriting a whole Chinese or
+Japanese sentence is fine: only the embedded number or link is protected, and
+CJK numerals such as 一 and 三 are words, not digits. When the transcript has
+at least four content words, at least 30% of them must appear in the answer,
+so an answer to the text or injected prose falls back; text without
+whitespace, or with any CJK, kana, or hangul character, is exempt. Unlike the
+cleanup's guard, there is no word-overlap check: rewording is the point.
 
 A pass that ran records `profile: "Neutral voice"` with its latency in the
 dictation's NDJSON `processing` field and in History's Processing line; a pass
@@ -1435,9 +1438,13 @@ words instead). Checks: `a_reworded_sentence_is_accepted`,
 `an_unmatched_quote_protects_nothing`,
 `only_a_quote_at_word_boundaries_pairs`,
 `a_curly_quote_pair_protects_its_text`,
+`a_failed_close_leaves_the_quote_open`,
+`quotes_pair_only_with_their_own_kind`,
 `brackets_around_a_path_are_not_part_of_it`,
+`balanced_brackets_stay_in_the_token`,
 `common_abbreviations_are_not_code`,
 `a_slash_between_words_is_not_a_path`,
+`folder_paths_stay_protected`,
 `a_chinese_rewrite_keeps_or_drops_its_ascii_number`,
 `cjk_text_skips_the_content_floor`,
 `a_moved_number_is_accepted`,

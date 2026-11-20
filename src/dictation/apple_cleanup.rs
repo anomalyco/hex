@@ -223,14 +223,14 @@ pub(crate) fn tidy(answer: &str, input: &str) -> String {
 
 /// The quote pairs a model may wrap its answer in, and a dictation may have
 /// dictated.
-pub(crate) const QUOTE_PAIRS: [(char, char); 3] = [
+const QUOTE_PAIRS: [(char, char); 3] = [
     ('"', '"'),
     ('\u{201c}', '\u{201d}'),
     ('\u{2018}', '\u{2019}'),
 ];
 
 /// `text` without one pair of quotes wrapping all of it, when it has one.
-pub(crate) fn strip_quotes(text: &str) -> Option<&str> {
+fn strip_quotes(text: &str) -> Option<&str> {
     QUOTE_PAIRS.iter().find_map(|(open, close)| {
         let rest = text.strip_prefix(*open)?;
         let inner = rest.strip_suffix(*close)?;
@@ -239,7 +239,7 @@ pub(crate) fn strip_quotes(text: &str) -> Option<&str> {
 }
 
 /// Whether `text` itself starts and ends with a pair of quotes.
-pub(crate) fn wrapped_in_quotes(text: &str) -> bool {
+fn wrapped_in_quotes(text: &str) -> bool {
     let text = text.trim();
     QUOTE_PAIRS
         .iter()
