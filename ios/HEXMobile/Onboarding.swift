@@ -120,7 +120,15 @@ private struct OnboardingWelcomePage: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         HexMarkView(size: 64)
-                            .padding(.bottom, 24)
+                            .padding(.bottom, 20)
+
+                        Label("100% on device", systemImage: "lock.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(HexTheme.textBase)
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            .background(HexTheme.bgBase, in: Capsule())
+                            .padding(.bottom, 16)
 
                         Text("Talk instead of type,\nin any app.")
                             .font(.system(size: 28, weight: .semibold))
@@ -132,7 +140,7 @@ private struct OnboardingWelcomePage: View {
 
                         VStack(alignment: .leading, spacing: 22) {
                             point(icon: "keyboard", title: "Dictate right in the keyboard")
-                            point(icon: "lock", title: "Free and private, on this iPhone")
+                            point(icon: "iphone", title: "Free, and nothing leaves your iPhone")
                             point(icon: "music.note", title: "Your music keeps playing")
                         }
                         .frame(maxWidth: 360, alignment: .leading)
