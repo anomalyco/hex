@@ -121,6 +121,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
 
         engine.autocorrect.isEnabled = FullKeyboardSettings().autocorrect
+        engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.configureForField()
         applyAppearance()
         refreshFromModel()
@@ -187,6 +188,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         if engine.journal !== journal {
             engine.journal = journal
         }
+        engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
             engine.autocorrect.isEnabled = wantsAutocorrect
@@ -578,7 +580,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
         accentCallout.show(nil)
         let layout = engine.layout
-        if let key = engine.previewKey, let balloon = layout.balloon(for: key) {
+        if engine.showsKeyPopups, let key = engine.previewKey, let balloon = layout.balloon(for: key) {
             callout.show(balloon, label: engine.displayLabel(for: key))
         } else {
             callout.show(nil, label: "")

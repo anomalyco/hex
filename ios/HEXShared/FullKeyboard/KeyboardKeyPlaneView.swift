@@ -47,7 +47,7 @@ final class KeyboardKeyPlaneView: UIView {
         let isLandscape = layout.orientation == .landscape
         let radius = layout.metrics.cornerRadius
         let pressed = engine.pressedKinds
-        let preview = layout.showsBalloons ? engine.previewKey?.kind : nil
+        let preview = layout.showsBalloons && engine.showsKeyPopups ? engine.previewKey?.kind : nil
         // Like Apple's spacebar trackpad, key glyphs blank out while sliding the cursor.
         let hideGlyphs = engine.isTrackpadActive
 

@@ -9,6 +9,7 @@ struct ExperimentsCard: View {
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var autocorrect = FullKeyboardSettings().autocorrect
+    @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var learnTyping = TypingJournalSettings().isEnabled
     @State private var typingLogs = TypingLogSettings().isEnabled
     @State private var showTypingLogs = false
@@ -58,6 +59,27 @@ struct ExperimentsCard: View {
                     .padding(.vertical, 10)
                     .onChange(of: autocorrect) { _, enabled in
                         FullKeyboardSettings().autocorrect = enabled
+                    }
+
+                    Divider()
+                        .overlay(HexTheme.borderWeak)
+                        .padding(.leading, 16)
+
+                    Toggle(isOn: $keyPopups) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Key pop-ups")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(HexTheme.textBase)
+                            Text("Show a bigger letter above the key you press")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HexTheme.textMuted)
+                        }
+                    }
+                    .tint(HexTheme.success)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .onChange(of: keyPopups) { _, enabled in
+                        FullKeyboardSettings().keyPopups = enabled
                     }
                 }
 
@@ -239,6 +261,7 @@ struct ExperimentsCard: View {
             customVocabulary = CustomVocabularySettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
             autocorrect = FullKeyboardSettings().autocorrect
+            keyPopups = FullKeyboardSettings().keyPopups
             learnTyping = TypingJournalSettings().isEnabled
             typingLogs = TypingLogSettings().isEnabled
         }
