@@ -45,12 +45,15 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     itself for a screen recording.
   - **Setup:** The keyboard needs Full Access to reach Hex through the App
     Group. Without it, the keyboard shows the Settings path and an **Open Hex
-    setup** button (`hex-dictation://keyboard/setup`). The app's setup card
-    shows live status for the keyboard, Full Access, the microphone, and the
-    speech model until all four are ready (after onboarding too), and opens
-    Hex's page in Settings. Full Access shows as on once the keyboard has run
-    with it (`keyboard.fullAccessSeenAt`): iOS reports Full Access only
-    inside the keyboard, so the app can't tell on from off until then.
+    setup** button (`hex-dictation://keyboard/setup`), which opens the app's
+    setup sheet. Home's status line counts the setup steps left ("Finish
+    setup · 1 step ›", else "Ready") and opens the same sheet: live status for
+    the keyboard, Full Access, the microphone, and the speech model, a field to
+    switch to Hex in while Full Access is unconfirmed, and **Open Settings**
+    (Hex's page in Settings) while the keyboard isn't ready. Full Access shows
+    as on once the keyboard has run with it (`keyboard.fullAccessSeenAt`): iOS
+    reports Full Access only inside the keyboard, so the app can't tell on from
+    off until then, and the sheet calls it "Not confirmed yet".
   - **Opening Hex:** SwiftUI `Link`, `openURL`, and `extensionContext.open`
     do nothing in a keyboard extension, so the keyboard opens Hex through
     the `UIApplication` at the end of its responder chain
@@ -92,7 +95,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     dictionary doesn't know in lowercase (likely names). German keeps the case,
     since its dictionary takes nouns in lowercase; so does a language with no
     dictionary on the iPhone (`TranscriptFormatter.insertionText`).
-  - **Full keyboard Hex key (Experiments › Full keyboard):** A tap, or a
+  - **Full keyboard Hex key (Settings › Keyboard › Full):** A tap, or a
     still hold of 0.35 s, starts dictation: in a warm session, else inside
     the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving
     more than 10 pt first opens the style menu; releasing over a row picks it, and releasing elsewhere leaves
@@ -100,19 +103,19 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     and the **Dictation styles** action opens the menu.
   - **Push to talk:** Holding still for 0.35 s on the full keyboard's Hex key
     or the dictation bar's **Dictate** starts dictation at once with a light
-    haptic (Experiments › Haptics), and lifting the finger finishes it as
+    haptic (Settings › Keyboard › Haptics), and lifting the finger finishes it as
     **Done** does; a quick tap still starts it and **Done** finishes it. On
     the Hex key, sliding more than 10 pt before the hold fires opens the menu
     instead, and once dictation has started, moving the finger changes
     nothing. Push to talk needs dictation in the keyboard (a warm session or
     in-keyboard dictation); a hold that opens Hex is only a tap.
-  - **Apple Intelligence cleanup (Experiments › Clean up with Apple
-    Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
+  - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
+    Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly
     misheard words and spoken self-corrections, within a 2 s budget. A
     timeout, error, empty or implausible output keeps the raw transcript, and
     the toggle is disabled with a reason when Apple Intelligence is unusable.
-  - **Clean up what I say (Experiments › Clean up what I say):** Off by
+  - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by
     default. For every style but `Verbatim`, Hex's dictation cleanup tagger
     labels each spoken word KEEP or DELETE on the iPhone and drops ums,
     repeats, and the words a spoken correction replaces ("3pm, actually 4pm"
@@ -144,7 +147,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     stays loaded, and is freed on a memory warning. Cleanup gets 150 ms; a
     timeout, an error, or a result with no words left keeps the transcript as
     heard.
-  - **Custom vocabulary (Experiments › Custom vocabulary):** Off by default.
+  - **Custom vocabulary (Settings › Dictation › Custom vocabulary):** Off by default.
     A local list of up to 100 names and phrases, applied to every engine. After
     transcription, matching words are rewritten to the listed spelling across
     case, spaces, tabs, a single hyphen, and possessive apostrophes, before
@@ -157,7 +160,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
     the list is also sent as a best-effort recognition hint; Parakeet's batch
     path gets no hint.
-  - **Learn how I type (Experiments › Learn how I type):** Off by default, and
+  - **Learn how I type (Settings › Privacy › Learn how I type):** Off by default, and
     shown whether or not the full keyboard is on. A private journal in the App
     Group (`typing-journal.json`) that never stores what you write: per-key tap
     offsets, and word-level pairs with counts and at most one word of context on
@@ -194,7 +197,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
-  - **Record typing logs (Experiments › Record typing logs):** Off by default,
+  - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. For testing and training prediction and
     per-user touch models: the keyboard writes every touch on Hex's keys (raw
     position, radius, `UITouch` timestamp, the key it resolved to), every layout
@@ -204,12 +207,36 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     after each word and when the host changes it, and each dictation's steps
     (heard, learned fixes, cleanup, inserted) with its outcome. One NDJSON file a
     day in the App Group (`TypingLogs/`), kept 14 days, at most 64 MB a day;
-    Experiments › Typing logs shares a day or all of them (AirDrop to a Mac) and
+    Privacy › Advanced › Typing logs shares a day or all of them (AirDrop to a Mac) and
     deletes them. Password, one-time code, and card fields write one `skipped`
     line and nothing else. Events are buffered on the main thread and encoded and
     appended on a utility queue every 2 s. Nothing is sent. The schema is in
     [`docs/typing-logs.md`](docs/typing-logs.md).
-- **Dictation language (Settings › Dictation language, iOS 26+):** Automatic by
+- **Settings (`ContentView`, `SettingsPages.swift`):** Home fits one screen: the
+  Hex header, one status line ("Ready" with a check, or "Finish setup · 1 step ›"),
+  Dictate, and four rows that each open a short page, then **Keyboard settings**
+  (Hex's page in iOS Settings) and **Run setup again**. Each row has a one-line
+  description at most. The pages:
+  - **Dictation:** Style, Dictation language, Translate what I say, Clean up
+    what I say, Custom vocabulary (its list below the switch), Keep mic warm,
+    and Always use iPhone microphone.
+  - **Keyboard:** Keyboard, **Full** or **Dictation bar** (stored as
+    `FullKeyboardSettings.isEnabled`), then Keyboard layout, Autocorrect and Key
+    pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
+    and a field to try the keyboard in.
+  - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
+    learned below the switch), and under **Advanced**, Record typing logs (off
+    by default) with its Typing logs viewer while it's on.
+  - **Experiments:** Emoji (it says it needs the full keyboard while the
+    dictation bar is chosen; Clear emoji history while it's on), and Clean up
+    with Apple Intelligence.
+
+  Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
+  added, Full Access not confirmed yet), `setup-sheet`, and
+  `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
+  its page's switches to the App Group: off by default, on with `-on`.
+  `-end` starts the page scrolled to the bottom.
+- **Dictation language (Settings › Dictation › Dictation language, iOS 26+):** Automatic by
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
   dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
@@ -242,7 +269,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   under `AssetInventory.maximumReservedLocales` by releasing others first. Only
   Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
   and other packages' descriptions go to logs, however readable.
-  The setup card's Speech model row names the language ("Norwegian Bokmål ·
+  The setup sheet's Speech model row names the language ("Norwegian Bokmål ·
   Apple"). Steps that only know English follow the language: Clean up what I
   say (an English tagger) uses word rules in Spanish, German and Norwegian and
   skips other languages; Clean up with Apple
@@ -266,7 +293,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   in-keyboard dictation uses it at once; a warm Hex session follows it within
   100 ms and prepares the language between dictations, and a handoff or the
   Action Button picks it up before recording.
-- **Translate what I say (Experiments, iOS 26+):** Off by default. Translates
+- **Translate what I say (Settings › Dictation, iOS 26+):** Off by default. Translates
   each dictation on the iPhone with Apple's Translation framework into the
   language picked under Insert in, once its pack is downloaded; without the
   pack the transcript goes in as spoken. Where you dictate, a switch picks
@@ -282,7 +309,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   language label read "Español → English". The App Group carries the
   switch, so in-keyboard dictation, a warm session, and the Action Button
   all follow it.
-- **Keyboard layouts (Experiments › Full keyboard › Keyboard layout):** English,
+- **Keyboard layouts (Settings › Keyboard › Keyboard layout, with Full chosen):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2) and
   Deutsch (QWERTZ with `ü`, `ö ä`), as Apple's iOS keyboards lay them out
   (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -300,7 +327,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
-- **Emoji (Experiments › Full keyboard › Emoji):** Off by default. An emoji key
+- **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
   emoji for the text before the cursor, then a grid that scrolls sideways through
