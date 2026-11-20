@@ -191,13 +191,13 @@ final class HexKeyRecordingPanel: UIView {
         cancelButton.symbol = "xmark"
         cancelButton.accessibilityLabel = "Cancel dictation"
         cancelButton.addTarget(self, action: #selector(cancel), for: .touchUpInside)
-        doneButton.title = "Done"
+        doneButton.symbol = "checkmark"
         doneButton.isPrimary = true
         doneButton.accessibilityLabel = "Done"
         doneButton.addTarget(self, action: #selector(done), for: .touchUpInside)
 
         doneSpinner.hidesWhenStopped = true
-        doneSpinner.color = palette.textMuted
+        doneSpinner.color = palette.textBase
         doneSpinner.isUserInteractionEnabled = false
         for view in [dot, clockLabel, styleButton, well, cancelButton, doneButton, doneSpinner] {
             addSubview(view)
@@ -217,12 +217,12 @@ final class HexKeyRecordingPanel: UIView {
         isTranscribing = phase == .processing
         scope.phase = phase
         dot.isHidden = isTranscribing
-        // One status, in one place: the clock becomes "Transcribing…" and Done waits with a
-        // spinner instead of a second label.
-        clockLabel.text = isTranscribing ? "Transcribing…" : clock
+        // Two round buttons, ✕ and ✓; once the recording stops the ✓ turns into the spinner in
+        // the same spot, so there's one place to look, and ✕ still cancels.
+        clockLabel.text = clock
         clockLabel.textColor = isTranscribing ? palette.textMuted : palette.textBase
-        doneButton.title = isTranscribing ? nil : "Done"
-        doneButton.isPrimary = !isTranscribing
+        doneButton.symbol = isTranscribing ? nil : "checkmark"
+        doneButton.isPrimary = true
         doneButton.isEnabled = !isTranscribing
         doneButton.accessibilityLabel = isTranscribing ? "Transcribing" : "Done"
         if isTranscribing { doneSpinner.startAnimating() } else { doneSpinner.stopAnimating() }
@@ -245,7 +245,7 @@ final class HexKeyRecordingPanel: UIView {
         scope.isDark = palette.isDark
         cancelButton.palette = palette
         doneButton.palette = palette
-        doneSpinner.color = palette.textMuted
+        doneSpinner.color = palette.textBase
     }
 
     override func layoutSubviews() {
@@ -263,10 +263,9 @@ final class HexKeyRecordingPanel: UIView {
         clockLabel.frame = CGRect(x: x, y: 0, width: clockLabel.bounds.width, height: bounds.height)
         x = clockLabel.frame.maxX + 8
 
-        let doneW: CGFloat = 72
         doneButton.cornerRadius = rowH / 2
         cancelButton.cornerRadius = rowH / 2
-        doneButton.frame = CGRect(x: innerRight - doneW, y: rowY, width: doneW, height: rowH)
+        doneButton.frame = CGRect(x: innerRight - rowH, y: rowY, width: rowH, height: rowH)
         cancelButton.frame = CGRect(x: doneButton.frame.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
         doneSpinner.center = CGPoint(x: doneButton.frame.midX, y: doneButton.frame.midY)
 
