@@ -1,0 +1,41 @@
+engine	id	wall_ms	cpu_ms	load_ms	hwm_kib	hypothesis
+tiny	01	610.3	1131.7	62.0	138488	please bring the green notebook to the meeting.
+tiny	02	562.1	1069.7	62.0	140572	Please bring the green note to the meeting.
+tiny	12	559.8	1061.7	62.0	141772	Bring the blue folder, I mean the green folder.
+tiny	19	546.5	1041.7	62.0	141772	I usually leave the keys near the entrance.
+tiny	25	562.7	1064.1	62.0	141772	El cafito de avía está caliente.
+tiny	26	566.8	1071.8	62.0	141772	trae el cuaderno verde a la reunión.
+tiny	32	838.7	1436.6	62.0	159204	mit dem Präden-Krüller-Ref-Tour-Besch-Drechen.
+tiny	37	765.9	1348.0	62.0	159616	Da med en gir en nye bort galt i møretta.
+base	01	1275.8	2468.1	96.9	188788	Please bring the green notebook to the meeting.
+base	02	1248.6	2421.4	96.9	190824	Please bring the green notebook to the meeting.
+base	12	1259.0	2427.3	96.9	191928	Bring the blue folder, I mean the green folder.
+base	19	1233.1	2383.2	96.9	191928	I usually leave the keys near the entrance.
+base	25	1213.9	2363.1	96.9	191928	El café todavía está caliente.
+base	26	1259.7	2438.3	96.9	191928	Trae el cuaderno verde a la reunión.
+base	32	2421.5	3919.6	96.9	227864	Die Repräsentatz-Klue, die Rews-Worpuch-Präsum.
+base	37	1523.3	2846.2	96.9	228276	Ta med den virkeligere nevbult kalt i møtte.
+small	01	4901.0	9586.8	239.8	386540	Please bring the green notebook to the meeting.
+small	02	5816.0	11316.8	239.8	388580	Please bring the green notebook to the meeting.
+small	12	5155.1	10013.7	239.8	389688	Bring the blue folder, I mean the green folder.
+small	19	5129.4	9993.0	239.8	389688	I usually leave the keys near the entrance.
+small	25	5462.9	10640.1	239.8	389688	El café todavía está caliente.
+small	26	5370.7	10476.0	239.8	389688	Trae el cuaderno verde a la reunión.
+small	32	5931.5	11533.8	239.8	389688	Bitte bring das grüne Räft so auf die Strecke.
+small	37	6166.6	11972.2	239.8	389688	Ta med den grønne boket i møte.
+small-short	01	1353.8	2631.6	90.6	349080	Please bring the green notebook to the meeting.
+small-short	02	1350.8	2625.3	90.6	351120	Please bring the green notebook to the meeting.
+small-short	12	1359.3	2627.6	90.6	352220	Bring the blue folder, I mean the green folder.
+small-short	19	1357.3	2638.0	90.6	352220	I usually leave the keys near the entrance.
+small-short	25	1344.7	2616.3	90.6	352220	El café todavía está caliente.
+small-short	26	1389.2	2683.3	90.6	352220	Trae el cuaderno verde a la reunión.
+small-short	32	1459.7	2799.9	90.6	352220	Bitte bring das grüne Räft zur Bestrechung.
+small-short	37	1440.5	2767.0	90.6	352220	Ta med den grønne bokat i møte.
+parakeet	01	175.9	331.8	3172.6	1428708	Please bring the green notebook to the meeting.
+parakeet	02	158.5	306.8	3172.6	1428708	Please bring the green notebook to the meeting.
+parakeet	12	173.6	340.5	3172.6	1428708	Bring the blue folder, I mean the green folder.
+parakeet	19	166.3	323.4	3172.6	1428708	I usually leave the keys near the entrance.
+parakeet	25	130.1	255.9	3172.6	1428708	El café todavía está caliente.
+parakeet	26	162.8	319.9	3172.6	1428708	Trae el cuaderno verde a la reunión.
+parakeet	32	192.4	375.6	3172.6	1428708	Metal Play the Scroll of Zwap.
+parakeet	37	147.5	288.4	3172.6	1428708	Ta med den gröne bokar till möte.

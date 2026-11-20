@@ -1,0 +1,41 @@
+id	lang	words	errors	end_audio_to_result_ms	ready_to_result_ms	hypothesis	status
+01	en	8	0	34	3695	Please bring the green notebook to the meeting	ok
+02	en	8	0	33	3378	Please bring the green notebook to the meeting	ok
+03	en	5	0	27	2766	The coffee is still warm	ok
+04	en	7	0	34	3629	Move the afternoon call to Friday morning	ok
+05	en	10	0	30	4007	I left the small brass key beside the kitchen door	ok
+06	en	7	0	42	3678	Please send the revised invoice before lunch	ok
+07	en	9	9				error 7
+08	en	8	0	48	3695	We should meet at the station after work	ok
+09	en	7	7				error 7
+10	en	9	0	24	3467	Can you find the receipt for the yellow jacket	ok
+11	en	6	1	33	3235	I left the door open	ok
+12	en	9	0	58	3827	Bring the blue folder I mean the green folder	ok
+13	en	6	0	29	4190	Meet me on Tuesday sorry Wednesday	ok
+14	en	9	0	34	3914	My brother plays the cello in a small Orchestra	ok
+15	en	8	0	25	3498	Check the spelling before you send the message	ok
+16	en	7	0	33	3094	Let's take a walk along the river	ok
+17	en	8	0	46	3763	Keep the windows open until the paint dries	ok
+18	en	8	0	31	3958	The dentist moved my appointment to next month	ok
+19	en	8	0	46	3803	I usually leave the keys near the entrance	ok
+20	en	6	0	33	3290	Nobody ordered another cup of tea	ok
+21	en	10	0	25	3458	We need fresh bread and a bottle of olive oil	ok
+22	en	7	7				error 7
+23	en	8	0	28	3953	I didn't agree to change the delivery address	ok
+24	en	8	0	33	4275	Please read the instructions before connecting the cable	ok
+25	es	5	0	31	2916	el café todavía está caliente	ok
+26	es	7	0	33	3450	trae el cuaderno verde a la reunión	ok
+27	es	6	0	36	2899	nos vemos mañana en la estación	ok
+28	es	6	0	38	2768	te digo que no puedo ir	ok
+29	es	6	0	50	3082	la tienda cierra temprano los domingos	ok
+30	es	7	0	26	3463	dejé las llaves junto a la puerta	ok
+31	de	5	0	26	2789	der Kaffee ist noch warm	ok
+32	de	7	3	30	3972	bitte bring das grüne Rechtsprechung	ok
+33	de	6	0	31	3436	wir treffen uns morgen am Bahnhof	ok
+34	de	8	0	28	4094	ich habe den Schlüssel auf den Tisch gelegt	ok
+35	de	7	1	29	3979	Bibliothek schliesst heute früher als sonst	ok
+36	no	4	4				error 12
+37	no	7	7				error 12
+38	no	6	6				error 12
+39	no	7	7				error 12
+40	no	5	5				error 12
