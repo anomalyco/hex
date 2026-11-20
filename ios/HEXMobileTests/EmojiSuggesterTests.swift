@@ -184,6 +184,7 @@ final class EmojiSuggesterTests: XCTestCase {
     private struct Fixture: Decodable {
         let dev: [Sentence]
         let heldOut: [Sentence]
+        let blind: [Sentence]
     }
 
     private static func plain(_ emoji: String) -> String {
@@ -221,11 +222,14 @@ final class EmojiSuggesterTests: XCTestCase {
         }
         let devWords = score(fixture.dev, nil)
         let heldWords = score(fixture.heldOut, nil)
+        let blindWords = score(fixture.blind, nil)
         let devSemantic = score(fixture.dev, neighbors)
         let heldSemantic = score(fixture.heldOut, neighbors)
-        print("EMOJI_QUALITY words: dev \(devWords.hits)/30 (top-1 \(devWords.top1)), held-out \(heldWords.hits)/30 (top-1 \(heldWords.top1)), \(String(format: "%.2f", heldWords.ms)) ms a sentence")
-        print("EMOJI_QUALITY words + embeddings: dev \(devSemantic.hits)/30 (top-1 \(devSemantic.top1)), held-out \(heldSemantic.hits)/30 (top-1 \(heldSemantic.top1)), \(String(format: "%.2f", heldSemantic.ms)) ms a sentence, index built in \(String(format: "%.0f", built * 1000)) ms (\(semantic?.vocabularySize ?? 0) words)")
+        let blindSemantic = score(fixture.blind, neighbors)
+        print("EMOJI_QUALITY words: dev \(devWords.hits)/30 (top-1 \(devWords.top1)), held-out \(heldWords.hits)/30 (top-1 \(heldWords.top1)), blind \(blindWords.hits)/\(fixture.blind.count) (top-1 \(blindWords.top1)), \(String(format: "%.2f", heldWords.ms)) ms a sentence")
+        print("EMOJI_QUALITY words + embeddings: dev \(devSemantic.hits)/30 (top-1 \(devSemantic.top1)), held-out \(heldSemantic.hits)/30 (top-1 \(heldSemantic.top1)), blind \(blindSemantic.hits)/\(fixture.blind.count) (top-1 \(blindSemantic.top1)), \(String(format: "%.2f", heldSemantic.ms)) ms a sentence, index built in \(String(format: "%.0f", built * 1000)) ms (\(semantic?.vocabularySize ?? 0) words)")
         XCTAssertGreaterThanOrEqual(devWords.hits, 28)
         XCTAssertGreaterThanOrEqual(heldWords.hits, 27)
+        XCTAssertGreaterThanOrEqual(blindWords.hits, 35)
     }
 }
