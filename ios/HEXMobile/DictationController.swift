@@ -208,6 +208,10 @@ final class DictationController {
 
         wireAudioCallbacks()
         wireSystemIntentBus()
+        if autoPrepareOnInit {
+            // At launch no dictation is running, so any Hex Live Activity is left over.
+            liveActivity.endImmediately()
+        }
 
         if Self.applyLaunchFixtureIfPresent(to: self) {
             return
@@ -280,6 +284,8 @@ final class DictationController {
         if duration == .off {
             if keyboardSessionEnabled {
                 endWarmSession()
+            } else {
+                endStaleLiveActivities()
             }
         } else if !keyboardSessionEnabled {
             requestWarmSession(attemptAutoReturn: false)
@@ -449,8 +455,15 @@ final class DictationController {
         if phase != .recording {
             audio.deactivateSession()
         }
+        endStaleLiveActivities()
 
         publishKeyboardSnapshot()
+    }
+
+    /// Ends Live Activities no dictation owns, such as one a suspended or killed process left.
+    func endStaleLiveActivities() {
+        guard activeCapture == nil, phase != .recording, phase != .transcribing else { return }
+        liveActivity.endImmediately()
     }
 
     func noteSceneDidEnterBackground() {
@@ -844,7 +857,11 @@ final class DictationController {
                 loudnessDB = -120
                 recordingDuration = 0
                 phase = .recording
-                liveActivity.startRecording(startedAt: Date(timeIntervalSince1970: startedAt))
+                // Only the Action Button, Control Center, and Siri (the dictations that copy)
+                // get a Live Activity: the keyboard and the app show their own recording UI.
+                if copyToPasteboard {
+                    liveActivity.startRecording(startedAt: Date(timeIntervalSince1970: startedAt))
+                }
                 startMetering(for: captureGeneration)
                 publishKeyboardSnapshot()
 

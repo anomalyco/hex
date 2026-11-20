@@ -257,6 +257,12 @@ it on-device with Apple Speech, downloading the speech assets on first use
     `HexDictationControl` (`ControlWidget`) start recording on first press with
     a Dynamic Island / Lock Screen Live Activity (`Stop` and `Cancel` buttons)
     and transcribe + copy to the clipboard on second press.
+  - Only these dictations get a Live Activity; the keyboard and the app show
+    their own recording UI. It shows Copied for 2 s, and a cancel, failure, or
+    empty capture ends it at once, under a background task so a suspending app
+    can't leave it behind (`LiveActivityCoordinator`). Every end also ends any
+    other Hex activity, and launch, returning to Hex, and ending the warm
+    session (Keep mic warm › Off) end any no dictation owns.
 
 ## Build & Test
 

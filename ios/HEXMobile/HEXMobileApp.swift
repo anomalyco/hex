@@ -52,6 +52,8 @@ struct HEXMobileApp: App {
                     if phase == .background {
                         dictation.noteSceneDidEnterBackground()
                         openedFromKeyboard = false
+                    } else if phase == .active {
+                        dictation.endStaleLiveActivities()
                     }
                 }
             }
