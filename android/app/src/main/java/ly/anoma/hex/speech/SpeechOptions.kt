@@ -1,10 +1,20 @@
 package ly.anoma.hex.speech
 
 import android.content.Context
+import android.content.res.Resources
 
 internal enum class Style { Polished, Casual, Notes, Verbatim }
 internal enum class Spoken(val code: String, val label: String) {
-    English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk")
+    English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk");
+
+    // Whisper calls Bokmål "no"; the keyboard and its model use BCP 47 "nb".
+    val layoutCode get() = if (this == Norwegian) "nb" else code
+    companion object {
+        fun matching(code: String?): Spoken? = when (code) {
+            "no", "nb", "nn" -> Norwegian
+            else -> entries.firstOrNull { it.code == code }
+        }
+    }
 }
 internal data class SpeechOptions(val style: Style, val spoken: Spoken, val clean: Boolean, val translate: Boolean)
 internal class SpeechPreferences(context: Context) {
@@ -12,9 +22,17 @@ internal class SpeechPreferences(context: Context) {
     var style: Style
         get() = Style.entries.firstOrNull { it.name == prefs.getString("style", null) } ?: Style.Polished
         set(value) { prefs.edit().putString("style", value.name).apply() }
-    var spoken: Spoken
-        get() = Spoken.entries.firstOrNull { it.code == prefs.getString("spoken", null) } ?: Spoken.English
-        set(value) { prefs.edit().putString("spoken", value.code).apply() }
+    // Null means Automatic; never save the resolved locale over that choice.
+    var language: Spoken?
+        get() = Spoken.matching(prefs.getString("spoken", null))
+        set(value) { prefs.edit().putString("spoken", value?.code).apply() }
+    val spoken: Spoken
+        get() {
+            language?.let { return it }
+            val locales = Resources.getSystem().configuration.locales
+            for (i in 0 until locales.size()) Spoken.matching(locales[i].language)?.let { return it }
+            return Spoken.English
+        }
     var clean: Boolean
         get() = prefs.getBoolean("clean", false)
         set(value) { prefs.edit().putBoolean("clean", value).apply() }

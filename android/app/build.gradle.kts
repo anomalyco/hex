@@ -66,7 +66,7 @@ android {
         version = "3.22.1"
     }
     buildFeatures { compose = true }
-    androidResources { noCompress += listOf("bin", "hextm") }
+    androidResources { noCompress += listOf("bin", "hextm", "valid") }
     sourceSets["main"].assets.srcDir(modelAssets)
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -87,7 +87,7 @@ val verifyInter by tasks.registering {
 // Pin the licensed HXTM files. An older prototype word-pair list cannot slip into an APK.
 val verifyTypingModels by tasks.registering {
     val dir = file("src/main/assets/typing")
-    val names = listOf("en.hextm", "es.hextm")
+    val names = listOf("en.hextm", "es.hextm", "de.hextm", "nb.hextm", "en.valid")
     val manifest = dir.resolve("SHA256SUMS")
     inputs.files(names.map(dir::resolve) + manifest)
     doLast {

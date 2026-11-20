@@ -2,9 +2,19 @@ package ly.anoma.hex.typing
 
 import android.content.Context
 import java.security.MessageDigest
+import ly.anoma.hex.speech.Spoken
 
 internal class TypingPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("typing", Context.MODE_PRIVATE)
+    var layout: Spoken?
+        get() = Spoken.matching(prefs.getString("layout", null))
+        set(value) { prefs.edit().putString("layout", value?.layoutCode).apply() }
+    var autocorrect: Boolean
+        get() = prefs.getBoolean("autocorrect", true)
+        set(value) { prefs.edit().putBoolean("autocorrect", value).apply() }
+    var spatial: Boolean
+        get() = prefs.getBoolean("spatial", true)
+        set(value) { prefs.edit().putBoolean("spatial", value).apply() }
     var popups: Boolean
         get() = prefs.getBoolean("popups", true)
         set(value) { prefs.edit().putBoolean("popups", value).apply() }

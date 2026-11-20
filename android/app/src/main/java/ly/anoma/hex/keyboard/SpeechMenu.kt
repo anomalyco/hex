@@ -20,6 +20,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
     init { addView(body); isFillViewport = true }
     private fun dp(n: Int) = (resources.displayMetrics.density * n).roundToInt()
     fun home() = show("Hex menu")
+    fun language() = show("Language")
     fun accents(values: List<String>, pick: (String) -> Unit) {
         page = "Accents"; title(page); body.removeAllViews(); scrollTo(0, 0)
         values.forEach { s -> row(s, "") { pick(s) } }
@@ -31,7 +32,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
         when (next) {
             "Hex menu" -> {
                 row("Style", prefs.style.name + "  ›") { show("Style") }
-                row("Language", prefs.spoken.label + "  ›") { show("Language") }
+                row("Language", (prefs.language?.label ?: "Automatic") + "  ›") { show("Language") }
                 if (prefs.translation && prefs.spoken == Spoken.Spanish)
                     row("Next dictation", (if (ime.nextEnglish != false) "Paste in English" else "Paste as spoken") + "  ›") {
                         show("Next dictation")
@@ -50,9 +51,11 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
             "Style" -> Style.entries.forEach { value -> row(value.name, if (prefs.style == value) "✓" else "") {
                 prefs.style = value; home()
             } }
-            "Language" -> Spoken.entries.forEach { value -> row(value.label, if (prefs.spoken == value) "✓" else "") {
-                prefs.spoken = value; ime.nextEnglish = null; home()
-            } }
+            "Language" -> (listOf(null) + Spoken.entries).forEach { value ->
+                row(value?.label ?: "Automatic", if (prefs.language == value) "✓" else "") {
+                    prefs.language = value; ime.nextEnglish = null; close()
+                }
+            }
             else -> listOf(true, false).forEach { english ->
                 row(if (english) "Paste in English" else "Paste as spoken", if ((ime.nextEnglish ?: true) == english) "✓" else "") {
                     ime.nextEnglish = english; close()

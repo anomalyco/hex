@@ -1,67 +1,98 @@
 # Android typing benchmark
 
-Replay of the iOS decoder’s **held-out English test set** on the Android runtime. Each of 2,000 synthetic sentences supplies its intended text, the key hit by each tap, and the original x/y taps from the 402-point iOS layout. These are simulated taps on public Tatoeba English sentences, not a person’s keyboard events.
+**On the same iOS R1 word models and synthetic taps, Android now has 136 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
 
-## Results
+## Same-model results
 
-**Android reduced WER from 33.81% to 10.53%. iOS reached 8.39% with the identical Google Books file and no personal offsets.** Android made 298 more word errors than that iOS run.
+Each language has 2,000 held-out synthetic Tatoeba sentences. English has 13,870 reference words; Spanish has 13,301. Errors are word insertions, deletions and substitutions, ignoring case and terminal punctuation. A missing space can change the word count. No user-specific offsets are applied.
 
-| Decoder | Word errors / 13,870 | WER | Exact sentences / 2,000 |
+| Decoder | English errors | English WER | English exact / 2,000 | Spanish errors | Spanish WER | Spanish exact / 2,000 |
+|---|---:|---:|---:|---:|---:|---:|
+| Raw hit keys | 4,689 | 33.8068% | 160 | 5,343 | 40.1699% | 94 |
+| Phase 3 Android | 1,461 | 10.5335% | 983 | 1,338 | 10.0594% | 1,086 |
+| iOS R1, same HXTM, no offsets | 1,163 | 8.3850% | 1,154 | 1,387 | 10.4278% | 1,064 |
+| **Phase 4 Android** | **1,027** | **7.4045%** | **1,249** | **1,374** | **10.3301%** | **1,070** |
+
+The installed APK ran on the Studio’s Android 15/API 35 ARM64 emulator (4 vCPUs, 4 GiB guest RAM). It received the original 402-point iOS key geometry, hit-key sequence, coordinates and separators. Letters request suggestions and spaces request replacements and predictions, exactly as in the Android IME. English and Spanish HXTM files are byte-identical across platforms. The iOS reference is the recorded `output-r1-decoder-{en,es}.json` output, before calibration. The earlier iOS prototype’s 6.71% English WER used a **different** model; it is not the comparison target. [Phase 3 measurements](metrics.tsv) · [historical iOS aggregate, including calibration](ios-shared.tsv) · [Phase 4 replay counts and latency](phase4.tsv).
+
+## Where the 298 English errors came from
+
+We changed one decision rule at a time on the same 2,000 English inputs. The diagnostic runner used scratch copies of the Kotlin classes on Android. Its phase 3 and phase 4 error and agreement counts matched the installed APKs. Deltas below are conditional on the preceding rows; they are not independent effects.
+
+| Cumulative change | Errors | Δ errors | Normalized outputs matching iOS / 2,000 |
 |---|---:|---:|---:|
-| Raw hit keys | 4,689 | 33.81% | 160 |
-| iOS previous engine | 2,086 | 15.04% | 736 |
-| iOS spatial, earlier prototype | 930 | 6.71% | 1,319 |
-| iOS prototype with calibrated offsets | 869 | 6.27% | 1,355 |
-| iOS spatial, shared Google Books v3 | 1,163 | 8.39% | 1,154 |
-| iOS shared model with calibrated offsets | 1,137 | 8.20% | 1,170 |
-| **Android Kotlin, shared Google Books v3** | **1,461** | **10.53%** | **983** |
+| Phase 3 | 1,461 | — | 1,517 |
+| Apply iOS’s English contractions/common typos before search | 1,230 | −231 | 1,724 |
+| Increase English word/pair weight from 1.25 to 1.5 | 1,255 | +25 | 1,740 |
+| Score only the five best whole-word spatial readings | 1,207 | −48 | 1,762 |
+| Use R1’s 0.26-row-pitch vertical spread on the recorded layout | 1,186 | −21 | 1,832 |
+| Use R1’s 6.0 missed-space penalty | 1,196 | +10 | 1,864 |
+| **Protect valid English spellings outside HXTM (phase 4)** | **1,027** | **−169** | **1,773** |
+| Diagnostic only: fixed Android 3.9 split penalty even at iOS pitches | 1,007 | −20 | 1,751 |
 
-| Android emulator latency | Samples | Median | p95 |
-|---|---:|---:|---:|
-| Replay: letter + candidates | 56,826 | 0.004 ms | 0.239 ms |
-| Replay: space + correction + next words | 13,675 | 0.082 ms | 0.372 ms |
-| Real Hex keyboard: touch-up to external editor, letter | 245 | 1.409 ms | 2.589 ms |
-| Real Hex keyboard: touch-up to external editor, space | 70 | 3.161 ms | 4.428 ms |
+The R1 scoring and correction order alone closed **265 of the 298** errors. The remaining 33 were a net WER difference, not 33 sentences with one known cause. The intermediate decoders disagreed on 138 alignment spans; in 54, iOS retained a literal absent from HXTM. iOS can ask `UITextChecker` whether such a spelling is valid. Android had treated every missing spelling as a nonword. It now uses the same valid-literal cost (15 instead of 22) and replacement margin (7 instead of 2), with a bundled public SCOWL list. That list is not Apple’s dictionary. Lower WER is not identical decisions: the final engines produce the same normalized word sequence on 1,773 English and 1,906 Spanish sentences. Spanish made 36 more errors than phase 3 but agreed with iOS on 84 more sentences and still beat the same-model iOS WER.
 
-The live timing used guest monotonic timestamps immediately before injecting key-up and at the unrelated editor’s text-change callback. All five passes of the requested sentence matched, with pop-ups and haptics on. It measures insertion, not display paint or finger-down time. [Replay aggregates, including maximum latencies](metrics.tsv) · [Same-model iOS aggregates](ios-shared.tsv).
+The production IME scores **actual** key centres. Android’s rows are shorter than the test layout, so its vertical spread has a floor based on the iOS reference aspect ratio (56 / 39.5). This floor is inactive on the replay geometry. A fixed 6.0 split penalty ranked “seeks” ahead of “see how” for the real centre taps for `seehkw`. The IME now scales that squared-distance cost with row height, floored at the existing Android 3.9 prior (2% omitted separators). The measured Android pitch was 106.2 × 131 px, giving a cost of about 4.5; the recorded iOS layout uses exactly 6.0. This keeps the iOS behavior on its geometry and fixes the Android regression without a sentence-specific exception. The external editor received `we need to do research into this and see how well we can get it` from `we need tk dk research into this and seehkw well we can get it`. Tapping space after `we need tk` produced `we need to `; one backspace restored `we need tk`.
 
-## What the numbers mean
+## Checks in an external editor
 
-WER is word-level Levenshtein insertions, deletions and substitutions divided by reference words, ignoring case and trailing punctuation, as in the iOS scorer. A lost space therefore counts as a word error even when every letter is present. Both platforms use the **same 2,000 references**. The previous-engine and prototype rows use the recorded iOS outputs for commit `92faec63`. The Google Books rows come from the later Studio R1 runs (`output-r1-decoder-en.json` and `output-r1-decoder-en-offsets.json`); both R1 model files were compared byte-for-byte against the Android files. Only aggregate scores for synthetic IDs were exported from those runs. No personal offsets are fed to Android.
+The Studio sent touch events to Hex’s visible keys and suggestion strip, then read the separate editor’s text. With Wi-Fi off and airplane mode on:
 
-The Android runner executes the installed APK’s Kotlin classes on an Android 15/API 35 ARM64 emulator (4 vCPUs, 4 GiB configured, Apple M5 Ultra Studio). Timing wraps each letter or space, including Gaussian scoring, completions, correction, and next-word suggestions where applicable. It excludes JSON parsing, scoring the benchmark, the editor IPC and rendering. It measures the emulator, not a handset.
+| Layout | Typed and completed with a model suggestion | Space-triggered correction |
+|---|---|---|
+| Español | `Nos vemos mañan` → **Nos vemos mañana**; ¿ and ¡ inserted from the second symbols page | `nos vemos mañnaa` → **nos vemos mañana** |
+| Deutsch | `Bären mögen süße Äpfe` → **Bären mögen süße Äpfel**; held **s** and slid to **ß** | `vielen dnak` → **vielen dank** |
+| Norsk (Bokmål) | `Jeg lærer norsk på lørda` → **Jeg lærer norsk på lørdag**; next words included **kveld**, **morgen** and **og** | `tusen takkk` → **tusen takk** |
 
-Android uses a 48-prefix beam, a Gaussian per tap and a previous-word probability with unigram backoff. Replacement must beat the literal by 2 nats (7 for a known word). On the Android layout, testing rapid, exact key-centre presses exposed a delayed space click and a valid missed-space reading below the margin. Committing space on key-up preserves order. A vertical spread floor of 0.43 key pitches across and a 3.9-nat missed-space cost (2% omitted separators in the generator) let `seehkw` clear the unchanged margin. These rules apply to all words. The held-out WER was measured afterward.
+Automatic on a fresh install displayed English, followed the system locale to Español, and returned to English when the system did. With layout pinned to Deutsch and dictation set to Español, the keyboard kept the German letters and showed Español on the space bar.
 
 ## Models and licences
 
-[The shared v3 builder](build-typing-model.py) is an unmodified snapshot of the iOS Google Books builder (SHA-256 `cba009fe227632d9f8d176055f26ca34d5eb6f88a7cbd947955d8f9142878317`). It sums 1980–2019 counts in [Google Books Ngram v3, 2020-02-17](https://storage.googleapis.com/books/ngrams/books/datasetsv3.html): English has 24 unigram and 589 bigram shards; Spanish has 3 and 73. It filters spellings, takes the most frequent words, selects informative pairs and quantizes costs in eighths of a nat. Source counts are **CC BY 3.0**. Neither model uses SymSpell. The files are packaged uncompressed so Android can map them directly from its APK. [Pinned SHA-256 manifest](../../app/src/main/assets/typing/SHA256SUMS).
+All four HXTM v3 assets are uncompressed and memory-mapped from the APK; Gradle verifies the [pinned hashes](../../app/src/main/assets/typing/SHA256SUMS). There is no SymSpell data. German and Bokmål have the same binary format as the iOS files; the Studio checked them with the Swift model reader as well as the Android IME. The two new files are also in the iOS checkout’s `ios/HEXKeyboard/TypingModel/` folder, local commit `230a437e`. The Swift reader round-tripped every spelling and every stored pair cost. This verifies file compatibility, not iOS device behavior.
 
-The Studio reconstruction used complete, cached source counts and the filtered vocabularies from the shared build. Both outputs were byte-for-byte identical to the iOS builder’s outputs:
+| Language | Words | Word pairs | Source of counts | Source of spelling |
+|---|---:|---:|---|---|
+| English | 86,133 | 417,480 | Google Books v3, 24 unigram / 589 bigram shards | SCOWL 2020.12.07 |
+| Spanish | 110,000 | 326,366 | Google Books v3, 3 / 73 shards; existing model unchanged | RLA-ES Hunspell |
+| German | 95,000 | 368,534 | Google Books v3, all 8 / 181 German shards | German alphabetic corpus spellings |
+| Bokmål | 95,000 | 370,560 | NB N-gram 2026 book unigrams and bigrams, language `nob` | Norsk ordbank, Bokmål full forms |
 
-| Language | Words | Word pairs | SHA-256 |
-|---|---:|---:|---|
-| English | 86,133 | 417,480 | `14370569c747a7efb5cd2f8e75b70d2899937c12e149671fe7a0929c5e0c4028` |
-| Spanish | 110,000 | 326,366 | `02ffcac185eb832d766b300a7454ba069d0b26251469ea7cdc6eda36926ad5ad` |
+The [shared iOS builder](build-typing-model.py), SHA-256 `cba009fe227632d9f8d176055f26ca34d5eb6f88a7cbd947955d8f9142878317`, sums counts from 1980–2019, selects informative pairs and writes quantized probabilities. The [German/Bokmål adapter](build-layout-model.py) uses the same writer. For German, it uses the iOS shard reader and filters lowercased words to its alphabet. For Bokmål, it NFC-normalizes and lowercases the words, filters vocabulary to standard Bokmål forms in the 1 February 2022 Ordbank `fullformsliste.txt` (`OPPSLAG`, normative and current in that snapshot), and only retains pairs whose two words are in that vocabulary. The September 2026 inflection export alone dropped common uninflected words such as `og`, `på` and `det`; it was not used in the shipped model. The complete snapshot supplied 617,139 distinct forms. Of 20,096,783 observed in-vocabulary pair types, 394,825 met the shared writer’s count and information thresholds; 370,560 fit the model budget.
 
-English spellings are filtered using **SCOWL 2020.12.07**, sizes through 70; the source archive SHA-256 is `5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc`. The APK includes the collective permission and the component notices. Spanish spellings are from RLA-ES’s `es_ES` and `es_MX` Hunspell dictionaries under their **MPL 1.1** option. All four source files from the shared build matched [LibreOffice’s pinned sources](https://github.com/LibreOffice/dictionaries/tree/762abe74008b94b2ff06db6f4024b59a8254c467/es). [APK credits and complete notices](../../app/src/main/assets/licenses/credits.txt).
+- [Google Books Ngram v3 (2020-02-17)](https://storage.googleapis.com/books/ngrams/books/datasetsv3.html): **CC BY 3.0**. English and Spanish keep the original shared builds. German uses no second dictionary.
+- [NB N-gram 2026](https://data.norge.no/nb/datasets/f2eebe8b-bd83-34e4-bcf3-c0c5e37a77f8/n-grammer-fra-nasjonalbiblioteket-2026): the National Library of Norway’s counts are **CC0 1.0**. The [Norsk ordbank – Bokmål 2005, February 2022](https://data.norge.no/en/datasets/f0db926d-a154-3a12-82b8-6573b57f6dbb/norsk-ordbank-norwegian-bokmal-2005) spelling filter is separately **CC BY 4.0**.
+- [SCOWL](https://wordlist.aspell.net/) permits commercial redistribution subject to its [included notices](../../app/src/main/assets/licenses/scowl.txt). The English literal-validity list contains 45,303 unique spellings absent from the frequency model (440,142 bytes). It is built from the same public SCOWL archive, not from benchmark outputs or personal data. It cannot supply scored candidates or word probabilities.
+- [RLA-ES es_ES/es_MX sources](https://github.com/LibreOffice/dictionaries/tree/762abe74008b94b2ff06db6f4024b59a8254c467/es) use their **MPL 1.1** option. [APK credits, source links and modification notices](../../app/src/main/assets/licenses/credits.txt) · [full licence texts](../../app/src/main/assets/licenses/).
 
-## Reproduce
+## Reproduce on the Studio
 
-1. From the iOS experiment, export only the synthetic rows. The exporter requires the exact IDs `test-0` through `test-1999`, empty context and no logged flag. It takes no personal labels, calibration data, metadata or logged sentences. Do not transfer the mixed input/results files themselves.
+1. Export only the allowlisted synthetic IDs **where the iOS inputs already reside**. The exporter accepts `test-0…1999` (English) or `es-test-0…1999` (Spanish), empty context, no logged flag, and key-aligned finite x/y pairs. It exports only ID, intended text, synthetic hit keys/taps and the matching uncalibrated iOS output. Never transfer the mixed source, labels or personal offsets.
 
    ```sh
-   python3 android/benchmark/typing/export_synthetic.py "$HOME/dev/experiments/2026-11-20-hex-typing-logs/bench" > "$LOCAL_SCRATCH/synthetic.jsonl"
-   ferry cp "$LOCAL_SCRATCH/synthetic.jsonl" anomastudio:Library/Caches/hex-android-phase3/synthetic.jsonl
+   mkdir -p "$T/bench"
+   for lang in en es; do
+     python3 benchmark/typing/export_synthetic.py "$IOS_BENCH/input.json" \
+       "$IOS_BENCH/output-r1-decoder-$lang.json" "$lang" > "$T/bench/$lang.jsonl"
+   done
    ```
-2. On the Studio, set `T` to that scratch directory, `JAVA_HOME` to JDK 21, `ANDROID_HOME` to the SDK, and `ANDROID_SERIAL` to the test emulator. From the synced `android/` directory, run:
+
+2. In the synced Android project with JDK 21, Android SDK 35 and the designated emulator:
 
    ```sh
    ./gradlew assembleDebug test
-   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   adb install --no-incremental -r app/build/outputs/apk/debug/app-debug.apk
    sh benchmark/typing/replay.sh
    ```
 
-   The replay loader and the synthetic sentences live only in scratch; neither is an APK feature. The output contains only aggregate counts and timing percentiles. To regenerate models from the public sources, invoke `python3 benchmark/typing/build-typing-model.py en <count-cache> en.hextm` and similarly for `es` (the Spanish source filter needs `spylls`).
+   The Java replay shim executes the installed APK’s Kotlin classes with Android’s `app_process`. The output is aggregate WER, normalized sentences matching iOS and per-key timing (median/p95/max). Timings exclude loading, JSON parsing, evaluation, editor IPC and screen paint. Phase 3 timed the separate editor’s text-change callback from key-up (letter median/p95: 1.409/2.589 ms; space: 3.161/4.428 ms). The Phase 4 replay measures decoder work, not that end-to-end path or a physical handset.
 
-For the R1 comparison, on the Studio where the iOS outputs already reside, run `python3 benchmark/typing/compare_ios.py "$T/synthetic.jsonl" ios_spatial_shared /private/tmp/hex-bench-decoder/output-r1-decoder-en.json` (and similarly for `-offsets`). It prints only the synthetic aggregate; the mixed iOS file stays in place.
+3. To rebuild the new typing models, use Python 3.9+, `curl`, `gzip` and `zstd` with scratch storage. German streams each shard and caches its counts. The Bokmål adapter resumes the two large NB archives in validated byte ranges and verifies their SHA-256 alongside the Ordbank snapshot. The SCOWL English validity list has a separate pinned-source generator:
+
+   ```sh
+   mkdir -p "$T/models" "$T/source"
+   python3 benchmark/typing/build-layout-model.py de "$T/source/de" "$T/models/de.hextm"
+   python3 benchmark/typing/build-layout-model.py nb "$T/source/nb" "$T/models/nb.hextm"
+   curl -fsSL https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz -o "$T/source/scowl.tar.gz"
+   python3 benchmark/typing/build-valid-words.py "$T/source/scowl.tar.gz" \
+     app/src/main/assets/typing/en.hextm "$T/models/en.valid"
+   ```

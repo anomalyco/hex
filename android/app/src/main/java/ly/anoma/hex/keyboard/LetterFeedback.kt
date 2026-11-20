@@ -70,9 +70,18 @@ internal class LetterFeedback(private val host: ViewGroup) {
             's' to "sßśš", 'z' to "zžźż", 'l' to "lł", 'ñ' to "ñn")
         fun options(c: Char, language: String): List<String> {
             val lower = c.lowercaseChar()
-            val raw = if (language == "es") when (lower) {
-                'a' -> "aáàäâ"; 'e' -> "eéèëê"; 'i' -> "iíìïî"; 'o' -> "oóòöô"; 'u' -> "uúüùû"; else -> accents[lower]
-            } else accents[lower]
+            val raw = when (language) {
+                "es" -> when (lower) {
+                    'a' -> "aáàäâãåąæāª"; 'e' -> "eéèëêęėē"; 'i' -> "iíïìîįī"; 'o' -> "oóòöôõøœōº"; 'u' -> "uúüùûū"; else -> accents[lower]
+                }
+                "nb" -> when (lower) {
+                    'a' -> "aàáâäãā"; 'o' -> "oôöòóœōõ"; 'æ' -> "æä"; 'ø' -> "øö"; else -> accents[lower]
+                }
+                "de" -> when (lower) {
+                    'a' -> "aàáâæãåā"; 'o' -> "oôòóœøōõ"; 'u' -> "uûùúū"; else -> accents[lower]
+                }
+                else -> accents[lower]
+            }
             return raw.orEmpty().map { (if (c.isUpperCase()) (if (it == 'ß') 'ẞ' else it.uppercaseChar()) else it).toString() }
         }
     }

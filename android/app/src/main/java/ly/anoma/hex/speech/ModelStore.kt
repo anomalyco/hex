@@ -10,7 +10,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import javax.net.ssl.HttpsURLConnection
 
-/** The only network operation in Hex: an explicit, fixed model GET from onboarding. */
+/** The only network operation in Hex: an explicit, fixed model GET from setup or Dictation settings. */
 internal object ModelStore {
     private const val size = 190085487L
     private const val hash = "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"

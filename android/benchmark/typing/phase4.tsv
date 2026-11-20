@@ -1,0 +1,12 @@
+wer	en_raw	4689	13870	33.8068	160/2000
+wer	en_ios_shared	1163	13870	8.3850	1154/2000
+wer	en_android_spatial	1027	13870	7.4045	1249/2000
+agreement	en	1773/2000
+latency	en_letter	56826	0.0031	0.1727	5.6892
+latency	en_space	13675	0.0629	0.3183	2.8677
+wer	es_raw	5343	13301	40.1699	94/2000
+wer	es_ios_shared	1387	13301	10.4278	1064/2000
+wer	es_android_spatial	1374	13301	10.3301	1070/2000
+agreement	es	1906/2000
+latency	es_letter	59378	0.0046	0.2116	5.4735
+latency	es_space	13094	0.0568	0.2288	15.2690

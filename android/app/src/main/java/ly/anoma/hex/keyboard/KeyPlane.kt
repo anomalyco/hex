@@ -25,6 +25,7 @@ import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.useInter
 import ly.anoma.hex.speech.SpeechPhase
+import ly.anoma.hex.speech.Spoken
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -69,6 +70,9 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     private var originY = 0f
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val hold = Runnable { if (tracking) held = ime.beginSpeech() }
+    private val switchLanguage = Runnable {
+        if (spaceKey.isPressed) { spaceKey.isPressed = false; spaceKey.performLongClick() }
+    }
     private val repeatDelete = object : Runnable {
         override fun run() {
             if (deleting) { repeated = true; ime.delete(); postDelayed(this, 65) }
@@ -159,6 +163,18 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
         }
         spaceKey = cap(bottom, 3.5f, "English", "Space", key, 14f) { ime.type(" ") }
         spaceKey.label?.setTextColor(quiet)
+        spaceKey.setOnLongClickListener { openMenu(); menu.language(); true }
+        spaceKey.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { v.isPressed = true; postDelayed(switchLanguage, ViewConfiguration.getLongPressTimeout().toLong()) }
+                MotionEvent.ACTION_MOVE -> if (e.x < -slop || e.x > v.width + slop || e.y < -slop || e.y > v.height + slop) {
+                    removeCallbacks(switchLanguage); v.isPressed = false
+                }
+                MotionEvent.ACTION_UP -> { removeCallbacks(switchLanguage); val tap = v.isPressed; v.isPressed = false; if (tap) v.performClick() }
+                MotionEvent.ACTION_CANCEL -> { removeCallbacks(switchLanguage); v.isPressed = false }
+            }
+            true
+        }
         cap(bottom, 1f, ".", "Period", key) { ime.type(".") }
         enterKey = cap(bottom, 1.65f, "", "Return", modifier, 17f, ime::enter)
         enterIcon.setImageResource(R.drawable.ic_enter)
@@ -171,19 +187,27 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     fun layoutKeys(symbols: Boolean, more: Boolean, shifted: Boolean, locked: Boolean, action: String?) {
         clearCallout(); grid = null; letters.clear()
         plane.removeAllViews()
-        val spanish = !symbols && ime.preferences.spoken.code == "es"
+        val language = ime.layoutLanguage
+        val punctuation = if (more && language == Spoken.Spanish) ".,¿¡'" else ".,?!'"
         val lines = when {
-            !symbols -> listOf("qwertyuiop", if (spanish) "asdfghjklñ" else "asdfghjkl", "zxcvbnm")
-            more -> listOf("~`|•√π÷×¶∆", "£¢€¥^°={}", "[]<>_\"*")
-            else -> listOf("1234567890", "@#$%&-+()", "!,?'/;:")
+            !symbols -> when (language) {
+                Spoken.English -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+                Spoken.Spanish -> listOf("qwertyuiop", "asdfghjklñ", "zxcvbnm")
+                Spoken.Norwegian -> listOf("qwertyuiopå", "asdfghjkløæ", "zxcvbnm")
+                Spoken.German -> listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm")
+            }
+            more -> listOf("[]{}#%^*+=", "_\\|~<>€£¥•", punctuation)
+            else -> listOf("1234567890", "-/:;()$&@\"", punctuation)
         }
+        val columns = maxOf(lines[0].length, lines[1].length)
+        val side = if (symbols) 1.5f else (columns - lines[2].length) / 2f
         for ((index, line) in lines.withIndex()) {
             val row = LinearLayout(context)
             plane.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, keyHeight))
-            if (index == 1 && !spanish) row.addView(View(context), LayoutParams(0, 1, .5f))
+            if (index < 2 && line.length < columns) row.addView(View(context), LayoutParams(0, 1, (columns - line.length) / 2f))
             if (index == 2) {
-                if (symbols) cap(row, 1.5f, if (more) "123" else "=\\<", "More symbols", modifier, 15f, ime::shift)
-                else icon(row, 1.5f, R.drawable.ic_shift, if (locked) "Caps lock" else "Shift",
+                if (symbols) cap(row, side, if (more) "123" else "=\\<", "More symbols", modifier, 15f, ime::shift)
+                else icon(row, side, R.drawable.ic_shift, if (locked) "Caps lock" else "Shift",
                     if (shifted) ink else modifier, ime::shift, if (shifted) color(R.color.page) else ink)
             }
             for (c in line) {
@@ -195,7 +219,7 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
                     if (g != null && p != null) ime.letter(text, p.x, p.y, g) else ime.type(text)
                 }
                 if (!symbols) letters[c] = k
-                val accents = if (symbols) emptyList() else LetterFeedback.options(text.single(), ime.preferences.spoken.code)
+                val accents = if (symbols) emptyList() else LetterFeedback.options(text.single(), language.layoutCode)
                 if (accents.isNotEmpty()) k.setOnLongClickListener {
                     openMenu(); menu.accents(accents) { accent -> closeMenu(); ime.type(accent) }; true
                 }
@@ -230,9 +254,9 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
                     true
                 }
             }
-            if (index == 1 && !spanish) row.addView(View(context), LayoutParams(0, 1, .5f))
+            if (index < 2 && line.length < columns) row.addView(View(context), LayoutParams(0, 1, (columns - line.length) / 2f))
             if (index == 2) {
-                deleteKey = icon(row, 1.5f, R.drawable.ic_delete, "Delete", modifier, ime::delete).also { k ->
+                deleteKey = icon(row, side, R.drawable.ic_delete, "Delete", modifier, ime::delete).also { k ->
                     k.setOnTouchListener { v, e ->
                         when (e.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
@@ -327,6 +351,7 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     }
     private fun refreshSpace() {
         val next = ime.preferences.options(ime.nextEnglish)
+        spaceKey.contentDescription = "Space, " + next.spoken.label + ". Hold to switch dictation language"
         spaceKey.label?.text = next.spoken.label + if (next.translate) " → English" else ""
         spaceKey.label?.textSize = if (next.translate) 12f else 14f
     }
@@ -352,7 +377,8 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     fun setLevel(value: Float) = scope.push(value)
     fun cancelGestures() {
         clearCallout()
-        removeCallbacks(hold); removeCallbacks(repeatDelete)
+        removeCallbacks(hold); removeCallbacks(repeatDelete); removeCallbacks(switchLanguage)
+        if (::spaceKey.isInitialized) spaceKey.isPressed = false
         held = false; tracking = false; deleting = false
         if (::hexKey.isInitialized) hexKey.isPressed = false
         deleteKey?.isPressed = false

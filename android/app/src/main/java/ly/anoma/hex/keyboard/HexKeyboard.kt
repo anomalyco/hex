@@ -26,6 +26,7 @@ class HexKeyboard : InputMethodService() {
     internal val preferences by lazy { SpeechPreferences(this) }
     internal var nextEnglish: Boolean? = null
     internal val feedback by lazy { TypingPreferences(this) }
+    internal val layoutLanguage get() = feedback.layout ?: preferences.spoken
     private val models = HashMap<String, SpatialDecoder>()
     private var word: TypingWord? = null
     private var ordinaryField = false
@@ -134,15 +135,15 @@ class HexKeyboard : InputMethodService() {
         word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
     internal fun configureTyping(keepWord: Boolean = false) {
-        val language = preferences.spoken.code
+        val language = layoutLanguage.layoutCode
         val active = word
-        if (keepWord && active != null && active.decoder.model.language == language &&
+        if (keepWord && active != null && active.decoder.model.language == language && active.spatial == feedback.spatial &&
             active.token.isNotEmpty() && endsWith(prefix + active.token)) {
             showPlane(); keys?.suggestions(active.suggestions()); return
         }
         resetTyping()
-        word = if (ordinaryField && language in setOf("en", "es")) {
-            try { TypingWord(models.getOrPut(language) { SpatialDecoder(TypingModel.asset(assets, language)) }) }
+        word = if (ordinaryField) {
+            try { TypingWord(models.getOrPut(language) { SpatialDecoder(TypingModel.asset(assets, language)) }, feedback.spatial) }
             catch (_: java.io.IOException) { null } // The editor can still type if its asset cannot be mapped.
         } else null
         showPlane()
@@ -201,7 +202,7 @@ class HexKeyboard : InputMethodService() {
         val w = word
         if (value == " " && w != null && !symbols) {
             val old = w.token; val lang = w.decoder.model.language
-            val fix = if (old.isNotEmpty() && endsWith(prefix + old) && canEndWord()) w.replacement() else null
+            val fix = if (feedback.autocorrect && old.isNotEmpty() && endsWith(prefix + old) && canEndWord()) w.replacement() else null
             if (fix != null && !feedback.blocked(lang, old, fix) && replace(old, fix + " ")) {
                 undo = Undo(lang, prefix, old, fix)
                 if (expectedCaret >= 0) expectedCaret += fix.length + 1 - old.length

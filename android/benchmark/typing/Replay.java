@@ -7,10 +7,10 @@ import java.util.*;
 
 /** Runs via app_process against the actual installed APK. Never built into Hex. */
 public final class Replay {
-    static KeyGrid originalGeometry() {
+    static KeyGrid originalGeometry(String language) {
         // Portrait KeyboardLayout at 402 pt (side 6.5, gap 6, letter height 45, row gap 11).
         double pitch = 39.5; Map<Character,KeyPoint> points = new LinkedHashMap<>();
-        String[] rows = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
+        String[] rows = {"qwertyuiop", language.equals("es") ? "asdfghjklñ" : "asdfghjkl", "zxcvbnm"};
         for (int row=0; row<rows.length; row++) {
             String letters=rows[row];
             for (int i=0; i<letters.length(); i++)
@@ -39,15 +39,16 @@ public final class Replay {
             name,ns.size(),ns.get(ns.size()/2)/1e6,ns.get(ns.size()*95/100)/1e6,ns.get(ns.size()-1)/1e6);
     }
     public static void main(String[] args) throws Exception {
-        TypingModel model=TypingModel.Companion.file(new File(args[0]),"en");
-        KeyGrid grid=originalGeometry(); TypingWord state=new TypingWord(new SpatialDecoder(model));
+        String lang=args[2], group=lang.equals("es") ? "es-test-" : "test-";
+        TypingModel model=TypingModel.Companion.file(new File(args[0]),lang);
+        KeyGrid grid=originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
         List<Long> letters=new ArrayList<>(), spaces=new ArrayList<>();
-        int count=0, total=0; int[] errors=new int[5], exact=new int[5];
+        int count=0, total=0, matches=0; int[] errors=new int[3], exact=new int[3];
         try (BufferedReader reader=new BufferedReader(new FileReader(args[1]))) {
             String line;
             while((line=reader.readLine())!=null) {
                 JSONObject r=new JSONObject(line);
-                if(!r.getString("id").equals("test-"+count)) throw new IllegalArgumentException("Unexpected row "+count);
+                if(!r.getString("id").equals(group+count)) throw new IllegalArgumentException("Unexpected row "+count);
                 String typed=r.getString("typed"); JSONArray taps=r.getJSONArray("taps");
                 if(typed.length()!=taps.length()) throw new IllegalArgumentException("Unaligned taps");
                 StringBuilder out=new StringBuilder(); state.reset("");
@@ -64,14 +65,17 @@ public final class Replay {
                     (key==' '?spaces:letters).add(System.nanoTime()-start);
                 }
                 String[] ref=words(r.getString("intended")); total+=ref.length; count++;
-                String[] results={typed,r.getString("ios_previous"),r.getString("ios_spatial"),r.getString("ios_calibrated"),out.toString()};
-                for(int i=0;i<5;i++) { int err=edits(ref,words(results[i])); errors[i]+=err; if(err==0) exact[i]++; }
+                String ios=r.getString("ios_shared");
+                if (Arrays.equals(words(ios),words(out.toString()))) matches++;
+                String[] results={typed,ios,out.toString()};
+                for(int i=0;i<3;i++) { int err=edits(ref,words(results[i])); errors[i]+=err; if(err==0) exact[i]++; }
             }
         }
         if(count!=2000) throw new IllegalArgumentException("Incomplete synthetic set: "+count);
-        String[] names={"raw","ios_previous","ios_spatial","ios_calibrated","android_spatial"};
-        for(int i=0;i<5;i++)
-            System.out.printf(Locale.ROOT,"wer\t%s\t%d\t%d\t%.4f\t%d/%d\n",names[i],errors[i],total,100.0*errors[i]/total,exact[i],count);
-        latency("letter",letters); latency("space",spaces);
+        String[] names={"raw","ios_shared","android_spatial"};
+        for(int i=0;i<3;i++)
+            System.out.printf(Locale.ROOT,"wer\t%s\t%d\t%d\t%.4f\t%d/%d\n",lang+"_"+names[i],errors[i],total,100.0*errors[i]/total,exact[i],count);
+        System.out.printf("agreement\t%s\t%d/%d\n",lang,matches,count);
+        latency(lang+"_letter",letters); latency(lang+"_space",spaces);
     }
 }

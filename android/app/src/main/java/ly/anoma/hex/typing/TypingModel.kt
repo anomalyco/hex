@@ -9,7 +9,7 @@ import java.nio.channels.FileChannel
 
 /** HXTM v3: sorted letter-code spellings, quantized unigram costs and CSR bigram rows.
  * All large tables stay in the read-only file mapping, including when mapped inside the APK. */
-internal class TypingModel private constructor(private val data: ByteBuffer, val language: String) {
+internal class TypingModel private constructor(private val data: ByteBuffer, val language: String, private val validWords: ByteBuffer?) {
     private fun u8(pos: Int) = data.get(pos).toInt() and 255
     private fun int(pos: Int) = data.getInt(pos)
     val words = int(8)
@@ -112,6 +112,27 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         }
         return (a.toLong() shl 32) or b.toLong()
     }
+    // Public, newline-delimited ASCII spellings outside the word-pair model. Find a
+    // literal in the mapped bytes without allocating a heap dictionary or calling an IME service.
+    fun validLiteral(word: String): Boolean {
+        val data = validWords ?: return false
+        var lo = 0; var hi = data.limit()
+        while (lo < hi) {
+            var at = (lo + hi) ushr 1
+            while (at > lo && data.get(at - 1) != 10.toByte()) at--
+            var end = at
+            while (data.get(end) != 10.toByte()) end++
+            var cmp = 0
+            for (i in 0 until minOf(word.length, end - at)) {
+                cmp = data.get(at + i).toInt() - word[i].code
+                if (cmp != 0) break
+            }
+            if (cmp == 0) cmp = (end - at) - word.length
+            if (cmp == 0) return true
+            if (cmp < 0) lo = end + 1 else hi = at
+        }
+        return false
+    }
     fun index(word: String): Int {
         val r = range(word); val a = (r ushr 32).toInt()
         return if (r != 0L && length(a) == word.length) a else -1
@@ -135,15 +156,25 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         best
     }
     companion object {
-        private fun mapped(channel: FileChannel, offset: Long, size: Long, language: String): TypingModel {
-            require(size in 36L..32_000_000L)
-            val m = channel.map(FileChannel.MapMode.READ_ONLY, offset, size).order(ByteOrder.LITTLE_ENDIAN)
-            require(m.getInt(20) in 1..250)
-            return TypingModel(m, language)
+        private fun mapped(channel: FileChannel, offset: Long, size: Long): ByteBuffer {
+            require(size in 1L..32_000_000L)
+            return channel.map(FileChannel.MapMode.READ_ONLY, offset, size).order(ByteOrder.LITTLE_ENDIAN)
         }
-        fun asset(assets: AssetManager, language: String) = assets.openFd("typing/" + language + ".hextm").use { fd ->
-            FileInputStream(fd.fileDescriptor).use { mapped(it.channel, fd.startOffset, fd.declaredLength, language) }
+        private fun open(model: ByteBuffer, language: String, valid: ByteBuffer?): TypingModel {
+            require(model.limit() >= 36 && model.getInt(20) in 1..250)
+            require(valid == null || valid.get(valid.limit() - 1) == 10.toByte())
+            return TypingModel(model, language, valid)
         }
-        fun file(file: File, language: String) = FileInputStream(file).use { mapped(it.channel, 0, file.length(), language) }
+        fun asset(assets: AssetManager, language: String): TypingModel {
+            fun read(name: String) = assets.openFd("typing/" + name).use { fd ->
+                FileInputStream(fd.fileDescriptor).use { mapped(it.channel, fd.startOffset, fd.declaredLength) }
+            }
+            return open(read(language + ".hextm"), language, if (language == "en") read("en.valid") else null)
+        }
+        fun file(file: File, language: String): TypingModel {
+            fun read(f: File) = FileInputStream(f).use { mapped(it.channel, 0, f.length()) }
+            val valid = File(file.parentFile, "en.valid")
+            return open(read(file), language, if (language == "en") read(valid) else null)
+        }
     }
 }

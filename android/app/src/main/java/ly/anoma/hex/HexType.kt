@@ -10,7 +10,7 @@ import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 
 @OptIn(ExperimentalTextApi::class)
-private val inter = FontFamily(*listOf(400, 500, 600, 700).map { w ->
+internal val inter = FontFamily(*listOf(400, 500, 600, 700).map { w ->
     Font(R.font.inter_variable, weight = FontWeight(w),
         variationSettings = FontVariation.Settings(FontVariation.weight(w)))
 }.toTypedArray())

@@ -10,7 +10,7 @@ Welcome explains that the internet is used only to fetch the 190 MB speech model
 
 ## Keyboard and styles
 
-Swipe up on the Hex key or tap **Hex menu**. Choose the spoken language (English, Spanish, German, Norwegian) and a style:
+**Automatic** uses the first supported Android system language, or English if none is supported. Hold the language-labelled space bar to switch immediately between Automatic, English, Español, Deutsch and Norsk (Bokmål). Swipe up on the Hex key or tap **Hex menu** to change the spoken language or style:
 
 - **Polished** (default): trims standalone hesitation sounds, fixes spacing/capitals and closes sentences.
 - **Casual:** lowercase texting, without the period at the end of a single statement.
@@ -23,13 +23,29 @@ Swipe up on the Hex key or tap **Hex menu**. Choose the spoken language (English
 
 ## Typing assistance
 
-English and Español share the iOS keyboard’s **HXTM v3** files. Both are bundled, uncompressed and memory-mapped from the APK. Start typing to see three frequency-ranked candidates; tap one to insert it. After a space the strip predicts the next word from the word-pair counts. Spanish has a dedicated ñ key. German, Norwegian, passwords, addresses, and editors that disable suggestions use literal typing.
+All four layouts have a bundled, memory-mapped **HXTM v3** word and word-pair model. English and Spanish keep the original iOS Google Books files. German uses Google Books; Bokmål uses the National Library of Norway’s book counts filtered by Norsk ordbank. Start typing to see ranked suggestions; tap one to insert it. A space brings up next-word predictions. Passwords, addresses and editors that disable suggestions use literal typing.
+
+**Keyboard › Keyboard layout** follows dictation by default; an explicit layout can differ from the space bar’s spoken language. Spanish has a dedicated ñ and ¿/¡ on the second symbols page. German is QWERTZ with ü, ö and ä; hold s for ß. Bokmål has å, ø and æ.
 
 On space, the Kotlin decoder compares each tap with the measured key centres and combines those distances with the previous word’s probability. It can recover a missing space. A known spelling requires a higher confidence margin than a nonword. Immediately press **Delete** to restore exactly what you typed, without the space. Undo the same replacement twice and Hex keeps that spelling in later sessions. Only rejection counts keyed by hashes are saved locally; there is no typing journal.
 
-**Hex menu → Typing feedback** controls key pop-ups and key haptics independently. Both default on; Hex follows system keyboard vibration. Hold a letter, slide to an accent, and release. Turning off pop-ups leaves the deliberate accent picker available.
+**Keyboard settings and Hex menu → Typing feedback** control key pop-ups and key haptics independently. Both default on; Hex follows system keyboard vibration. Hold a letter, slide to an accent, and release. Turning off pop-ups leaves the deliberate accent picker available.
 
-[Typing benchmark, source data and licences](benchmark/typing/README.md)
+[English/Spanish typing benchmark, model sources and licences](benchmark/typing/README.md)
+
+## Settings
+
+After setup, Home shows **Ready** or **Finish setup**, a **Dictate** bar and four destinations, following the iOS navigation in #2054. Tap Dictate, speak, then Finish dictation: Hex displays the local result on Home. **Dictation** controls style, language, translation, cleanup and the offline speech model. **Keyboard** has layout, autocorrect, key pop-ups, haptics and a practice field. **Privacy** explains storage and links the model credits. **Experiments › Spatial autocorrect** controls tap-based correction; it starts on to preserve existing Android behavior. Turning it off keeps dictionary completions and the fixed English typo/contraction rules; turning off Keyboard › Autocorrect disables all automatic replacements.
+
+## Phase 4 verification
+
+On identical held-out synthetic taps and **unchanged English and Spanish iOS models**, Android’s English word error rate fell from 10.53% to **7.40%**, against **8.39%** for iOS R1 without offsets. Spanish was **10.33%** against **10.43%** for iOS (phase 3 Android: 10.06%). The [step-by-step benchmark](benchmark/typing/README.md#where-the-298-english-errors-came-from) explains the original 298 extra English errors; [the replay table](benchmark/typing/phase4.tsv) gives raw counts, exact sentences and timing.
+
+The Studio verified Spanish, German and Bokmål suggestions and space-triggered corrections in a separate Android app, including **¿¡**, **ß** and **æøå**. The German and Bokmål assets were also copied, byte-for-byte, into the iOS typing-model folder in local commit `230a437e`. The production Swift reader checked all 95,000 words per language and every stored pair score; no iOS source or existing English/Spanish model changed.
+
+With airplane mode on and Wi-Fi off, fixed audio went through the emulator microphone and Whisper small into that editor. Spanish **“Nos vemos mañana en la estación”** and German **“Wir treffen uns morgen am Bahnhof”** matched. Bokmål **“Tusen takk for hjelpen”** also matched; on corpus clip 40 Hex inserted **“Biblioteket stenger tydelig på lørdag”** instead of **“Biblioteket stenger tidlig på lørdag.”** The same Spanish clip also produced a transcript from Home’s Dictate bar.
+
+Five unit tests passed in each of the debug and release variants. Home, the four settings pages and all four detail pages were captured in light and dark. Deselecting Hex as the current keyboard changed **Ready** to **Finish setup · 1 step**; selecting it again through setup restored **Ready**. The local APK, full-size screenshots, replay results and Studio log are under `build/phase4-proof/`.
 
 ## How it works
 
@@ -55,4 +71,4 @@ adb shell am start -n ly.anoma.hex/.MainActivity
 
 On the headless Studio, start an ARM64 AVD with `-audio none -grpc 8566 -grpc-use-token`. [inject.py](benchmark/inject.py) uses the matching emulator discovery record and streams paced mono PCM16 into the guest microphone. Generate the bindings from the SDK emulator’s `lib/emulator_controller.proto` with `grpcio-tools`, then put them on `PYTHONPATH`. No recording or transcript is injected directly into the application.
 
-**Scope:** Android 12+ (min API 31), target 35, ARM64, English and Spanish QWERTY typing models and four dictation languages. The Studio exercised download, offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing. Physical handset accuracy, deadlines, thermal behavior and Bluetooth routing remain unmeasured.
+**Scope:** Android 12+ (min API 31), target 35, ARM64, four typing models and four dictation languages. The Studio exercised download, offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing. Physical handset accuracy, deadlines, thermal behavior and Bluetooth routing remain unmeasured.

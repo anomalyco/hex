@@ -38,9 +38,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
-import ly.anoma.hex.speech.ModelStore
+import ly.anoma.hex.speech.*
+import ly.anoma.hex.typing.TypingPreferences
 
-private data class Setup(val mic: Boolean = false, val enabled: Boolean = false, val chosen: Boolean = false,
+internal data class Setup(val mic: Boolean = false, val enabled: Boolean = false, val chosen: Boolean = false,
                          val micNeedsSettings: Boolean = false) {
     val ready get() = mic && enabled && chosen
 }
@@ -50,6 +51,12 @@ class MainActivity : ComponentActivity() {
     private val imm by lazy { getSystemService(InputMethodManager::class.java) }
     private var setup by mutableStateOf(Setup())
     private var page by mutableIntStateOf(0)
+    private val speech by lazy { SpeechPreferences(this) }
+    private val typing by lazy { TypingPreferences(this) }
+    private var phase by mutableStateOf(SpeechPhase.Idle)
+    private var transcript by mutableStateOf("")
+    private var notice by mutableStateOf<String?>(null)
+    private lateinit var capture: MicCapture
     private val changed = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) = refresh()
     }
@@ -58,6 +65,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        capture = MicCapture(LocalSpeech(applicationContext),
+            update = { next, reason -> phase = next; notice = reason },
+            meter = {}, insert = { transcript = it })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
@@ -66,15 +76,29 @@ class MainActivity : ComponentActivity() {
         setContent {
             HexTheme {
                 BackHandler(page in 1..2) { go(page - 1) }
-                SetupScreen(page, setup, ::go, ::askForMic,
+                val model = ModelStore.state.collectAsState().value
+                if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.download(this) },
+                    phase, transcript, notice, ::dictate, capture::cancel, { go(it) },
+                    { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) })
+                else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
-                    choose = { imm.showInputMethodPicker() }, model = ModelStore.state.collectAsState().value,
+                    choose = { imm.showInputMethodPicker() }, model = model,
                     download = { ModelStore.download(this) })
             }
         }
     }
 
+    private fun dictate() {
+        when (phase) {
+            SpeechPhase.Idle -> if (setup.mic) {
+                transcript = ""; capture.start(speech.options(null))
+            } else askForMic()
+            SpeechPhase.Opening, SpeechPhase.Listening -> capture.finish()
+            SpeechPhase.Transcribing -> Unit
+        }
+    }
     private fun go(next: Int) {
+        if (page == 3 && next != 3) { capture.cancel(); transcript = "" }
         page = next
         prefs.edit().putInt("page", next).apply()
     }
@@ -95,7 +119,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() { super.onResume(); refresh() }
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) refresh() }
-    override fun onDestroy() { contentResolver.unregisterContentObserver(changed); super.onDestroy() }
+    override fun onStop() { capture.cancel(); super.onStop() }
+    override fun onDestroy() { capture.close(); contentResolver.unregisterContentObserver(changed); super.onDestroy() }
 }
 
 @Composable
@@ -126,7 +151,7 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                         Text("Hex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(Modifier.weight(1f))
-                    if (page < 3) Text("Step " + (page + 1) + " of 3", color = colors.onSurfaceVariant,
+                    Text("Step " + (page + 1) + " of 3", color = colors.onSurfaceVariant,
                         style = MaterialTheme.typography.labelLarge)
                 }
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -172,15 +197,6 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                             }
                             if (!setup.chosen) TextButton(onClick = choose) { Text("Choose Hex keyboard") }
                         }
-                        else -> {
-                            Spacer(Modifier.height(26.dp))
-                            Heading(if (setup.ready) "Your keyboard is ready." else "Set up your keyboard.")
-                            Detail(if (setup.ready) "Hold the Hex key anywhere you type." else "Check your keyboard and microphone in setup.")
-                            Spacer(Modifier.height(18.dp))
-                            ModelRow(model, download)
-                            Text("Swipe up on the Hex key for styles and translation.", style = MaterialTheme.typography.bodyMedium)
-                            TextButton(onClick = { go(0) }) { Text("Run setup again") }
-                        }
                     }
                 }
                 if (page == 2 && text.isBlank()) {
@@ -193,11 +209,10 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                             0 -> { download(); go(1) }
                             1 -> go(2)
                             2 -> { keyboard?.hide(); go(3) }
-                            else -> go(if (setup.ready) 2 else 1)
                         }
                     }, enabled = page != 1 || setup.ready, shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                        Text(listOf("Get started", "Continue", "Done", if (setup.ready) "Try the keyboard" else "Set up Hex")[page],
+                        Text(listOf("Get started", "Continue", "Done")[page],
                             style = MaterialTheme.typography.titleMedium)
                     }
                 }
