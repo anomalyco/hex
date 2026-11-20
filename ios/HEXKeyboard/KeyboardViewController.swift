@@ -327,7 +327,7 @@ final class KeyboardViewController: UIInputViewController {
             guard let self else { return }
             if self.localDictation.isActive { self.localDictation.cancel() } else { self.cancelWarmDictation() }
         }
-        syncLocalDictationAvailability()
+        syncLocalDictationAvailability(access: dictationAccess(now: Date().timeIntervalSince1970))
         viewModel.onStyleSelected = { [weak self] style in
             guard let self else { return }
             self.bridge.style = style
@@ -392,10 +392,12 @@ final class KeyboardViewController: UIInputViewController {
         mountSurface()
     }
 
-    /// The dictation bar, or the full keyboard when its experiment is on (iPhone only).
-    /// Only switches while idle.
+    /// The full keyboard (iPhone only), or the dictation bar once it was chosen. Without Full
+    /// Access always the full keyboard: the bar types nothing but spaces and line breaks,
+    /// and its Dictate needs Full Access. Only switches while idle.
     private func mountSurface() {
-        let wantsFull = FullKeyboardSettings().isEnabled && UIDevice.current.userInterfaceIdiom == .phone
+        let wantsFull = (FullKeyboardSettings().isEnabled || !hasFullAccess)
+            && UIDevice.current.userInterfaceIdiom == .phone
         guard surface == nil || wantsFull != (fullKeyboard != nil) else { return }
         guard surface == nil || viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
 
@@ -469,19 +471,23 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// Full Access, which dictation needs (Hex's App Group, the microphone). In the simulator
+    /// a live Hex session stands in for it.
+    private func dictationAccess(now: TimeInterval) -> Bool {
+        #if targetEnvironment(simulator)
+        return hasFullAccess || bridge.snapshot().isAvailable(at: now)
+        #else
+        return hasFullAccess
+        #endif
+    }
+
     private func syncFromBridge(animated: Bool) {
         let now = Date().timeIntervalSince1970
         updateKeyboardTraits()
         fullKeyboard?.syncSettings()
         syncTypingLogEnabled()
-        syncLocalDictationAvailability()
-
-        #if targetEnvironment(simulator)
-        let simSnap = bridge.snapshot()
-        let effectiveFullAccess = hasFullAccess || simSnap.isAvailable(at: now)
-        #else
-        let effectiveFullAccess = hasFullAccess
-        #endif
+        let effectiveFullAccess = dictationAccess(now: now)
+        syncLocalDictationAvailability(access: effectiveFullAccess)
 
         guard effectiveFullAccess else {
             viewModel.applyBridgeState(
@@ -578,8 +584,14 @@ final class KeyboardViewController: UIInputViewController {
     /// screen, and iOS ends a keyboard that passes its limit (older iPhones, many apps open).
     /// While the keyboard is short of it, `onLocalDictateTap` is nil, so Dictate and the Hex
     /// key take the cold start that opens Hex, as before iOS 26 (a hold stays a tap there).
-    private func syncLocalDictationAvailability() {
+    /// Without Full Access it is nil too, and the Hex key says dictation needs Full Access.
+    private func syncLocalDictationAvailability(access: Bool) {
         guard KeyboardLocalDictation.isSupported else { return }
+        guard access || localDictation.isActive else {
+            if viewModel.onLocalDictateTap != nil { viewModel.onLocalDictateTap = nil }
+            localDictationAvailable = nil
+            return
+        }
         let available = localDictation.isActive || localDictation.hasMemoryToStart
         guard available != localDictationAvailable else { return }
         // Noted at most every 5 s, as the footprint can hover at the line.

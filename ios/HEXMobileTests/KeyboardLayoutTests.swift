@@ -356,16 +356,18 @@ final class KeyboardLayoutTests: XCTestCase {
 
 @MainActor
 final class FullKeyboardSettingsTests: XCTestCase {
-    func testFullKeyboardIsOffAndAutocorrectOnByDefault() throws {
+    func testFullKeyboardAndAutocorrectAreOnByDefault() throws {
         let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = FullKeyboardSettings(defaults: defaults)
 
-        XCTAssertFalse(settings.isEnabled)
+        XCTAssertTrue(settings.isEnabled)
         XCTAssertTrue(settings.autocorrect)
 
         settings.applyLaunchArguments(["HEX"])
+        XCTAssertTrue(settings.isEnabled)
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.keyboardLaunchArgument, "dictation-bar"])
         XCTAssertFalse(settings.isEnabled)
         settings.applyLaunchArguments(["HEX", FullKeyboardSettings.launchArgument])
         XCTAssertTrue(settings.isEnabled)
@@ -374,7 +376,24 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertFalse(FullKeyboardSettings(defaults: defaults).autocorrect)
     }
 
-    func testNoAppGroupReadsAsOff() {
-        XCTAssertFalse(FullKeyboardSettings(defaults: nil).isEnabled)
+    /// Testers who turned the full keyboard experiment off chose the dictation bar and keep
+    /// it; those who never touched it (unset) get the full keyboard.
+    func testExplicitlyOffKeepsTheDictationBar() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(false, forKey: "experiments.fullKeyboard")
+        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).isEnabled)
+        defaults.set(true, forKey: "experiments.fullKeyboard")
+        XCTAssertTrue(FullKeyboardSettings(defaults: defaults).isEnabled)
+
+        FullKeyboardSettings(defaults: defaults).isEnabled = false
+        XCTAssertEqual(defaults.object(forKey: "experiments.fullKeyboard") as? Bool, false)
+    }
+
+    /// Without Full Access the keyboard reads no App Group: the full keyboard, which types.
+    func testNoAppGroupReadsAsFullKeyboard() {
+        XCTAssertTrue(FullKeyboardSettings(defaults: nil).isEnabled)
     }
 }

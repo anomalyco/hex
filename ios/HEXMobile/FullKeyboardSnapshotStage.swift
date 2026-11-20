@@ -195,7 +195,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 ),
                 now: now
             )
-        case "no-access":
+        case "no-access", "no-access-hint":
             model.configureFixture(snapshot: .offline, now: now, hasFullAccess: false)
         default:
             model.configureFixture(snapshot: warm, now: now)
@@ -251,6 +251,9 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.emojiPanel?.debugJump(toSection: 3)
             case "emoji-probe":
                 EmojiFixture.probe(view)
+            case "no-access-hint":
+                // The Hex key tapped without Full Access.
+                view.showFullAccessHint()
             case "style":
                 view.debugShowStyleMenu()
             case "languages":

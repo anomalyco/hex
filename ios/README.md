@@ -45,10 +45,22 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     `onboarding-allow`, `onboarding-try`, `onboarding-try-done`,
     `onboarding-try-off`, and `onboarding-tour`, which walks every page by
     itself for a screen recording.
-  - **Setup:** The keyboard needs Full Access to reach Hex through the App
-    Group. Without it, the keyboard shows the Settings path and an **Open Hex
-    setup** button (`hex-dictation://keyboard/setup`), which opens the app's
-    setup sheet. Home's status line counts the setup steps left ("Finish
+  - **Without Full Access (App Review 4.4.1):** Hex is a keyboard first. The
+    full keyboard types without Full Access or network: letters, shift and caps
+    lock, numbers and symbols, accents, delete, return, the globe key, and
+    suggestions and autocorrect (`UITextChecker`, the supplementary lexicon,
+    and Spatial autocorrect's bundled model when that experiment is on). Words
+    it learns may last only while the keyboard runs, as an iPhone may not let
+    it write the App Group; haptics, Paste and dictation need Full Access. Without Full
+    Access the keyboard always mounts the full keyboard, whichever keyboard is
+    chosen (the dictation bar types only spaces and line breaks). Dictation needs
+    Full Access (Hex's App Group and the microphone): tapping the Hex key, or
+    sliding for its menu, shows for 8 s in the suggestion strip "Allow Full
+    Access to dictate" and "Settings › Apps › Hex › Keyboards", with an **Open
+    Hex** chip (`hex-dictation://keyboard/setup`) that opens the app's setup
+    sheet. Nothing else opens Hex without Full Access, and the strip shows no
+    notice until the Hex key is tapped.
+  - **Setup:** Home's status line counts the setup steps left ("Finish
     setup · 1 step ›", else "Ready") and opens the same sheet: live status for
     the keyboard, Full Access, the microphone ("For dictation" with
     **Continue**, which iOS's prompt follows, until it's asked; never a button
@@ -99,7 +111,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     dictionary doesn't know in lowercase (likely names). German keeps the case,
     since its dictionary takes nouns in lowercase; so does a language with no
     dictionary on the iPhone (`TranscriptFormatter.insertionText`).
-  - **Full keyboard Hex key (Settings › Keyboard › Full):** A tap, or a
+  - **Full keyboard Hex key (Settings › Keyboard › Full, the default):** A tap, or a
     still hold of 0.35 s, starts dictation: in a warm session, else inside
     the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving
     more than 10 pt first opens the style menu; releasing over a row picks it, and releasing elsewhere leaves
@@ -247,8 +259,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   - **Dictation:** Style, Dictation language, Translate what I say, Clean up
     what I say, Custom vocabulary (its list below the switch), Keep mic warm,
     and Always use iPhone microphone.
-  - **Keyboard:** Keyboard, **Full** or **Dictation bar** (stored as
-    `FullKeyboardSettings.isEnabled`), then Keyboard layout, Autocorrect and Key
+  - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
+    as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
+    from when the full keyboard was an experiment: unset or true is Full, false
+    the dictation bar, so testers who turned that experiment off keep the bar),
+    then Keyboard layout, Autocorrect and Key
     pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
@@ -538,11 +553,27 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   `keyboard-capture-probe.log` records the footprint around each in-keyboard
   dictation.
 - **In-keyboard dictation memory:** Measured only in the simulator (Release,
-  iPhone 13, which enforces no limit and leaves out GPU memory): the first
-  dictation adds 7–8 MB on the dictation bar and 11–13 MB on the full keyboard
-  within 3 s of the tap (to 29–32 MB), and later ones 1–5 MB. The 32 and 24 MB
-  thresholds rest on that plus the Metal scope's GPU memory, not on an iPhone's;
-  `keyboard-capture-probe.log` records each step's footprint, peak and headroom.
+  iPhone 13, iOS 27.2, which enforces no limit and leaves out GPU memory; three
+  runs each, the same before and after the full keyboard became the default):
+  the full keyboard rests at 18.4–18.6 MB with Full Access and 18.0–18.3 MB
+  without, and its first dictation reaches 30.8–31.8 MB within 3 s of the tap
+  (peak 32.1–33.0 MB, so about 13 MB); the dictation bar rests at 20.7–20.8 MB
+  and its first dictation reaches 27.3–27.9 MB (about 7 MB). Later dictations
+  add 1–5 MB. The 32 and 24 MB thresholds rest on that plus the Metal scope's
+  GPU memory, not on an iPhone's; `keyboard-capture-probe.log` records each
+  step's footprint, peak and headroom.
+- **Without Full Access:** Verified in the simulator with the keyboard in a
+  real hosted field (`--snap-state hosted-keyboard`) and Full Access off: a
+  fresh install mounts the full keyboard and offers no in-keyboard dictation;
+  keys typed through the engine autocorrect ("thw" became "the", "tk" "to",
+  and with Spatial autocorrect on, "ofthw" "of the"); the Hex key shows the
+  hint. Scenes: `full-keyboard-no-access[-hint][-dark]`; `--keyboard
+  full|dictation-bar` picks the keyboard. The simulator's keyboard reads the App
+  Group without Full Access; whether an iPhone's does is unverified, which is
+  why the keyboard mounts the full keyboard without Full Access whatever was
+  chosen. Full Access in a simulator: a `kTCCServiceKeyboardNetwork` row for
+  the containing app (`anomaly.hex.mobile`, auth 2) in the shut-down
+  simulator's `data/Library/TCC/TCC.db`. Unverified on a physical iPhone.
 - **First run:** Reading Full Access from the keyboard on page 3, the
   keyboard-switch signal behind "Full Access looks off"
   (`UITextInputMode.currentInputModeDidChangeNotification`), and Settings
