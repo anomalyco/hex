@@ -390,6 +390,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Not granted", "Non accordé"),
     ("Your desktop did not grant every shortcut. Record another one, or free it in your desktop's keyboard settings.", "Votre bureau n'a pas accordé tous les raccourcis. Enregistrez-en un autre ou libérez-le dans les paramètres clavier de votre bureau."),
     ("Your desktop has no shortcuts portal. Bind these commands in its keyboard settings.", "Votre bureau n'a pas de portail de raccourcis. Associez ces commandes dans ses paramètres clavier."),
+    (
+        "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
+        "Votre bureau n'a pas de portail de raccourcis. Associez cette commande dans ses paramètres clavier.",
+    ),
     ("Hold to dictate", "Maintenir pour dicter"),
     ("Bind start to the key press and stop to its release", "Associez start à l'appui sur la touche et stop à son relâchement"),
     ("Toggle dictation", "Basculer la dictée"),

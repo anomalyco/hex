@@ -206,7 +206,7 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
             note(
                 "no-portal",
                 tr(
-                    "Your desktop has no shortcuts portal. Bind these commands in its keyboard settings.",
+                    "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
                 ),
                 p.muted(),
             ),

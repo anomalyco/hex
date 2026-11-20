@@ -387,6 +387,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Not granted", "Не назначено"),
     ("Your desktop did not grant every shortcut. Record another one, or free it in your desktop's keyboard settings.", "Окружение рабочего стола назначило не все сочетания. Запишите другое или освободите его в настройках клавиатуры окружения."),
     ("Your desktop has no shortcuts portal. Bind these commands in its keyboard settings.", "В вашем окружении рабочего стола нет портала сочетаний клавиш. Назначьте эти команды в его настройках клавиатуры."),
+    (
+        "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
+        "В вашем окружении рабочего стола нет портала сочетаний клавиш. Назначьте эту команду в его настройках клавиатуры.",
+    ),
     ("Hold to dictate", "Удерживать для диктовки"),
     ("Bind start to the key press and stop to its release", "Назначьте start на нажатие клавиши, а stop — на её отпускание"),
     ("Toggle dictation", "Переключить диктовку"),

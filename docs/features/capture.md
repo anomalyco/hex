@@ -144,8 +144,9 @@ On Linux                                 // capture.linux
 │   entering, an output below wl_output v4), the single file above is used
 │   exactly as before. Needs the compositor to export ext-image-copy-capture
 │   to ordinary clients (COSMIC does only for non-sandboxed ones) and, on
-│   wlroots, a hardware cursor (a software cursor reports nothing); not
-│   observed on real COSMIC hardware
+│   wlroots, a hardware cursor (a software cursor reports nothing, read from
+│   wlroots' source rather than observed); not observed on real COSMIC
+│   hardware
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
 │   KDE) or shared memory. A stream that ends or fails before its first frame

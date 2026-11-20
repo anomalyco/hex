@@ -7,13 +7,17 @@
 //! staging protocols, or whose cursor is drawn without an output cursor,
 //! reports nothing and the caller falls back to the ScreenCast portal's one
 //! remembered screen.
+//!
+//! One connection and a fixed two round trips, each blocking until the
+//! compositor answers, as [`super::output`] already does; this is not a time
+//! bound.
 
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_output::{self, WlOutput};
 use wayland_client::protocol::wl_pointer::{self, WlPointer};
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_seat::{self, WlSeat};
-use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::{
     self, ExtImageCaptureSourceV1,
 };
@@ -37,8 +41,8 @@ const NAME_VERSION: u32 = 4;
 const ROUND_TRIPS: usize = 2;
 
 /// The name of the output the pointer is on, such as `DP-3`, or `None` when
-/// it can't be known. Bounded: one connection, a fixed number of round trips,
-/// and every object destroyed before it returns.
+/// it can't be known. One connection and a fixed two round trips (each blocks
+/// until the compositor answers); every object is released before it returns.
 pub(crate) fn under_pointer() -> Option<String> {
     match probe() {
         Ok(found) => found,
@@ -60,7 +64,9 @@ fn probe() -> Result<Option<String>, String> {
         .map_err(|_| "the desktop offers no seat".to_owned())?;
     // Only the seat token: a session identifies its seat by this pointer, and
     // a client with no surface never receives pointer events of its own.
+    let seat_version = seat.version();
     let pointer = seat.get_pointer(&qh, ());
+    let pointer_version = pointer.version();
     let sources = globals
         .bind::<ExtOutputImageCaptureSourceManagerV1, Probe, ()>(&qh, 1..=1, ())
         .map_err(|_| {
@@ -93,6 +99,7 @@ fn probe() -> Result<Option<String>, String> {
         probe.candidates.push(Candidate {
             name: None,
             entered: false,
+            position: None,
             output,
             source,
             session,
@@ -104,12 +111,13 @@ fn probe() -> Result<Option<String>, String> {
             .map_err(|error| format!("the compositor stopped answering: {error}"))?;
     }
 
-    let picked = entered(
-        probe
-            .candidates
-            .iter()
-            .map(|candidate| (candidate.name.as_deref(), candidate.entered)),
-    )
+    let picked = entered(probe.candidates.iter().map(|candidate| {
+        (
+            candidate.name.as_deref(),
+            candidate.entered,
+            candidate.position.is_some(),
+        )
+    }))
     .map(str::to_owned);
     if let Some(name) = &picked {
         tracing::debug!(output = %name, "the pointer's output");
@@ -121,17 +129,35 @@ fn probe() -> Result<Option<String>, String> {
     }
     sources.destroy();
     captures.destroy();
+    if pointer_version >= 3 {
+        pointer.release();
+    }
+    if seat_version >= 5 {
+        seat.release();
+    }
     let _ = connection.flush();
     let _ = queue.roundtrip(&mut probe);
     Ok(picked)
 }
 
-/// The name of the first output whose cursor session reported `enter`.
-/// Outputs without a name (a compositor below `wl_output` v4) are skipped.
-fn entered<'a>(candidates: impl IntoIterator<Item = (Option<&'a str>, bool)>) -> Option<&'a str> {
-    candidates
-        .into_iter()
-        .find_map(|(name, entered)| name.filter(|_| entered))
+/// The name of the output whose cursor session reported `enter`, preferring
+/// one that also reported a `position` when several entered (a crossing
+/// between two sessions). Outputs without a name (a compositor below
+/// `wl_output` v4) are skipped.
+fn entered<'a>(
+    candidates: impl IntoIterator<Item = (Option<&'a str>, bool, bool)>,
+) -> Option<&'a str> {
+    let mut fallback = None;
+    for (name, entered, positioned) in candidates {
+        let Some(name) = name.filter(|_| entered) else {
+            continue;
+        };
+        if positioned {
+            return Some(name);
+        }
+        fallback.get_or_insert(name);
+    }
+    fallback
 }
 
 #[derive(Default)]
@@ -143,6 +169,8 @@ struct Candidate {
     name: Option<String>,
     /// Whether this output's cursor session last said `enter`.
     entered: bool,
+    /// The cursor's position on this output, once it reported one.
+    position: Option<(i32, i32)>,
     output: WlOutput,
     source: ExtImageCaptureSourceV1,
     session: ExtImageCopyCaptureCursorSessionV1,
@@ -251,7 +279,13 @@ impl Dispatch<ExtImageCopyCaptureCursorSessionV1, usize> for Probe {
         };
         match event {
             ext_image_copy_capture_cursor_session_v1::Event::Enter => candidate.entered = true,
-            ext_image_copy_capture_cursor_session_v1::Event::Leave => candidate.entered = false,
+            ext_image_copy_capture_cursor_session_v1::Event::Leave => {
+                candidate.entered = false;
+                candidate.position = None;
+            }
+            ext_image_copy_capture_cursor_session_v1::Event::Position { x, y } => {
+                candidate.position = Some((x, y));
+            }
             _ => {}
         }
     }
@@ -264,28 +298,34 @@ mod tests {
     #[test]
     fn the_output_that_entered_is_the_one() {
         let candidates = [
-            (Some("DP-3"), false),
-            (Some("HDMI-A-1"), true),
-            (Some("eDP-1"), false),
+            (Some("DP-3"), false, false),
+            (Some("HDMI-A-1"), true, true),
+            (Some("eDP-1"), false, false),
         ];
         assert_eq!(entered(candidates), Some("HDMI-A-1"));
     }
 
     #[test]
     fn no_session_entering_names_nothing() {
-        let candidates = [(Some("DP-3"), false), (Some("eDP-1"), false)];
+        let candidates = [(Some("DP-3"), false, false), (Some("eDP-1"), false, false)];
         assert_eq!(entered(candidates), None);
     }
 
     #[test]
     fn an_unnamed_output_is_skipped() {
-        let candidates = [(None, true), (Some("eDP-1"), true)];
+        let candidates = [(None, true, true), (Some("eDP-1"), true, false)];
         assert_eq!(entered(candidates), Some("eDP-1"));
     }
 
     #[test]
-    fn the_first_of_two_entered_outputs_wins() {
-        let candidates = [(Some("DP-3"), true), (Some("HDMI-A-1"), true)];
+    fn a_positioned_session_wins_a_crossing() {
+        let candidates = [(Some("DP-3"), true, false), (Some("HDMI-A-1"), true, true)];
+        assert_eq!(entered(candidates), Some("HDMI-A-1"));
+    }
+
+    #[test]
+    fn without_a_position_the_first_entered_output_wins() {
+        let candidates = [(Some("DP-3"), true, false), (Some("HDMI-A-1"), true, false)];
         assert_eq!(entered(candidates), Some("DP-3"));
     }
 }

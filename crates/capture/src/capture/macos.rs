@@ -1150,6 +1150,7 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         target: sampler_target,
         video_output_path,
         movie_quality,
+        portal_token: _,
         excluded_window_ids,
         own_windows_recorded,
         started_at,

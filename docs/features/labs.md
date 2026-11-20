@@ -23,10 +23,10 @@ feedback and Run setup again. A card's title and line are
 `labs::Feature::title` and `summary` (`src/labs/card.rs`), translated by the
 window, and its OSes `labs::Feature::oses`.
 
-**On the web.** Every `Everyone` lab (not Dev ones, nor Screenshots, Annotate
-last 15 seconds, Record the screen under the pointer, or Copy a capture as one
-file, which only do anything in builds with the capture build option) has a
-page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
+**On the web.** Every `Everyone` lab (not Dev ones, nor the labs that only
+matter once Annotate is on: Screenshots, Annotate last 15 seconds, Record the
+screen under the pointer, Copy a capture as one file) has a page at
+`anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
 the dev site), listed newest first at `/hex/labs`, with a 1200 × 630 social
 card. The pages come from `site/src/labs.json`, which only the registry
 writes:

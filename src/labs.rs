@@ -422,7 +422,10 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-// 1 << 20 is free (Yearly stats merged into Dictation stats).
+/// On Wayland, a screen capture follows the pointer to the monitor it is on
+/// (Linux). Yearly stats left this bit free when it merged into Dictation
+/// stats.
+const ANNOTATE_POINTER_SCREEN: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 // 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps
@@ -451,9 +454,6 @@ const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 /// The next bit above Caps Lock dictation's switch.
 const GNOME_ANNOTATE: u64 = CAPS_LOCK_DICTATION << 1;
 
-/// The next bit above GNOME Annotate (a free bit below the minutes): on
-/// Wayland, a screen capture follows the pointer to the monitor it is on.
-const ANNOTATE_POINTER_SCREEN: u64 = 1 << 20;
 /// The next bit above Annotate on GNOME's switch.
 const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording

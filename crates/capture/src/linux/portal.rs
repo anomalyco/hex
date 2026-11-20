@@ -255,7 +255,10 @@ fn recorded_output(
     size: Option<(i32, i32)>,
     outputs: &[OutputBounds],
 ) -> Option<String> {
-    if let Some(name) = mapping_id.filter(|name| !name.is_empty()) {
+    // A name the outputs don't know (a window pick's, or a connector the
+    // compositor no longer lists) names nothing: fall back to the geometry.
+    if let Some(name) = mapping_id.filter(|name| outputs.iter().any(|output| output.name == *name))
+    {
         return Some(name.to_owned());
     }
     let position = position?;
@@ -466,11 +469,25 @@ mod tests {
     }
 
     #[test]
-    fn the_desktop_s_own_name_wins() {
-        let outputs = [output("DP-3", (0, 0), (2560, 1440))];
+    fn the_desktop_s_own_name_wins_when_an_output_has_it() {
+        let outputs = [
+            output("DP-3", (0, 0), (2560, 1440)),
+            output("HDMI-A-1", (2560, 0), (1920, 1080)),
+        ];
         assert_eq!(
             recorded_output(Some("HDMI-A-1"), Some((0, 0)), Some((2560, 1440)), &outputs),
             Some("HDMI-A-1".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_name_no_output_has_falls_back_to_the_geometry() {
+        let outputs = [output("DP-3", (0, 0), (2560, 1440))];
+        // A window pick reports no output name of ours, or the connector is
+        // gone: the stream's own position still names the output.
+        assert_eq!(
+            recorded_output(Some("0"), Some((0, 0)), Some((2560, 1440)), &outputs),
+            Some("DP-3".to_owned())
         );
         assert_eq!(
             recorded_output(Some(""), Some((0, 0)), None, &outputs),
