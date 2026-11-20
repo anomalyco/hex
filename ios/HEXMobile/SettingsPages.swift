@@ -360,6 +360,7 @@ struct ExperimentsSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
+    @State private var swipeTyping = FullKeyboardSettings().swipeTyping
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
 
@@ -367,6 +368,16 @@ struct ExperimentsSettingsPage: View {
         SettingsPageScaffold(title: "Experiments") {
             SettingsCard {
                 EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: String(localized: "Swipe typing"),
+                    detail: FullKeyboardSettings().isEnabled
+                        ? String(localized: "Slide across a word's letters, in English and Spanish")
+                        : String(localized: "Needs the full keyboard"),
+                    isOn: $swipeTyping
+                )
 
                 SettingsDivider()
 
@@ -382,8 +393,12 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: appleIntelligenceCleanup) { _, enabled in
             AppleIntelligenceCleanupSettings().isEnabled = enabled
         }
+        .onChange(of: swipeTyping) { _, enabled in
+            FullKeyboardSettings().swipeTyping = enabled
+        }
         .onAppear {
             emoji = FullKeyboardSettings().emoji
+            swipeTyping = FullKeyboardSettings().swipeTyping
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current

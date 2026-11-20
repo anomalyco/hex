@@ -174,6 +174,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         syncSpatialAutocorrect()
         refreshLanguageSignals()
         syncLanguage()
+        syncSwipeTyping()
         engine.configureForField()
         applyAppearance()
         refreshFromModel()
@@ -332,6 +333,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.partnerLanguage = list.partner(available: Self.spellCheckLanguages)
         syncSpatialAutocorrect()
         refreshSpaceLabel()
+        syncSwipeTyping()
         setNeedsLayout()
     }
 
@@ -380,6 +382,24 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             engine.refreshSuggestions()
         }
         syncSpatialAutocorrect()
+        syncSwipeTyping()
+    }
+
+    /// Fixtures and tests turn Swipe typing on or off; otherwise its switch in Experiments.
+    var swipeOverride: Bool? { didSet { syncSwipeTyping() } }
+
+    /// Experiments › Swipe typing (off by default): on the English and Spanish layouts, a
+    /// drag across the letters types a word, read with the layout language's bundled model.
+    /// Off under VoiceOver, which has its own way to type.
+    private func syncSwipeTyping() {
+        let on = (swipeOverride ?? FullKeyboardSettings().swipeTyping) && engine.language.supportsSwipeTyping
+            && !UIAccessibility.isVoiceOverRunning
+        let model = on ? TypingDecoderModel.bundled(engine.language.rawValue) : nil
+        if plane.swipe?.model !== model {
+            plane.swipe = model.map { SwipeTyping(engine: engine, model: $0) }
+        } else {
+            plane.swipe?.syncWords()
+        }
     }
 
     /// Settings › Keyboard › Spatial autocorrect (on by default): maps the layout language's

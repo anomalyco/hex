@@ -270,6 +270,7 @@ enum SettingsSnapshotFixture {
         keyboard.keyPopups = true
         keyboard.haptics = true
         keyboard.emoji = on
+        keyboard.swipeTyping = on
         let emojiUsage = EmojiUsageStore()
         emojiUsage.clear()
         if on {

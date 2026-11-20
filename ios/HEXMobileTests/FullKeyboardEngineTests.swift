@@ -844,4 +844,301 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(DeleteWordSwipe.wordLength(before: "?!"), 2)
         XCTAssertEqual(DeleteWordSwipe.wordLength(before: "line\n"), 5)
     }
+
+    // MARK: - Swipe typing
+
+    /// A 390 pt keyboard with Swipe typing on: its key plane, typing into a field holding `text`.
+    private func swipeKeyboard(_ text: String = "", language: KeyboardLanguage = .english) throws -> (FixtureTextTarget, KeyboardKeyPlaneView) {
+        let field = FixtureTextTarget(text: text)
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let keys = FullKeyboardEngine(
+            target: field,
+            autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults))
+        )
+        keys.width = 390
+        keys.language = language
+        keys.configureForField()
+        let plane = KeyboardKeyPlaneView(engine: keys)
+        plane.swipe = SwipeTyping(engine: keys, model: try XCTUnwrap(TypingDecoderModel.bundled(language.rawValue)))
+        return (field, plane)
+    }
+
+    private func sample(_ point: CGPoint) -> TypingLogTouchSample {
+        TypingLogTouchSample(point: point, timestamp: 0)
+    }
+
+    /// Swipes `word` through its keys' centres; `lift` false leaves the finger down.
+    private func swipe(_ word: String, on plane: KeyboardKeyPlaneView, id: Int = 50, lift: Bool = true) {
+        swipe(points: SwipePath.through(word, keys: plane.engine.swipeKeys), on: plane, id: id, lift: lift)
+    }
+
+    private func swipe(points: [CGPoint], on plane: KeyboardKeyPlaneView, id: Int = 50, lift: Bool = true) {
+        plane.began(id: id, sample: sample(points[0]))
+        for point in points.dropFirst() {
+            plane.moved(id: id, sample: sample(point))
+        }
+        if lift { plane.ended(id: id, sample: sample(points[points.count - 1])) }
+    }
+
+    private func tap(_ kind: KeyKind, on plane: KeyboardKeyPlaneView, id: Int = 60) {
+        let key = plane.engine.layout.key(kind)!
+        let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+        plane.began(id: id, sample: sample(centre))
+        plane.ended(id: id, sample: sample(centre))
+    }
+
+    func testASwipeTypesItsWordAndTheNextOneASpaceLater() throws {
+        let (field, plane) = try swipeKeyboard()
+        swipe("hello", on: plane)
+        XCTAssertEqual(field.text, "hello", "no space before the first word, none after it")
+        XCTAssertFalse(plane.engine.isSwiping)
+        swipe("world", on: plane)
+        XCTAssertEqual(field.text, "hello world")
+        tap(.character("s"), on: plane)
+        XCTAssertEqual(field.text, "hello worlds", "a tap after a swipe adds to its word")
+        tap(.space, on: plane)
+        swipe("keyboard", on: plane)
+        XCTAssertEqual(field.text, "hello worlds keyboard", "no second space after one typed")
+    }
+
+    func testASwipedWordFollowsSpacingAndPunctuationAsApplesDoes() {
+        for (before, after) in [("Hi.", "Hi. "), ("(", "("), ("¿", "¿"), ("say \"", "say \""), ("3", "3 "), ("x\n", "x\n")] {
+            XCTAssertEqual(SwipeTyping.needsSpace(before: before), after != before, before)
+        }
+        XCTAssertFalse(SwipeTyping.needsSpace(before: ""))
+        XCTAssertFalse(SwipeTyping.needsSpace(before: nil))
+        XCTAssertTrue(SwipeTyping.needsSpace(before: "\"hi\""), "a closing quote")
+    }
+
+    func testShiftGivesASwipedWordItsCapital() throws {
+        let (field, plane) = try swipeKeyboard()
+        tap(.shift, on: plane)
+        swipe("hello", on: plane)
+        XCTAssertEqual(field.text, "Hello")
+        swipe("world", on: plane)
+        XCTAssertEqual(field.text, "Hello world", "one-shot shift turned off")
+
+        let (sentence, keys) = try swipeKeyboard("Great.")
+        sentence.autocapitalizationType = .sentences
+        keys.engine.refreshAutoCapitalization()
+        swipe("thanks", on: keys)
+        XCTAssertEqual(sentence.text, "Great. Thanks", "the space the swipe adds starts a sentence")
+
+        let (locked, capsKeys) = try swipeKeyboard()
+        tap(.shift, on: capsKeys)
+        tap(.shift, on: capsKeys)
+        swipe("people", on: capsKeys)
+        XCTAssertEqual(locked.text, "PEOPLE", "caps lock")
+    }
+
+    func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {
+        let (field, plane) = try swipeKeyboard()
+        swipe("hello", on: plane)
+        swipe("world", on: plane)
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "hello", "the word and the space it brought")
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "hell", "then one letter at a time")
+        swipe("people", on: plane)
+        tap(.character("s"), on: plane)
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "hell people", "only right after the swipe")
+    }
+
+    func testTheStripOffersTheSwipesOtherReadingsInItsWordsPlace() throws {
+        let (field, plane) = try swipeKeyboard("a")
+        swipe("of", on: plane)
+        XCTAssertEqual(field.text, "a of")
+        let readings = plane.engine.suggestions
+        XCTAssertTrue(readings.allSatisfy { $0.kind == .swiped })
+        XCTAssertEqual(KeyboardStripView.slots(for: readings).count, readings.count)
+        let off = try XCTUnwrap(readings.first { $0.replacement == "off" })
+        XCTAssertEqual(readings.count >= 2 ? readings[1].replacement : readings[0].replacement, "off", "the likeliest in the centre")
+        plane.engine.acceptSuggestion(off)
+        XCTAssertEqual(field.text, "a off", "no space after it, as after the swipe")
+        XCTAssertTrue(plane.engine.suggestions.contains { $0.replacement == "of" }, "the swiped word joins the others")
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "a", "delete still takes the swipe back")
+    }
+
+    func testSpaceNeverChangesASwipedWord() throws {
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.autocorrect.loadLexiconEntries([("hello", "Hello, friend")])
+        swipe("hello", on: plane)
+        tap(.space, on: plane)
+        XCTAssertEqual(field.text, "hello ", "a text replacement applies to what you type, not to a swiped word")
+    }
+
+    func testTapsShortSlidesAndAccentsStillTypeWithSwipeTypingOn() throws {
+        let (field, plane) = try swipeKeyboard()
+        for letter in "the" { tap(.character(String(letter)), on: plane) }
+        XCTAssertEqual(field.text, "the")
+        // A slide onto the next key (less than a key's pitch) types where the finger lifts.
+        let f = plane.engine.layout.key(.character("f"))!.frame, g = plane.engine.layout.key(.character("g"))!.frame
+        let onG = CGPoint(x: g.midX - 4, y: g.midY)
+        plane.began(id: 1, sample: sample(CGPoint(x: f.midX, y: f.midY)))
+        plane.moved(id: 1, sample: sample(onG))
+        XCTAssertFalse(plane.engine.isSwiping)
+        plane.ended(id: 1, sample: sample(onG))
+        XCTAssertEqual(field.text, "theg")
+        // Held for its accents, a letter's drag picks one, however far.
+        let e = plane.engine.layout.key(.character("e"))!.frame
+        plane.began(id: 2, sample: sample(CGPoint(x: e.midX, y: e.midY)))
+        XCTAssertTrue(plane.engine.openAccentMenuIfEligible(forTouch: 2))
+        let menu = try XCTUnwrap(plane.engine.activeAccentMenu)
+        let cell = menu.cellFrames[2]
+        plane.moved(id: 2, sample: sample(CGPoint(x: cell.midX, y: e.midY)))
+        XCTAssertFalse(plane.engine.isSwiping)
+        plane.ended(id: 2, sample: sample(CGPoint(x: cell.midX, y: e.midY)))
+        XCTAssertEqual(field.text, "theg" + menu.options[2])
+    }
+
+    func testDeleteAndTheSpaceBarNeverStartASwipe() throws {
+        let (field, plane) = try swipeKeyboard("one two three")
+        let step = plane.engine.layout.letterWidth
+        let delete = plane.engine.layout.key(.delete)!.frame
+        plane.began(id: 1, sample: sample(CGPoint(x: delete.midX, y: delete.midY)))
+        plane.moved(id: 1, sample: sample(CGPoint(x: delete.midX - step * 2.2, y: delete.midY)))
+        plane.ended(id: 1, sample: sample(CGPoint(x: delete.midX - step * 2.2, y: delete.midY)))
+        XCTAssertEqual(field.text, "one ", "delete's slide deletes word by word")
+        XCTAssertFalse(plane.engine.isSwiping)
+
+        let space = plane.engine.layout.key(.space)!.frame
+        plane.began(id: 2, sample: sample(CGPoint(x: space.midX, y: space.midY)))
+        plane.moved(id: 2, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
+        plane.ended(id: 2, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
+        XCTAssertEqual(field.text, "one ", "the space bar's trackpad moves the cursor, types nothing")
+        XCTAssertFalse(plane.engine.isSwiping)
+
+        // With two languages a quick slide along the space bar switches language, never a swipe.
+        var steps: [Int] = []
+        plane.engine.onLanguageSwipe = { steps.append($0) }
+        plane.engine.switchesLanguage = true
+        plane.began(id: 3, sample: sample(CGPoint(x: space.midX, y: space.midY)))
+        plane.moved(id: 3, sample: sample(CGPoint(x: space.midX - 25, y: space.midY)))
+        plane.moved(id: 3, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
+        plane.ended(id: 3, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
+        XCTAssertEqual(steps, [1])
+        XCTAssertFalse(plane.engine.isSwiping)
+        XCTAssertEqual(field.text, "one ")
+    }
+
+    /// Swipe typing follows the language the space bar switches to: on for English and
+    /// Spanish (each with its own model), off for any other.
+    func testSwipeTypingFollowsALiveLanguageSwitch() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .german, .spanish]
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.languageSettings = settings
+        view.swipeOverride = true
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.swipe?.model.language, "en")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .german)
+        XCTAssertNil(view.plane.swipe, "German: a drag stays a slide to another key")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertEqual(view.plane.swipe?.model.language, "es")
+    }
+
+    func testOnlyTheEnglishAndSpanishLayoutsSwipe() {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+        view.swipeOverride = true
+        for language in KeyboardLanguage.allCases {
+            view.languageOverride = language
+            XCTAssertEqual(view.plane.swipe != nil, language == .english || language == .spanish, language.rawValue)
+            if let swipe = view.plane.swipe {
+                XCTAssertEqual(swipe.model.language, language.rawValue)
+            }
+        }
+        view.languageOverride = .english
+        view.swipeOverride = false
+        XCTAssertNil(view.plane.swipe, "off by default and when turned off")
+        view.swipeOverride = nil
+        XCTAssertEqual(view.plane.swipe != nil, FullKeyboardSettings().swipeTyping)
+    }
+
+    /// On the Duo's split keyboard (unfolded upright) a swipe reads across the middle between
+    /// the halves, as Gboard joins them, and either half's G and V is the one letter.
+    func testASwipeReadsAcrossTheSplitKeyboardsMiddle() throws {
+        let (field, plane) = try swipeKeyboard()
+        let keys = plane.engine
+        keys.posture = .unfoldedWide
+        keys.windowInset = 75
+        keys.width = 801
+        let layout = keys.layout
+        let split = try XCTUnwrap(layout.split)
+        XCTAssertEqual(plane.swipe?.threshold, SplitGeometry.pitch)
+        /// Straight strokes through the drawn keys; of a letter's two keys, the one nearer the
+        /// key before it (the first letter's: the side `firstOnRight` says, else the left).
+        func path(_ word: String, firstOnRight: Bool = false) -> [CGPoint] {
+            var centres: [CGPoint] = []
+            for letter in word {
+                let options = layout.keys.filter { $0.label == String(letter) }.map { CGPoint(x: $0.frame.midX, y: $0.frame.midY) }
+                let anchor = centres.last ?? CGPoint(x: firstOnRight ? layout.width : 0, y: options[0].y)
+                let key = options.min { hypot($0.x - anchor.x, $0.y - anchor.y) < hypot($1.x - anchor.x, $1.y - anchor.y) }!
+                if centres.last != key { centres.append(key) }
+            }
+            var points = [centres[0]]
+            for (a, b) in zip(centres, centres.dropFirst()) {
+                let count = max(1, Int((hypot(b.x - a.x, b.y - a.y) / 6).rounded(.up)))
+                for i in 1...count {
+                    let t = CGFloat(i) / CGFloat(count)
+                    points.append(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+                }
+            }
+            return points
+        }
+        let hello = path("hello")
+        XCTAssertTrue(hello.contains { $0.x < split.leftEdge } && hello.contains { $0.x > split.rightEdge }, "both halves")
+        for word in ["hello", "the", "keyboard"] {
+            swipe(points: path(word), on: plane)
+        }
+        XCTAssertEqual(field.text, "hello the keyboard")
+        swipe(points: path("give", firstOnRight: true), on: plane)
+        XCTAssertEqual(field.text, "hello the keyboard give", "from the right half's G")
+    }
+
+    func testASpanishSwipeGetsItsAccentsAndÑ() throws {
+        let (field, plane) = try swipeKeyboard(language: .spanish)
+        swipe("mañana", on: plane)
+        swipe("también", on: plane)
+        XCTAssertEqual(field.text, "mañana también")
+    }
+
+    func testASecondFingerTypesTheSwipesWordFirst() throws {
+        let (field, plane) = try swipeKeyboard()
+        swipe("hello", on: plane, lift: false)
+        XCTAssertTrue(plane.engine.isSwiping)
+        tap(.character("s"), on: plane)
+        XCTAssertEqual(field.text, "hellos")
+        XCTAssertFalse(plane.engine.isSwiping)
+    }
+
+    func testACancelledSwipeTypesNothing() throws {
+        let (field, plane) = try swipeKeyboard("x")
+        swipe("hello", on: plane, lift: false)
+        plane.cancelled(id: 50, sample: sample(.zero))
+        XCTAssertEqual(field.text, "x")
+        XCTAssertFalse(plane.engine.isSwiping)
+        XCTAssertFalse(plane.engine.suggestions.contains { $0.kind == .swiped })
+    }
+
+    func testASwipeNeverTypesASlurAndSwearsOnlyWhenAsked() throws {
+        let (field, plane) = try swipeKeyboard()
+        let words = OffensiveWords.bundled("en")
+        for allow in [false, true] {
+            plane.engine.autocorrect.allowsSwearing = allow
+            for probe in ["fuck", "shit", "nigger", "faggot"] {
+                swipe(probe, on: plane)
+                let typed = field.text.split(separator: " ").last.map(String.init) ?? ""
+                XCTAssertFalse(words.blocks(typed, allowSwearing: allow), "\(probe) typed \(typed), swear words \(allow)")
+                for reading in plane.engine.suggestions {
+                    XCTAssertFalse(words.blocks(reading.replacement, allowSwearing: allow), "\(probe) offered \(reading.replacement)")
+                }
+            }
+        }
+        swipe("fuck", on: plane)
+        XCTAssertTrue(field.text.hasSuffix(" fuck"), "with Suggest swear words on")
+    }
 }

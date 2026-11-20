@@ -1879,6 +1879,16 @@
         }
       }
     },
+    "Slide across a word's letters, in English and Spanish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑过单词的字母来键入，支持英语和西班牙语"
+          }
+        }
+      }
+    },
     "Slurs are never suggested" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2045,6 +2055,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "轻扫横条返回"
+          }
+        }
+      }
+    },
+    "Swipe typing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑行键入"
           }
         }
       }

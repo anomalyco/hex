@@ -249,6 +249,7 @@ final class FullKeyboardEngine {
         lastSpaceAt = nil
         suggestionSpaceBefore = nil
         tokenTaps.removeAll()
+        swipedWord = nil
         autocorrect.clearPendingUndo()
         cancelAllTouches()
         rebuildLayout(cause: "field")
@@ -264,6 +265,7 @@ final class FullKeyboardEngine {
             suggestionSpaceBefore = nil
         }
         tokenTaps.removeAll()
+        swipedWord = nil
         autocorrect.clearPendingUndo()
         refreshAutoCapitalization()
         refreshSuggestions()
@@ -286,12 +288,17 @@ final class FullKeyboardEngine {
 
     func refreshSuggestions() {
         syncLearning()
-        autocorrect.decoderTaps = currentTokenTaps
-        let next = autocorrect.suggestions(
-            beforeInput: target.documentContextBeforeInput,
-            field: field,
-            autocorrectionType: target.autocorrectionType
-        )
+        let next: [KeyboardSuggestion]
+        if let swipeSuggestions {
+            next = swipeSuggestions
+        } else {
+            autocorrect.decoderTaps = currentTokenTaps
+            next = autocorrect.suggestions(
+                beforeInput: target.documentContextBeforeInput,
+                field: field,
+                autocorrectionType: target.autocorrectionType
+            )
+        }
         if next != suggestions {
             suggestions = next
             typingLog?.suggestionsChanged(next)
@@ -300,6 +307,13 @@ final class FullKeyboardEngine {
     }
 
     func acceptSuggestion(_ suggestion: KeyboardSuggestion) {
+        // The strip shows a swipe's readings: mid-swipe they're only shown, after it one
+        // takes the swiped word's place.
+        if isSwiping { return }
+        if suggestion.kind == .swiped {
+            replaceSwipedWord(with: suggestion.replacement)
+            return
+        }
         if let log = typingLog {
             let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) ?? ""
             log.edit("suggestion", [
@@ -597,6 +611,7 @@ final class FullKeyboardEngine {
         touch.isTrackpad = true
         touch.trackpadAnchorX = anchorX
         lastSpaceAt = nil
+        swipedWord = nil
         autocorrect.clearPendingUndo()
         touches[id] = touch
         var fields = [TypingLogField("id", .int(id))]
@@ -710,9 +725,11 @@ final class FullKeyboardEngine {
     }
 
     func cancelAllTouches() {
-        let hadTouches = !touches.isEmpty || activeAccentMenu != nil
+        let hadTouches = !touches.isEmpty || activeAccentMenu != nil || isSwiping
         touches.removeAll()
         touchOrder.removeAll()
+        isSwiping = false
+        swipePreview = nil
         activeAccentMenu = nil
         activeAccentTouchID = nil
         if shift.isHeld {
@@ -743,6 +760,10 @@ final class FullKeyboardEngine {
     }
 
     func deleteBackward(allowAutocorrectUndo: Bool = true, source: String = "key") {
+        // Right after a swipe, delete takes back its whole word (and the space it added).
+        let swiped = swipedWord
+        swipedWord = nil
+        if allowAutocorrectUndo, let swiped, deleteSwipedWord(swiped) { return }
         if allowAutocorrectUndo,
            let undo = autocorrect.consumePendingUndo(),
            let before = target.documentContextBeforeInput,
@@ -786,6 +807,7 @@ final class FullKeyboardEngine {
     }
 
     func deleteWordBackward() {
+        swipedWord = nil
         autocorrect.clearPendingUndo()
         guard let before = target.documentContextBeforeInput, !before.isEmpty else {
             deleteBackward(allowAutocorrectUndo: false, source: "repeat_word")
@@ -844,6 +866,9 @@ final class FullKeyboardEngine {
     }
 
     private func typeSpace() {
+        // Space never autocorrects a swiped word: it is a reading, not a typo.
+        let afterSwipe = swipedWord != nil
+        swipedWord = nil
         let now = clock()
         if let before = suggestionSpaceBefore {
             suggestionSpaceBefore = nil
@@ -878,7 +903,7 @@ final class FullKeyboardEngine {
         learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
         syncLearning()
         autocorrect.decoderTaps = currentTokenTaps
-        if let (original, replacement) = autocorrect.replacementOnSpace(
+        if !afterSwipe, let (original, replacement) = autocorrect.replacementOnSpace(
             beforeInput: target.documentContextBeforeInput,
             field: field,
             autocorrectionType: target.autocorrectionType
@@ -912,6 +937,7 @@ final class FullKeyboardEngine {
 
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
     private func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
+        swipedWord = nil
         if text.count == 1, text.first?.isLetter == true {
             // Spatial autocorrect reads taps as on the unsplit keyboard (`KeyboardLayout.unsplitX`).
             tokenTaps.append(point.map { CGPoint(x: layout.unsplitX($0.x), y: $0.y) })
@@ -942,6 +968,201 @@ final class FullKeyboardEngine {
         refreshAutoCapitalization()
         refreshSuggestions()
         onEdit?()
+    }
+
+    // MARK: - Swipe typing (Experiments › Swipe typing; SwipeTyping.swift)
+
+    /// The word a swipe just typed, until anything else changes the text: delete takes it
+    /// back whole, space never autocorrects it, and the strip offers the swipe's other
+    /// readings, any of which takes its place.
+    struct SwipedWord: Equatable {
+        /// What the swipe put in: a space when one was needed, then the word.
+        var inserted: String
+        var word: String
+        /// Its other readings, cased as the word is, best first.
+        var alternatives: [String]
+    }
+
+    private(set) var swipedWord: SwipedWord?
+    /// From a touch becoming a swipe until it ends.
+    private(set) var isSwiping = false
+    /// What the swipe under way reads as so far, for the strip.
+    private(set) var swipePreview: String?
+
+    /// Whether a letter touch may become a swipe now: on the letters page of a text field
+    /// (not an address or a URL), with no accent menu open.
+    var allowsSwipes: Bool {
+        layerState.layer == .letters && field == .text && activeAccentMenu == nil
+    }
+
+    /// The letter keys a swipe is read against, where they're drawn.
+    var swipeKeys: TypingDecoder.Keys {
+        TypingDecoder.Keys(layout: layout) ?? TypingDecoder.Keys(centres: [:], pitch: .zero, bottomRowY: 0)
+    }
+
+    /// The word before a swipe's, lowercased, when only spaces (or the one the swipe will
+    /// add) come between them.
+    var swipePreviousWord: String? {
+        let before = target.documentContextBeforeInput ?? ""
+        return AutocorrectEngine.previousWord(SwipeTyping.needsSpace(before: before) ? before + " " : before, token: "")
+    }
+
+    /// A letter touch became a swipe: its key no longer types.
+    func beginSwipe(touchID id: Int) {
+        guard touches.removeValue(forKey: id) != nil else { return }
+        touchOrder.removeAll { $0 == id }
+        isSwiping = true
+        swipePreview = nil
+        typingLog?.ui("swipe_start", [TypingLogField("id", .int(id))])
+        refreshSuggestions()
+        onChange?()
+    }
+
+    /// The swipe under way reads as `words` so far (best first): the strip shows the first
+    /// that may be offered.
+    func showSwipePreview(_ words: [String]) {
+        guard isSwiping else { return }
+        let next = swipeReadings(words).first.map { swipeCased($0, capital: swipeCapital) }
+        guard next != swipePreview else { return }
+        swipePreview = next
+        refreshSuggestions()
+    }
+
+    /// A swipe ended. `words` are its readings, best first (none when it was cancelled): the
+    /// first that may be offered goes in, after a space unless the text before ends in one or
+    /// in opening punctuation, as Apple's keyboard types a swiped word, with a capital when
+    /// shift is on (all capitals with caps lock); the next three wait in the strip.
+    func endSwipe(typing words: [String], points: Int, decodeTime: TimeInterval?) {
+        guard isSwiping else { return }
+        isSwiping = false
+        swipePreview = nil
+        // The finger came up off a key: a quick tap on the strip's lower half next is a key.
+        lastKeyTouchAt = clock()
+        let readings = swipeReadings(words)
+        if let log = typingLog {
+            log.ui("swipe_end", [
+                TypingLogField("points", .int(points)),
+                TypingLogField("ms", decodeTime.map { .ms($0 * 1000) } ?? .null),
+                TypingLogField("readings", .strings(Array(readings.prefix(4)))),
+            ])
+        }
+        guard let first = readings.first else {
+            refreshSuggestions()
+            onChange?()
+            return
+        }
+        let before = target.documentContextBeforeInput
+        let space = SwipeTyping.needsSpace(before: before)
+        let capital = swipeCapital
+        let word = swipeCased(first, capital: capital)
+        let inserted = (space ? " " : "") + word
+        if space { learning?.didFinish(word: AutocorrectEngine.currentToken(in: before)) }
+        autocorrect.clearPendingUndo()
+        tokenTaps.removeAll()
+        typingLog?.edit("insert", [
+            TypingLogField("inserted", .string(inserted)),
+            TypingLogField("src", .string("swipe")),
+        ])
+        target.insertText(inserted)
+        lastSpaceAt = nil
+        layerState.didInsert(inserted)
+        if layerState.layer == .letters { shift.didType() }
+        swipedWord = SwipedWord(
+            inserted: inserted,
+            word: word,
+            alternatives: readings.dropFirst().prefix(3).map { swipeCased($0, capital: capital) }
+        )
+        logState("typed")
+        didEdit()
+        typingLog?.context("swipe")
+    }
+
+    /// The strip while swiping (the word so far) and right after (the other readings, the
+    /// likeliest in the centre slot); nil otherwise.
+    private var swipeSuggestions: [KeyboardSuggestion]? {
+        if isSwiping {
+            return swipePreview.map { [KeyboardSuggestion(displayText: $0, replacement: $0, kind: .primary(autoReplace: true))] } ?? []
+        }
+        guard let swipedWord else { return nil }
+        let items = swipedWord.alternatives.prefix(3).map { KeyboardSuggestion(displayText: $0, replacement: $0, kind: .swiped) }
+        return items.count >= 2 ? [items[1], items[0]] + items.dropFirst(2) : items
+    }
+
+    /// `words` that may be offered after the word before (`AutocorrectEngine.mayOffer`), once each.
+    private func swipeReadings(_ words: [String]) -> [String] {
+        let previous = swipePreviousWord
+        var seen = Set<String>()
+        return words.filter { autocorrect.mayOffer($0, after: previous) && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Whether a swiped word starts with a capital: shift (one-shot, held, caps lock, or
+    /// automatic), or the automatic capital the space the swipe adds brings ("Hi." then a
+    /// swipe types " There").
+    private var swipeCapital: Bool {
+        if shift.isUppercase { return true }
+        guard shift.state == .off, !shift.isHeld else { return false }
+        let before = target.documentContextBeforeInput
+        guard SwipeTyping.needsSpace(before: before) else { return false }
+        return AutoCapitalization.shouldCapitalize(
+            mode: AutoCapitalization.Mode(target.autocapitalizationType),
+            before: (before ?? "") + " ",
+            hasText: true
+        )
+    }
+
+    /// A reading as it's typed: all capitals with caps lock, a capital first letter with
+    /// `capital`, else a name the dictionary only knows capitalised ("monday" -> "Monday").
+    private func swipeCased(_ word: String, capital: Bool) -> String {
+        if shift.state == .locked { return word.uppercased() }
+        guard let first = word.first else { return word }
+        if capital { return first.uppercased() + word.dropFirst() }
+        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2 else { return word }
+        let capitalised = first.uppercased() + word.dropFirst()
+        return autocorrect.checker.isWordValid(capitalised) && !autocorrect.checker.isWordValid(word) ? capitalised : word
+    }
+
+    /// Puts another of the swipe's readings in its word's place; the word joins the others.
+    private func replaceSwipedWord(with text: String) {
+        guard var swiped = swipedWord, let before = target.documentContextBeforeInput, before.hasSuffix(swiped.word) else {
+            swipedWord = nil
+            refreshSuggestions()
+            return
+        }
+        typingLog?.edit("suggestion", [
+            TypingLogField("slot", suggestions.firstIndex { $0.replacement == text }.map { .int($0) } ?? .null),
+            TypingLogField("text", .string(text)),
+            TypingLogField("deleted", .string(swiped.word)),
+            TypingLogField("inserted", .string(text)),
+            TypingLogField("candidates", TypingLogger.candidates(suggestions)),
+        ])
+        for _ in 0..<swiped.word.count {
+            target.deleteBackward()
+        }
+        target.insertText(text)
+        swiped.inserted = String(swiped.inserted.dropLast(swiped.word.count)) + text
+        swiped.alternatives = Array(([swiped.word] + swiped.alternatives.filter { $0 != text }).prefix(3))
+        swiped.word = text
+        swipedWord = swiped
+        lastSpaceAt = nil
+        didEdit()
+        typingLog?.context("suggestion")
+    }
+
+    /// Takes back what a swipe typed when it is still right before the cursor.
+    private func deleteSwipedWord(_ swiped: SwipedWord) -> Bool {
+        guard let before = target.documentContextBeforeInput, before.hasSuffix(swiped.inserted) else { return false }
+        autocorrect.clearPendingUndo()
+        typingLog?.edit("delete", [
+            TypingLogField("deleted", .string(swiped.inserted)),
+            TypingLogField("src", .string("swipe")),
+        ])
+        for _ in 0..<swiped.inserted.count {
+            target.deleteBackward()
+        }
+        tokenTaps.removeAll()
+        lastSpaceAt = nil
+        didEdit()
+        return true
     }
 
     // MARK: - Layout

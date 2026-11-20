@@ -283,6 +283,44 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     them as words). An expression is blocked only as the pair ("blow job"), never its words
     alone. A word it may not offer, typed in full, is never corrected (as on Android); your own `UILexicon` words
     (Contacts names, text replacements) are always offered.
+  - **Swipe typing (Settings › Experiments › Swipe typing):** Off by default, for the
+    English and Spanish layouts only (every other layout keeps a drag as a slide to
+    another key) and off under VoiceOver. A touch that goes down on a letter and travels
+    more than a key's pitch (width plus gap) is a swipe (`SwipeTyping`): its key no longer
+    types, a light trail (a shape layer, the last 0.45 s of the path) follows the finger,
+    and the strip shows what the path reads as so far, decoded off the main thread at most
+    every 70 ms. Lifting types the best reading after a space, unless the text before
+    ends in a space, a line break or opening punctuation (`( [ { « “ ‘ ¿ ¡ @ # /`, or a
+    straight quote after a space), as Apple's QuickPath does; shift capitalises its first
+    letter (caps lock all of it), the space it adds can start a sentence ("Hi." then a
+    swipe types " There"), and a name the dictionary only knows capitalised is
+    capitalised. The strip then offers the next three readings, the likeliest in the
+    centre; tapping one puts it in the word's place. Until anything else changes the
+    text, delete takes the whole word back (with the space it added) and space never
+    autocorrects it; a tap after it adds to the word. A second finger going down ends the
+    swipe first, so its word goes before that key's letter. On the iPhone Duo's split
+    keyboard a swipe reads across the middle between the halves: its points are read with
+    the right half pushed against the left and the middle shrunk to one key's gap
+    (`KeyboardLayout.joinedForSwipe`), so either half's G and V is the one letter, as for
+    Spatial autocorrect's taps. Taps, holds for accents, slides
+    shorter than a key, delete's word slide, the space bar's trackpad, 123 and the Hex key
+    work as before: no swipe starts on them, and none once an accent menu is open.
+    `SwipeDecoder` is a shape-matching decoder after SHARK2: the path is resampled to 32
+    points in key pitches; words come from the language's typing model by the keys the
+    path starts and ends near (each start letter is one range of the sorted word list,
+    read in place from the memory-mapped model, so nothing is built or kept between
+    swipes), kept when every key lies near the path and their ideal path (the polyline
+    through their keys' centres) is about as long; each is scored on location (point by
+    point, then dynamic time warping for the best 80), shape, and how near its first and
+    last keys the finger went down and lifted, and weighed with the model's word-pair
+    frequency after the word before. English contractions, which the Google Books model
+    barely counts, and your own words (Contacts names and other `UILexicon` terms, one-word
+    text replacements, words you kept) are read beside it. It never reads a slur, and reads
+    swear words only with Suggest swear words on (`TypingDecoder.NeverSuggest` and
+    `mayOffer`, as the strip). Its weights are tuned on synthetic swipes of the
+    autocorrect benchmark's held-out dev sentences; Record typing logs keeps a swipe's
+    touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
+    real fingers.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. Its description says what it records, and
     turning it on asks first in a dialog (App Review 2.5.14): each tap and the
@@ -329,8 +367,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     learned below the switch), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Emoji (it says it needs the full keyboard while the
-    dictation bar is chosen; Clear emoji history while it's on), and Clean up
-    with Apple Intelligence.
+    dictation bar is chosen; Clear emoji history while it's on), Swipe typing
+    (the same), and Clean up with Apple Intelligence.
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
