@@ -67,6 +67,7 @@ struct KeyboardSnapshotStage: View {
         let now: TimeInterval = 10_000
         viewModel.needsGlobeKey = true
         DictationLanguageFixture.apply(to: viewModel)
+        viewModel.isLoggingTyping = ProcessInfo.processInfo.arguments.contains("--typing-log-mark")
 
         switch scene {
         case "keyboard-cold":

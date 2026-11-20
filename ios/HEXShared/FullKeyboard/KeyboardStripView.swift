@@ -33,6 +33,21 @@ final class KeyboardStripView: UIView {
     private var showsFullAccessHint = false
     /// Built the first time the Hex key is tapped without Full Access.
     private var fullAccessHintView: FullAccessHintView?
+    /// Record typing logs is recording: a small mark in the strip's leading corner.
+    var showsLoggingMark = false {
+        didSet {
+            guard showsLoggingMark != oldValue else { return }
+            if showsLoggingMark, loggingMark == nil {
+                let mark = TypingLogMarkView()
+                mark.textColor = palette.textMuted
+                addSubview(mark)
+                loggingMark = mark
+            }
+            loggingMark?.isHidden = !showsLoggingMark
+            setNeedsLayout()
+        }
+    }
+    private var loggingMark: TypingLogMarkView?
     /// A plain chip: `UIPasteControl` renders as an empty blue box inside a keyboard
     /// extension (TestFlight build 4), so this reads the clipboard on tap instead.
     private let pasteControl = UIButton(type: .custom)
@@ -204,6 +219,7 @@ final class KeyboardStripView: UIView {
         chip?.background.backgroundColor = palette.chipFill
         undoChip.configuration = chip
         fullAccessHintView?.palette = palette
+        loggingMark?.textColor = palette.textMuted
         for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
             slotButtons[slot].configure(with: currentSuggestions[item], palette: palette)
         }
@@ -240,7 +256,15 @@ final class KeyboardStripView: UIView {
             width: nextSize.width,
             height: chipH
         )
-        fullAccessHintView?.frame = bounds.insetBy(dx: 12, dy: 0)
+        var hintFrame = bounds.insetBy(dx: 12, dy: 0)
+        if let loggingMark, showsLoggingMark {
+            // Above the first slot's text, and in from the keyboard's rounded top corner.
+            let size = loggingMark.sizeThatFits(bounds.size)
+            loggingMark.frame = CGRect(x: 18, y: 2, width: size.width, height: size.height)
+            bringSubviewToFront(loggingMark)
+            hintFrame = CGRect(x: loggingMark.frame.maxX + 8, y: 0, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: bounds.height)
+        }
+        fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
         let slotW = bounds.width / 3
         for (idx, button) in slotButtons.enumerated() {
@@ -435,5 +459,55 @@ final class FullAccessHintView: UIView {
         let top = (bounds.height - 2 * lineHeight - 1) / 2
         titleLabel.frame = CGRect(x: 0, y: top, width: textWidth, height: lineHeight)
         pathLabel.frame = CGRect(x: 0, y: top + lineHeight + 1, width: textWidth, height: lineHeight)
+    }
+}
+
+/// Record typing logs is recording this field: a dot and "Logging", flat and small, in the
+/// strip's corner and in the recording bar, so logging is never hidden.
+@MainActor
+final class TypingLogMarkView: UIView {
+    static let text = "Logging"
+    static let accessibilityText = "Typing logs are recording"
+
+    /// The dot and the word share the strip's muted ink: an orange dot would read as iOS's
+    /// microphone indicator.
+    var textColor: UIColor = .secondaryLabel {
+        didSet {
+            label.textColor = textColor
+            dot.backgroundColor = textColor
+        }
+    }
+
+    private let dot = UIView()
+    private let label = UILabel()
+    private static let dotSize: CGFloat = 5
+    private static let gap: CGFloat = 4
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = true
+        accessibilityLabel = Self.accessibilityText
+        dot.backgroundColor = textColor
+        dot.layer.cornerRadius = Self.dotSize / 2
+        label.text = Self.text
+        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.textColor = textColor
+        addSubview(dot)
+        addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let text = label.sizeThatFits(size)
+        return CGSize(width: Self.dotSize + Self.gap + ceil(text.width), height: max(Self.dotSize, ceil(text.height)))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        dot.frame = CGRect(x: 0, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
+        label.frame = CGRect(x: Self.dotSize + Self.gap, y: 0, width: max(0, bounds.width - Self.dotSize - Self.gap), height: bounds.height)
     }
 }

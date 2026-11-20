@@ -246,7 +246,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     Privacy › Advanced › Typing logs shares a day or all of them (AirDrop to a Mac) and
     deletes them. Password, one-time code, and card fields write one `skipped`
     line and nothing else. Events are buffered on the main thread and encoded and
-    appended on a utility queue every 2 s. Nothing is sent. The schema is in
+    appended on a utility queue every 2 s. Nothing is sent. While a field is
+    logged, both keyboards show a small "● Logging" mark the whole time (App
+    Review 2.5.14): in the full keyboard's strip corner, or at the start of its
+    recording bar while dictating, and beside the Hex mark in the dictation bar.
+    The schema is in
     [`docs/typing-logs.md`](docs/typing-logs.md).
 - **Settings (`ContentView`, `SettingsPages.swift`):** Home fits one screen: the
   Hex header, one status line ("Ready" with a check, or "Finish setup · 1 step ›"),
@@ -568,7 +572,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   keys typed through the engine autocorrect ("thw" became "the", "tk" "to",
   and with Spatial autocorrect on, "ofthw" "of the"); the Hex key shows the
   hint. Scenes: `full-keyboard-no-access[-hint][-dark]`; `--keyboard
-  full|dictation-bar` picks the keyboard. The simulator's keyboard reads the App
+  full|dictation-bar` picks the keyboard and `--typing-log-mark` shows the
+  Logging mark in the keyboard scenes. The simulator's keyboard reads the App
   Group without Full Access; whether an iPhone's does is unverified, which is
   why the keyboard mounts the full keyboard without Full Access whatever was
   chosen. Full Access in a simulator: a `kTCCServiceKeyboardNetwork` row for

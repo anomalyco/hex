@@ -517,6 +517,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             setRecording(recording)
         }
         refreshRecordingPanel()
+        stripView.showsLoggingMark = model.isLoggingTyping
+        recordingPanel?.showsLoggingMark = model.isLoggingTyping
         plane.spaceLabel = model.hasFullAccess ? model.languageSummary : nil
         // A language picked in the switch changes the layout at once when it follows dictation.
         syncLanguage()
@@ -768,6 +770,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             ])
             self.model.onStyleSelected?(self.model.style.next)
         }
+        panel.showsLoggingMark = model.isLoggingTyping
         insertSubview(panel, belowSubview: callout)
         recordingPanel = panel
         setNeedsLayout()

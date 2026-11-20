@@ -120,6 +120,7 @@ final class KeyboardViewController: UIInputViewController {
         typingLogTraits = traits
         log.beginSession(typingLogSessionInfo(trigger: trigger, traits: traits))
         attachTypingLog()
+        syncLoggingMark()
     }
 
     /// `settleDictation` is the text the last dictation's outcome is judged on (nil: where
@@ -132,6 +133,15 @@ final class KeyboardViewController: UIInputViewController {
         fullKeyboard?.typingLog = nil
         log.endSession(reason: reason)
         typingLogTraits = nil
+        syncLoggingMark()
+    }
+
+    /// Both keyboards show a small mark the whole time typing logs record this field.
+    private func syncLoggingMark() {
+        let logging = typingLog?.isRecording == true
+        if viewModel.isLoggingTyping != logging {
+            viewModel.isLoggingTyping = logging
+        }
     }
 
     private func attachTypingLog() {
@@ -486,6 +496,7 @@ final class KeyboardViewController: UIInputViewController {
         updateKeyboardTraits()
         fullKeyboard?.syncSettings()
         syncTypingLogEnabled()
+        syncLoggingMark()
         let effectiveFullAccess = dictationAccess(now: now)
         syncLocalDictationAvailability(access: effectiveFullAccess)
 
