@@ -631,6 +631,9 @@ final class AutocorrectEngine {
             }
             if diffs.count == 1 {
                 let i = diffs[0]
+                // An accent or tilde you didn't add ("aqui" -> "aquí", "manana" -> "mañana")
+                // is the cheapest fix there is, not a far-away key.
+                if sameLetterIgnoringAccents(s[i], t[i]) { return 0.15 }
                 return areAdjacentKeys(s[i], t[i], language: language) ? 0.65 : 1.15
             }
             if diffs.count == 2, diffs[1] == diffs[0] + 1,
@@ -661,6 +664,13 @@ final class AutocorrectEngine {
         let leftAdj = extraIdx > 0 && areAdjacentKeys(extraChar, longer[extraIdx - 1], language: language)
         let rightAdj = extraIdx + 1 < longer.count && areAdjacentKeys(extraChar, longer[extraIdx + 1], language: language)
         return (leftAdj || rightAdj) ? 0.70 : 0.90
+    }
+
+    /// Whether two letters differ only by an accent, diaeresis or tilde (e/é, u/ü, n/ñ).
+    static func sameLetterIgnoringAccents(_ a: Character, _ b: Character) -> Bool {
+        guard a != b else { return false }
+        let base: (Character) -> Unicode.Scalar? = { String($0).decomposedStringWithCanonicalMapping.unicodeScalars.first }
+        return base(a) == base(b)
     }
 
     private static let keyCoordinates: [KeyboardLanguage: [Character: (Double, Double)]] = Dictionary(
