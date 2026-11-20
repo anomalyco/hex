@@ -185,9 +185,21 @@ private struct OnboardingAllowPage: View {
     @State private var showsKeyboardFallback = OnboardingFixture.current == .allow && ProcessInfo.processInfo.arguments.contains("--onboarding-fallback")
 
     /// Full Access can't be verified from the app; the next page checks it. The speech model
-    /// keeps downloading in the background and never holds up Continue.
+    /// keeps downloading in the background and never holds up Continue, and neither does the
+    /// microphone: someone who declines it can still type with Hex and allow it later
+    /// (App Review 5.1.1(iv)).
     private var canContinue: Bool {
-        monitor.keyboardAdded != false && monitor.microphone == .granted
+        monitor.keyboardAdded != false
+    }
+
+    /// Before iOS's microphone prompt, Hex's own buttons say Continue or Open Settings, never
+    /// Allow (App Review 5.1.1(iv)).
+    private func continueTapped() {
+        if monitor.microphone == .undetermined {
+            monitor.requestMicrophone { onContinue() }
+        } else {
+            onContinue()
+        }
     }
 
     var body: some View {
@@ -204,14 +216,13 @@ private struct OnboardingAllowPage: View {
                     // Microphone first: iOS lists Microphone on Hex's Settings page only once
                     // the app has asked, so asking first means one trip to Settings.
                     VStack(spacing: 0) {
-                        OnboardingCheckRow(title: "Microphone", done: monitor.microphone == .granted) {
-                            switch monitor.microphone {
-                            case .undetermined:
-                                OnboardingSmallButton(title: "Allow") { monitor.requestMicrophone() }
-                            case .denied:
+                        OnboardingCheckRow(
+                            title: "Microphone",
+                            detail: monitor.microphone == .granted ? nil : "So Hex can hear you dictate",
+                            done: monitor.microphone == .granted
+                        ) {
+                            if monitor.microphone == .denied {
                                 OnboardingSmallButton(title: "Open Settings") { openSettings(openURL) }
-                            default:
-                                EmptyView()
                             }
                         }
                         Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
@@ -254,7 +265,7 @@ private struct OnboardingAllowPage: View {
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            OnboardingPrimaryButton(title: "Continue", enabled: canContinue, action: onContinue)
+            OnboardingPrimaryButton(title: "Continue", enabled: canContinue, action: continueTapped)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
         }
