@@ -224,6 +224,41 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Hi. There")
     }
 
+    /// Settings › Keyboard › Auto-capitalization off, as Apple's switch: shift never turns
+    /// itself on, whatever the field asks, not even after the double-space period; shift and
+    /// caps lock still work.
+    func testAutoCapitalizationOffNeverTurnsShiftOn() {
+        engine.autoCapitalizes = false
+        for type in [UITextAutocapitalizationType.sentences, .words, .allCharacters] {
+            target.autocapitalizationType = type
+            engine.configureForField()
+            XCTAssertEqual(engine.shift.state, .off, "autocapitalizationType \(type.rawValue)")
+        }
+        target.autocapitalizationType = .sentences
+        engine.configureForField()
+        type("hi")
+        tap(.space)
+        now += 0.2
+        tap(.space)
+        XCTAssertEqual(engine.shift.state, .off, "after the double-space period")
+        type("there ok")
+        tap(.shift)
+        type("x")
+        tap(.shift)
+        tap(.shift)
+        type("yz")
+        XCTAssertEqual(target.text, "hi. there okXYZ", "shift, then caps lock")
+
+        tap(.shift)
+        tap(.space)
+        now += 0.2
+        tap(.space)
+        XCTAssertEqual(target.text, "hi. there okXYZ. ")
+        XCTAssertEqual(engine.shift.state, .off)
+        engine.autoCapitalizes = true
+        XCTAssertEqual(engine.shift.state, .on, "switched back on, the next sentence starts with a capital")
+    }
+
     func testAcceleratingDeleteRampAndWordDelete() {
         type("hello world")
         down(1, .delete)
@@ -1006,6 +1041,19 @@ final class FullKeyboardEngineTests: XCTestCase {
         tap(.shift, on: capsKeys)
         swipe("people", on: capsKeys)
         XCTAssertEqual(locked.text, "PEOPLE", "caps lock")
+    }
+
+    /// Auto-capitalization off: no sentence-start capital on a swiped word, as on Apple's
+    /// keyboard with it off; shift still gives one.
+    func testAutoCapitalizationOffLeavesASwipedWordLowercase() throws {
+        let (sentence, keys) = try swipeKeyboard("Great.")
+        sentence.autocapitalizationType = .sentences
+        keys.engine.autoCapitalizes = false
+        swipe("thanks", on: keys)
+        XCTAssertEqual(sentence.text, "Great. thanks", "the space the swipe adds starts no sentence")
+        tap(.shift, on: keys)
+        swipe("hello", on: keys)
+        XCTAssertEqual(sentence.text, "Great. thanks Hello", "shift still capitalises")
     }
 
     func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {

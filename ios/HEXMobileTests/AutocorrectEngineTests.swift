@@ -134,6 +134,32 @@ final class AutocorrectEngineTests: XCTestCase {
         }
     }
 
+    /// Settings › Keyboard › Auto-capitalization off, as Apple's keyboard with it off (iOS 27.2
+    /// simulator: "i" stays "i", "im" becomes "i'm", "mondya" "monday"): a fix adds no capital
+    /// you didn't type, but keeps those you typed and your own spellings'.
+    func testAutoCapitalizationOffAddsNoCapitalsToFixes() {
+        engine.autoCapitalizes = false
+        engine.autocorrect.loadLexiconEntries([("omw", "On my way!"), ("Kit", "Kit")])
+        let replacements: [(String, String?)] = [
+            ("i", nil),
+            ("im", "i'm"),
+            ("Im", "I'm"),
+            ("ive", "i've"),
+            ("dont", "don't"),
+            ("Teh", "The"),
+            ("mondya", "monday"),
+            ("omw", "On my way!"),
+        ]
+        for (typed, expected) in replacements {
+            let actual = engine.autocorrect.replacementOnSpace(beforeInput: typed, field: .text, autocorrectionType: .default)
+            XCTAssertEqual(actual?.replacement, expected, "expected \(typed) -> \(String(describing: expected))")
+        }
+        target.autocapitalizationType = .sentences
+        engine.configureForField()
+        typeWord("i think im here ")
+        XCTAssertEqual(target.text, "i think i'm here ")
+    }
+
     func testAmbiguousContractionsSuggestWithoutAutoReplacing() {
         let slots = engine.autocorrect.suggestions(
             beforeInput: "well",
@@ -583,6 +609,16 @@ final class AutocorrectEngineTests: XCTestCase {
         try useDecoder()
         for word in ["see", "mary", "on", "monday", "in", "boston"] { typeTaps(word) }
         XCTAssertEqual(target.text, "see Mary on Monday in Boston ")
+    }
+
+    /// Auto-capitalization off: a name typed in lowercase stays lowercase, and a slip in one
+    /// of your own names still gets its capital.
+    func testSpatialAutocorrectKeepsNamesLowercaseWithAutoCapitalizationOff() throws {
+        try useDecoder()
+        engine.autoCapitalizes = false
+        engine.autocorrect.loadLexiconEntries([("Zorbix", "Zorbix")])
+        for word in ["see", "mary", "on", "monday", "with", "zorbiz"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "see mary on monday with Zorbix ")
     }
 
     func testSpatialAutocorrectAddsSpanishAccents() throws {

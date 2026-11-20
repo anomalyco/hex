@@ -264,6 +264,7 @@ enum SettingsSnapshotFixture {
         let on = scene.contains("-on")
         let keyboard = FullKeyboardSettings()
         keyboard.isEnabled = on || opensKeyboardLanguages
+        keyboard.autoCapitalization = true
         keyboard.autocorrect = true
         keyboard.spatialAutocorrect = true
         keyboard.suggestSwearWords = on
