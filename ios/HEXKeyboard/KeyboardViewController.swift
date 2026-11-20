@@ -30,7 +30,7 @@ final class KeyboardViewController: UIInputViewController {
     /// The dictation bar's key haptic; the full keyboard has its own generator.
     private lazy var barHaptics = UIImpactFeedbackGenerator(style: .light)
 
-    /// Haptics need Full Access, and Experiments › Haptics covers both keyboards.
+    /// Haptics need Full Access, and Settings › Keyboard › Haptics covers both keyboards.
     private var allowsKeyHaptics: Bool {
         hasFullAccess && FullKeyboardSettings().haptics
     }

@@ -5,11 +5,12 @@ struct HEXMobileApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var dictation = DictationController.shared
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
-    @State private var showSetup = false
+    @State private var showSetup = SettingsSnapshotFixture.showsSetupSheet
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
         TypingLogSettings().applyLaunchArguments()
+        SettingsSnapshotFixture.applyDefaults()
     }
 
     private static var initialOpenedFromKeyboard: Bool {

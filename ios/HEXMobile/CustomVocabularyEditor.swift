@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The custom vocabulary list shown under its experiment toggle.
+/// The custom vocabulary list shown under its switch in Settings › Dictation.
 struct CustomVocabularyEditor: View {
     private let settings = CustomVocabularySettings()
 
@@ -82,11 +82,7 @@ struct CustomVocabularyEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text(
-                "Hex fixes the spelling of listed words when it hears them. "
-                    + "It can't teach the speech engine new sounds, so a word heard "
-                    + "as something different stays as it is."
-            )
+            Text("Fixes spelling, not words Hex mishears")
             .font(.system(size: 12))
             .foregroundStyle(HexTheme.textMuted)
             .fixedSize(horizontal: false, vertical: true)

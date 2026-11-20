@@ -1,7 +1,7 @@
 import SwiftUI
 @preconcurrency import Translation
 
-/// Experiments › Translate what I say: the toggle, the target language, the switch the
+/// Settings › Dictation › Translate what I say: the toggle, the target language, the switch the
 /// keyboard's menus also have (paste translated or as spoken), and the one-time download
 /// of Apple's on-device language pack.
 struct TranslateDictationRow: View {
@@ -33,7 +33,7 @@ struct TranslateDictationRow: View {
                     Text("Translate what I say")
                         .font(.system(size: 15, weight: .regular))
                         .foregroundStyle(HexTheme.textBase)
-                    Text("Speak your language, insert another, translated on this iPhone")
+                    Text("Speak one language, insert another")
                         .font(.system(size: 12))
                         .foregroundStyle(HexTheme.textMuted)
                 }
@@ -53,12 +53,22 @@ struct TranslateDictationRow: View {
                         .font(.system(size: 13))
                         .foregroundStyle(HexTheme.textMuted)
                     Spacer()
-                    Picker("Insert in", selection: $target) {
+                    Menu {
                         ForEach(languages, id: \.minimalIdentifier) { language in
-                            Text(name(of: language)).tag(language.minimalIdentifier)
+                            Button {
+                                target = language.minimalIdentifier
+                            } label: {
+                                if target == language.minimalIdentifier {
+                                    Label(name(of: language), systemImage: "checkmark")
+                                } else {
+                                    Text(name(of: language))
+                                }
+                            }
                         }
+                    } label: {
+                        SettingsMenuValue(value: name(of: Locale.Language(identifier: target)))
                     }
-                    .pickerStyle(.menu)
+                    .accessibilityLabel("Insert in")
                 }
                 .onChange(of: target) { _, value in
                     DictationTranslationSettings().targetLanguage = value

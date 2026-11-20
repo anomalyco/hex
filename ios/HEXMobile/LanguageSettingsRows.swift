@@ -73,7 +73,7 @@ struct DictationLanguageRow: View {
     }
 }
 
-/// Experiments › Full keyboard › Keyboard layout: Automatic (the dictation language's
+/// Settings › Keyboard › Keyboard layout (while the full keyboard is on): Automatic (the dictation language's
 /// layout), English, Norsk, Español, or Deutsch.
 struct KeyboardLayoutRow: View {
     @State private var setting = LanguageSettings().keyboardLayout
