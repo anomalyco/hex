@@ -343,7 +343,10 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
   the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
   is the cheapest fix of all ("aqui" → "aquí", "manana" → "mañana"; a word the
-  dictionary knows, such as "esta", is never changed). Auto-capitalization is unchanged.
+  dictionary knows, such as "esta", is never changed). A two-letter non-word one
+  neighbouring key (or one swap) from a very common two-letter word is fixed too
+  ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English
+  and Spanish only). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key

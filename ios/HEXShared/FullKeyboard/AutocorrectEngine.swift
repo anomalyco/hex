@@ -464,7 +464,14 @@ final class AutocorrectEngine {
             return decision.replacement.map { Self.matchCase(of: token, onto: $0) }
         }
 
-        // 3. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
+        // 3. A two-letter non-word one neighbouring key from a very common two-letter word
+        // ("tk" -> "to", Spanish "nl" -> "no"); `UITextChecker` guesses skip two letters.
+        if token.count == 2, !token.contains("'"), let fix = commonTwoLetterFix(for: lower),
+           !checker.isWordValid(token) {
+            return Self.matchCase(of: token, onto: fix)
+        }
+
+        // 4. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
         guard token.count >= 3, !token.contains("'") else { return nil }
         guard !checker.isWordValid(token) else { return nil }
 
@@ -483,6 +490,18 @@ final class AutocorrectEngine {
         }
         guard let bestGuess, bestScore <= 1.35 else { return nil }
         return Self.matchCase(of: token, onto: bestGuess)
+    }
+
+    /// The very common two-letter word (the language's `commonTwoLetterWords`, commonest
+    /// first) one neighbouring key or one swap away from `lower`, if any.
+    private func commonTwoLetterFix(for lower: String) -> String? {
+        var best: (word: String, cost: Double)?
+        for word in language.commonTwoLetterWords {
+            guard let cost = Self.singleEditKeyboardCost(from: lower, to: word, language: language),
+                  cost > 0, cost <= 0.65 else { continue }
+            if best == nil || cost < best!.cost { best = (word, cost) }
+        }
+        return best?.word
     }
 
     /// What spatial autocorrect makes of `token`'s taps, or nil when it doesn't apply: off,
