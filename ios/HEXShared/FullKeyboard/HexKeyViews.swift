@@ -317,22 +317,19 @@ final class PanelKeyButton: UIControl {
     }
 }
 
-/// Holding the Hex key: dictation styles, then "Return to" for the app Hex goes back to.
+/// Holding the Hex key: dictation styles, then the dictation language when there are choices.
 @MainActor
 final class HexStyleMenuView: UIView {
-    enum Page { case styles, returnApps, languages }
+    enum Page { case styles, languages }
 
     var palette = FullKeyboardPalette(isDark: false) { didSet { rebuild() } }
     var style: DictationStyle = .polished { didSet { rebuild() } }
-    var returnAppID: String? { didSet { rebuild() } }
-    var quickReturnApps: [HostApp] = HostAppCatalog.quickChips { didSet { if quickReturnApps != oldValue { rebuild() } } }
     /// Settings › Dictation language (nil for Automatic), what Automatic resolves to, and the
     /// quick choices; with no choices the menu has no Language row.
     var dictationLanguage: String? { didSet { if dictationLanguage != oldValue { rebuild() } } }
     var automaticLanguage: String? { didSet { if automaticLanguage != oldValue { rebuild() } } }
     var languageChoices: [String] = [] { didSet { if languageChoices != oldValue { rebuild() } } }
     var onStyle: ((DictationStyle) -> Void)?
-    var onReturnApp: ((String?) -> Void)?
     var onLanguage: ((String?) -> Void)?
     var onDismiss: (() -> Void)?
     var onHoverChanged: (() -> Void)?
@@ -418,23 +415,6 @@ final class HexStyleMenuView: UIView {
                 let current = (dictationLanguage ?? automaticLanguage).map(DictationLanguageSwitch.nativeName(for:))
                 rows.append(makeRow(title: "Language", detail: current ?? "Automatic", chevron: true, selected: false, showsTopDivider: true) { [weak self] in
                     self?.show(page: .languages)
-                })
-            }
-            let appName = HostAppCatalog.app(for: returnAppID)?.name ?? "None"
-            rows.append(makeRow(title: "Return to", detail: appName, chevron: true, selected: false, showsTopDivider: languageChoices.isEmpty) { [weak self] in
-                self?.show(page: .returnApps)
-            })
-        case .returnApps:
-            rows.append(makeRow(title: "None", selected: returnAppID == nil) { [weak self] in
-                self?.onReturnApp?(nil)
-            })
-            var apps = quickReturnApps.isEmpty ? HostAppCatalog.quickChips : quickReturnApps
-            if let current = HostAppCatalog.app(for: returnAppID), !apps.contains(current) {
-                apps.insert(current, at: 0)
-            }
-            for app in apps {
-                rows.append(makeRow(title: app.name, selected: app.id == returnAppID) { [weak self] in
-                    self?.onReturnApp?(app.id)
                 })
             }
         case .languages:

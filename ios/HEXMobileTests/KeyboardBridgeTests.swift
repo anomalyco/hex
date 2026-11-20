@@ -58,8 +58,7 @@ final class KeyboardBridgeTests: XCTestCase {
         let request = KeyboardLaunchRequest.startRecording(
             jobID: "job with spaces",
             requestedAt: t0,
-            style: .casual,
-            returnAppID: "claude"
+            style: .casual
         )
 
         let decoded = KeyboardLaunchRequest(url: request.url)
@@ -69,8 +68,13 @@ final class KeyboardBridgeTests: XCTestCase {
     }
 
     func testKeyboardSessionLaunchDoesNotRequestRecording() {
-        let request = KeyboardLaunchRequest.startSession(requestedAt: 100, returnAppID: "messages")
+        let request = KeyboardLaunchRequest.startSession(requestedAt: 100)
         XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+        // A keyboard from before the return-app setting went away may still send `return=`.
+        XCTAssertEqual(
+            KeyboardLaunchRequest(url: URL(string: "hex-dictation://keyboard/start?ts=100&return=messages")!),
+            request
+        )
     }
 
     func testKeyboardSetupLaunchRoundTripsWithoutAHandoff() {

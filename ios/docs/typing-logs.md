@@ -209,7 +209,7 @@ Taps that aren't text: `action`:
   `rollover` when another key committed it), `accent_cancel`;
 - `trackpad_start` (`id`), `trackpad_end` (`id`, `offset`: total characters);
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
-  (`style`, `from`: `hex_menu` or `recording_panel`), `return_app` (`app`),
+  (`style`, `from`: `hex_menu` or `recording_panel`),
   `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),
   `dictation_stop` (`from: hex_key_release` when lifting a push-to-talk hold
   ends it), `dictation_cancel`;
