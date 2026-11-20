@@ -202,6 +202,44 @@ private struct OnboardingAllowPage: View {
         }
     }
 
+    @ViewBuilder
+    private var microphoneRow: some View {
+        switch monitor.microphone {
+        case .granted:
+            OnboardingCheckRow(title: "Microphone", state: "Allowed", done: true)
+        case .denied:
+            OnboardingCheckRow(
+                title: "Microphone",
+                detail: "So Hex can hear you dictate",
+                state: "Off",
+                done: false,
+                actionTitle: "Open Settings"
+            ) {
+                openSettings(openURL)
+            }
+        default:
+            // iOS asks right after this tap, so the button says Continue, never Allow
+            // (App Review 5.1.1(iv)), as the setup sheet's does.
+            OnboardingCheckRow(
+                title: "Microphone",
+                detail: "So Hex can hear you dictate",
+                state: "Not allowed yet",
+                done: false,
+                actionTitle: "Continue"
+            ) {
+                monitor.requestMicrophone()
+            }
+        }
+    }
+
+    private var keyboardState: LocalizedStringKey {
+        switch monitor.keyboardAdded {
+        case true?: "Added"
+        case false?: "Not added"
+        case nil: "Not verified"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             OnboardingHeader(page: .allow, onBack: onBack)
@@ -213,29 +251,20 @@ private struct OnboardingAllowPage: View {
                         .tracking(-0.4)
                         .foregroundStyle(HexTheme.textBase)
 
-                    // Microphone first: iOS lists Microphone on Hex's Settings page only once
-                    // the app has asked, so asking first means one trip to Settings.
+                    // Each row does its own job: tapping the Microphone row (or its Continue)
+                    // shows iOS's prompt right away, and once declined, opens Hex's page in
+                    // Settings to turn it on. The Keyboard row only opens Settings.
                     VStack(spacing: 0) {
-                        OnboardingCheckRow(
-                            title: "Microphone",
-                            detail: monitor.microphone == .granted ? nil : "So Hex can hear you dictate",
-                            done: monitor.microphone == .granted
-                        ) {
-                            if monitor.microphone == .denied {
-                                OnboardingSmallButton(title: "Open Settings") { openSettings(openURL) }
-                            }
-                        }
+                        microphoneRow
                         Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
-                        OnboardingCheckRow(title: "Keyboard", detail: "Add Hex and Allow Full Access", done: monitor.keyboardAdded == true) {
-                            if !monitor.fullAccessOn {
-                                OnboardingSmallButton(title: "Open Settings") {
-                                    if monitor.microphone == .undetermined {
-                                        monitor.requestMicrophone { openSettings(openURL) }
-                                    } else {
-                                        openSettings(openURL)
-                                    }
-                                }
-                            }
+                        OnboardingCheckRow(
+                            title: "Keyboard",
+                            detail: "Add Hex and Allow Full Access",
+                            state: keyboardState,
+                            done: monitor.keyboardAdded == true,
+                            actionTitle: monitor.fullAccessOn ? nil : "Open Settings"
+                        ) {
+                            openSettings(openURL)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -473,13 +502,34 @@ private struct OnboardingHeader: View {
     }
 }
 
-private struct OnboardingCheckRow<Trailing: View>: View {
+/// A setup row. With an action, the whole row is one button (its pill on the right is what it
+/// does), so VoiceOver reads it as one button with its state.
+private struct OnboardingCheckRow: View {
     let title: LocalizedStringKey
     var detail: LocalizedStringKey? = nil
+    let state: LocalizedStringKey
     let done: Bool
-    @ViewBuilder var trailing: Trailing
+    var actionTitle: LocalizedStringKey? = nil
+    var action: () -> Void = {}
 
     var body: some View {
+        if let actionTitle {
+            Button(action: action) {
+                content(actionTitle: actionTitle)
+            }
+            .buttonStyle(OnboardingPressStyle())
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(Text(state))
+            .accessibilityHint(Text(actionTitle))
+        } else {
+            content(actionTitle: nil)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(title))
+                .accessibilityValue(Text(state))
+        }
+    }
+
+    private func content(actionTitle: LocalizedStringKey?) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 18, weight: .medium))
@@ -496,10 +546,12 @@ private struct OnboardingCheckRow<Trailing: View>: View {
                 }
             }
             Spacer(minLength: 8)
-            trailing
+            if let actionTitle {
+                OnboardingPill(title: actionTitle)
+            }
         }
         .frame(minHeight: 52)
-        .accessibilityElement(children: .contain)
+        .contentShape(Rectangle())
     }
 }
 
@@ -546,18 +598,17 @@ private struct OnboardingSecondaryButton: View {
     }
 }
 
-private struct OnboardingSmallButton: View {
+/// The small action pill on the right of a setup row; the row itself is the button.
+private struct OnboardingPill: View {
     let title: LocalizedStringKey
-    let action: () -> Void
 
     var body: some View {
-        Button(title, action: action)
+        Text(title)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(HexTheme.textBase)
             .padding(.horizontal, 12)
             .frame(height: 28)
             .background(Color.white.opacity(0.09), in: Capsule())
-            .buttonStyle(OnboardingPressStyle())
     }
 }
 
