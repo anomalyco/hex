@@ -1006,6 +1006,36 @@ final class FullKeyboardEngineTests: XCTestCase {
         plane.ended(id: 2, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
         XCTAssertEqual(field.text, "one ", "the space bar's trackpad moves the cursor, types nothing")
         XCTAssertFalse(plane.engine.isSwiping)
+
+        // With two languages a quick slide along the space bar switches language, never a swipe.
+        var steps: [Int] = []
+        plane.engine.onLanguageSwipe = { steps.append($0) }
+        plane.engine.switchesLanguage = true
+        plane.began(id: 3, sample: sample(CGPoint(x: space.midX, y: space.midY)))
+        plane.moved(id: 3, sample: sample(CGPoint(x: space.midX - 25, y: space.midY)))
+        plane.moved(id: 3, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
+        plane.ended(id: 3, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
+        XCTAssertEqual(steps, [1])
+        XCTAssertFalse(plane.engine.isSwiping)
+        XCTAssertEqual(field.text, "one ")
+    }
+
+    /// Swipe typing follows the language the space bar switches to: on for English and
+    /// Spanish (each with its own model), off for any other.
+    func testSwipeTypingFollowsALiveLanguageSwitch() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .german, .spanish]
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.languageSettings = settings
+        view.swipeOverride = true
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.swipe?.model.language, "en")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .german)
+        XCTAssertNil(view.plane.swipe, "German: a drag stays a slide to another key")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertEqual(view.plane.swipe?.model.language, "es")
     }
 
     func testOnlyTheEnglishAndSpanishLayoutsSwipe() {

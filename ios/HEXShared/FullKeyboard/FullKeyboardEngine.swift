@@ -1036,6 +1036,8 @@ final class FullKeyboardEngine {
         guard isSwiping else { return }
         isSwiping = false
         swipePreview = nil
+        // The finger came up off a key: a quick tap on the strip's lower half next is a key.
+        lastKeyTouchAt = clock()
         let readings = swipeReadings(words)
         if let log = typingLog {
             log.ui("swipe_end", [
