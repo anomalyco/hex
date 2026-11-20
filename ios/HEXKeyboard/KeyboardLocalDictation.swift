@@ -32,6 +32,25 @@ final class KeyboardLocalDictation {
         return false
     }
 
+    /// Memory left below iOS's limit for this keyboard that the first dictation needs to start:
+    /// the capture web view, its page and WebKit's first use (7–11 MB in the simulator with
+    /// the recording screen), the Metal scope's device and pipeline (about 3.5 MB of GPU
+    /// memory the simulator doesn't count) and drawables, with margin. iOS ends a keyboard
+    /// that passes its limit, which varies by model (testers' 4 GB iPhones hit it), and
+    /// switches to the system keyboard; short of this, Dictate opens Hex instead.
+    static let startHeadroomNeeded = 32 * 1_048_576
+    /// Later dictations reuse the loaded web view, so only the capture and recording screen
+    /// start (1–5 MB in the simulator on the dictation bar; up to 8 MB on the full keyboard,
+    /// which rebuilds its recording strip and briefly peaks leaving it).
+    static let restartHeadroomNeeded = 24 * 1_048_576
+
+    /// Whether in-keyboard dictation can start without passing the memory limit. Where iOS
+    /// doesn't say (0, the simulator), it can.
+    var hasMemoryToStart: Bool {
+        let headroom = os_proc_available_memory()
+        return headroom == 0 || headroom >= (capture == nil ? Self.startHeadroomNeeded : Self.restartHeadroomNeeded)
+    }
+
     var isActive: Bool {
         switch phase {
         case .recording, .transcribing: true
@@ -162,7 +181,11 @@ final class KeyboardLocalDictation {
             )
         case .processTerminated:
             pcmFile = nil
+            // The next start needs a new web view; this one leaves the keyboard's view too,
+            // once WebKit's callback has returned, instead of staying behind with its page.
+            let ended = capture
             capture = nil
+            Task { @MainActor in ended?.tearDown() }
             fail(UserFacingError.Context.microphone.fallback, detail: "WebKit capture process ended")
         }
     }
@@ -383,6 +406,18 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         webView.evaluateJavaScript("hexStop()")
     }
 
+    /// Takes the web view out of the keyboard, after its content process ended, so it doesn't
+    /// stay behind next to the new one the next dictation makes.
+    func tearDown() {
+        onEvent = nil
+        startWhenLoaded = false
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "hex")
+        webView.removeFromSuperview()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoaded = true
         if startWhenLoaded {
@@ -594,7 +629,9 @@ final class KeyboardProbeLog: @unchecked Sendable {
             }
         }
         let footprint = result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
+        // The highest footprint this keyboard process has reached, for what iOS's limit saw.
+        let peak = result == KERN_SUCCESS ? Double(info.ledger_phys_footprint_peak) / 1_048_576 : -1
         let available = Double(os_proc_available_memory()) / 1_048_576
-        return String(format: "[footprint %.1f MB, headroom %.1f MB]", footprint, available)
+        return String(format: "[footprint %.1f MB, peak %.1f MB, headroom %.1f MB]", footprint, peak, available)
     }
 }

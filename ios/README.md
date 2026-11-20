@@ -13,7 +13,11 @@ dictation, iOS 26+): iOS refuses to record from a keyboard extension
 directly, so it captures through `getUserMedia` in a hidden `WKWebView`
 under Hex's microphone permission, writes a temporary WAV, and transcribes
 it on-device with Apple Speech, downloading the speech assets on first use
-(`HEXKeyboard/KeyboardLocalDictation.swift`). Audio never leaves the iPhone.
+(`HEXKeyboard/KeyboardLocalDictation.swift`). iOS ends a keyboard that passes
+its memory limit (about 60–90 MB depending on the model), so while less is left
+than starting needs (`os_proc_available_memory`: 32 MB for the first
+dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key
+open Hex instead, as before iOS 26. Audio never leaves the iPhone.
 
 ## Capabilities
 
@@ -358,6 +362,12 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   footprint next to Apple Speech are unmeasured on an iPhone;
   `keyboard-capture-probe.log` records the footprint around each in-keyboard
   dictation.
+- **In-keyboard dictation memory:** Measured only in the simulator (Release,
+  iPhone 13, which enforces no limit and leaves out GPU memory): the first
+  dictation adds 7–8 MB on the dictation bar and 11–13 MB on the full keyboard
+  within 3 s of the tap (to 29–32 MB), and later ones 1–5 MB. The 32 and 24 MB
+  thresholds rest on that plus the Metal scope's GPU memory, not on an iPhone's;
+  `keyboard-capture-probe.log` records each step's footprint, peak and headroom.
 - **First run:** Reading Full Access from the keyboard on page 3, the
   keyboard-switch signal behind "Full Access looks off"
   (`UITextInputMode.currentInputModeDidChangeNotification`), and Settings

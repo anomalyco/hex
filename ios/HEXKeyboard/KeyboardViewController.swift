@@ -326,12 +326,7 @@ final class KeyboardViewController: UIInputViewController {
             guard let self else { return }
             if self.localDictation.isActive { self.localDictation.cancel() } else { self.cancelWarmDictation() }
         }
-        if KeyboardLocalDictation.isSupported {
-            viewModel.onLocalDictateTap = { [weak self] in
-                guard let self else { return }
-                self.localDictation.start(in: self.view, allowBluetoothMic: self.bridge.allowBluetoothMic)
-            }
-        }
+        syncLocalDictationAvailability()
         viewModel.onStyleSelected = { [weak self] style in
             guard let self else { return }
             self.bridge.style = style
@@ -473,6 +468,7 @@ final class KeyboardViewController: UIInputViewController {
         updateKeyboardTraits()
         fullKeyboard?.syncSettings()
         syncTypingLogEnabled()
+        syncLocalDictationAvailability()
 
         #if targetEnvironment(simulator)
         let simSnap = bridge.snapshot()
@@ -564,6 +560,34 @@ final class KeyboardViewController: UIInputViewController {
 
         refreshColdStartURL(now: now, force: false)
         schedulePoll(force: false)
+    }
+
+    // MARK: - In-keyboard dictation
+
+    /// Whether the Dictate and Hex keys dictate in the keyboard; nil until first decided.
+    private var localDictationAvailable: Bool?
+    private var lastAvailabilityNote: TimeInterval = 0
+
+    /// In-keyboard dictation (iOS 26) needs memory for its capture web view and recording
+    /// screen, and iOS ends a keyboard that passes its limit (older iPhones, many apps open).
+    /// While the keyboard is short of it, `onLocalDictateTap` is nil, so Dictate and the Hex
+    /// key take the cold start that opens Hex, as before iOS 26 (a hold stays a tap there).
+    private func syncLocalDictationAvailability() {
+        guard KeyboardLocalDictation.isSupported else { return }
+        let available = localDictation.isActive || localDictation.hasMemoryToStart
+        guard available != localDictationAvailable else { return }
+        // Noted at most every 5 s, as the footprint can hover at the line.
+        let now = Date().timeIntervalSince1970
+        if localDictationAvailable != nil || !available, now - lastAvailabilityNote >= 5 {
+            lastAvailabilityNote = now
+            let change = available ? "memory back, dictating in the keyboard" : "short of memory, Dictate opens Hex"
+            KeyboardProbeLog.shared.write("\(change) \(KeyboardProbeLog.memory())")
+        }
+        localDictationAvailable = available
+        viewModel.onLocalDictateTap = available ? { [weak self] in
+            guard let self else { return }
+            self.localDictation.start(in: self.view, allowBluetoothMic: self.bridge.allowBluetoothMic)
+        } : nil
     }
 
     // MARK: - Dictation language
