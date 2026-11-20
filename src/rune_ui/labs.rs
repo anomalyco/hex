@@ -585,6 +585,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         }
     }
     rows.push(row(Feature::VocabularyBiasing, Some(&BOOK)));
+    rows.push(row(Feature::ImportVocabulary, Some(&BOOK)));
     // macOS reads the focused window through Accessibility as a capture
     // becomes real.
     if caps.os == super::platform::Os::Macos {
@@ -894,6 +895,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
+        Feature::ImportVocabulary => "lab-import-vocabulary",
         Feature::ScreenVocabulary => "lab-screen-vocabulary",
         Feature::TerminalPaste => "lab-terminal-paste",
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",

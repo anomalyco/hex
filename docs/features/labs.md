@@ -73,6 +73,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary help no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
+├── Import vocabulary no labs.import_vocabulary                the Vocabulary sheet gains Import…, which reads a CSV, TSV, or text file (Microsoft Teams' custom dictionary CSV included) and merges its rows into the list in any case, keeping 500 terms, 64 characters, and 16 spellings; off, the sheet is unchanged
 ├── Words on screen no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
@@ -3672,6 +3673,27 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `dictation::vocabulary::transcription_bias` returns nothing, so no run or stream takes
   the list; rewriting and search still use it, and the Vocabulary sheet says
   so.
+- Import vocabulary (`labs.import_vocabulary`, every OS): while on, General ›
+  Vocabulary's sheet shows Import…, which opens the native file dialog for a
+  CSV, TSV, or text file and merges its rows into the list through
+  `dictation::vocabulary::add_clamped`, then saves through the sheet's own
+  debounced path. The first column is the term and further columns are
+  "sounds like" spellings; the delimiter comes from the first non-empty line,
+  quotes follow RFC 4180, blank and # comment lines are skipped, and a header
+  row (Term, Word, Phrase, Display form, Vocabulary) is skipped. A header that
+  names a Sounds like column, as Microsoft Teams' custom dictionary does,
+  makes that column the only spelling source, so Teams' Long form of the term
+  and Definition and context columns are ignored. Files over 1 MiB and
+  non-UTF-8 files are refused. The sheet says Added 12 terms, No new terms,
+  Updated existing terms, or Couldn't read that file, with Some didn't fit
+  after a clamped import. Off, the sheet has no Import… button and nothing
+  else changes. Checks: `dictation::vocabulary::import::tests` (quotes, the
+  three delimiters, a BOM and CRLF, a header, a quoted #, plain text, the
+  Microsoft Teams sample, and merging into a list at its limits) in
+  [vocabulary/import.rs](../../src/dictation/vocabulary/import.rs), and
+  `an_import_merges_into_the_sheet_and_says_what_happened` in
+  [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs). The native picker
+  and the button in a real window are unobserved.
 - Words on screen (macOS): each dictation may read the focused window's
   visible text through Accessibility as temporary vocabulary. Off by default
   (`labs.screen_vocabulary`). Parakeet reads the terms only with Vocabulary

@@ -31,6 +31,23 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing
 ├── Done, Escape, or a press outside -> Saves, drops blank rows, closes
+├── Import… (Labs › Import vocabulary on) -> Native file dialog for CSV, TSV,
+│   or text; the first column is the term and further columns are "sounds
+│   like" spellings
+│   ├── Delimiter from the first non-empty line: comma, semicolon, or tab;
+│   │   RFC 4180 quotes, so quoted delimiters and line breaks stay in a term
+│   ├── Blank lines and # comment lines are skipped; plain text with one term
+│   │   a line reads the same, quote a # to keep it a term
+│   ├── An optional header row (Term, Word, Phrase, Display form, Vocabulary)
+│   │   is skipped; when it names a Sounds like column, only that column
+│   │   supplies spellings, so Microsoft Teams' custom dictionary CSV imports
+│   │   its Term and Sounds like columns and leaves Long form of the term and
+│   │   Definition and context out
+│   ├── Each row merges through add_clamped: repeats in any case join the
+│   │   existing term, and 500 terms, 64 characters, and 16 spellings hold
+│   ├── Over 1 MiB or not UTF-8 -> Refused before parsing
+│   └── A note says Added 12 terms, No new terms, Updated existing terms, or
+│       Couldn't read that file; Some didn't fit follows a clamped import
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
 │   that fit; inline danger note    // never drops the term
 └── Boost -> no control in the window: Normal (default) unless changed with
@@ -182,6 +199,11 @@ Search                                   // vocabulary.search
 The list lives in `settings.json` as `vocabulary`, each entry a plain term
 (`"Rune"`) or `{term, sounds_like}`; both load, and Hex writes a term without
 spellings as a plain string. `hex vocabulary list --json` keeps the object form.
+Labs › Import vocabulary (`labs.import_vocabulary`, off by default, every OS)
+adds the sheet's Import… button; off, the sheet and every path through it are
+unchanged. An import reads the file in the window process (at most 1 MiB),
+merges each row into the list through `add_clamped`, and saves it the way a
+typed edit does.
 It is written only when non-empty, so older files load unchanged and are not
 rewritten. Terms are unique ignoring case; at most 500 terms, 64 characters
 each, and 16 spellings per term. Read-only commands (`hex history`,
@@ -256,9 +278,14 @@ trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 `the_sheet_starts_empty_lists_with_a_row_and_saves_on_close`,
 `removing_a_focused_row_leaves_the_others_and_late_edits_touch_nothing`,
 `removing_the_last_row_then_editing_it_is_harmless`,
-`rapid_removals_from_one_frame_remove_only_their_own_rows`, and
+`rapid_removals_from_one_frame_remove_only_their_own_rows`,
+`an_import_merges_into_the_sheet_and_says_what_happened`, and
 `a_reload_retires_the_old_rows` in
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs);
+`dictation::vocabulary::import::tests` (quotes, the three delimiters, a BOM
+and CRLF, a header, a quoted #, plain text, the Microsoft Teams sample, and
+merging into a list at its limits) in
+[dictation/vocabulary/import.rs](../../src/dictation/vocabulary/import.rs);
 `the_vocabulary_row_opens_its_sheet`,
 `add_term_scrolls_the_new_row_into_view`,
 `the_vocabulary_row_says_when_the_model_ignores_the_list`, and

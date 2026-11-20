@@ -29,6 +29,9 @@ impl Feature {
             Self::VocabularyBiasing => {
                 "Help Parakeet-based speech models hear your Vocabulary words; rewriting and search use them anyway"
             }
+            Self::ImportVocabulary => {
+                "The Vocabulary sheet offers Import…, adding terms from a CSV, TSV, or text file; repeats merge in any case and the list's limits still hold"
+            }
             Self::ScreenVocabulary => {
                 "Names in the window you're dictating into help Hex spell them. Never saved. Parakeet needs Vocabulary help, and a dictation with terms runs after release instead of from the live stream."
             }

@@ -900,6 +900,19 @@
       ],
       "summary": "Drop a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file on the Hex window to save its transcript as a text file next to it",
       "title": "Transcribe dropped audio"
+    },
+    {
+      "added": "2026-11-20",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "import-vocabulary",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Adds Import… to the Vocabulary sheet to add terms from a CSV or text file",
+      "title": "Import vocabulary"
     }
   ]
 }

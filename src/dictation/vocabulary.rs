@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::dictation::context::ContextSnapshot;
 
+pub mod import;
+
 /// Longest term or "sounds like" entry, in characters.
 const MAX_TERM_CHARS: usize = 64;
 /// Most entries in the list, and most "sounds like" spellings per entry.

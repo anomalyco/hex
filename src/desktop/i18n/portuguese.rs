@@ -1456,6 +1456,17 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show in folder", "Mostrar na pasta"),
     ("Could not transcribe {}", "Não foi possível transcrever {}"),
     ("A file could not be chosen.", "Não foi possível escolher um arquivo."),
+    ("Import vocabulary", "Importar vocabulário"),
+    ("Adds Import… to the Vocabulary sheet to add terms from a CSV or text file", "Adiciona Importar… à folha Vocabulário para adicionar termos de um arquivo CSV ou de texto"),
+    ("Import…", "Importar…"),
+    ("CSV or text files", "Arquivos CSV ou de texto"),
+    ("Any file", "Qualquer arquivo"),
+    ("Added {} terms", "{} termos adicionados"),
+    ("Added 1 term", "1 termo adicionado"),
+    ("Updated existing terms", "Termos existentes atualizados"),
+    ("No new terms", "Nenhum termo novo"),
+    ("Couldn't read that file", "Não foi possível ler esse arquivo"),
+    ("Some didn't fit", "Alguns não couberam"),
 ];
 
 #[cfg(test)]

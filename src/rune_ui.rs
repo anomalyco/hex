@@ -1416,6 +1416,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         changed |= labs::screenshots::poll(ui);
     }
     changed |= drop_transcribe::poll(ui);
+    changed |= vocabulary::poll(ui);
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);

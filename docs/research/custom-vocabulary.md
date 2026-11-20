@@ -5,6 +5,9 @@ come from a vendor's own benchmark or a third party's write-up are labeled as
 such. **Update 2026-10-28:** a vocabulary boost is now implemented as
 post-decode rescoring rather than a decode-loop bonus; see
 [`vocabulary-boost-results.md`](vocabulary-boost-results.md).
+**Update 2026-11-20:** CSV, TSV, and plain-text import ships behind Labs ›
+Import vocabulary ([vocabulary.md](../features/vocabulary.md)); export is not
+built.
 
 **Question (Kit):** People want voice replacements and vocabulary, and Hex's
 default model, Parakeet, has no hints. Can we build something ourselves,

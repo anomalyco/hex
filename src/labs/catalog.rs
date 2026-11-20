@@ -92,6 +92,7 @@ impl Feature {
             | Self::CopyDictationAudio
             | Self::StopPhrase
             | Self::HoldThroughKeys
+            | Self::ImportVocabulary
             | Self::ModesEditor => Audience::Everyone,
         }
     }
@@ -169,7 +170,10 @@ impl Feature {
             Self::ModesEditor => 20261118,
             Self::CalendarSelectAll => 20261118,
             Self::PasteLastPicker => 20261119,
-            Self::NeutralVoice | Self::AnnotatePointerScreen | Self::FasterLiveText => 20261120,
+            Self::NeutralVoice
+            | Self::AnnotatePointerScreen
+            | Self::FasterLiveText
+            | Self::ImportVocabulary => 20261120,
         }
     }
 
@@ -326,6 +330,7 @@ impl Feature {
             | Self::YoloMode
             | Self::CopyDictationAudio
             | Self::StopPhrase
+            | Self::ImportVocabulary
             | Self::ModesEditor => EVERY,
         }
     }
@@ -415,6 +420,7 @@ impl Feature {
             Self::HoldThroughKeys => "hold-through-keys",
             Self::ModesEditor => "modes-editor",
             Self::PasteLastPicker => "paste-last-picker",
+            Self::ImportVocabulary => "import-vocabulary",
         }
     }
 
@@ -502,6 +508,7 @@ impl Feature {
             Self::CopyDictationAudio => "labs.copy_dictation_audio",
             Self::StopPhrase => "labs.stop_phrase",
             Self::HoldThroughKeys => "labs.hold_through_keys",
+            Self::ImportVocabulary => "labs.import_vocabulary",
             Self::ModesEditor => "labs.modes_editor",
         }
     }

@@ -22,6 +22,7 @@ mod portuguese;
 mod russian;
 mod text_language;
 mod traditional_chinese;
+mod vocabulary_import;
 
 pub(crate) use clock::{clock_time, twelve_hour_clock};
 
@@ -377,6 +378,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(onboarding::TRANSLATIONS)
         .chain(menu::TRANSLATIONS)
         .chain(history::TRANSLATIONS)
+        .chain(vocabulary_import::TRANSLATIONS)
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.

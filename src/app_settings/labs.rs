@@ -74,6 +74,9 @@ pub struct LabsSettings {
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
     pub vocabulary_biasing: bool,
+    /// The Vocabulary sheet offers Import…, adding terms from a CSV, TSV,
+    /// or text file.
+    pub import_vocabulary: bool,
     /// Names and terms shown in the focused window become temporary
     /// vocabulary for each dictation (macOS).
     pub screen_vocabulary: bool,
@@ -382,6 +385,7 @@ impl Default for LabsSettings {
             live_chapters: false,
             playground: false,
             vocabulary_biasing: false,
+            import_vocabulary: false,
             screen_vocabulary: false,
             cursor_context: false,
             mouse_shortcuts: false,

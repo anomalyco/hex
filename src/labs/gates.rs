@@ -44,6 +44,12 @@ pub fn vocabulary_biasing() -> bool {
     on(VOCABULARY_BIASING)
 }
 
+/// The Vocabulary sheet offers Import…, adding terms from a CSV, TSV, or
+/// text file (read as the sheet draws and as an import's file arrives).
+pub fn import_vocabulary() -> bool {
+    on(IMPORT_VOCABULARY)
+}
+
 /// Names and terms visible in the focused window join one dictation's
 /// vocabulary, read once as the capture becomes real (macOS; read by the
 /// listener at its hold threshold, its control start, or the released

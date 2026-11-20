@@ -12,7 +12,9 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
 };
 use super::lists::remove_button;
+use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::dictation::vocabulary::import::{self, ImportedTerm};
 use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 const MODAL_WIDTH: f32 = 620.0;
@@ -29,6 +31,9 @@ const ROWS_HEIGHT: f32 = 8.0 * ROW_HEIGHT + FADES.0 + FADES.1;
 /// aren't cut at its sides.
 const SIDE_ROOM: f32 = 2.0;
 const TERM_WIDTH: f32 = 200.0;
+/// What the import dialog offers first; `"*"` is any file.
+const IMPORT_EXTENSIONS: &[&str] = &["csv", "tsv", "txt"];
+const ANY_FILE: &[&str] = &["*"];
 
 /// One term row: its term and "sounds like" fields, and an identity that
 /// stays with the row as rows before it are removed, so a callback built
@@ -49,7 +54,26 @@ pub(super) struct VocabularyEditor {
     /// The row Add term made last while the sheet is open: only it arrives
     /// with motion, so opening the sheet never animates its rows.
     added: Option<u64>,
+    /// The open import dialog's answer.
+    chooser: Option<Pending>,
+    /// What the last import did, until the sheet closes.
+    notice: Option<Notice>,
     pub(super) open: bool,
+}
+
+/// What an import says in the sheet.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Notice {
+    /// New terms joined the list; some may have been cut or left out.
+    Added { terms: usize, clamped: bool },
+    /// Existing terms gained spellings; some may have been left out.
+    Updated { clamped: bool },
+    /// The file held nothing new.
+    Nothing,
+    /// The file could not be read or parsed.
+    Unreadable,
+    /// The native file dialog could not open.
+    Chooser,
 }
 
 impl VocabularyEditor {
@@ -176,6 +200,8 @@ pub(super) fn open(ui: &mut Ui) {
     super::sound_sets::close(ui);
     ui.open = None;
     ui.vocabulary.open = true;
+    ui.vocabulary.notice = None;
+    ui.vocabulary.chooser = None;
     if ui.vocabulary.rows.is_empty() {
         add_row(ui);
     }
@@ -188,6 +214,8 @@ pub(super) fn close(ui: &mut Ui) {
     }
     ui.vocabulary.open = false;
     ui.vocabulary.added = None;
+    ui.vocabulary.notice = None;
+    ui.vocabulary.chooser = None;
     ui.flush_drafts();
     ui.vocabulary
         .rows
@@ -209,6 +237,94 @@ fn add_row(ui: &mut Ui) -> u64 {
 fn add_term(ui: &mut Ui, tx: &mut Tx) {
     ui.vocabulary.added = Some(add_row(ui));
     tx.scroll_to_bottom("term-scroll");
+}
+
+/// Import…: the native dialog for one CSV, TSV, or text file.
+fn start_import(ui: &mut Ui, _: &mut Tx) {
+    if ui.vocabulary.chooser.is_some() {
+        return;
+    }
+    let waker = ui.modes.waker.clone();
+    ui.vocabulary.notice = None;
+    ui.vocabulary.chooser = Some(crate::desktop::file_dialog::open(
+        Dialog {
+            title: tr("Import vocabulary").into(),
+            target: Target::File(vec![
+                Filter {
+                    label: tr("CSV or text files").into(),
+                    extensions: IMPORT_EXTENSIONS,
+                },
+                Filter {
+                    label: tr("Any file").into(),
+                    extensions: ANY_FILE,
+                },
+            ]),
+            directory: None,
+        },
+        move || {
+            if let Some(waker) = &waker {
+                waker();
+            }
+        },
+    ));
+}
+
+/// The import dialog's answer, once it has one.
+pub(super) fn poll(ui: &mut Ui) -> bool {
+    let Some(choice) = ui.vocabulary.chooser.as_ref().and_then(Pending::poll) else {
+        return false;
+    };
+    ui.vocabulary.chooser = None;
+    match choice {
+        Ok(Some(path)) => match import::read(&path) {
+            Ok(terms) => apply_import(ui, &terms),
+            Err(_) => ui.vocabulary.notice = Some(Notice::Unreadable),
+        },
+        Ok(None) => {}
+        Err(_) => ui.vocabulary.notice = Some(Notice::Chooser),
+    }
+    true
+}
+
+/// Merges the file's terms into the sheet's rows and saves them the way an
+/// edit does.
+fn apply_import(ui: &mut Ui, terms: &[ImportedTerm]) {
+    let mut entries = ui.vocabulary.project();
+    let merged = import::merge(&mut entries, terms);
+    ui.vocabulary.reload(&entries);
+    ui.flush_drafts();
+    ui.vocabulary.notice = Some(if merged.added > 0 {
+        Notice::Added {
+            terms: merged.added,
+            clamped: merged.clamped,
+        }
+    } else if merged.changed {
+        Notice::Updated {
+            clamped: merged.clamped,
+        }
+    } else {
+        Notice::Nothing
+    });
+}
+
+fn notice_text(notice: Notice) -> String {
+    let clamped = match notice {
+        Notice::Added { clamped, .. } | Notice::Updated { clamped } => clamped,
+        Notice::Nothing | Notice::Unreadable | Notice::Chooser => false,
+    };
+    let mut text = match notice {
+        Notice::Added { terms: 1, .. } => tr("Added 1 term").to_string(),
+        Notice::Added { terms, .. } => tr_fill("Added {} terms", &terms.to_string()),
+        Notice::Updated { .. } => tr("Updated existing terms").to_string(),
+        Notice::Nothing => tr("No new terms").to_string(),
+        Notice::Unreadable => tr("Couldn't read that file").to_string(),
+        Notice::Chooser => tr("A file could not be chosen.").to_string(),
+    };
+    if clamped {
+        text.push_str(". ");
+        text.push_str(tr("Some didn't fit"));
+    }
+    text
 }
 
 fn row_key(id: u64) -> String {
@@ -298,22 +414,26 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         ButtonKind::Secondary,
         add_term,
     );
-    let footer = row()
-        .key("footer")
-        .gap(12.0)
-        .center_y()
-        .child(add)
-        .child(el().key("spacer").grow(1.0))
-        .child(
-            button(
-                p,
-                "close-vocabulary",
-                tr("Done"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| close(ui),
-            )
-            .default_button(),
-        );
+    let mut footer = row().key("footer").gap(12.0).center_y().child(add);
+    if crate::labs::import_vocabulary() {
+        footer = footer.child(button(
+            p,
+            "import-vocabulary",
+            tr("Import…"),
+            ButtonKind::Secondary,
+            start_import,
+        ));
+    }
+    let footer = footer.child(el().key("spacer").grow(1.0)).child(
+        button(
+            p,
+            "close-vocabulary",
+            tr("Done"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| close(ui),
+        )
+        .default_button(),
+    );
     let mut heading = col()
         .key("heading")
         .gap(4.0)
@@ -353,6 +473,15 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         heading = heading.child(
             text(unused)
                 .key("unused")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        );
+    }
+    if let Some(notice) = ui.vocabulary.notice {
+        heading = heading.child(
+            text(notice_text(notice))
+                .key("import-note")
                 .font(DESCRIPTION)
                 .color(p.muted())
                 .wrap(),
@@ -624,6 +753,54 @@ mod tests {
         );
         ui.settings.transcription.model = TranscriptionModelId::SenseVoiceSmall;
         assert!(unused_note(&ui).is_some());
+    }
+
+    #[test]
+    fn an_import_merges_into_the_sheet_and_says_what_happened() {
+        let mut ui = ui();
+        open(&mut ui);
+        ui.vocabulary.rows.clear();
+        ui.vocabulary
+            .push(TextEdit::new("Rune"), TextEdit::new("roon"));
+        apply_import(
+            &mut ui,
+            &import::parse("term,sounds like\nRune,rooney\nCappuccino,capuchin\nDax\n"),
+        );
+        assert_eq!(
+            ui.vocabulary.notice,
+            Some(Notice::Added {
+                terms: 2,
+                clamped: false
+            })
+        );
+        assert_eq!(notice_text(ui.vocabulary.notice.unwrap()), "Added 2 terms");
+        assert_eq!(terms(&ui), ["Rune", "Cappuccino", "Dax"]);
+        assert_eq!(
+            ui.settings.vocabulary[0].sounds_like,
+            ["roon".to_string(), "rooney".to_string()]
+        );
+        assert_eq!(ui.settings.vocabulary.len(), 3);
+
+        // The same file again only finds what is already there.
+        apply_import(&mut ui, &import::parse("term,sounds like\nRune,rooney\n"));
+        assert_eq!(ui.vocabulary.notice, Some(Notice::Nothing));
+        assert_eq!(notice_text(ui.vocabulary.notice.unwrap()), "No new terms");
+
+        apply_import(
+            &mut ui,
+            &import::parse(&format!("term\n{}", "x".repeat(65))),
+        );
+        assert_eq!(
+            ui.vocabulary.notice,
+            Some(Notice::Added {
+                terms: 1,
+                clamped: true
+            })
+        );
+        assert_eq!(
+            notice_text(ui.vocabulary.notice.unwrap()),
+            "Added 1 term. Some didn't fit"
+        );
     }
 
     #[test]

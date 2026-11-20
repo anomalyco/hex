@@ -17,6 +17,7 @@ impl Feature {
             Self::LiveTyping => "Live typing",
             Self::LiveChapters => "Live chapters",
             Self::VocabularyBiasing => "Vocabulary help",
+            Self::ImportVocabulary => "Import vocabulary",
             Self::ScreenVocabulary => "Words on screen",
             Self::TerminalPaste => "Terminal paste",
             Self::KeyboardModelSwitching => "Switch model with keyboard language",
@@ -114,6 +115,9 @@ impl Feature {
             Self::LiveChapters => "Split a meeting's text into chapters while it records",
             Self::VocabularyBiasing => {
                 "Help Parakeet-based speech models hear your Vocabulary words. Rewriting and search use them anyway"
+            }
+            Self::ImportVocabulary => {
+                "Adds Import… to the Vocabulary sheet to add terms from a CSV or text file"
             }
             Self::ScreenVocabulary => {
                 "Names in the window you're dictating into help Hex spell them. Never saved"

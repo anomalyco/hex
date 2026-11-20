@@ -126,6 +126,7 @@ impl Feature {
             Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
+            Self::ImportVocabulary => settings.labs.import_vocabulary,
             Self::ScreenVocabulary => settings.labs.screen_vocabulary,
             Self::TerminalPaste => settings.paste_with_shift,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled,
@@ -220,6 +221,7 @@ impl Feature {
             &mut labs.live_typing,
             &mut labs.live_chapters,
             &mut labs.vocabulary_biasing,
+            &mut labs.import_vocabulary,
             &mut labs.screen_vocabulary,
             &mut labs.mouse_shortcuts,
             &mut labs.unload_idle,
@@ -308,6 +310,7 @@ impl Feature {
             Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
+            Self::ImportVocabulary => settings.labs.import_vocabulary = on,
             Self::ScreenVocabulary => settings.labs.screen_vocabulary = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled = on,
@@ -495,6 +498,10 @@ const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
 /// [`MICROPHONE_LINGER_SECONDS`]. A new lab can take one of the free bits
 /// below the minutes.
 const KEEP_MICROPHONE_OPEN: u64 = 1 << 60;
+/// The next never-used bit above it: the Vocabulary sheet offers Import…,
+/// adding terms from a CSV or text file. The word is this process's own, so
+/// the bit's place in it is free to move.
+const IMPORT_VOCABULARY: u64 = 1 << 61;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -885,6 +892,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::VocabularyBiasing,
             settings.vocabulary_biasing,
             VOCABULARY_BIASING,
+        ),
+        (
+            Feature::ImportVocabulary,
+            settings.import_vocabulary,
+            IMPORT_VOCABULARY,
         ),
         (
             Feature::MouseShortcuts,

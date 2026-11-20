@@ -70,6 +70,7 @@ impl Feature {
             | Self::LiveTyping
             | Self::NotchIndicator
             | Self::VocabularyBiasing
+            | Self::ImportVocabulary
             | Self::ScreenVocabulary
             | Self::PauseBrowser
             | Self::KeepMicrophoneOpen
