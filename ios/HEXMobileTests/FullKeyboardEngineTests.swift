@@ -351,4 +351,37 @@ final class FullKeyboardEngineTests: XCTestCase {
         engine.configureForField()
         XCTAssertEqual(engine.layout.layer, .numbers)
     }
+
+    // MARK: - Haptics in every layout
+
+    /// Key haptics come from the same calls whatever the layout (a TestFlight tester felt
+    /// none on the Portuguese one): every layout asks for a tap per key going down and a tick
+    /// per accent step, the same number of times.
+    func testEveryLayoutAsksForTheSameKeyHaptics() {
+        var counts: [KeyboardLanguage: Int] = [:]
+        for language in KeyboardLanguage.allCases {
+            let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+            view.languageOverride = language
+            view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+            view.layoutIfNeeded()
+            var asked = 0
+            view.allowsHaptics = {
+                asked += 1
+                return true
+            }
+            for (id, kind) in [KeyKind.character("a"), .space, .delete].enumerated() {
+                let key = view.engine.layout.key(kind)!
+                let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
+                view.plane.began(id: id + 10, sample: sample)
+                view.plane.ended(id: id + 10, sample: sample)
+            }
+            view.debugHoldAccent("e", selectIndex: 1)
+            counts[language] = asked
+        }
+        XCTAssertGreaterThanOrEqual(counts[.english] ?? 0, 4, "three keys and an accent step")
+        for language in KeyboardLanguage.allCases {
+            XCTAssertEqual(counts[language], counts[.english], "\(language.rawValue) haptics")
+        }
+    }
+
 }
