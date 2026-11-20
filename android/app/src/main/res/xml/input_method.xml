@@ -1,0 +1,7 @@
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="ly.anoma.hex.MainActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype android:label="@string/english" android:languageTag="en-US"
+        android:imeSubtypeLocale="en_US" android:imeSubtypeMode="keyboard"
+        android:isAsciiCapable="true" />
+</input-method>
