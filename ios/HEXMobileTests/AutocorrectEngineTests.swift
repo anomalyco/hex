@@ -345,6 +345,66 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(strip(engine.autocorrect, "Th").dropFirst().first, "The")
     }
 
+    // MARK: - Spatial autocorrect (the bundled models)
+
+    private func useDecoder(_ language: KeyboardLanguage = .english) throws {
+        if language != engine.language { engine.language = language }
+        let model = try XCTUnwrap(TypingDecoderModel.bundled(language.rawValue), "the \(language) model is bundled")
+        engine.autocorrect.decoder = TypingDecoder(model: model)
+    }
+
+    private func tap(at point: CGPoint) {
+        engine.touchBegan(id: 1, at: point)
+        engine.touchEnded(id: 1, at: point)
+        now += 0.2
+    }
+
+    /// Types `word` at the keys' centres, except an "o" written as "^" lands low, just inside
+    /// the k key (where these logs' o taps go astray), then a space.
+    private func typeTaps(_ word: String) {
+        for ch in word {
+            if ch == "^" {
+                let o = engine.layout.key(.character("o"))!.frame
+                let k = engine.layout.key(.character("k"))!.frame
+                let point = CGPoint(x: o.midX - 8, y: k.minY + 4)
+                XCTAssertEqual(engine.layout.hitTest(point)?.kind, .character("k"))
+                tap(at: point)
+            } else {
+                let key = engine.layout.key(.character(String(ch)))!.frame
+                tap(at: CGPoint(x: key.midX, y: key.midY))
+            }
+        }
+        tap(.space)
+    }
+
+    func testSpatialAutocorrectReadsTapsWithTheWordBefore() throws {
+        try useDecoder()
+        for word in ["we", "need", "t^"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "we need to ", "a two-letter slip after \"need\"")
+        for word in ["and", "seeh^w"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "we need to and see how ", "a missed space with a slip inside")
+    }
+
+    func testSpatialAutocorrectLeavesWordsTypedRight() throws {
+        try useDecoder()
+        for word in ["come", "and", "miss", "the", "quiz"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "come and miss the quiz ")
+    }
+
+    func testSpatialAutocorrectAddsSpanishAccents() throws {
+        try useDecoder(.spanish)
+        for word in ["esta", "aqui", "manana"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "esta aquí mañana ", "\"esta\" is a word too, so it stays")
+    }
+
+    func testSpatialAutocorrectKnowsYourOwnWords() throws {
+        try useDecoder()
+        engine.autocorrect.loadLexiconEntries([("Zorbix", "Zorbix")])
+        typeTaps("zorbiz")
+        typeTaps("zorbix")
+        XCTAssertEqual(target.text, "Zorbix zorbix ", "a slip in a name from Contacts, and the name typed right")
+    }
+
     func testTurningAutocorrectSettingOffKeepsSuggestionsWithoutAutoReplacing() {
         engine.autocorrect.isEnabled = false
         typeWord("dont")

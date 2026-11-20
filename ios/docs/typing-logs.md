@@ -80,7 +80,7 @@ The keyboard appeared (`trigger`: `appear`), the field changed while it showed
   (`iOS 26.1`), `version` and `build` of Hex, `locale`, `languages` (first
   four preferred), `keyboardLanguage` (the keyboard's `primaryLanguage`),
   `inputMode` (the field's input mode language), `fullAccess`.
-- `settings`: `autocorrect` (Hex's), `key_popups`, `haptics`, `learnHowIType`, `cleanupTagger`,
+- `settings`: `autocorrect` (Hex's), `spatialAutocorrect`, `key_popups`, `haptics`, `learnHowIType`, `cleanupTagger`,
   `hexKeyPlacement`, `dictationLanguage` (BCP 47, or `automatic`), `keyboardLayout`
   (`en`/`nb`/`es`/`de`, empty for the dictation bar), `style` (dictation style).
 

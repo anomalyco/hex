@@ -97,6 +97,22 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// Whether the built-in English contractions and typo list apply.
     var usesEnglishFixes: Bool { self == .english }
 
+    /// Two-letter words common enough that autocorrect fixes a two-letter non-word one
+    /// neighbouring key from one of them ("tk" -> "to"), commonest first. Empty where no list
+    /// has been chosen yet: then two-letter words are left alone, as before.
+    var commonTwoLetterWords: [String] {
+        switch self {
+        case .english:
+            ["to", "of", "in", "it", "is", "be", "as", "at", "so", "we", "he", "by", "or", "on",
+             "do", "if", "me", "my", "up", "an", "go", "no", "us", "am"]
+        case .spanish:
+            ["de", "la", "el", "en", "no", "se", "lo", "es", "un", "su", "me", "te", "ya", "mi",
+             "tu", "yo", "le", "si", "al", "ha", "ni"]
+        case .norwegian, .german:
+            []
+        }
+    }
+
     /// Each letter's (row, column) for autocorrect's neighbouring-key cost, with rows 2
     /// and 3 shifted as the keys are.
     var keyCoordinates: [Character: (Double, Double)] {

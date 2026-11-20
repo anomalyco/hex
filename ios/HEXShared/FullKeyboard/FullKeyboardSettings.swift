@@ -12,6 +12,7 @@ struct FullKeyboardSettings {
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
         static let autocorrect = "settings.keyboardAutocorrect"
+        static let spatialAutocorrect = "experiments.spatialAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
         static let emoji = "experiments.emoji"
@@ -33,6 +34,13 @@ struct FullKeyboardSettings {
     var autocorrect: Bool {
         get { defaults?.object(forKey: Key.autocorrect) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.autocorrect) }
+    }
+
+    /// Experiment: autocorrect reads your taps with a language model (`TypingDecoder`) instead
+    /// of `UITextChecker`'s one-edit guesses, in English and Spanish. Off by default.
+    var spatialAutocorrect: Bool {
+        get { defaults?.bool(forKey: Key.spatialAutocorrect) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.spatialAutocorrect) }
     }
 
     /// The enlarged letter that pops up over a pressed key. On by default.

@@ -199,6 +199,21 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
+  - **Spatial autocorrect (Settings › Experiments › Spatial autocorrect):**
+    Off by default; it needs the full keyboard with Autocorrect on. A noisy-channel decoder
+    (`TypingDecoder`) replaces `UITextChecker`'s one-edit guesses on space and in the
+    strip for English and Spanish: each tap is scored against every letter with a 2D
+    Gaussian around the key (shifted by Learn how I type's tap offsets when it has 20
+    or more taps on a letter), words are found with a beam search over a memory-mapped
+    word list and over your own words (Contacts names and other `UILexicon` terms,
+    one-word text replacements, words you kept, fixes Hex learned), a word-pair language
+    model weighs them by the word before, a missed space is tried by splitting the taps,
+    accented letters read from their base key (é from e), and what you typed is replaced
+    only when the best reading beats it by a margin (more when what you typed is a word).
+    Shortcuts, learned fixes, contractions, and words you kept still come first. The
+    models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
+    built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
+    Acknowledgements below).
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. For testing and training prediction and
     per-user touch models: the keyboard writes every touch on Hex's keys (raw
@@ -326,7 +341,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   `UITextChecker` dictionary (`nb`, `es`, `de`); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
-  the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
+  the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
+  is the cheapest fix of all ("aqui" → "aquí", "manana" → "mañana"; a word the
+  dictionary knows, such as "esta", is never changed). A two-letter non-word one
+  neighbouring key (or one swap) from a very common two-letter word is fixed too
+  ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English
+  and Spanish only). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
@@ -383,6 +403,30 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     can't leave it behind (`LiveActivityCoordinator`). Every end also ends any
     other Hex activity, and launch, returning to Hex, and ending the warm
     session (Keep mic warm › Off) end any no dictation owns.
+
+## Acknowledgements
+
+The app shows these under Settings › Acknowledgements (`HEXMobile/AcknowledgementsView.swift`).
+
+- **Google Books Ngram data:** Spatial autocorrect's word and word-pair frequencies come
+  from the Google Books Ngram Viewer data, version 3 (2020), by Google, licensed under
+  [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/). Counts
+  are summed over 1980–2019 and kept only for words in the lists below.
+- **SCOWL:** English words are checked against SCOWL (Spell Checker Oriented Word Lists)
+  and VarCon by Kevin Atkinson, sizes up to 70 (<http://wordlist.aspell.net/>). Copyright
+  2000-2018 by Kevin Atkinson. Permission to use, copy, modify, distribute and sell these
+  word lists, the associated scripts, the output created from the scripts, and its
+  documentation for any purpose is hereby granted without fee, provided that the above
+  copyright notice appears in all copies and that both that copyright notice and this
+  permission notice appear in supporting documentation. Kevin Atkinson makes no
+  representations about the suitability of this array for any purpose. It is provided
+  "as is" without express or implied warranty. SCOWL's inflections come from WordNet 1.6,
+  Copyright 1997 by Princeton University, all rights reserved, provided "as is" without
+  warranties (the full notice is in the app); its other sources are public domain.
+- **RLA-ES:** Spanish words are checked against RLA-ES, the Spanish spelling dictionaries
+  for LibreOffice by Santiago Bosio and contributors (Spain and Mexico), used under the
+  [Mozilla Public License 1.1](https://www.mozilla.org/en-US/MPL/1.1/)
+  (<https://github.com/sbosio/rla-es>).
 
 ## Build & Test
 

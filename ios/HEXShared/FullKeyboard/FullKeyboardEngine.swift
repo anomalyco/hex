@@ -81,6 +81,14 @@ final class FullKeyboardEngine {
     private var touchOrder: [Int] = []
     private var lastSpaceAt: TimeInterval?
 
+    /// Where each letter of the word being typed was tapped (nil for one that came another
+    /// way, such as an accent), for Spatial autocorrect.
+    private var tokenTaps: [CGPoint?] = []
+    /// Spatial autocorrect: where you tend to tap each letter, from its centre (Learn how I type).
+    var tapOffsets: [Character: CGVector] = [:] {
+        didSet { if tapOffsets != oldValue { syncDecoderKeys() } }
+    }
+
     private(set) var activeAccentMenu: AccentMenu?
     private var activeAccentTouchID: Int?
     private(set) var suggestions: [KeyboardSuggestion] = []
@@ -178,6 +186,7 @@ final class FullKeyboardEngine {
         }
         shift.reset()
         lastSpaceAt = nil
+        tokenTaps.removeAll()
         autocorrect.clearPendingUndo()
         cancelAllTouches()
         rebuildLayout(cause: "field")
@@ -188,6 +197,7 @@ final class FullKeyboardEngine {
     /// Call after the text or the cursor changed outside these keys.
     func textDidChange() {
         lastSpaceAt = nil
+        tokenTaps.removeAll()
         autocorrect.clearPendingUndo()
         refreshAutoCapitalization()
         refreshSuggestions()
@@ -210,6 +220,7 @@ final class FullKeyboardEngine {
 
     func refreshSuggestions() {
         syncLearning()
+        autocorrect.decoderTaps = currentTokenTaps
         let next = autocorrect.suggestions(
             beforeInput: target.documentContextBeforeInput,
             field: field,
@@ -284,7 +295,7 @@ final class FullKeyboardEngine {
                 activeAccentMenu = nil
                 activeAccentTouchID = nil
             } else {
-                commitCharacter(touch.key)
+                commitCharacter(touch.key, at: touch.startPoint)
             }
             touch.committed = true
             touches[other] = touch
@@ -385,6 +396,7 @@ final class FullKeyboardEngine {
                     touch.trackpadOffset += rawSteps
                     touches[id] = touch
                     typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
+                    tokenTaps.removeAll()
                     target.adjustTextPosition(byCharacterOffset: rawSteps)
                     onSelectionStep?()
                     refreshAutoCapitalization()
@@ -433,7 +445,7 @@ final class FullKeyboardEngine {
         switch touch.key.kind {
         case .character:
             if !touch.committed {
-                commitCharacter(touch.key)
+                commitCharacter(touch.key, at: touch.startPoint)
             }
         case .shift:
             shift.shiftUp()
@@ -542,6 +554,7 @@ final class FullKeyboardEngine {
             for _ in 0..<undo.insertedText.count {
                 target.deleteBackward()
             }
+            tokenTaps.removeAll()
             target.insertText(undo.original)
             autocorrect.suppressAndKeep(undo.original)
             learning?.record(
@@ -561,6 +574,11 @@ final class FullKeyboardEngine {
                 deleted.map { TypingLogField("deleted", .string($0)) } ?? TypingLogField("deletedCount", .int(1)),
                 TypingLogField("src", .string(source)),
             ])
+        }
+        if let last = target.documentContextBeforeInput?.last, last.isLetter || last == "'", !tokenTaps.isEmpty {
+            tokenTaps.removeLast()
+        } else {
+            tokenTaps.removeAll()
         }
         target.deleteBackward()
         lastSpaceAt = nil
@@ -584,6 +602,7 @@ final class FullKeyboardEngine {
             index = before.index(before: index)
             count += 1
         }
+        tokenTaps.removeAll()
         typingLog?.edit("delete_word", [
             TypingLogField("deleted", .string(String(before.suffix(max(1, count))))),
             TypingLogField("src", .string("repeat_word")),
@@ -598,15 +617,21 @@ final class FullKeyboardEngine {
 
     // MARK: - Typing
 
-    private func commitCharacter(_ key: KeyboardKey) {
+    private func commitCharacter(_ key: KeyboardKey, at point: CGPoint) {
         guard let character = key.character else { return }
         let text = layerState.layer == .letters && shift.isUppercase ? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
         }
         autocorrect.clearPendingUndo()
-        insert(text, source: "key")
+        insert(text, source: "key", at: point)
         logState("typed")
+    }
+
+    /// The taps of the word being typed when every letter came from a key, else nil.
+    private var currentTokenTaps: [CGPoint]? {
+        let taps = tokenTaps.compactMap { $0 }
+        return taps.count == tokenTaps.count && !taps.isEmpty ? taps : nil
     }
 
     private func commitAccentSelection(_ chosen: String) {
@@ -628,6 +653,7 @@ final class FullKeyboardEngine {
             ])
             target.deleteBackward()
             target.insertText(". ")
+            tokenTaps.removeAll()
             lastSpaceAt = nil
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
@@ -637,6 +663,7 @@ final class FullKeyboardEngine {
         }
         learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
         syncLearning()
+        autocorrect.decoderTaps = currentTokenTaps
         if let (original, replacement) = autocorrect.replacementOnSpace(
             beforeInput: target.documentContextBeforeInput,
             field: field,
@@ -646,6 +673,7 @@ final class FullKeyboardEngine {
                 target.deleteBackward()
             }
             let inserted = replacement + " "
+            tokenTaps.removeAll()
             typingLog?.edit("autocorrect", [
                 TypingLogField("from", .string(original)),
                 TypingLogField("to", .string(replacement)),
@@ -669,7 +697,12 @@ final class FullKeyboardEngine {
     }
 
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
-    private func insert(_ text: String, source: String?) {
+    private func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
+        if text.count == 1, text.first?.isLetter == true {
+            tokenTaps.append(point)
+        } else {
+            tokenTaps.removeAll()
+        }
         if let source {
             typingLog?.edit("insert", [
                 TypingLogField("inserted", .string(text)),
@@ -714,7 +747,14 @@ final class FullKeyboardEngine {
             horizontalInset: horizontalInset,
             language: language
         )
+        syncDecoderKeys()
         logState(cause)
+    }
+
+    /// The letter keys Spatial autocorrect scores taps against: this layout's, moved by
+    /// `tapOffsets`. None off the letters page.
+    private func syncDecoderKeys() {
+        autocorrect.decoderKeys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets)
     }
 
     /// Hands the layout and shift to typing logs, which writes a line when either changed.

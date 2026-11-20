@@ -296,6 +296,7 @@ struct ExperimentsSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
+    @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
 
@@ -303,6 +304,16 @@ struct ExperimentsSettingsPage: View {
         SettingsPageScaffold(title: "Experiments") {
             SettingsCard {
                 EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Spatial autocorrect",
+                    detail: FullKeyboardSettings().isEnabled && FullKeyboardSettings().autocorrect
+                        ? "Reads where your taps land to fix typos, in English and Spanish"
+                        : "Needs the full keyboard with Autocorrect on",
+                    isOn: $spatialAutocorrect
+                )
 
                 SettingsDivider()
 
@@ -318,9 +329,13 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: appleIntelligenceCleanup) { _, enabled in
             AppleIntelligenceCleanupSettings().isEnabled = enabled
         }
+        .onChange(of: spatialAutocorrect) { _, enabled in
+            FullKeyboardSettings().spatialAutocorrect = enabled
+        }
         .onAppear {
             emoji = FullKeyboardSettings().emoji
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
+            spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         }
