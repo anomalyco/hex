@@ -180,6 +180,17 @@ it on-device with Apple Speech, downloading the speech assets on first use
     a Dynamic Island / Lock Screen Live Activity (`Stop` and `Cancel` buttons)
     and transcribe + copy to the clipboard on second press.
 
+## Active users
+
+TestFlight and App Store builds are counted on Anomaly's DAU page
+(`https://anoma.ly/release/admin/?app=hex-ios`) the way the desktop app's update
+checks are: `HEXShared/ActiveUserCheck.swift` requests
+`https://anoma.ly/release/hex-ios/ios/<beta|stable>.json` with only
+`User-Agent: hex-ios/<channel>/<short version>-<build>/ios` when the app comes to
+the foreground or the keyboard appears with Full Access, at most once an hour
+across both (the last check is in the App Group). The answer is ignored; a 404
+counts. Debug builds never check. Never add an install ID, text, or settings to it.
+
 ## Build & Test
 
 Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46.0+.
