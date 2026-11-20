@@ -105,10 +105,19 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     `15m`) so subsequent taps on **Dictate** record directly inside the
     keyboard with zero app switches; picking `Off` or tapping the header timer
     ends it.
-  - **Styles:** `Polished` (sentence case + punctuation + filler trim),
-    `Casual` (lowercase chat without trailing period), `Notes` (spoken
-    `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
-    insertion spacing and repeating backspace.
+  - **Styles (`TranscriptFormatter`):** `Polished` (full
+    sentences: fillers trimmed, each sentence capitalized, "I" too, and ended,
+    in Chinese and Japanese with "。"), `Casual` (texting: sentences may start
+    lowercase, though never an acronym or a word with inner capitals; "i" for
+    "I"; no comma after an opening "yeah" or "ok"; no final full stop on a
+    message of one line and up to three sentences), `Notes` (spoken `"bullet"`
+    / `"new line"` markers, else several sentences become a bulleted list and
+    "Shopping list: eggs, milk and bread" bullets its items; no opening "so",
+    "yeah" or "and then", no final full stops), and `Verbatim` (as the speech
+    model wrote it), with cursor-aware insertion spacing and repeating
+    backspace. On an already punctuated sentence ("Sounds good, see you at
+    5.") Polished and Verbatim read the same; they differ on fillers, missing
+    capitals or endings, and with Clean up what I say on.
   - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
     name for @) and "at sign" become "@", and an address said around it joins
     up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning

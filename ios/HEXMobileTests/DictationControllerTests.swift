@@ -272,7 +272,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertGreaterThan(audio.deactivateCount, 0)
         try await settle()
 
-        await transcriber.resumeSuspended(with: "Um, Ship It Tonight.")
+        await transcriber.resumeSuspended(with: "Um, ship it tonight.")
         try await settle()
 
         XCTAssertEqual(controller.phase, .ready)
