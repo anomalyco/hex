@@ -41,20 +41,13 @@ struct ContentView: View {
     @Binding var showSetup: Bool
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var onboardingPage = OnboardingProgress.launchPage
-    @State private var practiceText = ""
-    @FocusState private var practiceFocused: Bool
+    @State private var settingsPath = SettingsSnapshotFixture.initialPath
 
     private static let stageWellHeight: CGFloat = 48
     private static let stageControlHeight: CGFloat = 36
     private static let stageInset: CGFloat = 6
     private static let stageCancelWidth: CGFloat = 36
     private static let stageDoneWidth: CGFloat = 70
-
-    private static var autoFocusPracticeField: Bool {
-        let args = ProcessInfo.processInfo.arguments
-        guard let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count else { return false }
-        return args[idx + 1].hasPrefix("hosted-keyboard")
-    }
 
     private static var simulatesHomeButtonDevice: Bool {
         let args = ProcessInfo.processInfo.arguments
@@ -126,10 +119,8 @@ struct ContentView: View {
         }
     }
 
-    private var setupComplete: Bool {
-        setupMonitor.keyboardReady
-            && setupMonitor.microphone == .granted
-            && dictation.isModelReady
+    private var setupStepsLeft: Int {
+        setupMonitor.stepsLeft(modelReady: dictation.isModelReady)
     }
 
     private var hasTranscript: Bool {
@@ -139,13 +130,40 @@ struct ContentView: View {
     // MARK: - Standalone App
 
     private var standaloneView: some View {
+        NavigationStack(path: $settingsPath) {
+            homeView
+                .navigationTitle("Hex")
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: SettingsPage.self) { page in
+                    settingsPage(page)
+                }
+        }
+        .tint(HexTheme.textBase)
+        .sheet(isPresented: $showSetup) {
+            SetupSheet(dictation: dictation, monitor: setupMonitor)
+        }
+        .task {
+            while !Task.isCancelled {
+                setupMonitor.refresh()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                setupMonitor.refresh()
+            }
+        }
+    }
+
+    /// Fits one screen: the header and its status line, Dictate, and the four pages.
+    private var homeView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                headerRow
-
-                if showSetup || !setupComplete {
-                    KeyboardSetupCard(dictation: dictation, monitor: setupMonitor)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                VStack(alignment: .leading, spacing: 2) {
+                    headerRow
+                    SetupStatusRow(stepsLeft: setupStepsLeft) {
+                        showSetup = true
+                    }
                 }
 
                 stageBar
@@ -163,9 +181,39 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
-                settingsCard
-                ExperimentsCard()
-                practiceField
+                SettingsCard {
+                    ForEach(Array(SettingsPage.allCases.enumerated()), id: \.element) { index, page in
+                        if index > 0 {
+                            SettingsDivider(leading: 50)
+                        }
+                        NavigationLink(value: page) {
+                            SettingsLinkLabel(title: page.title, icon: page.icon)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 8)
+
+                SettingsCard {
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            openURL(url)
+                        }
+                    } label: {
+                        SettingsLinkLabel(title: "Keyboard settings", icon: "gearshape", trailingIcon: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
+
+                    SettingsDivider(leading: 50)
+
+                    Button {
+                        OnboardingProgress.save(.welcome)
+                        onboardingPage = .welcome
+                    } label: {
+                        SettingsLinkLabel(title: "Run setup again", icon: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .frame(maxWidth: 500)
             .padding(.horizontal, 20)
@@ -175,19 +223,24 @@ struct ContentView: View {
             .animation(HexMotion.stageAnimation(reduceMotion: reduceMotion), value: appStageMode)
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: dictation.keyboardSessionEnabled)
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: hasTranscript)
-            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: setupComplete)
+            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: setupStepsLeft)
         }
+        .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .task {
-            while !Task.isCancelled {
-                setupMonitor.refresh()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                setupMonitor.refresh()
-            }
+        .background(HexTheme.bgDeep.ignoresSafeArea())
+    }
+
+    @ViewBuilder
+    private func settingsPage(_ page: SettingsPage) -> some View {
+        switch page {
+        case .dictation:
+            DictationSettingsPage(dictation: dictation)
+        case .keyboard:
+            KeyboardSettingsPage()
+        case .privacy:
+            PrivacySettingsPage()
+        case .experiments:
+            ExperimentsSettingsPage()
         }
     }
 
@@ -416,136 +469,6 @@ struct ContentView: View {
         )
     }
 
-    private var settingsCard: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                rowTitle("Keep mic warm")
-                Spacer(minLength: 8)
-                compactSegments(
-                    items: WarmSessionDuration.allCases,
-                    selected: dictation.warmDuration,
-                    label: \.shortLabel,
-                    onSelect: { duration in
-                        withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
-                            dictation.selectWarmDuration(duration)
-                        }
-                    }
-                )
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 50)
-
-            rowDivider
-
-            HStack(spacing: 12) {
-                rowTitle("Style")
-                Spacer(minLength: 8)
-                Menu {
-                    ForEach(DictationStyle.allCases, id: \.self) { candidate in
-                        Button {
-                            dictation.setStyle(candidate)
-                        } label: {
-                            if dictation.style == candidate {
-                                Label(candidate.label, systemImage: "checkmark")
-                            } else {
-                                Text(candidate.label)
-                            }
-                        }
-                    }
-                } label: {
-                    menuValueLabel(dictation.style.label)
-                }
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-
-            DictationLanguageRow(dictation: dictation)
-
-            rowDivider
-
-            Toggle(
-                isOn: Binding(
-                    get: { !dictation.allowBluetoothMic },
-                    set: { dictation.setAllowBluetoothMic(!$0) }
-                )
-            ) {
-                VStack(alignment: .leading, spacing: 2) {
-                    rowTitle("Always use iPhone microphone")
-                    Text("Keeps music playing and starts faster")
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
-                }
-            }
-            .tint(HexTheme.success)
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-
-            rowDivider
-
-            Button {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    openURL(url)
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    rowTitle("Keyboard settings")
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            rowDivider
-
-            Button {
-                OnboardingProgress.save(.welcome)
-                onboardingPage = .welcome
-            } label: {
-                HStack(spacing: 8) {
-                    rowTitle("Run setup again")
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .background(
-            HexTheme.bgBase,
-            in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
-        )
-    }
-
-    private var practiceField: some View {
-        TextField("Test keyboard…", text: $practiceText, axis: .vertical)
-            .font(.system(size: 15))
-            .foregroundStyle(HexTheme.textBase)
-            .focused($practiceFocused)
-            .lineLimit(1...4)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .background(
-                HexTheme.bgBase,
-                in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
-            )
-            .onAppear {
-                if Self.autoFocusPracticeField {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        practiceFocused = true
-                    }
-                }
-            }
-    }
-
     // MARK: - Cold-Start Handoff Screen (unified bar + home-indicator swipe cue)
 
     private var keyboardHandoffView: some View {
@@ -746,68 +669,6 @@ struct ContentView: View {
     }
 
     // MARK: - Pieces
-
-    private func rowTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 15, weight: .regular))
-            .foregroundStyle(HexTheme.textBase)
-    }
-
-    private var rowDivider: some View {
-        Rectangle()
-            .fill(HexTheme.borderWeak)
-            .frame(height: 0.5)
-            .padding(.leading, 16)
-    }
-
-    private func menuValueLabel(_ value: String) -> some View {
-        HStack(spacing: 5) {
-            Text(value)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(HexTheme.textMuted)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(HexTheme.textMuted)
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    private func compactSegments<Item: Hashable>(
-        items: [Item],
-        selected: Item,
-        label: KeyPath<Item, String>,
-        onSelect: @escaping (Item) -> Void
-    ) -> some View {
-        HStack(spacing: 2) {
-            ForEach(items, id: \.self) { item in
-                let isSelected = item == selected
-                Button {
-                    onSelect(item)
-                } label: {
-                    Text(item[keyPath: label])
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(isSelected ? HexTheme.textBase : HexTheme.textMuted)
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(
-                            isSelected ? Color.white.opacity(0.14) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(2)
-        .background(
-            Color.white.opacity(0.055),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
-    }
 
     /// `offer`: a language (BCP 47) that works here, when the one chosen doesn't yet.
     private func errorBanner(_ message: String, offer: String? = nil) -> some View {

@@ -29,7 +29,7 @@ final class KeyboardSetupMonitor {
         let args = ProcessInfo.processInfo.arguments
         if let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count {
             switch args[idx + 1] {
-            case "setup", "onboarding-try", "onboarding-try-off":
+            case "setup", "setup-sheet", "onboarding-try", "onboarding-try-off":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .granted
@@ -69,11 +69,70 @@ final class KeyboardSetupMonitor {
     }
 }
 
-struct KeyboardSetupCard: View {
+/// The four setup steps and how many are left. Full Access only counts as done once the
+/// keyboard has run with it, so "not confirmed yet" is an ordinary step, not a failure.
+extension KeyboardSetupMonitor {
+    func stepsLeft(modelReady: Bool) -> Int {
+        [keyboardAdded == true, fullAccessOn, microphone == .granted, modelReady]
+            .filter { !$0 }
+            .count
+    }
+}
+
+/// Home's one status line under the Hex header: "Ready", or "Finish setup · 1 step" opening
+/// the sheet.
+struct SetupStatusRow: View {
+    let stepsLeft: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Group {
+                    if stepsLeft == 0 {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(HexTheme.success)
+                    } else {
+                        Image(systemName: "circle.dotted")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+                .frame(width: 20)
+
+                HStack(spacing: 5) {
+                    if stepsLeft == 0 {
+                        Text("Ready")
+                            .foregroundStyle(HexTheme.textMuted)
+                    } else {
+                        Text("Finish setup")
+                            .foregroundStyle(HexTheme.textBase)
+                        Text("· \(stepsLeft) \(stepsLeft == 1 ? "step" : "steps")")
+                            .foregroundStyle(HexTheme.textMuted)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .frame(minHeight: 30, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(stepsLeft == 0 ? "Hex is ready" : "Finish setup, \(stepsLeft) left")
+    }
+}
+
+/// The setup checklist, opened from home's status line or the keyboard's Open Hex setup.
+struct SetupSheet: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
     @Bindable var dictation: DictationController
     let monitor: KeyboardSetupMonitor
     @State private var checkText = ""
+    @State private var contentHeight: CGFloat = 360
     @FocusState private var checkFocused: Bool
 
     /// iOS only tells Hex about Full Access from inside its keyboard, so until the keyboard
@@ -83,55 +142,93 @@ struct KeyboardSetupCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Keyboard setup")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(HexTheme.textBase)
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .presentationDetents([.height(contentHeight)])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(HexTheme.bgDeep)
+            .preferredColorScheme(.dark)
+            .onChange(of: monitor.fullAccessOn) { _, on in
+                if on { checkFocused = false }
+            }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Text(monitor.stepsLeft(modelReady: dictation.isModelReady) == 0 ? "Hex is ready" : "Finish setup")
+                    .font(.system(size: 17, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundStyle(HexTheme.textBase)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .frame(width: 30, height: 30)
+                        .background(Color.white.opacity(0.07), in: Circle())
+                        .frame(width: 44, height: 44, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+            }
+            .frame(height: 30)
 
             VStack(spacing: 0) {
                 row(
                     title: "Hex Keyboard",
                     status: keyboardStatus,
-                    done: monitor.keyboardAdded == true
+                    icon: monitor.keyboardAdded == true ? .done : .todo
                 )
-                divider
+                SettingsDivider(leading: 42)
                 row(
-                    title: "Allow Full Access",
-                    status: monitor.fullAccessOn ? "On" : needsKeyboardCheck ? "Not checked" : "Off",
-                    done: monitor.fullAccessOn
+                    title: "Full Access",
+                    status: monitor.fullAccessOn ? "On" : needsKeyboardCheck ? "Not confirmed yet" : "Off",
+                    icon: monitor.fullAccessOn ? .done : needsKeyboardCheck ? .unconfirmed : .todo
                 )
-                divider
+                SettingsDivider(leading: 42)
                 row(
                     title: "Microphone",
                     status: microphoneStatus,
-                    done: monitor.microphone == .granted
+                    icon: monitor.microphone == .granted ? .done : .todo
                 ) {
                     if monitor.microphone == .undetermined {
                         smallButton("Allow") { monitor.requestMicrophone() }
                     }
                 }
-                divider
+                SettingsDivider(leading: 42)
                 row(
                     title: "Speech model",
                     status: modelStatus,
-                    done: dictation.isModelReady
+                    icon: dictation.isModelReady ? .done : .todo
                 )
             }
+            .background(
+                HexTheme.bgBase,
+                in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
+            )
 
             if needsKeyboardCheck {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Already turned it on? Tap the field and switch to Hex with \(Image(systemName: "globe")). Hex can only check Full Access from its keyboard.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    TextField("Tap here, then switch to Hex", text: $checkText)
-                        .font(.system(size: 15))
-                        .foregroundStyle(HexTheme.textBase)
-                        .focused($checkFocused)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 40)
-                        .background(Color.white.opacity(0.06), in: Capsule())
-                }
+                TextField(
+                    "",
+                    text: $checkText,
+                    prompt: Text("Tap here, then switch to Hex with \(Image(systemName: "globe"))")
+                        .foregroundStyle(HexTheme.textFaint)
+                )
+                .font(.system(size: 15))
+                .foregroundStyle(HexTheme.textBase)
+                .focused($checkFocused)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 46)
+                .background(
+                    HexTheme.bgBase,
+                    in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
+                )
             }
 
             if !monitor.keyboardReady || monitor.microphone == .denied {
@@ -140,24 +237,24 @@ struct KeyboardSetupCard: View {
                         openURL(url)
                     }
                 } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Open Settings")
-                            .font(.system(size: 15, weight: .medium))
-                    }
-                    .foregroundStyle(HexTheme.textBase)
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(Color.white.opacity(0.09), in: Capsule())
+                    Text("Open Settings")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(HexTheme.textBase)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.white.opacity(0.09), in: Capsule())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(16)
-        .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
-        .onChange(of: monitor.fullAccessOn) { _, on in
-            if on { checkFocused = false }
-        }
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+    }
+
+    private enum RowIcon {
+        case done
+        case unconfirmed
+        case todo
     }
 
     private var keyboardStatus: String {
@@ -197,20 +294,32 @@ struct KeyboardSetupCard: View {
         }
     }
 
-    private func row(title: String, status: String, done: Bool) -> some View {
-        row(title: title, status: status, done: done) { EmptyView() }
+    private func row(title: String, status: String, icon: RowIcon) -> some View {
+        row(title: title, status: status, icon: icon) { EmptyView() }
     }
 
     private func row<Trailing: View>(
         title: String,
         status: String,
-        done: Bool,
+        icon: RowIcon,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(done ? HexTheme.success : HexTheme.textFaint)
+            Group {
+                switch icon {
+                case .done:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(HexTheme.success)
+                case .unconfirmed:
+                    Image(systemName: "circle.dotted")
+                        .foregroundStyle(HexTheme.textMuted)
+                case .todo:
+                    Image(systemName: "circle")
+                        .foregroundStyle(HexTheme.textFaint)
+                }
+            }
+            .font(.system(size: 16, weight: .medium))
+            .frame(width: 16)
 
             Text(title)
                 .font(.system(size: 15, weight: .regular))
@@ -225,7 +334,8 @@ struct KeyboardSetupCard: View {
 
             trailing()
         }
-        .padding(.vertical, 9)
+        .padding(.horizontal, 16)
+        .frame(minHeight: 46)
     }
 
     private func smallButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -236,11 +346,5 @@ struct KeyboardSetupCard: View {
             .frame(height: 28)
             .background(Color.white.opacity(0.09), in: Capsule())
             .buttonStyle(.plain)
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(HexTheme.borderWeak)
-            .frame(height: 0.5)
     }
 }

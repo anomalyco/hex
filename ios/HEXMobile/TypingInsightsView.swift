@@ -73,11 +73,11 @@ struct TypingInsightsView: View {
 
     private var summary: String {
         if snapshot.isEmpty {
-            return "Type or dictate with the Hex keyboard and this fills in. It stays on this iPhone."
+            return "Fills in as you type and dictate with Hex"
         }
         let dictations = snapshot.dictationOutcomes.count
-        return "\(snapshot.tapCount) taps, \(snapshot.corrections.count) typing fixes, and \(dictations) "
-            + (dictations == 1 ? "dictation" : "dictations") + " learned, kept only on this iPhone."
+        return "\(snapshot.tapCount) taps, \(snapshot.corrections.count) typing fixes and \(dictations) "
+            + (dictations == 1 ? "dictation" : "dictations") + " learned"
     }
 
     /// Learned fixes, most used first; each can be switched off.

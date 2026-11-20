@@ -130,7 +130,7 @@ enum ShareSheet {
     }
 }
 
-/// `--snap-state experiments` (the Experiments card) and `--snap-state typing-logs`
+/// `--snap-state experiments` (Settings › Experiments) and `--snap-state typing-logs`
 /// (the Typing logs screen) on Simulator; pass `--experiment-typing-logs` to show it on.
 struct ExperimentsSnapshotStage: View {
     let scene: String
@@ -146,14 +146,10 @@ struct ExperimentsSnapshotStage: View {
         if scene == "typing-logs" {
             TypingLogsView()
         } else {
-            ScrollView {
-                ExperimentsCard()
-                    .frame(maxWidth: 500)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .frame(maxWidth: .infinity)
+            NavigationStack {
+                ExperimentsSettingsPage()
             }
-            .background(HexTheme.bgDeep.ignoresSafeArea())
+            .tint(HexTheme.textBase)
             .preferredColorScheme(.dark)
         }
     }

@@ -1,0 +1,364 @@
+import SwiftUI
+
+/// Settings › Dictation: how Hex writes what you say, and the microphone.
+struct DictationSettingsPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Bindable var dictation: DictationController
+    @State private var cleanupTagger = CleanupTaggerSettings().isEnabled
+    @State private var customVocabulary = CustomVocabularySettings().isEnabled
+
+    var body: some View {
+        SettingsPageScaffold(title: "Dictation") {
+            SettingsCard {
+                HStack(spacing: 12) {
+                    SettingsRowLabel(title: "Style")
+                    Spacer(minLength: 8)
+                    Menu {
+                        ForEach(DictationStyle.allCases, id: \.self) { candidate in
+                            Button {
+                                dictation.setStyle(candidate)
+                            } label: {
+                                if dictation.style == candidate {
+                                    Label(candidate.label, systemImage: "checkmark")
+                                } else {
+                                    Text(candidate.label)
+                                }
+                            }
+                        }
+                    } label: {
+                        SettingsMenuValue(value: dictation.style.label)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 48)
+
+                DictationLanguageRow(dictation: dictation)
+            }
+
+            SettingsCard {
+                TranslateDictationRow()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 50)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Clean up what I say",
+                    detail: "Drops ums, repeats and corrected words",
+                    isOn: $cleanupTagger
+                )
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Custom vocabulary",
+                    detail: "Spell names and terms your way",
+                    isOn: $customVocabulary
+                )
+
+                if customVocabulary {
+                    CustomVocabularyEditor()
+                        .padding(.horizontal, 16)
+                        .padding(.top, 2)
+                        .padding(.bottom, 14)
+                }
+            }
+
+            SettingsCard {
+                HStack(spacing: 12) {
+                    SettingsRowLabel(title: "Keep mic warm")
+                    Spacer(minLength: 8)
+                    SettingsSegments(
+                        items: WarmSessionDuration.allCases,
+                        selected: dictation.warmDuration,
+                        label: \.shortLabel,
+                        onSelect: { duration in
+                            withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
+                                dictation.selectWarmDuration(duration)
+                            }
+                        }
+                    )
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 50)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Always use iPhone microphone",
+                    detail: "Keeps music playing and starts faster",
+                    isOn: Binding(
+                        get: { !dictation.allowBluetoothMic },
+                        set: { dictation.setAllowBluetoothMic(!$0) }
+                    )
+                )
+            }
+        }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: customVocabulary)
+        .onChange(of: cleanupTagger) { _, enabled in
+            CleanupTaggerSettings().isEnabled = enabled
+        }
+        .onChange(of: customVocabulary) { _, enabled in
+            CustomVocabularySettings().isEnabled = enabled
+        }
+        .onAppear {
+            cleanupTagger = CleanupTaggerSettings().isEnabled
+            customVocabulary = CustomVocabularySettings().isEnabled
+        }
+    }
+}
+
+/// Which keyboard Hex shows: the full keyboard (letters, with a Hex key to dictate) or the
+/// dictation bar. Stored as `FullKeyboardSettings.isEnabled`.
+private enum KeyboardChoice: CaseIterable {
+    case full
+    case dictationBar
+
+    var label: String {
+        switch self {
+        case .full: "Full"
+        case .dictationBar: "Dictation bar"
+        }
+    }
+}
+
+/// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
+/// chosen), and haptics, which the dictation bar uses too.
+struct KeyboardSettingsPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var fullKeyboard = FullKeyboardSettings().isEnabled
+    @State private var autocorrect = FullKeyboardSettings().autocorrect
+    @State private var keyPopups = FullKeyboardSettings().keyPopups
+    @State private var haptics = FullKeyboardSettings().haptics
+    @State private var practiceText = ""
+
+    var body: some View {
+        SettingsPageScaffold(title: "Keyboard") {
+            SettingsCard {
+                HStack(spacing: 12) {
+                    SettingsRowLabel(title: "Keyboard")
+                    Spacer(minLength: 8)
+                    SettingsSegments(
+                        items: KeyboardChoice.allCases,
+                        selected: fullKeyboard ? .full : .dictationBar,
+                        label: \.label,
+                        onSelect: { choice in
+                            fullKeyboard = choice == .full
+                        }
+                    )
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 50)
+
+                if fullKeyboard {
+                    KeyboardLayoutRow()
+
+                    SettingsDivider()
+
+                    SettingsToggleRow(
+                        title: "Autocorrect",
+                        detail: "Fixes typos when you press space",
+                        isOn: $autocorrect
+                    )
+
+                    SettingsDivider()
+
+                    SettingsToggleRow(
+                        title: "Key pop-ups",
+                        detail: "Shows the letter above your finger",
+                        isOn: $keyPopups
+                    )
+                }
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Haptics",
+                    detail: "A light tap as you press Hex's keys",
+                    isOn: $haptics
+                )
+            }
+
+            TextField("Test keyboard…", text: $practiceText, axis: .vertical)
+                .font(.system(size: 15))
+                .foregroundStyle(HexTheme.textBase)
+                .lineLimit(1...4)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+                .background(
+                    HexTheme.bgBase,
+                    in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
+                )
+        }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: fullKeyboard)
+        .onChange(of: fullKeyboard) { _, enabled in
+            FullKeyboardSettings().isEnabled = enabled
+        }
+        .onChange(of: autocorrect) { _, enabled in
+            FullKeyboardSettings().autocorrect = enabled
+        }
+        .onChange(of: keyPopups) { _, enabled in
+            FullKeyboardSettings().keyPopups = enabled
+        }
+        .onChange(of: haptics) { _, enabled in
+            FullKeyboardSettings().haptics = enabled
+        }
+        .onAppear {
+            fullKeyboard = FullKeyboardSettings().isEnabled
+            autocorrect = FullKeyboardSettings().autocorrect
+            keyPopups = FullKeyboardSettings().keyPopups
+            haptics = FullKeyboardSettings().haptics
+        }
+    }
+}
+
+/// Settings › Privacy: what Hex keeps about how you type, all of it on this iPhone, and
+/// under Advanced the typing logs you can record to export.
+struct PrivacySettingsPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var learnTyping = TypingJournalSettings().isEnabled
+    @State private var typingLogs = TypingLogSettings().isEnabled
+    @State private var showTypingLogs = false
+
+    var body: some View {
+        SettingsPageScaffold(title: "Privacy") {
+            HStack(spacing: 7) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Everything stays on this iPhone")
+                    .font(.system(size: 13))
+            }
+            .foregroundStyle(HexTheme.textMuted)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 2)
+
+            SettingsCard {
+                // Not only for the full keyboard: it also learns from dictations the
+                // dictation bar inserts.
+                SettingsToggleRow(
+                    title: "Learn how I type",
+                    detail: "Learns from taps and the words you fix",
+                    isOn: $learnTyping
+                )
+
+                if learnTyping {
+                    SettingsDivider()
+                    TypingInsightsView()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
+            }
+
+            SettingsSectionHeader(title: "Advanced")
+
+            SettingsCard {
+                // Apart from Learn how I type: this keeps everything, to export and train on.
+                SettingsToggleRow(
+                    title: "Record typing logs",
+                    detail: "Off by default. Stays on this iPhone to export",
+                    isOn: $typingLogs
+                )
+
+                if typingLogs {
+                    SettingsDivider()
+                    Button {
+                        showTypingLogs = true
+                    } label: {
+                        SettingsLinkLabel(title: "Typing logs")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: learnTyping)
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: typingLogs)
+        .sheet(isPresented: $showTypingLogs) {
+            TypingLogsView()
+        }
+        .onChange(of: learnTyping) { _, enabled in
+            TypingJournalSettings().isEnabled = enabled
+        }
+        .onChange(of: typingLogs) { _, enabled in
+            TypingLogSettings().isEnabled = enabled
+        }
+        .onAppear {
+            learnTyping = TypingJournalSettings().isEnabled
+            typingLogs = TypingLogSettings().isEnabled
+        }
+    }
+}
+
+/// Settings › Experiments: unfinished features, off until turned on. They live in the App
+/// Group so the keyboard reads them too.
+struct ExperimentsSettingsPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var emoji = FullKeyboardSettings().emoji
+    @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
+    @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
+    @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+
+    var body: some View {
+        SettingsPageScaffold(title: "Experiments") {
+            SettingsCard {
+                EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: "Clean up with Apple Intelligence",
+                    detail: cleanupAvailability.reason ?? "Fixes misheard words on device",
+                    isOn: $appleIntelligenceCleanup
+                )
+                .disabled(!cleanupAvailability.isAvailable)
+            }
+        }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: emoji)
+        .onChange(of: appleIntelligenceCleanup) { _, enabled in
+            AppleIntelligenceCleanupSettings().isEnabled = enabled
+        }
+        .onAppear {
+            emoji = FullKeyboardSettings().emoji
+            emojiHistoryEmpty = EmojiUsageStore().isEmpty
+            appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
+            cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+        }
+    }
+}
+
+/// Experiments › Emoji: the full keyboard's emoji key, and while it's on, Clear emoji history.
+private struct EmojiExperimentRows: View {
+    @Binding var emoji: Bool
+    @Binding var historyEmpty: Bool
+
+    var body: some View {
+        SettingsToggleRow(
+            title: "Emoji",
+            detail: FullKeyboardSettings().isEnabled
+                ? "An emoji key with suggestions as you type"
+                : "Needs the full keyboard",
+            isOn: $emoji
+        )
+        .onChange(of: emoji) { _, enabled in
+            FullKeyboardSettings().emoji = enabled
+        }
+
+        if emoji {
+            SettingsDivider()
+            Button {
+                EmojiUsageStore().clear()
+                historyEmpty = true
+            } label: {
+                Text("Clear emoji history")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(historyEmpty ? HexTheme.textFaint : HexTheme.textBase)
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(historyEmpty)
+        }
+    }
+}
