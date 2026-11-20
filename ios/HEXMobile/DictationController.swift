@@ -982,6 +982,14 @@ final class DictationController {
                 self.recordingDuration = 0
                 self.activeKeyboardJobID = nil
                 self.liveActivity.endImmediately()
+                // Nothing was said: end quietly, as a capture too short to hold a word does.
+                if EmptyCapture.endsQuietly(error) {
+                    self.keyboardMessage = nil
+                    self.refreshWarmExpiry()
+                    self.phase = .ready
+                    self.publishKeyboardSnapshot()
+                    return
+                }
                 let message = UserFacingError.message(for: error, context: .transcription)
                 self.keyboardMessage = keyboardJobID == nil ? nil : message
                 self.phase = .failed(message)

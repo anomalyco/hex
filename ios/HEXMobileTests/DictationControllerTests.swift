@@ -82,6 +82,11 @@ private actor ControlledTranscriber: LocalTranscribing {
     private(set) var transcribedURLs: [URL] = []
     private(set) var vocabularyArguments: [[String]] = []
     private var suspendNext = false
+    private var nextError: Error?
+
+    func failNext(with error: Error) {
+        nextError = error
+    }
 
     func armSuspension() {
         suspendNext = true
@@ -107,6 +112,10 @@ private actor ControlledTranscriber: LocalTranscribing {
 
     func transcribe(_ audioURL: URL) async throws -> String {
         transcribedURLs.append(audioURL)
+        if let error = nextError {
+            nextError = nil
+            throw error
+        }
         if suspendNext {
             suspendNext = false
             if let early = pendingResume {
@@ -921,6 +930,58 @@ final class DictationControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.phase, .failed("Another app is using audio. Try again."))
         XCTAssertEqual(bridge.snapshot().message, "Another app is using audio. Try again.")
+    }
+
+    func testEmptyCaptureRule() {
+        XCTAssertTrue(EmptyCapture.isTooShort(frames: 0, sampleRate: 48_000), "Done before the microphone came up")
+        XCTAssertTrue(EmptyCapture.isTooShort(frames: 4_800, sampleRate: 48_000), "0.1 s is a tap")
+        XCTAssertTrue(EmptyCapture.isTooShort(frames: 4_800, sampleRate: 0))
+        XCTAssertFalse(EmptyCapture.isTooShort(frames: 14_400, sampleRate: 48_000), "0.3 s can hold a word")
+
+        XCTAssertTrue(EmptyCapture.endsQuietly(CancellationError()))
+        XCTAssertTrue(EmptyCapture.endsQuietly(ParakeetTranscriber.TranscriberError.emptyTranscript))
+        XCTAssertFalse(EmptyCapture.endsQuietly(ParakeetTranscriber.TranscriberError.notPrepared))
+        XCTAssertFalse(EmptyCapture.endsQuietly(NSError(domain: NSOSStatusErrorDomain, code: 560_557_684)))
+    }
+
+    func testNoSpeechEndsTheKeyboardDictationQuietly() async throws {
+        let now = 40_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.selectWarmDuration(.fifteenMinutes)
+        try await settle()
+
+        await transcriber.failNext(with: ParakeetTranscriber.TranscriberError.emptyTranscript)
+        controller.startRecording(keyboardJobID: "silent-job")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+
+        XCTAssertEqual(controller.phase, .ready, "no speech is not a failure")
+        let snap = bridge.snapshot()
+        XCTAssertEqual(snap.state, .ready)
+        XCTAssertNil(snap.message)
+        XCTAssertNil(snap.transcript)
+
+        // Anything else still fails, as a sentence.
+        await transcriber.failNext(with: ParakeetTranscriber.TranscriberError.notPrepared)
+        controller.startRecording(keyboardJobID: "broken-job")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.phase, .failed("Parakeet V2 is not ready."))
+        XCTAssertEqual(bridge.snapshot().message, "Parakeet V2 is not ready.")
     }
 
     private func settle() async throws {
