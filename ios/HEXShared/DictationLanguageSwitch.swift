@@ -36,15 +36,17 @@ nonisolated enum DictationLanguageSwitch {
         return candidates.first { Locale(identifier: $0).region?.identifier == usual } ?? candidates.first
     }
 
-    /// The language's own short name: "English", "Norsk", "Español", "Deutsch", "עברית".
+    /// The language's own short name: "English", "Norsk", "Español", "Deutsch", "עברית",
+    /// "Русский", and "Srpski" in its script for Serbian (Latin).
     static func nativeName(for identifier: String) -> String {
-        let code = Locale(identifier: identifier).language.languageCode?.identifier ?? identifier
+        let language = Locale(identifier: identifier).language
+        let code = language.languageCode?.identifier ?? identifier
         switch code {
         case "nb", "no": return "Norsk"
         case "nn": return "Nynorsk"
         default: break
         }
-        let own = Locale(identifier: code)
+        let own = Locale(identifier: language.script.map { "\(code)-\($0.identifier)" } ?? code)
         guard let name = own.localizedString(forLanguageCode: code) else { return identifier }
         return name.prefix(1).uppercased(with: own) + name.dropFirst()
     }

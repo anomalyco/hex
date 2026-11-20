@@ -5,7 +5,9 @@ import Foundation
 /// another language is a new case with those filled in. Italian, French and Portuguese
 /// type on the English letters (Apple's Italian and Portuguese keyboards are QWERTY; Hex
 /// has no AZERTY yet, so French is QWERTY too, as on Apple's Canadian French keyboard)
-/// with their own accents and dictionary.
+/// with their own accents and dictionary. Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
+/// held ь); Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
+/// its own for č ć đ š ž: they are held on c, d, s and z, as on Apple's.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
     case norwegian = "nb"
@@ -14,6 +16,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case italian = "it"
     case french = "fr"
     case portuguese = "pt"
+    case russian = "ru"
+    case serbianLatin = "sr-Latn"
 
     /// Its own name, as Apple's keyboard list shows it.
     var displayName: String {
@@ -25,17 +29,21 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .italian: "Italiano"
         case .french: "Français"
         case .portuguese: "Português"
+        case .russian: "Русский"
+        case .serbianLatin: "Srpski"
         }
     }
 
-    /// The three letter rows, lowercase. Rows 1 and 2 may hold 11 keys (Apple's Nordic and
-    /// German layouts); row 3 sits between shift and delete.
+    /// The three letter rows, lowercase. Rows 1 and 2 may hold 11 keys (Apple's Nordic,
+    /// German and Russian layouts); row 3 sits between shift and delete.
     var letterRows: [[String]] {
         let rows = switch self {
         case .english, .italian, .french, .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
         case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
         case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
+        case .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"]
+        case .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
         }
         return rows.map { $0.map(String.init) }
     }
@@ -95,6 +103,45 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "o": ["o", "ó", "õ", "ô", "ò", "ö", "œ", "ø", "ō", "º"],
                 "u": ["u", "ú", "ü", "ù", "û", "ū"],
             ]
+        case .russian:
+            // Apple's Russian lists (TextInput_ru), base letter first: ё on е, ъ on ь, and
+            // the letters of other Cyrillic languages. Apple's combining-macron forms (а̄ е̄ о̄ с̄)
+            // are left out.
+            [
+                "а": ["а", "ӕ", "ӑ", "ӓ"],
+                "г": ["г", "ғ", "ҕ", "ӷ", "ґ"],
+                "е": ["е", "ё", "ӗ", "є", "ѣ"],
+                "ж": ["ж", "җ", "ӝ", "ӂ", "ѥ"],
+                "з": ["з", "ҙ", "ӟ", "ӡ"],
+                "и": ["и", "і", "ӥ", "ӣ"],
+                "й": ["й", "ї", "ј", "ѵ"],
+                "к": ["к", "ҡ", "қ", "ҟ", "ѯ", "ҝ"],
+                "л": ["л", "ӆ"],
+                "н": ["н", "ң", "ҥ", "ӈ"],
+                "о": ["о", "ө", "ӧ", "ѡ"],
+                "п": ["п", "ԥ", "ѱ"],
+                "с": ["с", "ҫ"],
+                "т": ["т", "ҭ"],
+                "у": ["у", "ү", "ў", "ӱ", "ӳ", "ұ", "ӯ"],
+                "ф": ["ф", "ѳ"],
+                "х": ["х", "ҳ", "һ"],
+                "ц": ["ц", "ҵ"],
+                "ч": ["ч", "ҷ", "ӌ", "ӵ", "ҹ"],
+                "ш": ["ш", "ҽ", "ҿ"],
+                "ы": ["ы", "ӹ"],
+                "ь": ["ь", "ъ", "ӏ", "ѫ"],
+                "э": ["э", "ӭ", "ә"],
+                "ю": ["ю", "ҩ", "ѭ"],
+                "я": ["я", "џ", "ѧ"],
+            ]
+        case .serbianLatin:
+            // Apple's Serbian (Latin) lists (TextInput_sr), base letter first.
+            [
+                "c": ["c", "č", "ć", "ç"],
+                "d": ["d", "đ"],
+                "s": ["s", "š", "ß", "ś"],
+                "z": ["z", "ž", "ź", "ż"],
+            ]
         }
     }
 
@@ -109,6 +156,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .french: ["fr", "fr_FR", "fr_CA"]
         // Brazil's spelling first, Portugal's where only it is installed.
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
+        case .russian: ["ru", "ru_RU"]
+        // Latin only: a Cyrillic `sr` dictionary would reject every Latin word.
+        case .serbianLatin: ["sr_Latn", "sr_Latn_RS", "sr-Latn"]
         }
     }
 
@@ -147,7 +197,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .italian:
             ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
-        case .norwegian, .german, .french, .portuguese:
+        case .norwegian, .german, .french, .portuguese, .russian, .serbianLatin:
             []
         }
     }
@@ -166,11 +216,13 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         return map
     }
 
-    /// The layout for a language identifier ("nb-NO", "no", "nn_NO", "es-MX"), if any.
+    /// The layout for a language identifier ("nb-NO", "no", "nn_NO", "es-MX", "sr-Latn-RS"),
+    /// if any. Serbian only in Latin script: Hex has no Cyrillic Serbian layout.
     static func matching(_ identifier: String) -> KeyboardLanguage? {
-        let code = identifier.lowercased()
+        let parts = identifier.lowercased()
             .split(whereSeparator: { $0 == "-" || $0 == "_" })
-            .first.map(String.init) ?? ""
+            .map(String.init)
+        let code = parts.first ?? ""
         switch code {
         case "nb", "no", "nn": return .norwegian
         case "en": return .english
@@ -179,12 +231,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "it": return .italian
         case "fr": return .french
         case "pt": return .portuguese
+        case "ru": return .russian
+        case "sr": return parts.contains("latn") ? .serbianLatin : nil
         default: return nil
         }
     }
 
     /// Automatic follows the dictation language: its layout, or English for a language
-    /// without one (Hebrew, Russian). Before any dictation language is known, the first
+    /// without one (Hebrew, Greek). Before any dictation language is known, the first
     /// iPhone keyboard, then preferred language, that has a layout. Hex's own input mode
     /// says nothing here: its `primaryLanguage` is the Info.plist's en-US, whatever you type.
     static func automatic(

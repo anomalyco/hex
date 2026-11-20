@@ -286,6 +286,10 @@ final class FullKeyboardEngineTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(view.plane.spaceLabel, "Norsk")
 
+        model.dictationLanguage = "ru-RU"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(view.plane.spaceLabel, "Русский")
+
         model.hasFullAccess = false
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertNil(view.plane.spaceLabel, "without Full Access the keyboard can't dictate")
@@ -324,6 +328,12 @@ final class FullKeyboardEngineTests: XCTestCase {
         view.languageOverride = .italian
         XCTAssertEqual(view.engine.autocorrect.language, .italian)
         XCTAssertNil(view.engine.autocorrect.decoder)
+        // Nor do Russian and Serbian (Latin).
+        for language in [KeyboardLanguage.russian, .serbianLatin] {
+            view.languageOverride = language
+            XCTAssertEqual(view.engine.autocorrect.language, language)
+            XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")
+        }
         view.languageOverride = .english
         XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "en")
     }

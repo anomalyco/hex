@@ -216,6 +216,30 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Domani andiamo al mare con i bambini perché Sono molto stai ")
     }
 
+    /// Russian types in Russian: its words stay and its typos get Russian fixes, never English.
+    func testRussianCorrectsInRussianNeverEnglish() {
+        engine.language = .russian
+        XCTAssertEqual(engine.autocorrect.language, .russian)
+        XCTAssertTrue(engine.autocorrect.hasDictionary)
+        for word in ["Привет", "опаздываю", "на", "десчть", "минут", "буду", "дома", "в", "восемь", "хорошл", "спасибл"] {
+            typeWord(word)
+            tap(.space)
+        }
+        XCTAssertEqual(target.text, "Привет опаздываю на десять минут буду дома в восемь хорошо спасибо ")
+    }
+
+    /// Serbian (Latin) has no dictionary on iOS: nothing is "corrected", into English or anything else.
+    func testSerbianLatinWithoutADictionaryCorrectsNothing() {
+        engine.language = .serbianLatin
+        XCTAssertEqual(engine.autocorrect.language, .serbianLatin)
+        XCTAssertFalse(engine.autocorrect.hasDictionary)
+        for word in ["Kasnim", "deset", "minuta", "hvala", "sta", "radis", "Sutra", "dolazim", "the", "teh"] {
+            typeWord(word)
+            tap(.space)
+        }
+        XCTAssertEqual(target.text, "Kasnim deset minuta hvala sta radis Sutra dolazim the teh ")
+    }
+
     func testAdjacencyFollowsTheLayout() {
         // German swaps Y and Z: on QWERTZ, Z sits beside T.
         XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("z", "t", language: .german))

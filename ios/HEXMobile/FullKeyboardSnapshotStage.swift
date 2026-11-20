@@ -5,8 +5,8 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|pt|en` pins it; drafts are in the layout's language.
-/// `--accent-key ø` picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// `--keyboard-layout nb|es|de|it|fr|pt|ru|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--accent-key ø` (or Cyrillic `е`, `ь`) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Experiments › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
@@ -117,6 +117,24 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Vou chegar dez minutos atras"
             case "accents": "Caf"
             default: "Vou chegar dez minutos atrasado, "
+            }
+        case .russian:
+            return switch state {
+            case "inserted": "Опаздываю на десять минут, буду дома в 19:30. Начинайте без меня."
+            case "numbers": "Опаздываю на десять минут, буду дома в 19:3"
+            case "shift": "Опаздываю на десять минут. "
+            case "typing": "Опаздываю на десять мину"
+            case "accents": Self.accentKey == "ь" ? "Об" : "Ещ"
+            default: "Опаздываю на десять минут, "
+            }
+        case .serbianLatin:
+            return switch state {
+            case "inserted": "Kasnim deset minuta, biću kod kuće u 19:30. Počnite bez mene."
+            case "numbers": "Kasnim deset minuta, biću kod kuće u 19:3"
+            case "shift": "Kasnim deset minuta. "
+            case "typing": "Kasnim deset minuta, biću kod kuć"
+            case "accents": Self.accentKey == "s" ? "Po" : "Laku no"
+            default: "Kasnim deset minuta, "
             }
         case .english:
             break
@@ -250,7 +268,11 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.debugPress("g")
             case "accents":
                 let key = FullKeyboardSnapshotStage.accentKey
-                let pick = ["e": "é", "s": "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú", "i": "ì"][key]
+                let serbian = FullKeyboardSnapshotStage.layout == .serbianLatin
+                let pick = [
+                    "e": "é", "s": serbian ? "š" : "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú",
+                    "i": "ì", "е": "ё", "ь": "ъ", "c": "ć",
+                ][key]
                 view.debugHoldAccent(key, selecting: pick ?? key)
             case "numbers":
                 view.engine.touchBegan(id: 900, at: center(of: .layerSwitch(.numbers), in: view))
