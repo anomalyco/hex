@@ -273,7 +273,11 @@ Settings › Annotate                      // capture.pane
 │   │   (`ScreenCapture` reset on running bundle + retired IDs, re-prompt + guide)
 │   └── Allow -> clears retired Hex IDs, rechecks, then opens the permission
 │       guide over System Settings' list (PermissionKind::ScreenRecording); flips
-│       on the next read. Never part of onboarding (macOS also asks at the first
+│       on the next read. The guide's own preflight caches the launch answer,
+│       so it reads the grant from TCC and the host closes it as soon as the
+│       watched read says granted or needs a restart; it hides while another
+│       app is in front of System Settings and returns when System Settings
+│       does. Never part of onboarding (macOS also asks at the first
 │       capture). Check: rune_ui::scrawl tests
 ├── Show in screen recordings (capture.show_overlays_in_recordings, default
 │   off) -> see capture.own-windows; applies at once, to open windows and a recording capture
