@@ -371,6 +371,8 @@ final class DictationLanguageSwitchTests: XCTestCase {
         XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "es-ES"), "Español")
         XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "de-DE"), "Deutsch")
         XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "he-IL"), "עברית")
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "ru-RU"), "Русский")
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "sr-Latn-RS"), "Srpski")
         XCTAssertEqual(
             DictationLanguageSwitch.nativeNames(for: ["en-US", "en-GB", "nb-NO"]),
             ["en-US": "English (US)", "en-GB": "English (GB)", "nb-NO": "Norsk"]

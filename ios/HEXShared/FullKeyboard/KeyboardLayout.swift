@@ -336,16 +336,21 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             addCharacters(chars, row: row, startX: centredStart(count: chars.count, keyWidth: lw), keyWidth: lw)
         }
 
-        // Row 3: shift (or the symbol-page switch), the middle keys, delete.
+        // Row 3: shift (or the symbol-page switch), the middle keys, delete. A letter row too
+        // long for full-size shift and delete (Russian's nine) narrows them to fit instead, as
+        // Apple's Russian keyboard does; every other layout keeps them at `modW`.
+        let middle = rows[2]
+        let row3ModW = layer == .letters
+            ? min(modW, (innerWidth - 2 * m.side - CGFloat(middle.count) * lw - CGFloat(middle.count + 1) * m.gap) / 2)
+            : modW
         switch layer {
         case .letters:
-            add(.shift, row: 2, x: left, w: modW, label: "shift")
+            add(.shift, row: 2, x: left, w: row3ModW, label: "shift")
         case .numbers:
             add(.layerSwitch(.symbols), row: 2, x: left, w: modW, label: "#+=")
         case .symbols:
             add(.layerSwitch(.numbers), row: 2, x: left, w: modW, label: "123")
         }
-        let middle = rows[2]
         if layer == .letters {
             addCharacters(middle, row: 2, startX: centredStart(count: middle.count, keyWidth: lw), keyWidth: lw)
         } else {
@@ -355,7 +360,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             let middleW = (innerWidth - 2 * m.side - 2 * modW - 2 * edgeGap - (count - 1) * m.gap) / count
             addCharacters(middle, row: 2, startX: left + modW + edgeGap, keyWidth: middleW)
         }
-        add(.delete, row: 2, x: right - modW, w: modW, label: "delete")
+        add(.delete, row: 2, x: right - row3ModW, w: row3ModW, label: "delete")
 
         // Row 4: 123/ABC, globe?, emoji?, space, field extras (@ . / . /), Hex, return.
         let isCompactBottomRow = showsGlobe || showsEmoji || field != .text

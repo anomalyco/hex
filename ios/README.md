@@ -237,8 +237,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     accented letters read from their base key (é from e), and what you typed is replaced
     only when the best reading beats it by a margin (more when what you typed is a word).
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português) keep the dictionary engine in
-    their own language, never the English model. The
+    layouts (Norsk, Deutsch, Italiano, Français, Português, Русский) keep the dictionary
+    engine in their own language, and Srpski (no iOS dictionary) none, never the English
+    model. The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
@@ -375,20 +376,27 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
   Deutsch (QWERTZ with `ü`, `ö ä`), and Italiano, Français and Português on the
   English letters (Apple's Italian and Portuguese keyboards are QWERTY; French is
-  QWERTY until Hex has AZERTY), as Apple's iOS keyboards lay them out
-  (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
-  Automatic follows the dictation language (Hebrew and other languages without a
-  layout get English); before any dictation language is known, the first iPhone
+  QWERTY until Hex has AZERTY), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
+  held е, ъ on a held ь) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
+  and z, and only the iPad's Croatian layouts give them keys), as Apple's iOS keyboards
+  lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
+  Automatic follows the dictation language (Hebrew, Greek, Cyrillic Serbian and other
+  languages without a layout get English; Serbian only in Latin script, `sr-Latn`);
+  before any dictation language is known, the first iPhone
   keyboard, then preferred language, that has a layout. It never follows Hex's own
   input mode, whose `primaryLanguage` is always the Info.plist's en-US. Rows of 11 keys narrow
   only the letters: shift, delete and the bottom row keep their English sizes,
-  and row 3's letters sit centred between shift and delete. Long-press accents
+  and row 3's letters sit centred between shift and delete. Russian's nine-letter row 3
+  wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's. Long-press accents
   drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
   Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º; Italian
-  à, è, ì, ò, ù; French é, à, î, ô, ù; Portuguese á, ã, é, ó, õ, ú), and
-  German keeps ß on a held S. Autocorrect and suggestions use the layout's
+  à, è, ì, ò, ù; French é, à, î, ô, ù; Portuguese á, ã, é, ó, õ, ú; Russian and
+  Serbian copy Apple's lists from the simulator's `TextInput_ru` and `TextInput_sr`,
+  base letter first), and German keeps ß on a held S. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`); where the iPhone has none
+  `pt_PT`, `ru`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
   the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
