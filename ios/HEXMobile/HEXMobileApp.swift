@@ -9,6 +9,7 @@ struct HEXMobileApp: App {
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
+        TypingLogSettings().applyLaunchArguments()
     }
 
     private static var initialOpenedFromKeyboard: Bool {
@@ -27,6 +28,8 @@ struct HEXMobileApp: App {
                 KeyboardSnapshotStage(scene: keyboardScene)
             } else if let fullKeyboardScene = FullKeyboardSnapshotStage.requestedScene {
                 FullKeyboardSnapshotStage(scene: fullKeyboardScene)
+            } else if let experimentsScene = ExperimentsSnapshotStage.requestedScene {
+                ExperimentsSnapshotStage(scene: experimentsScene)
             } else if let hostedScene = HostedKeyboardConversationStage.requestedScene {
                 HostedKeyboardConversationStage(scene: hostedScene, dictation: dictation)
             } else {

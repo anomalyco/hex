@@ -95,6 +95,8 @@ final class DictationController {
     private var keyboardResultExpiresAt: TimeInterval?
     private var keyboardResult: String?
     private var keyboardResultHeard: String?
+    /// Record typing logs: each step of the result, for the keyboard's log; nil while off.
+    private var keyboardResultStages: DictationStages?
     private var keyboardMessage: String?
     private var pendingHandoff: PendingKeyboardHandoff?
     private var keyboardSessionExpiresAt: TimeInterval = 0
@@ -841,6 +843,7 @@ final class DictationController {
             defer {
                 try? FileManager.default.removeItem(at: captureURL)
             }
+            let transcribeStarted = Date()
 
             do {
                 let rawText = try await activeTranscriber.transcribe(
@@ -882,6 +885,22 @@ final class DictationController {
                     self.keyboardResult = formatted
                     // A translation's words can't be compared with what was heard.
                     self.keyboardResultHeard = session.sharesHeard && translated == nil ? rawText : nil
+                    self.keyboardResultStages = TypingLogSettings().isEnabled
+                        ? DictationStages(
+                            engine: self.engineName,
+                            language: self.transcriptionLanguage,
+                            style: session.style.rawValue,
+                            recordedMS: Int((finalDuration * 1000).rounded()),
+                            transcribeMS: Int((Date().timeIntervalSince(transcribeStarted) * 1000).rounded()),
+                            raw: rawText,
+                            fixed: corrected,
+                            spelled: spelled,
+                            tagged: CleanupTaggerSettings().isEnabled && session.style != .verbatim ? tagged : nil,
+                            cleaned: session.usesCleanup && session.style != .verbatim ? cleaned : nil,
+                            translated: translated,
+                            formatted: formatted
+                        )
+                        : nil
                     self.keyboardResultExpiresAt = self.now() + Self.resultDeliveryTTL
                     self.keyboardMessage = nil
                 }
@@ -1064,6 +1083,7 @@ final class DictationController {
             keyboardResultID = nil
             keyboardResult = nil
             keyboardResultHeard = nil
+            keyboardResultStages = nil
             keyboardResultExpiresAt = nil
         }
 
@@ -1122,7 +1142,8 @@ final class DictationController {
                 resultExpiresAt: keyboardResultExpiresAt,
                 transcript: keyboardResult,
                 message: failureMessage,
-                heard: keyboardResultHeard
+                heard: keyboardResultHeard,
+                stages: keyboardResultStages
             )
         )
     }

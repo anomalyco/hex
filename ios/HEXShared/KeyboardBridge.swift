@@ -235,6 +235,9 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     /// Learn how I type is on so the keyboard can tell misheard words from formatting.
     /// Nil when it can't be learned from (translated) or the experiment is off.
     let heard: String?
+    /// Record typing logs: what each step of the dictation made of it, sent only while
+    /// that experiment is on.
+    let stages: DictationStages?
 
     init(
         state: KeyboardDictationState,
@@ -248,7 +251,8 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         resultExpiresAt: TimeInterval? = nil,
         transcript: String? = nil,
         message: String? = nil,
-        heard: String? = nil
+        heard: String? = nil,
+        stages: DictationStages? = nil
     ) {
         self.state = state
         self.heartbeat = heartbeat
@@ -262,6 +266,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         self.transcript = transcript
         self.message = message
         self.heard = heard
+        self.stages = stages
     }
 
     var effectiveLoudnessDB: Float {

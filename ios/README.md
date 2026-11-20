@@ -145,6 +145,21 @@ it on-device with Apple Speech, downloading the speech assets on first use
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
+  - **Record typing logs (Experiments › Record typing logs):** Off by default,
+    and apart from Learn how I type. For testing and training prediction and
+    per-user touch models: the keyboard writes every touch on Hex's keys (raw
+    position, radius, `UITouch` timestamp, the key it resolved to), every layout
+    with each key's frame and touch target, what each key did to the text
+    (inserts, deletes, autocorrections and undos, suggestion picks, double-space
+    periods, returns), the suggestions shown, the host's text around the cursor
+    after each word and when the host changes it, and each dictation's steps
+    (heard, learned fixes, cleanup, inserted) with its outcome. One NDJSON file a
+    day in the App Group (`TypingLogs/`), kept 14 days, at most 64 MB a day;
+    Experiments › Typing logs shares a day or all of them (AirDrop to a Mac) and
+    deletes them. Password, one-time code, and card fields write one `skipped`
+    line and nothing else. Events are buffered on the main thread and encoded and
+    appended on a utility queue every 2 s. Nothing is sent. The schema is in
+    [`docs/typing-logs.md`](docs/typing-logs.md).
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -209,6 +224,12 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   `textDidChange` after the keyboard's own edits, varies by app and is
   unverified on a physical iPhone; when the context is cut short or missing,
   the dictation is settled on where it was last seen or not learned from.
+- **Record typing logs:** `TypingLogTests` cover the line format, day files,
+  the cap, retention, the skip rule, and a real `FullKeyboardView` typing
+  through the logger, whose edits replay to the field's text. Touches there are
+  synthetic samples fed to the same path `UITouch`es take; real touch radii,
+  sampling rates, how often hosts call `textDidChange`, and the extension's
+  write cost on an iPhone are unmeasured.
 - **Clean up what I say:** `CleanupTaggerTests` check, in the simulator
   (CPU only), the tokenizer against Hugging Face on 1,891 words,
   reconstruction against `reconstruct.js` on 670 cases, and the model on the

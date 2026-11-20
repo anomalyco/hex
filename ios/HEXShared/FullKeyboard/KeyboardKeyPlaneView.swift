@@ -182,50 +182,78 @@ final class KeyboardKeyPlaneView: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard let id = id(for: touch, creating: true) else { continue }
-            let point = touch.location(in: self)
-            engine.touchBegan(id: id, at: point)
-            if let kind = engine.touches[id]?.key.kind {
-                onKeyDown?(kind)
-                if kind == .delete { startDeleteRepeat() }
-                if case .character = kind { armAccentTimer(for: id) }
-            }
+            began(id: id, sample: TypingLogTouchSample(touch, in: self))
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
             guard let id = id(for: touch, creating: false) else { continue }
-            let previousKey = engine.touches[id]?.key.kind
-            engine.touchMoved(id: id, to: touch.location(in: self))
-            let currentKey = engine.touches[id]?.key.kind
-            if currentKey != previousKey {
-                cancelAccentTimer(for: id)
-                if case .character = currentKey {
-                    armAccentTimer(for: id)
-                }
-            }
+            moved(id: id, sample: TypingLogTouchSample(touch, in: self))
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard let id = touchIDs.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
-            cancelAccentTimer(for: id)
-            if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
-            engine.touchEnded(id: id, at: touch.location(in: self))
+            ended(id: id, sample: TypingLogTouchSample(touch, in: self))
         }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
             guard let id = touchIDs.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
-            cancelAccentTimer(for: id)
-            if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
-            engine.touchCancelled(id: id)
+            cancelled(id: id, sample: TypingLogTouchSample(touch, in: self))
         }
     }
 
+    // One finger's samples, from UIKit or a test. Record typing logs writes the touch line
+    // before the engine acts on a press or a release, so the edits it causes follow it,
+    // and after a move, so the line names the key the finger slid onto.
+
+    func began(id: Int, sample: TypingLogTouchSample) {
+        typingLog?.touch(.began, id: id, sample: sample, key: engine.layout.hitTest(sample.point))
+        engine.touchBegan(id: id, at: sample.point)
+        if let kind = engine.touches[id]?.key.kind {
+            onKeyDown?(kind)
+            if kind == .delete { startDeleteRepeat() }
+            if case .character = kind { armAccentTimer(for: id) }
+        }
+    }
+
+    func moved(id: Int, sample: TypingLogTouchSample) {
+        let previousKey = engine.touches[id]?.key.kind
+        engine.touchMoved(id: id, to: sample.point)
+        let current = engine.touches[id]?.key
+        typingLog?.touch(.moved, id: id, sample: sample, key: current, under: engine.layout.hitTest(sample.point))
+        if current?.kind != previousKey {
+            cancelAccentTimer(for: id)
+            if case .character = current?.kind {
+                armAccentTimer(for: id)
+            }
+        }
+    }
+
+    func ended(id: Int, sample: TypingLogTouchSample) {
+        cancelAccentTimer(for: id)
+        if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
+        typingLog?.touch(.ended, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
+        engine.touchEnded(id: id, at: sample.point)
+    }
+
+    func cancelled(id: Int, sample: TypingLogTouchSample) {
+        cancelAccentTimer(for: id)
+        if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
+        typingLog?.touch(.cancelled, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
+        engine.touchCancelled(id: id)
+    }
+
+    private var typingLog: TypingLogger? { engine.typingLog }
+
     func cancelAllTouches() {
+        if !touchIDs.isEmpty {
+            typingLog?.ui("touches_cancelled", [TypingLogField("count", .int(touchIDs.count))])
+        }
         touchIDs.removeAll()
         for work in accentHoldWork.values { work.cancel() }
         accentHoldWork.removeAll()
