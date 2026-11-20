@@ -109,7 +109,7 @@ struct SetupStatusRow: View {
                     } else {
                         Text("Finish setup")
                             .foregroundStyle(HexTheme.textBase)
-                        Text("· \(stepsLeft) \(stepsLeft == 1 ? "step" : "steps")")
+                        Text("· \(stepsLeft) steps")
                             .foregroundStyle(HexTheme.textMuted)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .semibold))
@@ -122,7 +122,7 @@ struct SetupStatusRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(stepsLeft == 0 ? "Hex is ready" : "Finish setup, \(stepsLeft) left")
+        .accessibilityLabel(stepsLeft == 0 ? Text("Hex is ready") : Text("Finish setup, \(stepsLeft) left"))
     }
 }
 
@@ -159,7 +159,7 @@ struct SetupSheet: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Text(monitor.stepsLeft(modelReady: dictation.isModelReady) == 0 ? "Hex is ready" : "Finish setup")
+                (monitor.stepsLeft(modelReady: dictation.isModelReady) == 0 ? Text("Hex is ready") : Text("Finish setup"))
                     .font(.system(size: 17, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundStyle(HexTheme.textBase)
@@ -189,7 +189,7 @@ struct SetupSheet: View {
                 SettingsDivider(leading: 42)
                 row(
                     title: "Full Access",
-                    status: monitor.fullAccessOn ? "On" : needsKeyboardCheck ? "Not confirmed yet" : "Off",
+                    status: monitor.fullAccessOn ? String(localized: "On") : needsKeyboardCheck ? String(localized: "Not confirmed yet") : String(localized: "Off"),
                     icon: monitor.fullAccessOn ? .done : needsKeyboardCheck ? .unconfirmed : .todo
                 )
                 SettingsDivider(leading: 42)
@@ -262,17 +262,17 @@ struct SetupSheet: View {
 
     private var keyboardStatus: String {
         switch monitor.keyboardAdded {
-        case true?: "Added"
-        case false?: "Not added"
-        case nil: "Not verified"
+        case true?: String(localized: "Added")
+        case false?: String(localized: "Not added")
+        case nil: String(localized: "Not verified")
         }
     }
 
     private var microphoneStatus: String {
         switch monitor.microphone {
-        case .granted: "Allowed"
-        case .denied: "Off"
-        default: "For dictation"
+        case .granted: String(localized: "Allowed")
+        case .denied: String(localized: "Off")
+        default: String(localized: "For dictation")
         }
     }
 
@@ -291,18 +291,18 @@ struct SetupSheet: View {
         case .preparingModel:
             return "\(Int(dictation.modelPreparation.fractionCompleted * 100))%"
         case .failed:
-            return "Failed"
+            return String(localized: "Failed")
         default:
-            return "Preparing"
+            return String(localized: "Preparing")
         }
     }
 
-    private func row(title: String, status: String, icon: RowIcon) -> some View {
+    private func row(title: LocalizedStringKey, status: String, icon: RowIcon) -> some View {
         row(title: title, status: status, icon: icon) { EmptyView() }
     }
 
     private func row<Trailing: View>(
-        title: String,
+        title: LocalizedStringKey,
         status: String,
         icon: RowIcon,
         @ViewBuilder trailing: () -> Trailing
@@ -341,7 +341,7 @@ struct SetupSheet: View {
         .frame(minHeight: 46)
     }
 
-    private func smallButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func smallButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(HexTheme.textBase)

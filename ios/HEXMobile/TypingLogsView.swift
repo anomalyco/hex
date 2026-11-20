@@ -82,15 +82,17 @@ struct TypingLogsView: View {
 
     private func title(_ day: TypingLogDay) -> String {
         guard let date = day.date else { return day.day }
-        if Calendar.current.isDateInToday(date) { return "Today" }
-        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        if Calendar.current.isDateInToday(date) { return String(localized: "Today") }
+        if Calendar.current.isDateInYesterday(date) { return String(localized: "Yesterday") }
         return date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
     }
 
     private func detail(_ day: TypingLogDay) -> String {
         let size = ByteCountFormatter.string(fromByteCount: Int64(day.bytes), countStyle: .file)
         guard let count = counts[countKey(day)] else { return size }
-        return "\(size) · \(count.formatted()) " + (count == 1 ? "event" : "events")
+        return count == 1
+            ? String(localized: "\(size) · 1 event")
+            : String(localized: "\(size) · \(count.formatted()) events")
     }
 
     private func countKey(_ day: TypingLogDay) -> String {

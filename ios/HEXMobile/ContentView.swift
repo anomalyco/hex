@@ -201,7 +201,7 @@ struct ContentView: View {
                             openURL(url)
                         }
                     } label: {
-                        SettingsLinkLabel(title: "Keyboard settings", icon: "gearshape", trailingIcon: "arrow.up.right")
+                        SettingsLinkLabel(title: String(localized: "Keyboard settings"), icon: "gearshape", trailingIcon: "arrow.up.right")
                     }
                     .buttonStyle(.plain)
 
@@ -211,7 +211,7 @@ struct ContentView: View {
                         OnboardingProgress.save(.welcome)
                         onboardingPage = .welcome
                     } label: {
-                        SettingsLinkLabel(title: "Run setup again", icon: "arrow.counterclockwise")
+                        SettingsLinkLabel(title: String(localized: "Run setup again"), icon: "arrow.counterclockwise")
                     }
                     .buttonStyle(.plain)
                 }
@@ -222,7 +222,7 @@ struct ContentView: View {
                     Button {
                         SafariSheet.present(HexLinks.privacyPolicy)
                     } label: {
-                        SettingsLinkLabel(title: "Privacy policy", icon: "hand.raised", trailingIcon: "arrow.up.right")
+                        SettingsLinkLabel(title: String(localized: "Privacy policy"), icon: "hand.raised", trailingIcon: "arrow.up.right")
                     }
                     .buttonStyle(.plain)
 
@@ -231,7 +231,7 @@ struct ContentView: View {
                     Button {
                         SafariSheet.present(HexLinks.support)
                     } label: {
-                        SettingsLinkLabel(title: "Support", icon: "questionmark.circle", trailingIcon: "arrow.up.right")
+                        SettingsLinkLabel(title: String(localized: "Support"), icon: "questionmark.circle", trailingIcon: "arrow.up.right")
                     }
                     .buttonStyle(.plain)
 
@@ -240,7 +240,7 @@ struct ContentView: View {
                     Button {
                         showAcknowledgements = true
                     } label: {
-                        SettingsLinkLabel(title: "Acknowledgements", icon: "doc.text")
+                        SettingsLinkLabel(title: String(localized: "Acknowledgements"), icon: "doc.text")
                     }
                     .buttonStyle(.plain)
                     .sheet(isPresented: $showAcknowledgements) {
@@ -473,7 +473,7 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Spacer()
 
-                Button(dictation.copied ? "Copied" : "Copy") {
+                Button(dictation.copied ? String(localized: "Copied") : String(localized: "Copy")) {
                     dictation.copyTranscript()
                 }
                 .font(.system(size: 13, weight: .medium))
@@ -714,7 +714,7 @@ struct ContentView: View {
                 .foregroundStyle(HexTheme.textBase)
             Spacer(minLength: 0)
             if let offer {
-                Button("Use \(SpeechModelUnavailable.englishName(offer))") {
+                Button("Use \(SpeechModelUnavailable.interfaceName(offer))") {
                     dictation.useOfferedLanguage()
                 }
                 .font(.system(size: 13, weight: .medium))
@@ -753,9 +753,9 @@ struct ContentView: View {
     private var primaryActionLabel: String {
         switch dictation.phase {
         case .modelRequired, .failed:
-            "Set up"
+            String(localized: "Set up")
         default:
-            "Dictate"
+            String(localized: "Dictate")
         }
     }
 
@@ -776,13 +776,13 @@ struct ContentView: View {
         case .failed(let message):
             return message
         case .requestingPermission:
-            return "Allow microphone access"
+            return String(localized: "Allow microphone access")
         case .preparingModel:
-            return "Preparing model…"
+            return String(localized: "Preparing model…")
         case .transcribing:
-            return "Transcribing…"
+            return String(localized: "Transcribing…")
         case .ready where dictation.keyboardSessionEnabled:
-            return "Ready"
+            return String(localized: "Ready")
         default:
             return nil
         }

@@ -45,7 +45,7 @@ struct DictationTranslationSettings {
 }
 
 /// Translate what I say's switch where you dictate: "Paste in English" (translated) or
-/// "Paste in Spanish" (as spoken), named in English like the rest of Hex's words.
+/// "Paste in Spanish" (as spoken), named in Hex's interface language like the rest of its words.
 struct TranslationPasteChoice: Equatable {
     let target: String
     let source: String?
@@ -58,17 +58,22 @@ struct TranslationPasteChoice: Equatable {
     }
 
     var translatedTitle: String {
-        "Paste in \(Self.name(of: Locale.Language(identifier: target).minimalIdentifier))"
+        let name = Self.name(of: Locale.Language(identifier: target).minimalIdentifier)
+        return String(localized: "Paste in \(name)")
     }
 
     var spokenTitle: String {
-        source.map { "Paste in \(Self.name(of: Self.code(of: $0)))" } ?? "Paste as spoken"
+        guard let source else { return String(localized: "Paste as spoken") }
+        let name = Self.name(of: Self.code(of: source))
+        return String(localized: "Paste in \(name)")
     }
 
     /// "Spanish", "Chinese, Traditional"; Norwegian without "Bokmål".
     static func name(of identifier: String) -> String {
-        if ["nb", "nn", "no"].contains(code(of: identifier)) { return "Norwegian" }
-        return Locale(identifier: "en").localizedString(forIdentifier: identifier) ?? identifier
+        if ["nb", "nn", "no"].contains(code(of: identifier)) {
+            return Locale.hexInterface.localizedString(forLanguageCode: "no") ?? "Norwegian"
+        }
+        return Locale.hexInterface.localizedString(forIdentifier: identifier) ?? identifier
     }
 
     private static func code(of identifier: String) -> String {

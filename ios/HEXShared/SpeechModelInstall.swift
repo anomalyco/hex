@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// A language Hex can't get Apple's speech model for on this iPhone. Its message is written
-/// for people, in English, so it names languages in English.
+/// for people, in Hex's interface language, so it names languages in that language.
 nonisolated struct SpeechModelUnavailable: HexDescribedError, Equatable {
     enum Reason: Equatable, Sendable {
         /// Neither Apple Speech module installs it here, though the iPhone is online.
@@ -33,25 +33,25 @@ nonisolated struct SpeechModelUnavailable: HexDescribedError, Equatable {
 
     /// Short enough for the full keyboard's strip (about 60 characters).
     var errorDescription: String? {
-        let name = Self.englishName(language)
+        let name = Self.interfaceName(language)
         switch reason {
         case .downloadFailed:
-            return "\(name) speech didn't download. Check your connection."
+            return String(localized: "\(name) speech didn't download. Check your connection.")
         case .notOnThisIPhone:
             guard let fallback else {
-                return "\(name) isn't available for dictation on this iPhone yet."
+                return String(localized: "\(name) isn't available for dictation on this iPhone yet.")
             }
-            let other = Self.englishName(fallback)
+            let other = Self.interfaceName(fallback)
             return automatic
-                ? "\(name) isn't available on this iPhone yet. Using \(other)."
-                : "\(name) isn't available on this iPhone yet. Try \(other)."
+                ? String(localized: "\(name) isn't available on this iPhone yet. Using \(other).")
+                : String(localized: "\(name) isn't available on this iPhone yet. Try \(other).")
         }
     }
 
-    /// "Russian", "Norwegian Bokmål": the language alone, in English.
-    static func englishName(_ identifier: String) -> String {
+    /// "Russian", "Norwegian Bokmål": the language alone, in Hex's interface language.
+    static func interfaceName(_ identifier: String) -> String {
         let code = Locale(identifier: identifier).language.languageCode?.identifier ?? identifier
-        let name = Locale(identifier: "en").localizedString(forLanguageCode: code) ?? identifier
+        let name = Locale.hexInterface.localizedString(forLanguageCode: code) ?? identifier
         return name.prefix(1).uppercased() + name.dropFirst()
     }
 }
@@ -169,7 +169,7 @@ nonisolated enum SpeechModelInstall {
 /// compiling a model, which can't be cancelled anyway).
 nonisolated enum StallWatch {
     struct Stalled: HexDescribedError {
-        var errorDescription: String? { "The download stopped. Check your connection and try again." }
+        var errorDescription: String? { String(localized: "The download stopped. Check your connection and try again.") }
     }
 
     static func run<T: Sendable>(

@@ -9,10 +9,10 @@ enum SettingsPage: String, Hashable, CaseIterable {
 
     var title: String {
         switch self {
-        case .dictation: "Dictation"
-        case .keyboard: "Keyboard"
-        case .privacy: "Privacy"
-        case .experiments: "Experiments"
+        case .dictation: String(localized: "Dictation")
+        case .keyboard: String(localized: "Keyboard")
+        case .privacy: String(localized: "Privacy")
+        case .experiments: String(localized: "Experiments")
         }
     }
 
@@ -28,7 +28,7 @@ enum SettingsPage: String, Hashable, CaseIterable {
 
 /// A settings page: a short scrolling column of cards under an inline title.
 struct SettingsPageScaffold<Content: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -69,7 +69,7 @@ struct SettingsCard<Content: View>: View {
 
 /// A small label above a card, such as Privacy's "Advanced".
 struct SettingsSectionHeader: View {
-    let title: String
+    let title: LocalizedStringKey
 
     var body: some View {
         Text(title)

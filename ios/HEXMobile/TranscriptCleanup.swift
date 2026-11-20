@@ -39,11 +39,11 @@ nonisolated enum AppleIntelligenceCleanupAvailability: Equatable, Sendable {
     var reason: String? {
         switch self {
         case .available: nil
-        case .requiresIOS26: "Requires iOS 26"
-        case .deviceNotEligible: "Not available on this iPhone"
-        case .appleIntelligenceOff: "Turn on Apple Intelligence in Settings"
-        case .modelNotReady: "Apple Intelligence is getting ready"
-        case .unavailable: "Apple Intelligence is unavailable"
+        case .requiresIOS26: String(localized: "Requires iOS 26")
+        case .deviceNotEligible: String(localized: "Not available on this iPhone")
+        case .appleIntelligenceOff: String(localized: "Turn on Apple Intelligence in Settings")
+        case .modelNotReady: String(localized: "Apple Intelligence is getting ready")
+        case .unavailable: String(localized: "Apple Intelligence is unavailable")
         }
     }
 }

@@ -8,19 +8,19 @@ nonisolated enum DictationStyle: String, Codable, CaseIterable, Sendable {
 
     var label: String {
         switch self {
-        case .polished: "Polished"
-        case .casual: "Casual"
-        case .notes: "Notes"
-        case .verbatim: "Verbatim"
+        case .polished: String(localized: "Polished")
+        case .casual: String(localized: "Casual")
+        case .notes: String(localized: "Notes")
+        case .verbatim: String(localized: "Verbatim")
         }
     }
 
     var shortHint: String {
         switch self {
-        case .polished: "Clean punctuation and filler trim"
-        case .casual: "Lowercase texting, no trailing period"
-        case .notes: "Spoken bullets and line breaks"
-        case .verbatim: "Exact words from the model"
+        case .polished: String(localized: "Clean punctuation and filler trim")
+        case .casual: String(localized: "Lowercase texting, no trailing period")
+        case .notes: String(localized: "Spoken bullets and line breaks")
+        case .verbatim: String(localized: "Exact words from the model")
         }
     }
 

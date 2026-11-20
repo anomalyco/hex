@@ -39,11 +39,11 @@ actor ParakeetTranscriber: LocalTranscribing {
         var errorDescription: String? {
             switch self {
             case .notPrepared:
-                "Parakeet V2 is not ready."
+                String(localized: "Parakeet V2 is not ready.")
             case .emptyTranscript:
-                "Parakeet did not detect any speech."
+                String(localized: "Parakeet did not detect any speech.")
             case .downloadFailed:
-                "Parakeet V2 didn't download. Check your connection and try again."
+                String(localized: "Parakeet V2 didn't download. Check your connection and try again.")
             }
         }
     }
@@ -154,7 +154,7 @@ nonisolated struct ParakeetLoadGuard {
     private static let loadingKey = "parakeet.loadStartedAt"
     private static let interruptedKey = "parakeet.loadInterrupted"
 
-    static let message = "Hex closed while loading the speech model, likely short of memory. Close other apps, then tap Set up to try again."
+    static let message = String(localized: "Hex closed while loading the speech model, likely short of memory. Close other apps, then tap Set up to try again.")
 
     private let defaults: UserDefaults
 

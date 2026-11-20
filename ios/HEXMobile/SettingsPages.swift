@@ -11,7 +11,7 @@ struct DictationSettingsPage: View {
         SettingsPageScaffold(title: "Dictation") {
             SettingsCard {
                 HStack(spacing: 12) {
-                    SettingsRowLabel(title: "Style")
+                    SettingsRowLabel(title: String(localized: "Style"))
                     Spacer(minLength: 8)
                     Menu {
                         ForEach(DictationStyle.allCases, id: \.self) { candidate in
@@ -44,16 +44,16 @@ struct DictationSettingsPage: View {
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: "Clean up what I say",
-                    detail: "Drops ums, repeats and corrected words",
+                    title: String(localized: "Clean up what I say"),
+                    detail: String(localized: "Drops ums, repeats and corrected words"),
                     isOn: $cleanupTagger
                 )
 
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: "Custom vocabulary",
-                    detail: "Spell names and terms your way",
+                    title: String(localized: "Custom vocabulary"),
+                    detail: String(localized: "Spell names and terms your way"),
                     isOn: $customVocabulary
                 )
 
@@ -67,7 +67,7 @@ struct DictationSettingsPage: View {
 
             SettingsCard {
                 HStack(spacing: 12) {
-                    SettingsRowLabel(title: "Keep mic warm")
+                    SettingsRowLabel(title: String(localized: "Keep mic warm"))
                     Spacer(minLength: 8)
                     SettingsSegments(
                         items: WarmSessionDuration.allCases,
@@ -86,8 +86,8 @@ struct DictationSettingsPage: View {
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: "Always use iPhone microphone",
-                    detail: "Keeps music playing and starts faster",
+                    title: String(localized: "Always use iPhone microphone"),
+                    detail: String(localized: "Keeps music playing and starts faster"),
                     isOn: Binding(
                         get: { !dictation.allowBluetoothMic },
                         set: { dictation.setAllowBluetoothMic(!$0) }
@@ -117,8 +117,8 @@ private enum KeyboardChoice: CaseIterable {
 
     var label: String {
         switch self {
-        case .full: "Full"
-        case .dictationBar: "Dictation bar"
+        case .full: String(localized: "Full")
+        case .dictationBar: String(localized: "Dictation bar")
         }
     }
 }
@@ -137,7 +137,7 @@ struct KeyboardSettingsPage: View {
         SettingsPageScaffold(title: "Keyboard") {
             SettingsCard {
                 HStack(spacing: 12) {
-                    SettingsRowLabel(title: "Keyboard")
+                    SettingsRowLabel(title: String(localized: "Keyboard"))
                     Spacer(minLength: 8)
                     SettingsSegments(
                         items: KeyboardChoice.allCases,
@@ -157,16 +157,16 @@ struct KeyboardSettingsPage: View {
                     SettingsDivider()
 
                     SettingsToggleRow(
-                        title: "Autocorrect",
-                        detail: "Fixes typos when you press space",
+                        title: String(localized: "Autocorrect"),
+                        detail: String(localized: "Fixes typos when you press space"),
                         isOn: $autocorrect
                     )
 
                     SettingsDivider()
 
                     SettingsToggleRow(
-                        title: "Key pop-ups",
-                        detail: "Shows the letter above your finger",
+                        title: String(localized: "Key pop-ups"),
+                        detail: String(localized: "Shows the letter above your finger"),
                         isOn: $keyPopups
                     )
                 }
@@ -174,8 +174,8 @@ struct KeyboardSettingsPage: View {
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: "Haptics",
-                    detail: "A light tap as you press Hex's keys",
+                    title: String(localized: "Haptics"),
+                    detail: String(localized: "A light tap as you press Hex's keys"),
                     isOn: $haptics
                 )
             }
@@ -238,8 +238,8 @@ struct PrivacySettingsPage: View {
                 // Not only for the full keyboard: it also learns from dictations the
                 // dictation bar inserts.
                 SettingsToggleRow(
-                    title: "Learn how I type",
-                    detail: "Learns from taps and the words you fix",
+                    title: String(localized: "Learn how I type"),
+                    detail: String(localized: "Learns from taps and the words you fix"),
                     isOn: $learnTyping
                 )
 
@@ -258,8 +258,8 @@ struct PrivacySettingsPage: View {
                 // Apart from Learn how I type: this keeps everything, to export and train on.
                 // Turning it on asks first (App Review 2.5.14); turning it off doesn't.
                 SettingsToggleRow(
-                    title: "Record typing logs",
-                    detail: "Records taps and the text you type for 14 days, on this iPhone, to export. Off by default.",
+                    title: String(localized: "Record typing logs"),
+                    detail: String(localized: "Records taps and the text you type for 14 days, on this iPhone, to export. Off by default."),
                     isOn: Binding(
                         get: { typingLogs },
                         set: { on in
@@ -285,7 +285,7 @@ struct PrivacySettingsPage: View {
                     Button {
                         showTypingLogs = true
                     } label: {
-                        SettingsLinkLabel(title: "Typing logs")
+                        SettingsLinkLabel(title: String(localized: "Typing logs"))
                     }
                     .buttonStyle(.plain)
                 }
@@ -327,18 +327,18 @@ struct ExperimentsSettingsPage: View {
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: "Spatial autocorrect",
+                    title: String(localized: "Spatial autocorrect"),
                     detail: FullKeyboardSettings().isEnabled && FullKeyboardSettings().autocorrect
-                        ? "Reads where your taps land to fix typos, in English and Spanish"
-                        : "Needs the full keyboard with Autocorrect on",
+                        ? String(localized: "Reads where your taps land to fix typos, in English and Spanish")
+                        : String(localized: "Needs the full keyboard with Autocorrect on"),
                     isOn: $spatialAutocorrect
                 )
 
                 SettingsDivider()
 
                 SettingsToggleRow(
-                    title: "Clean up with Apple Intelligence",
-                    detail: cleanupAvailability.reason ?? "Fixes misheard words on device",
+                    title: String(localized: "Clean up with Apple Intelligence"),
+                    detail: cleanupAvailability.reason ?? String(localized: "Fixes misheard words on device"),
                     isOn: $appleIntelligenceCleanup
                 )
                 .disabled(!cleanupAvailability.isAvailable)
@@ -368,10 +368,10 @@ private struct EmojiExperimentRows: View {
 
     var body: some View {
         SettingsToggleRow(
-            title: "Emoji",
+            title: String(localized: "Emoji"),
             detail: FullKeyboardSettings().isEnabled
-                ? "An emoji key with suggestions as you type"
-                : "Needs the full keyboard",
+                ? String(localized: "An emoji key with suggestions as you type")
+                : String(localized: "Needs the full keyboard"),
             isOn: $emoji
         )
         .onChange(of: emoji) { _, enabled in

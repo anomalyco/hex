@@ -13,6 +13,9 @@ settings:
   base:
     DEVELOPMENT_TEAM: 5NZ4Q7NXJ4
     SWIFT_VERSION: 6.0
+    # The compiler finds the interface's strings for the String Catalogs (Localizable.xcstrings).
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
 targets:
   HEXMobile:
     type: application

@@ -157,7 +157,7 @@ private struct OnboardingWelcomePage: View {
         }
     }
 
-    private func point(icon: String, title: String) -> some View {
+    private func point(icon: String, title: LocalizedStringKey) -> some View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .medium))
@@ -474,8 +474,8 @@ private struct OnboardingHeader: View {
 }
 
 private struct OnboardingCheckRow<Trailing: View>: View {
-    let title: String
-    var detail: String? = nil
+    let title: LocalizedStringKey
+    var detail: LocalizedStringKey? = nil
     let done: Bool
     @ViewBuilder var trailing: Trailing
 
@@ -505,7 +505,7 @@ private struct OnboardingCheckRow<Trailing: View>: View {
 
 /// The one filled action on a page.
 private struct OnboardingPrimaryButton: View {
-    let title: String
+    let title: LocalizedStringKey
     var enabled = true
     let action: () -> Void
 
@@ -525,7 +525,7 @@ private struct OnboardingPrimaryButton: View {
 }
 
 private struct OnboardingSecondaryButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     let action: () -> Void
 
@@ -547,7 +547,7 @@ private struct OnboardingSecondaryButton: View {
 }
 
 private struct OnboardingSmallButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let action: () -> Void
 
     var body: some View {
