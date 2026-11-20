@@ -334,8 +334,17 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   module installs while the iPhone is online, Automatic sets the language aside
   for three days and dictates the next one ("Russian isn't available on this
   iPhone yet. Using English."); a language picked by hand says so and offers that
-  one ("Try English", with **Use English** in the app). Offline or stalled, it
-  says the download failed and tries again next time. Reservations make room
+  one ("Try English", with **Use English** in the app). With nothing else to move
+  to (an English-only iPhone), Automatic tries the set-aside language again
+  rather than none, so "Apple Speech doesn't have your language" means neither
+  module lists any of the iPhone's languages. Offline or stalled, it
+  says the download failed and tries again next time. In the keyboard, a model it
+  can't get itself (each process holds its own reservation, and one released or
+  removed since Hex downloaded it reads as not installed there) says "Open Hex to
+  download English." and Dictate and the Hex key open Hex, which downloads it,
+  until a model installs, a language is chosen, or a day passes
+  (`SpeechModelNeedsHex`, `settings.dictationLanguage.keyboardNeedsHex`); a move
+  to another language keeps its own sentence. Reservations make room
   under `AssetInventory.maximumReservedLocales` by releasing others first. Only
   Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
   and other packages' descriptions go to logs, however readable.
@@ -553,8 +562,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   returned nothing), so Polished only capitalizes and ends the sentence.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
-  the fallback, set-aside, offline, and stall rules against fakes of Apple
-  Speech's calls (the simulator has no speech models), and `--snap-state
+  the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
+  of Apple Speech's calls (the simulator has no speech models),
+  `SpeechLanguagePickerTests` the set-aside and no-`SpeechTranscriber` picks, and `--snap-state
   full-keyboard-language-unavailable`, `keyboard-language-unavailable`,
   `language-unavailable` and `language-switched` render the messages. Which
   module fails for which language on iOS 26.x, whether a stalled Apple download

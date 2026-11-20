@@ -56,6 +56,40 @@ nonisolated struct SpeechModelUnavailable: HexDescribedError, Equatable {
     }
 }
 
+/// In-keyboard dictation couldn't get its language's speech model ready itself: an asset
+/// released or removed since Hex downloaded it (each process holds its own reservation, and an
+/// unreserved one reads as not installed), a download the keyboard couldn't finish, or Speech
+/// listing nothing in the keyboard. Hex downloads it in the foreground, so the Hex key opens
+/// Hex until a model installs (`LanguageSettings.keyboardNeedsHex`). Never "Apple doesn't
+/// have your language": Speech listed the language, or listed nothing at all.
+nonisolated struct SpeechModelNeedsHex: HexDescribedError, Equatable {
+    /// BCP 47, such as `en-US`.
+    let language: String
+
+    /// Short enough for the full keyboard's strip (about 60 characters).
+    var errorDescription: String? {
+        String(localized: "Open Hex to download \(SpeechModelUnavailable.interfaceName(language)).")
+    }
+
+    /// Hands the keyboard's dictation to Hex for `language` and says so.
+    static func handOff(_ language: String, settings: LanguageSettings) -> SpeechModelNeedsHex {
+        settings.markKeyboardNeedsHex()
+        return SpeechModelNeedsHex(language: language)
+    }
+
+    /// What the keyboard says when installing `language`'s model failed there. Automatic
+    /// moving to another language, or a choice that can't be had with one to try instead,
+    /// keeps `SpeechModelUnavailable`'s sentence: the next dictation works without Hex.
+    /// Anything else is Hex's to download (`handOff`).
+    static func keyboardError(for error: Error, language: String, settings: LanguageSettings) -> Error {
+        if error is CancellationError { return error }
+        if let unavailable = error as? SpeechModelUnavailable, unavailable.fallback != nil {
+            return unavailable
+        }
+        return handOff(language, settings: settings)
+    }
+}
+
 /// How Hex gets a language's speech model onto the iPhone, shared by the app and in-keyboard
 /// dictation: the module the picker chose, then the same language on `DictationTranscriber`
 /// when `SpeechTranscriber`'s won't install (Apple lists some languages whose
@@ -99,11 +133,16 @@ nonisolated enum SpeechModelInstall {
         }
         var downloadable = false
         var stalled = false
+        // A model in place ends the keyboard's handoff to Hex, whichever process installed it.
+        func installed(_ attempt: SpeechLanguage) -> SpeechLanguage {
+            settings.clearKeyboardNeedsHex()
+            return attempt
+        }
         for attempt in attempts {
             try Task.checkCancellation()
             switch await steps.status(attempt) {
             case .installed:
-                return attempt
+                return installed(attempt)
             case .unsupported:
                 log("speech \(attempt.identifier) \(attempt.module.rawValue): unsupported")
                 continue
@@ -119,7 +158,7 @@ nonisolated enum SpeechModelInstall {
                     }
                 }
                 if await steps.status(attempt) == .installed {
-                    return attempt
+                    return installed(attempt)
                 }
                 log("speech \(attempt.identifier) \(attempt.module.rawValue): not installed after download")
             } catch is CancellationError {

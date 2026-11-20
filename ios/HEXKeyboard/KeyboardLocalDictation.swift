@@ -826,12 +826,24 @@ private enum KeyboardSpeech {
         let log = KeyboardProbeLog.shared
         // The same rule as the app's (Settings › Dictation language, else Automatic), so the
         // keyboard uses the assets Hex downloaded.
-        guard let picked = await AppleSpeechLanguages.resolve() else { throw Failure.noLocale }
+        let settings = LanguageSettings()
+        guard let picked = await AppleSpeechLanguages.resolve(settings: settings) else {
+            // Only Speech listing languages, none of them the iPhone's, means it lacks yours.
+            guard await AppleSpeechLanguages.listsNone() else { throw Failure.noLocale }
+            log.write("speech lists no languages in the keyboard: handing over to Hex")
+            throw SpeechModelNeedsHex.handOff(settings.effectiveDictationLanguage ?? "en-US", settings: settings)
+        }
         log.write("speech locale=\(picked.identifier) module=\(picked.module.rawValue) available=\(SpeechTranscriber.isAvailable)")
-        // The model the app uses, else the same language on `DictationTranscriber`; when neither
-        // installs, `SpeechModelUnavailable` says so in a sentence (never Apple's asset error).
+        // The model the app uses, else the same language on `DictationTranscriber`. One the
+        // keyboard can't get (released since Hex downloaded it, or a download that failed here)
+        // is Hex's to download: the Hex key opens Hex until it installs.
         let started = Date()
-        let language = try await AppleSpeechAssets.install(picked, log: { log.write($0) })
+        let language: SpeechLanguage
+        do {
+            language = try await AppleSpeechAssets.install(picked, settings: settings, log: { log.write($0) })
+        } catch {
+            throw SpeechModelNeedsHex.keyboardError(for: error, language: picked.identifier, settings: settings)
+        }
         if language != picked || Date().timeIntervalSince(started) > 0.5 {
             log.write("speech assets ready (\(language.module.rawValue) \(language.identifier)) after \(String(format: "%.1f", Date().timeIntervalSince(started))) s \(KeyboardProbeLog.memory())")
         }
