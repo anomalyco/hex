@@ -215,6 +215,9 @@ Taps that aren't text: `action`:
   `rollover` when another key committed it), `accent_cancel`;
 - `trackpad_start` (`id`; `hold: true` when holding space still for 0.4 s
   started it), `trackpad_end` (`id`, `offset`: total characters);
+- `language_swipe` (`id`, `step`: 1 the next language, -1 the one before) and
+  `keyboard_language` (`language`: the layout it switched to), with two or more
+  keyboard languages;
 - `hex_key` (`dictation`: `warm`, `keyboard`, `open_hex`), `hex_menu`, `style`
   (`style`, `from`: `hex_menu` or `recording_panel`),
   `dictation_language` (`language`: BCP 47 or `automatic`, from the Hex menu),

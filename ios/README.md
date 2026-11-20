@@ -267,7 +267,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
     layouts (Norsk, Deutsch, Italiano, Français, Português, Русский) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
-    model. The
+    model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
@@ -322,7 +322,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
     the dictation bar, so testers who turned that experiment off keep the bar),
-    then Keyboard layout, Autocorrect (with Spatial autocorrect below it while it's
+    then Languages, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
@@ -394,7 +394,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
 - **Switching the dictation language in the keyboard (iOS 26+, Full Access):**
   the dictation bar shows the language beside the style ("Norsk ⌄") and opens a
   tray of chips; the full keyboard's Hex key menu has a Language row with its
-  own page, and the space bar names the language faintly ("English", "Norsk").
+  own page, and the space bar names the language faintly ("English", "Norsk"),
+  unless the keyboard switches between two or more languages: then it names the keyboard's.
   Both offer Automatic plus up to five languages: the one set, the ones picked
   lately (`settings.dictationLanguage.recent`), then the iPhone's preferred
   languages, each matched to one Apple Speech has (`DictationLanguageSwitch`;
@@ -421,7 +422,37 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   language label read "Español → English". The App Group carries the
   switch, so in-keyboard dictation, a warm session, and the Action Button
   all follow it.
-- **Keyboard layouts (Settings › Keyboard › Keyboard layout, with Full chosen):** English,
+- **Keyboard languages (Settings › Keyboard › Languages, with Full chosen):** Automatic (the
+  default, as before: the dictation language's layout, below), or one or more layouts ticked
+  and dragged into order (`KeyboardLanguagesPage`, App Group `settings.keyboardLanguages`,
+  which reads the one-layout `settings.keyboardLayout` until first written and writes its
+  first language there). The layouts of the iPhone's own keyboards and preferred languages
+  come first ("On this iPhone"); ticking one from Automatic keeps Automatic's language beside
+  it, and unticking the last goes back to Automatic. With two or more, the space bar names
+  the current one ("Français", with the region only beside another French layout) and a
+  quick swipe along it switches (left the next, right the one before): letters, accents
+  and autocorrect. Apple and Gboard switch with a long press on the globe, but a Face ID
+  iPhone shows no globe in a third-party keyboard and Hex's space-bar slide is its cursor
+  trackpad, so this follows SwiftKey: with two or more languages the cursor slides once the
+  space bar was held still for 0.4 s (the hold that starts Apple's trackpad, below), a slide
+  before that is a swipe, and one shorter than 24 pt types a space
+  (`FullKeyboardEngine.trackpadHoldDelay`, `languageSwipeDistance`).
+  The globe key is unchanged. The keyboard comes back in the language it was left in
+  (`settings.keyboardLanguages.current`; without Full Access an iPhone may keep it only
+  while the keyboard runs). **Switch dictation too** (off by default, shown with two or more
+  on iOS 26+) sets the dictation language to the keyboard's on each switch, in the
+  iPhone's region where Apple Speech has it (`KeyboardLanguage.dictationLanguage`; none for
+  Srpski). **Bilingual autocorrect:** the first other chosen language with Latin letters and
+  an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
+  English; none for Русский, Srpski, or two French layouts) is checked on the same keys,
+  with its Spatial model where it has one, as Apple's "Français et English" keyboard does: a
+  word either language knows as typed is never changed, a typo only one can fix gets that
+  fix ("teh" → "the" while French types), and when both can, the language of the last words
+  only one dictionary knows wins, else the clearly cheaper slip, else the keyboard's own;
+  the strip shows both languages' fixes and completions. In the simulator the English
+  keyboard alone changed 34 of 77 common French words and the French keyboard alone 28 of
+  80 English words; with both chosen, none.
+- **Keyboard layouts (each language's letters):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
   Deutsch (QWERTZ with `ü`, `ö ä`), Italiano and Português on the English letters
   (Apple's keyboards for them are QWERTY), Français (France) on Apple's AZERTY (rows of
@@ -488,7 +519,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   types its own space, so a space pressed right after it is swallowed, as on Apple's
   keyboard; it still counts towards double-space for a period. Holding the space bar
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
-  space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once.
+  space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
+  the keyboard switches between two or more languages (Keyboard languages, above).
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
@@ -643,6 +675,18 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   module fails for which language on iOS 26.x, whether a stalled Apple download
   ever moves again, the reservation limit on a full iPhone, and Parakeet's
   memory on 4 GB iPhones are unverified on hardware.
+- **Keyboard languages:** `KeyboardLayoutTests` cover the list (resolution, switching,
+  space-bar label, pairing, migration, the dictation pick), `FullKeyboardEngineTests` the
+  swipe against the hold-then-slide trackpad and switching in a `FullKeyboardView`, and
+  `AutocorrectEngineTests` bilingual autocorrect on stub dictionaries and iOS's own
+  (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Checked live in
+  Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
+  simulator, iOS 27.2, Full Access, three runs, `footprint` after typing a sentence): Français
+  alone 28.7–28.8 MB, with English beside it 29.7–29.9 MB; English alone 28.9–29.9 MB, with
+  Français 29.5–29.9 MB; resting 18.7–19.1 MB and peaks 37–41 MB either way, so the second
+  language costs about 1 MB (the simulator counts no GPU memory). A real iPhone, the strip's
+  latency with two Spatial models (English and Spanish), and whether a keyboard without Full
+  Access keeps the current language are unverified.
 - **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
   widths, hit frames (tiling the key area and row 1's band above it with no gaps
   or overlaps), balloons
