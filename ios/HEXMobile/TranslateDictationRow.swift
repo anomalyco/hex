@@ -87,6 +87,13 @@ struct TranslateDictationRow: View {
                     }
                 }
 
+                if Locale.Language(identifier: target).languageCode == source.languageCode {
+                    // You dictate in the target already: switch the dictation language from the
+                    // keyboard's Hex key to speak another one and paste in this one.
+                    Text("Switch the language from the Hex key to speak another one.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                } else {
                 switch status {
                 case .installed:
                     Text("Ready. Works offline.")
@@ -107,6 +114,7 @@ struct TranslateDictationRow: View {
                 default:
                     EmptyView()
                 }
+                }
             }
         }
         .translationTask(download) { session in
@@ -118,9 +126,13 @@ struct TranslateDictationRow: View {
             pastesTranslation = DictationTranslationSettings().pastesTranslation
         }
         .task {
+            // Every language, including the one you dictate in now: you can switch the
+            // dictation language per dictation, so English must be pickable while you
+            // usually dictate in English. A dictation already in the target pastes as spoken.
             let supported = await LanguageAvailability().supportedLanguages
+            var seen = Set<String>()
             languages = supported
-                .filter { $0.languageCode != source.languageCode }
+                .filter { seen.insert($0.minimalIdentifier).inserted }
                 .sorted { name(of: $0) < name(of: $1) }
             await refreshStatus()
         }
