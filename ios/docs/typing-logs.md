@@ -80,7 +80,7 @@ The keyboard appeared (`trigger`: `appear`), the field changed while it showed
   (`iOS 26.1`), `version` and `build` of Hex, `locale`, `languages` (first
   four preferred), `keyboardLanguage` (the keyboard's `primaryLanguage`),
   `inputMode` (the field's input mode language), `fullAccess`.
-- `settings`: `autocorrect` (Hex's), `key_popups`, `learnHowIType`, `cleanupTagger`,
+- `settings`: `autocorrect` (Hex's), `key_popups`, `haptics`, `learnHowIType`, `cleanupTagger`,
   `hexKeyPlacement`, `style` (dictation style).
 
 A `context` line follows at once with the text already in the field.

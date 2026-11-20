@@ -10,6 +10,7 @@ struct ExperimentsCard: View {
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var keyPopups = FullKeyboardSettings().keyPopups
+    @State private var haptics = FullKeyboardSettings().haptics
     @State private var learnTyping = TypingJournalSettings().isEnabled
     @State private var typingLogs = TypingLogSettings().isEnabled
     @State private var showTypingLogs = false
@@ -80,6 +81,27 @@ struct ExperimentsCard: View {
                     .padding(.vertical, 10)
                     .onChange(of: keyPopups) { _, enabled in
                         FullKeyboardSettings().keyPopups = enabled
+                    }
+
+                    Divider()
+                        .overlay(HexTheme.borderWeak)
+                        .padding(.leading, 16)
+
+                    Toggle(isOn: $haptics) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Haptics")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(HexTheme.textBase)
+                            Text("A light tap under your finger as you type")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HexTheme.textMuted)
+                        }
+                    }
+                    .tint(HexTheme.success)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .onChange(of: haptics) { _, enabled in
+                        FullKeyboardSettings().haptics = enabled
                     }
                 }
 
@@ -262,6 +284,7 @@ struct ExperimentsCard: View {
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
             autocorrect = FullKeyboardSettings().autocorrect
             keyPopups = FullKeyboardSettings().keyPopups
+            haptics = FullKeyboardSettings().haptics
             learnTyping = TypingJournalSettings().isEnabled
             typingLogs = TypingLogSettings().isEnabled
         }
