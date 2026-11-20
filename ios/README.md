@@ -242,7 +242,10 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
-    learned below the switch), and under **Advanced**, Record typing logs (off
+    learned below the switch), **Privacy policy** and **Support** (App Review
+    5.1.1(i); `HexLinks`, opened in Safari inside Hex, under one base URL that is
+    `https://dev.anoma.ly/hex` until the production site serves
+    `anoma.ly/hex/privacy`), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Emoji (it says it needs the full keyboard while the
     dictation bar is chosen; Clear emoji history while it's on), and Clean up

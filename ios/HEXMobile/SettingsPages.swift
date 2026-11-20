@@ -213,8 +213,9 @@ struct KeyboardSettingsPage: View {
     }
 }
 
-/// Settings › Privacy: what Hex keeps about how you type, all of it on this iPhone, and
-/// under Advanced the typing logs you can record to export.
+/// Settings › Privacy: what Hex keeps about how you type, all of it on this iPhone, the
+/// privacy policy and support pages (App Review 5.1.1(i)), and under Advanced the typing logs
+/// you can record to export.
 struct PrivacySettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var learnTyping = TypingJournalSettings().isEnabled
@@ -249,6 +250,24 @@ struct PrivacySettingsPage: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                 }
+            }
+
+            SettingsCard {
+                Button {
+                    SafariSheet.present(HexLinks.privacyPolicy)
+                } label: {
+                    SettingsLinkLabel(title: "Privacy policy", trailingIcon: "arrow.up.right")
+                }
+                .buttonStyle(.plain)
+
+                SettingsDivider()
+
+                Button {
+                    SafariSheet.present(HexLinks.support)
+                } label: {
+                    SettingsLinkLabel(title: "Support", trailingIcon: "arrow.up.right")
+                }
+                .buttonStyle(.plain)
             }
 
             SettingsSectionHeader(title: "Advanced")
