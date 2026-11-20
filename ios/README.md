@@ -120,6 +120,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     backspace. On an already punctuated sentence ("Sounds good, see you at
     5.") Polished and Verbatim read the same; they differ on fillers, missing
     capitals or endings, and with Clean up what I say on.
+  - **Lowercase (Settings › Dictation › Lowercase):** Off by default. After the
+    style and custom vocabulary's spellings, everything is lowercased, custom
+    vocabulary included, as desktop's Lowercase step (`str::to_lowercase` on the
+    final text) does, on every path (`DictationLowercaseSettings`, App Group key
+    `settings.dictationLowercase`).
   - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
     name for @) and "at sign" become "@", and an address said around it joins
     up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning
@@ -310,7 +315,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
   `https://dev.anoma.ly/hex` until the production site serves
   `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
-  - **Dictation:** Style, Dictation language, Translate what I say, Clean up
+  - **Dictation:** Style, Lowercase, Dictation language, Translate what I say, Clean up
     what I say, Custom vocabulary (its list below the switch), Keep mic warm,
     and Always use iPhone microphone.
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored

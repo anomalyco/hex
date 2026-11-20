@@ -351,4 +351,23 @@ final class SpokenCleanupRulesTests: XCTestCase {
         )
     }
 
+    /// Lowercase comes after the style and the vocabulary's spellings, as desktop's Lowercase
+    /// step lowercases the final text, custom vocabulary included.
+    func testLowercaseRunsAfterTheStyleAndVocabulary() {
+        let heard = "Yeah, text John about the iphone order."
+        var pipeline = DictationPipeline(style: .polished, language: "en-US", vocabulary: ["iPhone"])
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "Yeah, text John about the iPhone order.")
+        pipeline.lowercase = true
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "yeah, text john about the iphone order.")
+        pipeline.style = .casual
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "yeah text john about the iphone order")
+        pipeline.style = .verbatim
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "yeah, text john about the iphone order.")
+
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let settings = DictationLowercaseSettings(defaults: defaults)
+        XCTAssertFalse(settings.isEnabled, "off by default")
+        settings.isEnabled = true
+        XCTAssertTrue(DictationLowercaseSettings(defaults: defaults).isEnabled)
+    }
 }
