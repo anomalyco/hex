@@ -1,20 +1,17 @@
 import UIKit
 
 /// The full keyboard's colours, light and dark, calibrated against Apple's iOS 26
-/// Liquid Glass system keyboard. Dark is chosen by the field's `keyboardAppearance`
-/// first, then the host's interface style.
+/// Liquid Glass system keyboard. Dark follows the keyboard's trait collection, which iOS
+/// sets from the field's `keyboardAppearance` and the host's current style, as it does
+/// the system platter behind the keys. The document proxy's `keyboardAppearance` can't
+/// decide it: the host resolves a default field to light or dark when it sends its traits
+/// and doesn't send them again when only its style changes, so after switching apps it
+/// could still say light in dark mode (TestFlight build 29).
 struct FullKeyboardPalette: Equatable {
     let isDark: Bool
 
-    static func isDark(appearance: UIKeyboardAppearance?, traits: UITraitCollection) -> Bool {
-        switch appearance {
-        case .dark?:
-            return true
-        case .light?:
-            return false
-        default:
-            return traits.userInterfaceStyle == .dark
-        }
+    static func isDark(traits: UITraitCollection) -> Bool {
+        traits.userInterfaceStyle == .dark
     }
 
     private static func rgb(_ hex: UInt32, alpha: CGFloat = 1) -> UIColor {
