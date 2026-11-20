@@ -142,8 +142,8 @@ final class HexKeyControl: UIControl {
     }
 }
 
-/// While recording, this replaces the strip and keys at the same height: the clock and
-/// style, a wide Dot Scope well, then ✕ and Done where the bottom row was.
+/// While recording, this replaces the suggestion strip only, so the keys stay put: the
+/// clock, a Dot Scope well that takes the rest of the strip, then ✕ and Done.
 @MainActor
 final class HexKeyRecordingPanel: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { applyPalette() } } }
@@ -165,8 +165,8 @@ final class HexKeyRecordingPanel: UIView {
     var metrics = KeyboardMetrics.portrait { didSet { setNeedsLayout() } }
 
     init(loudness: @escaping () -> Float) {
-        var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 36, spacing: 6.5)
-        tuning.height = 120
+        var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 5)
+        tuning.height = 32
         // Cap drawables at 2 inside the keyboard extension to save ~2.2 MB of IOSurface RAM.
         scope = DotScopeHostView(tuning: tuning, maximumDrawableCount: 2)
         super.init(frame: .zero)
@@ -182,7 +182,7 @@ final class HexKeyRecordingPanel: UIView {
         styleButton.addTarget(self, action: #selector(cycleStyle), for: .touchUpInside)
         styleButton.accessibilityHint = "Changes the dictation style"
 
-        well.layer.cornerRadius = 20
+        well.layer.cornerRadius = 16
         well.layer.cornerCurve = .continuous
         well.clipsToBounds = true
         well.addSubview(scope)
@@ -243,35 +243,27 @@ final class HexKeyRecordingPanel: UIView {
         super.layoutSubviews()
         let innerLeft = horizontalInset + metrics.side
         let innerRight = bounds.width - horizontalInset - metrics.side
-        let innerW = max(120, innerRight - innerLeft)
-        let headerTop = metrics.stripTop
-        let headerH = metrics.stripHeight
-        var x = innerLeft + 8
+        let rowH = max(28, bounds.height - 8)
+        let rowY = (bounds.height - rowH) / 2
+        var x = innerLeft + 4
         if !dot.isHidden {
-            dot.frame = CGRect(x: x, y: headerTop + headerH / 2 - 3.5, width: 7, height: 7)
+            dot.frame = CGRect(x: x, y: bounds.midY - 3.5, width: 7, height: 7)
             x += 7 + 6
         }
         clockLabel.sizeToFit()
-        clockLabel.frame = CGRect(x: x, y: headerTop, width: clockLabel.bounds.width, height: headerH)
-        styleButton.sizeToFit()
-        let styleW = styleButton.bounds.width + 12
-        styleButton.frame = CGRect(x: innerRight - styleW, y: headerTop, width: styleW, height: headerH)
+        clockLabel.frame = CGRect(x: x, y: 0, width: clockLabel.bounds.width, height: bounds.height)
+        x = clockLabel.frame.maxX + 8
 
-        let keyH = metrics.keyHeight
-        let bottomY = bounds.height - metrics.keysBottom - keyH
-        let cancelW = sideKeyWidth * 2 + metrics.gap
-        cancelButton.cornerRadius = metrics.cornerRadius
-        doneButton.cornerRadius = metrics.cornerRadius
-        cancelButton.frame = CGRect(x: innerLeft, y: bottomY, width: cancelW, height: keyH)
-        doneButton.frame = CGRect(
-            x: innerLeft + cancelW + metrics.gap,
-            y: bottomY,
-            width: innerW - cancelW - metrics.gap,
-            height: keyH
-        )
+        let doneW: CGFloat = isTranscribing ? 92 : 64
+        doneButton.cornerRadius = rowH / 2
+        cancelButton.cornerRadius = rowH / 2
+        doneButton.frame = CGRect(x: innerRight - doneW, y: rowY, width: doneW, height: rowH)
+        cancelButton.frame = CGRect(x: doneButton.frame.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
 
-        let wellTop = headerTop + headerH + 6
-        well.frame = CGRect(x: innerLeft, y: wellTop, width: innerW, height: max(24, bottomY - 8 - wellTop))
+        // No room for the style chip in the strip; the Hex key's menu sets the style.
+        styleButton.isHidden = true
+        let wellRight = cancelButton.frame.minX - 6
+        well.frame = CGRect(x: x, y: rowY, width: max(24, wellRight - x), height: rowH)
         scope.frame = well.bounds
     }
 
