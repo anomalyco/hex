@@ -174,6 +174,7 @@ private struct OnboardingAllowPage: View {
     let fixtureModelProgress: Double?
     let onBack: () -> Void
     let onContinue: () -> Void
+    @State private var showsKeyboardFallback = OnboardingFixture.current == .allow && ProcessInfo.processInfo.arguments.contains("--onboarding-fallback")
 
     /// Full Access can't be verified from the app; the next page checks it. The speech model
     /// keeps downloading in the background and never holds up Continue.
@@ -192,13 +193,9 @@ private struct OnboardingAllowPage: View {
                         .tracking(-0.4)
                         .foregroundStyle(HexTheme.textBase)
 
+                    // Microphone first: iOS lists Microphone on Hex's Settings page only once
+                    // the app has asked, so asking first means one trip to Settings.
                     VStack(spacing: 0) {
-                        OnboardingCheckRow(title: "Keyboard", done: monitor.keyboardAdded == true) {
-                            if !monitor.fullAccessOn {
-                                OnboardingSmallButton(title: "Open Settings") { openSettings(openURL) }
-                            }
-                        }
-                        Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
                         OnboardingCheckRow(title: "Microphone", done: monitor.microphone == .granted) {
                             switch monitor.microphone {
                             case .undetermined:
@@ -209,15 +206,40 @@ private struct OnboardingAllowPage: View {
                                 EmptyView()
                             }
                         }
+                        Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
+                        OnboardingCheckRow(title: "Keyboard", done: monitor.keyboardAdded == true) {
+                            if !monitor.fullAccessOn {
+                                OnboardingSmallButton(title: "Open Settings") {
+                                    if monitor.microphone == .undetermined {
+                                        monitor.requestMicrophone { openSettings(openURL) }
+                                    } else {
+                                        openSettings(openURL)
+                                    }
+                                }
+                            }
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
                     .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
 
-                    Text("Keyboards  ›  Hex Keyboard  ›  Allow Full Access")
-                        .font(.system(size: 13))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .padding(.horizontal, 4)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Keyboards  ›  Hex Keyboard  ›  Allow Full Access")
+                        Button {
+                            withAnimation(HexMotion.reducedFade) { showsKeyboardFallback.toggle() }
+                        } label: {
+                            Text("Don't see Keyboards?")
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                        if showsKeyboardFallback {
+                            Text("General  ›  Keyboard  ›  Keyboards  ›  Add New Keyboard  ›  Hex")
+                                .transition(.opacity)
+                        }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .padding(.horizontal, 4)
                 }
                 .padding(.top, 8)
                 .padding(.bottom, 16)
