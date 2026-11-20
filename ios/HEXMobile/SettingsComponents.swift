@@ -220,6 +220,7 @@ struct SettingsSegments<Item: Hashable>: View {
 ///   `setup-sheet-microphone`: the sheet before iOS has asked for the microphone.
 /// - `settings-<page>` opens a page (`dictation`, `keyboard`, `privacy`, `experiments`) with
 ///   every switch at its default; `-on` turns the switches on, `-end` starts scrolled to the end.
+///   `settings-keyboard-languages[-on]` opens Keyboard › Languages.
 ///   `settings-privacy-confirm` opens Record typing logs' consent dialog.
 ///
 /// `KeyboardSetupMonitor.refresh` and `DictationController` supply the matching state.
@@ -250,13 +251,19 @@ enum SettingsSnapshotFixture {
         scene?.hasSuffix("-end") == true
     }
 
+    /// `settings-keyboard-languages[-on]`: Keyboard › Languages, open (Automatic, or with
+    /// `-on` English, Français and Русский with Switch dictation too).
+    static var opensKeyboardLanguages: Bool {
+        scene?.hasPrefix("settings-keyboard-languages") == true
+    }
+
     /// Writes the page's switches to the App Group so every run renders the same.
     @MainActor
     static func applyDefaults() {
         guard let scene, scene.hasPrefix("settings-") else { return }
         let on = scene.contains("-on")
         let keyboard = FullKeyboardSettings()
-        keyboard.isEnabled = on
+        keyboard.isEnabled = on || opensKeyboardLanguages
         keyboard.autocorrect = true
         keyboard.spatialAutocorrect = true
         keyboard.suggestSwearWords = on
@@ -268,7 +275,9 @@ enum SettingsSnapshotFixture {
         if on {
             emojiUsage.record("🎉")
         }
-        LanguageSettings().keyboardLayout = nil
+        LanguageSettings().keyboardLanguages = on ? [.english, .french, .russian] : []
+        LanguageSettings().currentKeyboardLanguage = nil
+        LanguageSettings().dictationFollowsKeyboard = on
         CleanupTaggerSettings().isEnabled = on
         AppleIntelligenceCleanupSettings().isEnabled = false
         CustomVocabularySettings().isEnabled = on

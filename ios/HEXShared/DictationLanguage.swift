@@ -1,7 +1,7 @@
 import Foundation
 
-/// Settings › Dictation language and Experiments › Full keyboard › Keyboard layout, in the
-/// App Group so the keyboard reads them and can switch the language.
+/// Settings › Dictation language and Settings › Keyboard › Languages, in the App Group so the
+/// keyboard reads them and can switch the language.
 nonisolated struct LanguageSettings {
     private enum Key {
         static let dictation = "settings.dictationLanguage"
@@ -9,7 +9,12 @@ nonisolated struct LanguageSettings {
         static let automaticDictation = "settings.dictationLanguage.automatic"
         static let recent = "settings.dictationLanguage.recent"
         static let supported = "settings.dictationLanguage.supported"
+        /// One layout, or none for Automatic: the setting before Languages, still written
+        /// with the first language for an older build.
         static let keyboardLayout = "settings.keyboardLayout"
+        static let keyboardLanguages = "settings.keyboardLanguages"
+        static let currentKeyboardLanguage = "settings.keyboardLanguages.current"
+        static let dictationFollowsKeyboard = "settings.keyboardLanguages.switchDictation"
         static let speechModuleFailed = "settings.dictationLanguage.speechModuleFailed"
         static let unavailable = "settings.dictationLanguage.unavailable"
         static let keyboardNeedsHex = "settings.dictationLanguage.keyboardNeedsHex"
@@ -58,10 +63,36 @@ nonisolated struct LanguageSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.supported) }
     }
 
-    /// The full keyboard's letters, or nil for Automatic (follow the dictation language).
-    var keyboardLayout: KeyboardLanguage? {
-        get { defaults?.string(forKey: Key.keyboardLayout).flatMap(KeyboardLanguage.init(rawValue:)) }
-        nonmutating set { defaults?.set(newValue?.rawValue, forKey: Key.keyboardLayout) }
+    /// Settings › Keyboard › Languages: the full keyboard's languages in order, the space bar
+    /// switching between them; empty is Automatic (the dictation language's layout). Until
+    /// it is first written, the one layout chosen before (`settings.keyboardLayout`).
+    var keyboardLanguages: [KeyboardLanguage] {
+        get {
+            let stored = defaults?.stringArray(forKey: Key.keyboardLanguages)
+                ?? defaults?.string(forKey: Key.keyboardLayout).map { [$0] }
+                ?? []
+            var seen = Set<KeyboardLanguage>()
+            return stored.compactMap(KeyboardLanguage.init(rawValue:)).filter { seen.insert($0).inserted }
+        }
+        nonmutating set {
+            var seen = Set<KeyboardLanguage>()
+            let languages = newValue.filter { seen.insert($0).inserted }
+            defaults?.set(languages.map(\.rawValue), forKey: Key.keyboardLanguages)
+            defaults?.set(languages.first?.rawValue, forKey: Key.keyboardLayout)
+        }
+    }
+
+    /// The language the space bar last switched to, so the keyboard comes back in it.
+    var currentKeyboardLanguage: KeyboardLanguage? {
+        get { defaults?.string(forKey: Key.currentKeyboardLanguage).flatMap(KeyboardLanguage.init(rawValue:)) }
+        nonmutating set { defaults?.set(newValue?.rawValue, forKey: Key.currentKeyboardLanguage) }
+    }
+
+    /// Settings › Keyboard › Languages › Switch dictation too: switching the keyboard's language
+    /// on the space bar switches the dictation language to it. Off by default.
+    var dictationFollowsKeyboard: Bool {
+        get { defaults?.bool(forKey: Key.dictationFollowsKeyboard) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.dictationFollowsKeyboard) }
     }
 
     /// The language dictation uses, when known: the one set, else what Automatic picks,

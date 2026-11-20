@@ -11,8 +11,9 @@ final class KeyboardKeyPlaneView: UIView {
     var returnSymbol: String? = "return" { didSet { if returnSymbol != oldValue { setNeedsDisplay() } } }
     var returnIsAction = false { didSet { if returnIsAction != oldValue { setNeedsDisplay() } } }
     var returnIsEnabled = true { didSet { if returnIsEnabled != oldValue { setNeedsDisplay() } } }
-    /// The dictation language's name, drawn faintly on the space bar ("English", "Norsk"),
-    /// with the language dictations paste in while they're translated ("Español → English").
+    /// Drawn faintly on the space bar: the keyboard's language while it switches between two
+    /// or more ("Français"), else the dictation language's name ("English", "Norsk"), with
+    /// the language dictations paste in while they're translated ("Español → English").
     var spaceLabel: String? { didSet { if spaceLabel != oldValue { setNeedsDisplay() } } }
     /// Called on every key going down, for clicks and haptics.
     var onKeyDown: ((KeyKind) -> Void)?

@@ -483,6 +483,68 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic(nil, preferred: ["el-GR"]), .english)
     }
 
+    /// Settings › Keyboard › Languages: empty is Automatic (one language, as before); the
+    /// language last switched to counts only while it is still chosen; the space bar's label
+    /// names a French layout's region only beside another French one.
+    func testTheChosenLanguagesSwitchInOrder() {
+        let automatic = KeyboardLanguageList.resolve(chosen: [], stored: .french, automatic: .norwegian)
+        XCTAssertEqual(automatic.languages, [.norwegian])
+        XCTAssertEqual(automatic.current, .norwegian)
+        XCTAssertFalse(automatic.switches)
+        XCTAssertNil(automatic.spaceLabel)
+
+        let list = KeyboardLanguageList.resolve(chosen: [.english, .french, .russian, .english], stored: .russian, automatic: .german)
+        XCTAssertEqual(list.languages, [.english, .french, .russian])
+        XCTAssertEqual(list.current, .russian)
+        XCTAssertEqual(list.switched(by: 1), .english, "round the list")
+        XCTAssertEqual(list.switched(by: -1), .french)
+        XCTAssertEqual(list.spaceLabel, "Русский")
+        XCTAssertEqual(KeyboardLanguageList.resolve(chosen: [.english, .french], stored: .german, automatic: .german).current, .english)
+        XCTAssertEqual(KeyboardLanguageList.resolve(chosen: [.french, .english], stored: nil, automatic: .german).spaceLabel, "Français")
+        XCTAssertEqual(
+            KeyboardLanguageList.resolve(chosen: [.french, .frenchCanadian], stored: .frenchCanadian, automatic: .english).spaceLabel,
+            "Français (Canada)"
+        )
+    }
+
+    /// Settings › Keyboard › Languages offers the iPhone's own keyboards first, then its
+    /// languages; Switch dictation too dictates in the iPhone's region where it has one.
+    func testLanguagesOfferTheIPhonesKeyboardsAndDictateInItsRegion() {
+        XCTAssertEqual(
+            KeyboardLanguage.suggested(inputModes: ["en-GB", "emoji", "fr-FR", "en-US"], preferred: ["ru-RU", "fr-CA", "he-IL"]),
+            [.english, .french, .russian, .frenchCanadian]
+        )
+        let supported = ["en-US", "en-GB", "fr-FR", "fr-CA", "ru-RU", "nb-NO", "pt-BR", "pt-PT"]
+        XCTAssertEqual(KeyboardLanguage.english.dictationLanguage(supported: supported, preferred: ["en-GB", "fr-FR"]), "en-GB")
+        XCTAssertEqual(KeyboardLanguage.english.dictationLanguage(supported: supported, preferred: ["fr-FR"]), "en-US")
+        XCTAssertEqual(KeyboardLanguage.french.dictationLanguage(supported: supported, preferred: ["en-GB"]), "fr-FR")
+        XCTAssertEqual(KeyboardLanguage.frenchCanadian.dictationLanguage(supported: supported, preferred: ["fr-FR"]), "fr-CA")
+        XCTAssertEqual(KeyboardLanguage.portuguese.dictationLanguage(supported: supported, preferred: ["pt-PT"]), "pt-PT")
+        XCTAssertEqual(KeyboardLanguage.norwegian.dictationLanguage(supported: supported, preferred: ["nn-NO"]), "nb-NO")
+        XCTAssertNil(KeyboardLanguage.serbianLatin.dictationLanguage(supported: supported, preferred: ["sr-Latn-RS"]))
+        XCTAssertNil(KeyboardLanguage.german.dictationLanguage(supported: supported, preferred: []), "Apple Speech has no German here")
+        XCTAssertEqual(KeyboardLanguage.german.dictationLanguage(supported: [], preferred: []), "de-DE", "not listed yet")
+    }
+
+    /// The languages read the one layout chosen before them, and write their first for an
+    /// older build.
+    func testLanguagesReadTheOneLayoutChosenBefore() {
+        let suite = "KeyboardLayoutTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        XCTAssertEqual(settings.keyboardLanguages, [], "Automatic")
+        defaults.set("fr-CA", forKey: "settings.keyboardLayout")
+        XCTAssertEqual(settings.keyboardLanguages, [.frenchCanadian])
+        settings.keyboardLanguages = [.english, .french, .english]
+        XCTAssertEqual(settings.keyboardLanguages, [.english, .french])
+        XCTAssertEqual(defaults.string(forKey: "settings.keyboardLayout"), "en")
+        settings.keyboardLanguages = []
+        XCTAssertEqual(settings.keyboardLanguages, [])
+        XCTAssertNil(defaults.string(forKey: "settings.keyboardLayout"))
+        XCTAssertFalse(settings.dictationFollowsKeyboard, "off by default")
+    }
+
     func testSpellCheckUsesTheLayoutsLanguageOrNone() {
         XCTAssertEqual(KeyboardLanguage.norwegian.spellCheckLanguage(available: ["en_US", "nb"]), "nb")
         XCTAssertNil(KeyboardLanguage.norwegian.spellCheckLanguage(available: ["en_US", "da"]))
