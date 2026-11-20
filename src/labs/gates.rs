@@ -44,6 +44,12 @@ pub fn vocabulary_biasing() -> bool {
     on(VOCABULARY_BIASING)
 }
 
+/// The Vocabulary sheet offers Import and Export for CSV files (read as the
+/// sheet builds, and as each Import or Export starts; nothing else changes).
+pub fn vocabulary_files() -> bool {
+    on(VOCABULARY_FILES)
+}
+
 /// Names and terms visible in the focused window join one dictation's
 /// vocabulary, read once as the capture becomes real (macOS; read by the
 /// listener at its hold threshold, its control start, or the released

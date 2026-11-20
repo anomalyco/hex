@@ -371,6 +371,16 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          // a_failed_wsl_request_forgets_the_workspace, a_not_found_wsl_request_forgets_the_workspace,
                                          // a_wsl_request_failure_reads_as_the_capsule_expects,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
+├── Vocabulary files no  labs.vocabulary_files           (every OS) the Vocabulary sheet offers Import… and Export…
+│                                        beside Add term; Import merges a CSV or TXT file's terms (Teams' custom dictionary
+│                                        columns) into the list and saves it, and Export writes the list as a CSV file. Off,
+│                                        the sheet is exactly as before
+│                                        // checks: dictation::vocabulary::csv tests (header, quotes and embedded newlines,
+│                                        // BOM, CRLF, blank rows, merge, caps, export→import round trip), merge_status and
+│                                        // the sheet's import and export in rune_ui/vocabulary.rs,
+│                                        // the_vocabulary_sheet_offers_files_only_with_its_lab_on (rune_ui/tests.rs),
+│                                        // vocabulary_files_is_its_own_switch_and_everywhere (labs.rs); the native
+│                                        // dialogs were not opened in a desktop session
 └── Only on speakers no   labs.speakers_only            (every OS) While dictating (Mute, Lower audio, Pause
                                          media) applies only while the default output is speakers; wired or Bluetooth
                                          headphones leave the output and media alone for that recording or capture, and
@@ -3362,6 +3372,33 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 
 ## Features
 
+- Vocabulary files: the Vocabulary sheet gains **Import…** and **Export…**
+  beside Add term (every OS; off by default, `labs.vocabulary_files`). Off,
+  the sheet is exactly as before. Import opens one CSV or TXT file, refuses
+  one over 1 MiB or not UTF-8, and reads Microsoft Teams' custom dictionary
+  columns: column 1 is the term and column 2 its comma-separated "sounds
+  like" spellings, with a first header row naming the column "Term" or
+  "Term (required)" (any case) left out; further columns are ignored.
+  Quoted fields keep commas, quotes, and line breaks, and CRLF or LF ends a
+  row. Blank rows and rows without a term are left out. Lines split and merge
+  as the sheet's own fields do: a term already listed in any case keeps its
+  entry and gains the spellings it lacks, new terms append in file order,
+  and terms or spellings over 64 characters, spellings past 16 per term, and
+  terms past the list's 500 are skipped. The merged rows then save through
+  the same draft path typing uses, and the sheet says "Added 12 terms",
+  "Added 3 terms, updated 2", "Updated 2 terms", "Added 3 terms, updated 2,
+  skipped 1", "No new terms in that file" only when nothing changed at all,
+  "No terms found in that file", or what failed; an existing term counts as
+  updated only when it gains at least one spelling.
+  Export opens a save dialog named `hex-vocabulary.csv` (starting in
+  Downloads), appends `.csv` to a name without an extension, and writes the
+  header plus one row per entry, its spellings joined by ", " and two empty
+  cells, quoting what needs it. The file is written atomically
+  (`durable::write`), and the sheet says "Exported N terms" or the error.
+  The CSV parser, merge, and writer are `dictation::vocabulary::csv`, with
+  no new dependency; the save dialog is the same native
+  `desktop::file_dialog` wrapper as open, over Rune's
+  `FileDialogs::save`.
 - Paste Last picker: tapping Paste Last pastes the newest ready dictation or
   finished annotation, and holding it (⌥⇧V) opens a picker of recent rows, or
   all of History; History then lists dictations, annotations, screenshots and

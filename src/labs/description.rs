@@ -238,6 +238,9 @@ impl Feature {
             Self::ModesEditor => {
                 "Edit each mode's apps and websites, corrections, OpenCode rewrite (on or off, and its model), and transformations in a Modes pane; Output stays the read-only view"
             }
+            Self::VocabularyFiles => {
+                "Import terms from a CSV file into the vocabulary sheet, merging them into the list, and export the list as a CSV file"
+            }
         }
     }
 }

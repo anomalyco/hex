@@ -323,6 +323,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: bias Parakeet transcription toward the vocabulary",
     ),
     key(
+        "labs.vocabulary_files",
+        Kind::Bool,
+        "Labs: import vocabulary terms from a CSV file in the Vocabulary sheet, and export the list as one",
+    ),
+    key(
         "labs.screen_vocabulary",
         Kind::Bool,
         "Labs: use names and terms visible in the focused window as temporary vocabulary for each dictation (macOS)",

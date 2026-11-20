@@ -1,6 +1,6 @@
-//! The Labs rows' translated strings and the History multiple-selection
-//! card's, kept beside [`super::TRANSLATIONS`] so the main table stays under
-//! the source cap.
+//! The Labs rows' translated strings, the History multiple-selection card's,
+//! and the Vocabulary sheet's Import and Export strings, kept beside
+//! [`super::TRANSLATIONS`] so the main table stays under the source cap.
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
@@ -185,4 +185,31 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("A file could not be chosen.", ["Nie udało się wybrać pliku.", "无法选择文件。", "ファイルを選択できませんでした。", "Eine Datei konnte nicht gewählt werden.", "No se pudo elegir un archivo.", "Не вдалося вибрати файл."]),
     ("Record the screen under the pointer", ["Nagrywaj ekran pod wskaźnikiem", "录制指针所在的屏幕", "ポインターのある画面を収録", "Den Bildschirm unter dem Zeiger aufnehmen", "Grabar la pantalla bajo el puntero", "Записувати екран під вказівником"]),
     ("On Wayland, a capture records the monitor you point at, and each monitor remembers its own screen", ["W Waylandzie nagranie obejmuje monitor, na który wskazujesz, a każdy monitor pamięta własny ekran", "在 Wayland 上，录制你指向的显示器，每台显示器各自记住自己的屏幕", "Wayland では、ポインターがあるモニターを収録し、モニターごとに画面を記憶します", "Unter Wayland nimmt eine Aufnahme den Monitor auf, auf den du zeigst, und jeder Monitor merkt sich seinen eigenen Bildschirm", "En Wayland, la captura graba el monitor al que apuntas y cada monitor recuerda su propia pantalla", "У Wayland запис охоплює монітор, на який ви вказуєте, і кожен монітор пам’ятає власний екран"]),
+    ("Vocabulary files", ["Pliki słownictwa", "词汇文件", "語彙ファイル", "Vokabular-Dateien", "Archivos de vocabulario", "Файли словника"]),
+    ("Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one", ["Importuj terminy z pliku CSV w arkuszu Słownictwa lub zapisz całą listę jako taki plik", "在词汇表中从 CSV 文件导入术语，或把整个列表保存为 CSV 文件", "語彙シートで CSV ファイルから用語を読み込むか、リスト全体を CSV ファイルとして保存します", "Importiere Begriffe aus einer CSV-Datei im Vokabular-Blatt oder speichere die ganze Liste als eine", "Importa términos de un archivo CSV en la hoja de vocabulario o guarda toda la lista como uno", "Імпортуйте терміни з файлу CSV в аркуші словника або збережіть увесь список як такий файл"]),
+    ("Import…", ["Importuj…", "导入…", "読み込む…", "Importieren…", "Importar…", "Імпортувати…"]),
+    ("Export…", ["Eksportuj…", "导出…", "書き出す…", "Exportieren…", "Exportar…", "Експортувати…"]),
+    ("Import vocabulary", ["Importuj słownictwo", "导入词汇", "語彙を読み込む", "Vokabular importieren", "Importar vocabulario", "Імпортувати словник"]),
+    ("Export vocabulary", ["Eksportuj słownictwo", "导出词汇", "語彙を書き出す", "Vokabular exportieren", "Exportar vocabulario", "Експортувати словник"]),
+    ("CSV files", ["Pliki CSV", "CSV 文件", "CSV ファイル", "CSV-Dateien", "Archivos CSV", "Файли CSV"]),
+    ("Text files", ["Pliki tekstowe", "文本文件", "テキストファイル", "Textdateien", "Archivos de texto", "Текстові файли"]),
+    ("Couldn't import that file: {}", ["Nie udało się zaimportować tego pliku: {}", "无法导入该文件：{}", "このファイルを読み込めませんでした: {}", "Diese Datei konnte nicht importiert werden: {}", "No se pudo importar ese archivo: {}", "Не вдалося імпортувати цей файл: {}"]),
+    ("Couldn't export the vocabulary: {}", ["Nie udało się wyeksportować słownictwa: {}", "无法导出词汇：{}", "語彙を書き出せませんでした: {}", "Das Vokabular konnte nicht exportiert werden: {}", "No se pudo exportar el vocabulario: {}", "Не вдалося експортувати словник: {}"]),
+    ("No terms found in that file", ["Nie znaleziono terminów w tym pliku", "该文件中没有找到术语", "そのファイルには用語がありません", "In dieser Datei wurden keine Begriffe gefunden", "No se encontraron términos en ese archivo", "У цьому файлі не знайдено термінів"]),
+    ("No new terms in that file", ["Brak nowych terminów w tym pliku", "该文件中没有新术语", "そのファイルに新しい用語はありません", "Keine neuen Begriffe in dieser Datei", "No hay términos nuevos en ese archivo", "У цьому файлі немає нових термінів"]),
+    ("No terms added; skipped {}", ["Nie dodano terminów; pominięto {}", "未添加术语；已跳过 {}", "用語は追加されませんでした。{} 件をスキップ", "Keine Begriffe hinzugefügt; {} übersprungen", "No se añadieron términos; se omitieron {}", "Термінів не додано; пропущено {}"]),
+    ("Added 1 term", ["Dodano 1 termin", "已添加 1 个术语", "1 件の用語を追加しました", "1 Begriff hinzugefügt", "Se añadió 1 término", "Додано 1 термін"]),
+    ("Added {} terms", ["Dodano {} terminów", "已添加 {} 个术语", "{} 件の用語を追加しました", "{} Begriffe hinzugefügt", "Se añadieron {} términos", "Додано термінів: {}"]),
+    ("Added 1 term, skipped {}", ["Dodano 1 termin, pominięto {}", "已添加 1 个术语，跳过 {}", "1 件の用語を追加し、{} 件をスキップしました", "1 Begriff hinzugefügt, {} übersprungen", "Se añadió 1 término, se omitieron {}", "Додано 1 термін, пропущено {}"]),
+    ("Added {added} terms, skipped {skipped}", ["Dodano {added} terminów, pominięto {skipped}", "已添加 {added} 个术语，跳过 {skipped}", "{added} 件の用語を追加し、{skipped} 件をスキップしました", "{added} Begriffe hinzugefügt, {skipped} übersprungen", "Se añadieron {added} términos, se omitieron {skipped}", "Додано термінів: {added}, пропущено {skipped}"]),
+    ("Exported 1 term", ["Wyeksportowano 1 termin", "已导出 1 个术语", "1 件の用語を書き出しました", "1 Begriff exportiert", "Se exportó 1 término", "Експортовано 1 термін"]),
+    ("Exported {} terms", ["Wyeksportowano {} terminów", "已导出 {} 个术语", "{} 件の用語を書き出しました", "{} Begriffe exportiert", "Se exportaron {} términos", "Експортовано термінів: {}"]),
+    ("Updated 1 term", ["Zaktualizowano 1 termin", "已更新 1 个术语", "1 件の用語を更新しました", "1 Begriff aktualisiert", "Se actualizó 1 término", "Оновлено 1 термін"]),
+    ("Updated {} terms", ["Zaktualizowano {} terminów", "已更新 {} 个术语", "{} 件の用語を更新しました", "{} Begriffe aktualisiert", "Se actualizaron {} términos", "Оновлено термінів: {}"]),
+    ("Updated 1 term, skipped {}", ["Zaktualizowano 1 termin, pominięto {}", "已更新 1 个术语，跳过 {}", "1 件の用語を更新し、{} 件をスキップしました", "1 Begriff aktualisiert, {} übersprungen", "Se actualizó 1 término, se omitieron {}", "Оновлено 1 термін, пропущено {}"]),
+    ("Updated {updated} terms, skipped {skipped}", ["Zaktualizowano {updated} terminów, pominięto {skipped}", "已更新 {updated} 个术语，跳过 {skipped}", "{updated} 件の用語を更新し、{skipped} 件をスキップしました", "{updated} Begriffe aktualisiert, {skipped} übersprungen", "Se actualizaron {updated} términos, se omitieron {skipped}", "Оновлено термінів: {updated}, пропущено {skipped}"]),
+    ("Added 1 term, updated {updated}", ["Dodano 1 termin, zaktualizowano {updated}", "已添加 1 个术语，更新 {updated}", "1 件の用語を追加し、{updated} 件を更新しました", "1 Begriff hinzugefügt, {updated} aktualisiert", "Se añadió 1 término, se actualizaron {updated}", "Додано 1 термін, оновлено {updated}"]),
+    ("Added {added} terms, updated {updated}", ["Dodano {added} terminów, zaktualizowano {updated}", "已添加 {added} 个术语，更新 {updated}", "{added} 件の用語を追加し、{updated} 件を更新しました", "{added} Begriffe hinzugefügt, {updated} aktualisiert", "Se añadieron {added} términos, se actualizaron {updated}", "Додано термінів: {added}, оновлено {updated}"]),
+    ("Added 1 term, updated {updated}, skipped {skipped}", ["Dodano 1 termin, zaktualizowano {updated}, pominięto {skipped}", "已添加 1 个术语，更新 {updated}，跳过 {skipped}", "1 件の用語を追加し、{updated} 件を更新し、{skipped} 件をスキップしました", "1 Begriff hinzugefügt, {updated} aktualisiert, {skipped} übersprungen", "Se añadió 1 término, se actualizaron {updated}, se omitieron {skipped}", "Додано 1 термін, оновлено {updated}, пропущено {skipped}"]),
+    ("Added {added} terms, updated {updated}, skipped {skipped}", ["Dodano {added} terminów, zaktualizowano {updated}, pominięto {skipped}", "已添加 {added} 个术语，更新 {updated}，跳过 {skipped}", "{added} 件の用語を追加し、{updated} 件を更新し、{skipped} 件をスキップしました", "{added} Begriffe hinzugefügt, {updated} aktualisiert, {skipped} übersprungen", "Se añadieron {added} términos, se actualizaron {updated}, se omitieron {skipped}", "Додано термінів: {added}, оновлено {updated}, пропущено {skipped}"]),
 ];

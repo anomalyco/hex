@@ -220,6 +220,9 @@ pub struct LabsSettings {
     /// Holding Paste Last opens a picker of recent dictations and
     /// annotations, and History lists them together (macOS).
     pub paste_last_picker: bool,
+    /// The Vocabulary sheet imports terms from a CSV file and exports the
+    /// list as one (Labs › Vocabulary files).
+    pub vocabulary_files: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -437,6 +440,7 @@ impl Default for LabsSettings {
             yolo_mode_apps: Vec::new(),
             drop_transcribe: false,
             paste_last_picker: false,
+            vocabulary_files: false,
             api_processing: false,
             api_timestamps: false,
             api_browser_access: false,

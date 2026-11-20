@@ -15,11 +15,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::dictation::context::ContextSnapshot;
 
+pub(crate) mod csv;
+
 /// Longest term or "sounds like" entry, in characters.
-const MAX_TERM_CHARS: usize = 64;
+pub(crate) const MAX_TERM_CHARS: usize = 64;
 /// Most entries in the list, and most "sounds like" spellings per entry.
 pub const MAX_ENTRIES: usize = 500;
-const MAX_SOUNDS_LIKE: usize = 16;
+pub(crate) const MAX_SOUNDS_LIKE: usize = 16;
 /// Most terms one transcription is biased toward, first in list order: the
 /// engine's own cap (`k_vocab_max_terms` in transcribe.cpp), which keeps the
 /// biasing a bounded cost per decode.
@@ -434,11 +436,11 @@ pub fn parse_sounds_like(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn clean(text: &str) -> String {
+pub(crate) fn clean(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn same(left: &str, right: &str) -> bool {
+pub(crate) fn same(left: &str, right: &str) -> bool {
     left.to_lowercase() == right.to_lowercase()
 }
 
