@@ -2953,13 +2953,17 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Apple documents them only for DictationTranscriber, and Parakeet's batch
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
+Android keyboard -> English, Spanish, German and Bokmål typing assistance
+├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
+└── Type a listed word in full -> keep its spelling on space or tap its literal chip
 Unmerged Windows / deferred features -> Not part of this map
 ```
 
 Sources: [meeting.rs](../../src/meeting.rs),
 [meeting/watcher.rs](../../src/meeting/watcher.rs),
 [control/developer_control.rs](../../src/control/developer_control.rs),
-`SCENES` in [rune_ui.rs](../../src/rune_ui.rs), [iOS guide](../../ios/README.md).
+`SCENES` in [rune_ui.rs](../../src/rune_ui.rs), [iOS guide](../../ios/README.md),
+[Android typing and checks](../../android/benchmark/typing/README.md).
 The iOS custom vocabulary experiment stays off by default and keeps its list in
 the App Group. Apple Speech also receives it as a best-effort recognition hint,
 unverified on a physical iPhone; Apple documents contextual strings only for

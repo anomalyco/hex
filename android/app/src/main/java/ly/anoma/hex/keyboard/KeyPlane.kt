@@ -299,12 +299,18 @@ internal class KeyPlane(context: Context, private val ime: HexKeyboard) : Linear
     private fun clearCallout() {
         pendingAccents?.let(::removeCallbacks); pendingAccents = null; feedback.clear()
     }
-    fun suggestions(words: List<String>) {
-        offered = words
+    fun suggestions(words: List<String>, literal: String? = null) {
+        offered = if (literal == null) words else listOf(literal) + words.take(2)
         for (i in 0..2) {
             val cell = suggestions.getChildAt(i * 2) as TextView
-            val s = words.getOrNull(i).orEmpty()
-            cell.text = s; cell.contentDescription = if (s.isEmpty()) null else "Suggest " + s
+            val s = offered.getOrNull(i).orEmpty()
+            val keep = i == 0 && literal != null
+            cell.text = if (keep) "“$s”" else s
+            cell.contentDescription = when {
+                s.isEmpty() -> null
+                keep -> "Keep " + s
+                else -> "Suggest " + s
+            }
             cell.isEnabled = s.isNotEmpty()
         }
         updateStrip()

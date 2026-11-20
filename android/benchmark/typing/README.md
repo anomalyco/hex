@@ -1,6 +1,6 @@
 # Android typing benchmark
 
-**On the same iOS R1 word models and synthetic taps, Android now has 136 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
+**On the same iOS R1 word models and synthetic taps, Android with its default suggestion filter has 135 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
 
 ## Same-model results
 
@@ -11,7 +11,12 @@ Each language has 2,000 held-out synthetic Tatoeba sentences. English has 13,870
 | Raw hit keys | 4,689 | 33.8068% | 160 | 5,343 | 40.1699% | 94 |
 | Phase 3 Android | 1,461 | 10.5335% | 983 | 1,338 | 10.0594% | 1,086 |
 | iOS R1, same HXTM, no offsets | 1,163 | 8.3850% | 1,154 | 1,387 | 10.4278% | 1,064 |
-| **Phase 4 Android** | **1,027** | **7.4045%** | **1,249** | **1,374** | **10.3301%** | **1,070** |
+| Phase 4 Android | 1,027 | 7.4045% | 1,249 | 1,374 | 10.3301% | 1,070 |
+| **Android, default suggestion filter** | **1,028** | **7.4117%** | **1,248** | **1,374** | **10.3301%** | **1,070** |
+
+The before/after replay used the installed APKs on the same Studio API 35 emulator:
+one additional English error out of 13,870 reference words (+0.0072 percentage points)
+and no change across 13,301 Spanish reference words.
 
 The installed APK ran on the Studio’s Android 15/API 35 ARM64 emulator (4 vCPUs, 4 GiB guest RAM). It received the original 402-point iOS key geometry, hit-key sequence, coordinates and separators. Letters request suggestions and spaces request replacements and predictions, exactly as in the Android IME. English and Spanish HXTM files are byte-identical across platforms. The iOS reference is the recorded `output-r1-decoder-{en,es}.json` output, before calibration. The earlier iOS prototype’s 6.71% English WER used a **different** model; it is not the comparison target. [Phase 3 measurements](metrics.tsv) · [historical iOS aggregate, including calibration](ios-shared.tsv) · [Phase 4 replay counts and latency](phase4.tsv).
 

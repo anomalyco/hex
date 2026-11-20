@@ -9,12 +9,16 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     private var literalOnly = false
     private val taps = ArrayList<SpatialDecoder.Tap>()
     private var decision: SpatialDecoder.Decision? = null
+    var suggestSwearWords = false
+        set(value) {
+            if (value != field) { field = value; decision = null }
+        }
     fun reset(before: String = "") {
         token = ""; taps.clear(); decision = null; literalOnly = false
-        previous = model.index(previousWord(before))
+        previous = model.context(previousWord(before))
     }
     fun restored(text: String, before: String) { reset(before); explicit(text) } // No taps: space keeps the undone spelling.
-    fun predictions(before: String) = model.nextWords(model.index(previousWord(before)))
+    fun predictions(before: String) = model.nextWords(model.context(previousWord(before)), suggestSwearWords)
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid) {
         token += text; decision = null
         if (spatial && !literalOnly && taps.size < MAX_LENGTH) taps.add(decoder.score(grid, x, y))
@@ -27,18 +31,20 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (taps.size == token.length) taps.removeAt(taps.lastIndex)
         token = token.dropLast(1); decision = null
     }
-    private fun decision() = decision ?: decoder.decide(token.lowercase(), taps, previous).also { decision = it }
+    private fun decision() = decision ?: decoder.decide(token.lowercase(), taps, previous, suggestSwearWords).also { decision = it }
+    private fun blocked(spelling: String) = model.neverSuggest.blocks(spelling.lowercase(), suggestSwearWords, previous)
+    fun literalChip(suggestions: List<String>) = token.takeIf { it.isNotEmpty() && (suggestions.isEmpty() || blocked(it)) }
     private fun protected() = token.drop(1).any { it.isUpperCase() } ||
         (model.language == "en" && token.lowercase() in shorthand)
     private fun cased(s: String) = if (token.firstOrNull()?.isUpperCase() == true) s.replaceFirstChar { it.uppercase() } else s
     fun replacement(): String? {
-        if (literalOnly || token.isEmpty()) return null
+        if (literalOnly || token.isEmpty() || blocked(token)) return null
         val lower = token.lowercase()
         val allCaps = token.length >= 2 && token.all { it.isUpperCase() }
         if (token.drop(1).any { it.isUpperCase() } && !allCaps) return null
         if (model.language == "en") {
             if (lower in shorthand) return null
-            englishFixes[lower]?.let { return if (allCaps) {
+            englishFixes[lower]?.takeUnless(::blocked)?.let { return if (allCaps) {
                 if (token.length >= 3) it.uppercase() else null
             } else cased(it) }
         }
@@ -47,10 +53,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     fun suggestions(): List<String> {
         if (token.length !in 1..MAX_LENGTH) return emptyList()
         val options = LinkedHashMap<String, Int>()
-        for (w in model.completions(token.lowercase())) if (w >= 0) options[model.text(w)] = model.frequencyCost(w)
+        for (w in model.completions(token.lowercase(), suggestSwearWords, previous)) options[model.text(w)] = model.frequencyCost(w)
         if (spatial && options.size < 3 && token.length >= 2 && !protected()) for (r in decision().readings)
             options.putIfAbsent(r.text, r.frequency)
-        if (options.isEmpty()) return listOf(token)
         return options.entries.sortedWith(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
             .take(3).map { cased(it.key) }
     }

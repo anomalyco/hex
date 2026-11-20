@@ -27,6 +27,12 @@ All four layouts have a bundled, memory-mapped **HXTM v3** word and word-pair mo
 
 **Keyboard › Keyboard layout** follows dictation by default; an explicit layout can differ from the space bar’s spoken language. Spanish has a dedicated ñ and ¿/¡ on the second symbols page. German is QWERTZ with ü, ö and ä; hold s for ß. Bokmål has å, ø and æ.
 
+**Keyboard › Suggest swear words** is off by default on every layout. Slurs on the
+[curated list](app/src/main/assets/typing/never-suggest.tsv) are never offered, even when
+swear words are enabled. The filter applies to completions, next words, autocorrect and
+both halves of a missed-space correction. Typing a listed word in full keeps your exact
+spelling; its literal chip accepts what you typed. The filter never changes the HXTM models.
+
 On space, the Kotlin decoder compares each tap with the measured key centres and combines those distances with the previous word’s probability. It can recover a missing space. A known spelling requires a higher confidence margin than a nonword. Immediately press **Delete** to restore exactly what you typed, without the space. Undo the same replacement twice and Hex keeps that spelling in later sessions. Only rejection counts keyed by hashes are saved locally; there is no typing journal.
 
 **Keyboard settings and Hex menu → Typing feedback** control key pop-ups and key haptics independently. Both default on; Hex follows system keyboard vibration. Hold a letter, slide to an accent, and release. Turning off pop-ups leaves the deliberate accent picker available.

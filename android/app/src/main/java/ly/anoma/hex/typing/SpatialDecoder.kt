@@ -42,8 +42,9 @@ internal class SpatialDecoder(val model: TypingModel) {
     private data class Found(val word: Int, val cost: Double)
     // Keep at most 48 promising prefixes at each spelling depth. One extra, missing or
     // transposed letter is possible; an untyped apostrophe costs nothing.
-    private fun search(taps: List<Tap>, from: Int, end: Int, edits: Int): List<Found> {
+    private fun search(taps: List<Tap>, from: Int, end: Int, edits: Int, swears: Boolean, previous: Int): List<Found> {
         val depthLimit = end - from + edits + 2
+        val context = model.neverSuggest.restrictedContext(previous)
         val layers = Array(depthLimit + 1) { ArrayList<State>() }
         layers[0].add(State(0, model.words, from, 0, 0.0))
         val found = HashMap<Int, Double>()
@@ -53,7 +54,8 @@ internal class SpatialDecoder(val model: TypingModel) {
             var i = 0
             while (i < layer.size) {
                 val s = layer[i++]
-                if (s.tap == end && model.length(s.lo) == d && s.cost < (found[s.lo] ?: Double.POSITIVE_INFINITY))
+                if (s.tap == end && model.length(s.lo) == d && !model.neverSuggest.blocks(s.lo, swears, context) &&
+                    s.cost < (found[s.lo] ?: Double.POSITIVE_INFINITY))
                     found[s.lo] = s.cost
                 if (d == depthLimit) continue
                 fun push(c: Int, next: Int, e: Int, cost: Double) {
@@ -83,9 +85,10 @@ internal class SpatialDecoder(val model: TypingModel) {
         return found.map { Found(it.key, it.value) }
     }
 
-    fun decide(typed: String, taps: List<Tap>, previous: Int): Decision {
+    fun decide(typed: String, taps: List<Tap>, previous: Int, swears: Boolean): Decision {
         val none = Decision(null, emptyList())
-        if (typed.length !in 2..32 || taps.size != typed.length || typed.any { model.code(it) == 0 || it == '\'' }) return none
+        if (typed.length !in 2..32 || taps.size != typed.length || model.neverSuggest.blocks(typed, swears, previous) ||
+            typed.any { model.code(it) == 0 || it == '\'' }) return none
         val literal = model.index(typed)
         val knownLiteral = literal >= 0 || model.validLiteral(typed)
         var cost = lmWeight * when {
@@ -97,19 +100,20 @@ internal class SpatialDecoder(val model: TypingModel) {
         if (!cost.isFinite()) return none
         val readings = ArrayList<Reading>()
         // iOS applies the language score only to the five best spatial readings.
-        for ((w, spatial) in search(taps, 0, taps.size, 1).sortedWith(spatialOrder).take(5)) if (w != literal)
+        for ((w, spatial) in search(taps, 0, taps.size, 1, swears, previous).sortedWith(spatialOrder).take(5)) if (w != literal)
             readings.add(Reading(model.text(w), spatial + lmWeight * model.languageCost(previous, w), model.frequencyCost(w)))
         if (taps.size >= 3) {
             fun alone(f: Found) = model.length(f.word) > 1 || model.frequencyCost(f.word) < 56
-            fun half(a: Int, b: Int) = search(taps, a, b, 0).sortedWith(spatialOrder)
+            fun half(a: Int, b: Int, prev: Int) = search(taps, a, b, 0, swears, prev).sortedWith(spatialOrder)
                 .take(3).filter(::alone)
             for (k in 1 until taps.size) {
-                val left = half(0, k)
+                val left = half(0, k, previous)
                 if (left.isEmpty()) continue
                 val stops = if (k + 1 < taps.size && taps[k].belowLetters) k..k+1 else k..k
                 for (start in stops) {
-                    val right = half(start, taps.size)
+                    val right = half(start, taps.size, -1)
                     for (l in left) for (r in right) {
+                        if (model.neverSuggest.blocksFollowing(r.word, swears, l.word)) continue
                         val lm = model.languageCost(previous, l.word) + model.languageCost(l.word, r.word)
                         readings.add(Reading(model.text(l.word) + " " + model.text(r.word), l.cost + r.cost + taps[k].missedSpaceCost + lmWeight * lm,
                             model.frequencyCost(l.word) + model.frequencyCost(r.word)))

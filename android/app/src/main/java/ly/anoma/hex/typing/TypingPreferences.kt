@@ -12,6 +12,9 @@ internal class TypingPreferences(context: Context) {
     var autocorrect: Boolean
         get() = prefs.getBoolean("autocorrect", true)
         set(value) { prefs.edit().putBoolean("autocorrect", value).apply() }
+    var suggestSwearWords: Boolean
+        get() = prefs.getBoolean(SUGGEST_SWEAR_WORDS, false)
+        set(value) { prefs.edit().putBoolean(SUGGEST_SWEAR_WORDS, value).apply() }
     var spatial: Boolean
         get() = prefs.getBoolean("spatial", true)
         set(value) { prefs.edit().putBoolean("spatial", value).apply() }
@@ -33,4 +36,5 @@ internal class TypingPreferences(context: Context) {
         val key = pair(language, original, replacement)
         prefs.edit().putInt(key, (prefs.getInt(key, 0) + 1).coerceAtMost(2)).apply()
     }
+    companion object { const val SUGGEST_SWEAR_WORDS = "suggestSwearWords" }
 }
