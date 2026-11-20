@@ -1829,6 +1829,16 @@
         }
       }
     },
+    "Slurs are never suggested" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绝不会建议歧视性词语"
+          }
+        }
+      }
+    },
     "So Hex can hear you dictate" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1965,6 +1975,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "风格：%@"
+          }
+        }
+      }
+    },
+    "Suggest swear words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在建议中显示脏话"
           }
         }
       }

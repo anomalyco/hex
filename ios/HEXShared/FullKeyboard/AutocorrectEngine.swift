@@ -205,6 +205,13 @@ final class AutocorrectEngine {
     /// Bumped whenever a source of your own words changes, so the decoder's copy is rebuilt.
     private var userWordsRevision = 0
     private var userWordsBuilt: (revision: Int, model: ObjectIdentifier)?
+    /// Words never suggested or corrected to in `language` (`OffensiveWords`).
+    private(set) var offensiveWords: OffensiveWords
+    /// Settings › Keyboard › Suggest swear words: swear words may be suggested and corrected
+    /// to; slurs never are. Off by default.
+    var allowsSwearing = false {
+        didSet { if oldValue != allowsSwearing { userWordsRevision += 1; decoderCache = nil } }
+    }
     private var decoderCache: (before: String, taps: [CGPoint], decision: TypingDecoder.Decision?)?
 
     init(
@@ -213,6 +220,22 @@ final class AutocorrectEngine {
     ) {
         self.checker = checker ?? SystemTextChecker()
         self.learnedWords = learnedWords ?? LearnedWordsStore()
+        self.offensiveWords = .bundled(KeyboardLanguage.english.rawValue)
+    }
+
+    /// Whether `candidate` may be suggested or corrected to: not an offensive word, nor an
+    /// offensive two-word expression with `previous` (slurs never, swear words only with
+    /// `allowsSwearing`), unless it is your own from `UILexicon` (a Contacts name, a text
+    /// replacement), as Apple's keyboard offers those.
+    func mayOffer(_ candidate: String, after previous: String? = nil) -> Bool {
+        guard offensiveWords.blocks(candidate, allowSwearing: allowsSwearing, after: previous) else { return true }
+        return lexiconTerms.contains { $0.caseInsensitiveCompare(candidate) == .orderedSame }
+            || lexiconShortcuts.values.contains { $0.caseInsensitiveCompare(candidate) == .orderedSame }
+    }
+
+    /// `mayOffer` for a candidate in place of `token`, after the word before it.
+    private func mayOffer(_ candidate: String, replacing token: String) -> Bool {
+        mayOffer(candidate, after: Self.previousWord(beforeInput ?? "", token: token))
     }
 
     func loadLexicon(_ lexicon: UILexicon) {
@@ -253,6 +276,9 @@ final class AutocorrectEngine {
     /// Follows the keyboard layout. `available` is `UITextChecker.availableLanguages`.
     func setLanguage(_ language: KeyboardLanguage, available: [String] = UITextChecker.availableLanguages) {
         self.language = language
+        offensiveWords = .bundled(language.rawValue)
+        userWordsRevision += 1
+        decoderCache = nil
         let code = language.spellCheckLanguage(available: available)
         hasDictionary = code != nil
         if let code {
@@ -328,7 +354,7 @@ final class AutocorrectEngine {
 
         if let autoFix {
             pool.append(autoFix)
-        } else if let learned = learning.typos[lower] {
+        } else if let learned = learning.typos[lower], mayOffer(learned, replacing: token) {
             // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
             pool.append(Self.matchCase(of: token, onto: learned))
         } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
@@ -337,7 +363,7 @@ final class AutocorrectEngine {
 
         // Spatial autocorrect's other readings of your taps.
         if let decision = decoderDecision(for: token) {
-            for reading in decision.readings where pool.count < 2 {
+            for reading in decision.readings where pool.count < 2 && mayOffer(reading.text, replacing: token) {
                 let cased = Self.matchCase(of: token, onto: reading.text)
                 if !pool.contains(where: { $0.caseInsensitiveCompare(cased) == .orderedSame }) {
                     pool.append(cased)
@@ -351,7 +377,7 @@ final class AutocorrectEngine {
             if !valid {
                 for guess in rankedGuesses(for: token) {
                     let cased = Self.matchCase(of: token, onto: guess)
-                    if cased.caseInsensitiveCompare(token) != .orderedSame,
+                    if cased.caseInsensitiveCompare(token) != .orderedSame, mayOffer(guess, replacing: token),
                        !pool.contains(where: { $0.caseInsensitiveCompare(cased) == .orderedSame }) {
                         pool.append(cased)
                     }
@@ -401,7 +427,7 @@ final class AutocorrectEngine {
         var yours: [String] = []
         var names: [String] = []
         for item in checker.completions(for: lower)
-        where item.count > token.count && item.count <= token.count + 8 && seen.insert(item.lowercased()).inserted {
+        where item.count > token.count && item.count <= token.count + 8 && mayOffer(item, replacing: token) && seen.insert(item.lowercased()).inserted {
             if isName(item) && !typedCapital { names.append(item) } else { common.append(item) }
         }
         for term in lexiconTerms
@@ -438,9 +464,15 @@ final class AutocorrectEngine {
         if let shortcut = lexiconShortcuts[lower] {
             return shortcut
         }
+        // A word that may not be offered, typed in full, is a word you meant: never corrected
+        // into another (as on Android: blocked by the current setting, or after its expression's
+        // first word).
+        if offensiveWords.blocks(lower, allowSwearing: allowsSwearing, after: Self.previousWord(beforeInput ?? "", token: token)) {
+            return nil
+        }
         // A typo you fixed the same way at least twice (Learn how I type), unless what you
         // typed is a real word: then it is only suggested.
-        if let learned = learning.typos[lower], !checker.isWordValid(token) {
+        if let learned = learning.typos[lower], mayOffer(learned, replacing: token), !checker.isWordValid(token) {
             return Self.matchCase(of: token, onto: learned)
         }
         // Leave ALL-CAPS acronyms (`API`, `PR`, `NYC`) alone unless matched in `UILexicon` above,
@@ -461,7 +493,7 @@ final class AutocorrectEngine {
 
         // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
         if let decision = decoderDecision(for: token) {
-            if let replacement = decision.replacement {
+            if let replacement = decision.replacement, mayOffer(replacement, replacing: token) {
                 return Self.matchCase(of: token, onto: replacement)
             }
             // A name, day or place its lowercase word list lacks, typed in lowercase, is
@@ -484,7 +516,7 @@ final class AutocorrectEngine {
         var bestScore = Double.greatestFiniteMagnitude
         let guesses = checker.guesses(for: token)
         for (rank, checkerGuess) in guesses.prefix(8).enumerated() {
-            guard let rawGuess = usableGuess(checkerGuess, typed: token, among: guesses) else { continue }
+            guard let rawGuess = usableGuess(checkerGuess, typed: token, among: guesses), mayOffer(rawGuess, replacing: token) else { continue }
             let normalizedGuess = rawGuess.replacingOccurrences(of: "'", with: "").lowercased()
             guard let editCost = Self.singleEditKeyboardCost(from: lower, to: normalizedGuess, language: language) else { continue }
             let totalScore = editCost + Double(rank) * 0.08
@@ -542,12 +574,18 @@ final class AutocorrectEngine {
     /// Gives the decoder your own words: Contacts names and other `UILexicon` terms, the
     /// one-word outputs of text replacements, words you kept twice, and typo fixes Hex
     /// learned. Rebuilt only when one of them, or the model, changed.
+    ///
+    /// Also hands it the words never to offer: the language's offensive words, less the swear
+    /// words while Suggest swear words is on. Words Hex learned are left out when offensive;
+    /// your `UILexicon` words never are.
     private func syncUserWords() {
         guard let model = decoder?.model else { return }
         let id = ObjectIdentifier(model)
         if let built = userWordsBuilt, built.revision == userWordsRevision, built.model == id { return }
-        let words = lexiconTerms + Array(lexiconShortcuts.values) + learnedWords.words + Array(learning.typos.values)
+        let learned = (learnedWords.words + Array(learning.typos.values)).filter { mayOffer($0) }
+        let words = lexiconTerms + Array(lexiconShortcuts.values) + learned
         decoder?.userWords = TypingDecoder.UserWords(words, model: model)
+        decoder?.neverSuggest = TypingDecoder.NeverSuggest(offensiveWords.blocked(allowSwearing: allowsSwearing), model: model)
         userWordsBuilt = (userWordsRevision, id)
         decoderCache = nil
     }

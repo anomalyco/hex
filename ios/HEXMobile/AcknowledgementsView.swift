@@ -39,8 +39,8 @@ struct AcknowledgementsView: View {
         let body: String
     }
 
-    /// Spatial autocorrect's word lists (`scripts/build-typing-model.py`); keep in step with
-    /// ios/README.md.
+    /// Spatial autocorrect's word lists (`scripts/build-typing-model.py`) and the keyboard's
+    /// never-suggest list (`OffensiveWords`); keep in step with ios/README.md.
     static let entries: [Entry] = [
         Entry(
             title: "Google Books Ngram data",
@@ -79,6 +79,19 @@ struct AcknowledgementsView: View {
 
             Its other sources (12Dicts, Moby Words II, and Brian Kelk's UK English Wordlist) \
             are in the public domain.
+            """
+        ),
+        Entry(
+            title: "List of Dirty, Naughty, Obscene, and Otherwise Bad Words",
+            body: """
+            The keyboard's suggestion filter uses the List of Dirty, Naughty, Obscene, and \
+            Otherwise Bad Words (LDNOOBW), © 2012–2020 Shutterstock, Inc., and contributors: \
+            its English, Spanish, German and Norwegian lists, revision 5faf2ba \
+            (github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words), \
+            licensed under Creative Commons Attribution 4.0 International \
+            (creativecommons.org/licenses/by/4.0). Hex lowercased and classified the entries, \
+            omitted ordinary, medical and search-only terms, and added common slurs, \
+            inflections and spelling variants.
             """
         ),
         Entry(
