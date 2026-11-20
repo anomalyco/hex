@@ -217,7 +217,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
-    and apart from Learn how I type. For testing and training prediction and
+    and apart from Learn how I type. Its description says what it records, and
+    turning it on asks first in a dialog (App Review 2.5.14): each tap and the
+    text you type or dictate with Hex, including the text around the cursor,
+    for 14 days, on this iPhone, to export or delete, never password, code or
+    card fields. **Turn On** turns it on; **Cancel** leaves it off. Turning it
+    off doesn't ask. For testing and training prediction and
     per-user touch models: the keyboard writes every touch on Hex's keys (raw
     position, radius, `UITouch` timestamp, the key it resolved to), every layout
     with each key's frame and touch target, what each key did to the text
@@ -258,7 +263,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   (before iOS has asked for the microphone), and
   `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
   its page's switches to the App Group: off by default, on with `-on`.
-  `-end` starts the page scrolled to the bottom.
+  `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
+  opens Record typing logs' consent dialog.
 - **Dictation language (Settings › Dictation › Dictation language, iOS 26+):** Automatic by
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone

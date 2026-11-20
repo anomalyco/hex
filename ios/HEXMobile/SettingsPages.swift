@@ -221,6 +221,7 @@ struct PrivacySettingsPage: View {
     @State private var learnTyping = TypingJournalSettings().isEnabled
     @State private var typingLogs = TypingLogSettings().isEnabled
     @State private var showTypingLogs = false
+    @State private var confirmingTypingLogs = SettingsSnapshotFixture.confirmsTypingLogs
 
     var body: some View {
         SettingsPageScaffold(title: "Privacy") {
@@ -274,11 +275,29 @@ struct PrivacySettingsPage: View {
 
             SettingsCard {
                 // Apart from Learn how I type: this keeps everything, to export and train on.
+                // Turning it on asks first (App Review 2.5.14); turning it off doesn't.
                 SettingsToggleRow(
                     title: "Record typing logs",
-                    detail: "Off by default. Stays on this iPhone to export",
-                    isOn: $typingLogs
+                    detail: "Records taps and the text you type for 14 days, on this iPhone, to export. Off by default.",
+                    isOn: Binding(
+                        get: { typingLogs },
+                        set: { on in
+                            if on {
+                                confirmingTypingLogs = true
+                            } else {
+                                typingLogs = false
+                            }
+                        }
+                    )
                 )
+                .alert("Record typing logs?", isPresented: $confirmingTypingLogs) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Turn On") {
+                        typingLogs = true
+                    }
+                } message: {
+                    Text("Hex's keyboard will record each tap and the text you type or dictate with it, including the text around the cursor, for 14 days. The logs stay on this iPhone for you to export or delete. Password, code and card fields are never recorded.")
+                }
 
                 if typingLogs {
                     SettingsDivider()

@@ -220,6 +220,7 @@ struct SettingsSegments<Item: Hashable>: View {
 ///   `setup-sheet-microphone`: the sheet before iOS has asked for the microphone.
 /// - `settings-<page>` opens a page (`dictation`, `keyboard`, `privacy`, `experiments`) with
 ///   every switch at its default; `-on` turns the switches on, `-end` starts scrolled to the end.
+///   `settings-privacy-confirm` opens Record typing logs' consent dialog.
 ///
 /// `KeyboardSetupMonitor.refresh` and `DictationController` supply the matching state.
 enum SettingsSnapshotFixture {
@@ -238,6 +239,11 @@ enum SettingsSnapshotFixture {
 
     static var showsSetupSheet: Bool {
         scene?.hasPrefix("setup-sheet") == true
+    }
+
+    /// `settings-privacy-confirm`: Record typing logs' consent dialog, open.
+    static var confirmsTypingLogs: Bool {
+        scene?.hasSuffix("-confirm") == true
     }
 
     static var scrollsToEnd: Bool {
