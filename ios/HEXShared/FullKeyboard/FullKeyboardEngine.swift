@@ -64,6 +64,8 @@ final class FullKeyboardEngine {
         /// True once a spacebar press crosses `trackpadActivationDistance`.
         var isTrackpad = false
         var trackpadAnchorX: CGFloat = 0
+        /// Characters the trackpad has moved the cursor, for Record typing logs.
+        var trackpadOffset = 0
     }
 
     static let accentHoldDelay: TimeInterval = 0.40
@@ -94,6 +96,9 @@ final class FullKeyboardEngine {
         guard let journal, TypingJournal.allows(field: field, target: target) else { return nil }
         return journal
     }
+    /// Record typing logs (Experiments); nil while it is off, in fields it skips, and in the
+    /// app's fixtures. Every call through it is skipped (arguments too) while nil.
+    var typingLog: TypingLogger?
     var width: CGFloat = 375 { didSet { if width != oldValue { rebuildLayout() } } }
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { rebuildLayout() } } }
     var showsGlobe = false { didSet { if showsGlobe != oldValue { rebuildLayout() } } }
@@ -158,7 +163,7 @@ final class FullKeyboardEngine {
         lastSpaceAt = nil
         autocorrect.clearPendingUndo()
         cancelAllTouches()
-        rebuildLayout()
+        rebuildLayout(cause: "field")
         refreshAutoCapitalization()
         refreshSuggestions()
     }
@@ -180,7 +185,10 @@ final class FullKeyboardEngine {
                 hasText: target.hasText
             )
         )
-        if shift != before { onChange?() }
+        if shift != before {
+            logState("auto")
+            onChange?()
+        }
     }
 
     func refreshSuggestions() {
@@ -192,11 +200,22 @@ final class FullKeyboardEngine {
         )
         if next != suggestions {
             suggestions = next
+            typingLog?.suggestionsChanged(next)
             onChange?()
         }
     }
 
     func acceptSuggestion(_ suggestion: KeyboardSuggestion) {
+        if let log = typingLog {
+            let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) ?? ""
+            log.edit("suggestion", [
+                TypingLogField("slot", suggestions.firstIndex(of: suggestion).map { .int($0) } ?? .null),
+                TypingLogField("text", .string(suggestion.displayText)),
+                TypingLogField("deleted", .string(token)),
+                TypingLogField("inserted", .string(suggestion.replacement + " ")),
+                TypingLogField("candidates", TypingLogger.candidates(suggestions)),
+            ])
+        }
         if let journal = learning {
             let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput)
             if let token, !token.isEmpty, token != suggestion.replacement {
@@ -219,7 +238,8 @@ final class FullKeyboardEngine {
             }
         }
         autocorrect.clearPendingUndo()
-        insert(suggestion.replacement + " ")
+        insert(suggestion.replacement + " ", source: nil)
+        typingLog?.context("suggestion")
     }
 
     // MARK: - Touches
@@ -230,6 +250,12 @@ final class FullKeyboardEngine {
         for other in touchOrder {
             guard var touch = touches[other], touch.key.character != nil, !touch.committed else { continue }
             if activeAccentTouchID == other, let menu = activeAccentMenu {
+                typingLog?.ui("accent_pick", [
+                    TypingLogField("id", .int(other)),
+                    TypingLogField("index", .int(menu.selectedIndex)),
+                    TypingLogField("chosen", .string(menu.selectedOption)),
+                    TypingLogField("rollover", .bool(true)),
+                ])
                 commitAccentSelection(menu.selectedOption)
                 activeAccentMenu = nil
                 activeAccentTouchID = nil
@@ -253,13 +279,14 @@ final class FullKeyboardEngine {
         switch key.kind {
         case .shift:
             shift.shiftDown(now: clock())
+            logState("shift_key")
         case .delete:
             deleteBackward(allowAutocorrectUndo: true)
         case .layerSwitch(let next):
             touch.returnLayer = layerState.layer
             layerState.switchTo(next)
             if next == .letters { shift.reset() }
-            rebuildLayout()
+            rebuildLayout(cause: "layer_key")
             if next == .letters { refreshAutoCapitalization() }
         case .character, .space, .returnKey, .hex, .globe:
             break
@@ -287,6 +314,11 @@ final class FullKeyboardEngine {
             horizontalInset: layout.horizontalInset
         )
         activeAccentTouchID = id
+        typingLog?.ui("accent_open", [
+            TypingLogField("id", .int(id)),
+            TypingLogField("key", .string(TypingLogger.keyID(touch.key.kind))),
+            TypingLogField("options", .strings(activeAccentMenu?.options ?? [])),
+        ])
         onChange?()
         return true
     }
@@ -316,6 +348,7 @@ final class FullKeyboardEngine {
                 lastSpaceAt = nil
                 autocorrect.clearPendingUndo()
                 touches[id] = touch
+                typingLog?.ui("trackpad_start", [TypingLogField("id", .int(id))])
                 onSelectionStep?()
                 onChange?()
                 return
@@ -325,7 +358,9 @@ final class FullKeyboardEngine {
                 let rawSteps = Int((delta / Self.trackpadPointsPerCharacter).rounded(.towardZero))
                 if rawSteps != 0 {
                     touch.trackpadAnchorX += CGFloat(rawSteps) * Self.trackpadPointsPerCharacter
+                    touch.trackpadOffset += rawSteps
                     touches[id] = touch
+                    typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
                     target.adjustTextPosition(byCharacterOffset: rawSteps)
                     onSelectionStep?()
                     refreshAutoCapitalization()
@@ -360,6 +395,11 @@ final class FullKeyboardEngine {
             activeAccentMenu = nil
             activeAccentTouchID = nil
             if !touch.committed {
+                typingLog?.ui("accent_pick", [
+                    TypingLogField("id", .int(id)),
+                    TypingLogField("index", .int(index)),
+                    TypingLogField("chosen", .string(chosen)),
+                ])
                 commitAccentSelection(chosen)
             }
             onChange?()
@@ -373,18 +413,35 @@ final class FullKeyboardEngine {
             }
         case .shift:
             shift.shiftUp()
+            logState("shift_key")
         case .space:
-            if !touch.isTrackpad {
+            if touch.isTrackpad {
+                typingLog?.ui("trackpad_end", [
+                    TypingLogField("id", .int(id)),
+                    TypingLogField("offset", .int(touch.trackpadOffset)),
+                ])
+                typingLog?.context("trackpad")
+            } else {
                 typeSpace()
             }
         case .returnKey:
             if target.enablesReturnKeyAutomatically == true && !target.hasText {
+                typingLog?.edit("return", [
+                    TypingLogField("returnKeyType", .string(TypingLogTraits.name(target.returnKeyType ?? .default))),
+                    TypingLogField("ignored", .bool(true)),
+                ])
                 break
             }
             learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
             autocorrect.clearPendingUndo()
+            typingLog?.edit("return", [
+                TypingLogField("inserted", .string("\n")),
+                TypingLogField("returnKeyType", .string(TypingLogTraits.name(target.returnKeyType ?? .default))),
+                TypingLogField("send", .bool(target.returnKeyType == .send)),
+            ])
             onReturn?()
-            insert("\n")
+            insert("\n", source: nil)
+            typingLog?.context("return")
         case .layerSwitch:
             // Hold 123, slide to a key, let go: type it and go back.
             if let returnLayer = touch.returnLayer,
@@ -392,9 +449,9 @@ final class FullKeyboardEngine {
                let character = under.character,
                under.kind != touch.key.kind {
                 autocorrect.clearPendingUndo()
-                insert(character)
+                insert(character, source: "slide")
                 layerState.switchTo(returnLayer)
-                rebuildLayout()
+                rebuildLayout(cause: "layer_slide")
                 refreshAutoCapitalization()
             }
         case .delete, .hex, .globe:
@@ -407,6 +464,7 @@ final class FullKeyboardEngine {
         if activeAccentTouchID == id {
             activeAccentMenu = nil
             activeAccentTouchID = nil
+            typingLog?.ui("accent_cancel", [TypingLogField("id", .int(id))])
         }
         guard touches.removeValue(forKey: id) != nil else { return }
         touchOrder.removeAll { $0 == id }
@@ -419,7 +477,10 @@ final class FullKeyboardEngine {
         touchOrder.removeAll()
         activeAccentMenu = nil
         activeAccentTouchID = nil
-        if shift.isHeld { shift.shiftUp() }
+        if shift.isHeld {
+            shift.shiftUp()
+            logState("cancel")
+        }
         if hadTouches { onChange?() }
     }
 
@@ -436,18 +497,22 @@ final class FullKeyboardEngine {
         if heldFor >= Self.wordDeleteAfter {
             deleteWordBackward()
         } else if heldFor >= Self.fastRepeatAfter {
-            deleteBackward(allowAutocorrectUndo: false)
-            deleteBackward(allowAutocorrectUndo: false)
+            deleteBackward(allowAutocorrectUndo: false, source: "repeat_fast")
+            deleteBackward(allowAutocorrectUndo: false, source: "repeat_fast")
         } else {
-            deleteBackward(allowAutocorrectUndo: false)
+            deleteBackward(allowAutocorrectUndo: false, source: "repeat")
         }
     }
 
-    func deleteBackward(allowAutocorrectUndo: Bool = true) {
+    func deleteBackward(allowAutocorrectUndo: Bool = true, source: String = "key") {
         if allowAutocorrectUndo,
            let undo = autocorrect.consumePendingUndo(),
            let before = target.documentContextBeforeInput,
            before.hasSuffix(undo.insertedText) {
+            typingLog?.edit("autocorrect_undo", [
+                TypingLogField("deleted", .string(undo.insertedText)),
+                TypingLogField("inserted", .string(undo.original)),
+            ])
             for _ in 0..<undo.insertedText.count {
                 target.deleteBackward()
             }
@@ -464,6 +529,13 @@ final class FullKeyboardEngine {
         }
         autocorrect.clearPendingUndo()
         learning?.willErase(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
+        if let log = typingLog {
+            let deleted = target.documentContextBeforeInput?.last.map { String($0) }
+            log.edit("delete", [
+                deleted.map { TypingLogField("deleted", .string($0)) } ?? TypingLogField("deletedCount", .int(1)),
+                TypingLogField("src", .string(source)),
+            ])
+        }
         target.deleteBackward()
         lastSpaceAt = nil
         didEdit()
@@ -472,7 +544,7 @@ final class FullKeyboardEngine {
     func deleteWordBackward() {
         autocorrect.clearPendingUndo()
         guard let before = target.documentContextBeforeInput, !before.isEmpty else {
-            deleteBackward(allowAutocorrectUndo: false)
+            deleteBackward(allowAutocorrectUndo: false, source: "repeat_word")
             return
         }
         learning?.willErase(word: AutocorrectEngine.currentToken(in: before))
@@ -486,11 +558,16 @@ final class FullKeyboardEngine {
             index = before.index(before: index)
             count += 1
         }
+        typingLog?.edit("delete_word", [
+            TypingLogField("deleted", .string(String(before.suffix(max(1, count))))),
+            TypingLogField("src", .string("repeat_word")),
+        ])
         for _ in 0..<max(1, count) {
             target.deleteBackward()
         }
         lastSpaceAt = nil
         didEdit()
+        typingLog?.context("delete_word")
     }
 
     // MARK: - Typing
@@ -502,7 +579,8 @@ final class FullKeyboardEngine {
             shift.didType()
         }
         autocorrect.clearPendingUndo()
-        insert(text)
+        insert(text, source: "key")
+        logState("typed")
     }
 
     private func commitAccentSelection(_ chosen: String) {
@@ -510,19 +588,25 @@ final class FullKeyboardEngine {
             shift.didType()
         }
         autocorrect.clearPendingUndo()
-        insert(chosen)
+        insert(chosen, source: "accent")
+        logState("typed")
     }
 
     private func typeSpace() {
         let now = clock()
         if DoubleSpacePeriod.shouldReplace(before: target.documentContextBeforeInput, lastSpaceAt: lastSpaceAt, now: now) {
             autocorrect.clearPendingUndo()
+            typingLog?.edit("double_space_period", [
+                TypingLogField("deleted", .string(" ")),
+                TypingLogField("inserted", .string(". ")),
+            ])
             target.deleteBackward()
             target.insertText(". ")
             lastSpaceAt = nil
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
             didEdit()
+            typingLog?.context("space")
             return
         }
         learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
@@ -536,6 +620,12 @@ final class FullKeyboardEngine {
                 target.deleteBackward()
             }
             let inserted = replacement + " "
+            typingLog?.edit("autocorrect", [
+                TypingLogField("from", .string(original)),
+                TypingLogField("to", .string(replacement)),
+                TypingLogField("deleted", .string(original)),
+                TypingLogField("inserted", .string(inserted)),
+            ])
             target.insertText(inserted)
             autocorrect.recordAppliedCorrection(original: original, insertedText: inserted)
             learning?.record(.autocorrected, typed: original, final: replacement)
@@ -543,14 +633,23 @@ final class FullKeyboardEngine {
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
             didEdit()
+            typingLog?.context("space")
             return
         }
         autocorrect.clearPendingUndo()
-        insert(" ")
+        insert(" ", source: "key")
         lastSpaceAt = now
+        typingLog?.context("space")
     }
 
-    private func insert(_ text: String) {
+    /// `source` names the edit in typing logs; nil when the caller writes its own line.
+    private func insert(_ text: String, source: String?) {
+        if let source {
+            typingLog?.edit("insert", [
+                TypingLogField("inserted", .string(text)),
+                TypingLogField("src", .string(source)),
+            ])
+        }
         target.insertText(text)
         lastSpaceAt = nil
         layerState.didInsert(text)
@@ -574,11 +673,11 @@ final class FullKeyboardEngine {
 
     private func rebuildLayoutIfNeeded() {
         if layout.layer != layerState.layer {
-            rebuildLayout()
+            rebuildLayout(cause: "layer_auto")
         }
     }
 
-    private func rebuildLayout() {
+    private func rebuildLayout(cause: String = "layout") {
         layout = KeyboardLayout(
             width: width,
             orientation: orientation,
@@ -587,5 +686,11 @@ final class FullKeyboardEngine {
             showsGlobe: showsGlobe,
             horizontalInset: horizontalInset
         )
+        logState(cause)
+    }
+
+    /// Hands the layout and shift to typing logs, which writes a line when either changed.
+    func logState(_ cause: String) {
+        typingLog?.keyboardState(layout: layout, shift: shift, cause: cause)
     }
 }

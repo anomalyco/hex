@@ -10,6 +10,8 @@ struct ExperimentsCard: View {
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var learnTyping = TypingJournalSettings().isEnabled
+    @State private var typingLogs = TypingLogSettings().isEnabled
+    @State private var showTypingLogs = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -86,6 +88,51 @@ struct ExperimentsCard: View {
                     TypingInsightsView()
                         .padding(.horizontal, 16)
                         .padding(.bottom, 12)
+                }
+
+                Divider()
+                    .overlay(HexTheme.borderWeak)
+                    .padding(.leading, 16)
+
+                // Apart from Learn how I type: this keeps everything, to export and train on.
+                Toggle(isOn: $typingLogs) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Record typing logs")
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(HexTheme.textBase)
+                        Text("Saves every tap, where it lands, and the text you type or dictate with Hex's keyboard on this iPhone for 14 days, so you can export it. Nothing is sent.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                }
+                .tint(HexTheme.success)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .onChange(of: typingLogs) { _, enabled in
+                    TypingLogSettings().isEnabled = enabled
+                }
+
+                if typingLogs {
+                    Button {
+                        showTypingLogs = true
+                    } label: {
+                        HStack {
+                            Text("Typing logs")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(HexTheme.textBase)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(HexTheme.textFaint)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .sheet(isPresented: $showTypingLogs) {
+                        TypingLogsView()
+                    }
                 }
             }
             .background(
@@ -193,6 +240,7 @@ struct ExperimentsCard: View {
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
             autocorrect = FullKeyboardSettings().autocorrect
             learnTyping = TypingJournalSettings().isEnabled
+            typingLogs = TypingLogSettings().isEnabled
         }
     }
 }
