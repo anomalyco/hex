@@ -120,11 +120,16 @@ pub(crate) fn runs_here() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn observation(latency_ms: u64, fallback: Option<String>) -> ProcessingObservation {
+pub(crate) fn observation(
+    profile: &str,
+    latency_ms: u64,
+    fallback: Option<String>,
+) -> ProcessingObservation {
     ProcessingObservation {
-        profile: PROFILE.into(),
+        profile: profile.into(),
         latency_ms,
-        // Apple Intelligence cleans the text on this Mac; no OpenCode model runs.
+        // Apple Intelligence cleans or rewrites the text on this Mac; no
+        // OpenCode model runs.
         model: None,
         fallback,
     }
@@ -145,10 +150,15 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
                     reason = "the cleaned text changed too much",
                     "dictation cleanup fell back to the corrected transcript"
                 );
-                return fallback(text, latency_ms, "the cleaned text changed too much");
+                return fallback(
+                    PROFILE,
+                    text,
+                    latency_ms,
+                    "the cleaned text changed too much",
+                );
             }
             tracing::info!(latency_ms, "dictation cleanup completed");
-            (cleaned, Some(observation(latency_ms, None)))
+            (cleaned, Some(observation(PROFILE, latency_ms, None)))
         }
         Err(error) => {
             tracing::warn!(
@@ -156,7 +166,7 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
                 latency_ms,
                 "dictation cleanup fell back to the corrected transcript"
             );
-            fallback(text, latency_ms, &error.to_string())
+            fallback(PROFILE, text, latency_ms, &error.to_string())
         }
     }
 }
@@ -169,23 +179,28 @@ fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
 
 /// The corrected transcript, with why the model's answer was not used.
 #[cfg(target_os = "macos")]
-fn fallback(text: &str, latency_ms: u64, reason: &str) -> (String, Option<ProcessingObservation>) {
+pub(crate) fn fallback(
+    profile: &str,
+    text: &str,
+    latency_ms: u64,
+    reason: &str,
+) -> (String, Option<ProcessingObservation>) {
     (
         text.to_owned(),
-        Some(observation(latency_ms, Some(reason.to_owned()))),
+        Some(observation(profile, latency_ms, Some(reason.to_owned()))),
     )
 }
 
 /// Why Apple Intelligence can't run now, or `None` when it can. The answer is
 /// the cached one, so an unavailable Mac costs this stage no wait at all.
 #[cfg(target_os = "macos")]
-fn unavailable_reason() -> Option<&'static str> {
+pub(crate) fn unavailable_reason() -> Option<&'static str> {
     let availability = crate::apple_intelligence::availability();
     (!availability.is_available()).then(|| availability.description())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn unavailable_reason() -> Option<&'static str> {
+pub(crate) fn unavailable_reason() -> Option<&'static str> {
     Some("Apple Intelligence needs a Mac")
 }
 
@@ -194,7 +209,7 @@ fn unavailable_reason() -> Option<&'static str> {
 /// of what the person said), and one pair of wrapping quotes goes only when
 /// the transcript didn't dictate its own, since spoken formatting's
 /// "quote … unquote" becomes a quoted transcript.
-fn tidy(answer: &str, input: &str) -> String {
+pub(crate) fn tidy(answer: &str, input: &str) -> String {
     let trimmed = answer.trim();
     let unwrapped = if wrapped_in_quotes(input) {
         trimmed
@@ -208,14 +223,14 @@ fn tidy(answer: &str, input: &str) -> String {
 
 /// The quote pairs a model may wrap its answer in, and a dictation may have
 /// dictated.
-const QUOTE_PAIRS: [(char, char); 3] = [
+pub(crate) const QUOTE_PAIRS: [(char, char); 3] = [
     ('"', '"'),
     ('\u{201c}', '\u{201d}'),
     ('\u{2018}', '\u{2019}'),
 ];
 
 /// `text` without one pair of quotes wrapping all of it, when it has one.
-fn strip_quotes(text: &str) -> Option<&str> {
+pub(crate) fn strip_quotes(text: &str) -> Option<&str> {
     QUOTE_PAIRS.iter().find_map(|(open, close)| {
         let rest = text.strip_prefix(*open)?;
         let inner = rest.strip_suffix(*close)?;
@@ -224,7 +239,7 @@ fn strip_quotes(text: &str) -> Option<&str> {
 }
 
 /// Whether `text` itself starts and ends with a pair of quotes.
-fn wrapped_in_quotes(text: &str) -> bool {
+pub(crate) fn wrapped_in_quotes(text: &str) -> bool {
     let text = text.trim();
     QUOTE_PAIRS
         .iter()
@@ -333,7 +348,7 @@ fn ratio(shared: usize, total: usize) -> f64 {
     shared as f64 / total as f64
 }
 
-pub(crate) fn digits(text: &str) -> Vec<char> {
+fn digits(text: &str) -> Vec<char> {
     text.chars()
         .filter(|character| character.is_numeric() || CJK_DIGITS.contains(character))
         .collect()
@@ -367,7 +382,7 @@ pub(crate) fn words(text: &str) -> Vec<String> {
     result
 }
 
-pub(crate) fn trim_apostrophes(word: String) -> String {
+fn trim_apostrophes(word: String) -> String {
     let mut word = word;
     while word.ends_with('\'') {
         word.pop();

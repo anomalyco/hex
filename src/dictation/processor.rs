@@ -509,12 +509,16 @@ impl Profiles {
             source,
             DictationLabs::current(),
         );
+        // A transcript of numbers alone has nothing to rewrite; a model only
+        // turns it into digits and re-punctuates it (#949). The neutral pass
+        // and Labs › Clean up with Apple Intelligence skip those too.
+        let numbers_only = numbers_only(&corrected);
         // Labs › Neutral voice replaces both the rewrite and the cleanup for
         // an opted-in mode, and outranks the voice prompt too, so a privacy
         // dictation never reaches OpenCode.
         if let Some(processed) = crate::dictation::neutral_voice::processed(
             &corrected,
-            numbers_only(&corrected),
+            numbers_only,
             cancelled,
             profile.neutral_voice,
             source,
@@ -531,11 +535,6 @@ impl Profiles {
         {
             return voice_prompt_processed(profile, &instruction, &corrected, context, cancelled);
         }
-        // A transcript of numbers alone has nothing to rewrite; a model only
-        // turns it into digits and re-punctuates it (#949). Labs › Clean up
-        // with Apple Intelligence skips those too, so the count is read
-        // whether or not this mode rewrites.
-        let numbers_only = numbers_only(&corrected);
         if profile.ai_enabled && numbers_only {
             tracing::info!(
                 profile = profile.name,
@@ -2111,8 +2110,6 @@ mod tests {
         assert!(!profiles.select(&context("Zed", None)).neutral_voice);
     }
 
-    /// On an OS without the lab, a mode's switch alone never reaches the
-    /// stage: the pipeline checks the lab's own gate too.
     #[test]
     fn speech_preparation_precedes_global_and_mode_corrections() {
         use crate::app_settings::{DictationMode, DictationProcessingSettings};

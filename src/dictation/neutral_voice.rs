@@ -16,7 +16,9 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
-use crate::dictation::apple_cleanup::{NEGATIONS, words};
+use crate::dictation::apple_cleanup::{NEGATIONS, unavailable_reason, words};
+#[cfg(target_os = "macos")]
+use crate::dictation::apple_cleanup::{fallback, observation, tidy};
 use crate::dictation::processor::{Processed, ProcessingObservation, Source};
 
 /// How long the model gets before the corrected transcript is pasted.
@@ -127,18 +129,6 @@ pub(crate) fn stage(
 }
 
 #[cfg(target_os = "macos")]
-fn observation(latency_ms: u64, fallback: Option<String>) -> ProcessingObservation {
-    ProcessingObservation {
-        profile: PROFILE.into(),
-        latency_ms,
-        // Apple Intelligence rewrites the text on this Mac; no OpenCode model runs.
-        model: None,
-        fallback,
-    }
-}
-
-/// One on-device pass, with the time budget the bridge enforces.
-#[cfg(target_os = "macos")]
 fn rewrite(text: &str) -> (String, Option<ProcessingObservation>) {
     let started = Instant::now();
     let outcome =
@@ -153,10 +143,10 @@ fn rewrite(text: &str) -> (String, Option<ProcessingObservation>) {
                     reason,
                     "dictation neutral voice fell back to the corrected transcript"
                 );
-                return fallback(text, latency_ms, reason);
+                return fallback(PROFILE, text, latency_ms, reason);
             }
             tracing::info!(latency_ms, "dictation neutral voice completed");
-            (rewritten, Some(observation(latency_ms, None)))
+            (rewritten, Some(observation(PROFILE, latency_ms, None)))
         }
         Err(error) => {
             tracing::warn!(
@@ -164,7 +154,7 @@ fn rewrite(text: &str) -> (String, Option<ProcessingObservation>) {
                 latency_ms,
                 "dictation neutral voice fell back to the corrected transcript"
             );
-            fallback(text, latency_ms, &error.to_string())
+            fallback(PROFILE, text, latency_ms, &error.to_string())
         }
     }
 }
@@ -174,28 +164,6 @@ fn rewrite(text: &str) -> (String, Option<ProcessingObservation>) {
 #[cfg(not(target_os = "macos"))]
 fn rewrite(text: &str) -> (String, Option<ProcessingObservation>) {
     (text.to_owned(), None)
-}
-
-/// The corrected transcript, with why the model's answer was not used.
-#[cfg(target_os = "macos")]
-fn fallback(text: &str, latency_ms: u64, reason: &str) -> (String, Option<ProcessingObservation>) {
-    (
-        text.to_owned(),
-        Some(observation(latency_ms, Some(reason.to_owned()))),
-    )
-}
-
-/// Why Apple Intelligence can't run now, or `None` when it can. The answer is
-/// the cached one, so an unavailable Mac costs this stage no wait at all.
-#[cfg(target_os = "macos")]
-fn unavailable_reason() -> Option<&'static str> {
-    let availability = crate::apple_intelligence::availability();
-    (!availability.is_available()).then(|| availability.description())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn unavailable_reason() -> Option<&'static str> {
-    Some("Apple Intelligence needs a Mac")
 }
 
 // How many times [`stage`] was entered on this test thread, so the pipeline's
@@ -214,46 +182,6 @@ fn note_stage_call() {
 #[cfg(all(test, not(target_os = "macos")))]
 pub(crate) fn calls() -> usize {
     STAGE_CALLS.with(std::cell::Cell::get)
-}
-
-/// The model's answer, ready to judge: the transcript's own leading and
-/// trailing whitespace comes back, and one pair of wrapping quotes goes only
-/// when the transcript didn't dictate its own.
-fn tidy(answer: &str, input: &str) -> String {
-    let trimmed = answer.trim();
-    let unwrapped = if wrapped_in_quotes(input) {
-        trimmed
-    } else {
-        strip_quotes(trimmed).unwrap_or(trimmed)
-    };
-    let leading = input.len() - input.trim_start().len();
-    let trailing = input.trim_end().len();
-    format!("{}{}{}", &input[..leading], unwrapped, &input[trailing..])
-}
-
-/// The quote pairs a model may wrap its answer in, and a dictation may have
-/// dictated.
-const QUOTE_PAIRS: [(char, char); 3] = [
-    ('"', '"'),
-    ('\u{201c}', '\u{201d}'),
-    ('\u{2018}', '\u{2019}'),
-];
-
-/// `text` without one pair of quotes wrapping all of it, when it has one.
-fn strip_quotes(text: &str) -> Option<&str> {
-    QUOTE_PAIRS.iter().find_map(|(open, close)| {
-        let rest = text.strip_prefix(*open)?;
-        let inner = rest.strip_suffix(*close)?;
-        (!inner.trim().is_empty()).then(|| inner.trim())
-    })
-}
-
-/// Whether `text` itself starts and ends with a pair of quotes.
-fn wrapped_in_quotes(text: &str) -> bool {
-    let text = text.trim();
-    QUOTE_PAIRS
-        .iter()
-        .any(|(open, close)| text.starts_with(*open) && text.ends_with(*close))
 }
 
 /// Why a rewrite may not replace the transcript, or `None` when it may.
@@ -350,16 +278,16 @@ fn protected_tokens(text: &str) -> Vec<String> {
             tokens.push(token.to_owned());
         }
     };
-    // Text inside double quotes, between matched pairs. An unmatched final
-    // quote is just punctuation, so `a 5" screen` protects the 5 alone.
-    let mut spans = text.split('"').skip(1);
-    while let (Some(span), Some(_)) = (spans.next(), spans.next()) {
+    // Text inside matched quote pairs that open at a word start and close at
+    // a word end. An inch mark or an unmatched final quote is just
+    // punctuation, so `a 5" screen` protects the 5 alone.
+    for span in quoted_spans(text) {
         add(span);
     }
     for run in compound_runs(text) {
         // A sentence's own punctuation around a token is not part of it,
         // while punctuation inside one (file.rs, foo(), a::b) is.
-        let core = run.trim_matches(['"', '\'', ',', ';', ':', '!', '?', '.']);
+        let core = trim_code_token(run);
         if looks_like_code(core) {
             add(core);
         }
@@ -368,6 +296,95 @@ fn protected_tokens(text: &str) -> Vec<String> {
         add(run);
     }
     tokens
+}
+
+/// The spans between matched double or curly double quotes, where a quote
+/// opens at a word start and closes at a word end. CJK characters count as
+/// word characters on either side, so `他说“船明天开”` pairs too.
+fn quoted_spans(text: &str) -> Vec<&str> {
+    let mut spans = Vec::new();
+    let mut open: Option<usize> = None;
+    for (index, character) in text.char_indices() {
+        match character {
+            '"' => {
+                if open.is_none() {
+                    if opens_a_quote(text, index) {
+                        open = Some(index + 1);
+                    }
+                } else if let Some(start) = open.take()
+                    && closes_a_quote(text, index)
+                {
+                    spans.push(&text[start..index]);
+                }
+            }
+            '\u{201c}' => {
+                if open.is_none() && opens_a_quote(text, index) {
+                    open = Some(index + character.len_utf8());
+                }
+            }
+            '\u{201d}' => {
+                if let Some(start) = open.take()
+                    && closes_a_quote(text, index)
+                {
+                    spans.push(&text[start..index]);
+                }
+            }
+            _ => {}
+        }
+    }
+    spans
+}
+
+/// Whether a quote at `index` starts a quoted span: at the start of the text,
+/// after whitespace, after opening punctuation, or after a CJK character.
+fn opens_a_quote(text: &str, index: usize) -> bool {
+    text[..index].chars().next_back().is_none_or(|character| {
+        character.is_whitespace()
+            || is_cjk(character)
+            || matches!(
+                character,
+                '(' | '[' | '{' | '<' | '\u{2014}' | '\u{2013}' | '\u{00ab}'
+            )
+    })
+}
+
+/// Whether a quote at `index` ends a quoted span: at the end of the text,
+/// before whitespace, before closing punctuation, or before a CJK character.
+fn closes_a_quote(text: &str, index: usize) -> bool {
+    let mut after = text[index..].chars();
+    let _quote = after.next();
+    after.next().is_none_or(|character| {
+        character.is_whitespace()
+            || is_cjk(character)
+            || matches!(
+                character,
+                '.' | ','
+                    | ';'
+                    | ':'
+                    | '!'
+                    | '?'
+                    | ')'
+                    | ']'
+                    | '}'
+                    | '>'
+                    | '\u{2014}'
+                    | '\u{2013}'
+                    | '\u{00bb}'
+            )
+    })
+}
+
+/// Whether `character` is a Chinese, Japanese, or Korean character.
+fn is_cjk(character: char) -> bool {
+    matches!(character,
+        '\u{1100}'..='\u{11ff}'   // Hangul Jamo
+        | '\u{3040}'..='\u{30ff}' // Hiragana and Katakana
+        | '\u{3400}'..='\u{4dbf}' // CJK Extension A
+        | '\u{4e00}'..='\u{9fff}' // CJK Unified Ideographs
+        | '\u{ac00}'..='\u{d7af}' // Hangul syllables
+        | '\u{f900}'..='\u{faff}' // CJK Compatibility Ideographs
+        | '\u{20000}'..='\u{2fa1f}' // CJK Extensions B and later
+    )
 }
 
 /// Characters a link, code, or path token is made of beyond ASCII letters
@@ -398,15 +415,52 @@ fn compound_runs(text: &str) -> Vec<&str> {
     runs
 }
 
+/// A sentence's own brackets around a token are not part of it, while
+/// brackets inside one (`foo()`, `arr[i]`) are.
+fn trim_code_token(run: &str) -> &str {
+    let core = run.trim_matches(['"', '\'', ',', ';', ':', '!', '?', '.']);
+    let core = core.trim_start_matches(['(', '[']);
+    if core.contains('(') {
+        core
+    } else {
+        core.trim_end_matches([')', ']'])
+    }
+}
+
 /// Whether `token` must survive a rewrite verbatim: something that reads as
 /// a link, or as code or a path.
 fn looks_like_code(token: &str) -> bool {
     token.contains("://")
         || token.starts_with("www.")
-        || token.contains(['/', '\\', '_', '`'])
+        || token.contains(['\\', '_', '`'])
         || token.contains("::")
-        || (token.contains('(') && token.contains(')'))
-        || dotted_word(token)
+        || token.contains(['(', ')', '[', ']'])
+        || (token.contains('/') && !plain_slash(token))
+        || (dotted_word(token) && !single_letter_abbreviation(token))
+}
+
+/// Whether every `/` in `token` separates two plain alphabetic words, as in
+/// `and/or` or `yes/no`, so the token is not a path.
+fn plain_slash(token: &str) -> bool {
+    token.contains('/')
+        && token
+            .chars()
+            .all(|character| character == '/' || character.is_ascii_alphabetic())
+        && token.split('/').all(|part| !part.is_empty())
+}
+
+/// Whether `token` is a common abbreviation of single letters and dots, such
+/// as `e.g`, `i.e`, or `u.s`, rather than a file name.
+fn single_letter_abbreviation(token: &str) -> bool {
+    let core = token.trim_matches('.');
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() >= 2
+        && parts.iter().all(|part| {
+            part.chars().count() == 1
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+        })
 }
 
 /// Whether `token` has a `.` inside a word, as in `file.rs` or `example.com`.
@@ -445,10 +499,10 @@ const STOPWORDS: &[&str] = &[
 
 /// A loose floor against an answer or an injected reply: when the transcript
 /// has at least four content words, at least 30% of them must appear in the
-/// rewrite. Text without whitespace (Chinese and Japanese) is exempt, since
-/// its words are not split that way.
+/// rewrite. Text with no whitespace, and any text with Chinese, Japanese, or
+/// Korean characters, is exempt, since its words are not split that way.
 fn shares_content(original: &str, rewritten: &str) -> bool {
-    if !original.chars().any(char::is_whitespace) {
+    if !original.chars().any(char::is_whitespace) || original.chars().any(is_cjk) {
         return true;
     }
     let original = content_words(original);
@@ -466,6 +520,7 @@ fn shares_content(original: &str, rewritten: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dictation::apple_cleanup::tidy;
 
     /// Rewording is the point: a plainly restyled sentence with the same
     /// meaning is accepted.
@@ -509,6 +564,29 @@ mod tests {
         ));
     }
 
+    /// Only a quote that opens at a word start and closes at a word end
+    /// pairs, so an inch mark doesn't swallow the rest of the sentence.
+    #[test]
+    fn only_a_quote_at_word_boundaries_pairs() {
+        let text = "a 5\" screen and \"ship it\" now";
+        assert_eq!(protected_tokens(text), ["ship it", "5"]);
+        assert!(is_acceptable(text, "A 5-inch screen, and ship it now."));
+    }
+
+    /// Curly double quotes pair like straight ones, in English and in a CJK
+    /// sentence.
+    #[test]
+    fn a_curly_quote_pair_protects_its_text() {
+        let text = "he said \u{201c}ship it\u{201d} now";
+        assert_eq!(protected_tokens(text), ["ship it"]);
+        assert!(is_acceptable(text, "He said \u{201c}ship it\u{201d} now."));
+        assert!(!is_acceptable(text, "He said something now."));
+        assert_eq!(
+            protected_tokens("他说\u{201c}船明天开\u{201d}然后走了"),
+            ["船明天开"]
+        );
+    }
+
     /// A Chinese or Japanese sentence is one whitespace-free run: only its
     /// ASCII digit run is protected, and CJK numerals (一, 三) are words,
     /// never digits.
@@ -520,6 +598,16 @@ mod tests {
         ));
         assert!(!is_acceptable("会议在14楼，请准时", "会议在楼上，请准时。"));
         assert!(is_acceptable("我们一起开会", "大家一起开会。"));
+    }
+
+    /// Any CJK, kana, or hangul character exempts the text from the content
+    /// floor, even when it has spaces and Latin words.
+    #[test]
+    fn cjk_text_skips_the_content_floor() {
+        assert!(is_acceptable(
+            "我们 discuss the quarterly revenue numbers today",
+            "我们 talk about weather and weekend plans today"
+        ));
     }
 
     #[test]
@@ -626,6 +714,46 @@ mod tests {
             ["ship it", "file.rs", "https://x.com"]
         );
         assert_eq!(protected_tokens("foo() at 5pm"), ["foo()", "5"]);
+    }
+
+    /// A sentence's own brackets are not part of the path inside them.
+    #[test]
+    fn brackets_around_a_path_are_not_part_of_it() {
+        assert_eq!(
+            protected_tokens("(see file.rs) for the details"),
+            ["file.rs"]
+        );
+        assert!(!is_acceptable(
+            "(see file.rs) for the details",
+            "See the file for the details."
+        ));
+    }
+
+    /// Common single-letter abbreviations are prose, not file names.
+    #[test]
+    fn common_abbreviations_are_not_code() {
+        for token in ["e.g.", "i.e.", "p.m.", "a.m.", "u.s."] {
+            assert!(protected_tokens(token).is_empty(), "{token}");
+        }
+        assert!(is_acceptable(
+            "ship it e.g. on friday",
+            "Ship it, for example on Friday."
+        ));
+    }
+
+    /// A slash joining two plain words is not a path.
+    #[test]
+    fn a_slash_between_words_is_not_a_path() {
+        assert!(protected_tokens("and/or").is_empty());
+        assert!(protected_tokens("yes/no").is_empty());
+        assert!(is_acceptable(
+            "use and/or for those cases",
+            "Use and/or for those cases."
+        ));
+        assert!(!is_acceptable(
+            "open /etc/hosts now",
+            "Open the hosts file now."
+        ));
     }
 
     /// A cancelled dictation starts no model work: the words go back as they

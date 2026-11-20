@@ -25,9 +25,7 @@ pub(super) fn row(ui: &Ui, p: Paint) -> Option<El> {
         p,
         "neutral-voice",
         tr("Neutral voice"),
-        Some(tr(
-            "Rewrites on this Mac instead of the OpenCode transformation.",
-        )),
+        Some(tr("Rewrites on this Mac instead of any other rewrite.")),
         enabled,
         |ui: &mut Ui| {
             let Some(current) = mode(&ui.settings, ui.modes.selected) else {
