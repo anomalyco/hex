@@ -66,6 +66,9 @@ final class FullKeyboardEngine {
         var trackpadAnchorX: CGFloat = 0
         /// Characters the trackpad has moved the cursor, for Record typing logs.
         var trackpadOffset = 0
+        /// True when the likelier next letter claimed this touch from the key under it; a
+        /// small move then keeps it rather than sliding back (`letterReach`).
+        var claimed = false
     }
 
     static let accentHoldDelay: TimeInterval = 0.40
@@ -88,6 +91,26 @@ final class FullKeyboardEngine {
     var tapOffsets: [Character: CGVector] = [:] {
         didSet { if tapOffsets != oldValue { syncDecoderKeys() } }
     }
+
+    /// The layout language's word list, which lets the likelier of two neighbouring letters
+    /// claim a few points of the other's touch target, as Apple's keyboard does ("th" then a
+    /// tap on the e/d border types e). Used only while autocorrect is on in a text field
+    /// that allows it; nil keeps every target fixed.
+    var letterOdds: TypingDecoderModel? {
+        didSet {
+            if letterOdds !== oldValue {
+                continuationCache = nil
+                wordStartMass = nil
+            }
+        }
+    }
+    /// How far past its own target a likelier letter may reach, in points.
+    var letterReach: CGFloat = 5
+    /// Nats of odds (ln of how many times likelier) a letter needs for each point it claims.
+    var letterOddsPerPoint = 0.8
+    private var continuationCache: (prefix: [UInt8], mass: [Double]?)?
+    /// The first letters' frequencies, the costliest to add up (every word), kept apart.
+    private var wordStartMass: [Double]??
 
     private(set) var activeAccentMenu: AccentMenu?
     private var activeAccentTouchID: Int?
@@ -279,8 +302,72 @@ final class FullKeyboardEngine {
 
     // MARK: - Touches
 
+    /// The key a touch going down at `point` presses: the one under it, or a neighbouring
+    /// letter within `letterReach` points that is enough likelier to come next in the word.
+    func key(at point: CGPoint) -> KeyboardKey? {
+        guard let key = layout.hitTest(point) else { return nil }
+        guard key.character != nil, let model = letterOdds, layerState.layer == .letters,
+              field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
+              shift.state != .locked, model.language == language.rawValue else { return key }
+        let reach = letterReach
+        let near = layout.keys.filter {
+            $0.character != nil && $0.kind != key.kind && Self.distance(from: point, to: $0.hitFrame) < reach
+        }
+        guard !near.isEmpty, let continuations = continuationMass(model) else { return key }
+        // An accented letter without a key of its own is typed from its base letter's (é from e).
+        var mass = [Double](repeating: 0, count: continuations.count)
+        let keyed = Set(layout.keys.compactMap { key in
+            key.character.flatMap { $0.count == 1 ? model.codes[Character($0)] : nil }
+        })
+        for (code, m) in continuations.enumerated() where m > 0 {
+            mass[keyed.contains(UInt8(code)) ? code : Int(model.baseCodes[code])] += m
+        }
+        let total = mass.reduce(0, +)
+        func odds(_ k: KeyboardKey) -> Double? {
+            guard let c = k.character, c.count == 1, let code = model.codes[Character(c)] else { return nil }
+            return log(mass[Int(code)] + total * 1e-4)
+        }
+        guard let own = odds(key) else { return key }
+        var best = key
+        var bestScore = own
+        for other in near {
+            guard let theirs = odds(other) else { continue }
+            let score = theirs - letterOddsPerPoint * Double(Self.distance(from: point, to: other.hitFrame))
+            if score > bestScore {
+                best = other
+                bestScore = score
+            }
+        }
+        return best
+    }
+
+    /// The word list's next-letter frequencies after the word being typed, or nil when they
+    /// can't help: inside something that isn't a word, or a word the list doesn't have.
+    private func continuationMass(_ model: TypingDecoderModel) -> [Double]? {
+        let before = target.documentContextBeforeInput ?? ""
+        let token = AutocorrectEngine.currentToken(in: before)
+        if token == nil, let last = before.last, last.isLetter || last.isNumber || last == "'" { return nil }
+        guard let prefix = model.encode((token ?? "").lowercased()) else { return nil }
+        if prefix.isEmpty {
+            if let cached = wordStartMass { return cached }
+            let mass = model.continuations(after: [])
+            wordStartMass = .some(mass)
+            return mass
+        }
+        if let cache = continuationCache, cache.prefix == prefix { return cache.mass }
+        let mass = model.continuations(after: prefix)
+        continuationCache = (prefix, mass)
+        return mass
+    }
+
+    private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return (dx * dx + dy * dy).squareRoot()
+    }
+
     func touchBegan(id: Int, at point: CGPoint) {
-        guard let key = layout.hitTest(point) else { return }
+        guard let key = key(at: point) else { return }
         // Rollover: a new key going down commits any character or accent picker still held.
         for other in touchOrder {
             guard var touch = touches[other], touch.key.character != nil, !touch.committed else { continue }
@@ -308,6 +395,7 @@ final class FullKeyboardEngine {
             committed: false,
             returnLayer: nil
         )
+        touch.claimed = !key.hitFrame.contains(point)
         if key.character != nil {
             learning?.recordTap(on: key, at: point)
         }
@@ -409,8 +497,11 @@ final class FullKeyboardEngine {
         }
 
         // 3. Sliding across character keys updates the active key and re-anchors the hold timer.
+        // A letter the next-letter odds claimed keeps the touch while it stays within reach.
         if touch.key.character != nil, !touch.committed,
-           let under = layout.hitTest(point), under.character != nil, under.kind != touch.key.kind {
+           let under = layout.hitTest(point), under.character != nil, under.kind != touch.key.kind,
+           !(touch.claimed && Self.distance(from: point, to: touch.key.hitFrame) < letterReach) {
+            touch.claimed = false
             touch.key = under
             touch.startPoint = point
             touches[id] = touch

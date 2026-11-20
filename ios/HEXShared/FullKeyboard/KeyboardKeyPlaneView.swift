@@ -229,7 +229,9 @@ final class KeyboardKeyPlaneView: UIView {
     // and after a move, so the line names the key the finger slid onto.
 
     func began(id: Int, sample: TypingLogTouchSample) {
-        typingLog?.touch(.began, id: id, sample: sample, key: engine.layout.hitTest(sample.point))
+        if let log = typingLog {
+            log.touch(.began, id: id, sample: sample, key: engine.key(at: sample.point), under: engine.layout.hitTest(sample.point))
+        }
         engine.touchBegan(id: id, at: sample.point)
         if let kind = engine.touches[id]?.key.kind {
             onKeyDown?(kind)

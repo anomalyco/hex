@@ -423,6 +423,24 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   Spanish and Italian only). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
+- **Touch targets (full keyboard):** Every point of the key area types a key: gaps
+  split down the middle, the outer keys reach the screen's edges, and row 1 also
+  takes the strip's bottom 4 pt below its pills (`KeyboardLayout.stripTouchBand`),
+  so a tap just above a keycap types it rather than picking a suggestion (Apple's
+  keys reach about 8 pt above theirs, measured in the simulator). Taps are not
+  shifted: moving every logged tap up by 2 to 8 pt landed no more of them on the
+  meant key, and Apple's row borders sit within about 2 pt of the gaps' middles
+  when nothing is typed. While autocorrect is on in a text field that allows it,
+  the English and Spanish word lists (Spatial autocorrect's models, whether or not
+  that experiment is on) let the likelier next letter claim up to 5 pt of a
+  neighbouring letter's target, 1.25 pt for each e-fold it is likelier
+  (`FullKeyboardEngine.letterOdds`): after "th" a tap just inside d types e, as
+  Apple's does (there e reaches about 10 pt into d). A finger that rolls within
+  that reach keeps the letter. Other layouts keep fixed targets. The keyboard's
+  window no longer holds back touches near the screen's side edges for system
+  gestures: Record typing logs showed them reaching the keys about 80 ms later
+  than others on an iPhone (whether this removes it is unverified on hardware;
+  the simulator never delayed them).
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
@@ -571,7 +589,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   ever moves again, the reservation limit on a full iPhone, and Parakeet's
   memory on 4 GB iPhones are unverified on hardware.
 - **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
-  widths, hit frames (tiling the key area with no gaps or overlaps), balloons
+  widths, hit frames (tiling the key area and row 1's band above it with no gaps
+  or overlaps), balloons
   and accent menus at 320–440 pt and in landscape; `AutocorrectEngineTests` and
   `FullKeyboardEngineTests` check typing, dictionaries and English-only fixes.
   Whether the simulator or an iPhone has a `UITextChecker` dictionary for

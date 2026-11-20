@@ -303,9 +303,15 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// Experiments › Full keyboard › Spatial autocorrect: maps the layout language's bundled
     /// model the first time it is on (English and Spanish today; others keep `UITextChecker`),
-    /// and moves the keys' centres to where Learn how I type saw you tap.
+    /// and moves the keys' centres to where Learn how I type saw you tap. The same word list
+    /// lets the likely next letter claim a few points of its neighbour's touch target whether
+    /// or not the experiment is on (`FullKeyboardEngine.letterOdds`; only while autocorrecting).
     private func syncSpatialAutocorrect() {
-        let model = FullKeyboardSettings().spatialAutocorrect ? TypingDecoderModel.bundled(engine.language.rawValue) : nil
+        let words = TypingDecoderModel.bundled(engine.language.rawValue)
+        if engine.letterOdds !== words {
+            engine.letterOdds = words
+        }
+        let model = FullKeyboardSettings().spatialAutocorrect ? words : nil
         if engine.autocorrect.decoder?.model !== model {
             engine.autocorrect.decoder = model.map { TypingDecoder(model: $0) }
             engine.refreshSuggestions()

@@ -143,14 +143,16 @@ One finger sample on the keys (not the strip, whose buttons log `ui`/`edit`).
   `majorRadiusTolerance` (pt). `force` and `maxForce` only on devices with
   force. `ts`: `UITouch.timestamp` in ms (monotonic, same clock as `mt`).
 - `layout`: the layout hash at the time.
-- `key`: the key the engine resolves. For `began`, the key under the point
-  (what the engine presses). For `moved` and `ended`, the key the finger is held
+- `key`: the key the engine resolves. For `began`, the key the engine presses:
+  the key under the point, or a neighbouring letter the next-letter odds gave it
+  (`FullKeyboardEngine.letterOdds`). For `moved` and `ended`, the key the finger is held
   on: sliding across character keys moves it; any other key keeps the key it
   went down on. `null` when the finger went down outside every key.
-- `under`: on `moved`/`ended`/`cancelled`, the key under the raw point when it
-  differs from `key` (`null`: outside every key). The engine has no touch
-  correction model today: it uses the hit frames, so `key` on `began` always
-  equals the key under the point.
+- `under`: the key under the raw point when it differs from `key` (`null`:
+  outside every key, on `ended`/`cancelled`). On `began` it appears only when
+  the next-letter odds moved the press to a neighbouring letter; otherwise the
+  engine uses the hit frames as logged, so `key` on `began` is the key under
+  the point.
 - `moved` is throttled: a sample is written once the finger has moved at least
   2 pt and 8 ms since the last line for it, or when it slides onto another key.
 
