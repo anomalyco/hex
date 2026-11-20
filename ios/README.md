@@ -251,6 +251,17 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
+  - **Auto-capitalization (Settings › Keyboard › Auto-capitalization):** On by default,
+    as Apple's (`FullKeyboardSettings.autoCapitalization`, App Group key
+    `settings.keyboardAutoCapitalization`). Off, shift never turns itself on, whatever the
+    field's `autocapitalizationType` asks (a field's or sentence's start, after "." "!" "?"
+    or the double-space period, which still types ". "), and autocorrect and swipe typing add no
+    capital you didn't type: "i" stays "i", "im" becomes "i'm", "mary" stays "mary" and
+    "mondya" becomes "monday", as Apple's keyboard does with Auto-Capitalization off (seen on
+    the iOS 27.2 simulator). Words you typed with a capital, and your own spellings (text
+    replacements, Contacts names, words you kept, fixes Hex learned), keep theirs; shift and
+    caps lock work as before, and the strip may still offer a capitalised word to pick.
+    Dictation has its own switch (Settings › Dictation › Lowercase).
   - **Spatial autocorrect (Settings › Keyboard › Spatial autocorrect):**
     On by default, shown under Autocorrect while it's on (it needs the full keyboard
     with Autocorrect on). Stored as `experiments.spatialAutocorrect` from when it was an
@@ -363,7 +374,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
     the dictation bar, so testers who turned that experiment off keep the bar),
-    then Languages, Autocorrect (with Spatial autocorrect below it while it's
+    then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it

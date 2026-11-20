@@ -252,6 +252,13 @@ final class AutocorrectEngine {
             partner?.allowsSwearing = allowsSwearing
         }
     }
+    /// Settings › Keyboard › Auto-capitalization. Off, a fix from the dictionary or Spatial
+    /// autocorrect's model adds no capital you didn't type, as Apple's keyboard with
+    /// Auto-Capitalization off: "i" stays "i", "im" becomes "i'm", "mary" stays "mary" and
+    /// "mondya" becomes "monday". Your own spellings keep theirs (`isOwnSpelling`). On by default.
+    var addsCapitals = true {
+        didSet { partner?.addsCapitals = addsCapitals }
+    }
     private var decoderCache: (before: String, taps: [CGPoint], decision: TypingDecoder.Decision?)?
 
     init(
@@ -359,6 +366,7 @@ final class AutocorrectEngine {
         engine.lexiconTerms = lexiconTerms
         engine.learning = learning
         engine.allowsSwearing = allowsSwearing
+        engine.addsCapitals = addsCapitals
         engine.decoderKeys = decoderKeys
         engine.decoderTaps = decoderTaps
         partner = engine
@@ -654,7 +662,7 @@ final class AutocorrectEngine {
         // Norwegian "i" means "in" and must not become "I").
         if language.usesEnglishFixes, let fixed = Self.unambiguousFixes[lower] {
             if isAllCaps && token.count < 3 { return nil }
-            return Self.matchCase(of: token, onto: fixed)
+            return withoutAddedCapitals(Self.matchCase(of: token, onto: fixed), typed: token)
         }
 
         if isAllCaps { return nil }
@@ -662,11 +670,12 @@ final class AutocorrectEngine {
         // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
         if let decision = decoderDecision(for: token) {
             if let replacement = decision.replacement, mayOffer(replacement, replacing: token) {
-                return Self.matchCase(of: token, onto: replacement)
+                return withoutAddedCapitals(Self.matchCase(of: token, onto: replacement), typed: token)
             }
             // A name, day or place its lowercase word list lacks, typed in lowercase, is
-            // capitalised as the dictionary path does ("mary" -> "Mary").
-            return properNoun(for: token)
+            // capitalised as the dictionary path does ("mary" -> "Mary"), unless
+            // Auto-capitalization is off.
+            return addsCapitals ? properNoun(for: token) : nil
         }
 
         // 3. A two-letter non-word one neighbouring key from a very common two-letter word
@@ -694,7 +703,24 @@ final class AutocorrectEngine {
             }
         }
         guard let bestGuess, bestScore <= 1.35 else { return nil }
-        return Self.matchCase(of: token, onto: bestGuess)
+        return withoutAddedCapitals(Self.matchCase(of: token, onto: bestGuess), typed: token)
+    }
+
+    /// `fix` for `token` as autocorrect puts it in: with `addsCapitals` off and nothing
+    /// typed in capitals, all lowercase unless it is your own spelling; nil when that leaves
+    /// just what you typed ("i").
+    private func withoutAddedCapitals(_ fix: String, typed token: String) -> String? {
+        guard !addsCapitals, !token.contains(where: \.isUppercase), !isOwnSpelling(fix) else { return fix }
+        let lowered = fix.lowercased()
+        return lowered == token ? nil : lowered
+    }
+
+    /// Whether `word`, capitals and all, is one of your own spellings: a Contacts name or
+    /// other `UILexicon` term, a text replacement's output, a word you kept twice, or a fix
+    /// Hex learned from you. Auto-capitalization off leaves their capitals alone.
+    func isOwnSpelling(_ word: String) -> Bool {
+        lexiconTerms.contains(word) || lexiconShortcuts.values.contains(word)
+            || learning.typos.values.contains(word) || learnedWords.words.contains(word)
     }
 
     /// The very common two-letter word (the language's `commonTwoLetterWords`, commonest

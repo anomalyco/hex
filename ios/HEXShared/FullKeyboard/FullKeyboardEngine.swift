@@ -219,6 +219,23 @@ final class FullKeyboardEngine {
     /// Settings › Key pop-ups. Off: pressed keys only darken, as with iOS's Character Preview off.
     var showsKeyPopups = true
 
+    /// Settings › Keyboard › Auto-capitalization. Off, shift never turns itself on, whatever
+    /// the field's `autocapitalizationType` asks, and autocorrect and swipe typing add no
+    /// capitals (`AutocorrectEngine.addsCapitals`). Shift and caps lock still work.
+    var autoCapitalizes = true {
+        didSet {
+            guard autoCapitalizes != oldValue else { return }
+            autocorrect.addsCapitals = autoCapitalizes
+            refreshAutoCapitalization()
+            refreshSuggestions()
+        }
+    }
+
+    /// What the field asks for, or no automatic capitals with Auto-capitalization off.
+    private var autoCapitalizationMode: AutoCapitalization.Mode {
+        autoCapitalizes ? AutoCapitalization.Mode(target.autocapitalizationType) : .none
+    }
+
     /// The key whose balloon shows: the newest character still held, or the one a 123, #+= or
     /// shift press slid onto (hidden while an accent menu is up).
     var previewKey: KeyboardKey? {
@@ -284,7 +301,7 @@ final class FullKeyboardEngine {
         let before = shift
         shift.refreshAutoCapitalization(
             AutoCapitalization.shouldCapitalize(
-                mode: AutoCapitalization.Mode(target.autocapitalizationType),
+                mode: autoCapitalizationMode,
                 before: target.documentContextBeforeInput,
                 hasText: target.hasText
             )
@@ -1152,7 +1169,7 @@ final class FullKeyboardEngine {
         let before = target.documentContextBeforeInput
         guard SwipeTyping.needsSpace(before: before) else { return false }
         return AutoCapitalization.shouldCapitalize(
-            mode: AutoCapitalization.Mode(target.autocapitalizationType),
+            mode: autoCapitalizationMode,
             before: (before ?? "") + " ",
             hasText: true
         )
@@ -1160,10 +1177,15 @@ final class FullKeyboardEngine {
 
     /// A reading as it's typed: all capitals with caps lock, a capital first letter with
     /// `capital`, else a name the dictionary only knows capitalised ("monday" -> "Monday").
+    /// With Auto-capitalization off, no capital you didn't ask for ("i'm", "monday"), but
+    /// your own spellings keep theirs.
     private func swipeCased(_ word: String, capital: Bool) -> String {
         if shift.state == .locked { return word.uppercased() }
         guard let first = word.first else { return word }
         if capital { return first.uppercased() + word.dropFirst() }
+        if !autoCapitalizes {
+            return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
+        }
         guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2 else { return word }
         let capitalised = first.uppercased() + word.dropFirst()
         return autocorrect.checker.isWordValid(capitalised) && !autocorrect.checker.isWordValid(word) ? capitalised : word

@@ -510,6 +510,16 @@
         }
       }
     },
+    "Auto-capitalization" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动大写"
+          }
+        }
+      }
+    },
     "Autocorrect" : {
       "localizations" : {
         "zh-Hans" : {
@@ -556,6 +566,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "取消听写"
+          }
+        }
+      }
+    },
+    "Capitalizes the start of sentences" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "句首字母自动大写"
           }
         }
       }

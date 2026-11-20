@@ -16,6 +16,7 @@ struct FullKeyboardSettings {
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
         static let autocorrect = "settings.keyboardAutocorrect"
+        static let autoCapitalization = "settings.keyboardAutoCapitalization"
         static let spatialAutocorrect = "experiments.spatialAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
@@ -39,6 +40,17 @@ struct FullKeyboardSettings {
     var isEnabled: Bool {
         get { defaults?.object(forKey: Key.fullKeyboard) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.fullKeyboard) }
+    }
+
+    /// Settings › Keyboard › Auto-capitalization, as Apple's switch of the same name. On by
+    /// default: shift turns itself on where the field asks (the start of a field or sentence,
+    /// after "." "!" "?"). Off, Hex never adds a capital you didn't type: shift stays off
+    /// whatever the field's `autocapitalizationType`, and autocorrect and swipe typing keep
+    /// words lowercase ("i", "i'm", "monday") unless they're your own spelling. Dictation
+    /// keeps its own Lowercase setting.
+    var autoCapitalization: Bool {
+        get { defaults?.object(forKey: Key.autoCapitalization) as? Bool ?? true }
+        nonmutating set { defaults?.set(newValue, forKey: Key.autoCapitalization) }
     }
 
     /// Cautious autocorrect on space. On by default.
