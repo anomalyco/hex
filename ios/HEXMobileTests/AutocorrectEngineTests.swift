@@ -283,6 +283,68 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNotEqual(fix(engine.autocorrect, "eachother")?.contains("-"), true)
     }
 
+    // MARK: - Completions
+
+    private func strip(_ engine: AutocorrectEngine, _ typed: String) -> [String] {
+        engine.suggestions(beforeInput: typed, field: .text, autocorrectionType: .default).map(\.replacement)
+    }
+
+    func testCompletionsKeepTheDictionarysFrequencyOrderAheadOfYourContacts() {
+        let engine = stubbed {
+            $0.valid = ["zo"]
+            // Most probable first, as UITextChecker lists them; not by length or alphabet.
+            $0.completionTable = ["zo": ["zone", "zoo", "zombie", "zones"]]
+        }
+        engine.loadLexiconEntries([("Zorbin", "Zorbin"), ("Zoltrax", "Zoltrax"), ("zoeticket", "zoeticket")])
+        XCTAssertEqual(strip(engine, "zo"), ["zo", "zone", "zoo"])
+        XCTAssertEqual(strip(engine, "Zo"), ["Zo", "Zone", "Zoo"], "a capital at the start of a sentence still means words first")
+    }
+
+    func testNamesComeLastUnlessYouTypedACapital() {
+        let engine = stubbed {
+            $0.valid = ["qu"]
+            $0.completionTable = ["qu": ["Quilla", "quip", "quiz"]]
+        }
+        engine.loadLexiconEntries([("Quorvent", "Quorvent"), ("qubitly", "qubitly")])
+        XCTAssertEqual(strip(engine, "qu"), ["qu", "quip", "quiz"])
+        XCTAssertEqual(strip(engine, "Qu"), ["Qu", "Quilla", "Quip"], "you typed a capital: names keep their place")
+
+        // With fewer dictionary words, your own lowercase word comes before a name.
+        let few = stubbed {
+            $0.valid = ["qu"]
+            $0.completionTable = ["qu": ["Quilla", "quip"]]
+        }
+        few.loadLexiconEntries([("Quorvent", "Quorvent"), ("qubitly", "qubitly")])
+        XCTAssertEqual(strip(few, "qu"), ["qu", "quip", "qubitly"])
+        XCTAssertEqual(strip(few, "Qu"), ["Qu", "Quilla", "Quip"])
+        // Nothing else: a contact's name is still offered.
+        let names = stubbed { $0.valid = ["qu"] }
+        names.loadLexiconEntries([("Quorvent", "Quorvent")])
+        XCTAssertEqual(strip(names, "qu"), ["qu", "Quorvent"])
+    }
+
+    func testTheStripNeverRepeatsWhatYouTyped() {
+        let engine = stubbed {
+            $0.valid = ["k", "kay"]
+            $0.completionTable = ["k": ["k", "know", "keep"], "kay": ["kay", "kayak"]]
+        }
+        XCTAssertEqual(strip(engine, "k"), ["k", "know", "keep"], "one letter gets completions too")
+        XCTAssertEqual(strip(engine, "kay"), ["kay", "kayak"])
+        XCTAssertEqual(strip(engine, "Kay"), ["Kay", "Kayak"])
+        XCTAssertEqual(strip(engine, "kq"), ["kq"], "nothing to offer: only the left slot, not a second copy")
+        XCTAssertEqual(
+            engine.suggestions(beforeInput: "kq", field: .text, autocorrectionType: .default).map(\.kind),
+            [.keepLiteral]
+        )
+    }
+
+    func testTheSystemDictionaryRanksCommonWordsFirst() {
+        // iOS 27's UITextChecker lists "b" as but, be, because… and "th" as the, they, that's….
+        XCTAssertEqual(Array(strip(engine.autocorrect, "b").dropFirst()), ["but", "be"])
+        XCTAssertEqual(strip(engine.autocorrect, "th").dropFirst().first, "the")
+        XCTAssertEqual(strip(engine.autocorrect, "Th").dropFirst().first, "The")
+    }
+
     func testTurningAutocorrectSettingOffKeepsSuggestionsWithoutAutoReplacing() {
         engine.autocorrect.isEnabled = false
         typeWord("dont")

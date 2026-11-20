@@ -310,18 +310,7 @@ final class AutocorrectEngine {
             pool.append(Self.matchCase(of: token, onto: suggested))
         }
 
-        // Prefix matches from Contacts / lexicon terms.
-        if lower.count >= 2 {
-            for term in lexiconTerms where term.lowercased().hasPrefix(lower) && term.lowercased() != lower {
-                let candidate = Self.matchCase(of: token, onto: term)
-                if !pool.contains(where: { $0.caseInsensitiveCompare(candidate) == .orderedSame }) {
-                    pool.append(candidate)
-                }
-                if pool.count >= 3 { break }
-            }
-        }
-
-        // Spelling guesses or prefix completions from `UITextChecker`.
+        // Spelling guesses for a word the dictionary doesn't know.
         if pool.count < 2 && token.count >= 2 {
             let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower) || checker.isWordValid(token)
             if !valid {
@@ -334,39 +323,57 @@ final class AutocorrectEngine {
                     if pool.count >= 2 { break }
                 }
             }
-            if pool.count < 2 {
-                let completions = checker.completions(for: token)
-                    .filter { $0.count > token.count && $0.count <= token.count + 8 }
-                    .sorted { a, b in
-                        if a.count != b.count { return a.count < b.count }
-                        return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-                    }
-                for item in completions {
-                    let cased = Self.matchCase(of: token, onto: item)
-                    if !pool.contains(where: { $0.caseInsensitiveCompare(cased) == .orderedSame }) {
-                        pool.append(cased)
-                    }
-                    if pool.count >= 2 { break }
-                }
+        }
+
+        // Completions of what you're typing, the likeliest first.
+        if pool.count < 2 {
+            for item in rankedCompletions(for: token)
+            where item != token && !pool.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
+                pool.append(item)
+                if pool.count >= 2 { break }
             }
         }
 
         let literal = KeyboardSuggestion(displayText: "“\(token)”", replacement: token, kind: .keepLiteral)
-        let primary: KeyboardSuggestion = if let first = pool.first {
-            KeyboardSuggestion(
-                displayText: first,
-                replacement: first,
-                kind: .primary(autoReplace: autoFix != nil)
-            )
-        } else {
-            KeyboardSuggestion(displayText: token, replacement: token, kind: .primary(autoReplace: false))
-        }
+        // Nothing better than what you typed: the strip shows it once, not again in the centre.
+        guard let first = pool.first else { return [literal] }
+        let primary = KeyboardSuggestion(
+            displayText: first,
+            replacement: first,
+            kind: .primary(autoReplace: autoFix != nil)
+        )
         let secondary: KeyboardSuggestion? = if pool.count >= 2 {
             KeyboardSuggestion(displayText: pool[1], replacement: pool[1], kind: .secondary)
         } else {
             nil
         }
         return [literal, primary] + (secondary.map { [$0] } ?? [])
+    }
+
+    /// Words that start with `token`, the likeliest first, cased like `token`.
+    ///
+    /// `UITextChecker` already lists completions most probable first (its documented order,
+    /// and on iOS 27 plainly by frequency: "b" gives but, be, because), so that order is
+    /// kept. Your own words from `UILexicon` (Contacts names, text replacements) come
+    /// after the dictionary's, and a capitalised name comes last of all unless you typed a
+    /// capital, so "th" offers "the" and "they", not a contact called Thompson.
+    private func rankedCompletions(for token: String) -> [String] {
+        let lower = token.lowercased()
+        let typedCapital = token.first?.isUppercase == true
+        let isName: (String) -> Bool = { $0.first?.isUppercase == true }
+        var seen: Set<String> = [lower]
+        var common: [String] = []
+        var yours: [String] = []
+        var names: [String] = []
+        for item in checker.completions(for: lower)
+        where item.count > token.count && item.count <= token.count + 8 && seen.insert(item.lowercased()).inserted {
+            if isName(item) && !typedCapital { names.append(item) } else { common.append(item) }
+        }
+        for term in lexiconTerms
+        where term.count > token.count && term.lowercased().hasPrefix(lower) && seen.insert(term.lowercased()).inserted {
+            if isName(term) && !typedCapital { names.append(term) } else { yours.append(term) }
+        }
+        return (common + yours + names).map { Self.matchCase(of: token, onto: $0) }
     }
 
     /// Returns `(tokenToDelete, replacement)` only when cautious autocorrect is confident.
