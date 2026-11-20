@@ -1,0 +1,52 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Dictate with ${applicationName}" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Dictate with ${applicationName}",
+              "Start ${applicationName} dictation"
+            ]
+          }
+        },
+        "zh-Hans" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "用 ${applicationName} 听写",
+              "开始 ${applicationName} 听写"
+            ]
+          }
+        }
+      }
+    },
+    "Warm ${applicationName} keyboard" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Warm ${applicationName} keyboard",
+              "Start ${applicationName} session"
+            ]
+          }
+        },
+        "zh-Hans" : {
+          "stringSet" : {
+            "state" : "translated",
+            "values" : [
+              "让 ${applicationName} 键盘待命",
+              "开始 ${applicationName} 待命"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.3"
+}
