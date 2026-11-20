@@ -1040,7 +1040,7 @@ final class FullKeyboardEngine {
         if let log = typingLog {
             log.ui("swipe_end", [
                 TypingLogField("points", .int(points)),
-                TypingLogField("ms", decodeTime.map { .int(Int(($0 * 1000).rounded())) } ?? .null),
+                TypingLogField("ms", decodeTime.map { .ms($0 * 1000) } ?? .null),
                 TypingLogField("readings", .strings(Array(readings.prefix(4)))),
             ])
         }

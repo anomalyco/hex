@@ -250,6 +250,12 @@ final class SwipeTrailView: UIView {
         shape.frame = bounds
     }
 
+    /// Off screen, the display link (which holds this view) stops.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { clear() }
+    }
+
     var isShowing: Bool { shape.path != nil }
 
     func begin(_ start: [CGPoint]) {
@@ -257,7 +263,7 @@ final class SwipeTrailView: UIView {
         shape.opacity = 1
         let now = clock()
         points = start.map { ($0, now) }
-        if link == nil {
+        if link == nil, window != nil {
             let link = CADisplayLink(target: self, selector: #selector(tick))
             link.add(to: .main, forMode: .common)
             self.link = link
