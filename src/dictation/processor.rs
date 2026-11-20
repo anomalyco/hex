@@ -80,6 +80,9 @@ pub struct Profile {
     /// The mode's speech model and language while it matches the foreground
     /// app (Labs › Switch model with app).
     speech: Option<crate::app_settings::KeyboardModelChoice>,
+    /// Rewrite this mode's dictations into plain, neutral wording on this Mac
+    /// (Labs › Neutral voice, macOS).
+    neutral_voice: bool,
 }
 
 impl Profile {
@@ -94,6 +97,7 @@ impl Profile {
             transformations: Vec::new(),
             vocabulary: Vec::new(),
             speech: None,
+            neutral_voice: false,
         }
     }
 
@@ -159,14 +163,16 @@ impl Profile {
         } else {
             &mode.name
         };
-        Self::configured(
+        let mut profile = Self::configured(
             name,
             ReplacementSet::new(&mode.replacements),
             mode.transformations.clone(),
             &mode.post_processing,
         )
         .vocabulary(mode.vocabulary.clone())
-        .speech(mode.speech.clone())
+        .speech(mode.speech.clone());
+        profile.neutral_voice = mode.neutral_voice;
+        profile
     }
 
     /// Builds a runtime profile from persisted settings. A malformed model key
@@ -405,10 +411,12 @@ impl Profiles {
 
     pub fn processes(&self, context: &ContextSnapshot) -> bool {
         let profile = self.select(context);
-        // A cleanup-only dictation still shows the HUD's processing stage.
+        // A cleanup-only or neutral-only dictation still shows the HUD's
+        // processing stage.
         profile.ai_enabled
             || !profile.transformations.is_empty()
             || crate::dictation::apple_cleanup::runs_here()
+            || (profile.neutral_voice && crate::dictation::neutral_voice::runs_here())
     }
 
     fn corrected(
@@ -500,6 +508,23 @@ impl Profiles {
             source,
             DictationLabs::current(),
         );
+        // Labs › Neutral voice replaces both the rewrite and the cleanup for
+        // an opted-in mode, and outranks the voice prompt too, so a privacy
+        // dictation never reaches OpenCode.
+        if let Some((text, observation)) = crate::dictation::neutral_voice::run(
+            &corrected,
+            numbers_only(&corrected),
+            cancelled,
+            profile.neutral_voice,
+            source,
+        ) {
+            return Processed {
+                text,
+                nothing: false,
+                observation,
+                transformations: profile.transformations.clone(),
+            };
+        }
         // Labs › Rewrite by voice: heard speech may carry a spoken instruction
         // that replaces the mode's rewrite with one request of its own.
         if source == Source::Dictation
@@ -2121,6 +2146,61 @@ mod tests {
         );
         assert_eq!(processed.text, "one two three four five");
         assert!(processed.observation.is_none());
+    }
+
+    /// Only a mode that opts in carries Labs › Neutral voice into its
+    /// profile; every other mode behaves as before.
+    #[test]
+    fn only_a_mode_that_asks_for_neutral_voice_carries_it() {
+        use crate::app_settings::{DictationMode, DictationProcessingSettings};
+        let profiles = Profiles::from_settings(&DictationProcessingSettings {
+            modes: vec![
+                DictationMode {
+                    applications: vec!["Notes".into()],
+                    ..Default::default()
+                },
+                DictationMode {
+                    applications: vec!["Slack".into()],
+                    neutral_voice: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        assert!(!profiles.select(&context("Notes", None)).neutral_voice);
+        assert!(profiles.select(&context("Slack", None)).neutral_voice);
+        assert!(!profiles.select(&context("Zed", None)).neutral_voice);
+    }
+
+    /// On an OS without the lab, a mode's switch alone never reaches the
+    /// stage: the pipeline checks the lab's own gate too.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_mode_switch_alone_never_reaches_the_neutral_voice_stage() {
+        use crate::app_settings::{DictationMode, DictationProcessingSettings};
+        let profiles = Profiles::from_settings(&DictationProcessingSettings {
+            modes: vec![DictationMode {
+                applications: vec!["Notes".into()],
+                neutral_voice: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let before = crate::dictation::neutral_voice::calls();
+        let processed = profiles.process_cancellable(
+            "we should ship this on friday",
+            "en",
+            &context("Notes", None),
+            &AtomicBool::new(false),
+            Source::Dictation,
+        );
+        assert_eq!(processed.text, "we should ship this on friday");
+        assert!(processed.observation.is_none());
+        assert_eq!(
+            crate::dictation::neutral_voice::calls(),
+            before,
+            "the stage never ran"
+        );
     }
 
     #[test]

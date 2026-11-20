@@ -540,8 +540,8 @@ was not compiled or run here (Linux check, Windows cross-clippy only).
 On macOS a raw capture never reaches the processing worker at all
 (`parakeet::run_inference_worker` queues only Paste, Copy only, and Print; the
 raw targets go straight to output), so it also skips Labs › Clean up with
-Apple Intelligence ([labs.md](labs.md)); elsewhere that stage is macOS-only,
-so it never runs on the shared pipeline either.
+Apple Intelligence and Labs › Neutral voice ([labs.md](labs.md)); elsewhere
+that stage is macOS-only, so it never runs on the shared pipeline either.
 
 ### Transform Typed Text (Labs, Linux)
 
@@ -657,7 +657,8 @@ do they say Default and Use OpenCode default, because then OpenCode's own
 default answers. `live.ndjson` and History's processing observation record the
 rewrite model as `provider/id` in a `model` field, omitted when no model was
 named (OpenCode's own default answered, Hex's automatic choice failed before any
-model answered, or the on-device Apple Intelligence cleanup ran). The "dictation
+model answered, or the on-device Apple Intelligence cleanup or Neutral voice
+pass ran). The "dictation
 post-processing" and "voice prompt" completed and failed log lines name it too:
 `provider/id` for the named model that answered, or on failure the one the
 request asked for; `opencode default` when no model was named and OpenCode's

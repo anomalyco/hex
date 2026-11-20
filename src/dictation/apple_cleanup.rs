@@ -134,7 +134,7 @@ fn observation(latency_ms: u64, fallback: Option<String>) -> ProcessingObservati
 #[cfg(target_os = "macos")]
 fn clean(text: &str) -> (String, Option<ProcessingObservation>) {
     let started = Instant::now();
-    let outcome = crate::apple_intelligence::generate_text(INSTRUCTIONS, text, TIME_BUDGET);
+    let outcome = crate::apple_intelligence::generate_text(INSTRUCTIONS, text, 0.2, TIME_BUDGET);
     let latency_ms = started.elapsed().as_millis() as u64;
     match outcome {
         Ok(answer) => {

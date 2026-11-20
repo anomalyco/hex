@@ -152,6 +152,17 @@ pub fn clean_up() -> bool {
     CLEAN_UP.load(Ordering::Acquire) && Feature::CleanUpWithAppleIntelligence.on_this_os()
 }
 
+/// Labs › Neutral voice: a dictation in a mode that opts in is rewritten into
+/// plain, neutral wording on this Mac, instead of the OpenCode rewrite and
+/// the cleanup (read as each dictation's processing starts, and for the HUD's
+/// processing stage). The state word has no bit for it: its own atomic,
+/// written by `labs::apply`, and loaded here first in a process that never
+/// applied.
+pub fn neutral_voice() -> bool {
+    let _ = state();
+    NEUTRAL_VOICE.load(Ordering::Acquire) && Feature::NeutralVoice.on_this_os()
+}
+
 /// A pasted dictation gets one leading space when the character before the
 /// cursor asks for one (macOS; read as each paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

@@ -44,6 +44,10 @@ pub struct DictationMode {
         serialize_with = "serialize_saved"
     )]
     pub vocabulary: Vec<VocabularyEntry>,
+    /// Rewrite this mode's dictations into plain, neutral wording on this Mac
+    /// (Labs › Neutral voice, macOS). Off for every existing mode.
+    #[serde(default)]
+    pub neutral_voice: bool,
 }
 
 /// Persisted OpenCode rewrite settings for one mode.
@@ -67,5 +71,30 @@ impl Default for DictationPostProcessing {
             variant: None,
             deadline_seconds: 30,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DictationMode;
+
+    /// A mode saved before Labs › Neutral voice has no field, and loads with
+    /// the stage off.
+    #[test]
+    fn a_mode_without_neutral_voice_loads_it_off() {
+        let mode: DictationMode = serde_json::from_str(
+            r#"{"name":"Chat","applications":["Slack"],"replacements":[],"transformations":[]}"#,
+        )
+        .unwrap();
+        assert!(!mode.neutral_voice);
+    }
+
+    #[test]
+    fn a_mode_keeps_its_neutral_voice_choice() {
+        let mode: DictationMode =
+            serde_json::from_str(r#"{"name":"Chat","neutral_voice":true}"#).unwrap();
+        assert!(mode.neutral_voice);
+        let saved = serde_json::to_value(&mode).unwrap();
+        assert_eq!(saved["neutral_voice"], true);
     }
 }

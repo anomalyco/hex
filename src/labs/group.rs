@@ -86,6 +86,7 @@ impl Feature {
             | Self::SpokenSymbols
             | Self::FillerWords
             | Self::CleanUpWithAppleIntelligence
+            | Self::NeutralVoice
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::ReturnToApp

@@ -102,6 +102,10 @@ pub struct LabsSettings {
     /// Filler words such as "um" and "uh" are removed from dictations (issue 631).
     pub filler_words: bool,
     pub clean_up_with_apple_intelligence: bool,
+    /// A dictation in a mode that opts in is rewritten into plain, neutral
+    /// wording on this Mac instead of the OpenCode rewrite and the cleanup
+    /// (macOS).
+    pub neutral_voice: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
     pub second_dictation_shortcut: bool,
     /// Up to four more dictation shortcuts, each with its own activation
@@ -384,6 +388,7 @@ impl Default for LabsSettings {
             spoken_formatting: false,
             filler_words: false,
             clean_up_with_apple_intelligence: false,
+            neutral_voice: false,
             second_dictation_shortcut: false,
             more_dictation_shortcuts: false,
             terminal_paste_shortcut: false,

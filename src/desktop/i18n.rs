@@ -1722,6 +1722,7 @@ mod tests {
         include_str!("../rune_ui/model_details.rs"),
         include_str!("../rune_ui/model_import.rs"),
         include_str!("../rune_ui/modes.rs"),
+        include_str!("../rune_ui/modes/neutral_voice.rs"),
         include_str!("../rune_ui/onboarding_kit/first_run.rs"),
         include_str!("../rune_ui/onboarding_kit/flows.rs"),
         include_str!("../rune_ui/onboarding_kit/game.rs"),

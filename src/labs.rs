@@ -140,6 +140,7 @@ impl Feature {
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
             Self::CleanUpWithAppleIntelligence => settings.labs.clean_up_with_apple_intelligence,
+            Self::NeutralVoice => settings.labs.neutral_voice,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
@@ -226,6 +227,7 @@ impl Feature {
             &mut labs.spoken_formatting,
             &mut labs.filler_words,
             &mut labs.clean_up_with_apple_intelligence,
+            &mut labs.neutral_voice,
             &mut labs.second_dictation_shortcut,
             &mut labs.terminal_paste_shortcut,
             &mut labs.smart_spacing,
@@ -318,6 +320,7 @@ impl Feature {
             Self::CleanUpWithAppleIntelligence => {
                 settings.labs.clean_up_with_apple_intelligence = on;
             }
+            Self::NeutralVoice => settings.labs.neutral_voice = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
@@ -547,6 +550,11 @@ static YOLO_MODE_APPS: RwLock<Option<Vec<String>>> = RwLock::new(None);
 /// written by [`state`] and [`apply`].
 static CLEAN_UP: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Neutral voice's switch, set beside [`STATE`] like [`PRINT_START`]:
+/// the state word is full, so this lab has its own atomic, written by
+/// [`state`] and [`apply`].
+static NEUTRAL_VOICE: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Microphone key alone's switch, set beside [`STATE`] like
 /// [`PRINT_START`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
@@ -601,6 +609,7 @@ fn state() -> u64 {
                 CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
+                NEUTRAL_VOICE.store(neutral_voice_enabled(&saved), Ordering::Release);
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 PASTE_LAST_PICKER.store(paste_last_picker_enabled(&saved), Ordering::Release);
                 store_api_browser_access(&saved);
@@ -718,6 +727,14 @@ fn clean_up_enabled(settings: &LabsSettings) -> bool {
         && Feature::CleanUpWithAppleIntelligence.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Neutral voice in this build, before its
+/// managed lock; the state word has no bit for it.
+fn neutral_voice_enabled(settings: &LabsSettings) -> bool {
+    settings.neutral_voice
+        && Feature::NeutralVoice.shipped()
+        && Feature::NeutralVoice.managed().is_none()
+}
+
 /// Whether `settings` turn on Labs › Microphone key alone in this build,
 /// before its managed lock; the state word has no bit for it.
 fn microphone_key_enabled(settings: &LabsSettings) -> bool {
@@ -814,6 +831,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
+    NEUTRAL_VOICE.store(neutral_voice_enabled(settings), Ordering::Release);
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     PASTE_LAST_PICKER.store(paste_last_picker_enabled(settings), Ordering::Release);
     store_api_browser_access(settings);
@@ -1315,6 +1333,33 @@ mod tests {
         assert_eq!(
             Feature::CleanUpWithAppleIntelligence.name(),
             "clean-up-apple-intelligence"
+        );
+    }
+
+    /// The neutral voice lab's own atomic, its switch, and its macOS-only
+    /// card: the state word is full, so it is not a bit.
+    #[test]
+    fn neutral_voice_is_its_own_atomic_and_macos_only() {
+        let labs = LabsSettings::default();
+        assert!(!neutral_voice_enabled(&labs));
+        assert!(!Feature::NeutralVoice.on(&AppSettings::default()));
+        let on = LabsSettings {
+            neutral_voice: true,
+            ..LabsSettings::default()
+        };
+        assert!(neutral_voice_enabled(&on));
+        assert_eq!(
+            Feature::NeutralVoice.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::NeutralVoice.added(), 20261120);
+        assert_eq!(Feature::NeutralVoice.audience(), Audience::Everyone);
+        assert_eq!(Feature::NeutralVoice.group(), Group::Output);
+        assert_eq!(Feature::NeutralVoice.settings_key(), "labs.neutral_voice");
+        assert_eq!(Feature::NeutralVoice.name(), "neutral-voice");
+        assert_eq!(
+            Feature::for_settings_key("labs.neutral_voice"),
+            Some(Feature::NeutralVoice)
         );
     }
 
