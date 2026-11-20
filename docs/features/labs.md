@@ -59,6 +59,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        did before Output replaced it; off, `hex window show --pane modes` opens Output
 │                                        // checks: the_modes_editor_lab_brings_modes_back_to_the_sidebar (rune_ui/tests.rs)
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating; its card says when the selected speech model can't stream (Linux: or Speech engine is CPU), so no words would show
+├── Faster live text no    labs.faster_live_text               live words sooner: a shorter lookahead for Parakeet buffered
+│                                        streaming, chosen from the model's own menus (Unified English 70/7/7:
+│                                        1.12 s instead of 2.08 s), at about 1.6 times the encoder work; a change
+│                                        re-probes at the next capture, and an off-menu env value falls back
 ├── Stop phrase     no    labs.stop_phrase + labs.stop_phrase_text ("stop dictation", every OS)
 │                                        saying the phrase at the end of a hands-free dictation finishes it, as if the
 │                                        shortcut were pressed again, and the phrase never reaches the pasted text;

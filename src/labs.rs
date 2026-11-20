@@ -121,6 +121,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone,
             Self::Playground => settings.labs.playground,
             Self::LiveText => settings.labs.live_text,
+            Self::FasterLiveText => settings.labs.faster_live_text,
             Self::FailureNotices => settings.labs.failure_notices,
             Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
@@ -214,6 +215,7 @@ impl Feature {
             &mut settings.share_dictation_shortcut,
             &mut labs.playground,
             &mut labs.live_text,
+            &mut labs.faster_live_text,
             &mut labs.failure_notices,
             &mut labs.live_typing,
             &mut labs.live_chapters,
@@ -301,6 +303,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone = on,
             Self::Playground => settings.labs.playground = on,
             Self::LiveText => settings.labs.live_text = on,
+            Self::FasterLiveText => settings.labs.faster_live_text = on,
             Self::FailureNotices => settings.labs.failure_notices = on,
             Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
@@ -428,8 +431,10 @@ const RECENT_DICTATIONS: u64 = 1 << 19;
 const ANNOTATE_POINTER_SCREEN: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
-// 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps
-// graduated).
+/// Labs › Faster live text: a shorter stream lookahead, on the bit the
+/// graduated meeting labs left free.
+const FASTER_LIVE_TEXT: u64 = 1 << 23;
+// 1 << 24 is free (More call apps graduated).
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 // 1 << 26 is free (Vocabulary in meeting notes graduated).
 const NOTCH_INDICATOR: u64 = 1 << 27;
@@ -862,6 +867,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
     let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
+        (
+            Feature::FasterLiveText,
+            settings.faster_live_text,
+            FASTER_LIVE_TEXT,
+        ),
         (
             Feature::FailureNotices,
             settings.failure_notices,

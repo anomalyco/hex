@@ -16,6 +16,7 @@ impl Feature {
             Self::VoiceFilter | Self::Playground | Self::PasteLastPicker => Audience::Dev,
             Self::Meetings
             | Self::LiveText
+            | Self::FasterLiveText
             | Self::FailureNotices
             | Self::LiveTyping
             | Self::LiveChapters
@@ -168,7 +169,7 @@ impl Feature {
             Self::ModesEditor => 20261118,
             Self::CalendarSelectAll => 20261118,
             Self::PasteLastPicker => 20261119,
-            Self::NeutralVoice | Self::AnnotatePointerScreen => 20261120,
+            Self::NeutralVoice | Self::AnnotatePointerScreen | Self::FasterLiveText => 20261120,
         }
     }
 
@@ -293,6 +294,7 @@ impl Feature {
             Self::Playground
             | Self::KeyboardModelSwitching
             | Self::LiveText
+            | Self::FasterLiveText
             | Self::FailureNotices
             | Self::SecondDictationShortcut
             | Self::VocabularyBiasing
@@ -335,6 +337,7 @@ impl Feature {
             Self::VoiceFilter => "voice-filter",
             Self::Playground => "playground",
             Self::LiveText => "live-text",
+            Self::FasterLiveText => "faster-live-text",
             Self::FailureNotices => "failure-notices",
             Self::LiveTyping => "live-typing",
             Self::LiveChapters => "live-chapters",
@@ -422,6 +425,7 @@ impl Feature {
             Self::VoiceFilter => "experimental.hex_microphone",
             Self::Playground => "labs.playground",
             Self::LiveText => "labs.live_text",
+            Self::FasterLiveText => "labs.faster_live_text",
             Self::FailureNotices => "labs.failure_notices",
             Self::LiveTyping => "labs.live_typing",
             Self::LiveChapters => "labs.live_chapters",

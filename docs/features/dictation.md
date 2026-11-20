@@ -1741,6 +1741,15 @@ Model advertises streaming, GPU device             // dictate.streaming
   Load or switch model -> Probe a one-second silent stream (also prewarms the stream graph)
        ├── Succeeds -> Stream shortcut captures
        └── Fails, CPU device, Apple Speech, or HEX_STREAMING=0 -> Whole-clip path only
+  Geometry, from the model's own GGUF menus (frames of 80 ms)          // dictate.streaming-geometry
+       ├── Default -> the largest left, chunk, and right context; Unified English 70/13/13
+       │             is 5.6 s left, 1.04 s chunk, 1.04 s right (2.08 s of lookahead)
+       ├── Labs + labs.faster_live_text -> the largest chunk from 2 to 7 frames and the
+       │             largest right up to 7; Unified English 70/7/7 is 0.56/0.56 s (1.12 s)
+       ├── HEX_STREAM_CHUNK_MS + HEX_STREAM_RIGHT_MS -> those milliseconds for benchmarks
+       │   ├── Right alone defaults to the chunk, as a chunk alone always has
+       │   └── The model's menu rejects them -> warn, then stream with the default geometry
+       └── Any change re-probes at the next capture, with no restart
   Shortcut capture passes the hold threshold (Toggle on Windows and Linux: on press)
     -> Open one live stream; feed the 16 kHz backlog, then every 160 ms
        // same audio as the final clip, pre-roll included; never blocks capture
@@ -1851,8 +1860,16 @@ a later capture opens one, and the job then waits for its text in order. Linux
 ([windows/dictation.rs](../../src/windows/dictation.rs)) drive the same engine
 from their capture loops. Parakeet buffers with its largest context menu
 (Unified English: 5.6 s left, 1.04 s chunk, 1.04 s right), its most accurate and
-least compute-intensive setting; `HEX_STREAM_CHUNK_MS` overrides the chunk for
-benchmarks and `HEX_STREAMING=1` streams on any device, including a CPU
+least compute-intensive setting. Labs › Faster live text (`labs.faster_live_text`,
+off by default) asks for a shorter tuple chosen from the model's own GGUF menu
+(`stt.parakeet.encoder.att_chunk_{chunk,right}_choices`, in 80 ms frames): the
+largest chunk from 2 to 7 frames and the largest right up to 7, which for
+Unified English is 70/7/7 (0.56 s chunk and right, 1.12 s of lookahead instead
+of 2.08 s) at about 1.6 times the encoder work. `HEX_STREAM_CHUNK_MS` and
+`HEX_STREAM_RIGHT_MS` override both for benchmarks, ahead of the lab; a chunk
+alone still sets the right context, as it always has. A geometry the model's
+menu rejects warns and falls back to the default tuple instead of turning
+streaming off, and `HEX_STREAMING=1` streams on any device, including a CPU
 (diagnostics and the Linux CI fixture). Each dictation logs
 `source=stream|offline|fallback` and `finish_ms`. The macOS "Transcribe during
 pauses" setting no longer affects dictation.

@@ -62,6 +62,9 @@ impl AppearanceTheme {
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
     pub live_text: bool,
+    /// Live text with a shorter lookahead, so its words appear sooner at a
+    /// little more GPU work (Parakeet buffered streaming).
+    pub faster_live_text: bool,
     /// A failed dictation's explanation beside the HUD for a few seconds.
     pub failure_notices: bool,
     /// Provisional words in the focused text field as a Wayland input-method
@@ -373,6 +376,7 @@ impl Default for LabsSettings {
     fn default() -> Self {
         Self {
             live_text: false,
+            faster_live_text: false,
             failure_notices: false,
             live_typing: false,
             live_chapters: false,

@@ -1306,9 +1306,13 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let options = self
-            .model()
-            .and_then(|model| model.stream_options().cloned());
+        let options = self.model().and_then(|model| {
+            // Labs › Faster live text and the env overrides may have
+            // changed since this model loaded; a load already probed with
+            // the current tuning, so this costs a comparison until then.
+            model.refresh_stream();
+            model.stream_options().cloned()
+        });
         let Some(options) = options else {
             let loaded = self.model.is_some();
             let model_streams = self
@@ -1426,10 +1430,11 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let Some(options) = self
-            .model()
-            .and_then(|model| model.stream_options().cloned())
-        else {
+        let options = self.model().and_then(|model| {
+            model.refresh_stream();
+            model.stream_options().cloned()
+        });
+        let Some(options) = options else {
             return;
         };
         if cancel.is_cancelled() {

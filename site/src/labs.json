@@ -25,6 +25,19 @@
       "title": "Live text"
     },
     {
+      "added": "2026-11-20",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "faster-live-text",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Show live words sooner while you speak, with a shorter lookahead and a little more GPU work",
+      "title": "Faster live text"
+    },
+    {
       "added": "2026-11-07",
       "group": "dictation",
       "groupTitle": "Dictation",
