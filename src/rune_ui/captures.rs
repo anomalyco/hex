@@ -115,6 +115,7 @@ pub(super) struct CapturesPane {
     thumbs: RefCell<HashMap<u64, rune::Image>>,
     /// Larger pictures for the unified History's detail, decoded from the
     /// same files; a fixture fills them directly.
+    #[cfg(all(target_os = "macos", hex_capture))]
     pictures: RefCell<HashMap<u64, rune::Image>>,
     /// The entry whose Copy was pressed last.
     copied: Option<u64>,
@@ -129,6 +130,7 @@ impl CapturesPane {
 
     /// Entry `entry`'s picture at `width` points, for the unified History's
     /// detail; the list's own 72-point thumbs stay in [`Self::thumbnail`].
+    #[cfg(all(target_os = "macos", hex_capture))]
     pub(super) fn picture(&self, entry: &Listed, width: f32) -> Option<rune::Pixels> {
         if let Some(image) = self.pictures.borrow().get(&entry.id())
             && image.is_ready()
@@ -541,6 +543,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
 
 /// The Copy action a unified History row shows in its hover, in the age's
 /// place: a capture's file or bundle goes on the clipboard.
+#[cfg(all(target_os = "macos", hex_capture))]
 pub(super) fn copy_action(ui: &Ui, p: Paint, id: u64, in_row: bool) -> El {
     let copied = ui.captures.copied == Some(id);
     ld::row_action(
