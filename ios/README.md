@@ -494,8 +494,8 @@ uses Anomaly's signing team. The GitHub **Release Hex Mobile** workflow checks
 `dev` at noon and 6 p.m. Chicago time, or on manual dispatch, and cuts an
 `ios-beta-*` prerelease when iOS inputs have changed. These tags are separate
 from desktop releases. The marketing version stays fixed across beta builds.
-The App Store's first release is 1.0 (`MARKETING_VERSION`), which is the 0.2.0
-line of TestFlight betas. Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
+`MARKETING_VERSION` stays 0.2.0 for TestFlight; App Store submissions use their own
+higher version (the first is 0.2.1). Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
 
 The Xcode Cloud workflow needs a tag start condition with prefix `ios-beta-`,
 container `ios/HEXMobile.xcodeproj`, shared scheme `HEXMobile`, an iOS Archive
