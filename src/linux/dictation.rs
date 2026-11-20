@@ -804,7 +804,7 @@ pub(crate) fn run(
                     if !capture.is_recording() && !start_pending =>
                 {
                     // A failed stream keeps its backoff; the press asks now.
-                    if input.is_recovering() {
+                    if input.is_recovering() || input.is_stalled() {
                         input.retry_now();
                     }
                     recording_flavour = flavour;
@@ -815,15 +815,17 @@ pub(crate) fn run(
                     // A short tap or chord must never create an input method;
                     // Live typing starts at the hold threshold (or the Toggle
                     // press), before the stream opens so it can demand text.
-                    cancel_typing(&mut active_typing);
-                    let pressed_at = clock.at(Instant::now()).filter(|_| audio_ready);
+                    typing::cancel(&mut active_typing);
+                    let pressed_at = clock
+                        .at(Instant::now())
+                        .filter(|_| audio_ready && !input.is_recovering() && !input.is_stalled());
                     if let Some(pressed_at) = pressed_at {
                         let pre_roll =
                             crate::dictation::hotkey_pre_roll(settings.recording_audio_behavior);
                         start_capture(&mut capture, pressed_at, pre_roll, || {
                             feedback::play_provisional_start();
                         });
-                        begin_live_typing(
+                        typing::begin(
                             &capture,
                             toggle,
                             wayland,
@@ -832,14 +834,14 @@ pub(crate) fn run(
                             &mut active_typing,
                         );
                         stream_when_due(&mut capture, &engine, toggle);
-                    } else if audio_ready || release_while_idle {
+                    } else {
+                        // The microphone cannot capture yet: recording begins
+                        // at its first fresh chunk.
                         start_pending = true;
                         if !audio_ready {
                             input.request_open();
                         }
                         feedback::prepare();
-                    } else {
-                        continue;
                     }
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
@@ -848,7 +850,7 @@ pub(crate) fn run(
                     // Released before the opening microphone produced audio:
                     // nothing was captured.
                     start_pending = false;
-                    cancel_typing(&mut active_typing);
+                    typing::cancel(&mut active_typing);
                     if let Some(print) = print.take() {
                         print.send(PrintedTranscript::NoSpeech);
                     }
@@ -926,7 +928,7 @@ pub(crate) fn run(
                 }
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
-                    cancel_typing(&mut active_typing);
+                    typing::cancel(&mut active_typing);
                     feedback::retract_start();
                     feedback::play(Tone::Cancel);
                     suppressor.restore();
@@ -1064,7 +1066,7 @@ pub(crate) fn run(
                         service.lost(MICROPHONE_LOST);
                     } else if capture.is_recording() && finishing.is_none() {
                         capture.cancel();
-                        cancel_typing(&mut active_typing);
+                        typing::cancel(&mut active_typing);
                         feedback::retract_start();
                         suppressor.restore();
                         events.dictation(DictationPhase::Cancelled, "")?;
@@ -1146,7 +1148,7 @@ pub(crate) fn run(
                 // short tap must stay inert even while its last audio lands.
                 // A client's dictation returns its text and types nothing.
                 if finishing.is_none() && !service.is_active() {
-                    begin_live_typing(
+                    typing::begin(
                         &capture,
                         toggle,
                         wayland,
@@ -1184,25 +1186,60 @@ pub(crate) fn run(
                 if let Some(finish) = &mut finishing {
                     finish.release.stop_waiting();
                 }
+                // A press that was already waiting meets a stream that still
+                // delivered nothing: the microphone is not coming back for
+                // it, so it is discarded and reported as lost.
+                let discard_pending = start_pending && !audio_ready;
+                if discard_pending {
+                    start_pending = false;
+                }
                 audio_ready = false;
+                // An idle, tail-only, or annotate-only interruption is the
+                // stream's own recovery and writes no failed dictation; a
+                // capture or a press the stream took does.
+                let mut lost = false;
                 if service.is_active() {
                     capture.cancel();
                     suppressor.restore();
                     service.lost(MICROPHONE_LOST);
+                    lost = true;
                 } else if capture.is_recording() && finishing.is_none() {
+                    let tentative = capture.tentative_start().is_some();
                     capture.cancel();
-                    cancel_typing(&mut active_typing);
+                    typing::cancel(&mut active_typing);
                     feedback::retract_start();
                     suppressor.restore();
-                    events.dictation(DictationPhase::Cancelled, "")?;
+                    if tentative {
+                        // A capture that has not passed the hold threshold
+                        // would be discarded as a short tap anyway: reopen for
+                        // the same press.
+                        start_pending = true;
+                    } else {
+                        events.dictation(DictationPhase::Cancelled, "")?;
+                        lost = true;
+                    }
                 }
-                events.dictation(
-                    DictationPhase::Failed("microphone stream interrupted; reopening".into()),
-                    "",
-                )?;
+                if discard_pending {
+                    events.dictation(DictationPhase::Discarded, "")?;
+                    // The reopened stream never delivered, so the press
+                    // never started: report it as lost, not as a quiet
+                    // discard.
+                    lost = true;
+                }
+                if start_pending {
+                    // The held press asks for the microphone now, as a press
+                    // during any recovery does.
+                    input.retry_now();
+                }
+                if lost {
+                    events.dictation(
+                        DictationPhase::Failed("microphone stream interrupted; reopening".into()),
+                        "",
+                    )?;
+                }
                 emit_state(
                     &mut events,
-                    active_state(capture.is_recording(), pending),
+                    active_state(capture.is_recording() || start_pending, pending),
                     &device_label,
                 )?;
             }
@@ -1227,7 +1264,7 @@ pub(crate) fn run(
                 // An on-demand open failed (device busy or unplugged): report
                 // it and stay released rather than stopping the listener.
                 start_pending = false;
-                cancel_typing(&mut active_typing);
+                typing::cancel(&mut active_typing);
                 service.lost(MICROPHONE_LOST);
                 suppressor.restore();
                 fail(&events, format!("could not open microphone: {error}"))?;
@@ -1240,7 +1277,7 @@ pub(crate) fn run(
         capture.cancel();
         events.dictation(DictationPhase::Cancelled, "")?;
     }
-    cancel_typing(&mut active_typing);
+    typing::cancel(&mut active_typing);
     if let Some(mut host) = capture_host.take() {
         host.shutdown(&timeline);
     }
@@ -1411,32 +1448,6 @@ fn submit_capture(
         }
     }
     Ok(false)
-}
-
-/// Starts Live typing at the hold threshold (or the Toggle press), before
-/// the stream opens so the engine sees the demand; see
-/// [`typing::begin`]. Short taps and chords create no input method.
-fn begin_live_typing(
-    capture: &DictationCapture,
-    toggle: bool,
-    wayland: bool,
-    live_typing: &mut Option<Arc<crate::linux::live_typing::LiveTyping>>,
-    next_capture_id: &mut u64,
-    typing: &mut Option<CaptureTyping>,
-) {
-    typing::begin(
-        capture,
-        toggle,
-        wayland,
-        live_typing,
-        next_capture_id,
-        typing,
-    );
-}
-
-/// Ends a capture's Live typing session without committing anything.
-fn cancel_typing(typing: &mut Option<CaptureTyping>) {
-    typing::cancel(typing);
 }
 
 fn active_state(recording: bool, pending: usize) -> VoiceState {

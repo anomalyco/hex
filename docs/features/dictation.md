@@ -2509,6 +2509,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
         `hex dictation start` capture's audio is transcribed and copied
         instead of pasted    // recovery.md#keep-an-interrupted-dictation
         -> No usable audio after the start, or a near-silent clip -> Error tone
+        -> Nothing recording, a release tail, or Annotate -> no failure record
+           // recover.idle-interruption: a wake from sleep leaves the card clear
+     -> A press that has not passed the hold threshold waits for the reopen
+        -> its capture starts at the first fresh chunk  // recover.interrupted-press
   Tone requested -> Playback worker opens the default output, then plays
      -> macOS releases ~10 s after the last tone; Windows 5 min; Linux 1 s
      -> An open macOS output is a live CoreAudio client coreaudiod services
@@ -2529,7 +2533,9 @@ listener's own event log on its runtime thread, as Windows already did. The
 listener's own stopped warning and a dictation failure are separate fields, so
 `hex status` keeps treating only the former as a stopped listener; the card
 shows the stopped warning first. A failure whose timestamp predates this run's
-start is ignored. Known
+start is ignored, and an interruption with nothing recording writes no failure
+at all, so a wake from sleep leaves the card clear (`recover.idle-interruption`).
+Known
 microphone causes say what to do in every interface language — a built-in
 microphone switched off by a closed lid, or no microphone available; other
 failures keep their logged wording. Sources and checks:

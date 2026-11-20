@@ -13,6 +13,7 @@ platforms, and dependencies.
 - [Rearm without a phantom capture](#rearm-without-a-phantom-capture).
 - [Reopen with fresh audio](#reopen-with-fresh-audio).
 - [Keep an interrupted dictation](#keep-an-interrupted-dictation).
+- [Keep a press across a reopen](#keep-a-press-across-a-reopen).
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
@@ -278,7 +279,11 @@ initial open fails OR stream interrupts
   -> a dictation held past the hold threshold, or a `hex dictation start`
      control capture, keeps what it heard    // recover.interrupted-dictation
      -> transcribed and copied, never pasted
+  -> a press that has not passed the hold threshold waits for the reopen
+     -> its capture starts at the first fresh chunk  // recover.interrupted-press
   -> otherwise cancel the incomplete capture + discard stale audio  // interrupted audio cannot return
+  -> an idle, release-tail, or annotate-only interruption is the stream's
+     own recovery: no failed dictation is recorded  // recover.idle-interruption
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
@@ -399,6 +404,10 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
 open stream stops delivering audio without an error (any OS, #1206)
   -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
   -> reopened like any interrupted stream, idle or not // logged "microphone stopped delivering audio"
+     ├── an idle listener, a submitted release tail, or Annotate copying the
+     │     microphone -> recovery only, no failed dictation // recover.idle-interruption
+     ├── a press on the stalled stream is kept, not started on dead audio
+     │     -> its capture starts at the reopened stream's first chunk
      ├── it delivered for 8 s without stopping (STREAM_PROVEN_UPTIME) -> it was working:
      │     reopen at once with the backoff reset // exactly as before
      └── any stream that fails before that never proved steady delivery (#1681)
@@ -742,6 +751,44 @@ behind the loss: one salvaged submission, and the next press records). In
 and raw clips are both copied, with normal and raw history). Proof limit:
 channel-backed audio and the output worker, not a physical microphone taken by
 a call app or a target app's clipboard.
+
+### Keep A Press Across A Reopen
+
+`recover.interrupted-press`: a shortcut press taken before the hold threshold
+that arrives while the microphone cannot capture yet — the stream stopped
+delivering, its replacement is opening, or it opened but has not delivered —
+is kept instead of dropped. The capture begins at the first fresh chunk and
+anchors there, so audio from an earlier stream never joins it. The HUD and log
+already say dictating. Releasing or cancelling while the press waits discards
+it like any pending start.
+
+A reopened stream that is interrupted again before it delivers discards the
+press and records the failure, so the person sees why nothing was dictated.
+While opens keep failing, no event ends the press: it waits until it is
+released or cancelled (Release microphone while idle's failed on-demand open
+still clears it and reports the failure), and the listener keeps retrying with
+its bounded backoff.
+
+```ts
+press before the hold threshold while the stream cannot capture
+  -> the press waits, and the log says dictating
+  -> a failed stream's replacement still starts        // audio.rs recv_timeout
+     -> start_pending never holds the microphone closed
+  -> first fresh chunk -> capture starts there, with no pre-roll
+  ├── released or cancelled meanwhile -> discarded
+  └── interrupted again before any audio -> discarded + failed dictation
+```
+
+Both listeners keep the press when `DictationCapture::tentative_start` is
+`Some`: the capture is cancelled and turned back into a pending press. A
+capture past the hold threshold is dropped. The audio-owner pieces they share
+(`capture_idle` and a stalled stream) live in
+[audio/interruption.rs](../../src/audio/interruption.rs). On macOS the
+equivalent is the cold-stream branch of
+[dictation/audio.rs](../../src/dictation/audio.rs) that turns a tentative
+capture back into its pending capture. Proof limit: the Windows listener is
+compiled only on Windows, so its arm is proven by `Check Windows` rather than
+the Linux suite.
 
 ### Fence Late Capture Notifications
 
