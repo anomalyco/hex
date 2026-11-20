@@ -163,6 +163,16 @@ final class FullKeyboardEngine {
             refreshSuggestions()
         }
     }
+    /// Bilingual autocorrect's second language on these keys (`KeyboardLanguageList.partner`),
+    /// or nil.
+    var partnerLanguage: KeyboardLanguage? {
+        get { autocorrect.partner?.language }
+        set {
+            guard newValue != autocorrect.partner?.language else { return }
+            autocorrect.setPartner(newValue)
+            refreshSuggestions()
+        }
+    }
     /// Settings › Keyboard › Languages has two or more: a quick swipe along the space bar
     /// switches language (`onLanguageSwipe`) and the cursor slides once the space bar is held
     /// (`trackpadHoldDelay`), as on SwiftKey. With one, any slide moves the cursor at once.

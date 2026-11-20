@@ -507,6 +507,24 @@ final class KeyboardLayoutTests: XCTestCase {
         )
     }
 
+    /// Bilingual autocorrect pairs the current language with the first other Latin-script one
+    /// that has a dictionary: none for Russian, nor for Serbian (no iOS dictionary), nor
+    /// between two French layouts (one dictionary).
+    func testBilingualAutocorrectPairsTwoLatinLanguagesWithDictionaries() {
+        let available = ["en_US", "fr_FR", "fr_CA", "ru_RU", "de_DE"]
+        func partner(_ chosen: [KeyboardLanguage], _ current: KeyboardLanguage) -> KeyboardLanguage? {
+            KeyboardLanguageList.resolve(chosen: chosen, stored: current, automatic: .english).partner(available: available)
+        }
+        XCTAssertEqual(partner([.english, .french, .russian], .french), .english)
+        XCTAssertEqual(partner([.english, .french, .russian], .english), .french)
+        XCTAssertNil(partner([.english, .french, .russian], .russian))
+        XCTAssertEqual(partner([.russian, .german, .english], .english), .german, "the first other Latin one")
+        XCTAssertNil(partner([.french, .frenchCanadian], .frenchCanadian), "one language, two layouts")
+        XCTAssertNil(partner([.serbianLatin, .english], .serbianLatin), "Serbian has no dictionary to check")
+        XCTAssertNil(partner([.english, .serbianLatin], .english))
+        XCTAssertNil(partner([.english], .english))
+    }
+
     /// Settings › Keyboard › Languages offers the iPhone's own keyboards first, then its
     /// languages; Switch dictation too dictates in the iPhone's region where it has one.
     func testLanguagesOfferTheIPhonesKeyboardsAndDictateInItsRegion() {

@@ -53,6 +53,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         String(rawValue.prefix { $0 != "-" })
     }
 
+    /// Latin letters, so another Latin-script language can be autocorrected on its keys
+    /// (bilingual autocorrect). Russian's are Cyrillic.
+    var isLatin: Bool { self != .russian }
+
     /// The Apple Speech language (BCP 47) to dictate in while this layout types (Settings ›
     /// Keyboard › Languages › Switch dictation too): the iPhone's own region where it has one
     /// for the language (English on a British iPhone is en-GB), else the language's usual
@@ -377,5 +381,19 @@ nonisolated struct KeyboardLanguageList: Equatable, Sendable {
         guard switches else { return nil }
         let twins = languages.filter { $0.baseLanguage == current.baseLanguage }.count
         return twins > 1 ? current.displayName : current.shortName
+    }
+
+    /// Bilingual autocorrect's second language while `current` types: the first other chosen
+    /// language with Latin letters, another dictionary than `current`'s (French and
+    /// Canadian French are one), and, like `current`, a dictionary on this iPhone
+    /// (`available` is `UITextChecker.availableLanguages`). Nil for Cyrillic, or with one
+    /// language: a layout without a dictionary (Serbian) would otherwise see every word as a
+    /// typo of the other language.
+    func partner(available: [String]) -> KeyboardLanguage? {
+        guard current.isLatin, current.spellCheckLanguage(available: available) != nil else { return nil }
+        return languages.first {
+            $0.isLatin && $0.baseLanguage != current.baseLanguage
+                && $0.spellCheckLanguage(available: available) != nil
+        }
     }
 }

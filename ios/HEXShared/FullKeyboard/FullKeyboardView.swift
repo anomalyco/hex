@@ -274,6 +274,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// The language this keyboard last switched to, ahead of the App Group's copy, which an
     /// iPhone may not let a keyboard without Full Access write.
     private var switchedLanguage: KeyboardLanguage?
+    private static let spellCheckLanguages = UITextChecker.availableLanguages
 
     /// The iPhone's keyboards and preferred languages, read when the keyboard appears, for
     /// Automatic before any dictation language is known.
@@ -304,6 +305,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         languages = list
         engine.switchesLanguage = list.switches
         engine.language = list.current
+        engine.partnerLanguage = list.partner(available: Self.spellCheckLanguages)
         syncSpatialAutocorrect()
         refreshSpaceLabel()
         setNeedsLayout()
@@ -370,6 +372,14 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         if engine.autocorrect.decoder?.model !== model {
             engine.autocorrect.decoder = model.map { TypingDecoder(model: $0) }
             engine.refreshSuggestions()
+        }
+        // Bilingual autocorrect reads the same taps with the other language's model, where it has one.
+        if let partner = engine.autocorrect.partner {
+            let theirs = FullKeyboardSettings().spatialAutocorrect ? TypingDecoderModel.bundled(partner.language.rawValue) : nil
+            if partner.decoder?.model !== theirs {
+                partner.decoder = theirs.map { TypingDecoder(model: $0) }
+                engine.refreshSuggestions()
+            }
         }
         let keys = model == nil ? [:] : (engine.journal?.current.keys ?? [:])
         engine.tapOffsets = TypingDecoder.offsets(from: keys, layout: engine.layout)

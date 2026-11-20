@@ -254,7 +254,7 @@ final class FullKeyboardEngineTests: XCTestCase {
 
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
-    /// autocorrect, and the keyboard comes back
+    /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
     /// in the language it was left in. Switch dictation too picks the dictation language.
     func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
         let settings = LanguageSettings(defaults: defaults)
@@ -271,11 +271,13 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.engine.language, .english)
         XCTAssertTrue(view.engine.switchesLanguage)
         XCTAssertEqual(view.plane.spaceLabel, "English")
+        XCTAssertEqual(view.engine.partnerLanguage, .french)
 
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .french)
         XCTAssertEqual(firstLetter(), "a", "AZERTY")
         XCTAssertEqual(view.engine.autocorrect.language, .french)
+        XCTAssertEqual(view.engine.partnerLanguage, .english)
         XCTAssertEqual(view.plane.spaceLabel, "Français")
         XCTAssertEqual(settings.currentKeyboardLanguage, .french)
 
@@ -286,6 +288,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .russian)
         XCTAssertEqual(firstLetter(), "й")
+        XCTAssertNil(view.engine.partnerLanguage, "Cyrillic has no bilingual partner")
         XCTAssertEqual(view.plane.spaceLabel, "Русский")
         XCTAssertEqual(picked, ["ru-RU"])
         view.switchLanguage(by: 1)
