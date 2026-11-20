@@ -20,6 +20,7 @@ pub(crate) mod meeting_capsules;
 pub(crate) mod output;
 pub(crate) mod paste;
 pub(crate) mod pipewire;
+pub(crate) mod pointer_output;
 pub(crate) mod portal;
 pub(crate) mod remote_desktop;
 pub(crate) mod rune_hud;

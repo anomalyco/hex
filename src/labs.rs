@@ -171,6 +171,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
             Self::GnomeAnnotate => settings.labs.gnome_annotate,
+            Self::AnnotatePointerScreen => settings.labs.annotate_pointer_screen,
             Self::Screenshots => settings.labs.screenshots,
             Self::AnnotateReplay => settings.labs.annotate_replay,
             Self::MeetingImport => settings.labs.meeting_import,
@@ -258,6 +259,7 @@ impl Feature {
             &mut labs.notch_indicator,
             &mut labs.gnome_meeting_capsules,
             &mut labs.gnome_annotate,
+            &mut labs.annotate_pointer_screen,
             &mut labs.screenshots,
             &mut labs.annotate_replay,
             &mut labs.meeting_import,
@@ -353,6 +355,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
             Self::GnomeAnnotate => settings.labs.gnome_annotate = on,
+            Self::AnnotatePointerScreen => settings.labs.annotate_pointer_screen = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
@@ -447,6 +450,10 @@ const FAILURE_NOTICES: u64 = LIVE_TYPING << 1;
 const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 /// The next bit above Caps Lock dictation's switch.
 const GNOME_ANNOTATE: u64 = CAPS_LOCK_DICTATION << 1;
+
+/// The next bit above GNOME Annotate (a free bit below the minutes): on
+/// Wayland, a screen capture follows the pointer to the monitor it is on.
+const ANNOTATE_POINTER_SCREEN: u64 = 1 << 20;
 /// The next bit above Annotate on GNOME's switch.
 const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording
@@ -998,6 +1005,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::GnomeAnnotate,
             settings.gnome_annotate,
             GNOME_ANNOTATE,
+        ),
+        (
+            Feature::AnnotatePointerScreen,
+            settings.annotate_pointer_screen,
+            ANNOTATE_POINTER_SCREEN,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
         (

@@ -62,6 +62,7 @@ impl Feature {
             Self::NotchIndicator => "Notch indicator",
             Self::GnomeMeetingCapsules => "Call recording controls on GNOME",
             Self::GnomeAnnotate => "Annotate on GNOME",
+            Self::AnnotatePointerScreen => "Record the screen under the pointer",
             Self::Screenshots => "Screenshots",
             Self::AnnotateReplay => "Annotate last 15 seconds",
             Self::MeetingImport => "Import audio",
@@ -238,6 +239,9 @@ impl Feature {
             }
             Self::GnomeAnnotate => {
                 "On GNOME, show Annotate's recording controls and drawing over your screen. Works only while XWayland is already running; Esc can't stop drawing there, so use the pen button or let go of the Annotate key"
+            }
+            Self::AnnotatePointerScreen => {
+                "On Wayland, a capture records the monitor you point at, and each monitor remembers its own screen"
             }
             Self::Screenshots => {
                 "Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder"

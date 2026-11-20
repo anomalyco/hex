@@ -24,8 +24,9 @@ feedback and Run setup again. A card's title and line are
 window, and its OSes `labs::Feature::oses`.
 
 **On the web.** Every `Everyone` lab (not Dev ones, nor Screenshots, Annotate
-last 15 seconds, or Copy a capture as one file, which only builds with the capture
-build option have) has a page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
+last 15 seconds, Record the screen under the pointer, or Copy a capture as one
+file, which only do anything in builds with the capture build option) has a
+page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
 the dev site), listed newest first at `/hex/labs`, with a 1200 × 630 social
 card. The pages come from `site/src/labs.json`, which only the registry
 writes:
@@ -315,6 +316,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        held Annotate key (a tap of it stops the recording)
 │                                        // checks: gnome_annotate_is_its_own_bit_* (labs.rs), meeting capsule xwayland decision reused
 │                                        // (linux/meeting_capsules.rs); Rune's xwayland tests; not run on a GNOME session
+├── Record the screen under the pointer no labs.annotate_pointer_screen (Linux) on Wayland, a Screen capture asks the compositor which output
+│                                        the pointer is on (ext-image-copy-capture-v1 pointer cursor sessions, no surface, no frames) and remembers a
+│                                        screen-cast choice per output (`screencast-token-<output>`), so each monitor is asked once; off, one
+│                                        remembered screen for all, as before. See capture.linux
+│                                        // checks: entered (linux/pointer_output.rs), token_file_name and
+│                                        // recorded_output (crates/capture/src/linux/portal.rs); not run on a compositor exporting the protocol
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail;
 │                                        a saved record shortcut and Annotate's capture shortcuts never share a key, on or off

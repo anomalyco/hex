@@ -998,6 +998,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Press shortcut", ["Naciśnij skrót", "按下快捷键", "ショートカットを押す", "Kürzel drücken", "Pulsa el atajo", "Натисніть комбінацію клавіш"]),
     ("Press to start dictating, press again to transcribe", ["Naciśnij, aby zacząć dyktować, i ponownie, aby transkrybować", "按下开始听写，再按一次进行转写", "押すと音声入力を開始し、もう一度押すと文字起こし", "Drücken zum Diktieren, erneut drücken zum Transkribieren", "Pulsa para empezar a dictar y otra vez para transcribir", "Натисніть, щоб почати диктувати, і натисніть знову, щоб розпізнати мовлення"]),
     ("Re-paste the most recent dictation", ["Wklej ponownie ostatnie dyktowanie", "再次粘贴最近一次听写", "最新の音声入力をもう一度貼り付け", "Letztes Diktat erneut einfügen", "Volver a pegar el dictado más reciente", "Повторно вставити останнє диктування"]),
+    ("Start and stop an annotation", ["Rozpocznij i zatrzymaj adnotację", "开始或停止标注", "注釈を開始・停止", "Eine Anmerkung starten und stoppen", "Iniciar y detener una anotación", "Почати й зупинити анотацію"]),
     ("Refresh", ["Odśwież", "刷新", "更新", "Aktualisieren", "Actualizar", "Оновити"]),
     ("Replacement (e.g. OpenCode)", ["Zamiennik (np. OpenCode)", "替换为（例如 OpenCode）", "置換後（例: OpenCode）", "Ersetzung (z. B. OpenCode)", "Reemplazo (p. ej. OpenCode)", "Заміна (наприклад, OpenCode)"]),
     ("Switch to {channel} {version}", ["Przełącz na {channel} {version}", "切换到{channel} {version}", "{channel} {version} に切り替え", "Zu {channel} {version} wechseln", "Cambiar a {channel} {version}", "Перейти на {channel} {version}"]),

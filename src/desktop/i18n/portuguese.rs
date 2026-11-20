@@ -100,6 +100,14 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Microphone key alone", "Tecla do microfone sozinha"),
     ("Use the mic key in F5's spot on Mac laptops as a shortcut; once set, only Hex gets it", "Usa a tecla de microfone no lugar do F5 nos notebooks Mac como atalho; depois de definida, só o Hex a recebe"),
     ("Annotate on GNOME", "Annotate no GNOME"),
+    (
+        "Record the screen under the pointer",
+        "Gravar a tela sob o ponteiro",
+    ),
+    (
+        "On Wayland, a capture records the monitor you point at, and each monitor remembers its own screen",
+        "No Wayland, uma captura grava o monitor para o qual você aponta, e cada monitor lembra da própria tela",
+    ),
     ("Restore clipboard on GNOME", "Restaurar a área de transferência no GNOME"),
     ("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running", "Devolve o que você copiou antes de ditar, pelo XWayland. Só funciona se o XWayland já estiver rodando"),
     ("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.", "Este desktop não deixa o Hex devolver sua área de transferência depois de colar. Ative Labs › Restaurar a área de transferência no GNOME para testar."),
@@ -688,6 +696,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Press shortcut", "Pressione o atalho"),
     ("Press to start dictating, press again to transcribe", "Pressione para começar a ditar e de novo para transcrever"),
     ("Re-paste the most recent dictation", "Colar de novo o ditado mais recente"),
+    (
+        "Start and stop an annotation",
+        "Iniciar e parar uma anotação",
+    ),
     ("Refresh", "Atualizar"),
     ("Replacement (e.g. OpenCode)", "Substituição (ex.: OpenCode)"),
     ("Switch to {channel} {version}", "Mudar para {channel} {version}"),

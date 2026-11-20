@@ -45,10 +45,46 @@ pub(crate) fn set_pen_points(points: Option<(f64, f64)>) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = points;
 }
 
+/// An output's connector name and its logical geometry on the desktop, as
+/// the compositor describes them (xdg-output), for telling which output a
+/// screen-cast stream came from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Geometry {
+    pub(crate) name: String,
+    pub(crate) position: (i32, i32),
+    pub(crate) size: (i32, i32),
+}
+
+/// Every output that gives a name and a logical position and size, in the
+/// registry's order. Empty when the display isn't Wayland, the compositor
+/// offers no xdg-output, or no output describes itself.
+pub(crate) fn list() -> Vec<Geometry> {
+    with_outputs(|outputs| {
+        outputs
+            .iter()
+            .filter_map(|output| {
+                let (width, height) = output.points?;
+                Some(Geometry {
+                    name: output.name.clone()?,
+                    position: output.position?,
+                    size: (width.round() as i32, height.round() as i32),
+                })
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 /// The live output the compositor calls `name`, with its registry global
 /// and logical size. `None` when the display isn't Wayland, the compositor
 /// offers no xdg-output, or no output has that name and a size.
 pub(crate) fn find(name: &str) -> Option<RecordedOutput> {
+    with_outputs(|outputs| pick(outputs, name)).flatten()
+}
+
+/// Binds every output and its xdg-output, gives `read` the compositor's
+/// answers, then destroys them. `None` when the display can't be asked.
+fn with_outputs<T>(read: impl FnOnce(&[Output]) -> T) -> Option<T> {
     let connection = Connection::connect_to_env().ok()?;
     let (globals, mut queue) = registry_queue_init::<Outputs>(&connection).ok()?;
     let qh = queue.handle();
@@ -69,20 +105,21 @@ pub(crate) fn find(name: &str) -> Option<RecordedOutput> {
             global,
             name: None,
             points: None,
+            position: None,
         });
         outputs.bound.push((output, xdg));
     }
-    // The name and the logical size both come from the compositor's answer
-    // to the binds above.
+    // The name, logical size, and logical position all come from the
+    // compositor's answer to the binds above.
     queue.roundtrip(&mut outputs).ok()?;
-    let found = pick(&outputs.items, name);
+    let read = read(&outputs.items);
     for (output, xdg) in &outputs.bound {
         xdg.destroy();
         output.release();
     }
     manager.destroy();
     let _ = queue.roundtrip(&mut outputs);
-    found
+    Some(read)
 }
 
 /// One bound output, as the compositor described it.
@@ -90,6 +127,7 @@ struct Output {
     global: u32,
     name: Option<String>,
     points: Option<(f64, f64)>,
+    position: Option<(i32, i32)>,
 }
 
 #[derive(Default)]
@@ -164,13 +202,20 @@ impl Dispatch<ZxdgOutputV1, u32> for Outputs {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let zxdg_output_v1::Event::LogicalSize { width, height } = event
-            && let Some(output) = outputs
-                .items
-                .iter_mut()
-                .find(|output| output.global == *global)
+        if let Some(output) = outputs
+            .items
+            .iter_mut()
+            .find(|output| output.global == *global)
         {
-            output.points = Some((f64::from(width), f64::from(height)));
+            match event {
+                zxdg_output_v1::Event::LogicalSize { width, height } => {
+                    output.points = Some((f64::from(width), f64::from(height)));
+                }
+                zxdg_output_v1::Event::LogicalPosition { x, y } => {
+                    output.position = Some((x, y));
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -184,6 +229,7 @@ mod tests {
             global,
             name: name.map(str::to_owned),
             points: size,
+            position: Some((0, 0)),
         }
     }
 

@@ -127,6 +127,25 @@ On Linux                                 // capture.linux
 │   desktop's picker every time (the capsule's Window chip goes straight to
 │   it) and names no output, so the pen keeps its old placement; the cursor
 │   is embedded
+├── Labs › Record the screen under the pointer (`labs.annotate_pointer_screen`,
+│   off) -> each Screen capture first asks the compositor for the output the
+│   pointer is on, with no surface and no frame: one
+│   `ext_image_copy_capture_manager_v1.create_pointer_cursor_session` per
+│   output source, and the session that reports `enter` names its `wl_output`
+│   (`src/linux/pointer_output.rs`; two round trips, everything destroyed
+│   after). Its screen then has its own token file,
+│   `<support>/screencast-token-<output>` (output sanitized to [A-Za-z0-9_-]),
+│   so each monitor is asked once; a monitor without one shows the picker
+│   once. After Start the token is saved for the output the desktop actually
+│   recorded: `mapping_id`, else the output whose xdg-output logical geometry
+│   holds the stream's position (`src/linux/output.rs`), else the pointer's.
+│   The refused-token retry removes and forgets whichever file it read. Off,
+│   or when the lookup fails (no seat, no staging protocols, no session
+│   entering, an output below wl_output v4), the single file above is used
+│   exactly as before. Needs the compositor to export ext-image-copy-capture
+│   to ordinary clients (COSMIC does only for non-sandboxed ones) and, on
+│   wlroots, a hardware cursor (a software cursor reports nothing); not
+│   observed on real COSMIC hardware
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
 │   KDE) or shared memory. A stream that ends or fails before its first frame
@@ -186,8 +205,10 @@ On Linux                                 // capture.linux
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
-│   GlobalShortcuts portal ("Annotate") or X11 grabs. There is no separate
-│   draw shortcut and no send-to list shortcut on any OS
+│   GlobalShortcuts portal ("Annotate") or X11 grabs. Without the portal,
+│   General's commands list and this pane's Shortcut row give
+│   `hex annotate toggle` to bind in the desktop instead. There is no
+│   separate draw shortcut and no send-to list shortcut on any OS
 ├── GNOME Wayland -> no layer-shell, so Rune can't show the capsule or ink
 │   until Labs › Annotate on GNOME (`labs.gnome_annotate`, off by default)
 │   opens them on XWayland (`OverlayOptions::xwayland_input`): override-redirect
@@ -254,7 +275,9 @@ Settings › Annotate                      // capture.pane
 │   input, retention, or folder
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux and Windows) -> same keycap and recorder as dictation;
-│   a key is required; refused when it overlaps dictation or paste
+│   a key is required; refused when it overlaps dictation or paste. On a Linux desktop with no
+│   GlobalShortcuts portal (the `commands` fallback) the row is the `hex annotate toggle` command
+│   to bind in the desktop instead, as General's commands list has it
 ├── How it works (on) -> start (tap), draw (hold, no click; Shift too on
 │   macOS), the capsule's pen with Esc, stop (tap again), and send, each
 │   with its keys. Check: rune_ui::scrawl tests

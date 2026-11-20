@@ -6,13 +6,14 @@
 use std::collections::HashMap;
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use futures_util::StreamExt;
 use zbus::{Connection, MatchRule, MessageStream, OwnedObjectPath, OwnedVariant, Variant, message};
+
+use crate::capture::{OutputBounds, PortalToken};
 
 const DESKTOP: &str = "org.freedesktop.portal.Desktop";
 const DESKTOP_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -29,18 +30,6 @@ const SOURCE_WINDOW: u32 = 2;
 const CURSOR_EMBEDDED: u32 = 2;
 /// Kept until the person revokes it.
 const PERSIST_UNTIL_REVOKED: u32 = 2;
-
-/// Where the screen's restore token lives; `None` (the default) keeps none.
-static TOKEN_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
-
-/// Keeps the screen's restore token at `path`, so the picker shows once.
-pub fn set_token_path(path: PathBuf) {
-    *TOKEN_PATH.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
-}
-
-fn token_path() -> Option<PathBuf> {
-    TOKEN_PATH.lock().unwrap_or_else(|e| e.into_inner()).clone()
-}
 
 /// What the portal asks the person to pick.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,32 +184,118 @@ fn variant<'a>(value: impl Into<Variant<'a>>) -> Variant<'a> {
 }
 
 /// Asks the desktop for `source` and starts casting it. Blocks while the picker shows, until
-/// `stop` is set.
-pub fn start(source: Source, stop: &AtomicBool) -> Result<Cast> {
-    let token_file = (source == Source::Screen).then(token_path).flatten();
-    let restore = token_file
+/// `stop` is set. `tokens` says where the screen's remembered choice lives: one file for every
+/// screen, or one per output for the output under the pointer.
+pub fn start(source: Source, stop: &AtomicBool, tokens: &PortalToken) -> Result<Cast> {
+    let read = (source == Source::Screen)
+        .then(|| token_file(tokens))
+        .flatten();
+    let restore = read
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|token| token.trim().to_owned())
         .filter(|token| !token.is_empty());
-    match start_with(source, stop, token_file.clone(), restore.clone()) {
+    match start_with(source, stop, tokens, read.clone(), restore.clone()) {
         // A revoked or stale choice: forget it and ask again.
         Err(error) if restore.is_some() && !stop.load(Ordering::Acquire) => {
             crate::log::scrawl_log(format!(
                 "the remembered screen was refused ({error:#}); asking again"
             ));
-            if let Some(path) = &token_file {
+            if let Some(path) = &read {
                 let _ = std::fs::remove_file(path);
             }
-            start_with(source, stop, token_file, None)
+            start_with(source, stop, tokens, read, None)
         }
         result => result,
     }
 }
 
+/// The file a screen's remembered choice is asked from: the one file, or the
+/// pointer's output's file. `None` keeps none.
+fn token_file(tokens: &PortalToken) -> Option<PathBuf> {
+    match tokens {
+        PortalToken::None => None,
+        PortalToken::File(path) => Some(path.clone()),
+        PortalToken::PerOutput { dir, pointer, .. } => Some(dir.join(token_file_name(pointer))),
+    }
+}
+
+/// The file a screen's new token goes in: the one file, or the file of the
+/// output the desktop actually recorded (its `mapping_id`, else the output
+/// whose logical geometry holds the stream's position, else the pointer's).
+fn token_target(source: Source, tokens: &PortalToken, cast: &Cast) -> Option<PathBuf> {
+    if source != Source::Screen {
+        return None;
+    }
+    match tokens {
+        PortalToken::None => None,
+        PortalToken::File(path) => Some(path.clone()),
+        PortalToken::PerOutput {
+            dir,
+            pointer,
+            outputs,
+        } => {
+            let name = recorded_output(
+                cast.mapping_id.as_deref(),
+                cast.position,
+                cast.size,
+                outputs,
+            )
+            .unwrap_or_else(|| pointer.clone());
+            Some(dir.join(token_file_name(&name)))
+        }
+    }
+}
+
+/// The output the stream came from, as the desktop named it or as its logical
+/// geometry matches the stream's position and size.
+fn recorded_output(
+    mapping_id: Option<&str>,
+    position: Option<(i32, i32)>,
+    size: Option<(i32, i32)>,
+    outputs: &[OutputBounds],
+) -> Option<String> {
+    if let Some(name) = mapping_id.filter(|name| !name.is_empty()) {
+        return Some(name.to_owned());
+    }
+    let position = position?;
+    let exact = outputs
+        .iter()
+        .find(|output| output.position == position && size.is_none_or(|size| output.size == size));
+    let containing = exact.or_else(|| {
+        outputs.iter().find(|output| {
+            let (x, y) = output.position;
+            position.0 >= x
+                && position.0 < x + output.size.0
+                && position.1 >= y
+                && position.1 < y + output.size.1
+        })
+    });
+    containing.map(|output| output.name.clone())
+}
+
+/// `name` as a file name: every character but `A-Za-z0-9_-` becomes `_`.
+fn token_file_name(name: &str) -> String {
+    let mut file = String::from("screencast-token-");
+    for character in name.chars() {
+        file.push(
+            if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
+                character
+            } else {
+                '_'
+            },
+        );
+    }
+    if file.len() == "screencast-token-".len() {
+        file.push_str("output");
+    }
+    file
+}
+
 fn start_with(
     source: Source,
     stop: &AtomicBool,
+    tokens: &PortalToken,
     token_file: Option<PathBuf>,
     restore: Option<String>,
 ) -> Result<Cast> {
@@ -267,7 +342,7 @@ fn start_with(
                             ("multiple", variant(false)),
                             ("cursor_mode", variant(CURSOR_EMBEDDED)),
                         ]);
-                        if token_file.is_some() {
+                        if source == Source::Screen && token_file.is_some() {
                             options.insert("persist_mode", variant(PERSIST_UNTIL_REVOKED));
                         }
                         if let Some(restore) = restore.clone() {
@@ -326,17 +401,6 @@ fn start_with(
     // From here dropping `cast` closes the session.
     let (results, remote) = picked?;
     cast.remote = Some(remote);
-    if let (Some(path), Some(token)) = (token_file, results.get("restore_token")) {
-        let token: Result<String, _> = token
-            .try_clone()
-            .map_err(anyhow::Error::from)
-            .and_then(|t| Ok(t.try_into()?));
-        if let Ok(token) = token
-            && let Err(error) = write_private(&path, &token)
-        {
-            crate::log::scrawl_log(format!("could not keep the screen choice: {error:#}"));
-        }
-    }
     let streams: Vec<(u32, Results)> = results
         .get("streams")
         .ok_or_else(|| anyhow!("the portal started no stream"))?
@@ -355,6 +419,21 @@ fn start_with(
     cast.mapping_id = props
         .get("mapping_id")
         .and_then(|value| value.try_clone().ok()?.try_into().ok());
+    // Saved for the output the desktop recorded, once it has said which.
+    if let (Some(path), Some(token)) = (
+        token_target(source, tokens, &cast),
+        results.get("restore_token"),
+    ) {
+        let token: Result<String, _> = token
+            .try_clone()
+            .map_err(anyhow::Error::from)
+            .and_then(|t| Ok(t.try_into()?));
+        if let Ok(token) = token
+            && let Err(error) = write_private(&path, &token)
+        {
+            crate::log::scrawl_log(format!("could not keep the screen choice: {error:#}"));
+        }
+    }
     Ok(cast)
 }
 
@@ -372,4 +451,73 @@ fn write_private(path: &std::path::Path, token: &str) -> Result<()> {
         .open(path)?;
     file.write_all(token.as_bytes())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OutputBounds, recorded_output, token_file_name};
+
+    fn output(name: &str, position: (i32, i32), size: (i32, i32)) -> OutputBounds {
+        OutputBounds {
+            name: name.to_owned(),
+            position,
+            size,
+        }
+    }
+
+    #[test]
+    fn the_desktop_s_own_name_wins() {
+        let outputs = [output("DP-3", (0, 0), (2560, 1440))];
+        assert_eq!(
+            recorded_output(Some("HDMI-A-1"), Some((0, 0)), Some((2560, 1440)), &outputs),
+            Some("HDMI-A-1".to_owned())
+        );
+        assert_eq!(
+            recorded_output(Some(""), Some((0, 0)), None, &outputs),
+            Some("DP-3".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_stream_position_and_size_name_an_output() {
+        let outputs = [
+            output("DP-3", (0, 0), (2560, 1440)),
+            output("HDMI-A-1", (2560, 0), (1920, 1080)),
+        ];
+        assert_eq!(
+            recorded_output(None, Some((2560, 0)), Some((1920, 1080)), &outputs),
+            Some("HDMI-A-1".to_owned())
+        );
+        // A stream that reports its corner falls on the output holding it.
+        assert_eq!(
+            recorded_output(None, Some((3000, 200)), Some((1280, 720)), &outputs),
+            Some("HDMI-A-1".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_unplaced_stream_names_nothing() {
+        let outputs = [output("DP-3", (0, 0), (2560, 1440))];
+        assert_eq!(
+            recorded_output(None, None, Some((2560, 1440)), &outputs),
+            None
+        );
+        assert_eq!(
+            recorded_output(None, Some((5000, 5000)), None, &outputs),
+            None
+        );
+    }
+
+    #[test]
+    fn a_token_file_keeps_the_output_readable() {
+        assert_eq!(token_file_name("DP-3"), "screencast-token-DP-3".to_owned());
+        assert_eq!(
+            token_file_name("HDMI/A-1"),
+            "screencast-token-HDMI_A-1".to_owned()
+        );
+        assert_eq!(token_file_name("a b"), "screencast-token-a_b".to_owned());
+        assert_eq!(token_file_name("../x"), "screencast-token-___x".to_owned());
+        assert_eq!(token_file_name(""), "screencast-token-output".to_owned());
+        assert_eq!(token_file_name("日本"), "screencast-token-__".to_owned());
+    }
 }

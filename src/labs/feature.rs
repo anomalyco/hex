@@ -59,6 +59,7 @@ pub enum Feature {
     NotchIndicator,
     GnomeMeetingCapsules,
     GnomeAnnotate,
+    AnnotatePointerScreen,
     Screenshots,
     AnnotateReplay,
     MeetingImport,
@@ -88,7 +89,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 81] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -143,6 +144,7 @@ impl Feature {
         Self::NotchIndicator,
         Self::GnomeMeetingCapsules,
         Self::GnomeAnnotate,
+        Self::AnnotatePointerScreen,
         Self::Screenshots,
         Self::AnnotateReplay,
         Self::MeetingImport,

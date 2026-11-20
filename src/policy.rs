@@ -172,6 +172,7 @@ impl Policy {
             Lock::Annotate => vec![
                 &mut settings.capture.enabled,
                 &mut settings.labs.annotate_replay,
+                &mut settings.labs.annotate_pointer_screen,
             ],
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),

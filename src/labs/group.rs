@@ -118,6 +118,7 @@ impl Feature {
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate
+            | Self::AnnotatePointerScreen
             | Self::CopyCaptureZip => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
