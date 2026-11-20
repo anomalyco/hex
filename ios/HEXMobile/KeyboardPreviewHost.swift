@@ -152,13 +152,22 @@ struct KeyboardSnapshotStage: View {
 }
 
 /// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one,
-/// otherwise Automatic, which resolves to English.
+/// otherwise Automatic, which resolves to English. `--translate-to en` turns on Translate
+/// what I say with that target, pasting translated unless `--paste-as-spoken`.
 enum DictationLanguageFixture {
     static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
 
     static var explicit: String? {
+        argument(after: "--dictation-language")
+    }
+
+    static var translationTarget: String? {
+        argument(after: "--translate-to")
+    }
+
+    private static func argument(after flag: String) -> String? {
         let args = ProcessInfo.processInfo.arguments
-        guard let idx = args.firstIndex(of: "--dictation-language"), idx + 1 < args.count else { return nil }
+        guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
         return args[idx + 1]
     }
 
@@ -167,6 +176,8 @@ enum DictationLanguageFixture {
         model.languageChoices = choices
         model.dictationLanguage = explicit
         model.automaticLanguage = "en-US"
+        model.translationTarget = translationTarget
+        model.pastesTranslation = !ProcessInfo.processInfo.arguments.contains("--paste-as-spoken")
     }
 }
 

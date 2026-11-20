@@ -247,6 +247,22 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   in-keyboard dictation uses it at once; a warm Hex session follows it within
   100 ms and prepares the language between dictations, and a handoff or the
   Action Button picks it up before recording.
+- **Translate what I say (Experiments, iOS 26+):** Off by default. Translates
+  each dictation on the iPhone with Apple's Translation framework into the
+  language picked under Insert in, once its pack is downloaded; without the
+  pack the transcript goes in as spoken. Where you dictate, a switch picks
+  translated or as spoken for the next dictations and keeps the last choice
+  (`experiments.translateDictation.pastesTranslation`, translated by
+  default; turning the experiment on resets it to translated): two rows in
+  the full keyboard's Hex key menu ("Paste in English", "Paste in Spanish",
+  named in English, "Paste as spoken" when the dictation language is
+  unknown), a "Paste in English" chip in the dictation bar's language tray,
+  and a "Paste in English" toggle under Insert in. It shows only while the
+  experiment is on and you dictate in another language than the target.
+  While dictations paste translated, the space bar and the dictation bar's
+  language label read "Español → English". The App Group carries the
+  switch, so in-keyboard dictation, a warm session, and the Action Button
+  all follow it.
 - **Keyboard layouts (Experiments › Full keyboard › Keyboard layout):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2) and
   Deutsch (QWERTZ with `ü`, `ö ä`), as Apple's iOS keyboards lay them out

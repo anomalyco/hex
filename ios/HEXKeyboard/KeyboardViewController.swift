@@ -340,6 +340,11 @@ final class KeyboardViewController: UIInputViewController {
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
+        viewModel.onPasteTranslationSelected = { [weak self] translated in
+            DictationTranslationSettings().pastesTranslation = translated
+            self?.languageSignature = nil
+            self?.syncLanguageState()
+        }
         viewModel.onSpace = { [weak self] in
             self?.typingLog?.edit("insert", [
                 TypingLogField("inserted", .string(" ")),
@@ -614,8 +619,9 @@ final class KeyboardViewController: UIInputViewController {
     /// Apple Speech's languages are listed once per keyboard process.
     private static var didListDictationLanguages = false
 
-    /// Settings › Dictation language, what Automatic picks, and the switch's choices, from
-    /// the App Group (iOS 26, where dictation is Apple Speech).
+    /// Settings › Dictation language, what Automatic picks, and the switch's choices, plus
+    /// Translate what I say's target and paste switch, from the App Group (iOS 26, where
+    /// dictation is Apple Speech).
     private func syncLanguageState() {
         guard KeyboardLocalDictation.isSupported else { return }
         let settings = LanguageSettings()
@@ -623,8 +629,13 @@ final class KeyboardViewController: UIInputViewController {
         let automatic = settings.automaticDictationLanguage
         let recent = settings.recentDictationLanguages
         let supported = settings.supportedDictationLanguages
-        let signature = [explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)"]
-            .joined(separator: "|")
+        let translation = DictationTranslationSettings()
+        let target = translation.isEnabled ? translation.targetLanguage : nil
+        let pastesTranslation = translation.pastesTranslation
+        let signature = [
+            explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)",
+            target ?? "", "\(pastesTranslation)",
+        ].joined(separator: "|")
         guard signature != languageSignature else { return }
         languageSignature = signature
         let choices = DictationLanguageSwitch.choices(
@@ -636,6 +647,8 @@ final class KeyboardViewController: UIInputViewController {
         if viewModel.dictationLanguage != explicit { viewModel.dictationLanguage = explicit }
         if viewModel.automaticLanguage != automatic { viewModel.automaticLanguage = automatic }
         if viewModel.languageChoices != choices { viewModel.languageChoices = choices }
+        if viewModel.translationTarget != target { viewModel.translationTarget = target }
+        if viewModel.pastesTranslation != pastesTranslation { viewModel.pastesTranslation = pastesTranslation }
     }
 
     /// Asks Apple Speech which languages it has and what Automatic picks, so the switch can

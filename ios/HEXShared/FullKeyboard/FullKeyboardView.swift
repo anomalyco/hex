@@ -431,7 +431,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             setRecording(recording)
         }
         refreshRecordingPanel()
-        plane.spaceLabel = model.hasFullAccess ? model.languageLabel : nil
+        plane.spaceLabel = model.hasFullAccess ? model.languageSummary : nil
         // A language picked in the switch changes the layout at once when it follows dictation.
         syncLanguage()
         if let menu = styleMenu {
@@ -445,6 +445,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.dictationLanguage = model.dictationLanguage
         menu.automaticLanguage = model.automaticLanguage
         menu.languageChoices = model.showsLanguageSwitch ? model.languageChoices : []
+        menu.pasteChoice = model.pasteChoice
+        menu.pastesTranslation = model.pastesTranslation
     }
 
     private func refreshStrip() {
@@ -741,6 +743,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.onLanguage = { [weak self] language in
             self?.typingLog?.ui("dictation_language", [TypingLogField("language", .string(language ?? "automatic"))])
             self?.model.onLanguageSelected?(language)
+            self?.dismissStyleMenu()
+        }
+        menu.onPasteTranslation = { [weak self] translated in
+            self?.typingLog?.ui("paste_translation", [TypingLogField("translated", .bool(translated))])
+            self?.model.onPasteTranslationSelected?(translated)
             self?.dismissStyleMenu()
         }
         menu.onStyle = { [weak self] style in

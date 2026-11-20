@@ -62,6 +62,10 @@ final class KeyboardViewModel: ObservableObject {
     @Published var dictationLanguage: String?
     @Published var automaticLanguage: String?
     @Published var languageChoices: [String] = []
+    /// Translate what I say's target (BCP 47) while it is on, else nil, and the switch that
+    /// picks translated or as spoken for the next dictations.
+    @Published var translationTarget: String?
+    @Published var pastesTranslation = true
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
     // so 25–30 Hz polling never invalidates SwiftUI views mid-spring.
@@ -78,6 +82,8 @@ final class KeyboardViewModel: ObservableObject {
     var onStyleSelected: ((DictationStyle) -> Void)?
     /// A language picked in the keyboard's switch; nil is Automatic.
     var onLanguageSelected: ((String?) -> Void)?
+    /// Paste translated (true) or as spoken (false), picked where you dictate.
+    var onPasteTranslationSelected: ((Bool) -> Void)?
     var onSpace: (() -> Void)?
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
@@ -99,6 +105,21 @@ final class KeyboardViewModel: ObservableObject {
 
     var showsLanguageSwitch: Bool {
         hasFullAccess && !languageChoices.isEmpty
+    }
+
+    /// "Paste in English" or "Paste in Spanish", when Translate what I say is on and you
+    /// dictate in another language than its target.
+    var pasteChoice: TranslationPasteChoice? {
+        guard hasFullAccess, let translationTarget else { return nil }
+        return TranslationPasteChoice(target: translationTarget, source: effectiveLanguage)
+    }
+
+    /// The language label with where dictations go while they paste translated:
+    /// "Español → English".
+    var languageSummary: String? {
+        guard let languageLabel else { return nil }
+        guard pastesTranslation, let target = pasteChoice?.target else { return languageLabel }
+        return "\(languageLabel) → \(DictationLanguageSwitch.nativeName(for: target))"
     }
 
     var dotScopePhase: DotScopePhase {
@@ -744,7 +765,7 @@ struct KeyboardSurfaceView: View {
     }
 
     private func languageTrigger(palette p: KeyboardChromePalette) -> some View {
-        let label = model.languageLabel ?? "Automatic"
+        let label = model.languageSummary ?? "Automatic"
         return Button {
             model.onKeyFeedback?()
             model.setActiveTray(.language, reduceMotion: reduceMotion)
@@ -763,6 +784,9 @@ struct KeyboardSurfaceView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(TopBarTriggerButtonStyle(palette: p))
+        // "Español → English" before the status beside the Hex mark, which is short whenever
+        // the switch shows (it needs Full Access).
+        .layoutPriority(1)
         .accessibilityLabel("Dictation language: \(label)")
     }
 
@@ -782,9 +806,34 @@ struct KeyboardSurfaceView: View {
             .hexScrollEdgeEffectHidden()
             .hexHorizontalEdgeFade(leading: 4, trailing: 14)
 
+            if let choice = model.pasteChoice {
+                pasteTranslationChip(choice, palette: p)
+            }
             closeTrayButton(palette: p)
         }
         .frame(height: 26)
+    }
+
+    /// Lit while dictations paste translated; a tap switches to as spoken and back.
+    private func pasteTranslationChip(_ choice: TranslationPasteChoice, palette p: KeyboardChromePalette) -> some View {
+        let active = model.pastesTranslation
+        return Button {
+            model.onKeyFeedback?()
+            model.onPasteTranslationSelected?(!active)
+            model.setActiveTray(.none, reduceMotion: reduceMotion)
+        } label: {
+            Text(choice.translatedTitle)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(active ? p.textBase : p.textMuted)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(choice.translatedTitle)
+        .accessibilityValue(active ? "On" : "Off. \(choice.spokenTitle)")
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private func languageChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {

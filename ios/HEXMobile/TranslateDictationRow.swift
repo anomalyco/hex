@@ -1,11 +1,13 @@
 import SwiftUI
 @preconcurrency import Translation
 
-/// Experiments › Translate what I say: the toggle, the target language, and the
-/// one-time download of Apple's on-device language pack.
+/// Experiments › Translate what I say: the toggle, the target language, the switch the
+/// keyboard's menus also have (paste translated or as spoken), and the one-time download
+/// of Apple's on-device language pack.
 struct TranslateDictationRow: View {
     @State private var enabled = DictationTranslationSettings().isEnabled
     @State private var target = DictationTranslationSettings().targetLanguage
+    @State private var pastesTranslation = DictationTranslationSettings().pastesTranslation
     @State private var languages: [Locale.Language] = []
     @State private var status: LanguageAvailability.Status?
     @State private var download: TranslationSession.Configuration?
@@ -14,6 +16,14 @@ struct TranslateDictationRow: View {
     private var source: Locale.Language {
         LanguageSettings().effectiveDictationLanguage.map { Locale(identifier: $0).language }
             ?? Locale.current.language
+    }
+
+    /// "Paste in English" for what you dictate in, or nil when that is the target already.
+    private var pasteChoice: TranslationPasteChoice? {
+        TranslationPasteChoice(
+            target: target,
+            source: LanguageSettings().effectiveDictationLanguage ?? Locale.current.identifier
+        )
     }
 
     var body: some View {
@@ -31,6 +41,10 @@ struct TranslateDictationRow: View {
             .tint(HexTheme.success)
             .onChange(of: enabled) { _, value in
                 DictationTranslationSettings().isEnabled = value
+                // Turning it on means translating, whatever the switch said last time.
+                if value {
+                    pastesTranslation = true
+                }
             }
 
             if enabled {
@@ -49,6 +63,18 @@ struct TranslateDictationRow: View {
                 .onChange(of: target) { _, value in
                     DictationTranslationSettings().targetLanguage = value
                     Task { await refreshStatus() }
+                }
+
+                if let pasteChoice {
+                    Toggle(isOn: $pastesTranslation) {
+                        Text(pasteChoice.translatedTitle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(HexTheme.textMuted)
+                    }
+                    .tint(HexTheme.success)
+                    .onChange(of: pastesTranslation) { _, value in
+                        DictationTranslationSettings().pastesTranslation = value
+                    }
                 }
 
                 switch status {
@@ -76,6 +102,10 @@ struct TranslateDictationRow: View {
         .translationTask(download) { session in
             try? await session.prepareTranslation()
             await refreshStatus()
+        }
+        .onAppear {
+            // The keyboard's menus change it too.
+            pastesTranslation = DictationTranslationSettings().pastesTranslation
         }
         .task {
             let supported = await LanguageAvailability().supportedLanguages
