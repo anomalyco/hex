@@ -105,7 +105,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     `15m`) so subsequent taps on **Dictate** record directly inside the
     keyboard with zero app switches; picking `Off` or tapping the header timer
     ends it.
-  - **Styles (`TranscriptFormatter`):** `Polished` (full
+  - **Styles (`TranscriptFormatter`, run by `DictationPipeline` wherever Hex
+    dictates: the app, the keyboard's warm session and cold start, the Action
+    Button, Control Center and in-keyboard dictation):** `Polished` (full
     sentences: fillers trimmed, each sentence capitalized, "I" too, and ended,
     in Chinese and Japanese with "。"), `Casual` (texting: sentences may start
     lowercase, though never an acronym or a word with inner capitals; "i" for
@@ -170,8 +172,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     Spanish it dropped negations: "Te digo que no puedo ir" became "Te
     puedo ir"), so Spanish, German and Norwegian get word rules instead
     (`SpokenCleanupRules`): the language's hesitation sounds go (the
-    styles' list below, so in-keyboard dictation, which no style formats,
-    loses them too), a filler between commas goes ("este", "o sea"),
+    styles' list below), a filler between commas goes ("este", "o sea"),
     and a correction marker set off by commas ("digo", "perdón", "no",
     "mejor dicho"; "nein", "ich meine"; "nei", "nei vent", "jeg mener")
     drops the words it replaces, counted back to the nearest earlier word
@@ -179,7 +180,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     weekday, month, or today and tomorrow): "a las 3, digo, a las 4" becomes
     "a las 4". With no such word the sentence stays as said, and other
     languages stay as heard. It runs after transcription and learned fixes
-    (in the app also after custom vocabulary), before Apple Intelligence
+    and custom vocabulary, before Apple Intelligence
     cleanup, translation, and formatting, in in-keyboard dictation and in the
     app. The tagger is a BERT L-4/H-512 token classifier fine-tuned from
     Google's Apache-2.0 `bert_uncased_L-4_H-512_A-8` on generated examples,
@@ -192,7 +193,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     timeout, an error, or a result with no words left keeps the transcript as
     heard.
   - **Custom vocabulary (Settings › Dictation › Custom vocabulary):** Off by default.
-    A local list of up to 100 names and phrases, applied to every engine. After
+    A local list of up to 100 names and phrases, applied to every engine, in the
+    app and in-keyboard dictation. After
     transcription, matching words are rewritten to the listed spelling across
     case, spaces, tabs, a single hyphen, and possessive apostrophes, before
     cleanup and again after formatting, so a style cannot undo a spelling. The

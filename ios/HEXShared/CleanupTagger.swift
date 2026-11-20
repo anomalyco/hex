@@ -153,7 +153,7 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     /// `language` counts as English. Spoken symbols ("john at the rate gmail dot com" to
     /// "john@gmail.com", `SpokenCleanupRules.spokenSymbols`) apply in every style but
     /// Verbatim whether the experiment is on or off: both the app's and the keyboard's
-    /// dictation pass through here, and only the app's formats.
+    /// dictation pass through here (`DictationPipeline`).
     static func cleanIfEnabled(
         _ text: String,
         style: DictationStyle,

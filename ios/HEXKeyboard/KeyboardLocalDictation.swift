@@ -384,14 +384,18 @@ final class KeyboardLocalDictation {
                 let (heard, language) = try await KeyboardSpeech.transcribe(url, hints: hints)
                 try? FileManager.default.removeItem(at: url)
                 let locale = language.identifier
-                let corrected = DictationCorrections.apply(fixes, to: heard)
                 let style = KeyboardBridge().style
-                let cleaned = await CleanupTagger.cleanIfEnabled(corrected, style: style, language: locale)
-                let translated = await DictationTranslator.translateIfEnabled(
-                    cleaned,
-                    source: language.locale.language
+                let vocabulary = CustomVocabularySettings().activeTerms
+                // The app's steps (but Apple Intelligence's cleanup), its style included.
+                let pipeline = DictationPipeline(
+                    style: style,
+                    language: locale,
+                    vocabulary: vocabulary,
+                    corrections: fixes
                 )
-                let text = translated ?? cleaned
+                let steps = await pipeline.run(heard, translationSource: language.locale.language)
+                let translated = steps.translated
+                let text = steps.formatted
                 KeyboardProbeLog.shared.write("transcribed in \(String(format: "%.2f", Date().timeIntervalSince(started))) s: \(text.count) chars \(KeyboardProbeLog.memory())")
                 guard let self, !Task.isCancelled else { return }
                 // Record typing logs keeps every step; nothing is kept while it is off.
@@ -405,9 +409,11 @@ final class KeyboardLocalDictation {
                         recordedMS: Int((seconds * 1000).rounded()),
                         transcribeMS: Int((Date().timeIntervalSince(started) * 1000).rounded()),
                         raw: heard,
-                        fixed: corrected,
-                        tagged: CleanupTaggerSettings().isEnabled && style != .verbatim ? cleaned : nil,
-                        translated: translated
+                        fixed: steps.fixed,
+                        spelled: vocabulary.isEmpty ? nil : steps.spelled,
+                        tagged: CleanupTaggerSettings().isEnabled && style != .verbatim ? steps.tagged : nil,
+                        translated: translated,
+                        formatted: steps.formatted
                     )
                     : nil
                 // A translation's words can't be compared with what was heard, so it isn't learned from.

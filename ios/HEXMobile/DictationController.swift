@@ -861,30 +861,25 @@ final class DictationController {
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                // Learned fixes run first, on the words as heard. Spelling runs before
-                // optional cleanup so cleanup sees the preferred words, then again after
-                // formatting because a style can lowercase a term or capitalize a
-                // sentence start ("iPhone" -> "IPhone"); learned capitals get the same.
-                let corrected = DictationCorrections.apply(session.personalCorrections, to: rawText)
-                let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: corrected)
-                let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: session.style, language: session.language)
-                let cleaned = await self.cleanedTranscriptIfEnabled(tagged, session: session)
-                let translated = await DictationTranslator.translateIfEnabled(
-                    cleaned,
-                    source: Locale(identifier: session.language).language
+                // The steps in-keyboard dictation runs too, plus Apple Intelligence's cleanup.
+                let pipeline = DictationPipeline(
+                    style: session.style,
+                    language: session.language,
+                    vocabulary: session.vocabularyTerms,
+                    corrections: session.personalCorrections
                 )
-                let text = translated ?? cleaned
+                let stages = await pipeline.run(rawText) { tagged in
+                    await self.cleanedTranscriptIfEnabled(tagged, session: session)
+                }
+                let corrected = stages.fixed
+                let spelled = stages.spelled
+                let tagged = stages.tagged
+                let cleaned = stages.cleaned
+                let translated = stages.translated
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                // A translation is formatted in the language it is now in.
-                let formatLanguage = translated == nil
-                    ? session.language
-                    : DictationTranslationSettings().targetLanguage
-                let formatted = VocabularySpelling.apply(
-                    session.vocabularyTerms + DictationCorrections.spellings(session.personalCorrections),
-                    to: TranscriptFormatter.format(text, style: session.style, language: formatLanguage)
-                )
+                let formatted = stages.formatted
                 self.recordingDuration = 0
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {
