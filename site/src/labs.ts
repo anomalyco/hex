@@ -80,6 +80,7 @@ export function cardVersion(lab: Lab): string {
 export const cardPath = (lab: Lab) => withBase(`/labs/${lab.id}.png?v=${cardVersion(lab)}`)
 export const INDEX_PATH = withBase("/labs")
 export const INDEX_CARD_PATH = withBase("/labs.png")
+const LABS = { crumb: { href: INDEX_PATH, label: "Labs" } }
 
 const STYLE = `
 :root { color-scheme: only dark; }
@@ -119,9 +120,9 @@ li a:hover .title { text-decoration: underline; text-decoration-color: #4a4b50; 
 
 const MARK = `<svg aria-hidden="true" viewBox="0 0 64 64"><path d="M32 4 57 18.5v27L32 60 7 45.5v-27Z"/><path d="M32 15 48 24.25v15.5L32 49l-16-9.25v-15.5Z"/></svg>`
 
-type Meta = { title: string; description: string; url: string; image: string; imageAlt: string }
+export type Meta = { title: string; description: string; url: string; image: string; imageAlt: string }
 
-function head(origin: string, meta: Meta): string {
+function head(origin: string, meta: Meta, style: string): string {
   const url = `${origin}${meta.url.slice("/hex".length)}`
   const image = `${origin}${meta.image.slice("/hex".length)}`
   const tags = [
@@ -148,19 +149,21 @@ function head(origin: string, meta: Meta): string {
     `<meta name="twitter:image" content="${escape(image)}">`,
     `<meta name="twitter:image:alt" content="${escape(meta.imageAlt)}">`,
     `<link rel="icon" href="${withBase("/favicon.svg")}" type="image/svg+xml">`,
-    `<style>${STYLE}</style>`,
+    `<style>${STYLE}${style}</style>`,
   ]
   return tags.join("\n")
 }
 
-function shell(origin: string, meta: Meta, body: string): string {
+// A static page in the Labs pages' look: the Hex mark and a crumb, then the body.
+// The iPhone pages (src/iphone.ts) use it too, with their own crumb and styles.
+export function shell(origin: string, meta: Meta, body: string, page: { crumb: { href: string; label: string }; style?: string } = LABS): string {
   return `<!doctype html>
 <html lang="en">
 <head>
-${head(origin, meta)}
+${head(origin, meta, page.style ?? "")}
 </head>
 <body>
-<header><a href="${withBase("/")}">${MARK}<span>Hex</span></a><span class="crumb">/</span><a class="crumb" href="${INDEX_PATH}">Labs</a></header>
+<header><a href="${withBase("/")}">${MARK}<span>Hex</span></a><span class="crumb">/</span><a class="crumb" href="${page.crumb.href}">${escape(page.crumb.label)}</a></header>
 <main>
 ${body}
 </main>
