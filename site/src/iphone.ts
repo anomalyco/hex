@@ -108,14 +108,14 @@ export function renderIphone(origin: string): string {
 }
 
 export function renderPrivacy(origin: string): string {
-  const body = `<p class="eyebrow">Hex for iPhone</p>
+  const body = `<p class="eyebrow">Hex for iPhone and Android</p>
 <h1>Privacy policy</h1>
 <p class="summary">Hex doesn't collect any data. What you say and type stays on your iPhone.</p>
 <p class="updated">Last updated ${PRIVACY_UPDATED}</p>
 <div class="prose">
 <section>
 <h2>The short version</h2>
-<p>Hex for iPhone is made by Anomaly Innovations, Inc. This policy covers the Hex app for iPhone, Hex Keyboard, and Hex's widgets and Live Activities.</p>
+<p>Hex for iPhone and Android is made by Anomaly Innovations, Inc. This policy covers the Hex app for iPhone, Hex Keyboard, and Hex's widgets and Live Activities, and <a href="#android">Hex for Android</a> and its keyboard.</p>
 <p>There's no account, no analytics, no advertising, and no tracking. Hex has no servers your words could be sent to.</p>
 </section>
 <section>
@@ -149,9 +149,19 @@ export function renderPrivacy(origin: string): string {
 <h2>Children</h2>
 <p>Hex is suitable for all ages and collects no data from anyone, including children.</p>
 </section>
+<section id="android">
+<h2>Hex for Android</h2>
+<p>Hex for Android and its keyboard work the same way: no account, no analytics, no advertising, and no tracking.</p>
+<ul>
+<li><strong>Typing.</strong> Hex Keyboard uses the text around your cursor and where you tap to suggest and correct words on your phone, and keeps no log of what you type. In password and PIN fields it types exactly what you press, without reading the field, suggesting words, or dictating.</li>
+<li><strong>Dictation.</strong> Hex uses the microphone only while you dictate. It turns speech into text in memory on your phone, never saves a recording, and keeps no history of what you said. Clean up and translation also run on your phone.</li>
+<li><strong>The speech model.</strong> During setup, Hex downloads one public speech model (190 MB) from Hugging Face over HTTPS. The request carries none of your words, audio, or device identifiers; like any download, the server sees your IP address. If it fails, Hex uses the smaller model it comes with.</li>
+<li><strong>What Hex keeps.</strong> Your settings, setup progress, and the speech model, in Hex's private storage. When you undo an autocorrection, Hex keeps a count against a hash of that word pair, never the words, so it doesn't make the same correction again. Clearing Hex's storage or uninstalling Hex removes all of it, and you can turn off microphone access in Android's settings.</li>
+</ul>
+</section>
 <section>
 <h2>Hex on your computer</h2>
-<p>Hex for Mac, Windows, and Linux also transcribes on your computer. This policy covers only Hex for iPhone.</p>
+<p>Hex for Mac, Windows, and Linux also transcribes on your computer. This policy covers only Hex for iPhone and Android.</p>
 </section>
 <section>
 <h2>Changes</h2>
