@@ -23,6 +23,8 @@ final class KeyboardKeyPlaneView: UIView {
     private var nextTouchID = 0
     private var deleteTimer: Timer?
     private var deleteStartedAt: TimeInterval = 0
+    /// Hold delete and slide left to delete word by word (`DeleteWordSwipe`).
+    private(set) var deleteSwipe: DeleteWordSwipe?
     private var accentHoldWork: [Int: DispatchWorkItem] = [:]
 
     init(engine: FullKeyboardEngine) {
@@ -231,7 +233,11 @@ final class KeyboardKeyPlaneView: UIView {
         engine.touchBegan(id: id, at: sample.point)
         if let kind = engine.touches[id]?.key.kind {
             onKeyDown?(kind)
-            if kind == .delete { startDeleteRepeat() }
+            if kind == .delete {
+                startDeleteRepeat()
+                deleteSwipe?.finish()
+                deleteSwipe = DeleteWordSwipe(engine: engine, touchID: id, startX: sample.point.x)
+            }
             if case .character = kind { armAccentTimer(for: id) }
         }
     }
@@ -247,11 +253,15 @@ final class KeyboardKeyPlaneView: UIView {
                 armAccentTimer(for: id)
             }
         }
+        if let swipe = deleteSwipe, swipe.touchID == id, swipe.move(to: sample.point.x) {
+            stopDeleteRepeat()
+        }
     }
 
     func ended(id: Int, sample: TypingLogTouchSample) {
         cancelAccentTimer(for: id)
         if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
+        finishDeleteSwipe(for: id)
         typingLog?.touch(.ended, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
         engine.touchEnded(id: id, at: sample.point)
     }
@@ -259,6 +269,7 @@ final class KeyboardKeyPlaneView: UIView {
     func cancelled(id: Int, sample: TypingLogTouchSample) {
         cancelAccentTimer(for: id)
         if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
+        finishDeleteSwipe(for: id)
         typingLog?.touch(.cancelled, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
         engine.touchCancelled(id: id)
     }
@@ -273,7 +284,15 @@ final class KeyboardKeyPlaneView: UIView {
         for work in accentHoldWork.values { work.cancel() }
         accentHoldWork.removeAll()
         stopDeleteRepeat()
+        deleteSwipe?.finish()
+        deleteSwipe = nil
         engine.cancelAllTouches()
+    }
+
+    private func finishDeleteSwipe(for id: Int) {
+        guard let swipe = deleteSwipe, swipe.touchID == id else { return }
+        swipe.finish()
+        deleteSwipe = nil
     }
 
     private func armAccentTimer(for id: Int) {

@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -37,6 +38,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Keyboard dictation sets this process's audio session to record (WebKit captures for
+        // it), and iOS mutes a recording session's haptics by default: keep key haptics on.
+        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
         configureView()
         syncFromBridge(animated: false)
     }

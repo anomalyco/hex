@@ -351,4 +351,111 @@ final class FullKeyboardEngineTests: XCTestCase {
         engine.configureForField()
         XCTAssertEqual(engine.layout.layer, .numbers)
     }
+
+    // MARK: - Haptics in every layout
+
+    /// Key haptics come from the same calls whatever the layout (a TestFlight tester felt
+    /// none on the Portuguese one): every layout asks for a tap per key going down and a tick
+    /// per accent step, the same number of times.
+    func testEveryLayoutAsksForTheSameKeyHaptics() {
+        var counts: [KeyboardLanguage: Int] = [:]
+        for language in KeyboardLanguage.allCases {
+            let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+            view.languageOverride = language
+            view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+            view.layoutIfNeeded()
+            var asked = 0
+            view.allowsHaptics = {
+                asked += 1
+                return true
+            }
+            for (id, kind) in [KeyKind.character("a"), .space, .delete].enumerated() {
+                let key = view.engine.layout.key(kind)!
+                let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
+                view.plane.began(id: id + 10, sample: sample)
+                view.plane.ended(id: id + 10, sample: sample)
+            }
+            view.debugHoldAccent("e", selectIndex: 1)
+            counts[language] = asked
+        }
+        XCTAssertGreaterThanOrEqual(counts[.english] ?? 0, 4, "three keys and an accent step")
+        for language in KeyboardLanguage.allCases {
+            XCTAssertEqual(counts[language], counts[.english], "\(language.rawValue) haptics")
+        }
+    }
+
+    // MARK: - Delete swipe
+
+    private func swipeEngine(_ text: String) -> (FixtureTextTarget, FullKeyboardEngine) {
+        let field = FixtureTextTarget(text: text)
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let keys = FullKeyboardEngine(
+            target: field,
+            autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults))
+        )
+        keys.width = 393
+        keys.configureForField()
+        return (field, keys)
+    }
+
+    private func deleteSample(_ keys: FullKeyboardEngine, dx: CGFloat = 0) -> TypingLogTouchSample {
+        let key = keys.layout.key(.delete)!
+        return TypingLogTouchSample(point: CGPoint(x: key.frame.midX + dx, y: key.frame.midY), timestamp: 0)
+    }
+
+    func testDeleteSwipeDeletesWordByWordRestoresAndCommitsOnLift() {
+        let (field, keys) = swipeEngine("one two, three. four")
+        let plane = KeyboardKeyPlaneView(engine: keys)
+        var ticks = 0
+        keys.onSelectionStep = { ticks += 1 }
+        let step = keys.layout.letterWidth
+
+        plane.began(id: 1, sample: deleteSample(keys))
+        XCTAssertEqual(field.text, "one two, three. fou", "going down deletes a letter, as a tap does")
+        plane.moved(id: 1, sample: deleteSample(keys, dx: -step * 0.6))
+        XCTAssertEqual(field.text, "one two, three. fou", "less than a key width deletes nothing more")
+        XCTAssertEqual(plane.deleteSwipe?.isActive, false)
+
+        plane.moved(id: 1, sample: deleteSample(keys, dx: -step * 1.2))
+        XCTAssertEqual(field.text, "one two, three. ")
+        plane.moved(id: 1, sample: deleteSample(keys, dx: -step * 2.2))
+        XCTAssertEqual(field.text, "one two, ", "punctuation and spaces go with the word before them")
+        plane.moved(id: 1, sample: deleteSample(keys, dx: -step * 3.2))
+        XCTAssertEqual(field.text, "one ")
+        XCTAssertEqual(ticks, 3, "a tick per word")
+
+        plane.moved(id: 1, sample: deleteSample(keys, dx: -step * 1.5))
+        XCTAssertEqual(field.text, "one two, three. ", "sliding back types the words back")
+        XCTAssertEqual(ticks, 5)
+
+        plane.ended(id: 1, sample: deleteSample(keys, dx: -step * 1.5))
+        XCTAssertEqual(field.text, "one two, three. ", "lifting keeps what is deleted")
+        XCTAssertNil(plane.deleteSwipe)
+
+        plane.began(id: 2, sample: deleteSample(keys))
+        plane.ended(id: 2, sample: deleteSample(keys))
+        XCTAssertEqual(field.text, "one two, three.", "a tap after it deletes one character")
+    }
+
+    func testDeleteSwipeStopsAtTheStartAndRestoresOnlyItsWords() {
+        let (field, keys) = swipeEngine("hi there")
+        let plane = KeyboardKeyPlaneView(engine: keys)
+        let step = keys.layout.letterWidth
+        plane.began(id: 1, sample: deleteSample(keys))
+        plane.moved(id: 1, sample: deleteSample(keys, dx: -step * 6))
+        XCTAssertEqual(field.text, "")
+        plane.moved(id: 1, sample: deleteSample(keys))
+        XCTAssertEqual(field.text, "hi ther", "the letter the press deleted stays deleted")
+        plane.cancelled(id: 1, sample: deleteSample(keys))
+        XCTAssertEqual(field.text, "hi ther")
+    }
+
+    func testDeleteSwipeWordsMatchOptionDelete() {
+        XCTAssertNil(DeleteWordSwipe.wordLength(before: ""))
+        XCTAssertEqual(DeleteWordSwipe.wordLength(before: "Hello, world. "), 7)
+        XCTAssertEqual(DeleteWordSwipe.wordLength(before: "it's don't"), 5)
+        XCTAssertEqual(DeleteWordSwipe.wordLength(before: "Olá, você"), 4)
+        XCTAssertEqual(DeleteWordSwipe.wordLength(before: "?!"), 2)
+        XCTAssertEqual(DeleteWordSwipe.wordLength(before: "line\n"), 5)
+    }
 }
