@@ -190,6 +190,17 @@ final class AutocorrectEngine {
     /// Learn how I type: typos you fixed the same way twice and words you turned down twice.
     private(set) var learning = TypingLearning()
     private(set) var lastCorrection: AppliedCorrection?
+    /// Experiment (Spatial autocorrect): reads the word's taps with a language model in place
+    /// of `UITextChecker`'s one-edit guesses, for the language its model was built for. Nil
+    /// while off or without a model.
+    var decoder: TypingDecoder?
+    /// The letter keys for `decoder`, from the current layout.
+    var decoderKeys: TypingDecoder.Keys?
+    /// Where each letter of the word being typed was tapped, one point per letter; nil when
+    /// the keys don't know (the cursor moved, the text came from elsewhere).
+    var decoderTaps: [CGPoint]?
+    private var beforeInput: String?
+    private var decoderCache: (before: String, taps: [CGPoint], decision: TypingDecoder.Decision?)?
 
     init(
         checker: TextChecking? = nil,
@@ -293,6 +304,7 @@ final class AutocorrectEngine {
     ) -> [KeyboardSuggestion] {
         guard field == .text, autocorrectionType != .no, hasDictionary else { return [] }
         guard let token = Self.currentToken(in: beforeInput) else { return [] }
+        self.beforeInput = beforeInput
 
         let lower = token.lowercased()
         let allowAuto = isEnabled
@@ -311,6 +323,16 @@ final class AutocorrectEngine {
             pool.append(Self.matchCase(of: token, onto: learned))
         } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
             pool.append(Self.matchCase(of: token, onto: suggested))
+        }
+
+        // Spatial autocorrect's other readings of your taps.
+        if let decision = decoderDecision(for: token) {
+            for reading in decision.readings where pool.count < 2 {
+                let cased = Self.matchCase(of: token, onto: reading.text)
+                if !pool.contains(where: { $0.caseInsensitiveCompare(cased) == .orderedSame }) {
+                    pool.append(cased)
+                }
+            }
         }
 
         // Spelling guesses for a word the dictionary doesn't know.
@@ -387,6 +409,7 @@ final class AutocorrectEngine {
     ) -> (original: String, replacement: String)? {
         guard isEnabled, field == .text, autocorrectionType != .no else { return nil }
         guard let token = Self.currentToken(in: beforeInput) else { return nil }
+        self.beforeInput = beforeInput
         let lower = token.lowercased()
         guard !suppressedInSession.contains(lower),
               !learning.rejected.contains(lower),
@@ -426,6 +449,11 @@ final class AutocorrectEngine {
 
         if isAllCaps { return nil }
 
+        // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
+        if let decision = decoderDecision(for: token) {
+            return decision.replacement.map { Self.matchCase(of: token, onto: $0) }
+        }
+
         // 3. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
         guard token.count >= 3, !token.contains("'") else { return nil }
         guard !checker.isWordValid(token) else { return nil }
@@ -445,6 +473,39 @@ final class AutocorrectEngine {
         }
         guard let bestGuess, bestScore <= 1.35 else { return nil }
         return Self.matchCase(of: token, onto: bestGuess)
+    }
+
+    /// What spatial autocorrect makes of `token`'s taps, or nil when it doesn't apply: off,
+    /// another language's model, an apostrophe or one letter typed, a letter the model lacks,
+    /// or taps that don't match the word.
+    private func decoderDecision(for token: String) -> TypingDecoder.Decision? {
+        guard let decoder, let keys = decoderKeys, let taps = decoderTaps, decoder.model.language == language.rawValue,
+              token.count >= 2, taps.count == token.count, !token.contains("'") else { return nil }
+        let before = beforeInput ?? ""
+        if let cache = decoderCache, cache.before == before, cache.taps == taps { return cache.decision }
+        let lower = token.lowercased()
+        let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower)
+            || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
+        let decision = decoder.decide(
+            taps: taps, typed: lower, previous: Self.previousWord(before, token: token),
+            literalIsValid: valid, keys: keys
+        )
+        decoderCache = (before, taps, decision)
+        return decision
+    }
+
+    /// The word before `token` in `before`, lowercased, when only spaces separate them
+    /// (nil at the start of a sentence or after punctuation).
+    static func previousWord(_ before: String, token: String) -> String? {
+        var rest = before.hasSuffix(token) ? before.dropLast(token.count) : Substring(before)
+        guard rest.last == " " else { return nil }
+        while rest.last == " " { rest = rest.dropLast() }
+        var word = ""
+        while let c = rest.last, c.isLetter || c == "'" {
+            word.insert(c, at: word.startIndex)
+            rest = rest.dropLast()
+        }
+        return word.isEmpty ? nil : word.lowercased()
     }
 
     /// A `UITextChecker` guess as autocorrect and the strip may use it, or nil. A guess adds

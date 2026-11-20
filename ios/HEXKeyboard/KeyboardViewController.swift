@@ -215,6 +215,7 @@ final class KeyboardViewController: UIInputViewController {
             fullAccess: hasFullAccess,
             settings: [
                 TypingLogField("autocorrect", .bool(FullKeyboardSettings().autocorrect)),
+                TypingLogField("spatialAutocorrect", .bool(FullKeyboardSettings().spatialAutocorrect)),
                 TypingLogField("key_popups", .bool(FullKeyboardSettings().keyPopups)),
                 TypingLogField("haptics", .bool(FullKeyboardSettings().haptics)),
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),

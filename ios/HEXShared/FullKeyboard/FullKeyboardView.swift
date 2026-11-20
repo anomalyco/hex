@@ -155,6 +155,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.autocorrect.isEnabled = FullKeyboardSettings().autocorrect
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         refreshEmojiKey()
+        syncSpatialAutocorrect()
         refreshLanguageSignals()
         syncLanguage()
         engine.configureForField()
@@ -266,6 +267,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         )
         guard engine.language != next else { return }
         engine.language = next
+        syncSpatialAutocorrect()
         setNeedsLayout()
     }
 
@@ -282,6 +284,20 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             engine.autocorrect.isEnabled = wantsAutocorrect
             engine.refreshSuggestions()
         }
+        syncSpatialAutocorrect()
+    }
+
+    /// Experiments › Full keyboard › Spatial autocorrect: maps the layout language's bundled
+    /// model the first time it is on (English and Spanish today; others keep `UITextChecker`),
+    /// and moves the keys' centres to where Learn how I type saw you tap.
+    private func syncSpatialAutocorrect() {
+        let model = FullKeyboardSettings().spatialAutocorrect ? TypingDecoderModel.bundled(engine.language.rawValue) : nil
+        if engine.autocorrect.decoder?.model !== model {
+            engine.autocorrect.decoder = model.map { TypingDecoder(model: $0) }
+            engine.refreshSuggestions()
+        }
+        let keys = model == nil ? [:] : (engine.journal?.current.keys ?? [:])
+        engine.tapOffsets = TypingDecoder.offsets(from: keys, layout: engine.layout)
     }
 
     /// The field or its contents changed outside these keys.

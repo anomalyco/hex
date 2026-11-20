@@ -199,6 +199,19 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
+  - **Spatial autocorrect (Settings › Experiments › Spatial autocorrect):**
+    Off by default; it needs the full keyboard with Autocorrect on. A noisy-channel decoder
+    (`TypingDecoder`) replaces `UITextChecker`'s one-edit guesses on space and in the
+    strip for English and Spanish: each tap is scored against every letter with a 2D
+    Gaussian around the key (shifted by Learn how I type's tap offsets when it has 20
+    or more taps on a letter), words are found with a beam search over a memory-mapped
+    word list with a bigram language model on the word before, a missed space is tried by
+    splitting the taps, accented letters read from their base key (é from e), and what you
+    typed is replaced only when the best reading beats it by a margin (more when what you
+    typed is a word). Shortcuts, learned fixes, contractions, and words you kept still come
+    first. The models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, 2.5–3.3 MB) are
+    built by `scripts/build-typing-model.py` and kept out of git; without one the
+    experiment does nothing for that language.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. For testing and training prediction and
     per-user touch models: the keyboard writes every touch on Hex's keys (raw
