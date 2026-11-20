@@ -33,8 +33,8 @@ struct TypingInsightsView: View {
 
             if !snapshot.dictationOutcomes.isEmpty {
                 section("Dictation") {
-                    row("Kept as is", detail: share(of: .kept))
-                    row("Edited", detail: share(of: .edited))
+                    row(String(localized: "Kept as is"), detail: share(of: .kept))
+                    row(String(localized: "Edited"), detail: share(of: .edited))
                 }
             }
 
@@ -73,11 +73,14 @@ struct TypingInsightsView: View {
 
     private var summary: String {
         if snapshot.isEmpty {
-            return "Fills in as you type and dictate with Hex"
+            return String(localized: "Fills in as you type and dictate with Hex")
         }
+        let taps = snapshot.tapCount
+        let fixes = snapshot.corrections.count
         let dictations = snapshot.dictationOutcomes.count
-        return "\(snapshot.tapCount) taps, \(snapshot.corrections.count) typing fixes and \(dictations) "
-            + (dictations == 1 ? "dictation" : "dictations") + " learned"
+        return dictations == 1
+            ? String(localized: "\(taps) taps, \(fixes) typing fixes and 1 dictation learned")
+            : String(localized: "\(taps) taps, \(fixes) typing fixes and \(dictations) dictations learned")
     }
 
     /// Learned fixes, most used first; each can be switched off.
@@ -126,10 +129,25 @@ struct TypingInsightsView: View {
             .sorted { hypot($0.offset.dx, $0.offset.dy) > hypot($1.offset.dx, $1.offset.dy) }
             .prefix(4)
             .map { item in
-                let horizontal = abs(item.offset.dx) < 0.08 ? "" : (item.offset.dx > 0 ? "right" : "left")
-                let vertical = abs(item.offset.dy) < 0.08 ? "" : (item.offset.dy > 0 ? "low" : "high")
-                return (key: item.key, direction: [vertical, horizontal].filter { !$0.isEmpty }.joined(separator: " and "))
+                let right = abs(item.offset.dx) < 0.08 ? nil : item.offset.dx > 0
+                let low = abs(item.offset.dy) < 0.08 ? nil : item.offset.dy > 0
+                return (key: item.key, direction: Self.direction(low: low, right: right))
             }
+    }
+
+    /// "low and right": where taps land from the key's centre, empty when they're centred.
+    private static func direction(low: Bool?, right: Bool?) -> String {
+        switch (low, right) {
+        case (true?, true?): String(localized: "low and right")
+        case (true?, false?): String(localized: "low and left")
+        case (false?, true?): String(localized: "high and right")
+        case (false?, false?): String(localized: "high and left")
+        case (true?, nil): String(localized: "low")
+        case (false?, nil): String(localized: "high")
+        case (nil, true?): String(localized: "right")
+        case (nil, false?): String(localized: "left")
+        case (nil, nil): ""
+        }
     }
 
     private func reload() {
@@ -139,7 +157,7 @@ struct TypingInsightsView: View {
         disabledFixes = TypingJournalSettings().disabledDictationFixes
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))

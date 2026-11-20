@@ -477,7 +477,7 @@ final class DictationController {
 
         let currentTime = now()
         if request.isHandoffExpired(at: currentTime) {
-            handoffNotice = "Timed out"
+            handoffNotice = String(localized: "Timed out")
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: style,
@@ -518,7 +518,7 @@ final class DictationController {
         guard let handoff = pendingHandoff else { return }
 
         if now() - handoff.requestedAt > KeyboardLaunchRequest.handoffWindow {
-            handoffNotice = "Timed out"
+            handoffNotice = String(localized: "Timed out")
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: handoff.style,
@@ -561,7 +561,7 @@ final class DictationController {
                     copyToPasteboard: false
                 )
             } else {
-                handoffNotice = "Timed out"
+                handoffNotice = String(localized: "Timed out")
             }
             return
         }
@@ -578,7 +578,7 @@ final class DictationController {
                     )
                     return
                 } else {
-                    handoffNotice = "Timed out"
+                    handoffNotice = String(localized: "Timed out")
                 }
             }
             return
@@ -593,7 +593,7 @@ final class DictationController {
             let granted = await audio.requestPermission()
             guard self.jobGeneration == requestGen else { return }
             guard granted else {
-                phase = .failed("Microphone access is off. Allow it in Settings to dictate.")
+                phase = .failed(String(localized: "Microphone access is off. Allow it in Settings to dictate."))
                 publishKeyboardSnapshot()
                 return
             }
@@ -614,7 +614,7 @@ final class DictationController {
             }
 
             if let jobID = handoff?.jobID, !jobID.isEmpty {
-                self.handoffNotice = "Timed out"
+                self.handoffNotice = String(localized: "Timed out")
             }
 
             do {
@@ -750,7 +750,7 @@ final class DictationController {
             guard self.jobGeneration == captureGeneration else { return }
             guard granted else {
                 activeKeyboardJobID = nil
-                let message = "Microphone access is off. Allow it in Settings."
+                let message = String(localized: "Microphone access is off. Allow it in Settings.")
                 keyboardMessage = keyboardJobID == nil ? nil : message
                 phase = .failed(message)
                 publishKeyboardSnapshot()
@@ -1190,7 +1190,7 @@ final class DictationController {
                 self.finishRecording()
             } else {
                 self.cancelCurrentJob()
-                self.phase = .failed("Recording stopped unexpectedly.")
+                self.phase = .failed(String(localized: "Recording stopped unexpectedly."))
                 self.publishKeyboardSnapshot()
             }
         }
@@ -1211,7 +1211,7 @@ final class DictationController {
                     finishRecording()
                 } else {
                     cancelCurrentJob()
-                    keyboardMessage = "Interrupted"
+                    keyboardMessage = String(localized: "Interrupted")
                 }
             } else {
                 audio.stopKeepalive()

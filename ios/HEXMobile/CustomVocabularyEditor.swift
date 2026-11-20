@@ -98,19 +98,19 @@ struct CustomVocabularyEditor: View {
         guard !candidate.isEmpty else { return }
 
         guard candidate.count <= CustomVocabularySettings.maxTermLength else {
-            notice = "Too long"
+            notice = String(localized: "Too long")
             return
         }
         let key = VocabularySpelling.normalizedKey(candidate)
         guard key.count >= 2 else {
-            notice = "Needs at least two letters or digits"
+            notice = String(localized: "Needs at least two letters or digits")
             return
         }
         let isDuplicate = terms.contains {
             VocabularySpelling.normalizedKey($0) == key
         }
         guard !isDuplicate else {
-            notice = "Already in the list"
+            notice = String(localized: "Already in the list")
             return
         }
 

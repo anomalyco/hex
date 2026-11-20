@@ -96,11 +96,11 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         var errorDescription: String? {
             switch self {
             case .authorizationDenied:
-                "Speech Recognition access is required to use Apple Speech."
+                String(localized: "Speech Recognition access is required to use Apple Speech.")
             case .emptyTranscript:
-                "Apple Speech did not detect any speech."
+                String(localized: "Apple Speech did not detect any speech.")
             case .unavailable:
-                "Apple Speech can't transcribe this language on this iPhone."
+                String(localized: "Apple Speech can't transcribe this language on this iPhone.")
             }
         }
     }

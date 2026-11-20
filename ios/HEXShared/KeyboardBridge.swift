@@ -25,19 +25,19 @@ nonisolated enum WarmSessionDuration: String, Codable, CaseIterable, Sendable {
 
     var shortLabel: String {
         switch self {
-        case .off: "Off"
-        case .fiveMinutes: "5m"
-        case .fifteenMinutes: "15m"
-        case .oneHour: "1h"
+        case .off: String(localized: "Off")
+        case .fiveMinutes: String(localized: "5m")
+        case .fifteenMinutes: String(localized: "15m")
+        case .oneHour: String(localized: "1h")
         }
     }
 
     var title: String {
         switch self {
-        case .off: "One shot"
-        case .fiveMinutes: "5 minutes"
-        case .fifteenMinutes: "15 minutes"
-        case .oneHour: "1 hour"
+        case .off: String(localized: "One shot")
+        case .fiveMinutes: String(localized: "5 minutes")
+        case .fifteenMinutes: String(localized: "15 minutes")
+        case .oneHour: String(localized: "1 hour")
         }
     }
 }

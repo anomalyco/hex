@@ -67,7 +67,7 @@ struct DictationLanguageRow: View {
     }
 
     private var selectedName: String {
-        guard let id = dictation.dictationLanguage else { return "Automatic" }
+        guard let id = dictation.dictationLanguage else { return String(localized: "Automatic") }
         return SpeechLanguagePicker.shortNames(for: options.map(\.id))[id]
             ?? SpeechLanguagePicker.displayName(for: id)
     }
@@ -105,13 +105,13 @@ struct KeyboardLayoutRow: View {
                 }
                 Spacer(minLength: 8)
                 Menu {
-                    choice(nil, title: "Automatic")
+                    choice(nil, title: String(localized: "Automatic"))
                     Divider()
                     ForEach(KeyboardLanguage.allCases, id: \.self) { language in
                         choice(language, title: language.displayName)
                     }
                 } label: {
-                    LanguageMenuValue(value: setting?.displayName ?? "Automatic")
+                    LanguageMenuValue(value: setting?.displayName ?? String(localized: "Automatic"))
                 }
             }
             .padding(.horizontal, 16)
