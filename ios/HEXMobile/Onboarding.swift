@@ -207,7 +207,7 @@ private struct OnboardingAllowPage: View {
                             }
                         }
                         Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
-                        OnboardingCheckRow(title: "Keyboard", done: monitor.keyboardAdded == true) {
+                        OnboardingCheckRow(title: "Keyboard", detail: "Add Hex and Allow Full Access", done: monitor.keyboardAdded == true) {
                             if !monitor.fullAccessOn {
                                 OnboardingSmallButton(title: "Open Settings") {
                                     if monitor.microphone == .undetermined {
@@ -456,6 +456,7 @@ private struct OnboardingHeader: View {
 
 private struct OnboardingCheckRow<Trailing: View>: View {
     let title: String
+    var detail: String? = nil
     let done: Bool
     @ViewBuilder var trailing: Trailing
 
@@ -465,9 +466,16 @@ private struct OnboardingCheckRow<Trailing: View>: View {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(done ? HexTheme.success : HexTheme.textFaint)
                 .contentTransition(.symbolEffect(.replace))
-            Text(title)
-                .font(.system(size: 16))
-                .foregroundStyle(HexTheme.textBase)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 16))
+                    .foregroundStyle(HexTheme.textBase)
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 13))
+                        .foregroundStyle(HexTheme.textMuted)
+                }
+            }
             Spacer(minLength: 8)
             trailing
         }
