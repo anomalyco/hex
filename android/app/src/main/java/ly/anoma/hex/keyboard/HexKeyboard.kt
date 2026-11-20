@@ -41,7 +41,7 @@ class HexKeyboard : InputMethodService() {
     private var lastShift = 0L
     private var selStart = -1
     private var selEnd = -1
-    private var secure = false
+    private var secure = true
     internal val previewAllowed get() = !secure
 
     override fun onCreate() {
@@ -67,6 +67,7 @@ class HexKeyboard : InputMethodService() {
             else -> false
         }
         ordinaryField = kind == InputType.TYPE_CLASS_TEXT && !secure &&
+            attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 &&
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
             attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
@@ -137,7 +138,7 @@ class HexKeyboard : InputMethodService() {
     internal fun configureTyping(keepWord: Boolean = false) {
         val language = layoutLanguage.layoutCode
         val active = word
-        if (keepWord && active != null && active.decoder.model.language == language && active.spatial == feedback.spatial &&
+        if (ordinaryField && keepWord && active != null && active.decoder.model.language == language && active.spatial == feedback.spatial &&
             active.token.isNotEmpty() && endsWith(prefix + active.token)) {
             showPlane(); keys?.suggestions(active.suggestions()); return
         }
@@ -151,11 +152,11 @@ class HexKeyboard : InputMethodService() {
         val b = if (w != null && !symbols && selStart == selEnd) before() else null
         keys?.suggestions(if (w != null && b != null && TypingWord.boundary(b.lastOrNull()) && canEndWord()) w.predictions(b) else emptyList())
     }
-    private fun before() = currentInputConnection?.getTextBeforeCursor(96, 0)?.toString().orEmpty()
-    private fun endsWith(suffix: String) = currentInputConnection?.getTextBeforeCursor(suffix.length, 0)?.toString() == suffix
-    private fun canEndWord() = currentInputConnection?.getTextAfterCursor(1, 0)?.firstOrNull()?.let {
+    private fun before() = if (secure) "" else currentInputConnection?.getTextBeforeCursor(96, 0)?.toString().orEmpty()
+    private fun endsWith(suffix: String) = !secure && currentInputConnection?.getTextBeforeCursor(suffix.length, 0)?.toString() == suffix
+    private fun canEndWord() = !secure && (currentInputConnection?.getTextAfterCursor(1, 0)?.firstOrNull()?.let {
         !it.isLetterOrDigit() && it !in "'_/@#"
-    } ?: true
+    } ?: true)
     private fun inputDone() {
         lastShift = 0
         if (!locked && shifted) { shifted = false; showPlane() }
@@ -179,6 +180,7 @@ class HexKeyboard : InputMethodService() {
         inputDone()
     }
     private fun replace(old: String, new: String): Boolean {
+        if (secure) return false
         val ic = currentInputConnection ?: return false
         // With a non-empty selection deleteSurroundingText would remove text outside the selection.
         if (ic.getSelectedText(0)?.isNotEmpty() == true || (old.isNotEmpty() && !endsWith(old))) return false

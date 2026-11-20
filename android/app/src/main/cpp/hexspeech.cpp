@@ -1,6 +1,8 @@
 #include <android/asset_manager_jni.h>
 #include <jni.h>
+#ifndef NDEBUG
 #include <android/log.h>
+#endif
 #include <whisper.h>
 
 #include <algorithm>
@@ -13,6 +15,14 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jobject assets, js
                                          jshortArray samples, jint count, jint threads, jstring language,
                                          jboolean translate) {
     if (count < 1 || count > env->GetArrayLength(samples)) return nullptr;
+#ifdef NDEBUG
+    // whisper.cpp also installs this callback for ggml. Set it before either engine starts.
+    static const bool quiet = [] {
+        whisper_log_set([](ggml_log_level, const char *, void *) {}, nullptr);
+        return true;
+    }();
+    (void)quiet;
+#endif
     auto options = whisper_context_default_params();
     options.use_gpu = false;
     std::unique_ptr<whisper_context, decltype(&whisper_free)> ctx(nullptr, whisper_free);

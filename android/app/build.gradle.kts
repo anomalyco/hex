@@ -3,6 +3,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.DigestInputStream
 import java.security.MessageDigest
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -44,15 +45,30 @@ val prepareSpeechModel by tasks.registering {
     }
 }
 
+// Resolve the key relative to its private properties file, never to a checked-in path.
+val uploadProperties = providers.environmentVariable("HEX_ANDROID_KEYSTORE_PROPERTIES").orNull
+    ?.let(::file) ?: File(System.getProperty("user.home"), ".config/hex-android/keystore.properties")
+val upload = Properties().apply {
+    if (uploadProperties.isFile) uploadProperties.inputStream().use(::load)
+}
+val requireUploadKey by tasks.registering {
+    doLast {
+        check(listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !upload.getProperty(it).isNullOrBlank() } &&
+            uploadProperties.parentFile.resolve(upload.getProperty("storeFile")).isFile) {
+            "Release packaging requires a local upload keystore and keystore.properties."
+        }
+    }
+}
+
 android {
     namespace = "ly.anoma.hex"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "ly.anoma.hex"
         minSdk = 31
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
         ndk { abiFilters += "arm64-v8a" }
@@ -65,9 +81,30 @@ android {
         path = file("src/main/cpp/CMakeLists.txt")
         version = "3.22.1"
     }
+    signingConfigs {
+        create("upload") {
+            storeFile = upload.getProperty("storeFile")?.let { uploadProperties.parentFile.resolve(it) }
+            storePassword = upload.getProperty("storePassword")
+            keyAlias = upload.getProperty("keyAlias")
+            keyPassword = upload.getProperty("keyPassword")
+        }
+    }
+    buildTypes {
+        release {
+            isDebuggable = false
+            isJniDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("upload")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+    packaging.resources.excludes += "DebugProbesKt.bin"
     buildFeatures { compose = true }
     androidResources { noCompress += listOf("bin", "hextm", "valid") }
     sourceSets["main"].assets.srcDir(modelAssets)
+    // The same plain-text Android policy ships in Settings and in the Play listing drafts.
+    sourceSets["main"].assets.srcDir(rootProject.file("play/policy"))
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -75,6 +112,8 @@ android {
 }
 
 kotlin.compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+tasks.matching { it.name in setOf("packageRelease", "packageReleaseBundle", "signReleaseBundle", "bundleRelease", "assembleRelease") }
+    .configureEach { dependsOn(requireUploadKey) }
 // Unmodified InterVariable.ttf from rsms/inter v4.1, stored locally for offline builds.
 val verifyInter by tasks.registering {
     val font = file("src/main/res/font/inter_variable.ttf")

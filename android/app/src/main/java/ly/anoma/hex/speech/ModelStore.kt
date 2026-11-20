@@ -75,6 +75,8 @@ internal object ModelStore {
             try {
                 http.instanceFollowRedirects = false
                 http.connectTimeout = 15_000; http.readTimeout = 45_000
+                // Android's default user agent includes the phone model and OS build.
+                http.setRequestProperty("User-Agent", "HexModelDownloader/1")
                 http.setRequestProperty("Accept-Encoding", "identity")
                 when (http.responseCode) {
                     200 -> return http

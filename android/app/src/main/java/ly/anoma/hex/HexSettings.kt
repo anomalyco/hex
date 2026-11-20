@@ -34,11 +34,12 @@ import ly.anoma.hex.typing.TypingPreferences
 
 private enum class Page(val title: String) {
     Home("Hex"), Dictation("Dictation"), Keyboard("Keyboard"), Privacy("Privacy"), Experiments("Experiments"),
-    Language("Dictation language"), Layout("Keyboard layout"), Styles("Style"), Licences("Open-source licences");
+    Language("Dictation language"), Layout("Keyboard layout"), Styles("Style"),
+    Policy("Privacy policy"), Licences("Open-source licences");
     val parent get() = when (this) {
         Language, Styles -> Dictation
         Layout -> Keyboard
-        Licences -> Privacy
+        Policy, Licences -> Privacy
         else -> Home
     }
 }
@@ -176,7 +177,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry("Everything stays on this device", "Voice and typed text are never uploaded")
                             Rule(); Entry("Typing history", "Hex stores no keystrokes or transcripts")
                         }
-                        Card { Entry("Open-source licences", action = { open(Page.Licences) }) }
+                        Card {
+                            Entry("Privacy policy", action = { open(Page.Policy) })
+                            Rule(); Entry("Open-source licences", action = { open(Page.Licences) })
+                        }
                     }
                     Page.Experiments -> Card {
                         Toggle("Spatial autocorrect", if (autocorrect) "Use where taps land to fix typos" else "Turn on Autocorrect in Keyboard",
@@ -199,8 +203,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 })
                         }
                     }
-                    Page.Licences -> {
-                        val text = remember { context.assets.open("licenses/credits.txt").bufferedReader().use { it.readText() } }
+                    Page.Policy, Page.Licences -> {
+                        val asset = if (page == Page.Policy) "privacy-policy.txt" else "licenses/credits.txt"
+                        val text = remember(asset) { context.assets.open(asset).bufferedReader().use { it.readText() } }
                         SelectionContainer { Label(text.trim(), size = 14, lines = Int.MAX_VALUE) }
                     }
                 }
