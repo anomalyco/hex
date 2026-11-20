@@ -32,20 +32,22 @@ nonisolated enum DictationStyle: String, Codable, CaseIterable, Sendable {
 }
 
 nonisolated enum TranscriptFormatter {
-    static func format(_ raw: String, style: DictationStyle) -> String {
+    /// `language` (BCP 47) picks the fillers a style trims; nil is English.
+    static func format(_ raw: String, style: DictationStyle, language: String? = nil) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
+        let fillers = fillerPattern(for: language)
 
         switch style {
         case .verbatim:
             return collapseHorizontalSpaces(in: trimmed)
 
         case .polished:
-            let cleaned = stripStandaloneFillers(in: trimmed)
+            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
             return polishSentences(cleaned)
 
         case .casual:
-            let cleaned = stripStandaloneFillers(in: trimmed)
+            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
             var lowered = collapseHorizontalSpaces(in: cleaned).lowercased()
             // Keep standalone "i" and "i'm"/"i'll"/"i've"/"i'd" capitalized naturally, or pure casual lowercase?
             // Pure texting style: lowercase start and drop single-sentence trailing period, keep ? and !.
@@ -56,7 +58,7 @@ nonisolated enum TranscriptFormatter {
             return lowered.trimmingCharacters(in: .whitespacesAndNewlines)
 
         case .notes:
-            let cleaned = stripStandaloneFillers(in: trimmed)
+            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
             return formatNotes(cleaned)
         }
     }
@@ -102,8 +104,24 @@ nonisolated enum TranscriptFormatter {
         return ".,!?;:)]}”".contains(character)
     }
 
-    private static func stripStandaloneFillers(in text: String) -> String {
-        let pattern = #"(?i)(?:^|(?<=[\s,]))(?:um+|uh+|er+|ah+)(?=(?:[\s,.!?]|$)),?\s*"#
+    /// The hesitation sounds a style trims, per language. English "er" is a word in
+    /// Norwegian, Danish, Swedish ("er" = is) and German, and "um" is one in Portuguese, so
+    /// each language trims only its own; a language without a list trims nothing.
+    static func fillerPattern(for language: String?) -> String? {
+        let code = language.flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
+        switch code {
+        case "en":
+            return "um+|uh+|er+|ah+"
+        case "nb", "nn", "no", "da", "sv":
+            return "e+h+m*|ø+h+m*|ö+h+m*|hm+"
+        default:
+            return nil
+        }
+    }
+
+    private static func stripStandaloneFillers(in text: String, fillers: String?) -> String {
+        guard let fillers else { return collapseHorizontalSpaces(in: text) }
+        let pattern = #"(?i)(?:^|(?<=[\s,]))(?:"# + fillers + #")(?=(?:[\s,.!?]|$)),?\s*"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let stripped = regex.stringByReplacingMatches(in: text, range: range, withTemplate: " ")

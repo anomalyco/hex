@@ -299,7 +299,10 @@ final class KeyboardViewController: UIInputViewController {
                 self.localDictation.stop()
                 // Loading the cleanup model while recording starts ran older iPhones out of
                 // keyboard memory, so it loads after the microphone closes.
-                CleanupTagger.prepareIfEnabled(style: self.bridge.style)
+                CleanupTagger.prepareIfEnabled(
+                    style: self.bridge.style,
+                    language: LanguageSettings().effectiveDictationLanguage
+                )
             } else {
                 self.stopWarmDictation()
             }

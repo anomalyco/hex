@@ -147,15 +147,19 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     }
 
     /// Clean up what I say, as dictation runs it: after transcription and learned fixes,
-    /// before translation and formatting. Off, Verbatim, or blank keeps `text` as is.
+    /// before translation and formatting. Off, Verbatim, blank, or a language other than
+    /// English (the tagger only knows English) keeps `text` as is. A nil `language` counts
+    /// as English.
     static func cleanIfEnabled(
         _ text: String,
         style: DictationStyle,
+        language: String? = nil,
         settings: CleanupTaggerSettings = CleanupTaggerSettings(),
         tagger: CleanupTagger = .shared
     ) async -> String {
         guard settings.isEnabled,
               style != .verbatim,
+              SpeechLanguagePicker.isEnglish(language),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return text
         }
@@ -163,13 +167,15 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     }
 
     /// Starts loading the model when a dictation stops recording, while it transcribes, so
-    /// cleanup is ready by the time the transcript is. Does nothing while the experiment is off or for Verbatim.
+    /// cleanup is ready by the time the transcript is. Does nothing while the experiment is
+    /// off, for Verbatim, or for a language other than English.
     static func prepareIfEnabled(
         style: DictationStyle,
+        language: String? = nil,
         settings: CleanupTaggerSettings = CleanupTaggerSettings(),
         tagger: CleanupTagger = .shared
     ) {
-        guard settings.isEnabled, style != .verbatim else { return }
+        guard settings.isEnabled, style != .verbatim, SpeechLanguagePicker.isEnglish(language) else { return }
         tagger.prepare()
     }
 

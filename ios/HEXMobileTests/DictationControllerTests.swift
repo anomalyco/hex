@@ -803,9 +803,187 @@ final class DictationControllerTests: XCTestCase {
         }
     }
 
+    func testDictationLanguageChangeWaitsForTheDictationInFlight() async throws {
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let languages = LanguageSettings(defaults: defaults)
+        var preparations = 0
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: {
+                preparations += 1
+                return transcriber
+            },
+            autoPrepareOnInit: false,
+            languageSettings: languages
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(preparations, 1)
+        XCTAssertNil(controller.dictationLanguage, "Automatic by default")
+
+        controller.setDictationLanguage("nb-NO")
+        try await settle()
+        XCTAssertEqual(languages.dictationLanguage, "nb-NO", "saved in the App Group for the keyboard")
+        XCTAssertEqual(preparations, 2, "an idle change prepares the new language at once")
+        XCTAssertEqual(controller.phase, .ready)
+
+        controller.startRecording(keyboardJobID: "language-job")
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        controller.setDictationLanguage("de-DE")
+        try await settle()
+        XCTAssertEqual(preparations, 2, "never while recording")
+        XCTAssertEqual(controller.phase, .recording)
+
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "Ship the build.")
+        XCTAssertEqual(preparations, 3, "prepared once the dictation is done")
+        XCTAssertEqual(controller.phase, .ready)
+
+        controller.setDictationLanguage(nil)
+        try await settle()
+        XCTAssertNil(languages.dictationLanguage)
+        XCTAssertEqual(preparations, 4)
+    }
+
     private func settle() async throws {
         for _ in 0..<8 {
             try await Task.sleep(for: .milliseconds(25))
         }
+    }
+}
+
+/// The dictation language rule: an explicit choice, else the first preferred language either
+/// Apple Speech module has, `SpeechTranscriber` first.
+final class SpeechLanguagePickerTests: XCTestCase {
+    /// SpeechTranscriber's and DictationTranscriber's locales as of iOS 26 (abridged).
+    private let speechLocales = ["en-US", "en-GB", "de-DE", "es-ES", "es-MX", "fr-FR", "hi-IN"]
+    private let dictationLocales = ["en-US", "en-GB", "de-DE", "es-ES", "es-MX", "fr-FR", "nb-NO", "da-DK", "sv-SE", "he-IL"]
+
+    private func lookup(_ list: [String]) -> (Locale) async -> Locale? {
+        { wanted in
+            let code = wanted.language.languageCode?.identifier
+            let region = wanted.region?.identifier
+            let matches = list.map { Locale(identifier: $0) }.filter { $0.language.languageCode?.identifier == code }
+            return matches.first { $0.region?.identifier == region } ?? matches.first
+        }
+    }
+
+    private func pick(explicit: String? = nil, preferred: [String], current: String = "en_US") async -> SpeechLanguage? {
+        await SpeechLanguagePicker.pick(
+            explicit: explicit,
+            candidates: SpeechLanguagePicker.automaticCandidates(preferred: preferred, current: current),
+            speech: lookup(speechLocales),
+            dictation: lookup(dictationLocales)
+        )
+    }
+
+    func testANorwegianIPhoneGetsNorwegianFromDictationTranscriber() async {
+        let picked = await pick(preferred: ["nb-NO", "en-US"], current: "nb_NO")
+        XCTAssertEqual(picked?.identifier, "nb-NO")
+        XCTAssertEqual(picked?.module, .dictation)
+    }
+
+    func testSpeechTranscriberStaysWhereItAlreadyWorks() async {
+        let english = await pick(preferred: ["en-US"])
+        XCTAssertEqual(english?.identifier, "en-US")
+        XCTAssertEqual(english?.module, .speech)
+        let spanish = await pick(preferred: ["es-MX", "en-US"])
+        XCTAssertEqual(spanish?.identifier, "es-MX")
+        XCTAssertEqual(spanish?.module, .speech)
+    }
+
+    func testThePreferredOrderWinsOverTheModule() async {
+        // Hebrew first: DictationTranscriber's Hebrew beats SpeechTranscriber's English.
+        let picked = await pick(preferred: ["he-IL", "en-US"])
+        XCTAssertEqual(picked?.identifier, "he-IL")
+        XCTAssertEqual(picked?.module, .dictation)
+    }
+
+    func testNynorskFallsBackToBokmal() async {
+        XCTAssertEqual(
+            SpeechLanguagePicker.automaticCandidates(preferred: ["nn-NO", "en-US"], current: "nn_NO"),
+            ["nn-NO", "nb-NO", "en-US"]
+        )
+        let picked = await pick(preferred: ["nn-NO", "en-US"], current: "nn_NO")
+        XCTAssertEqual(picked?.identifier, "nb-NO")
+    }
+
+    func testAnExplicitChoiceWinsAndFallsBackToAutomaticWhenUnsupported() async {
+        let danish = await pick(explicit: "da-DK", preferred: ["en-US"])
+        XCTAssertEqual(danish?.identifier, "da-DK")
+        XCTAssertEqual(danish?.module, .dictation)
+        let german = await pick(explicit: "de-DE", preferred: ["nb-NO"])
+        XCTAssertEqual(german?.identifier, "de-DE")
+        XCTAssertEqual(german?.module, .speech)
+        let klingon = await pick(explicit: "tlh", preferred: ["nb-NO", "en-US"])
+        XCTAssertEqual(klingon?.identifier, "nb-NO", "an unsupported choice falls back to Automatic")
+    }
+
+    func testUSEnglishIsTheLastResort() async {
+        let picked = await pick(preferred: ["xx-XX"], current: "xx_XX")
+        XCTAssertEqual(picked?.identifier, "en-US")
+    }
+
+    func testShortNamesDropTheRegionOnlyWhenItIsTheOnlyOne() {
+        let english = Locale(identifier: "en-US")
+        let names = SpeechLanguagePicker.shortNames(for: ["nb-NO", "en-US", "en-GB", "he-IL"], in: english)
+        XCTAssertEqual(names["nb-NO"], "Norwegian Bokmål")
+        XCTAssertEqual(names["he-IL"], "Hebrew")
+        XCTAssertEqual(names["en-US"], "English (United States)")
+    }
+
+    func testOnlyEnglishCountsAsEnglish() {
+        XCTAssertTrue(SpeechLanguagePicker.isEnglish(nil))
+        XCTAssertTrue(SpeechLanguagePicker.isEnglish("en-GB"))
+        XCTAssertFalse(SpeechLanguagePicker.isEnglish("nb-NO"))
+        XCTAssertFalse(SpeechLanguagePicker.isEnglish("he-IL"))
+    }
+}
+
+/// Real Apple Speech on real clips, through the app's `AppleSpeechTranscriber`. Skipped unless
+/// `HEX_SPEECH_CLIPS` names a folder of `<language>.wav` files (`nb-NO.wav`, made with
+/// `say -v Nora`); it downloads each language's model, so it needs the network. It skips the
+/// Speech Recognition prompt, which a test can't answer (simctl can't grant it either).
+final class AppleSpeechClipTests: XCTestCase {
+    func testTranscribesEachClipInItsLanguage() async throws {
+        guard let folder = ProcessInfo.processInfo.environment["HEX_SPEECH_CLIPS"] else {
+            throw XCTSkip("Set HEX_SPEECH_CLIPS to a folder of <language>.wav clips")
+        }
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech needs iOS 26") }
+        let clips = try FileManager.default.contentsOfDirectory(atPath: folder)
+            .filter { $0.hasSuffix(".wav") }
+            .sorted()
+        XCTAssertFalse(clips.isEmpty)
+        var report: [String] = []
+        for clip in clips {
+            let identifier = String(clip.dropLast(4))
+            let suite = "hex.tests.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = LanguageSettings(defaults: defaults)
+            settings.dictationLanguage = identifier
+            guard let language = await AppleSpeechLanguages.resolve(settings: settings),
+                  Locale(identifier: language.identifier).language.languageCode
+                    == Locale(identifier: identifier).language.languageCode else {
+                report.append("\(identifier): unsupported by SpeechTranscriber and DictationTranscriber")
+                continue
+            }
+            let transcriber = AppleSpeechTranscriber(language: language, requestsAuthorization: false)
+            do {
+                try await transcriber.prepare { _ in }
+                let text = try await transcriber.transcribe(URL(fileURLWithPath: folder).appendingPathComponent(clip))
+                report.append("\(identifier) [\(language.module.rawValue) \(language.identifier)]: \(text)")
+            } catch {
+                report.append("\(identifier) [\(language.module.rawValue) \(language.identifier)]: FAILED \(error.localizedDescription)")
+            }
+        }
+        let joined = report.joined(separator: "\n")
+        print("HEX-SPEECH-CLIPS\n\(joined)\nHEX-SPEECH-CLIPS-END")
+        try? joined.write(toFile: (folder as NSString).appendingPathComponent("transcripts.txt"), atomically: true, encoding: .utf8)
     }
 }

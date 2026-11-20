@@ -457,6 +457,8 @@ struct ContentView: View {
             .padding(.horizontal, 16)
             .frame(minHeight: 48)
 
+            DictationLanguageRow(dictation: dictation)
+
             rowDivider
 
             HStack(spacing: 12) {

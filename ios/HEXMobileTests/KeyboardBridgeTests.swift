@@ -117,6 +117,28 @@ final class KeyboardBridgeTests: XCTestCase {
         )
     }
 
+    func testFillerTrimmingFollowsTheDictationLanguage() {
+        // "er" is Norwegian for "is"; English trims it as a filler, Norwegian must not.
+        XCTAssertEqual(
+            TranscriptFormatter.format("det er bra, eh, vi ses", style: .polished, language: "nb-NO"),
+            "Det er bra, vi ses."
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("er I think so", style: .polished, language: "en-US"),
+            "I think so."
+        )
+        // Portuguese "um" is "a"; a language without a filler list trims nothing.
+        XCTAssertEqual(
+            TranscriptFormatter.format("um café, por favor", style: .casual, language: "pt-BR"),
+            "um café, por favor"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("um let's go", style: .polished),
+            "Let's go.",
+            "no language is English, as before"
+        )
+    }
+
     func testSmartInsertionSpacingRespectsSurroundingContext() {
         XCTAssertEqual(
             TranscriptFormatter.insertionText(for: "world.", beforeContext: "Hello", afterContext: nil),
