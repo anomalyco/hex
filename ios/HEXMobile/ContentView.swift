@@ -42,7 +42,6 @@ struct ContentView: View {
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var onboardingPage = OnboardingProgress.launchPage
     @State private var practiceText = ""
-    @State private var showReturnAppsEditor = false
     @FocusState private var practiceFocused: Bool
 
     private static let stageWellHeight: CGFloat = 48
@@ -461,52 +460,6 @@ struct ContentView: View {
 
             rowDivider
 
-            HStack(spacing: 12) {
-                rowTitle("Return to")
-                Spacer(minLength: 8)
-                Menu {
-                    Button {
-                        dictation.setReturnAppID(nil)
-                    } label: {
-                        if dictation.returnAppID == nil {
-                            Label("Swipe back", systemImage: "checkmark")
-                        } else {
-                            Text("Swipe back")
-                        }
-                    }
-
-                    Divider()
-
-                    ForEach(dictation.quickReturnApps) { app in
-                        Button {
-                            dictation.setReturnAppID(app.id)
-                        } label: {
-                            if dictation.returnAppID == app.id {
-                                Label(app.name, systemImage: "checkmark")
-                            } else {
-                                Text(app.name)
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button("Edit apps…") { showReturnAppsEditor = true }
-                } label: {
-                    menuValueLabel(dictation.selectedReturnApp?.name ?? "Swipe back")
-                }
-            }
-            .sheet(isPresented: $showReturnAppsEditor) {
-                ReturnAppsSheet(
-                    chosen: dictation.quickReturnApps,
-                    onSave: dictation.setQuickReturnApps
-                )
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-
-            rowDivider
-
             Toggle(
                 isOn: Binding(
                     get: { !dictation.allowBluetoothMic },
@@ -603,16 +556,7 @@ struct ContentView: View {
             let showFailedRetry = mode == .failed
             let showPreparing = mode == .preparing
             let status = handoffStatusLine
-            let isAutoReturning: Bool = {
-                switch dictation.autoReturnState {
-                case .attempting, .succeeded:
-                    return true
-                case .idle, .swipeFallback:
-                    return false
-                }
-            }()
-            let showReturnChips = (showRecordingControls || dictation.keyboardSessionEnabled) && !isAutoReturning
-            let showHomeSwipeCue = hasHomeIndicator && showReturnChips
+            let showHomeSwipeCue = hasHomeIndicator && (showRecordingControls || dictation.keyboardSessionEnabled)
 
             let handoffWellHeight: CGFloat = 52
             let handoffControlHeight: CGFloat = 38
@@ -769,35 +713,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
 
                     Spacer()
-
-                    // Quiet app quick-jump strip comfortably above the bottom gesture zone
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(dictation.quickReturnApps) { app in
-                                let isSelected = dictation.returnAppID == app.id
-                                Button {
-                                    dictation.returnToHostApp(app, remember: true)
-                                } label: {
-                                    Text(app.name)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(isSelected ? HexTheme.textBase : HexTheme.textMuted)
-                                        .padding(.horizontal, 12)
-                                        .frame(height: 32)
-                                        .background(
-                                            Color.white.opacity(isSelected ? 0.15 : 0.075),
-                                            in: Capsule()
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                    .hexScrollEdgeEffectHidden()
-                    .hexHorizontalEdgeFade(leading: 16, trailing: 20)
-                    .padding(.horizontal, -20)
-                    .padding(.bottom, hasHomeIndicator ? 28 : 12)
-                    .hexControlReveal(showReturnChips, reduceMotion: reduceMotion, scale: 0.97, blur: 2.5)
                 }
                 .frame(maxWidth: 500)
                 .padding(.horizontal, 20)
@@ -822,7 +737,6 @@ struct ContentView: View {
                 }
             }
             .animation(HexMotion.stageAnimation(reduceMotion: reduceMotion), value: mode)
-            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showReturnChips)
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showHomeSwipeCue)
         }
         .persistentSystemOverlays(.hidden)
@@ -930,9 +844,6 @@ struct ContentView: View {
     private var handoffStatusLine: String? {
         if let notice = dictation.handoffNotice {
             return notice
-        }
-        if case .attempting(let app) = dictation.autoReturnState {
-            return app.name
         }
         switch dictation.phase {
         case .failed(let message):

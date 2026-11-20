@@ -436,8 +436,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         syncLanguage()
         if let menu = styleMenu {
             menu.style = model.style
-            menu.returnAppID = model.returnAppID
-            menu.quickReturnApps = model.quickReturnApps
             applyLanguages(to: menu)
         }
         refreshStrip()
@@ -738,8 +736,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let menu = HexStyleMenuView()
         menu.palette = palette
         menu.style = model.style
-        menu.returnAppID = model.returnAppID
-        menu.quickReturnApps = model.quickReturnApps
         applyLanguages(to: menu)
         menu.onHoverChanged = { [weak self] in self?.selectionFeedback() }
         menu.onLanguage = { [weak self] language in
@@ -753,11 +749,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
                 TypingLogField("from", .string("hex_menu")),
             ])
             self?.model.onStyleSelected?(style)
-            self?.dismissStyleMenu()
-        }
-        menu.onReturnApp = { [weak self] appID in
-            self?.typingLog?.ui("return_app", [TypingLogField("app", .text(appID))])
-            self?.model.onReturnAppSelected?(appID)
             self?.dismissStyleMenu()
         }
         menu.onDismiss = { [weak self] in self?.dismissStyleMenu() }

@@ -219,7 +219,6 @@ final class FullKeyboardEngineTests: XCTestCase {
             snapshot: KeyboardSnapshot(state: .recording, heartbeat: t, expiresAt: t + 60, recordingStartedAt: t - 1, jobID: "j1"),
             isModelInstalled: true,
             style: .polished,
-            returnAppID: nil,
             now: t,
             clearPending: false,
             animated: false
@@ -232,7 +231,6 @@ final class FullKeyboardEngineTests: XCTestCase {
             snapshot: KeyboardSnapshot(state: .ready, heartbeat: t + 1, expiresAt: t + 60),
             isModelInstalled: true,
             style: .polished,
-            returnAppID: nil,
             now: t + 1,
             clearPending: true,
             animated: false

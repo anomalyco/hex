@@ -240,8 +240,7 @@ final class DictationControllerTests: XCTestCase {
 
         controller.setWarmDuration(.off)
         controller.handleKeyboardLaunch(
-            .startRecording(jobID: "one-shot-job", requestedAt: now, style: .casual, returnAppID: nil),
-            urlOpener: { _ in false }
+            .startRecording(jobID: "one-shot-job", requestedAt: now, style: .casual)
         )
         try await settle()
         XCTAssertEqual(controller.phase, .recording)
@@ -263,38 +262,11 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(snap.transcript, "ship it tonight")
     }
 
-    func testChosenReturnAppsKeepTheirOrderAndUntickingTheSavedAppForgetsIt() throws {
-        let bridge = KeyboardBridge(defaults: defaults)
-        XCTAssertEqual(bridge.quickReturnApps, HostAppCatalog.quickChips)
-
-        let transcriber = ControlledTranscriber()
-        let controller = DictationController(
-            audio: FakeAudioManager(),
-            keyboardBridge: bridge,
-            transcriber: transcriber,
-            transcriberFactory: { transcriber },
-            autoPrepareOnInit: false
-        )
-        let signal = try XCTUnwrap(HostAppCatalog.app(for: "signal"))
-        let t3Code = try XCTUnwrap(HostAppCatalog.app(for: "t3code"))
-        controller.setReturnAppID("t3code")
-
-        controller.setQuickReturnApps([t3Code, signal])
-        XCTAssertEqual(bridge.quickReturnApps, [t3Code, signal])
-        XCTAssertEqual(bridge.returnAppID, "t3code")
-
-        controller.setQuickReturnApps([signal])
-        XCTAssertEqual(bridge.quickReturnApps, [signal])
-        XCTAssertNil(bridge.returnAppID)
-        XCTAssertNil(controller.returnAppID)
-    }
-
-    func testTenSecondHandoffWindowAndAutoReturnBehavior() async throws {
+    func testTenSecondHandoffWindow() async throws {
         var now = 5_000.0
         let audio = FakeAudioManager()
         let transcriber = ControlledTranscriber()
         let bridge = KeyboardBridge(defaults: defaults)
-        var openedURLs: [URL] = []
 
         let controller = DictationController(
             audio: audio,
@@ -302,42 +274,27 @@ final class DictationControllerTests: XCTestCase {
             transcriber: transcriber,
             transcriberFactory: { transcriber },
             now: { now },
-            autoPrepareOnInit: false,
-            urlOpener: { url in
-                openedURLs.append(url)
-                return url.scheme == "claude"
-            }
+            autoPrepareOnInit: false
         )
         controller.prepareModel()
         try await settle()
 
         // 1. Expired (>10s) handoff warms session without surprise-recording.
         controller.handleKeyboardLaunch(
-            .startRecording(jobID: "expired-job", requestedAt: now - 11.5, style: .polished, returnAppID: "claude")
+            .startRecording(jobID: "expired-job", requestedAt: now - 11.5, style: .polished)
         )
         try await settle()
         XCTAssertTrue(controller.keyboardSessionEnabled)
         XCTAssertEqual(controller.phase, .ready)
         XCTAssertNotNil(controller.handoffNotice)
-        XCTAssertTrue(openedURLs.isEmpty)
 
-        // 2. Fresh handoff starts recording and opens configured host URL scheme.
+        // 2. A fresh handoff starts recording; the user swipes back to their app themselves.
         now += 1
         controller.handleKeyboardLaunch(
-            .startRecording(jobID: "fresh-job", requestedAt: now - 0.4, style: .polished, returnAppID: "claude")
+            .startRecording(jobID: "fresh-job", requestedAt: now - 0.4, style: .polished)
         )
         try await settle()
         XCTAssertEqual(controller.phase, .recording)
-        XCTAssertEqual(openedURLs.map(\.absoluteString), ["claude://"])
-
-        // 3. Unsupported scheme immediately falls back to swipe guide.
-        controller.cancelCurrentJob()
-        now += 1
-        controller.handleKeyboardLaunch(
-            .startRecording(jobID: "fallback-job", requestedAt: now - 0.2, style: .polished, returnAppID: "slack")
-        )
-        try await settle()
-        XCTAssertEqual(controller.autoReturnState, .swipeFallback)
         controller.cancelCurrentJob()
     }
 

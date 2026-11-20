@@ -28,7 +28,6 @@ final class KeyboardViewModel: ObservableObject {
     enum PickerTray: Equatable {
         case none
         case style
-        case returnApp
         case language
     }
 
@@ -57,8 +56,6 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var stagePhase: StagePhase = .idle
     @Published private(set) var statusMessage: String?
     @Published var style: DictationStyle = .polished
-    @Published var returnAppID: String?
-    @Published var quickReturnApps: [HostApp] = HostAppCatalog.quickChips
     @Published var activeTray: PickerTray = .none
     /// Settings › Dictation language (nil for Automatic), what Automatic resolves to, and the
     /// languages the keyboard's quick switch offers. Empty choices hide the switch.
@@ -71,7 +68,7 @@ final class KeyboardViewModel: ObservableObject {
     var liveLoudnessDB: Float = -62.0
     var currentTimestamp: TimeInterval = Date().timeIntervalSince1970
     private(set) var currentSnapshot: KeyboardSnapshot = .offline
-    var coldStartURL: URL = KeyboardLaunchRequest.startSession(requestedAt: nil, returnAppID: nil).url
+    var coldStartURL: URL = KeyboardLaunchRequest.startSession(requestedAt: nil).url
     private(set) var pendingCommand: PendingCommand?
 
     var onDictateTap: (() -> Void)?
@@ -79,7 +76,6 @@ final class KeyboardViewModel: ObservableObject {
     var onStopTap: (() -> Void)?
     var onCancelTap: (() -> Void)?
     var onStyleSelected: ((DictationStyle) -> Void)?
-    var onReturnAppSelected: ((String?) -> Void)?
     /// A language picked in the keyboard's switch; nil is Automatic.
     var onLanguageSelected: ((String?) -> Void)?
     var onSpace: (() -> Void)?
@@ -90,10 +86,6 @@ final class KeyboardViewModel: ObservableObject {
     /// Access and Experiments › Haptics, as the full keyboard's keys.
     var onKeyFeedback: (() -> Void)?
     weak var inputViewController: UIInputViewController?
-
-    var selectedReturnApp: HostApp? {
-        HostAppCatalog.app(for: returnAppID)
-    }
 
     /// The language dictation uses now, when known.
     var effectiveLanguage: String? {
@@ -137,7 +129,6 @@ final class KeyboardViewModel: ObservableObject {
             snapshot: currentSnapshot,
             isModelInstalled: isModelInstalled,
             style: style,
-            returnAppID: returnAppID,
             now: now,
             animated: animated
         )
@@ -148,7 +139,6 @@ final class KeyboardViewModel: ObservableObject {
         snapshot newSnapshot: KeyboardSnapshot,
         isModelInstalled newModelInstalled: Bool,
         style newStyle: DictationStyle,
-        returnAppID newReturnAppID: String?,
         now: TimeInterval,
         clearPending: Bool = false,
         animated: Bool
@@ -186,7 +176,6 @@ final class KeyboardViewModel: ObservableObject {
             snapshot: newSnapshot,
             isModelInstalled: newModelInstalled,
             style: newStyle,
-            returnAppID: newReturnAppID,
             now: now,
             animated: animated
         )
@@ -199,7 +188,6 @@ final class KeyboardViewModel: ObservableObject {
         hasFullAccess: Bool = true,
         isModelInstalled: Bool = true,
         style: DictationStyle = .polished,
-        returnAppID: String? = "messages",
         activeTray: PickerTray = .none
     ) {
         self.activeTray = activeTray
@@ -208,7 +196,6 @@ final class KeyboardViewModel: ObservableObject {
             snapshot: snapshot,
             isModelInstalled: isModelInstalled,
             style: style,
-            returnAppID: returnAppID,
             now: now,
             clearPending: true,
             animated: false
@@ -220,7 +207,6 @@ final class KeyboardViewModel: ObservableObject {
         snapshot snap: KeyboardSnapshot,
         isModelInstalled newModelInstalled: Bool,
         style newStyle: DictationStyle,
-        returnAppID newReturnAppID: String?,
         now: TimeInterval,
         animated: Bool
     ) {
@@ -235,7 +221,6 @@ final class KeyboardViewModel: ObservableObject {
             || stagePhase != nextStage
             || statusMessage != nextMessage
             || style != newStyle
-            || returnAppID != newReturnAppID
 
         guard changed else { return }
 
@@ -246,7 +231,6 @@ final class KeyboardViewModel: ObservableObject {
             self.stagePhase = nextStage
             self.statusMessage = nextMessage
             self.style = newStyle
-            self.returnAppID = newReturnAppID
         }
 
         if animated {
@@ -624,9 +608,6 @@ struct KeyboardSurfaceView: View {
             styleTrayBar(palette: p)
                 .hexTrayReveal(model.activeTray == .style, reduceMotion: reduceMotion, offsetY: 3.5)
 
-            returnAppTrayBar(palette: p)
-                .hexTrayReveal(model.activeTray == .returnApp, reduceMotion: reduceMotion, offsetY: 3.5)
-
             languageTrayBar(palette: p)
                 .hexTrayReveal(model.activeTray == .language, reduceMotion: reduceMotion, offsetY: 3.5)
         }
@@ -692,35 +673,11 @@ struct KeyboardSurfaceView: View {
         .frame(height: 26)
     }
 
-    private func returnAppTrayBar(palette p: KeyboardChromePalette) -> some View {
-        HStack(spacing: 4) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    returnChip(id: nil, label: "Swipe", palette: p)
-                    ForEach(model.quickReturnApps) { app in
-                        returnChip(id: app.id, label: app.name, palette: p)
-                    }
-                }
-                .padding(.leading, 2)
-                .padding(.trailing, 10)
-            }
-            .hexScrollEdgeEffectHidden()
-            .hexHorizontalEdgeFade(leading: 4, trailing: 14)
-
-            closeTrayButton(palette: p)
-        }
-        .frame(height: 26)
-    }
-
     private func leadingAccessory(palette p: KeyboardChromePalette) -> some View {
         let showNoAccess = !model.hasFullAccess
         let showRecordingClock = model.hasFullAccess && model.stagePhase == .recording
         let showWarmStatus = model.hasFullAccess
             && model.isWarmAvailable
-            && model.stagePhase != .recording
-            && model.stagePhase != .transcribing
-        let showReturnTrigger = model.hasFullAccess
-            && !model.isWarmAvailable
             && model.stagePhase != .recording
             && model.stagePhase != .transcribing
 
@@ -762,25 +719,6 @@ struct KeyboardSurfaceView: View {
                 }
             }
             .hexTrayReveal(showWarmStatus, reduceMotion: reduceMotion, offsetY: 2)
-
-            Button {
-                model.onKeyFeedback?()
-                model.setActiveTray(.returnApp, reduceMotion: reduceMotion)
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 11, weight: .medium))
-                    Text(model.selectedReturnApp?.name ?? "Swipe")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .foregroundStyle(p.textMuted)
-                .padding(.horizontal, 8)
-                .frame(height: 26)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(TopBarTriggerButtonStyle(palette: p))
-            .accessibilityLabel("Return app")
-            .hexTrayReveal(showReturnTrigger, reduceMotion: reduceMotion, offsetY: 2)
         }
     }
 
@@ -865,23 +803,6 @@ struct KeyboardSurfaceView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(id == nil ? "Automatic language" : label)
-    }
-
-    private func returnChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {
-        let active = model.returnAppID == id
-        return Button {
-            model.onKeyFeedback?()
-            model.onReturnAppSelected?(id)
-            model.setActiveTray(.none, reduceMotion: reduceMotion)
-        } label: {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(active ? p.textBase : p.textMuted)
-                .padding(.horizontal, 10)
-                .frame(height: 26)
-                .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
-        }
-        .buttonStyle(.plain)
     }
 
     private func closeTrayButton(palette p: KeyboardChromePalette) -> some View {

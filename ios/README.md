@@ -53,15 +53,9 @@ it on-device with Apple Speech, downloading the speech assets on first use
     (`ContainingAppOpener`).
   - **Cold start (before iOS 26):** Tapping **Dictate** opens the containing app
     (`hex-dictation://keyboard/record?...`) with a 10-second
-    handoff window, starts recording, and opens the selected host app's URL
-    scheme (`messages://`, `slack://`, `claude://`, `chatgpt://`,
-    `mobilenotes://`, `discord://`, `mail://`, `x-web-search://`, etc.) using
-    public `UIApplication.shared.open(_:)`. Because iOS keyboard extensions
-    cannot inspect the host app's bundle ID without private APIs, you pick your
-    usual return app once on the `↩` chip (or jump bar), and apps without a
-    registered URL scheme fall back cleanly within ~1s to the bottom-edge swipe
-    bar and quick-jump chips. **Edit apps…** in the app's return menu picks and
-    orders the apps the keyboard tray and jump bar offer.
+    handoff window and starts recording. Hex never opens another app: the
+    handoff screen shows a quiet "Swipe bar to return" cue over the home
+    indicator, and you swipe back to the app you were typing in.
   - **GPU Dot Scope (`HEXShared/DotScope.swift`, `DotScopeShader.metal`):**
     Both `HEXMobile` and `HEXKeyboard` render Hex's desktop menu-bar braided
     oscilloscope (`src/dot_scope.rs`, `src/rune_hud.wgsl`) at native display
@@ -97,7 +91,7 @@ it on-device with Apple Speech, downloading the speech assets on first use
   - **Full keyboard Hex key (Experiments › Full keyboard):** A tap, or a
     still hold of 0.35 s, starts dictation: in a warm session, else inside
     the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving
-    more than 10 pt first opens the style and **Return to** menu; releasing over a row picks it, and releasing elsewhere leaves
+    more than 10 pt first opens the style menu; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
   - **Push to talk:** Holding still for 0.35 s on the full keyboard's Hex key
@@ -300,16 +294,14 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
 - **Verified in Simulator (`HEXMobileTests` + `--snap-state` scenes):** Compilation
   across `HEXMobile`, `HEXKeyboard`, and `HEXWidgets`; App Group command/snapshot
   framing; the `DictationController` generation/expiry race and 30s post-close
-  transcript delivery; 10s handoff window + URL-scheme auto-return fallback;
-  interruption handling; meter recovery after injected startup and mid-capture
+  transcript delivery; 10s handoff window; interruption handling; meter recovery after injected startup and mid-capture
   recorder unavailability (including keyboard levels and heartbeat); deterministic
   style formatting; UI layouts; and first-run onboarding's launch decision (a
   fresh install shows it, a saved page resumes, a ready keyboard and
   microphone skip it).
 - **Requires a physical iPhone:** Real `AVAudioSession` background keepalive
   survival across lock/app switches, live orange indicator behavior, on-device
-  `SpeechTranscriber` / Neural Engine Parakeet latency, URL-scheme return into
-  installed third-party apps (Messages, Slack, Claude, ChatGPT), Dynamic Island
+  `SpeechTranscriber` / Neural Engine Parakeet latency, Dynamic Island
   Live Activity interaction, and hardware Action Button invocation. Transient
   `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
   changes have not been reproduced on hardware; the meter recovery tests inject

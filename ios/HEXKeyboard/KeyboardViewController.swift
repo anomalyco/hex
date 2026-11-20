@@ -345,14 +345,6 @@ final class KeyboardViewController: UIInputViewController {
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
-        viewModel.onReturnAppSelected = { [weak self] appID in
-            guard let self else { return }
-            self.bridge.returnAppID = appID
-            if self.viewModel.returnAppID != appID {
-                self.viewModel.returnAppID = appID
-            }
-            self.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
-        }
         viewModel.onSpace = { [weak self] in
             self?.typingLog?.edit("insert", [
                 TypingLogField("inserted", .string(" ")),
@@ -495,7 +487,6 @@ final class KeyboardViewController: UIInputViewController {
                 snapshot: .offline,
                 isModelInstalled: false,
                 style: viewModel.style,
-                returnAppID: viewModel.returnAppID,
                 now: now,
                 clearPending: true,
                 animated: animated
@@ -559,10 +550,6 @@ final class KeyboardViewController: UIInputViewController {
             coldStartJobID = UUID().uuidString
         }
 
-        let quickReturnApps = bridge.quickReturnApps
-        if viewModel.quickReturnApps != quickReturnApps {
-            viewModel.quickReturnApps = quickReturnApps
-        }
         syncLanguageState()
 
         viewModel.applyBridgeState(
@@ -570,7 +557,6 @@ final class KeyboardViewController: UIInputViewController {
             snapshot: snap,
             isModelInstalled: bridge.isModelInstalled,
             style: bridge.style,
-            returnAppID: bridge.returnAppID,
             now: now,
             clearPending: insertedResult,
             animated: animated
@@ -652,14 +638,10 @@ final class KeyboardViewController: UIInputViewController {
             request = .startRecording(
                 jobID: coldStartJobID,
                 requestedAt: now,
-                style: bridge.style,
-                returnAppID: bridge.returnAppID
+                style: bridge.style
             )
         } else {
-            request = .startSession(
-                requestedAt: now,
-                returnAppID: bridge.returnAppID
-            )
+            request = .startSession(requestedAt: now)
         }
         viewModel.coldStartURL = request.url
     }
