@@ -334,8 +334,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
 ├── OpenCode in WSL no    labs.opencode_in_wsl          (Windows) Modes rewriting, the Modes model picker, and Annotate's capture sends
                                          use an OpenCode service running in the default WSL distribution
-                                         when no Windows registration answers; looking for it can start WSL
-                                         // checks: the_passwd_line_for_the_uid_names_its_home, both_wsl_prefixes_name_the_distribution,
+                                         when no Windows registration answers, as /etc/wsl.conf's [user] default
+                                         names it, else the registry's DefaultUid; looking for it can start WSL
+                                         // checks: the_passwd_line_for_the_uid_names_its_home, the_user_section_names_the_default_user,
+                                         // the_default_user_wins_over_the_registry_uid, both_wsl_prefixes_name_the_distribution,
                                          // a_distribution_or_home_windows_cant_reach_is_refused, a_zero_budget_or_cancellation_skips_the_lookup,
                                          // the_cache_follows_the_default_distribution_and_uid, one_lookup_serves_every_caller_and_a_short_wait_stops,
                                          // a_joiner_does_not_wait_for_a_lookup_older_than_its_cap, a_timed_out_lookup_defers_the_next_one,
@@ -3560,8 +3562,12 @@ Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 ├── a Windows registration answers /api/info -> it wins, exactly as before
 ├── none answers -> read HKCU\…\Lxss\DefaultDistribution, DistributionName and DefaultUid on every lookup
 │   ├── a cached home is reused only when DistributionName and DefaultUid still match; otherwise
-│   │   rebuild it from passwd: \\wsl.localhost\<distribution>\etc\passwd, else \\wsl$\<distribution>\etc\passwd
-│   │   on older Windows 10 (at most 1 MiB) -> the line whose uid is DefaultUid -> its (one trailing / trimmed) home
+│   │   rebuild it from \\wsl.localhost\<distribution>\etc\wsl.conf and \etc\passwd (1 MiB each;
+│   │   \\wsl$\… on older Windows 10):
+│   │   [user] default = <name> -> the passwd line that names <name> -> its (one trailing / trimmed) home;
+│   │   that name present but its home unreachable from Windows -> no home, never the registry uid's
+│   │   no [user] default, or a name /etc/passwd doesn't have -> the line whose uid is DefaultUid -> its home
+│   │   [automount] comes from the same parse; a cached home is not rechecked against wsl.conf
 │   ├── only the default distribution is opened; opening it can start the WSL VM too
 │   ├── state dir -> <home>/.local/state/opencode; same service.json order, cap, loopback, /api/info, password
 │   ├── found -> Hex's workspace is created at <home>/.local/share/hex/opencode once, and every
@@ -3585,10 +3591,10 @@ Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 └── Labs off -> nothing reads the registry or any WSL path; Hex is exactly as before
 ```
 
-The pure parts (the passwd line for a uid, a Linux home to its UNC path, the
-Linux workspace string, `wsl.conf`'s `[automount]` (read once with the
-home) and a drive path under its root, the cache identity, the shared lookup
-and its skip window) live in
+The pure parts (the passwd line for a name or uid, `wsl.conf`'s `[user]`
+default and `[automount]` from one parse, a Linux home to its UNC path, the
+Linux workspace string, a drive path under the automount root, the cache
+identity, the shared lookup and its skip window) live in
 [desktop/opencode_service/wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 the registry and `\\wsl.localhost\`/`\\wsl$\` reads are Windows-only. Nothing
 runs `wsl.exe`, and the passwd contents and password are never logged. A zero
@@ -3598,10 +3604,17 @@ next request retries `create_dir_all`.
 
 Limits: `XDG_STATE_HOME` set inside WSL is ignored (Hex always reads
 `<home>/.local/state/opencode`); a home that isn't in `/etc/passwd`, such as
-one from LDAP or SSSD, isn't found; Annotate's recorded-at line maps only
-Windows drive paths, so a UNC or relative capture folder keeps its Windows
-text (the summary header always keeps it).
+one from LDAP or SSSD, isn't found, and a `[user] default` naming such a user
+falls back to the registry `DefaultUid`'s home, which may be another user's;
+`[user]` and `[automount]` are read only when a home is rebuilt, so editing
+`wsl.conf` while a home is cached takes effect once the cache drops (lab off,
+a distribution or `DefaultUid` change, or an unreadable state directory);
+Annotate's recorded-at line maps only Windows drive paths, so a UNC or
+relative capture folder keeps its Windows text (the summary header always
+keeps it).
 Checks: `the_passwd_line_for_the_uid_names_its_home`,
+`the_user_section_names_the_default_user`,
+`the_default_user_wins_over_the_registry_uid`,
 `both_wsl_prefixes_name_the_distribution`,
 `a_distribution_or_home_windows_cant_reach_is_refused`,
 `a_zero_budget_or_cancellation_skips_the_lookup`,

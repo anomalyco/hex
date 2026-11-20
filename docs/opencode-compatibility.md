@@ -38,9 +38,14 @@ running service (`src/desktop/opencode_service.rs`):
   an older Windows 10. `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`
   is read on every lookup; a remembered home is reused only while its
   `DistributionName` and `DefaultUid` still match, otherwise the home is
-  rebuilt from that distribution's `/etc/passwd` (at most 1 MiB, and only the
-  default distribution; opening it can start the WSL VM too). One lookup
-  runs at a time on a shared helper thread with a fixed 3 s discover budget.
+  rebuilt from that distribution's `/etc/wsl.conf` and `/etc/passwd` (at most
+  1 MiB each, and only the default distribution; opening it can start the WSL
+  VM too). The default user is `/etc/wsl.conf`'s `[user] default` when it
+  names an `/etc/passwd` entry, else the line whose uid is the registry's
+  `DefaultUid`; a named user whose home Windows can't reach means no home
+  rather than root's, and `wsl.conf` is not re-read while a home is cached.
+  One lookup runs at a time on a shared helper thread with a fixed 3 s
+  discover budget.
   Its starter waits for its own remaining deadline or Escape; a joiner waits
   at most the smaller of its own budget and the cap minus the lookup's age,
   and returns "OpenCode isn't running" at once once that lookup is older
