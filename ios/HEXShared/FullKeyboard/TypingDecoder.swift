@@ -342,10 +342,49 @@ nonisolated struct TypingDecoder {
         var literalCost: Double
     }
 
+    /// Model words and two-word readings never offered (`OffensiveWords`): still scored as
+    /// words, so what you typed is read right, but never a reading or a replacement.
+    struct NeverSuggest: Equatable, Sendable {
+        struct Pair: Hashable, Sendable {
+            var first: Int
+            var second: Int
+        }
+
+        var words: Set<Int> = []
+        var pairs: Set<Pair> = []
+
+        init() {}
+
+        /// Whether `word` after `previous` makes a blocked two-word expression.
+        func follows(_ word: Int, after previous: Int?) -> Bool {
+            guard let previous, !pairs.isEmpty else { return false }
+            return pairs.contains(Pair(first: previous, second: word))
+        }
+
+        /// `blocked`'s words and two-word phrases that are in `model`.
+        init(_ blocked: [String], model: TypingDecoderModel) {
+            for entry in blocked {
+                let parts = entry.split(separator: " ").map(String.init)
+                switch parts.count {
+                case 1:
+                    if let i = model.index(of: entry) { words.insert(i) }
+                case 2:
+                    if let a = model.index(of: parts[0]), let b = model.index(of: parts[1]) {
+                        pairs.insert(Pair(first: a, second: b))
+                    }
+                default:
+                    break
+                }
+            }
+        }
+    }
+
     let model: TypingDecoderModel
     var parameters = Parameters()
     /// Your own words, searched beside the model's.
     var userWords = UserWords()
+    /// Words never offered; set by `AutocorrectEngine` for the language and Suggest swear words.
+    var neverSuggest = NeverSuggest()
 
     /// Learn how I type's average tap offsets (in keycap widths and heights) as points, for
     /// letters with 20 taps or more, shrunk toward the centre while there are few.
@@ -389,7 +428,8 @@ nonisolated struct TypingDecoder {
         literalCost += parameters.lmWeight * literalLM
 
         var readings: [Reading] = []
-        for (word, spatial) in search(model, costs, range: 0..<costs.count, limit: 5, maxEdits: parameters.maxEdits) where word != literalIndex {
+        for (word, spatial) in search(model, costs, range: 0..<costs.count, limit: 5, maxEdits: parameters.maxEdits, skipping: neverSuggest.words)
+        where word != literalIndex && !neverSuggest.follows(word, after: prev) {
             readings.append(Reading(text: model.word(word), cost: spatial + parameters.lmWeight * lmCost(word, after: prev)))
         }
         if !userWords.isEmpty {
@@ -475,9 +515,10 @@ nonisolated struct TypingDecoder {
         var cost: Float
     }
 
-    /// The best words of `words` for `costs[range]`, as (word index, spatial cost incl. edits).
+    /// The best words of `words` for `costs[range]`, as (word index, spatial cost incl. edits),
+    /// leaving out `skipping` (searched through, never found).
     private func search<Words: TypingDecoderWords>(
-        _ words: Words, _ costs: [[Double]], range: Range<Int>, limit: Int, maxEdits: Int
+        _ words: Words, _ costs: [[Double]], range: Range<Int>, limit: Int, maxEdits: Int, skipping: Set<Int> = []
     ) -> [(Int, Double)] {
         let n = range.count
         let maxDepth = n + maxEdits + 2
@@ -501,7 +542,7 @@ nonisolated struct TypingDecoder {
                 let s = layer[k]
                 k += 1
                 let lo = Int(s.lo), hi = Int(s.hi), tap = Int(s.tap)
-                if tap == n, words.length(lo) == depth {
+                if tap == n, words.length(lo) == depth, !skipping.contains(lo) {
                     let c = Double(s.cost)
                     if c < found[lo] ?? .infinity { found[lo] = c }
                 }
@@ -556,12 +597,13 @@ nonisolated struct TypingDecoder {
         var out: [Reading] = []
         func pair(left: Range<Int>, right: Range<Int>, extra: Double) {
             guard !left.isEmpty, !right.isEmpty else { return }
-            let lefts = search(model, costs, range: left, limit: 3, maxEdits: 0).filter { canStandAlone($0.0) }
+            let never = neverSuggest
+            let lefts = search(model, costs, range: left, limit: 3, maxEdits: 0, skipping: never.words).filter { canStandAlone($0.0) }
             guard !lefts.isEmpty else { return }
-            let rights = search(model, costs, range: right, limit: 3, maxEdits: 0).filter { canStandAlone($0.0) }
+            let rights = search(model, costs, range: right, limit: 3, maxEdits: 0, skipping: never.words).filter { canStandAlone($0.0) }
             for (l, ls) in lefts {
                 let lcost = ls + parameters.lmWeight * lmCost(l, after: prev)
-                for (r, rs) in rights {
+                for (r, rs) in rights where !never.follows(r, after: l) {
                     let cost = lcost + rs + parameters.lmWeight * lmCost(r, after: l) + extra
                     out.append(Reading(text: model.word(l) + " " + model.word(r), cost: cost))
                 }
