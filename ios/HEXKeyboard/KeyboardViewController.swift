@@ -295,7 +295,14 @@ final class KeyboardViewController: UIInputViewController {
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
         viewModel.onStopTap = { [weak self] in
             guard let self else { return }
-            if self.localDictation.isActive { self.localDictation.stop() } else { self.stopWarmDictation() }
+            if self.localDictation.isActive {
+                self.localDictation.stop()
+                // Loading the cleanup model while recording starts ran older iPhones out of
+                // keyboard memory, so it loads after the microphone closes.
+                CleanupTagger.prepareIfEnabled(style: self.bridge.style)
+            } else {
+                self.stopWarmDictation()
+            }
         }
         viewModel.onCancelTap = { [weak self] in
             guard let self else { return }
@@ -304,7 +311,6 @@ final class KeyboardViewController: UIInputViewController {
         if KeyboardLocalDictation.isSupported {
             viewModel.onLocalDictateTap = { [weak self] in
                 guard let self else { return }
-                CleanupTagger.prepareIfEnabled(style: self.bridge.style)
                 self.localDictation.start(in: self.view, allowBluetoothMic: self.bridge.allowBluetoothMic)
             }
         }
