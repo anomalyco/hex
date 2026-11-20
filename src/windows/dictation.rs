@@ -302,8 +302,8 @@ pub fn run(
     } else {
         device.clone().unwrap_or_else(|| "System default".into())
     };
-    // A hotkey press that arrived while the released microphone was still
-    // opening; recording begins at the first chunk.
+    // A hotkey press that arrived while the microphone could not capture;
+    // recording begins at the first fresh chunk.
     let mut start_pending = false;
     if shutdown.load(Ordering::Relaxed) {
         return Ok(());
@@ -712,16 +712,12 @@ pub fn run(
                         host.annotate_up(&timeline);
                     }
                 }
-                // A failed stream keeps its backoff; the press asks for the
-                // microphone now, though it cannot capture until it opens.
-                HotkeyAction::Start
-                    if !recording && input.is_recovering() && !release_while_idle =>
-                {
-                    input.retry_now();
-                }
-                HotkeyAction::Start
-                    if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
-                {
+                // A press while the microphone cannot capture yet (a stream
+                // that stopped delivering, or one still opening) is kept and
+                // starts at the first fresh chunk, as the released
+                // microphone's does. A failed stream keeps its backoff, but
+                // the press asks for the microphone now.
+                HotkeyAction::Start if !recording && !start_pending => {
                     recording_flavour = flavour;
                     recording_by_shortcut = !deliberate;
                     // The window in front now, where a paste returns if the
@@ -733,7 +729,7 @@ pub fn run(
                     if deliberate {
                         hotkey.command_capture(Some(flavour));
                     }
-                    if audio_ready {
+                    if audio_ready && !input.is_recovering() && !input.is_stalled() {
                         capture.start_hotkey_at(
                             occurred_at,
                             crate::dictation::hotkey_pre_roll(while_dictating),
@@ -750,11 +746,10 @@ pub fn run(
                         crate::feedback::play_provisional_start();
                         start_tone_played = true;
                     } else {
-                        // The released microphone opens on demand; recording
-                        // begins at the first chunk (no audio pre-roll). A
-                        // failed stream keeps its backoff, but the press
-                        // asks for it now.
-                        if input.is_recovering() {
+                        // The microphone is not delivering yet; recording
+                        // begins at the first fresh chunk. A failed stream
+                        // keeps its backoff, but the press asks for it now.
+                        if input.is_recovering() || input.is_stalled() {
                             input.retry_now();
                         }
                         start_pending = true;
@@ -993,31 +988,34 @@ pub fn run(
                 captured_through = chunk_captured_through;
                 crate::audio::input_level::record(&samples);
                 timeline.feed(&samples, input.sample_rate(), captured_through);
-                if !audio_ready {
+                let first_chunk = !audio_ready;
+                if first_chunk {
+                    // A reopened or newly opened stream keeps its own timeline.
                     capture = DictationCapture::new(input.sample_rate());
-                    capture.ingest_with_pending(&samples, captured_through, None);
                     audio_ready = true;
                     device_label = input.device_name().to_string();
-                    if start_pending {
-                        // The on-demand open finished while the shortcut is
-                        // still held: recording starts here, without the
-                        // pre-roll a held-open microphone would have had.
-                        start_pending = false;
-                        capture.start_hotkey_at(
-                            chunk_captured_through,
-                            crate::dictation::hotkey_pre_roll(while_dictating),
-                        );
-                        recording = true;
-                        // The released microphone is ready only now.
-                        recording_feedback_started = toggle_mode;
-                        start_tone_played = recording_feedback_started;
-                        if recording_feedback_started {
-                            crate::feedback::play(crate::feedback::Tone::DictationStart);
-                            audio_suppressor.suppress();
-                        }
-                        emit_state(&mut events, VoiceState::Dictating, &device_label)?;
-                        continue;
+                }
+                capture.ingest_with_pending(&samples, captured_through, None);
+                // A press that could not start when it was taken begins at
+                // the first chunk that can capture, whether the stream just
+                // opened or is one the press distrusted (a stalled stream the
+                // loop had not read yet). The chunk anchors it with no
+                // pre-roll: audio from before it may be from another stream.
+                if start_pending {
+                    start_pending = false;
+                    capture.start_hotkey_at(chunk_captured_through, Duration::ZERO);
+                    recording = true;
+                    // The released microphone is ready only now.
+                    recording_feedback_started = toggle_mode;
+                    start_tone_played = recording_feedback_started;
+                    if recording_feedback_started {
+                        crate::feedback::play(crate::feedback::Tone::DictationStart);
+                        audio_suppressor.suppress();
                     }
+                    emit_state(&mut events, VoiceState::Dictating, &device_label)?;
+                    continue;
+                }
+                if first_chunk {
                     if service.is_starting() {
                         // A client's dictation waited for the released
                         // microphone: it records from here.
@@ -1036,7 +1034,6 @@ pub fn run(
                     emit_current_state(&mut events, recording, pending, &device_label)?;
                     continue;
                 }
-                capture.ingest_with_pending(&samples, captured_through, None);
                 if service_recording {
                     if let Some(indicator) = &indicator {
                         indicator.meter(&samples);
@@ -1087,7 +1084,18 @@ pub fn run(
                 if let Some(finish) = &mut finishing {
                     finish.release.stop_waiting();
                 }
+                // A press that was already waiting meets a stream that still
+                // delivered nothing: the microphone is not coming back for
+                // it, so it is discarded and reported as lost.
+                let discard_pending = start_pending && !audio_ready;
+                if discard_pending {
+                    start_pending = false;
+                }
                 audio_ready = false;
+                // An idle, tail-only, or annotate-only interruption is the
+                // stream's own recovery and writes no failed dictation; a
+                // capture or a press the stream took does.
+                let mut lost = false;
                 if service.is_active() {
                     end_service_capture(
                         &mut capture,
@@ -1096,30 +1104,74 @@ pub fn run(
                         &mut service_recording,
                     );
                     service.lost(MICROPHONE_LOST);
+                    lost = true;
                 } else if recording {
-                    audio_suppressor.restore();
-                    crate::feedback::retract_start();
-                    recording_feedback_started = false;
-                    recording = false;
-                    capture.cancel();
-                    hotkey.command_capture(None);
-                    events.dictation(DictationPhase::Cancelled, "")?;
-                    if let Some(indicator) = &indicator {
-                        indicator.send(crate::rune_hud::HudEvent::Cancelled);
+                    if capture.tentative_start().is_some() {
+                        // A capture that has not passed the hold threshold
+                        // would be discarded as a short tap anyway: reopen for
+                        // the same press.
+                        capture.cancel();
+                        recording = false;
+                        recording_feedback_started = false;
+                        start_tone_played = false;
+                        audio_suppressor.restore();
+                        crate::feedback::retract_start();
+                        start_pending = true;
+                    } else {
+                        audio_suppressor.restore();
+                        crate::feedback::retract_start();
+                        recording_feedback_started = false;
+                        recording = false;
+                        capture.cancel();
+                        hotkey.command_capture(None);
+                        events.dictation(DictationPhase::Cancelled, "")?;
+                        if let Some(indicator) = &indicator {
+                            indicator.send(crate::rune_hud::HudEvent::Cancelled);
+                        }
+                        lost = true;
                     }
                 }
-                events.dictation(
-                    DictationPhase::Failed("microphone stream interrupted; reopening".into()),
-                    "",
+                if discard_pending {
+                    hotkey.command_capture(None);
+                    events.dictation(DictationPhase::Discarded, "")?;
+                    if let Some(indicator) = &indicator {
+                        indicator.send(crate::rune_hud::HudEvent::Discarded);
+                    }
+                    // The reopened stream never delivered, so the press
+                    // never started: report it as lost, not as a quiet
+                    // discard.
+                    lost = true;
+                }
+                if start_pending {
+                    // The held press asks for the microphone now, as a press
+                    // during any recovery does.
+                    input.retry_now();
+                }
+                if lost {
+                    events.dictation(
+                        DictationPhase::Failed("microphone stream interrupted; reopening".into()),
+                        "",
+                    )?;
+                }
+                emit_current_state(
+                    &mut events,
+                    recording || start_pending,
+                    pending,
+                    &device_label,
                 )?;
-                emit_current_state(&mut events, recording, pending, &device_label)?;
             }
             RecoveringAudioInputEvent::Reopened => {
                 timeline.restart();
                 capture = DictationCapture::new(input.sample_rate());
                 audio_ready = false;
                 device_label = input.device_name().to_string();
-                emit_current_state(&mut events, recording, pending, &device_label)?;
+                // A press waiting for the reopen is still dictating.
+                emit_current_state(
+                    &mut events,
+                    recording || start_pending,
+                    pending,
+                    &device_label,
+                )?;
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 if !release_while_idle {
