@@ -105,10 +105,26 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     `15m`) so subsequent taps on **Dictate** record directly inside the
     keyboard with zero app switches; picking `Off` or tapping the header timer
     ends it.
-  - **Styles:** `Polished` (sentence case + punctuation + filler trim),
-    `Casual` (lowercase chat without trailing period), `Notes` (spoken
-    `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
-    insertion spacing and repeating backspace.
+  - **Styles (`TranscriptFormatter`, run by `DictationPipeline` wherever Hex
+    dictates: the app, the keyboard's warm session and cold start, the Action
+    Button, Control Center and in-keyboard dictation):** `Polished` (full
+    sentences: fillers trimmed, each sentence capitalized, "I" too, and ended,
+    in Chinese and Japanese with "。"), `Casual` (texting: sentences may start
+    lowercase, though never an acronym or a word with inner capitals; "i" for
+    "I"; no comma after an opening "yeah" or "ok"; no final full stop on a
+    message of one line and up to three sentences), `Notes` (spoken `"bullet"`
+    / `"new line"` markers, else several sentences become a bulleted list and
+    "Shopping list: eggs, milk and bread" bullets its items; no opening "so",
+    "yeah" or "and then", no final full stops), and `Verbatim` (as the speech
+    model wrote it), with cursor-aware insertion spacing and repeating
+    backspace. On an already punctuated sentence ("Sounds good, see you at
+    5.") Polished and Verbatim read the same; they differ on fillers, missing
+    capitals or endings, and with Clean up what I say on.
+  - **Lowercase (Settings › Dictation › Lowercase):** Off by default. After the
+    style and custom vocabulary's spellings, everything is lowercased, custom
+    vocabulary included, as desktop's Lowercase step (`str::to_lowercase` on the
+    final text) does, on every path (`DictationLowercaseSettings`, App Group key
+    `settings.dictationLowercase`).
   - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
     name for @) and "at sign" become "@", and an address said around it joins
     up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning
@@ -161,8 +177,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     Spanish it dropped negations: "Te digo que no puedo ir" became "Te
     puedo ir"), so Spanish, German and Norwegian get word rules instead
     (`SpokenCleanupRules`): the language's hesitation sounds go (the
-    styles' list below, so in-keyboard dictation, which no style formats,
-    loses them too), a filler between commas goes ("este", "o sea"),
+    styles' list below), a filler between commas goes ("este", "o sea"),
     and a correction marker set off by commas ("digo", "perdón", "no",
     "mejor dicho"; "nein", "ich meine"; "nei", "nei vent", "jeg mener")
     drops the words it replaces, counted back to the nearest earlier word
@@ -170,7 +185,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     weekday, month, or today and tomorrow): "a las 3, digo, a las 4" becomes
     "a las 4". With no such word the sentence stays as said, and other
     languages stay as heard. It runs after transcription and learned fixes
-    (in the app also after custom vocabulary), before Apple Intelligence
+    and custom vocabulary, before Apple Intelligence
     cleanup, translation, and formatting, in in-keyboard dictation and in the
     app. The tagger is a BERT L-4/H-512 token classifier fine-tuned from
     Google's Apache-2.0 `bert_uncased_L-4_H-512_A-8` on generated examples,
@@ -183,7 +198,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     timeout, an error, or a result with no words left keeps the transcript as
     heard.
   - **Custom vocabulary (Settings › Dictation › Custom vocabulary):** Off by default.
-    A local list of up to 100 names and phrases, applied to every engine. After
+    A local list of up to 100 names and phrases, applied to every engine, in the
+    app and in-keyboard dictation. After
     transcription, matching words are rewritten to the listed spelling across
     case, spaces, tabs, a single hyphen, and possessive apostrophes, before
     cleanup and again after formatting, so a style cannot undo a spelling. The
@@ -299,7 +315,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
   `https://dev.anoma.ly/hex` until the production site serves
   `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
-  - **Dictation:** Style, Dictation language, Translate what I say, Clean up
+  - **Dictation:** Style, Lowercase, Dictation language, Translate what I say, Clean up
     what I say, Custom vocabulary (its list below the switch), Keep mic warm,
     and Always use iPhone microphone.
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored

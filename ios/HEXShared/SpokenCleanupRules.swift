@@ -5,7 +5,7 @@ import Foundation
 /// ir" became "Te puedo ir"), so these languages get two word rules instead, each needing
 /// the commas a pause leaves:
 /// - the language's hesitation sounds go anywhere ("eh", "mmm"; `TranscriptFormatter`'s
-///   list, so in-keyboard dictation, which no style formats, loses them too);
+///   list);
 /// - a filler phrase set off by commas goes ("Es caro, o sea, no lo compro");
 /// - a spoken correction ("a las 3, digo, a las 4") drops its marker and the words it
 ///   replaces, counted back from the nearest earlier word that matches the repair's first

@@ -48,6 +48,8 @@ final class DictationController {
         let keyboardJobID: String?
         let style: DictationStyle
         let usesCleanup: Bool
+        /// Settings › Dictation › Lowercase, read at start.
+        let lowercase: Bool
         let vocabularyTerms: [String]
         /// Learn how I type's dictation fixes, read at start; empty while it is off.
         let personalCorrections: [DictationCorrection]
@@ -71,6 +73,7 @@ final class DictationController {
     private let cleaner: (any TranscriptCleaning)?
     private let cleanupSettings: AppleIntelligenceCleanupSettings
     private let customVocabularySettings: CustomVocabularySettings
+    private let lowercaseSettings: DictationLowercaseSettings
     private let typingJournalSettings: TypingJournalSettings
     private let learnedDictationCorrections: @MainActor () -> [DictationCorrection]
     private let audio: any AudioManaging
@@ -174,6 +177,7 @@ final class DictationController {
         cleaner: (any TranscriptCleaning)? = nil,
         cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings(),
         customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
+        lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
         learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
         languageSettings: LanguageSettings = LanguageSettings()
@@ -189,6 +193,7 @@ final class DictationController {
         self.cleaner = cleaner
         self.cleanupSettings = cleanupSettings
         self.customVocabularySettings = customVocabularySettings
+        self.lowercaseSettings = lowercaseSettings
         self.typingJournalSettings = typingJournalSettings
         self.learnedDictationCorrections = learnedDictationCorrections ?? {
             TypingJournal.storedDictationCorrections(settings: typingJournalSettings)
@@ -732,6 +737,7 @@ final class DictationController {
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
+        let lowercase = lowercaseSettings.isEnabled
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
         let vocabularyTerms = customVocabularySettings.activeTerms
@@ -781,6 +787,7 @@ final class DictationController {
                     keyboardJobID: keyboardJobID,
                     style: effectiveStyle,
                     usesCleanup: usesCleanup,
+                    lowercase: lowercase,
                     vocabularyTerms: vocabularyTerms,
                     personalCorrections: personalCorrections,
                     recognitionHints: recognitionHints,
@@ -861,30 +868,26 @@ final class DictationController {
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                // Learned fixes run first, on the words as heard. Spelling runs before
-                // optional cleanup so cleanup sees the preferred words, then again after
-                // formatting because a style can lowercase a term or capitalize a
-                // sentence start ("iPhone" -> "IPhone"); learned capitals get the same.
-                let corrected = DictationCorrections.apply(session.personalCorrections, to: rawText)
-                let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: corrected)
-                let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: session.style, language: session.language)
-                let cleaned = await self.cleanedTranscriptIfEnabled(tagged, session: session)
-                let translated = await DictationTranslator.translateIfEnabled(
-                    cleaned,
-                    source: Locale(identifier: session.language).language
+                // The steps in-keyboard dictation runs too, plus Apple Intelligence's cleanup.
+                let pipeline = DictationPipeline(
+                    style: session.style,
+                    language: session.language,
+                    vocabulary: session.vocabularyTerms,
+                    corrections: session.personalCorrections,
+                    lowercase: session.lowercase
                 )
-                let text = translated ?? cleaned
+                let stages = await pipeline.run(rawText) { tagged in
+                    await self.cleanedTranscriptIfEnabled(tagged, session: session)
+                }
+                let corrected = stages.fixed
+                let spelled = stages.spelled
+                let tagged = stages.tagged
+                let cleaned = stages.cleaned
+                let translated = stages.translated
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                // A translation is formatted in the language it is now in.
-                let formatLanguage = translated == nil
-                    ? session.language
-                    : DictationTranslationSettings().targetLanguage
-                let formatted = VocabularySpelling.apply(
-                    session.vocabularyTerms + DictationCorrections.spellings(session.personalCorrections),
-                    to: TranscriptFormatter.format(text, style: session.style, language: formatLanguage)
-                )
+                let formatted = stages.formatted
                 self.recordingDuration = 0
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {

@@ -6,6 +6,7 @@ struct DictationSettingsPage: View {
     @Bindable var dictation: DictationController
     @State private var cleanupTagger = CleanupTaggerSettings().isEnabled
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
+    @State private var lowercase = DictationLowercaseSettings().isEnabled
 
     var body: some View {
         SettingsPageScaffold(title: "Dictation") {
@@ -31,6 +32,15 @@ struct DictationSettingsPage: View {
                 }
                 .padding(.horizontal, 16)
                 .frame(minHeight: 48)
+
+                SettingsDivider()
+
+                // After the style, on every path (`DictationPipeline`).
+                SettingsToggleRow(
+                    title: String(localized: "Lowercase"),
+                    detail: String(localized: "Lowercases everything"),
+                    isOn: $lowercase
+                )
 
                 DictationLanguageRow(dictation: dictation)
             }
@@ -102,9 +112,13 @@ struct DictationSettingsPage: View {
         .onChange(of: customVocabulary) { _, enabled in
             CustomVocabularySettings().isEnabled = enabled
         }
+        .onChange(of: lowercase) { _, enabled in
+            DictationLowercaseSettings().isEnabled = enabled
+        }
         .onAppear {
             cleanupTagger = CleanupTaggerSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
+            lowercase = DictationLowercaseSettings().isEnabled
         }
     }
 }

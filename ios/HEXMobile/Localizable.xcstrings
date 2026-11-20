@@ -510,16 +510,6 @@
         }
       }
     },
-    "Clean punctuation and filler trim" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "规范标点，去掉口头禅"
-          }
-        }
-      }
-    },
     "Clean up what I say" : {
       "localizations" : {
         "zh-Hans" : {
@@ -990,6 +980,16 @@
         }
       }
     },
+    "Full sentences, fillers trimmed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整句子，去掉口头禅"
+          }
+        }
+      }
+    },
     "General  ›  Keyboard  ›  Keyboards  ›  Add New Keyboard  ›  Hex" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1303,12 +1303,22 @@
         }
       }
     },
-    "Lowercase texting, no trailing period" : {
+    "Lowercase" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "小写聊天风格，句末不加句号"
+            "value" : "小写"
+          }
+        }
+      }
+    },
+    "Lowercases everything" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部转为小写"
           }
         }
       }
@@ -1779,6 +1789,16 @@
         }
       }
     },
+    "Short lines, a list for several items" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "简短分行，多项内容列成清单"
+          }
+        }
+      }
+    },
     "Shows the letter above your finger" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1885,16 +1905,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按你的方式拼写名字和术语"
-          }
-        }
-      }
-    },
-    "Spoken bullets and line breaks" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "口述项目符号和换行"
           }
         }
       }
@@ -2051,6 +2061,16 @@
     },
     "Testing the full-width Dot Scope bar right now." : {
       "shouldTranslate" : false
+    },
+    "Texting: lowercase start, no final period" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天风格：句首小写，句末不加句号"
+          }
+        }
+      }
     },
     "The download stopped. Check your connection and try again." : {
       "localizations" : {

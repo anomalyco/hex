@@ -253,4 +253,121 @@ final class SpokenCleanupRulesTests: XCTestCase {
             "Eh, nos vemos."
         )
     }
+
+    /// Ordinary short dictations as Apple Speech writes them read differently in each style.
+    func testStylesDifferOnOrdinaryShortDictation() {
+        func styled(_ text: String) -> [String] {
+            DictationStyle.allCases.map { TranscriptFormatter.format(text, style: $0) }
+        }
+        // Polished, Casual, Notes, Verbatim.
+        XCTAssertEqual(styled("Sounds good, see you at 5."), [
+            "Sounds good, see you at 5.", "sounds good, see you at 5", "Sounds good, see you at 5",
+            "Sounds good, see you at 5.",
+        ])
+        XCTAssertEqual(styled("Um, buy milk. Call the dentist. Book the flights."), [
+            "Buy milk. Call the dentist. Book the flights.", "buy milk. call the dentist. book the flights",
+            "- Buy milk\n- Call the dentist\n- Book the flights",
+            "Um, buy milk. Call the dentist. Book the flights.",
+        ])
+        // An already punctuated sentence reads the same in Polished and Verbatim.
+        XCTAssertEqual(styled("I'll be there in 10."), [
+            "I'll be there in 10.", "i'll be there in 10", "I'll be there in 10", "I'll be there in 10.",
+        ])
+        XCTAssertEqual(styled("i'm running late start without me"), [
+            "I'm running late start without me.", "i'm running late start without me",
+            "I'm running late start without me", "i'm running late start without me",
+        ])
+    }
+
+    /// Polished writes full sentences: "I", a capital and an ending for each paragraph, in
+    /// Chinese with "。" (never a second mark after one).
+    func testPolishedWritesFullSentences() {
+        XCTAssertEqual(
+            TranscriptFormatter.format("erm i think i'll go, it's fine", style: .polished),
+            "I think I'll go, it's fine."
+        )
+        XCTAssertEqual(TranscriptFormatter.format("first line\nsecond line", style: .polished), "First line.\nSecond line.")
+        XCTAssertEqual(TranscriptFormatter.format("Shopping list:", style: .polished), "Shopping list:")
+        XCTAssertEqual(TranscriptFormatter.format("好的，明天见。", style: .polished, language: "zh-CN"), "好的，明天见。")
+        XCTAssertEqual(TranscriptFormatter.format("好的，明天见", style: .polished, language: "zh-CN"), "好的，明天见。")
+        // "i" is English only.
+        XCTAssertEqual(TranscriptFormatter.format("i ragazzi", style: .polished, language: "it-IT"), "I ragazzi.")
+        XCTAssertEqual(TranscriptFormatter.format("dimmi i nomi", style: .polished, language: "it-IT"), "Dimmi i nomi.")
+    }
+
+    /// Casual texts: sentences may start lowercase, "I" is "i", an opening interjection loses
+    /// its comma, and a short message its final full stop. Acronyms, names inside a sentence
+    /// and words with inner capitals keep their case.
+    func testCasualTexts() {
+        XCTAssertEqual(
+            TranscriptFormatter.format("Yeah, I'll text John about the iPhone order tomorrow.", style: .casual),
+            "yeah i'll text John about the iPhone order tomorrow"
+        )
+        XCTAssertEqual(TranscriptFormatter.format("I think I can, i.e. maybe.", style: .casual), "i think i can, i.e. maybe")
+        XCTAssertEqual(
+            TranscriptFormatter.format("OK, can you send me the deck?", style: .casual),
+            "ok can you send me the deck?"
+        )
+        XCTAssertEqual(TranscriptFormatter.format("NASA launched it. Wow!", style: .casual), "NASA launched it. wow!")
+        XCTAssertEqual(TranscriptFormatter.format("iPhone is charged.", style: .casual), "iPhone is charged")
+        // Longer than a short message: four sentences, or more than one line, keep the full stop.
+        XCTAssertEqual(TranscriptFormatter.format("One. Two. Three. Four.", style: .casual), "one. two. three. four.")
+        XCTAssertEqual(TranscriptFormatter.format("Hi.\nSee you.", style: .casual), "hi.\nsee you.")
+        // Interjections are English; Chinese drops its final "。".
+        XCTAssertEqual(TranscriptFormatter.format("Sí, claro.", style: .casual, language: "es-ES"), "sí, claro")
+        XCTAssertEqual(TranscriptFormatter.format("好的，明天见。", style: .casual, language: "zh-CN"), "好的，明天见")
+    }
+
+    /// Notes writes concise lines, and a list when there are several items.
+    func testNotesListSeveralItemsConcisely() {
+        XCTAssertEqual(TranscriptFormatter.format("Call the dentist tomorrow at 9.", style: .notes), "Call the dentist tomorrow at 9")
+        XCTAssertEqual(TranscriptFormatter.format("Can you send the deck?", style: .notes), "Can you send the deck?")
+        XCTAssertEqual(TranscriptFormatter.format("Yeah, I'll call Ravi.", style: .notes), "I'll call Ravi")
+        XCTAssertEqual(
+            TranscriptFormatter.format("So, first, buy milk. And then call the dentist.", style: .notes),
+            "- Buy milk\n- Call the dentist"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("Shopping list: eggs, milk, and bread.", style: .notes),
+            "Shopping list:\n- Eggs\n- Milk\n- Bread"
+        )
+        // No list from an abbreviation's full stop or a colon before a sentence.
+        XCTAssertEqual(
+            TranscriptFormatter.format("Dr. Patel called. Call her back.", style: .notes),
+            "- Dr. Patel called\n- Call her back"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("Note: the build is green.", style: .notes),
+            "Note: the build is green"
+        )
+        // Spoken markers decide the lines when there are any; Chinese splits at "。".
+        XCTAssertEqual(
+            TranscriptFormatter.format("todo bullet ship it. Then tag it bullet tell Ravi", style: .notes),
+            "Todo\n- Ship it. Then tag it\n- Tell Ravi"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("买牛奶。给妈妈打电话。", style: .notes, language: "zh-CN"),
+            "- 买牛奶\n- 给妈妈打电话"
+        )
+    }
+
+    /// Lowercase comes after the style and the vocabulary's spellings, as desktop's Lowercase
+    /// step lowercases the final text, custom vocabulary included.
+    func testLowercaseRunsAfterTheStyleAndVocabulary() {
+        let heard = "Yeah, text John about the iphone order."
+        var pipeline = DictationPipeline(style: .polished, language: "en-US", vocabulary: ["iPhone"])
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "Yeah, text John about the iPhone order.")
+        pipeline.lowercase = true
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "yeah, text john about the iphone order.")
+        pipeline.style = .casual
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "yeah text john about the iphone order")
+        pipeline.style = .verbatim
+        XCTAssertEqual(pipeline.format(heard, language: "en-US"), "yeah, text john about the iphone order.")
+
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let settings = DictationLowercaseSettings(defaults: defaults)
+        XCTAssertFalse(settings.isEnabled, "off by default")
+        settings.isEnabled = true
+        XCTAssertTrue(DictationLowercaseSettings(defaults: defaults).isEnabled)
+    }
 }

@@ -272,7 +272,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertGreaterThan(audio.deactivateCount, 0)
         try await settle()
 
-        await transcriber.resumeSuspended(with: "Um, Ship It Tonight.")
+        await transcriber.resumeSuspended(with: "Um, ship it tonight.")
         try await settle()
 
         XCTAssertEqual(controller.phase, .ready)
@@ -635,6 +635,110 @@ final class DictationControllerTests: XCTestCase {
         try await settle()
         XCTAssertEqual(cleaner.cleanedInputs, ["i use OpenCode"])
         XCTAssertEqual(controller.transcript, "I use OpenCode.")
+    }
+
+    /// In-keyboard dictation runs `DictationPipeline` as the app does (but Apple
+    /// Intelligence's cleanup), so every style and Lowercase come out the same on both paths,
+    /// with Clean up what I say off and on.
+    func testInKeyboardDictationWritesEachStyleAsTheAppDoes() async throws {
+        let tagger = CleanupTaggerSettings()
+        let wasEnabled = tagger.isEnabled
+        defer { tagger.isEnabled = wasEnabled }
+        let heard = "Um, buy milk. Call the dentist about the iphone, no wait, the ipad."
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput(heard)
+        let vocabulary = CustomVocabularySettings(defaults: defaults)
+        vocabulary.terms = ["iPhone", "iPad"]
+        vocabulary.isEnabled = true
+        let lowercase = DictationLowercaseSettings(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 97_000 },
+            autoPrepareOnInit: false,
+            cleanupSettings: AppleIntelligenceCleanupSettings(defaults: defaults),
+            customVocabularySettings: vocabulary,
+            lowercaseSettings: lowercase,
+            typingJournalSettings: TypingJournalSettings(defaults: defaults)
+        )
+        controller.prepareModel()
+        try await settle()
+
+        var outputs: [String] = []
+        for (cleanup, lower) in [(false, false), (true, false), (false, true)] {
+            tagger.isEnabled = cleanup
+            lowercase.isEnabled = lower
+            for style in DictationStyle.allCases {
+                controller.clearTranscript()
+                controller.startRecording(keyboardJobID: "parity-\(style)-\(cleanup)-\(lower)", styleOverride: style)
+                try await settle()
+                controller.finishRecording()
+                try await settle()
+                let keyboard = await DictationPipeline(
+                    style: style,
+                    language: "en-US",
+                    vocabulary: vocabulary.activeTerms,
+                    lowercase: lower
+                ).run(heard).formatted
+                XCTAssertEqual(keyboard, controller.transcript, "\(style), cleanup \(cleanup), lowercase \(lower)")
+                outputs.append(keyboard)
+            }
+        }
+        XCTAssertEqual(outputs.prefix(4), [
+            "Buy milk. Call the dentist about the iPhone, no wait, the iPad.",
+            "buy milk. call the dentist about the iPhone, no wait, the iPad",
+            "- Buy milk\n- Call the dentist about the iPhone, no wait, the iPad",
+            "Um, buy milk. Call the dentist about the iPhone, no wait, the iPad.",
+        ])
+        XCTAssertEqual(outputs.suffix(4), [
+            "buy milk. call the dentist about the iphone, no wait, the ipad.",
+            "buy milk. call the dentist about the iphone, no wait, the ipad",
+            "- buy milk\n- call the dentist about the iphone, no wait, the ipad",
+            "um, buy milk. call the dentist about the iphone, no wait, the ipad.",
+        ])
+        for start in stride(from: 0, to: outputs.count, by: 4) {
+            XCTAssertEqual(Set(outputs[start..<start + 4]).count, 4, "every style differs")
+        }
+    }
+
+    func testLowercaseAppliesOnlyWhenCaptured() async throws {
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("Ship the iPhone build to Ravi.")
+        let lowercase = DictationLowercaseSettings(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 98_000 },
+            autoPrepareOnInit: false,
+            cleanupSettings: AppleIntelligenceCleanupSettings(defaults: defaults),
+            customVocabularySettings: CustomVocabularySettings(defaults: defaults),
+            lowercaseSettings: lowercase
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // The Action Button's and Control Center's dictation (it copies) too.
+        lowercase.isEnabled = true
+        controller.startRecording(styleOverride: .polished, copyToPasteboard: true)
+        try await settle()
+        lowercase.isEnabled = false // A mid-capture toggle must not affect this session.
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "ship the iphone build to ravi.")
+
+        controller.clearTranscript()
+        controller.startRecording(keyboardJobID: "lowercase-off", styleOverride: .polished)
+        try await settle()
+        lowercase.isEnabled = true
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "Ship the iPhone build to Ravi.")
     }
 
     func testCustomVocabularyReachesTheTranscriberOnlyWhileEnabled() async throws {

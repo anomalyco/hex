@@ -17,9 +17,9 @@ nonisolated enum DictationStyle: String, Codable, CaseIterable, Sendable {
 
     var shortHint: String {
         switch self {
-        case .polished: String(localized: "Clean punctuation and filler trim")
-        case .casual: String(localized: "Lowercase texting, no trailing period")
-        case .notes: String(localized: "Spoken bullets and line breaks")
+        case .polished: String(localized: "Full sentences, fillers trimmed")
+        case .casual: String(localized: "Texting: lowercase start, no final period")
+        case .notes: String(localized: "Short lines, a list for several items")
         case .verbatim: String(localized: "Exact words from the model")
         }
     }
@@ -32,11 +32,22 @@ nonisolated enum DictationStyle: String, Codable, CaseIterable, Sendable {
 }
 
 nonisolated enum TranscriptFormatter {
-    /// `language` (BCP 47) picks the fillers a style trims; nil is English.
+    /// `text` in `style`. `language` (BCP 47) picks the fillers a style trims and the
+    /// English-only rules ("I", Casual's interjections, Notes' connectives); nil is English.
+    /// - Verbatim: as the speech model wrote it.
+    /// - Polished: full sentences: fillers trimmed, each sentence capitalized ("I" too) and
+    ///   ended.
+    /// - Casual: texting: fillers trimmed, sentences may start lowercase (never an acronym
+    ///   or a name with inner capitals), English "i", no comma after an opening "yeah" or
+    ///   "ok", and no final period on a short message (one line, up to three sentences).
+    /// - Notes: concise lines: spoken "bullet" and "new line" markers, else several
+    ///   sentences become a list (and a list after a colon becomes bullets), with no
+    ///   opening "so", "yeah" or "and then" and no final periods.
     static func format(_ raw: String, style: DictationStyle, language: String? = nil) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         let fillers = fillerPattern(for: language)
+        let english = SpeechLanguagePicker.isEnglish(language)
 
         switch style {
         case .verbatim:
@@ -44,22 +55,15 @@ nonisolated enum TranscriptFormatter {
 
         case .polished:
             let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
-            return polishSentences(cleaned)
+            return polishSentences(cleaned, english: english)
 
         case .casual:
             let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
-            var lowered = collapseHorizontalSpaces(in: cleaned).lowercased()
-            // Keep standalone "i" and "i'm"/"i'll"/"i've"/"i'd" capitalized naturally, or pure casual lowercase?
-            // Pure texting style: lowercase start and drop single-sentence trailing period, keep ? and !.
-            lowered = fixSpacingBeforePunctuation(in: lowered)
-            if lowered.hasSuffix("."), !lowered.dropLast().contains(where: { ".!?".contains($0) }) {
-                lowered.removeLast()
-            }
-            return lowered.trimmingCharacters(in: .whitespacesAndNewlines)
+            return casualMessage(cleaned, english: english)
 
         case .notes:
             let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
-            return formatNotes(cleaned)
+            return formatNotes(cleaned, english: english)
         }
     }
 
@@ -154,7 +158,8 @@ nonisolated enum TranscriptFormatter {
         let code = language.flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
         switch code {
         case "en":
-            return "um+|uh+|er+|ah+"
+            // Desktop's list (`src/dictation/filler_words.rs`): um, umm, uh, uhh, erm, er, ah.
+            return "um+|uh+|er+m*|ah+"
         case "nb", "nn", "no", "da", "sv":
             return "e+h+m*|ø+h+m*|ö+h+m*|hm+"
         case "es":
@@ -175,16 +180,147 @@ nonisolated enum TranscriptFormatter {
         return collapseHorizontalSpaces(in: stripped)
     }
 
-    private static func polishSentences(_ text: String) -> String {
+    private static func polishSentences(_ text: String, english: Bool) -> String {
         guard !text.isEmpty else { return "" }
         var normalized = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
         normalized = capitalizeSentenceStarts(in: normalized)
-        // A lone address ("john@gmail.com") is no sentence to end.
-        let loneAddress = normalized.contains("@") && !normalized.contains(where: \.isWhitespace)
-        if let last = normalized.last, !".!?…\"”)]".contains(last), !loneAddress {
-            normalized.append(".")
+        if english {
+            normalized = capitalizingPronounI(in: normalized)
         }
+        // Every paragraph ends as a sentence does, a Chinese or Japanese one with "。".
         return normalized
+            .components(separatedBy: "\n")
+            .map(endingSentence)
+            .joined(separator: "\n")
+    }
+
+    /// `line` with a full stop unless it already ends a sentence (or a list's colon), is
+    /// empty, or is a lone address ("john@gmail.com"), which is no sentence to end.
+    private static func endingSentence(_ line: String) -> String {
+        guard let last = line.last, !sentenceClosers.contains(last) else { return line }
+        if line.contains("@"), !line.contains(where: \.isWhitespace) { return line }
+        return line + (usesIdeographicFullStop(last) ? "。" : ".")
+    }
+
+    /// What may end a sentence already: its mark, or a closing quote or bracket after one.
+    private static let sentenceClosers: Set<Character> = [
+        ".", "!", "?", "…", "\"", "”", ")", "]", ":", "。", "！", "？", "」", "』", "）",
+    ]
+
+    /// Marks that end a sentence. A full stop counts only before a space, a line break, or the
+    /// end ("gmail.com" and "e.g." end nothing), the ideographic ones anywhere.
+    private static func endsSentence(_ chars: [Character], at index: Int) -> Bool {
+        let ch = chars[index]
+        if "。！？".contains(ch) { return true }
+        guard ".!?…".contains(ch) else { return false }
+        return index + 1 == chars.count || chars[index + 1].isWhitespace
+    }
+
+    /// Chinese and Japanese end a sentence with "。", not ".".
+    private static func usesIdeographicFullStop(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first?.value else { return false }
+        return (0x4E00...0x9FFF).contains(scalar) // CJK unified ideographs
+            || (0x3400...0x4DBF).contains(scalar) // extension A
+            || (0x3040...0x30FF).contains(scalar) // hiragana and katakana
+            || (0xF900...0xFAFF).contains(scalar) // compatibility ideographs
+    }
+
+    /// English "i", "i'm", "i'll", "i've", "i'd" as "I", "I'm", ...; never "i.e." or an address.
+    private static func capitalizingPronounI(in text: String) -> String {
+        recasingPronounI(in: text, from: "i", to: "I")
+    }
+
+    /// The English pronoun "I" (alone or in "I'm", "I'll", "I've", "I'd") written as `to`.
+    private static func recasingPronounI(in text: String, from: String, to: String) -> String {
+        guard text.contains(from) else { return text }
+        let pattern = #"(?<![\p{L}\p{N}@.'’])"# + from + #"(?=(?:['’](?:m|ll|ve|d))?(?![\p{L}\p{N}@'’]|\.\p{L}))"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: to)
+    }
+
+    // MARK: Casual
+
+    /// Interjections that open a text without their comma in Casual ("yeah sounds good").
+    private static let casualInterjections: Set<String> = [
+        "yeah", "yes", "yep", "yup", "no", "nope", "nah", "ok", "okay", "oh", "hey", "hi", "hello",
+        "so", "well", "sure", "alright", "cool", "thanks",
+    ]
+
+    private static func casualMessage(_ text: String, english: Bool) -> String {
+        var message = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
+        if english {
+            message = droppingInterjectionCommas(in: message)
+        }
+        message = lowercasingSentenceStarts(in: message)
+        if english {
+            message = recasingPronounI(in: message, from: "I", to: "i")
+        }
+        // A short message drops its final full stop; a question or an exclamation keeps its mark.
+        let chars = Array(message)
+        let sentences = chars.indices.filter { endsSentence(chars, at: $0) }.count
+        if !message.contains("\n"), sentences <= 3, let last = message.last, last == "." || last == "。" {
+            message.removeLast()
+        }
+        return message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// "Yeah, sounds good. Ok, see you." -> "Yeah sounds good. Ok see you.": an interjection at
+    /// a sentence start loses its comma.
+    private static func droppingInterjectionCommas(in text: String) -> String {
+        var words = text.components(separatedBy: " ")
+        var atStart = true
+        for index in words.indices {
+            let word = words[index]
+            if atStart, word.hasSuffix(","), index + 1 < words.count,
+               casualInterjections.contains(String(word.dropLast()).lowercased()) {
+                words[index].removeLast()
+            }
+            let chars = Array(word)
+            atStart = word.contains("\n") || (!chars.isEmpty && endsSentence(chars + [" "], at: chars.count - 1))
+        }
+        return words.joined(separator: " ")
+    }
+
+    /// Lowercases the first letter of each sentence, as people text. Keeps acronyms ("NASA",
+    /// though "OK" becomes "ok"), words with capitals inside ("iPhone", "McDonald's"), and
+    /// addresses.
+    private static func lowercasingSentenceStarts(in text: String) -> String {
+        var chars = Array(text)
+        var atStart = true
+        var index = 0
+        while index < chars.count {
+            let ch = chars[index]
+            if atStart, ch.isLetter {
+                var end = index
+                while end < chars.count, chars[end].isLetter || chars[end] == "'" || chars[end] == "’" {
+                    end += 1
+                }
+                let word = String(chars[index..<end])
+                if !keepsCapital(word), !isAddress(chars, at: index) {
+                    let lowered = Array(word == "OK" ? "ok" : word.prefix(1).lowercased() + word.dropFirst())
+                    chars.replaceSubrange(index..<end, with: lowered)
+                    end = index + lowered.count
+                }
+                atStart = false
+                index = end
+                continue
+            }
+            if ch.isNewline || endsSentence(chars, at: index) {
+                atStart = true
+            } else if !ch.isWhitespace, !"\"“'‘(¿¡”’)]".contains(ch) {
+                atStart = false
+            }
+            index += 1
+        }
+        return String(chars)
+    }
+
+    private static func keepsCapital(_ word: String) -> Bool {
+        if word == "OK" { return false }
+        let letters = word.filter(\.isLetter)
+        if letters.count >= 2, letters == letters.uppercased() { return true }
+        return letters.dropFirst().contains(where: \.isUppercase)
     }
 
     /// Whether the word at `index` is an address ("john@gmail.com"), whose case stays.
@@ -197,7 +333,9 @@ nonisolated enum TranscriptFormatter {
         return false
     }
 
-    private static func formatNotes(_ text: String) -> String {
+    // MARK: Notes
+
+    private static func formatNotes(_ text: String, english: Bool) -> String {
         guard !text.isEmpty else { return "" }
         var working = text
         let replacements: [(String, String)] = [
@@ -211,17 +349,133 @@ nonisolated enum TranscriptFormatter {
                 working = regex.stringByReplacingMatches(in: working, range: range, withTemplate: template)
             }
         }
-        let lines = working
-            .components(separatedBy: "\n")
+        var lines = working.components(separatedBy: "\n")
+        // Without spoken markers, one dictation of several items becomes a list.
+        if lines.count == 1 {
+            let line = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: lines[0]))
+            let sentences = noteSentences(in: line)
+            if sentences.count >= 2 {
+                lines = sentences.map { "- " + $0 }
+            } else if let list = colonList(in: line, english: english) {
+                lines = [list.intro + ":"] + list.items.map { "- " + $0 }
+            }
+        }
+        return lines
             .map { line -> String in
                 let trimmedLine = collapseHorizontalSpaces(in: line)
                 if trimmedLine.hasPrefix("- ") {
                     let body = String(trimmedLine.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                    return body.isEmpty ? "" : "- " + capitalizeFirstLetter(fixSpacingBeforePunctuation(in: body))
+                    let note = conciseNote(body, english: english)
+                    return note.isEmpty ? "" : "- " + note
                 }
-                return capitalizeFirstLetter(fixSpacingBeforePunctuation(in: trimmedLine))
+                return conciseNote(trimmedLine, english: english)
             }
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// One note: no opening "so," "okay," "and" or "then" (English), no final full stop, and
+    /// a capital first letter.
+    private static func conciseNote(_ line: String, english: Bool) -> String {
+        var note = fixSpacingBeforePunctuation(in: line)
+        if english {
+            note = droppingConnectives(from: note)
+        }
+        if let last = note.last, last == "." || last == "。", !note.hasSuffix("...") {
+            note.removeLast()
+        }
+        return capitalizeFirstLetter(note.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// Words that open a spoken note but add nothing to a written one.
+    private static let noteConnectives: [String] = [
+        "and then", "and also", "and", "also", "then", "plus", "so", "okay", "ok", "yeah", "oh", "well", "anyway",
+        "alright", "basically", "first", "firstly", "second", "secondly", "third", "thirdly", "next",
+        "finally", "lastly",
+    ]
+    /// Of those, the ones that may also open a note without a comma after them.
+    private static let bareNoteConnectives: Set<String> = ["and then", "and also", "and", "also", "then", "plus"]
+
+    private static func droppingConnectives(from line: String) -> String {
+        var note = line
+        var changed = true
+        while changed {
+            changed = false
+            let lowered = note.lowercased()
+            for connective in noteConnectives where lowered.hasPrefix(connective) {
+                let rest = note.dropFirst(connective.count)
+                let next: Substring
+                if rest.hasPrefix(", ") {
+                    next = rest.dropFirst(2)
+                } else if rest.hasPrefix(" "), bareNoteConnectives.contains(connective) {
+                    next = rest.dropFirst()
+                } else {
+                    continue
+                }
+                // Never the whole note, and never into a closing mark ("And?").
+                guard let first = next.first, first.isLetter || first.isNumber else { continue }
+                note = String(next)
+                changed = true
+                break
+            }
+        }
+        return note
+    }
+
+    /// Abbreviations whose full stop ends no sentence ("Dr. Patel").
+    private static let abbreviations: Set<String> = [
+        "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "vs", "etc", "inc", "ltd", "approx", "e.g", "i.e",
+    ]
+
+    /// `line`'s sentences, each with its mark; one sentence or none returns `[line]`.
+    private static func noteSentences(in line: String) -> [String] {
+        let chars = Array(line)
+        var sentences: [String] = []
+        var start = 0
+        for index in chars.indices where endsSentence(chars, at: index) {
+            if chars[index] == "." {
+                var wordStart = index
+                while wordStart > start, !chars[wordStart - 1].isWhitespace { wordStart -= 1 }
+                let word = String(chars[wordStart..<index]).lowercased()
+                // "Dr." or an initial ("J. K.") ends nothing.
+                if abbreviations.contains(word) || (word.count == 1 && word.first?.isLetter == true) { continue }
+            }
+            let sentence = String(chars[start...index]).trimmingCharacters(in: .whitespaces)
+            if !sentence.isEmpty { sentences.append(sentence) }
+            start = index + 1
+        }
+        let rest = String(chars[start...]).trimmingCharacters(in: .whitespaces)
+        if !rest.isEmpty { sentences.append(rest) }
+        return sentences.isEmpty ? [line] : sentences
+    }
+
+    /// "Shopping list: eggs, milk and bread." -> ("Shopping list", ["eggs", "milk", "bread"]):
+    /// three or more short items (four words at most) after a colon. English splits the last
+    /// "and" or "or" off too; other languages take commas only.
+    private static func colonList(in line: String, english: Bool) -> (intro: String, items: [String])? {
+        guard let colon = line.range(of: ": ") else { return nil }
+        let intro = String(line[..<colon.lowerBound]).trimmingCharacters(in: .whitespaces)
+        var body = String(line[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
+        guard !intro.isEmpty, !body.contains(": ") else { return nil }
+        if let last = body.last, last == "." || last == "。" { body.removeLast() }
+        var items = body.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }
+        if english, let last = items.last {
+            items.removeLast()
+            var tail = last
+            for joiner in ["and ", "or "] where tail.lowercased().hasPrefix(joiner) {
+                tail = String(tail.dropFirst(joiner.count))
+            }
+            if let split = tail.range(of: " and ") ?? tail.range(of: " or ") {
+                items.append(String(tail[..<split.lowerBound]))
+                items.append(String(tail[split.upperBound...]))
+            } else {
+                items.append(tail)
+            }
+        }
+        let wordCounts = items.map { $0.split(separator: " ").count }
+        guard items.count >= 3, wordCounts.allSatisfy({ (1...4).contains($0) }),
+              !items.contains(where: { item in item.contains(where: { ".!?。！？".contains($0) }) }) else { return nil }
+        return (intro, items)
     }
 
     private static func collapseHorizontalSpaces(in text: String) -> String {
