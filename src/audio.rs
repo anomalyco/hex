@@ -32,7 +32,9 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryR
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
+/// A dictation press kept across a microphone reopen (the Linux and Windows
+/// listeners read it; macOS has no such reopen).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use interruption::capture_idle;
 use recovery::{MICROPHONE_RETRY_INITIAL, MICROPHONE_RETRY_MAX, MicrophoneRecovery};
 
