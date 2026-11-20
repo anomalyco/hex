@@ -767,6 +767,59 @@ Paste last dictation's own shortcut has no runtime filter beside dictation's,
 so one saved on the dictation shortcut's chord is cleared (logged) when
 settings load or save.
 
+### Windows Paste Target
+
+A Windows dictation sends Ctrl+V to whichever window is in front. The desktop
+and the taskbars belong to Explorer and take no paste, so a chord sent there is
+lost with no error. Before sending it, the listener reads the foreground
+window, its class, its process, and the keyboard-focused child, and logs one
+line per paste (`Windows paste target`, with the process stem and class; never
+the words). The desktop and taskbar classes (`Progman`, `WorkerW`,
+`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`) owned by `explorer` count as the
+shell; an Explorer window that is not one of them (`CabinetWClass`) pastes as
+usual, and a desktop rename box (`Edit`) still takes the paste.
+
+```ts
+Windows paste                                     // dictate.windows-paste-target
+├── Capture starts -> The window in front is remembered, with its process
+├── Target is an app -> Ctrl+V goes there
+├── Target is the shell
+│   ├── The remembered window is still its process's, alive, visible, not
+│   │   minimized, not Hex's, not the shell
+│   │   -> Bring it forward, poll GetForegroundWindow 10 ms up to 200 ms
+│   │      (Windows may refuse; the log's `returned` field says if it arrived)
+│   └── Still the shell -> No chord; the plain transcript stays on the
+│       clipboard with the usual history/cloud exclusion, the job reports
+│       "copied" (never "pasted"), and History and Paste Last still keep it
+└── Tray Paste Last -> The tracker skips the desktop and taskbars, so it never
+    brings one forward; the listener applies the same rule per paste
+```
+
+The fallback keeps the marking a default paste has: the transcript is left out
+of Windows clipboard history (Win+V) and cloud sync (#851) unless Labs › Keep
+dictation on clipboard or Copy dictation only is on, which writes it as an
+ordinary entry. It is the plain transcript, without the continuation's join.
+
+As a known gap, a copied dictation currently looks and sounds the same as a
+paste: the HUD plays the same done state, the done tone plays, and no notice
+appears. The visible difference is the `copied` phase in `live.ndjson`, the
+Activity line (`Dictation copied to the clipboard`), and the words left on the
+clipboard. Returning to the capture window is best effort: Windows can refuse
+`SetForegroundWindow`, and the paste line's `returned` field shows whether it
+arrived. The onboarding practice treats a copied dictation as a finished one,
+so its step completes even when its field couldn't receive the text.
+
+Checks: `the_desktop_and_taskbars_take_no_paste`,
+`no_foreground_window_takes_no_paste`,
+`a_desktop_rename_box_still_takes_a_paste`,
+`explorer_windows_that_are_not_the_shell_still_take_a_paste`, and
+`another_process_using_a_shell_class_is_not_the_shell` in
+[paste_target.rs](../../src/dictation/paste_target.rs), and
+`a_copied_dictation_completes_the_practice_like_a_paste` in
+[practice.rs](../../src/rune_ui/practice.rs). Proof limits: the classification
+and the practice mapping are unit-tested only; the foreground read, the return
+attempt, and the copy fallback have not run on a real Windows PC.
+
 ### Copy Recent Dictation (Labs, macOS)
 
 Paste Last Dictation reaches only the newest dictation. With Labs › Copy

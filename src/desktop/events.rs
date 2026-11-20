@@ -122,6 +122,10 @@ pub enum DictationPhase {
     /// The paste shortcut was sent. No platform confirms that the focused
     /// application accepted it, so this does not prove the text landed.
     Pasted,
+    /// No paste chord was sent: the text stayed on the clipboard, because the
+    /// window in front could not take one (the Windows desktop or a taskbar),
+    /// or Labs › Copy dictation only is on.
+    Copied,
     /// `hex dictation stop --print` received the text instead of a paste.
     Printed,
     Edited,

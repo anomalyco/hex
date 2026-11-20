@@ -870,7 +870,8 @@ pub(crate) fn foreground_other_process_stem() -> Option<String> {
 }
 
 /// The newest foreground window another process owns, polled with the
-/// runtime's refresh.
+/// runtime's refresh. The desktop and taskbars are skipped: a paste there is
+/// lost, so bringing one forward is never what Paste Last wants.
 #[derive(Default)]
 struct ForeignWindow(Option<isize>);
 
@@ -888,7 +889,9 @@ impl ForeignWindow {
             }
             let mut process_id = 0;
             GetWindowThreadProcessId(window, &mut process_id);
-            if process_id != GetCurrentProcessId() {
+            if process_id != GetCurrentProcessId()
+                && !crate::windows::paste::is_shell_window(window)
+            {
                 self.0 = Some(window as isize);
             }
         }
