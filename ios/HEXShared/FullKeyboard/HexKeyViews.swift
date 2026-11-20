@@ -152,8 +152,6 @@ final class HexKeyRecordingPanel: UIView {
     var onCycleStyle: (() -> Void)?
 
     let scope: DotScopeHostView
-    private let dot = UIView()
-    private let clockLabel = UILabel()
     private let styleButton = UIButton(type: .custom)
     private let well = UIView()
     private let cancelButton = PanelKeyButton()
@@ -176,8 +174,6 @@ final class HexKeyRecordingPanel: UIView {
         scope.reduceMotion = UIAccessibility.isReduceMotionEnabled
         scope.useDemoVoice = ProcessInfo.processInfo.arguments.contains("--snap-state")
 
-        dot.layer.cornerRadius = 3.5
-        clockLabel.font = .monospacedDigitSystemFont(ofSize: 17, weight: .medium)
         styleButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
         styleButton.semanticContentAttribute = .forceRightToLeft
         styleButton.addTarget(self, action: #selector(cycleStyle), for: .touchUpInside)
@@ -199,7 +195,7 @@ final class HexKeyRecordingPanel: UIView {
         doneSpinner.hidesWhenStopped = true
         doneSpinner.color = palette.textBase
         doneSpinner.isUserInteractionEnabled = false
-        for view in [dot, clockLabel, styleButton, well, cancelButton, doneButton, doneSpinner] {
+        for view in [styleButton, well, cancelButton, doneButton, doneSpinner] {
             addSubview(view)
         }
         applyPalette()
@@ -213,14 +209,11 @@ final class HexKeyRecordingPanel: UIView {
         scope.tearDown()
     }
 
-    func update(phase: DotScopePhase, clock: String, style: DictationStyle) {
+    func update(phase: DotScopePhase, style: DictationStyle) {
         isTranscribing = phase == .processing
         scope.phase = phase
-        dot.isHidden = isTranscribing
-        // Two round buttons, ✕ and ✓; once the recording stops the ✓ turns into the spinner in
-        // the same spot, so there's one place to look, and ✕ still cancels.
-        clockLabel.text = clock
-        clockLabel.textColor = isTranscribing ? palette.textMuted : palette.textBase
+        // The scope, then two round buttons, ✕ and ✓; once the recording stops the ✓ turns into
+        // the spinner in the same spot, so there's one place to look, and ✕ still cancels.
         doneButton.symbol = isTranscribing ? nil : "checkmark"
         doneButton.isPrimary = true
         doneButton.isEnabled = !isTranscribing
@@ -238,8 +231,6 @@ final class HexKeyRecordingPanel: UIView {
     }
 
     private func applyPalette() {
-        dot.backgroundColor = palette.recordingDot
-        clockLabel.textColor = isTranscribing ? palette.textMuted : palette.textBase
         styleButton.setTitleColor(palette.textMuted, for: .normal)
         well.backgroundColor = palette.wellFill
         scope.isDark = palette.isDark
@@ -254,14 +245,7 @@ final class HexKeyRecordingPanel: UIView {
         let innerRight = bounds.width - horizontalInset - metrics.side
         let rowH = max(28, bounds.height - 12)
         let rowY = (bounds.height - rowH) / 2
-        var x = innerLeft + 4
-        if !dot.isHidden {
-            dot.frame = CGRect(x: x, y: bounds.midY - 3.5, width: 7, height: 7)
-            x += 7 + 6
-        }
-        clockLabel.sizeToFit()
-        clockLabel.frame = CGRect(x: x, y: 0, width: clockLabel.bounds.width, height: bounds.height)
-        x = clockLabel.frame.maxX + 8
+        let x = innerLeft
 
         doneButton.cornerRadius = rowH / 2
         cancelButton.cornerRadius = rowH / 2
