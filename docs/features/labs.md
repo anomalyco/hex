@@ -3699,7 +3699,7 @@ Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 │   used when WSL answers nothing, exactly as before
 ├── Windows already confirmed a service -> the WSL lookup waits at most min(the caller's
 │   remaining budget, WSL_LOOKUP_CAP 3 s), so a cold WSL can't hold a rewrite or Annotate's send
-├── otherwise -> read HKCU\…\Lxss\DefaultDistribution, DistributionName and DefaultUid on every lookup
+├── each search -> read HKCU\…\Lxss\DefaultDistribution, DistributionName and DefaultUid on every lookup
 │   ├── a cached home is reused only when DistributionName and DefaultUid still match; otherwise
 │   │   rebuild it from passwd: \\wsl.localhost\<distribution>\etc\passwd, else \\wsl$\<distribution>\etc\passwd
 │   │   on older Windows 10 (at most 1 MiB) -> the line whose uid is DefaultUid -> its (one trailing / trimmed) home
