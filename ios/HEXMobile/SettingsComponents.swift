@@ -254,6 +254,11 @@ enum SettingsSnapshotFixture {
         keyboard.keyPopups = true
         keyboard.haptics = true
         keyboard.emoji = on
+        let emojiUsage = EmojiUsageStore()
+        emojiUsage.clear()
+        if on {
+            emojiUsage.record("🎉")
+        }
         LanguageSettings().keyboardLayout = nil
         CleanupTaggerSettings().isEnabled = on
         AppleIntelligenceCleanupSettings().isEnabled = false
