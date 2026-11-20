@@ -122,7 +122,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     reorders, or changes words. The tagger only knows English (run on
     Spanish it dropped negations: "Te digo que no puedo ir" became "Te
     puedo ir"), so Spanish, German and Norwegian get word rules instead
-    (`SpokenCleanupRules`): a filler between commas goes ("este", "o sea"),
+    (`SpokenCleanupRules`): the language's hesitation sounds go (the
+    styles' list below, so in-keyboard dictation, which no style formats,
+    loses them too), a filler between commas goes ("este", "o sea"),
     and a correction marker set off by commas ("digo", "perdón", "no",
     "mejor dicho"; "nein", "ich meine"; "nei", "nei vent", "jeg mener")
     drops the words it replaces, counted back to the nearest earlier word

@@ -112,6 +112,8 @@ final class SpokenCleanupRulesTests: XCTestCase {
             ("Es muy caro, o sea, no lo voy a comprar.", "Es muy caro, no lo voy a comprar."),
             ("Pues, este, no sé qué decirte.", "Pues, no sé qué decirte."),
             ("Y, este, fuimos al cine.", "Y fuimos al cine."),
+            ("Mmm, creo que sí, eh, pero no estoy seguro.", "Creo que sí, pero no estoy seguro."),
+            ("Eh, nos vemos a las 3, digo, a las 4.", "Nos vemos a las 4."),
         ] {
             XCTAssertEqual(SpokenCleanupRules.clean(spoken, language: "es-ES"), cleaned)
         }
@@ -130,6 +132,8 @@ final class SpokenCleanupRulesTests: XCTestCase {
             "Le dije a Juan que no, que mejor otro día.",
             "Un coche no mejor que el otro.",
             "¿Vienes el sábado o el domingo?",
+            "No te olvides, ¿eh?",
+            "Padre e hijo.",
             "Uno\ndos",
         ] {
             XCTAssertEqual(SpokenCleanupRules.clean(spoken, language: "es-419"), spoken)
@@ -146,6 +150,8 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(SpokenCleanupRules.clean("Vi sender den tirsdag, nei vent, torsdag.", language: "nb-NO"), "Vi sender den torsdag.")
         XCTAssertEqual(SpokenCleanupRules.clean("Møtet er klokka 3, nei, klokka 4.", language: "nn"), "Møtet er klokka 4.")
         XCTAssertEqual(SpokenCleanupRules.clean("Nei, jeg vil ikke.", language: "nb-NO"), "Nei, jeg vil ikke.")
+        XCTAssertEqual(SpokenCleanupRules.clean("Eh, jeg kommer snart.", language: "nb-NO"), "Jeg kommer snart.")
+        XCTAssertEqual(SpokenCleanupRules.clean("Äh, das ist eh egal.", language: "de-DE"), "Das ist eh egal.")
     }
 
     func testOnlyItsLanguagesHaveRules() {

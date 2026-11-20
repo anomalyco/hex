@@ -4,6 +4,8 @@ import Foundation
 /// was never trained on. Run on Spanish, the tagger dropped negations ("Te digo que no puedo
 /// ir" became "Te puedo ir"), so these languages get two word rules instead, each needing
 /// the commas a pause leaves:
+/// - the language's hesitation sounds go anywhere ("eh", "mmm"; `TranscriptFormatter`'s
+///   list, so in-keyboard dictation, which no style formats, loses them too);
 /// - a filler phrase set off by commas goes ("Es caro, o sea, no lo compro");
 /// - a spoken correction ("a las 3, digo, a las 4") drops its marker and the words it
 ///   replaces, counted back from the nearest earlier word that matches the repair's first
@@ -55,18 +57,26 @@ nonisolated enum SpokenCleanupRules {
     static func clean(_ text: String, language: String?) -> String {
         guard let rules = rules(for: language) else { return text }
         let words = CleanupTagger.words(in: text)
-        var cleaned = removingFillers(words, rules: rules)
+        var cleaned = removingFillers(words, rules: rules, language: language)
         cleaned = resolvingCorrections(cleaned, rules: rules)
         return cleaned == words ? text : cleaned.joined(separator: " ")
     }
 
     // MARK: Fillers
 
-    private static func removingFillers(_ input: [String], rules: Rules) -> [String] {
+    private static func removingFillers(_ input: [String], rules: Rules, language: String?) -> [String] {
         var words = input
         var deletes = Array(repeating: false, count: words.count)
+        let hesitation = TranscriptFormatter.fillerPattern(for: language).flatMap {
+            try? NSRegularExpression(pattern: "^(?:\($0))$", options: .caseInsensitive)
+        }
         var index = 0
         while index < words.count {
+            if let hesitation, isHesitation(words[index], hesitation) {
+                deletes[index] = true
+                index += 1
+                continue
+            }
             guard let phrase = rules.fillers.first(where: { matches($0, words, at: index) }) else {
                 index += 1
                 continue
@@ -87,6 +97,13 @@ nonisolated enum SpokenCleanupRules {
         }
         guard deletes.contains(true) else { return input }
         return CleanupTagger.words(in: CleanupReconstruction.reconstruct(words, deletes: deletes))
+    }
+
+    /// A sound like "eh", unless it asks or exclaims ("¿eh?", "¡Eh, tú!").
+    private static func isHesitation(_ word: String, _ pattern: NSRegularExpression) -> Bool {
+        guard !hasOpeningMark(word), let last = word.last, last != "?", last != "!" else { return false }
+        let bare = bare(word)
+        return pattern.firstMatch(in: bare, range: NSRange(bare.startIndex..., in: bare)) != nil
     }
 
     // MARK: Corrections
