@@ -168,6 +168,8 @@ final class AutocorrectEngine {
     private var lexiconShortcuts: [String: String] = [:]
     private var lexiconTerms: [String] = []
     private var suppressedInSession: Set<String> = []
+    /// Learn how I type: typos you fixed the same way twice and words you turned down twice.
+    private(set) var learning = TypingLearning()
     private(set) var lastCorrection: AppliedCorrection?
 
     init(
@@ -210,6 +212,10 @@ final class AutocorrectEngine {
     func consumePendingUndo() -> AppliedCorrection? {
         defer { lastCorrection = nil }
         return lastCorrection
+    }
+
+    func applyLearning(_ learning: TypingLearning) {
+        if self.learning != learning { self.learning = learning }
     }
 
     func suppressAndKeep(_ word: String) {
@@ -260,6 +266,7 @@ final class AutocorrectEngine {
         let lower = token.lowercased()
         let allowAuto = isEnabled
             && !suppressedInSession.contains(lower)
+            && !learning.rejected.contains(lower)
             && !learnedWords.contains(lower)
             && !Self.shorthandAllowlist.contains(lower)
 
@@ -268,6 +275,9 @@ final class AutocorrectEngine {
 
         if let autoFix {
             pool.append(autoFix)
+        } else if let learned = learning.typos[lower] {
+            // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
+            pool.append(Self.matchCase(of: token, onto: learned))
         } else if let suggested = Self.suggestOnlyContractions[lower] {
             pool.append(Self.matchCase(of: token, onto: suggested))
         }
@@ -341,6 +351,7 @@ final class AutocorrectEngine {
         guard let token = Self.currentToken(in: beforeInput) else { return nil }
         let lower = token.lowercased()
         guard !suppressedInSession.contains(lower),
+              !learning.rejected.contains(lower),
               !learnedWords.contains(lower),
               !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
@@ -352,6 +363,11 @@ final class AutocorrectEngine {
         // 1. Explicit iOS Text Replacement (`omw` -> `On my way!`).
         if let shortcut = lexiconShortcuts[lower] {
             return shortcut
+        }
+        // A typo you fixed the same way at least twice (Learn how I type), unless what you
+        // typed is a real word: then it is only suggested.
+        if let learned = learning.typos[lower], !checker.isWordValid(token) {
+            return Self.matchCase(of: token, onto: learned)
         }
         // Leave ALL-CAPS acronyms (`API`, `PR`, `NYC`) alone unless matched in `UILexicon` above,
         // except unambiguous all-caps contractions/typos of 3+ letters (`DONT` -> `DON'T`, `TEH` -> `THE`).
