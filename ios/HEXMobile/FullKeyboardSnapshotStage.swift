@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|pt|en` pins it; drafts are in the layout's language.
 /// `--accent-key ø` picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Experiments › Emoji on with a seeded history; `emoji-probe` prints the panel's
@@ -90,6 +90,33 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Bin zehn Minuten zu spä"
             case "accents": Self.accentKey == "s" ? "Stra" : "Caf"
             default: "Bin zehn Minuten zu spät, "
+            }
+        case .italian:
+            return switch state {
+            case "inserted": "Arrivo con dieci minuti di ritardo, a casa per le 19:30. Iniziate senza di me."
+            case "numbers": "Arrivo con dieci minuti di ritardo, a casa per le 19:3"
+            case "shift": "Arrivo con dieci minuti di ritardo. "
+            case "typing": "Arrivo con dieci minuti di ritsrdo"
+            case "accents": Self.accentKey == "e" ? "Perch" : "Cos"
+            default: "Arrivo con dieci minuti di ritardo, "
+            }
+        case .french:
+            return switch state {
+            case "inserted": "J'arrive avec dix minutes de retard, à la maison vers 19h30. Commencez sans moi."
+            case "numbers": "J'arrive avec dix minutes de retard, à la maison vers 19h3"
+            case "shift": "J'arrive avec dix minutes de retard. "
+            case "typing": "J'arrive avec dix minutes de reta"
+            case "accents": "Caf"
+            default: "J'arrive avec dix minutes de retard, "
+            }
+        case .portuguese:
+            return switch state {
+            case "inserted": "Vou chegar dez minutos atrasado, em casa às 19:30. Comecem sem mim."
+            case "numbers": "Vou chegar dez minutos atrasado, em casa às 19:3"
+            case "shift": "Vou chegar dez minutos atrasado. "
+            case "typing": "Vou chegar dez minutos atras"
+            case "accents": "Caf"
+            default: "Vou chegar dez minutos atrasado, "
             }
         case .english:
             break
@@ -223,7 +250,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.debugPress("g")
             case "accents":
                 let key = FullKeyboardSnapshotStage.accentKey
-                let pick = ["e": "é", "s": "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú"][key]
+                let pick = ["e": "é", "s": "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú", "i": "ì"][key]
                 view.debugHoldAccent(key, selecting: pick ?? key)
             case "numbers":
                 view.engine.touchBegan(id: 900, at: center(of: .layerSwitch(.numbers), in: view))

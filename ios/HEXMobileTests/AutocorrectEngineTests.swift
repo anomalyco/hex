@@ -203,6 +203,19 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "i I ")
     }
 
+    /// An Italian iPhone types in Italian: its words stay ("Domani" never becomes "Domain")
+    /// and its typos get Italian fixes, accents included.
+    func testItalianCorrectsInItalianNeverEnglish() {
+        engine.language = .italian
+        XCTAssertEqual(engine.autocorrect.language, .italian)
+        XCTAssertTrue(engine.autocorrect.hasDictionary)
+        for word in ["Domani", "andiano", "al", "mare", "con", "i", "bambibi", "perche", "Sono", "molto", "stai"] {
+            typeWord(word)
+            tap(.space)
+        }
+        XCTAssertEqual(target.text, "Domani andiamo al mare con i bambini perché Sono molto stai ")
+    }
+
     func testAdjacencyFollowsTheLayout() {
         // German swaps Y and Z: on QWERTZ, Z sits beside T.
         XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("z", "t", language: .german))
