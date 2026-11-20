@@ -154,6 +154,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self?.onReturnKey?()
         }
         engine.onEmojiKey = { [weak self] in self?.emojiKeyTapped() }
+        engine.onLanguageSwipe = { [weak self] step in self?.switchLanguage(by: step) }
         routedTarget.onSearchReturn = { [weak self] in self?.endEmojiSearch() }
 
         model.objectWillChange
@@ -257,11 +258,23 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     // MARK: - Language
 
-    /// Fixtures pin the layout; otherwise Settings › Keyboard layout, else Automatic, which
+    /// Fixtures pin one layout; otherwise Settings › Keyboard › Languages, whose Automatic
     /// follows the dictation language.
     var languageOverride: KeyboardLanguage? {
         didSet { syncLanguage() }
     }
+
+    /// Where Languages and the language last switched to are kept; tests give their own.
+    var languageSettings = LanguageSettings() {
+        didSet { syncLanguage() }
+    }
+
+    /// The languages the space bar switches between and the one typing now.
+    private(set) var languages = KeyboardLanguageList(languages: [.english], current: .english)
+    /// The language this keyboard last switched to, ahead of the App Group's copy, which an
+    /// iPhone may not let a keyboard without Full Access write.
+    private var switchedLanguage: KeyboardLanguage?
+    private static let spellCheckLanguages = UITextChecker.availableLanguages
 
     /// The iPhone's keyboards and preferred languages, read when the keyboard appears, for
     /// Automatic before any dictation language is known.
@@ -274,16 +287,54 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     private func syncLanguage() {
-        let settings = LanguageSettings()
-        let next = languageOverride ?? settings.keyboardLayout ?? KeyboardLanguage.automatic(
-            dictationLanguage: settings.effectiveDictationLanguage,
-            inputModes: inputModeLanguages,
-            preferredLanguages: preferredLanguages
-        )
-        guard engine.language != next else { return }
-        engine.language = next
+        let settings = languageSettings
+        let list = if let languageOverride {
+            KeyboardLanguageList(languages: [languageOverride], current: languageOverride)
+        } else {
+            KeyboardLanguageList.resolve(
+                chosen: settings.keyboardLanguages,
+                stored: switchedLanguage ?? settings.currentKeyboardLanguage,
+                automatic: KeyboardLanguage.automatic(
+                    dictationLanguage: settings.effectiveDictationLanguage,
+                    inputModes: inputModeLanguages,
+                    preferredLanguages: preferredLanguages
+                )
+            )
+        }
+        guard list != languages || engine.language != list.current else { return }
+        languages = list
+        engine.switchesLanguage = list.switches
+        engine.language = list.current
+        engine.partnerLanguage = list.partner(available: Self.spellCheckLanguages)
         syncSpatialAutocorrect()
+        refreshSpaceLabel()
         setNeedsLayout()
+    }
+
+    /// A swipe along the space bar: the next or previous language (its letters, accents and
+    /// autocorrect), kept for next time, and with Switch dictation too the dictation
+    /// language with it.
+    func switchLanguage(by step: Int) {
+        guard languages.switches, languageOverride == nil else { return }
+        let next = languages.switched(by: step)
+        typingLog?.ui("keyboard_language", [TypingLogField("language", .string(next.rawValue))])
+        switchedLanguage = next
+        languageSettings.currentKeyboardLanguage = next
+        selectionFeedback()
+        syncLanguage()
+        guard languageSettings.dictationFollowsKeyboard, model.hasFullAccess,
+              let dictation = next.dictationLanguage(
+                  supported: languageSettings.supportedDictationLanguages,
+                  preferred: preferredLanguages
+              ),
+              languageSettings.dictationLanguage != dictation else { return }
+        model.onLanguageSelected?(dictation)
+    }
+
+    /// With two or more languages the space bar names the keyboard's; otherwise, with Full
+    /// Access, the dictation language's.
+    private func refreshSpaceLabel() {
+        plane.spaceLabel = languages.spaceLabel ?? (model.hasFullAccess ? model.languageSummary : nil)
     }
 
     func syncSettings() {
@@ -321,6 +372,14 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         if engine.autocorrect.decoder?.model !== model {
             engine.autocorrect.decoder = model.map { TypingDecoder(model: $0) }
             engine.refreshSuggestions()
+        }
+        // Bilingual autocorrect reads the same taps with the other language's model, where it has one.
+        if let partner = engine.autocorrect.partner {
+            let theirs = FullKeyboardSettings().spatialAutocorrect ? TypingDecoderModel.bundled(partner.language.rawValue) : nil
+            if partner.decoder?.model !== theirs {
+                partner.decoder = theirs.map { TypingDecoder(model: $0) }
+                engine.refreshSuggestions()
+            }
         }
         let keys = model == nil ? [:] : (engine.journal?.current.keys ?? [:])
         engine.tapOffsets = TypingDecoder.offsets(from: keys, layout: engine.layout)
@@ -533,9 +592,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         refreshRecordingPanel()
         stripView.showsLoggingMark = model.isLoggingTyping
         recordingPanel?.showsLoggingMark = model.isLoggingTyping
-        plane.spaceLabel = model.hasFullAccess ? model.languageSummary : nil
         // A language picked in the switch changes the layout at once when it follows dictation.
         syncLanguage()
+        refreshSpaceLabel()
         if let menu = styleMenu {
             menu.style = model.style
             applyLanguages(to: menu)

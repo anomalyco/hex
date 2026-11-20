@@ -333,6 +333,136 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertFalse(slots.contains { $0.replacement.contains(".") || $0.replacement.contains("-") })
     }
 
+    // MARK: - Bilingual autocorrect
+
+    private func fix(_ engine: AutocorrectEngine, before: String) -> String? {
+        engine.replacementOnSpace(beforeInput: before, field: .text, autocorrectionType: .default)?.replacement
+    }
+
+    /// French and English on one keyboard (Apple's "Français et English"): a word of either is
+    /// never "corrected" into the other, a typo only one can fix gets its fix, and when both
+    /// can, the language of the words before wins, else the keyboard's own.
+    func testBilingualAutocorrectNeverCorrectsOneLanguageIntoTheOther() {
+        let available = ["fr_FR", "en_US"]
+        let english = StubChecker()
+        english.valid = ["the", "see", "you", "meeting", "at", "noon"]
+        english.guessTable = ["mercu": ["mercy"], "est": ["east", "set"], "meetign": ["meeting"], "chst": ["chat"]]
+        english.completionTable = ["mer": ["merry", "mercy"]]
+        let french = stubbed {
+            $0.valid = ["je", "pense", "que", "dont", "est", "le", "chat", "merci"]
+            $0.guessTable = ["mercu": ["merci"], "the": ["thé"], "chst": ["chat"], "dont": ["don't"]]
+            $0.completionTable = ["mer": ["merci", "mercredi"]]
+        }
+        french.setLanguage(.french, available: available)
+        french.setPartner(.english, available: available, checker: english)
+        XCTAssertEqual(french.partner?.language, .english)
+
+        XCTAssertNil(fix(french, before: "the"), "an English word stays on the French keyboard")
+        XCTAssertNil(fix(french, before: "dont"), "French \"dont\" never becomes \"don't\"")
+        XCTAssertEqual(fix(french, before: "teh"), "the", "an English typo is fixed while French types")
+        XCTAssertEqual(fix(french, before: "meetign"), "meeting")
+        XCTAssertEqual(fix(french, before: "chst"), "chat")
+        XCTAssertEqual(fix(french, before: "mercu"), "merci", "both can fix it: the keyboard's own language")
+        XCTAssertEqual(fix(french, before: "je pense que mercu"), "merci")
+        XCTAssertEqual(fix(french, before: "see you mercu"), "mercy", "the words before are English")
+        XCTAssertEqual(Array(strip(french, "mercu").dropFirst()), ["merci", "mercy"], "both languages' fixes in the strip")
+        XCTAssertEqual(Array(strip(french, "mer").dropFirst()), ["merci", "merry"], "and both languages' completions")
+
+        // English typing with French beside it: French words stay, "i" is still "I".
+        let englishFirst = stubbed { $0.valid = english.valid; $0.guessTable = english.guessTable }
+        englishFirst.setLanguage(.english, available: available)
+        let frenchChecker = StubChecker()
+        frenchChecker.valid = ["dont", "est", "merci"]
+        englishFirst.setPartner(.french, available: available, checker: frenchChecker)
+        XCTAssertNil(fix(englishFirst, before: "est"))
+        XCTAssertNil(fix(englishFirst, before: "dont"), "French \"dont\" stays")
+        XCTAssertEqual(fix(englishFirst, before: "i"), "I")
+
+        // No partner without a dictionary for it, or for the keyboard's own language.
+        french.setPartner(.german, available: available)
+        XCTAssertNil(french.partner)
+        french.setPartner(.english, available: available, checker: english)
+        french.setLanguage(.serbianLatin, available: available)
+        XCTAssertNil(french.partner)
+    }
+
+    /// How often one language's keyboard changes the other's words, against iOS's own
+    /// dictionaries and English's Spatial autocorrect model: common French words typed on the
+    /// English keyboard and common English words on the French one (taps where the layout has
+    /// the letters, else the word put in as it is), each in an empty field. With both
+    /// languages chosen, none changes. Prints `BILINGUAL_BREAKS` lines.
+    func testABilingualKeyboardKeepsBothLanguagesWords() throws {
+        let frenchWords = [
+            "bonjour", "merci", "demain", "toujours", "dont", "est", "pour", "sur", "pas", "plus",
+            "tout", "mais", "elle", "les", "des", "une", "que", "qui", "dans", "avec", "fait",
+            "être", "très", "où", "ça", "même", "bien", "aussi", "comme", "nous", "vous", "ils",
+            "sont", "été", "après", "encore", "chez", "parce", "rien", "peu", "beaucoup",
+            "jamais", "cette", "notre", "votre", "leur", "quand", "alors", "deux", "trois",
+            "jour", "temps", "voir", "faire", "dire", "aller", "veux", "peut", "suis", "oui",
+            "non", "soir", "matin", "maison", "travail", "ami", "amis", "envie", "vraiment",
+            "bisous", "salut", "réunion", "semaine", "rendez", "arrive", "attends", "train",
+        ]
+        let englishWords = [
+            "the", "and", "you", "that", "was", "for", "are", "with", "his", "they", "this",
+            "have", "from", "one", "had", "word", "but", "not", "what", "all", "were", "when",
+            "your", "can", "said", "there", "use", "each", "which", "she", "how", "their",
+            "will", "other", "about", "out", "many", "then", "them", "these", "some", "her",
+            "would", "make", "like", "him", "into", "time", "has", "look", "two", "more",
+            "write", "see", "number", "way", "could", "people", "than", "first", "water",
+            "been", "call", "who", "now", "find", "long", "down", "day", "did", "get", "come",
+            "made", "may", "part", "tomorrow", "meeting", "thanks", "weekend", "tonight",
+        ]
+        func typed(_ words: [String], on language: KeyboardLanguage, partner: KeyboardLanguage?) -> [String] {
+            engine.language = language
+            engine.partnerLanguage = partner
+            engine.autocorrect.decoder = TypingDecoderModel.bundled(language.rawValue).map { TypingDecoder(model: $0) }
+            engine.autocorrect.partner?.decoder = partner.flatMap { TypingDecoderModel.bundled($0.rawValue) }.map { TypingDecoder(model: $0) }
+            var changed: [String] = []
+            for word in words {
+                while target.hasText { target.deleteBackward() }
+                engine.textDidChange()
+                let keys = word.map { engine.layout.key(.character(String($0))) }
+                if keys.allSatisfy({ $0 != nil }) {
+                    for ch in word { tap(.character(String(ch))) }
+                } else {
+                    target.insertText(word)
+                    engine.textDidChange()
+                }
+                tap(.space)
+                if target.text != word + " " { changed.append("\(word)→\(target.text.trimmingCharacters(in: .whitespaces))") }
+            }
+            return changed
+        }
+        let englishAlone = typed(frenchWords, on: .english, partner: nil)
+        let frenchAlone = typed(englishWords, on: .french, partner: nil)
+        let englishWithFrench = typed(frenchWords, on: .english, partner: .french)
+        let frenchWithEnglish = typed(englishWords, on: .french, partner: .english)
+        let englishKeepsEnglish = typed(englishWords, on: .english, partner: .french)
+        let frenchKeepsFrench = typed(frenchWords, on: .french, partner: .english)
+        print("BILINGUAL_BREAKS English alone changed \(englishAlone.count) of \(frenchWords.count) French words: \(englishAlone)")
+        print("BILINGUAL_BREAKS Français alone changed \(frenchAlone.count) of \(englishWords.count) English words: \(frenchAlone)")
+        print("BILINGUAL_BREAKS English + Français, English typing, changed \(englishWithFrench.count) French words: \(englishWithFrench)")
+        print("BILINGUAL_BREAKS English + Français, Français typing, changed \(frenchWithEnglish.count) English words: \(frenchWithEnglish)")
+        print("BILINGUAL_BREAKS own words changed: English \(englishKeepsEnglish), Français \(frenchKeepsFrench)")
+        XCTAssertEqual(englishWithFrench, [])
+        XCTAssertEqual(frenchWithEnglish, [])
+        XCTAssertEqual(englishKeepsEnglish, [])
+        XCTAssertEqual(frenchKeepsFrench, [])
+    }
+
+    /// The iPhone's own dictionaries: English typos are fixed on the French keyboard while
+    /// French and English words stay as typed.
+    func testTheFrenchKeyboardFixesEnglishTyposWithEnglishBesideIt() {
+        engine.language = .french
+        engine.partnerLanguage = .english
+        XCTAssertEqual(engine.autocorrect.partner?.language, .english)
+        for word in ["Bonjour", "merci", "the", "meeting", "est", "dont", "teh", "tomorow", "demian"] {
+            typeWord(word)
+            tap(.space)
+        }
+        XCTAssertEqual(target.text, "Bonjour merci the meeting est dont the tomorrow demain ")
+    }
+
     func testTheSystemDictionarySplitsAMissedSpace() {
         // iOS 27's UITextChecker guesses "never mind" and "never-mind" for this.
         XCTAssertEqual(fix(engine.autocorrect, "nevermind"), "never mind")

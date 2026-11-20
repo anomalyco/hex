@@ -63,6 +63,9 @@ final class FullKeyboardEngine {
         var returnLayer: KeyboardLayer?
         /// True once a spacebar press crosses `trackpadActivationDistance`.
         var isTrackpad = false
+        /// True once a spacebar press slides before its hold (`holdSpace`) while it switches
+        /// language: letting go far enough along switches instead of typing a space.
+        var isLanguageSwipe = false
         var trackpadAnchorX: CGFloat = 0
         /// Characters the trackpad has moved the cursor, for Record typing logs.
         var trackpadOffset = 0
@@ -76,11 +79,14 @@ final class FullKeyboardEngine {
     static let trackpadActivationDistance: CGFloat = 10
     static let trackpadPointsPerCharacter: CGFloat = 7.5
     /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
-    /// letting go then types no space.
+    /// letting go then types no space. With two or more languages a slide moves the cursor
+    /// only after it; a slide before it is a language swipe.
     static let trackpadHoldDelay: TimeInterval = 0.4
     /// A finger on the strip's lower half this soon after a key went down or came up (or
     /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
     static let stripTouchGuard: TimeInterval = 0.25
+    /// How far along the space bar a language swipe must go; a shorter one types a space.
+    static let languageSwipeDistance: CGFloat = 24
 
     private(set) var shift = ShiftStateMachine()
     private(set) var layerState = KeyboardLayerState()
@@ -147,7 +153,7 @@ final class FullKeyboardEngine {
     /// Experiments › Emoji, in fields that take emoji.
     var showsEmoji = false { didSet { if showsEmoji != oldValue { rebuildLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
-    /// The letters, accents and spelling dictionary (Settings › Keyboard layout).
+    /// The letters, accents and spelling dictionary (Settings › Keyboard › Languages).
     var language: KeyboardLanguage = .english {
         didSet {
             guard language != oldValue else { return }
@@ -157,6 +163,20 @@ final class FullKeyboardEngine {
             refreshSuggestions()
         }
     }
+    /// Bilingual autocorrect's second language on these keys (`KeyboardLanguageList.partner`),
+    /// or nil.
+    var partnerLanguage: KeyboardLanguage? {
+        get { autocorrect.partner?.language }
+        set {
+            guard newValue != autocorrect.partner?.language else { return }
+            autocorrect.setPartner(newValue)
+            refreshSuggestions()
+        }
+    }
+    /// Settings › Keyboard › Languages has two or more: a quick swipe along the space bar
+    /// switches language (`onLanguageSwipe`) and the cursor slides once the space bar is held
+    /// (`trackpadHoldDelay`), as on SwiftKey. With one, any slide moves the cursor at once.
+    var switchesLanguage = false
     private(set) var layout = KeyboardLayout(width: 375)
 
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
@@ -170,6 +190,9 @@ final class FullKeyboardEngine {
     var onReturn: (() -> Void)?
     /// Called when the emoji key is let go.
     var onEmojiKey: (() -> Void)?
+    /// Called when a swipe along the space bar switches language: 1 for the next (a swipe
+    /// to the left), -1 for the one before.
+    var onLanguageSwipe: ((Int) -> Void)?
 
     init(target: KeyboardTextTarget, autocorrect: AutocorrectEngine? = nil) {
         self.target = target
@@ -505,9 +528,20 @@ final class FullKeyboardEngine {
             return
         }
 
-        // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret.
+        // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret. With two
+        // or more languages only once the space bar was held (`holdSpace`): a slide before
+        // that is a language swipe.
         if touch.key.kind == .space {
+            if touch.isLanguageSwipe {
+                touches[id] = touch
+                return
+            }
             if !touch.isTrackpad, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
+                if switchesLanguage {
+                    touch.isLanguageSwipe = true
+                    touches[id] = touch
+                    return
+                }
                 startTrackpad(&touch, id: id, anchorX: point.x, hold: false)
                 return
             }
@@ -551,7 +585,7 @@ final class FullKeyboardEngine {
     /// finger is, as Apple's does, so letting go types no space (a press held to move the
     /// cursor used to type one beside the space already there).
     func holdSpace(forTouch id: Int) {
-        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad else { return }
+        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad, !touch.isLanguageSwipe else { return }
         startTrackpad(&touch, id: id, anchorX: touch.point.x, hold: true)
     }
 
@@ -606,6 +640,12 @@ final class FullKeyboardEngine {
                     TypingLogField("offset", .int(touch.trackpadOffset)),
                 ])
                 typingLog?.context("trackpad")
+            } else if touch.isLanguageSwipe, let step = Self.languageSwipeStep(from: touch.startPoint, to: point) {
+                typingLog?.ui("language_swipe", [
+                    TypingLogField("id", .int(id)),
+                    TypingLogField("step", .int(step)),
+                ])
+                onLanguageSwipe?(step)
             } else {
                 typeSpace()
             }
@@ -645,6 +685,13 @@ final class FullKeyboardEngine {
             break
         }
         onChange?()
+    }
+
+    /// A language swipe's direction, or nil when it was too short or more up than along.
+    private static func languageSwipeStep(from start: CGPoint, to end: CGPoint) -> Int? {
+        let dx = end.x - start.x
+        guard abs(dx) >= languageSwipeDistance, abs(dx) >= abs(end.y - start.y) else { return nil }
+        return dx < 0 ? 1 : -1
     }
 
     func touchCancelled(id: Int) {

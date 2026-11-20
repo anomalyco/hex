@@ -39,6 +39,61 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// Its name on the space bar: French without its region ("Français"), as only one French
+    /// layout is usually chosen (`KeyboardLanguageList.spaceLabel` adds it back otherwise).
+    var shortName: String {
+        switch self {
+        case .french, .frenchCanadian, .frenchSwiss: "Français"
+        default: displayName
+        }
+    }
+
+    /// The language its dictionary is for: Apple's three French layouts are one language.
+    var baseLanguage: String {
+        String(rawValue.prefix { $0 != "-" })
+    }
+
+    /// Latin letters, so another Latin-script language can be autocorrected on its keys
+    /// (bilingual autocorrect). Russian's are Cyrillic.
+    var isLatin: Bool { self != .russian }
+
+    /// The Apple Speech language (BCP 47) to dictate in while this layout types (Settings ›
+    /// Keyboard › Languages › Switch dictation too): the iPhone's own region where it has one
+    /// for the language (English on a British iPhone is en-GB), else the language's usual
+    /// one, among `supported` (what Apple Speech transcribes here; empty when not listed yet).
+    /// Nil when Apple Speech has none of it (Serbian).
+    func dictationLanguage(supported: [String], preferred: [String]) -> String? {
+        func key(_ identifier: String) -> String {
+            identifier.replacingOccurrences(of: "_", with: "-").lowercased()
+        }
+        let usual = switch self {
+        case .english: "en-US"
+        case .norwegian: "nb-NO"
+        case .spanish: "es-ES"
+        case .german: "de-DE"
+        case .italian: "it-IT"
+        case .french: "fr-FR"
+        case .frenchCanadian: "fr-CA"
+        case .frenchSwiss: "fr-CH"
+        case .portuguese: "pt-BR"
+        case .russian: "ru-RU"
+        case .serbianLatin: "sr-Latn-RS"
+        }
+        // A French layout keeps its own region: Canadian French dictates fr-CA.
+        let ownRegion = self == .frenchCanadian || self == .frenchSwiss
+        let mine = ownRegion ? [] : preferred.filter { Self.matching($0)?.baseLanguage == baseLanguage }
+        let candidates = mine + [usual]
+        guard !supported.isEmpty else {
+            return self == .serbianLatin ? nil : candidates.first
+        }
+        let offered = Dictionary(supported.map { (key($0), $0) }, uniquingKeysWith: { a, _ in a })
+        for candidate in candidates {
+            if let found = offered[key(candidate)] { return found }
+        }
+        if ownRegion { return nil }
+        return supported.first { Self.matching($0)?.baseLanguage == baseLanguage }
+    }
+
     /// The three letter rows, lowercase. Rows 1 and 2 may hold 11 keys (Apple's Nordic,
     /// German and Russian layouts); row 3 sits between shift and delete.
     var letterRows: [[String]] {
@@ -257,6 +312,13 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// The layouts of the iPhone's own keyboards, then of its preferred languages, in that
+    /// order and once each: what Settings › Keyboard › Languages offers first.
+    static func suggested(inputModes: [String], preferred: [String]) -> [KeyboardLanguage] {
+        var seen = Set<KeyboardLanguage>()
+        return (inputModes + preferred).compactMap(matching).filter { seen.insert($0).inserted }
+    }
+
     /// Automatic follows the dictation language: its layout, or English for a language
     /// without one (Hebrew, Greek). Before any dictation language is known, the first
     /// iPhone keyboard, then preferred language, that has a layout. Hex's own input mode
@@ -275,5 +337,63 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             }
         }
         return .english
+    }
+}
+
+/// Settings › Keyboard › Languages as the keys use it: the languages the space bar switches
+/// between, in order, and the one typing now.
+nonisolated struct KeyboardLanguageList: Equatable, Sendable {
+    let languages: [KeyboardLanguage]
+    let current: KeyboardLanguage
+
+    /// `chosen` empty is Automatic: one language, the dictation language's (`automatic`).
+    /// `stored` is the language last switched to, kept only while it is still chosen; else
+    /// the first one.
+    static func resolve(
+        chosen: [KeyboardLanguage],
+        stored: KeyboardLanguage?,
+        automatic: @autoclosure () -> KeyboardLanguage
+    ) -> KeyboardLanguageList {
+        var seen = Set<KeyboardLanguage>()
+        let languages = chosen.filter { seen.insert($0).inserted }
+        guard let first = languages.first else {
+            let only = automatic()
+            return KeyboardLanguageList(languages: [only], current: only)
+        }
+        let current = stored.flatMap { languages.contains($0) ? $0 : nil } ?? first
+        return KeyboardLanguageList(languages: languages, current: current)
+    }
+
+    /// Two or more: the space bar names the language and switches it.
+    var switches: Bool { languages.count > 1 }
+
+    /// The language a swipe along the space bar goes to: `step` 1 the next, -1 the one
+    /// before, round the list.
+    func switched(by step: Int) -> KeyboardLanguage {
+        guard let index = languages.firstIndex(of: current), !languages.isEmpty else { return current }
+        let count = languages.count
+        return languages[((index + step) % count + count) % count]
+    }
+
+    /// The space bar's label while it switches: the current language's short name, with
+    /// its region only when another layout of it is chosen too ("Français (Canada)").
+    var spaceLabel: String? {
+        guard switches else { return nil }
+        let twins = languages.filter { $0.baseLanguage == current.baseLanguage }.count
+        return twins > 1 ? current.displayName : current.shortName
+    }
+
+    /// Bilingual autocorrect's second language while `current` types: the first other chosen
+    /// language with Latin letters, another dictionary than `current`'s (French and
+    /// Canadian French are one), and, like `current`, a dictionary on this iPhone
+    /// (`available` is `UITextChecker.availableLanguages`). Nil for Cyrillic, or with one
+    /// language: a layout without a dictionary (Serbian) would otherwise see every word as a
+    /// typo of the other language.
+    func partner(available: [String]) -> KeyboardLanguage? {
+        guard current.isLatin, current.spellCheckLanguage(available: available) != nil else { return nil }
+        return languages.first {
+            $0.isLatin && $0.baseLanguage != current.baseLanguage
+                && $0.spellCheckLanguage(available: available) != nil
+        }
     }
 }

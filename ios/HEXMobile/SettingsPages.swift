@@ -170,7 +170,7 @@ struct KeyboardSettingsPage: View {
                 .frame(minHeight: 50)
 
                 if fullKeyboard {
-                    KeyboardLayoutRow()
+                    KeyboardLanguagesRow()
 
                     SettingsDivider()
 

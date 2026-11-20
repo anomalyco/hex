@@ -197,6 +197,115 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "hello")
     }
 
+    /// With two or more languages a quick swipe along the space bar switches language (to the
+    /// left the next, to the right the one before) and types nothing; a slip shorter than a
+    /// swipe is still a space; a hold, then a slide, moves the cursor. With one language any
+    /// slide moves the cursor at once, as before.
+    func testASpaceBarSwipeSwitchesLanguageAndAHoldThenSlideMovesTheCursor() {
+        var steps: [Int] = []
+        engine.onLanguageSwipe = { steps.append($0) }
+        engine.switchesLanguage = true
+        type("hi")
+        let start = point(.space)
+        func slide(_ id: Int, by dx: CGFloat) {
+            engine.touchBegan(id: id, at: start)
+            now += 0.05
+            engine.touchMoved(id: id, to: CGPoint(x: start.x + dx / 2, y: start.y))
+            engine.touchMoved(id: id, to: CGPoint(x: start.x + dx, y: start.y))
+            engine.touchEnded(id: id, at: CGPoint(x: start.x + dx, y: start.y))
+            now += 0.5
+        }
+
+        slide(1, by: -40)
+        XCTAssertEqual(steps, [1])
+        slide(2, by: 32)
+        XCTAssertEqual(steps, [1, -1])
+        XCTAssertEqual(target.text, "hi", "a swipe types nothing")
+
+        slide(3, by: 20)
+        XCTAssertEqual(target.text, "hi ", "a short slip is a space")
+        XCTAssertEqual(steps, [1, -1])
+
+        // Held (the plane view's `trackpadHoldDelay` timer), then slid: the cursor moves.
+        engine.touchBegan(id: 4, at: start)
+        engine.holdSpace(forTouch: 4)
+        XCTAssertTrue(engine.isTrackpadActive, "held first: the cursor slides")
+        engine.touchMoved(id: 4, to: CGPoint(x: start.x - 16, y: start.y))
+        engine.touchEnded(id: 4, at: CGPoint(x: start.x - 16, y: start.y))
+        XCTAssertEqual(steps, [1, -1])
+        XCTAssertEqual(target.cursorIndex, 1)
+
+        // A slow swipe still switches: the hold timer firing mid-swipe leaves it a swipe.
+        engine.touchBegan(id: 6, at: start)
+        engine.touchMoved(id: 6, to: CGPoint(x: start.x - 15, y: start.y))
+        engine.holdSpace(forTouch: 6)
+        XCTAssertFalse(engine.isTrackpadActive)
+        engine.touchEnded(id: 6, at: CGPoint(x: start.x - 40, y: start.y))
+        XCTAssertEqual(steps, [1, -1, 1])
+
+        engine.switchesLanguage = false
+        engine.touchBegan(id: 5, at: start)
+        now += 0.05
+        engine.touchMoved(id: 5, to: CGPoint(x: start.x + 12, y: start.y))
+        XCTAssertTrue(engine.isTrackpadActive, "one language: a quick slide moves the cursor")
+        engine.touchEnded(id: 5, at: CGPoint(x: start.x + 12, y: start.y))
+        XCTAssertEqual(steps, [1, -1, 1])
+    }
+
+    /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
+    /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
+    /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
+    /// in the language it was left in. Switch dictation too picks the dictation language.
+    func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .french, .russian]
+        let model = KeyboardViewModel()
+        let view = FullKeyboardView(model: model, target: target)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+        view.layoutIfNeeded()
+        func firstLetter() -> String? {
+            view.engine.layout.keys.filter { $0.row == 0 && $0.character != nil }
+                .min { $0.frame.minX < $1.frame.minX }?.character
+        }
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertTrue(view.engine.switchesLanguage)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+        XCTAssertEqual(view.engine.partnerLanguage, .french)
+
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .french)
+        XCTAssertEqual(firstLetter(), "a", "AZERTY")
+        XCTAssertEqual(view.engine.autocorrect.language, .french)
+        XCTAssertEqual(view.engine.partnerLanguage, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "Français")
+        XCTAssertEqual(settings.currentKeyboardLanguage, .french)
+
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "fr-FR", "ru-RU"]
+        var picked: [String?] = []
+        model.onLanguageSelected = { picked.append($0) }
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .russian)
+        XCTAssertEqual(firstLetter(), "й")
+        XCTAssertNil(view.engine.partnerLanguage, "Cyrillic has no bilingual partner")
+        XCTAssertEqual(view.plane.spaceLabel, "Русский")
+        XCTAssertEqual(picked, ["ru-RU"])
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english, "round the list")
+        view.switchLanguage(by: -1)
+
+        let again = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        again.languageSettings = settings
+        XCTAssertEqual(again.engine.language, .russian, "back in the language it was left in")
+
+        settings.keyboardLanguages = [.german]
+        again.syncSettings()
+        XCTAssertEqual(again.engine.language, .german)
+        XCTAssertFalse(again.engine.switchesLanguage)
+        XCTAssertNil(again.plane.spaceLabel, "one language: the space bar names dictation's, unknown here")
+    }
+
     func testEnablesReturnKeyAutomaticallyBlocksEmptyField() {
         target.enablesReturnKeyAutomatically = true
         tap(.returnKey)
@@ -273,6 +382,7 @@ final class FullKeyboardEngineTests: XCTestCase {
     func testSpaceBarNamesTheDictationLanguage() {
         let model = KeyboardViewModel()
         let view = FullKeyboardView(model: model, target: target)
+        view.languageSettings = LanguageSettings(defaults: defaults)
         view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
         view.layoutIfNeeded()
         XCTAssertNil(view.plane.spaceLabel, "no label until the language is known")
