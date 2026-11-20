@@ -104,6 +104,18 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
     insertion spacing and repeating backspace.
+  - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
+    name for @) and "at sign" become "@", and an address said around it joins
+    up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning
+    into "." only inside the address (`SpokenCleanupRules.spokenSymbols`, run by
+    `CleanupTagger.cleanIfEnabled` with Clean up what I say on or off, in the app
+    and in-keyboard dictation). "at the rate" needs a domain after it, so "at the
+    rate of 5%" and "at the rate we planned" stay; "at" alone is never touched.
+    Apple's `SpeechTranscriber` glues the domain to the word before ("at the
+    rategmail.com"), which is split again; `DictationTranscriber` already writes
+    "@" for "at sign" and for "john at gmail dot com". Polished leaves an address's
+    case alone, starts no sentence at a full stop inside a word ("gmail.com"),
+    and ends no lone address with a full stop.
   - **Mid-sentence dictation:** when the text before the cursor doesn't end a
     sentence (`.` `!` `?` `…` or a line break), the keyboard lowercases the
     dictation's first word, except "I" and its contractions, acronyms, words

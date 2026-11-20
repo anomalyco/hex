@@ -228,6 +228,28 @@ final class CleanupTaggerTests: XCTestCase {
         XCTAssertEqual(result, "I mean what I say.", "a sentence with nothing to remove comes back as said")
     }
 
+    /// Spoken "@" runs in every style but Verbatim, with the experiment off too, so both the
+    /// app's and the keyboard's dictation get it.
+    func testSpokenAtSignsApplyWithTheExperimentOffButNotInVerbatim() async throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CleanupTaggerSettings(defaults: defaults)
+        let tagger = CleanupTagger()
+        let spoken = "Mail it to john at the rate gmail dot com."
+
+        XCTAssertFalse(settings.isEnabled)
+        for style in [DictationStyle.polished, .casual, .notes] {
+            let result = await CleanupTagger.cleanIfEnabled(spoken, style: style, language: "en-IN", settings: settings, tagger: tagger)
+            XCTAssertEqual(result, "Mail it to john@gmail.com.", "\(style)")
+        }
+        let verbatim = await CleanupTagger.cleanIfEnabled(spoken, style: .verbatim, language: "en-IN", settings: settings, tagger: tagger)
+        XCTAssertEqual(verbatim, spoken)
+        let spanish = await CleanupTagger.cleanIfEnabled(spoken, style: .polished, language: "es-ES", settings: settings, tagger: tagger)
+        XCTAssertEqual(spanish, spoken)
+        XCTAssertFalse(tagger.isLoaded, "the experiment's model stays unloaded")
+    }
+
     /// The English tagger never runs on another language: on Spanish it dropped negations
     /// ("Te digo que no puedo ir" became "Te puedo ir"). Spanish, German and Norwegian get
     /// word rules; the rest stay as heard.

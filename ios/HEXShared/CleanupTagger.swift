@@ -150,7 +150,10 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     /// before translation and formatting. Off, Verbatim, or blank keeps `text` as is. The
     /// tagger only knows English (on Spanish it dropped negations), so Spanish, German and
     /// Norwegian get `SpokenCleanupRules` instead and other languages stay as heard. A nil
-    /// `language` counts as English.
+    /// `language` counts as English. Spoken symbols ("john at the rate gmail dot com" to
+    /// "john@gmail.com", `SpokenCleanupRules.spokenSymbols`) apply in every style but
+    /// Verbatim whether the experiment is on or off: both the app's and the keyboard's
+    /// dictation pass through here, and only the app's formats.
     static func cleanIfEnabled(
         _ text: String,
         style: DictationStyle,
@@ -158,11 +161,11 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         settings: CleanupTaggerSettings = CleanupTaggerSettings(),
         tagger: CleanupTagger = .shared
     ) async -> String {
-        guard settings.isEnabled,
-              style != .verbatim,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard style != .verbatim, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return text
         }
+        let text = SpokenCleanupRules.spokenSymbols(in: text, language: language)
+        guard settings.isEnabled else { return text }
         guard SpeechLanguagePicker.isEnglish(language) else {
             return SpokenCleanupRules.clean(text, language: language)
         }
