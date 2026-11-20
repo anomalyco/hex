@@ -246,6 +246,13 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertFalse(AutocorrectEngine.areAdjacentKeys("z", "t", language: .english))
         XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ø", "l", language: .norwegian))
         XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ñ", "l", language: .spanish))
+        // AZERTY: M sits under P, A beside Z, and W under D.
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("m", "p", language: .french))
+        XCTAssertFalse(AutocorrectEngine.areAdjacentKeys("m", "p", language: .english))
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("a", "z", language: .french))
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("w", "d", language: .french))
+        XCTAssertFalse(AutocorrectEngine.areAdjacentKeys("w", "q", language: .french))
+        XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("a", "q", language: .frenchCanadian))
     }
 
     // MARK: - Split and punctuated guesses

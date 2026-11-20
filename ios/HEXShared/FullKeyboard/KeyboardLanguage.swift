@@ -2,10 +2,11 @@ import Foundation
 
 /// The full keyboard's letters. Each language is its letter rows, its long-press accents,
 /// and the spelling dictionary its autocorrect uses, matching Apple's keyboard for it;
-/// another language is a new case with those filled in. Italian, French and Portuguese
-/// type on the English letters (Apple's Italian and Portuguese keyboards are QWERTY; Hex
-/// has no AZERTY yet, so French is QWERTY too, as on Apple's Canadian French keyboard)
-/// with their own accents and dictionary. Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
+/// another language is a new case with those filled in. Italian and Portuguese type on the
+/// English letters (Apple's keyboards for them are QWERTY) with their own accents and
+/// dictionary. French is Apple's AZERTY, as on its French (France) and (Belgique) keyboards,
+/// Canadian French QWERTY, as on Apple's French (Canada), and Swiss French QWERTZ, as on
+/// Apple's French (Suisse). Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
 /// held ь); Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
 /// its own for č ć đ š ž: they are held on c, d, s and z, as on Apple's.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
@@ -15,6 +16,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case german = "de"
     case italian = "it"
     case french = "fr"
+    case frenchCanadian = "fr-CA"
+    case frenchSwiss = "fr-CH"
     case portuguese = "pt"
     case russian = "ru"
     case serbianLatin = "sr-Latn"
@@ -27,7 +30,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .spanish: "Español"
         case .german: "Deutsch"
         case .italian: "Italiano"
-        case .french: "Français"
+        case .french: "Français (France)"
+        case .frenchCanadian: "Français (Canada)"
+        case .frenchSwiss: "Français (Suisse)"
         case .portuguese: "Português"
         case .russian: "Русский"
         case .serbianLatin: "Srpski"
@@ -38,7 +43,12 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// German and Russian layouts); row 3 sits between shift and delete.
     var letterRows: [[String]] {
         let rows = switch self {
-        case .english, .italian, .french, .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        case .english, .italian, .frenchCanadian, .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        // Apple's French keyboards also hold a ´ dead key (AZERTY's row 3, the end of the
+        // others' row 2), which its French and English keyboard leaves out (a TestFlight
+        // tester's screenshot). Hex leaves it out too: accents are on a held letter.
+        case .french: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
+        case .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
         case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
         case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
         case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
@@ -87,13 +97,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "o": ["o", "ò", "ó", "ô", "ö", "õ", "œ", "ø", "ō"],
                 "u": ["u", "ù", "ú", "û", "ü", "ū"],
             ]
-        case .french:
+        case .french, .frenchCanadian, .frenchSwiss:
+            // Apple's French lists (TextInput_fr), base letter first, as its popup shows them.
             [
                 "e": ["e", "é", "è", "ê", "ë", "ę", "ė", "ē"],
-                "a": ["a", "à", "â", "æ", "á", "ä", "ã", "å", "ā"],
+                "a": ["a", "à", "â", "ª", "æ", "á", "ä", "ã", "å", "ā"],
                 "i": ["i", "î", "ï", "ì", "í", "į", "ī"],
-                "o": ["o", "ô", "œ", "ö", "ò", "ó", "õ", "ø", "ō"],
-                "u": ["u", "ù", "û", "ü", "ú", "ū"],
+                "o": ["o", "ô", "œ", "º", "ö", "ò", "ó", "õ", "ø", "ō"],
+                "u": ["u", "û", "ù", "ü", "ú", "ū"],
             ]
         case .portuguese:
             [
@@ -154,6 +165,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .german: ["de", "de_DE"]
         case .italian: ["it", "it_IT"]
         case .french: ["fr", "fr_FR", "fr_CA"]
+        case .frenchCanadian: ["fr_CA", "fr", "fr_FR"]
+        case .frenchSwiss: ["fr_CH", "fr", "fr_FR"]
         // Brazil's spelling first, Portugal's where only it is installed.
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
         case .russian: ["ru", "ru_RU"]
@@ -197,7 +210,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .italian:
             ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
-        case .norwegian, .german, .french, .portuguese, .russian, .serbianLatin:
+        case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .russian,
+             .serbianLatin:
             []
         }
     }
@@ -206,7 +220,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// and 3 shifted as the keys are.
     var keyCoordinates: [Character: (Double, Double)] {
         var map: [Character: (Double, Double)] = [:]
-        let offsets = [0.0, 0.5, 1.5]
+        // AZERTY's row 2 runs edge to edge, and its row 3 starts under e (W under E).
+        let offsets = self == .french ? [0.0, 0.0, 2.0] : [0.0, 0.5, 1.5]
         for (row, letters) in letterRows.enumerated() {
             for (column, letter) in letters.enumerated() {
                 guard let character = letter.first else { continue }
@@ -217,7 +232,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     }
 
     /// The layout for a language identifier ("nb-NO", "no", "nn_NO", "es-MX", "sr-Latn-RS"),
-    /// if any. Serbian only in Latin script: Hex has no Cyrillic Serbian layout.
+    /// if any. Serbian only in Latin script: Hex has no Cyrillic Serbian layout. French follows
+    /// Apple's keyboard for the region: QWERTY in Canada, QWERTZ in Switzerland, else AZERTY.
     static func matching(_ identifier: String) -> KeyboardLanguage? {
         let parts = identifier.lowercased()
             .split(whereSeparator: { $0 == "-" || $0 == "_" })
@@ -229,7 +245,11 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "es": return .spanish
         case "de": return .german
         case "it": return .italian
-        case "fr": return .french
+        case "fr":
+            let region = parts.dropFirst()
+            if region.contains("ca") { return .frenchCanadian }
+            if region.contains("ch") { return .frenchSwiss }
+            return .french
         case "pt": return .portuguese
         case "ru": return .russian
         case "sr": return parts.contains("latn") ? .serbianLatin : nil

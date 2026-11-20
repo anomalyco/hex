@@ -404,9 +404,13 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   all follow it.
 - **Keyboard layouts (Settings › Keyboard › Keyboard layout, with Full chosen):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
-  Deutsch (QWERTZ with `ü`, `ö ä`), and Italiano, Français and Português on the
-  English letters (Apple's Italian and Portuguese keyboards are QWERTY; French is
-  QWERTY until Hex has AZERTY), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
+  Deutsch (QWERTZ with `ü`, `ö ä`), Italiano and Português on the English letters
+  (Apple's keyboards for them are QWERTY), Français (France) on Apple's AZERTY (rows of
+  10, 10 and 6 letters, W to N under E to I with a gap beside shift and delete, as on
+  Apple's French and English keyboard; Apple's French-only one adds a ´ dead key that Hex
+  leaves out), Français (Canada) on QWERTY and Français (Suisse) on QWERTZ, as on Apple's
+  (automatic picks them for `fr-CA` and `fr-CH`, AZERTY for any other French, Belgium
+  included), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
   held е, ъ on a held ь) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z, and only the iPad's Croatian layouts give them keys), as Apple's iOS keyboards
@@ -421,7 +425,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's. Long-press accents
   drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
   Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º; Italian
-  à, è, ì, ò, ù; French é, à, î, ô, ù; Portuguese á, ã, é, ó, õ, ú; Russian and
+  à, è, ì, ò, ù; French é, à, î, ô, û in Apple's order; Portuguese á, ã, é, ó, õ, ú; Russian and
   Serbian copy Apple's lists from the simulator's `TextInput_ru` and `TextInput_sr`,
   base letter first), and German keeps ß on a held S. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then

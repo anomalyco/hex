@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|pt|ru|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|ru|sr-Latn|en` pins it; drafts are in the layout's language.
 /// `--accent-key ø` (or Cyrillic `е`, `ь`) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Experiments › Emoji on with a seeded history; `emoji-probe` prints the panel's
@@ -100,7 +100,7 @@ struct FullKeyboardSnapshotStage: View {
             case "accents": Self.accentKey == "e" ? "Perch" : "Cos"
             default: "Arrivo con dieci minuti di ritardo, "
             }
-        case .french:
+        case .french, .frenchCanadian, .frenchSwiss:
             return switch state {
             case "inserted": "J'arrive avec dix minutes de retard, à la maison vers 19h30. Commencez sans moi."
             case "numbers": "J'arrive avec dix minutes de retard, à la maison vers 19h3"

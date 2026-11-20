@@ -328,11 +328,13 @@ final class FullKeyboardEngineTests: XCTestCase {
         view.languageOverride = .italian
         XCTAssertEqual(view.engine.autocorrect.language, .italian)
         XCTAssertNil(view.engine.autocorrect.decoder)
-        // Nor do Russian and Serbian (Latin).
-        for language in [KeyboardLanguage.russian, .serbianLatin] {
+        // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
+        // next-letter odds move French targets (AZERTY's letters aren't theirs).
+        for language in [KeyboardLanguage.russian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")
+            XCTAssertNil(view.engine.letterOdds, "\(language)")
         }
         view.languageOverride = .english
         XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "en")
