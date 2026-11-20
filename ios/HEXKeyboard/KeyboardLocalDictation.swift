@@ -40,8 +40,9 @@ final class KeyboardLocalDictation {
     /// switches to the system keyboard; short of this, Dictate opens Hex instead.
     static let startHeadroomNeeded = 32 * 1_048_576
     /// Later dictations reuse the loaded web view, so only the capture and recording screen
-    /// start (1–5 MB in the simulator; the full keyboard rebuilds its recording panel).
-    static let restartHeadroomNeeded = 16 * 1_048_576
+    /// start (1–5 MB in the simulator on the dictation bar; up to 8 MB on the full keyboard,
+    /// which rebuilds its recording strip and briefly peaks leaving it).
+    static let restartHeadroomNeeded = 24 * 1_048_576
 
     /// Whether in-keyboard dictation can start without passing the memory limit. Where iOS
     /// doesn't say (0, the simulator), it can.
