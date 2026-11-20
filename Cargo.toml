@@ -47,12 +47,13 @@ strip = true
 # shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml),
 # Parakeet's vocabulary rescoring (branches hex/parakeet-vocabulary and
 # hex/vocabulary-sounds-like), a Metal residency heartbeat that sleeps once
-# its keep-alive runs out (branch hex/metal-idle-residency), and Fluid Speech
-# Pro's pre-Conformer encoder block (branch hex/fluid-pre-block). Drop this
-# once a transcribe.cpp release carries them.
+# its keep-alive runs out (branch hex/metal-idle-residency), Fluid Speech
+# Pro's pre-Conformer encoder block (branch hex/fluid-pre-block), and
+# upstream's Parakeet padding-frame fix (branch hex/nemo-padding-frame). Drop
+# this once a transcribe.cpp release carries them.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "295c7e601ee5a25da0d1f169c996aee839d49943" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "295c7e601ee5a25da0d1f169c996aee839d49943" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19" }
 # The crates Rune patches in its own workspace (Rune's README, "Depending on
 # Rune"): a dependency's `[patch]` never reaches the workspace that depends on
 # it, and without these Hex builds against stock winit, sctk-adwaita,
