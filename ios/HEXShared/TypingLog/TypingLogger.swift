@@ -297,7 +297,7 @@ final class TypingLogger {
         }
         if let under, under.kind != key?.kind {
             fields.append(TypingLogField("under", .string(Self.keyID(under.kind))))
-        } else if under == nil, phase == .ended || phase == .cancelled, key != nil {
+        } else if under == nil, phase != .moved, key != nil {
             fields.append(TypingLogField("under", .null))
         }
         emit("touch", fields)

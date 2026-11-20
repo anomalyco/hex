@@ -149,10 +149,12 @@ One finger sample on the keys (not the strip, whose buttons log `ui`/`edit`).
   on: sliding across character keys moves it; any other key keeps the key it
   went down on. `null` when the finger went down outside every key.
 - `under`: the key under the raw point when it differs from `key` (`null`:
-  outside every key, on `ended`/`cancelled`). On `began` it appears only when
-  the next-letter odds moved the press to a neighbouring letter; otherwise the
-  engine uses the hit frames as logged, so `key` on `began` is the key under
-  the point.
+  outside every key, on `began`/`ended`/`cancelled`). On `began` it appears
+  only when the next-letter odds moved the press to a neighbouring letter, or
+  (`null`) when a finger on the strip's lower half while typing went to the row-1
+  key below it (`FullKeyboardEngine.takesStripTouch`; `y` is then above the
+  keys); otherwise the engine uses the hit frames as logged, so `key` on
+  `began` is the key under the point.
 - `moved` is throttled: a sample is written once the finger has moved at least
   2 pt and 8 ms since the last line for it, or when it slides onto another key.
 

@@ -490,6 +490,64 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "pretty ", "a host that reports the keys' own edit leaves it swallowed")
     }
 
+    /// "th", then the e aimed a few points high 80 ms later, on the strip's lower half under
+    /// its left slot. Record typing logs showed that tap picked "th" and a space, so "the"
+    /// came out "th" and the space after it doubled. While you type, the keys take it.
+    func testATapOnTheStripsLowerHalfWhileTypingTypesTheKeyBelow() {
+        type("on t")
+        tap(.character("h"))
+        let e = engine.layout.key(.character("e"))!
+        let strip = engine.layout.stripFrame
+        let aimedHigh = CGPoint(x: e.frame.midX, y: strip.maxY - 6)
+        XCTAssertLessThan(aimedHigh.y, engine.layout.touchAreaFrame.minY, "on the strip, above the keys' touch area")
+        now += 0.08
+        XCTAssertTrue(engine.takesStripTouch(at: aimedHigh))
+        XCTAssertFalse(engine.takesStripTouch(at: CGPoint(x: aimedHigh.x, y: strip.minY + 6)), "the upper half stays the strip's")
+        XCTAssertEqual(engine.key(at: aimedHigh)?.kind, .character("e"))
+        engine.touchBegan(id: 9, at: aimedHigh)
+        engine.touchEnded(id: 9, at: aimedHigh)
+        XCTAssertEqual(target.text, "on the")
+        now += 0.1
+        tap(.space)
+        XCTAssertEqual(target.text, "on the ")
+
+        now += 0.3
+        XCTAssertFalse(engine.takesStripTouch(at: aimedHigh), "after a pause a pick is a pick")
+        down(1, .character("a"))
+        XCTAssertTrue(engine.takesStripTouch(at: aimedHigh), "while a key is down")
+        up(1, .character("a"))
+    }
+
+    /// The same through the view: the key plane lies over the strip and claims its lower half
+    /// while you type, so the suggestions never see the touch.
+    func testTheKeysTakeTheStripsLowerHalfWhileTyping() {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        var clock: TimeInterval = 50
+        view.engine.clock = { clock }
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        let layout = view.engine.layout
+        let e = layout.key(.character("e"))!
+        let aimedHigh = CGPoint(x: e.frame.midX, y: layout.stripFrame.maxY - 6)
+        XCTAssertFalse(view.hitTest(aimedHigh, with: nil) === view.plane, "the strip's, before typing")
+
+        for (id, letter) in ["t", "h"].enumerated() {
+            let key = layout.key(.character(letter))!
+            let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
+            view.plane.began(id: id + 1, sample: sample)
+            view.plane.ended(id: id + 1, sample: sample)
+            clock += 0.1
+        }
+        XCTAssertTrue(view.hitTest(aimedHigh, with: nil) === view.plane)
+        let sample = TypingLogTouchSample(point: aimedHigh, timestamp: 0)
+        view.plane.began(id: 3, sample: sample)
+        view.plane.ended(id: 3, sample: sample)
+        XCTAssertEqual(target.text, "the")
+
+        clock += 1
+        XCTAssertFalse(view.hitTest(aimedHigh, with: nil) === view.plane, "the strip's again after a pause")
+    }
+
     // MARK: - Haptics in every layout
 
     /// Key haptics come from the same calls whatever the layout (a TestFlight tester felt

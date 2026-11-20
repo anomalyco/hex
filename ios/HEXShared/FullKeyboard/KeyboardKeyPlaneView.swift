@@ -40,8 +40,10 @@ final class KeyboardKeyPlaneView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// The key area, and while you type the strip's lower half (`takesStripTouch(at:)`):
+    /// this view lies over the strip, so it gets those touches before the suggestions.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        engine.layout.touchAreaFrame.contains(point)
+        engine.layout.touchAreaFrame.contains(point) || engine.takesStripTouch(at: point)
     }
 
     // MARK: - Drawing

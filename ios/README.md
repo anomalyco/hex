@@ -448,7 +448,13 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   split down the middle, the outer keys reach the screen's edges, and row 1 also
   takes the strip's bottom 4 pt below its pills (`KeyboardLayout.stripTouchBand`),
   so a tap just above a keycap types it rather than picking a suggestion (Apple's
-  keys reach about 8 pt above theirs, measured in the simulator). Taps are not
+  keys reach about 8 pt above theirs, measured in the simulator). While you type (a
+  key is down, or one went down or came up in the last 0.25 s) the strip's whole
+  lower half goes to the row-1 key below the finger
+  (`FullKeyboardEngine.takesStripTouch`): Record typing logs showed every strip
+  pick that soon after a key was an e aimed high landing on the left slot, which
+  kept "th" and typed a space where "the" was meant; nobody reads a new suggestion
+  and taps it that fast. Taps are not
   shifted: moving every logged tap up by 2 to 8 pt landed no more of them on the
   meant key, and Apple's row borders sit within about 2 pt of the gaps' middles
   when nothing is typed. While autocorrect is on in a text field that allows it,

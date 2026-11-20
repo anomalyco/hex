@@ -75,6 +75,9 @@ final class FullKeyboardEngine {
     static let accentSlop: CGFloat = 10
     static let trackpadActivationDistance: CGFloat = 10
     static let trackpadPointsPerCharacter: CGFloat = 7.5
+    /// A finger on the strip's lower half this soon after a key went down or came up (or
+    /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
+    static let stripTouchGuard: TimeInterval = 0.25
 
     private(set) var shift = ShiftStateMachine()
     private(set) var layerState = KeyboardLayerState()
@@ -86,6 +89,8 @@ final class FullKeyboardEngine {
     /// The text before the cursor just after a suggestion typed its word and a space. A space
     /// typed next, while the text is still that, is swallowed, as on Apple's keyboard.
     private var suggestionSpaceBefore: String?
+    /// When a key last went down or came up, for `takesStripTouch(at:)`.
+    private var lastKeyTouchAt: TimeInterval?
 
     /// Where each letter of the word being typed was tapped (nil for one that came another
     /// way, such as an accent), for Spatial autocorrect.
@@ -314,6 +319,7 @@ final class FullKeyboardEngine {
     /// The key a touch going down at `point` presses: the one under it, or a neighbouring
     /// letter within `letterReach` points that is enough likelier to come next in the word.
     func key(at point: CGPoint) -> KeyboardKey? {
+        let point = pointOnKeys(point)
         guard let key = layout.hitTest(point) else { return nil }
         guard key.character != nil, let model = letterOdds, layerState.layer == .letters,
               field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
@@ -369,6 +375,28 @@ final class FullKeyboardEngine {
         return mass
     }
 
+    /// Whether a finger going down at `point`, in the strip above the keys, belongs to the
+    /// keys: in the strip's lower half while you type (a key is down, or one went down or came
+    /// up within `stripTouchGuard`) it is a row-1 key aimed high, not a pick. Nobody reads a
+    /// new suggestion and taps it that fast; Record typing logs showed such picks were the e
+    /// below the left slot, which kept "th" and typed a space where "the" was meant.
+    func takesStripTouch(at point: CGPoint) -> Bool {
+        let strip = layout.stripFrame
+        guard point.y < layout.touchAreaFrame.minY, point.y >= strip.midY,
+              point.x >= strip.minX, point.x < strip.maxX else { return false }
+        if !touches.isEmpty { return true }
+        guard let last = lastKeyTouchAt else { return false }
+        let elapsed = clock() - last
+        return elapsed >= 0 && elapsed < Self.stripTouchGuard
+    }
+
+    /// `point`, or for one above the keys (a strip touch `takesStripTouch(at:)` gave them)
+    /// the same spot on row 1's top edge.
+    private func pointOnKeys(_ point: CGPoint) -> CGPoint {
+        let top = layout.touchAreaFrame.minY
+        return point.y < top ? CGPoint(x: point.x, y: top) : point
+    }
+
     private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
         let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
         let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
@@ -376,7 +404,9 @@ final class FullKeyboardEngine {
     }
 
     func touchBegan(id: Int, at point: CGPoint) {
+        let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
+        lastKeyTouchAt = clock()
         // Rollover: a new key going down commits any character or accent picker still held.
         for other in touchOrder {
             guard var touch = touches[other], touch.key.character != nil, !touch.committed else { continue }
@@ -524,6 +554,7 @@ final class FullKeyboardEngine {
     func touchEnded(id: Int, at point: CGPoint) {
         guard var touch = touches.removeValue(forKey: id) else { return }
         touchOrder.removeAll { $0 == id }
+        lastKeyTouchAt = clock()
         touch.point = point
 
         if activeAccentTouchID == id, let menu = activeAccentMenu {
