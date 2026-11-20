@@ -135,6 +135,29 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return index(ofCodes: bytes)
     }
 
+    /// How much of the word list's frequency continues `prefix` with each letter, by letter
+    /// code. Nil when no word starts with `prefix`, or one ends there and none goes on.
+    func continuations(after prefix: [UInt8]) -> [Double]? {
+        var lo = 0, hi = wordCount
+        for (depth, b) in prefix.enumerated() {
+            (lo, hi) = narrow(lo, hi, depth: depth, byte: Int(b))
+            if lo >= hi { return nil }
+        }
+        var mass = [Double](repeating: 0, count: characters.count)
+        let depth = prefix.count
+        var any = false
+        for i in lo..<hi {
+            let code = byte(i, depth)
+            guard code > 0, code != Int(apostropheCode ?? 0) else { continue }
+            mass[code] += Self.frequency[Int(base.load(fromByteOffset: unigramAt + i, as: UInt8.self))]
+            any = true
+        }
+        return any ? mass : nil
+    }
+
+    /// exp(-cost) for each stored unigram cost byte (cost = byte / 8 nats).
+    private static let frequency: [Double] = (0..<256).map { exp(-Double($0) / 8) }
+
     func index(ofCodes bytes: [UInt8]) -> Int? {
         var lo = 0, hi = wordCount
         for (depth, b) in bytes.enumerated() {

@@ -65,6 +65,11 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // iOS holds back touches near the screen's side edges in a keyboard's window while it
+        // waits to see whether they start a system gesture: on an iPhone they reached the keys
+        // about 80 ms late (Record typing logs), so q, a, p, l, shift and delete lagged and
+        // could land after the next key. Apple's own keyboard has no such delay.
+        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
         warmFullKeyboardLexiconIfNeeded()
         listDictationLanguagesIfNeeded()
         prepareLocalDictationIfNeeded()
