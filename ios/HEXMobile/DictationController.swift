@@ -217,7 +217,12 @@ final class DictationController {
         }
 
         if autoPrepareOnInit {
-            if hasCachedModel {
+            // A launch after Hex ended while loading Parakeet doesn't load it again by itself,
+            // or it would end the same way at every launch.
+            let parakeetLoads = ParakeetLoadGuard()
+            parakeetLoads.noteLaunch()
+            let parakeetInterrupted = parakeetLoads.lastLoadWasInterrupted
+            if hasCachedModel && !parakeetInterrupted {
                 engineName = "Parakeet V2"
                 prepareModel()
             } else if #available(iOS 26.0, *) {
@@ -229,8 +234,14 @@ final class DictationController {
                         self.prepareModel()
                     } else {
                         self.engineName = "Parakeet V2"
+                        if hasCachedModel {
+                            self.phase = .failed(ParakeetLoadGuard.message)
+                        }
                     }
                 }
+            } else if hasCachedModel {
+                engineName = "Parakeet V2"
+                phase = .failed(ParakeetLoadGuard.message)
             }
         }
     }

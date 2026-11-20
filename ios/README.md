@@ -222,8 +222,13 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   the same rule and the same downloaded assets; both record the language they
   resolved (`settings.dictationLanguage.resolved`). Picking a language prepares
   (and if needed downloads) its model at once, or after the dictation in flight.
-  An iPhone without `SpeechTranscriber` keeps English on Parakeet, as before.
-  **When a model won't install**
+  An iPhone without `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation, all
+  3–4 GB) dictates English with `DictationTranscriber` on iOS 26+: loading
+  Parakeet there sat at 50% (Core ML's compile) until iOS ended Hex, at every
+  launch. Parakeet stays where it fits (6 GB) and before iOS 26. After Hex ended
+  while loading Parakeet, the next launch waits for Set up instead of loading it
+  again (`ParakeetLoadGuard`), and a Parakeet download that sits at one fraction
+  for 90 s ends with a message. **When a model won't install**
   (`SpeechModelInstall`, shared by the app and in-keyboard dictation): Apple lists
   some languages whose `SpeechTranscriber` asset never arrives ("transcription.ru
   asset not found after attempted download"), so Hex then installs the same
@@ -383,8 +388,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   full-keyboard-language-unavailable`, `keyboard-language-unavailable`,
   `language-unavailable` and `language-switched` render the messages. Which
   module fails for which language on iOS 26.x, whether a stalled Apple download
-  ever moves again, and the reservation limit on a full iPhone are unverified on
-  hardware.
+  ever moves again, the reservation limit on a full iPhone, and Parakeet's
+  memory on 4 GB iPhones are unverified on hardware.
 - **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
   widths, hit frames (tiling the key area with no gaps or overlaps), balloons
   and accent menus at 320–440 pt and in landscape; `AutocorrectEngineTests` and

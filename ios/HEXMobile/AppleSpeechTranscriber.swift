@@ -139,10 +139,16 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     }
 
     /// Whether Hex dictates this language with Apple Speech rather than Parakeet. English
-    /// without `SpeechTranscriber` (an iPhone that lacks it) stays on Parakeet, as before;
-    /// every other language `DictationTranscriber` has beats English-only Parakeet.
-    nonisolated static func shouldUse(_ language: SpeechLanguage) -> Bool {
-        language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier)
+    /// without `SpeechTranscriber` stays on Parakeet where it fits; every other language
+    /// `DictationTranscriber` has beats English-only Parakeet. The iPhones without
+    /// `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation) have 3–4 GB, where loading
+    /// Parakeet ended Hex at "50%" and again at every launch, so they dictate English with
+    /// `DictationTranscriber`.
+    nonisolated static func shouldUse(
+        _ language: SpeechLanguage,
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+    ) -> Bool {
+        language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier) || !parakeetFits
     }
 
     func prepare(

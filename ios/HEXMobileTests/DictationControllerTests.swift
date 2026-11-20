@@ -942,6 +942,10 @@ final class DictationControllerTests: XCTestCase {
             userInfo: [NSUnderlyingErrorKey: URLError(.notConnectedToInternet) as NSError]
         )
         XCTAssertEqual(UserFacingError.message(for: offline, context: .model), UserFacingError.offline)
+        XCTAssertEqual(
+            UserFacingError.message(for: ParakeetTranscriber.TranscriberError.downloadFailed, context: .model),
+            "Parakeet V2 didn't download. Check your connection and try again."
+        )
 
         // Hex's own language messages, short enough for the keyboard's strip.
         let messages = [
@@ -1018,6 +1022,35 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.phase, .ready)
         XCTAssertNil(controller.languageOffer)
         XCTAssertNil(controller.languageNotice)
+    }
+
+    func testIPhonesWithoutRoomForParakeetDictateEnglishWithApple() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech needs iOS 26") }
+        let dictation = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .dictation)
+        XCTAssertFalse(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: true), "Parakeet where it fits, as before")
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: false), "an iPhone 11 has 4 GB")
+        let speech = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .speech)
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(speech, parakeetFits: true))
+    }
+
+    func testAParakeetLoadThatEndedHexIsNotRepeatedAtLaunch() {
+        let loads = ParakeetLoadGuard(defaults: defaults)
+        loads.noteLaunch()
+        XCTAssertFalse(loads.lastLoadWasInterrupted)
+
+        loads.begin()
+        // iOS ends Hex while Core ML compiles; the next launch finds the load still marked.
+        let nextLaunch = ParakeetLoadGuard(defaults: defaults)
+        nextLaunch.noteLaunch()
+        XCTAssertTrue(nextLaunch.lastLoadWasInterrupted)
+
+        nextLaunch.begin()
+        nextLaunch.end(loaded: false)
+        nextLaunch.noteLaunch()
+        XCTAssertTrue(nextLaunch.lastLoadWasInterrupted, "a failed load keeps it")
+        nextLaunch.begin()
+        nextLaunch.end(loaded: true)
+        XCTAssertFalse(nextLaunch.lastLoadWasInterrupted, "a load that worked clears it")
     }
 
     func testWarmSessionAudioErrorReachesAppAndKeyboardAsASentence() async throws {
