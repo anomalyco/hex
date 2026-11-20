@@ -48,7 +48,7 @@ final class SwipeTyping {
     var model: TypingDecoderModel { decoder.model }
 
     /// How far a letter touch travels before it is a swipe: a key's width and gap.
-    var threshold: CGFloat { engine.layout.letterWidth + engine.layout.metrics.gap }
+    var threshold: CGFloat { engine.layout.swipePitch }
 
     var isSwiping: Bool { active != nil }
 
@@ -151,7 +151,10 @@ final class SwipeTyping {
         generation += 1
         trail.fade()
         let started = clock()
-        let candidates = decoder.decode(points, keys: engine.swipeKeys, previous: engine.swipePreviousWord, limit: 8)
+        let layout = engine.layout
+        let candidates = decoder.decode(
+            points.map(layout.joinedForSwipe), keys: engine.swipeKeys, previous: engine.swipePreviousWord, limit: 8
+        )
         let elapsed = clock() - started
         lastDecodeTime = elapsed
         engine.endSwipe(typing: candidates.map(\.text), points: points.count, decodeTime: elapsed)
@@ -168,7 +171,7 @@ final class SwipeTyping {
         previewInFlight = true
         lastPreviewAt = now
         let decoder = decoder, keys = engine.swipeKeys, previous = engine.swipePreviousWord
-        let points = swipe.points, generation = generation
+        let points = swipe.points.map(engine.layout.joinedForSwipe), generation = generation
         Self.previewQueue.async { [weak self] in
             let words = decoder.decode(points, keys: keys, previous: previous, limit: 3).map(\.text)
             DispatchQueue.main.async {

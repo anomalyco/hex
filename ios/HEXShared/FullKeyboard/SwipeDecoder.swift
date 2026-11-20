@@ -487,3 +487,20 @@ nonisolated struct SwipeDecoder: Sendable {
         return rows.0[n - 1] / Double(2 * n)
     }
 }
+
+extension KeyboardLayout {
+    /// A swipe's point where the decoder's keys are (`TypingDecoder.Keys`): on the split
+    /// keyboard the right half moves left against the left one (as `unsplitX`) and the middle
+    /// between the halves shrinks to one key's gap, so a stroke across it stays one unbroken
+    /// stroke, as Gboard joins the halves; elsewhere the point itself.
+    func joinedForSwipe(_ point: CGPoint) -> CGPoint {
+        guard let split else { return point }
+        if point.x <= split.leftEdge { return point }
+        if point.x >= split.rightEdge { return CGPoint(x: point.x - split.shift, y: point.y) }
+        let across = (point.x - split.leftEdge) / max(1, split.rightEdge - split.leftEdge)
+        return CGPoint(x: split.leftEdge + across * SplitGeometry.gap, y: point.y)
+    }
+
+    /// The distance between neighbouring letter keys' centres across: a split half's own pitch.
+    var swipePitch: CGFloat { isSplit ? SplitGeometry.pitch : letterWidth + metrics.gap }
+}

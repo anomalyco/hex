@@ -869,7 +869,10 @@ final class FullKeyboardEngineTests: XCTestCase {
 
     /// Swipes `word` through its keys' centres; `lift` false leaves the finger down.
     private func swipe(_ word: String, on plane: KeyboardKeyPlaneView, id: Int = 50, lift: Bool = true) {
-        let points = SwipePath.through(word, keys: plane.engine.swipeKeys)
+        swipe(points: SwipePath.through(word, keys: plane.engine.swipeKeys), on: plane, id: id, lift: lift)
+    }
+
+    private func swipe(points: [CGPoint], on plane: KeyboardKeyPlaneView, id: Int = 50, lift: Bool = true) {
         plane.began(id: id, sample: sample(points[0]))
         for point in points.dropFirst() {
             plane.moved(id: id, sample: sample(point))
@@ -1053,6 +1056,47 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.plane.swipe, "off by default and when turned off")
         view.swipeOverride = nil
         XCTAssertEqual(view.plane.swipe != nil, FullKeyboardSettings().swipeTyping)
+    }
+
+    /// On the Duo's split keyboard (unfolded upright) a swipe reads across the middle between
+    /// the halves, as Gboard joins them, and either half's G and V is the one letter.
+    func testASwipeReadsAcrossTheSplitKeyboardsMiddle() throws {
+        let (field, plane) = try swipeKeyboard()
+        let keys = plane.engine
+        keys.posture = .unfoldedWide
+        keys.windowInset = 75
+        keys.width = 801
+        let layout = keys.layout
+        let split = try XCTUnwrap(layout.split)
+        XCTAssertEqual(plane.swipe?.threshold, SplitGeometry.pitch)
+        /// Straight strokes through the drawn keys; of a letter's two keys, the one nearer the
+        /// key before it (the first letter's: the side `firstOnRight` says, else the left).
+        func path(_ word: String, firstOnRight: Bool = false) -> [CGPoint] {
+            var centres: [CGPoint] = []
+            for letter in word {
+                let options = layout.keys.filter { $0.label == String(letter) }.map { CGPoint(x: $0.frame.midX, y: $0.frame.midY) }
+                let anchor = centres.last ?? CGPoint(x: firstOnRight ? layout.width : 0, y: options[0].y)
+                let key = options.min { hypot($0.x - anchor.x, $0.y - anchor.y) < hypot($1.x - anchor.x, $1.y - anchor.y) }!
+                if centres.last != key { centres.append(key) }
+            }
+            var points = [centres[0]]
+            for (a, b) in zip(centres, centres.dropFirst()) {
+                let count = max(1, Int((hypot(b.x - a.x, b.y - a.y) / 6).rounded(.up)))
+                for i in 1...count {
+                    let t = CGFloat(i) / CGFloat(count)
+                    points.append(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+                }
+            }
+            return points
+        }
+        let hello = path("hello")
+        XCTAssertTrue(hello.contains { $0.x < split.leftEdge } && hello.contains { $0.x > split.rightEdge }, "both halves")
+        for word in ["hello", "the", "keyboard"] {
+            swipe(points: path(word), on: plane)
+        }
+        XCTAssertEqual(field.text, "hello the keyboard")
+        swipe(points: path("give", firstOnRight: true), on: plane)
+        XCTAssertEqual(field.text, "hello the keyboard give", "from the right half's G")
     }
 
     func testASpanishSwipeGetsItsAccentsAndÑ() throws {

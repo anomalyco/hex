@@ -298,7 +298,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     centre; tapping one puts it in the word's place. Until anything else changes the
     text, delete takes the whole word back (with the space it added) and space never
     autocorrects it; a tap after it adds to the word. A second finger going down ends the
-    swipe first, so its word goes before that key's letter. Taps, holds for accents, slides
+    swipe first, so its word goes before that key's letter. On the iPhone Duo's split
+    keyboard a swipe reads across the middle between the halves: its points are read with
+    the right half pushed against the left and the middle shrunk to one key's gap
+    (`KeyboardLayout.joinedForSwipe`), so either half's G and V is the one letter, as for
+    Spatial autocorrect's taps. Taps, holds for accents, slides
     shorter than a key, delete's word slide, the space bar's trackpad, 123 and the Hex key
     work as before: no swipe starts on them, and none once an accent menu is open.
     `SwipeDecoder` is a shape-matching decoder after SHARK2: the path is resampled to 32
