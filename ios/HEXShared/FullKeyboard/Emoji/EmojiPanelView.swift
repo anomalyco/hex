@@ -46,6 +46,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private let deleteKey = PanelKeyButton()
     private let callout = KeyCalloutView()
     private let tonePicker = AccentCalloutView()
+    /// A hairline between the suggestion row and the grid.
+    private let rowSeparator = UIView()
     private var toneEntry: Int?
     private var layoutKey: GridGeometry?
     private var sectionStarts: [CGFloat] = []
@@ -81,12 +83,15 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
         suggestionRow.onPick = { [weak self] index in self?.pickSuggestion(index) }
         addSubview(suggestionRow)
+        rowSeparator.isUserInteractionEnabled = false
+        addSubview(rowSeparator)
 
         grid.backgroundColor = .clear
         grid.showsHorizontalScrollIndicator = false
         grid.delaysContentTouches = false
         // Each drawn cell holds a bitmap of its emoji; only the visible ones should.
         grid.isPrefetchingEnabled = false
+        grid.hideEdgeEffects()
         grid.dataSource = self
         grid.delegate = self
         grid.register(EmojiCell.self, forCellWithReuseIdentifier: EmojiCell.reuseID)
@@ -186,6 +191,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         searchButton.frame = CGRect(x: row.minX + side, y: row.midY - buttonSide / 2, width: buttonSide + 4, height: buttonSide)
         searchButton.layer.cornerRadius = 10
         suggestionRow.frame = CGRect(x: searchButton.frame.maxX + 4, y: row.minY, width: row.maxX - side - searchButton.frame.maxX - 4, height: row.height)
+        let hairline = 1 / max(1, traitCollection.displayScale)
+        rowSeparator.frame = CGRect(x: row.minX + side, y: row.maxY - hairline, width: row.width - 2 * side, height: hairline)
         suggestionRow.fontSize = rowFontSize
 
         let barY = bounds.height - metrics.keysBottom - barKeyHeight
@@ -266,6 +273,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private func applyPalette() {
         searchButton.backgroundColor = palette.chipFill
         searchButton.tintColor = palette.textMuted
+        rowSeparator.backgroundColor = palette.separator
         suggestionRow.palette = palette
         categoryBar.palette = palette
         lettersKey.palette = palette
