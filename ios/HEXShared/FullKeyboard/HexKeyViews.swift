@@ -317,7 +317,8 @@ final class PanelKeyButton: UIControl {
     }
 }
 
-/// Holding the Hex key: dictation styles, then the dictation language when there are choices.
+/// Holding the Hex key: dictation styles, then the dictation language when there are choices,
+/// then, while Translate what I say is on, whether to paste translated or as spoken.
 @MainActor
 final class HexStyleMenuView: UIView {
     enum Page { case styles, languages }
@@ -329,8 +330,12 @@ final class HexStyleMenuView: UIView {
     var dictationLanguage: String? { didSet { if dictationLanguage != oldValue { rebuild() } } }
     var automaticLanguage: String? { didSet { if automaticLanguage != oldValue { rebuild() } } }
     var languageChoices: [String] = [] { didSet { if languageChoices != oldValue { rebuild() } } }
+    /// Translate what I say's switch; nil hides its rows.
+    var pasteChoice: TranslationPasteChoice? { didSet { if pasteChoice != oldValue { rebuild() } } }
+    var pastesTranslation = true { didSet { if pastesTranslation != oldValue { rebuild() } } }
     var onStyle: ((DictationStyle) -> Void)?
     var onLanguage: ((String?) -> Void)?
+    var onPasteTranslation: ((Bool) -> Void)?
     var onDismiss: (() -> Void)?
     var onHoverChanged: (() -> Void)?
     /// The Hex key's keycap, in this view's coordinates; the panel opens above it.
@@ -415,6 +420,14 @@ final class HexStyleMenuView: UIView {
                 let current = (dictationLanguage ?? automaticLanguage).map(DictationLanguageSwitch.nativeName(for:))
                 rows.append(makeRow(title: "Language", detail: current ?? "Automatic", chevron: true, selected: false, showsTopDivider: true) { [weak self] in
                     self?.show(page: .languages)
+                })
+            }
+            if let pasteChoice {
+                rows.append(makeRow(title: pasteChoice.translatedTitle, selected: pastesTranslation, showsTopDivider: true) { [weak self] in
+                    self?.onPasteTranslation?(true)
+                })
+                rows.append(makeRow(title: pasteChoice.spokenTitle, selected: !pastesTranslation) { [weak self] in
+                    self?.onPasteTranslation?(false)
                 })
             }
         case .languages:

@@ -147,9 +147,10 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     }
 
     /// Clean up what I say, as dictation runs it: after transcription and learned fixes,
-    /// before translation and formatting. Off, Verbatim, blank, or a language other than
-    /// English (the tagger only knows English) keeps `text` as is. A nil `language` counts
-    /// as English.
+    /// before translation and formatting. Off, Verbatim, or blank keeps `text` as is. The
+    /// tagger only knows English (on Spanish it dropped negations), so Spanish, German and
+    /// Norwegian get `SpokenCleanupRules` instead and other languages stay as heard. A nil
+    /// `language` counts as English.
     static func cleanIfEnabled(
         _ text: String,
         style: DictationStyle,
@@ -159,9 +160,11 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     ) async -> String {
         guard settings.isEnabled,
               style != .verbatim,
-              SpeechLanguagePicker.isEnglish(language),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return text
+        }
+        guard SpeechLanguagePicker.isEnglish(language) else {
+            return SpokenCleanupRules.clean(text, language: language)
         }
         return await tagger.clean(text, within: timeBudget)
     }

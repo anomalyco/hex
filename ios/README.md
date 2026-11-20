@@ -119,7 +119,19 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     becomes "4pm"); a word goes only above P(DELETE) 0.98.
     `CleanupReconstruction`, a port of the tagger's `reconstruct.js`, then
     repairs the commas and capitals next to a deletion. It never adds,
-    reorders, or changes words. It runs after transcription and learned fixes
+    reorders, or changes words. The tagger only knows English (run on
+    Spanish it dropped negations: "Te digo que no puedo ir" became "Te
+    puedo ir"), so Spanish, German and Norwegian get word rules instead
+    (`SpokenCleanupRules`): the language's hesitation sounds go (the
+    styles' list below, so in-keyboard dictation, which no style formats,
+    loses them too), a filler between commas goes ("este", "o sea"),
+    and a correction marker set off by commas ("digo", "perdón", "no",
+    "mejor dicho"; "nein", "ich meine"; "nei", "nei vent", "jeg mener")
+    drops the words it replaces, counted back to the nearest earlier word
+    that matches the repair's first word or is of its kind (a number,
+    weekday, month, or today and tomorrow): "a las 3, digo, a las 4" becomes
+    "a las 4". With no such word the sentence stays as said, and other
+    languages stay as heard. It runs after transcription and learned fixes
     (in the app also after custom vocabulary), before Apple Intelligence
     cleanup, translation, and formatting, in in-keyboard dictation and in the
     app. The tagger is a BERT L-4/H-512 token classifier fine-tuned from
@@ -213,10 +225,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   An iPhone without `SpeechTranscriber` keeps English on Parakeet, as before.
   The setup card's Speech model row names the language ("Norwegian Bokmål ·
   Apple"). Steps that only know English follow the language: Clean up what I
-  say (an English tagger) skips other languages; Clean up with Apple
+  say (an English tagger) uses word rules in Spanish, German and Norwegian and
+  skips other languages; Clean up with Apple
   Intelligence runs only when the on-device model supports the language; the
   styles trim English fillers (um, uh, er, ah) only in English, Nordic ones (eh,
-  ehm, øh, hm) in Norwegian, Danish and Swedish, and none elsewhere (Norwegian
+  ehm, øh, hm) in Norwegian, Danish and Swedish, Spanish ones (eh, em, mmm) in
+  Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
   "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
   language rather than a guess. Custom vocabulary works in any language.
 - **Switching the dictation language in the keyboard (iOS 26+, Full Access):**
@@ -233,6 +247,22 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   in-keyboard dictation uses it at once; a warm Hex session follows it within
   100 ms and prepares the language between dictations, and a handoff or the
   Action Button picks it up before recording.
+- **Translate what I say (Experiments, iOS 26+):** Off by default. Translates
+  each dictation on the iPhone with Apple's Translation framework into the
+  language picked under Insert in, once its pack is downloaded; without the
+  pack the transcript goes in as spoken. Where you dictate, a switch picks
+  translated or as spoken for the next dictations and keeps the last choice
+  (`experiments.translateDictation.pastesTranslation`, translated by
+  default; turning the experiment on resets it to translated): two rows in
+  the full keyboard's Hex key menu ("Paste in English", "Paste in Spanish",
+  named in English, "Paste as spoken" when the dictation language is
+  unknown), a "Paste in English" chip in the dictation bar's language tray,
+  and a "Paste in English" toggle under Insert in. It shows only while the
+  experiment is on and you dictate in another language than the target.
+  While dictations paste translated, the space bar and the dictation bar's
+  language label read "Español → English". The App Group carries the
+  switch, so in-keyboard dictation, a warm session, and the Action Button
+  all follow it.
 - **Keyboard layouts (Experiments › Full keyboard › Keyboard layout):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2) and
   Deutsch (QWERTZ with `ü`, `ö ä`), as Apple's iOS keyboards lay them out
@@ -251,6 +281,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
+- **Screen stays on while dictating in Hex:** recording and transcribing set
+  `isIdleTimerDisabled`, and every way out (done, cancel, failure) hands the
+  screen back to Auto-Lock. iOS honors it only while Hex is in front: the
+  handoff screen and in-app recording, not a warm session or in-keyboard
+  dictation, where another app is in front and a keyboard extension has no
+  public way to keep the screen on.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an

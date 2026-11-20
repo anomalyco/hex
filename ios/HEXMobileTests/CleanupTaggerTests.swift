@@ -228,20 +228,31 @@ final class CleanupTaggerTests: XCTestCase {
         XCTAssertEqual(result, "I mean what I say.", "a sentence with nothing to remove comes back as said")
     }
 
-    func testTheEnglishTaggerLeavesOtherLanguagesAsHeard() async throws {
+    /// The English tagger never runs on another language: on Spanish it dropped negations
+    /// ("Te digo que no puedo ir" became "Te puedo ir"). Spanish, German and Norwegian get
+    /// word rules; the rest stay as heard.
+    func testOtherLanguagesGetRulesNeverTheEnglishTagger() async throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = CleanupTaggerSettings(defaults: defaults)
         settings.isEnabled = true
         let tagger = CleanupTagger()
-        let norwegian = "Vi sender den tirsdag, nei vent, torsdag."
 
-        CleanupTagger.prepareIfEnabled(style: .polished, language: "nb-NO", settings: settings, tagger: tagger)
-        XCTAssertFalse(tagger.isLoaded, "a Norwegian dictation loads nothing")
-        let result = await CleanupTagger.cleanIfEnabled(norwegian, style: .polished, language: "nb-NO", settings: settings, tagger: tagger)
-        XCTAssertEqual(result, norwegian)
-        XCTAssertFalse(tagger.isLoaded)
+        for (language, spoken, cleaned) in [
+            ("nb-NO", "Vi sender den tirsdag, nei vent, torsdag.", "Vi sender den torsdag."),
+            ("es-MX", "Te digo que no puedo ir.", "Te digo que no puedo ir."),
+            ("es-ES", "Nos vemos a las 3, digo, a las 4.", "Nos vemos a las 4."),
+            ("de-DE", "Wir treffen uns um 3, nein, um 4.", "Wir treffen uns um 4."),
+            ("fr-FR", "On se voit mardi, non, jeudi.", "On se voit mardi, non, jeudi."),
+        ] {
+            CleanupTagger.prepareIfEnabled(style: .polished, language: language, settings: settings, tagger: tagger)
+            let result = await CleanupTagger.cleanIfEnabled(spoken, style: .polished, language: language, settings: settings, tagger: tagger)
+            XCTAssertEqual(result, cleaned, language)
+            let verbatim = await CleanupTagger.cleanIfEnabled(spoken, style: .verbatim, language: language, settings: settings, tagger: tagger)
+            XCTAssertEqual(verbatim, spoken, "\(language) Verbatim")
+        }
+        XCTAssertFalse(tagger.isLoaded, "no other language loads the model")
 
         let english = await CleanupTagger.cleanIfEnabled(
             "Let's ship it Tuesday, no wait, Thursday.", style: .polished, language: "en-GB", settings: settings, tagger: tagger

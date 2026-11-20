@@ -1,4 +1,5 @@
 import AVFAudio
+import UIKit
 import XCTest
 @testable import HEX
 
@@ -296,6 +297,50 @@ final class DictationControllerTests: XCTestCase {
         try await settle()
         XCTAssertEqual(controller.phase, .recording)
         controller.cancelCurrentJob()
+    }
+
+    /// A tester's iPhone locked mid-dictation: recording and transcribing keep the screen on,
+    /// and every way out of them hands it back to Auto-Lock.
+    func testRecordingAndTranscribingKeepTheScreenOn() async throws {
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 6_000 },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        UIApplication.shared.isIdleTimerDisabled = false
+
+        await transcriber.armSuspension()
+        controller.startRecording(keyboardJobID: "awake")
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        XCTAssertTrue(UIApplication.shared.isIdleTimerDisabled, "recording")
+        controller.finishRecording()
+        XCTAssertEqual(controller.phase, .transcribing)
+        XCTAssertTrue(UIApplication.shared.isIdleTimerDisabled, "transcribing")
+        await transcriber.resumeSuspended(with: "done")
+        try await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertFalse(UIApplication.shared.isIdleTimerDisabled, "done")
+
+        controller.startRecording(keyboardJobID: "cancelled")
+        try await settle()
+        XCTAssertTrue(UIApplication.shared.isIdleTimerDisabled)
+        controller.cancelCurrentJob()
+        XCTAssertFalse(UIApplication.shared.isIdleTimerDisabled, "cancelled")
+
+        await transcriber.failNext(with: CocoaError(.fileReadCorruptFile))
+        controller.startRecording(keyboardJobID: "failed")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertFalse(UIApplication.shared.isIdleTimerDisabled, "failed")
     }
 
     func testAudioInterruptionsAndRouteChangesNeverLeaveStuckListeningState() async throws {
