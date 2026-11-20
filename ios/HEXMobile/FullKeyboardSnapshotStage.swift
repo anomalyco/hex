@@ -117,7 +117,8 @@ struct FullKeyboardSnapshotStage: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
             FullKeyboardFixture(state: state, draft: draft, darkKeyboard: darkApp || darkField)
-                .frame(height: KeyboardLayout.height(for: .portrait))
+                .frame(height: KeyboardLayout.height(for: .portrait)
+                    + (["recording", "transcribing", "morph"].contains(state) ? FullKeyboardView.recordingLiftHeight : 0))
                 .background(Color(uiColor: backdrop).ignoresSafeArea(edges: .bottom))
         }
         .background(canvas.ignoresSafeArea())

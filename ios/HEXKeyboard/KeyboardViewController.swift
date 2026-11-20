@@ -421,6 +421,10 @@ final class KeyboardViewController: UIInputViewController {
                 target: DocumentProxyTextTarget { [weak self] in self?.textDocumentProxy }
             )
             keyboard.hostController = self
+            keyboard.onPreferredHeightChange = { [weak self] in
+                self?.view.setNeedsLayout()
+                self?.view.layoutIfNeeded()
+            }
             keyboard.allowsHaptics = { [weak self] in
                 self?.allowsKeyHaptics ?? false
             }
