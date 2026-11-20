@@ -913,7 +913,8 @@ final class FullKeyboardEngine {
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
     private func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
         if text.count == 1, text.first?.isLetter == true {
-            tokenTaps.append(point)
+            // Spatial autocorrect reads taps as on the unsplit keyboard (`KeyboardLayout.unsplitX`).
+            tokenTaps.append(point.map { CGPoint(x: layout.unsplitX($0.x), y: $0.y) })
         } else {
             tokenTaps.removeAll()
         }

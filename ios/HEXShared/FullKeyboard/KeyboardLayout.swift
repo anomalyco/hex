@@ -86,6 +86,10 @@ nonisolated enum KeyboardPosture: Equatable, Sendable {
         return screenSize.width > screenSize.height ? .unfoldedWide : .unfoldedTall
     }
 
+    /// Apple splits its keyboard on the Duo unfolded and held upright (the inner screen wider
+    /// than tall); Hex does too, automatically, as there's no setting a keyboard can read.
+    var splitsKeyboard: Bool { self == .unfoldedWide }
+
     /// iOS draws a band of its own above a third-party keyboard here, so the strip needs no gap
     /// under it to sit as far above the keys as Apple's predictive bar does.
     var hasSystemBand: Bool { self != .phone }
@@ -235,6 +239,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     let posture: KeyboardPosture
     let metrics: KeyboardMetrics
     let keys: [KeyboardKey]
+    /// The two halves' inner edges while the keyboard is split (the Duo unfolded upright, as
+    /// Apple's is there); nil otherwise.
+    let split: SplitGeometry?
 
     init(
         width: CGFloat,
@@ -260,17 +267,35 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         let innerWidth = width - 2 * self.horizontalInset
         let metrics = KeyboardMetrics.for(orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset)
         self.metrics = metrics
-        self.keys = Self.buildKeys(
-            width: width,
-            metrics: metrics,
-            layer: layer,
-            field: field,
-            showsGlobe: showsGlobe,
-            showsEmoji: showsEmoji,
-            inset: self.horizontalInset,
-            language: language
-        )
+        if posture.splitsKeyboard, orientation == .portrait {
+            let built = Self.buildSplitKeys(
+                width: width,
+                metrics: metrics,
+                layer: layer,
+                field: field,
+                showsGlobe: showsGlobe,
+                showsEmoji: showsEmoji,
+                inset: self.horizontalInset,
+                language: language
+            )
+            self.keys = built.keys
+            self.split = built.split
+        } else {
+            self.keys = Self.buildKeys(
+                width: width,
+                metrics: metrics,
+                layer: layer,
+                field: field,
+                showsGlobe: showsGlobe,
+                showsEmoji: showsEmoji,
+                inset: self.horizontalInset,
+                language: language
+            )
+            self.split = nil
+        }
     }
+
+    var isSplit: Bool { split != nil }
 
     static func height(for orientation: KeyboardOrientation, posture: KeyboardPosture = .phone) -> CGFloat {
         KeyboardMetrics.for(orientation, posture: posture).totalHeight
@@ -280,7 +305,12 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
 
     /// Where the suggestion / undo strip sits.
     var stripFrame: CGRect {
-        let full = CGRect(x: horizontalInset, y: metrics.stripTop, width: width - 2 * horizontalInset, height: metrics.stripHeight)
+        var full = CGRect(x: horizontalInset, y: metrics.stripTop, width: width - 2 * horizontalInset, height: metrics.stripHeight)
+        if let split {
+            // Over the right half, where Apple's split keyboard puts its predictions.
+            let minX = split.rightEdge - SplitGeometry.stripLead
+            full = CGRect(x: minX, y: full.minY, width: full.maxX - minX, height: full.height)
+        }
         guard let hex = key(.hex), hex.row < 0 else { return full }
         let reserved = hex.frame.width + metrics.side + metrics.gap
         return HexKeyPlacement.current == .stripLeading
@@ -309,13 +339,22 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// A letter key's width on a 10-key row. Shift, delete and the bottom row are sized
     /// from it in every language, as Apple's are.
     var letterWidth: CGFloat {
-        Self.letterWidth(innerWidth: width - 2 * horizontalInset, metrics: metrics)
+        if isSplit { return SplitGeometry.keyWidth }
+        return Self.letterWidth(innerWidth: width - 2 * horizontalInset, metrics: metrics)
+    }
+
+    /// `x` as it would be with the halves pushed together, so a tap on the right half's G and
+    /// one on the left half's land on the same key for Spatial autocorrect.
+    func unsplitX(_ x: CGFloat) -> CGFloat {
+        guard let split, x >= split.middle else { return x }
+        return x - split.shift
     }
 
     /// The width of this page's character keys: `letterWidth`, or narrower where a row
     /// holds 11 keys (Norwegian letters).
     var characterWidth: CGFloat {
-        Self.letterWidth(
+        if isSplit { return SplitGeometry.keyWidth }
+        return Self.letterWidth(
             innerWidth: width - 2 * horizontalInset,
             metrics: metrics,
             columns: Self.columns(Self.characterRows(for: layer, language: language))
@@ -539,5 +578,169 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             keys.append(KeyboardKey(kind: .hex, row: -1, frame: frame, hitFrame: hitFrame, label: "hex"))
         }
         return keys
+    }
+}
+
+/// Where a split keyboard's halves end. Apple's split keyboard on the Duo unfolded upright
+/// (iOS 27.2 simulator, 801 pt keyboard): 46.3 pt keycaps on a 57 pt pitch, shift and delete
+/// 63.3 pt, 123 66.7 pt, globe and emoji 40.7 pt, return 66 pt; each half starts at the
+/// keyboard's side, the middle (about 220 pt) holds no key, and its predictions sit over the
+/// right half.
+nonisolated struct SplitGeometry: Equatable, Sendable {
+    static let keyWidth: CGFloat = 46.3
+    static let gap: CGFloat = 10.7
+    static var pitch: CGFloat { keyWidth + gap }
+    static let modifierWidth: CGFloat = 63.3
+    static let layerSwitchWidth: CGFloat = 66.7
+    static let smallKeyWidth: CGFloat = 40.7
+    static let returnWidth: CGFloat = 66
+    /// How far left of the right half's first key the strip starts (Apple's first prediction).
+    static let stripLead: CGFloat = 38.3
+
+    /// The left half's right edge (row 1's last keycap) and the right half's left edge.
+    let leftEdge: CGFloat
+    let rightEdge: CGFloat
+
+    /// Touches right of this belong to the right half.
+    var middle: CGFloat { (leftEdge + rightEdge) / 2 }
+    /// How far the right half would move left to sit one gap after the left half.
+    var shift: CGFloat { rightEdge - leftEdge - Self.gap }
+
+    /// One row's keys for each half: an even row splits down the middle, an odd one gives its
+    /// middle key to both halves, as Apple's English split keeps G and V on both sides.
+    static func halves(_ row: [String]) -> (left: [String], right: [String]) {
+        let n = row.count
+        guard n > 1 else { return (row, row) }
+        if n % 2 == 1 {
+            return (Array(row[...(n / 2)]), Array(row[(n / 2)...]))
+        }
+        return (Array(row[..<(n / 2)]), Array(row[(n / 2)...]))
+    }
+}
+
+extension KeyboardLayout {
+    /// The split keyboard: each row's halves at the keyboard's sides with Apple's key sizes,
+    /// row 2 in half a key from the side and row 3's letters a key and a half, two space bars,
+    /// and touch targets that tile each half but leave the middle to no key.
+    static func buildSplitKeys(
+        width: CGFloat,
+        metrics m: KeyboardMetrics,
+        layer: KeyboardLayer,
+        field: KeyboardFieldKind,
+        showsGlobe: Bool,
+        showsEmoji: Bool,
+        inset: CGFloat,
+        language: KeyboardLanguage
+    ) -> (keys: [KeyboardKey], split: SplitGeometry) {
+        typealias G = SplitGeometry
+        let rows = characterRows(for: layer, language: language)
+        let left = inset + m.side
+        let right = width - inset - m.side
+        let p = G.pitch
+
+        func rowY(_ row: Int) -> CGFloat {
+            m.stripArea + m.keysTop + CGFloat(row) * (m.keyHeight + m.rowGap)
+        }
+        var drawn: [(KeyKind, Int, CGRect, String, Bool)] = [] // kind, row, frame, label, right half
+        func add(_ kind: KeyKind, row: Int, x: CGFloat, w: CGFloat, label: String, rightHalf: Bool) {
+            drawn.append((kind, row, CGRect(x: x, y: rowY(row), width: w, height: m.keyHeight), label, rightHalf))
+        }
+        func addRow(_ chars: [String], row: Int, leftStart: CGFloat, rightEnd: CGFloat) -> (CGFloat, CGFloat) {
+            let (l, r) = G.halves(chars)
+            for (i, ch) in l.enumerated() {
+                add(.character(ch), row: row, x: leftStart + CGFloat(i) * p, w: G.keyWidth, label: ch, rightHalf: false)
+            }
+            let rStart = rightEnd - CGFloat(r.count) * p + G.gap
+            for (i, ch) in r.enumerated() {
+                add(.character(ch), row: row, x: rStart + CGFloat(i) * p, w: G.keyWidth, label: ch, rightHalf: true)
+            }
+            return (leftStart + CGFloat(l.count) * p - G.gap, rStart)
+        }
+
+        // Rows 1 and 2: row 2 sits half a key in from each side.
+        let (leftEdge, rightEdge) = addRow(rows[0], row: 0, leftStart: left, rightEnd: right)
+        _ = addRow(rows[1], row: 1, leftStart: left + p / 2, rightEnd: right - p / 2)
+
+        // Row 3: shift (or the page switch) and delete at the sides, the middle keys a key and a
+        // half in from each side.
+        switch layer {
+        case .letters: add(.shift, row: 2, x: left, w: G.modifierWidth, label: "shift", rightHalf: false)
+        case .numbers: add(.layerSwitch(.symbols), row: 2, x: left, w: G.modifierWidth, label: "#+=", rightHalf: false)
+        case .symbols: add(.layerSwitch(.numbers), row: 2, x: left, w: G.modifierWidth, label: "123", rightHalf: false)
+        }
+        _ = addRow(rows[2], row: 2, leftStart: left + 1.5 * p, rightEnd: right - 1.5 * p)
+        add(.delete, row: 2, x: right - G.modifierWidth, w: G.modifierWidth, label: "delete", rightHalf: true)
+
+        // Row 4: 123/ABC, globe?, emoji? and a space bar on the left; a space bar, the field's
+        // extras, Hex (when it sits in the row) and return on the right.
+        var x = left
+        let switchKind: KeyKind = layer == .letters ? .layerSwitch(.numbers) : .layerSwitch(.letters)
+        add(switchKind, row: 3, x: x, w: G.layerSwitchWidth, label: layer == .letters ? "123" : "ABC", rightHalf: false)
+        x += G.layerSwitchWidth + G.gap
+        if showsGlobe {
+            add(.globe, row: 3, x: x, w: G.smallKeyWidth, label: "globe", rightHalf: false)
+            x += G.smallKeyWidth + G.gap
+        }
+        if showsEmoji {
+            add(.emoji, row: 3, x: x, w: G.smallKeyWidth, label: "emoji", rightHalf: false)
+            x += G.smallKeyWidth + G.gap
+        }
+        add(.space, row: 3, x: x, w: max(G.keyWidth, leftEdge - x), label: "space", rightHalf: false)
+
+        var trailing: [(KeyKind, CGFloat, String)] = []
+        switch field {
+        case .text: break
+        case .url:
+            trailing.append((.character("."), G.smallKeyWidth, "."))
+            trailing.append((.character("/"), G.smallKeyWidth, "/"))
+        case .email:
+            trailing.append((.character("@"), G.smallKeyWidth, "@"))
+            trailing.append((.character("."), G.smallKeyWidth, "."))
+        }
+        if HexKeyPlacement.current == .leftOfSpace || HexKeyPlacement.current == .rightOfSpace {
+            trailing.append((.hex, G.smallKeyWidth, "hex"))
+        }
+        trailing.append((.returnKey, G.returnWidth, "return"))
+        let trailingWidth = trailing.reduce(0) { $0 + $1.1 + G.gap }
+        let spaceRightWidth = max(G.keyWidth, right - rightEdge - trailingWidth)
+        add(.space, row: 3, x: rightEdge, w: spaceRightWidth, label: "space", rightHalf: true)
+        x = rightEdge + spaceRightWidth + G.gap
+        for (kind, w, label) in trailing {
+            add(kind, row: 3, x: x, w: w, label: label, rightHalf: true)
+            x += w + G.gap
+        }
+
+        // Touch targets: each half tiles from its side to half a gap past its inner key; the
+        // middle between the halves is no key's.
+        let top = m.stripArea - max(m.stripBottom, stripTouchBand)
+        var keys: [KeyboardKey] = []
+        for row in 0..<4 {
+            let y0 = row == 0 ? top : rowY(row) - m.rowGap / 2
+            let y1 = row == 3 ? m.totalHeight : rowY(row + 1) - m.rowGap / 2
+            for half in [false, true] {
+                let items = drawn.filter { $0.1 == row && $0.4 == half }.sorted { $0.2.minX < $1.2.minX }
+                for (i, item) in items.enumerated() {
+                    let x0 = i == 0 ? (half ? item.2.minX - G.gap / 2 : 0) : (items[i - 1].2.maxX + item.2.minX) / 2
+                    let x1 = i == items.count - 1 ? (half ? width : item.2.maxX + G.gap / 2) : (item.2.maxX + items[i + 1].2.minX) / 2
+                    keys.append(KeyboardKey(
+                        kind: item.0,
+                        row: row,
+                        frame: item.2,
+                        hitFrame: CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0),
+                        label: item.3
+                    ))
+                }
+            }
+        }
+        if HexKeyPlacement.current.isInStrip {
+            let height = m.stripHeight - 8
+            let hexWidth: CGFloat = 44
+            let hx = HexKeyPlacement.current == .stripLeading ? left : right - hexWidth
+            let frame = CGRect(x: hx, y: m.stripTop + 4, width: hexWidth, height: height)
+            let target = frame.insetBy(dx: -4, dy: -4)
+            let hitFrame = CGRect(x: target.minX, y: target.minY, width: target.width, height: top - target.minY)
+            keys.append(KeyboardKey(kind: .hex, row: -1, frame: frame, hitFrame: hitFrame, label: "hex"))
+        }
+        return (keys, SplitGeometry(leftEdge: leftEdge, rightEdge: rightEdge))
     }
 }

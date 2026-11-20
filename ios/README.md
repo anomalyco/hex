@@ -502,6 +502,19 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
   upright, starting as far in from the screen's side as Apple's. Measured in the
   simulator; unverified on a Duo.
+- **Split keyboard (iPhone Duo):** Unfolded and held upright (the inner screen wider than
+  tall), the full keyboard splits as Apple's does there (`SplitGeometry`): each half at
+  the keyboard's side with Apple's 46.3 pt keys on a 57 pt pitch, row 2 half a key in
+  and row 3's letters a key and a half, an odd row's middle key on both halves (G and V
+  in English), a space bar on each half, and nothing in the middle, where a tap types
+  nothing. The strip sits over the right half, where Apple's predictions are; the
+  recording bar still spans the top. Every layout splits by the same rule (measured
+  against Apple's English split only; AZERTY, QWERTZ, Russian and the rest follow the
+  rule unchecked), and every page (123, #+=). Spatial autocorrect reads taps as on the
+  unsplit keyboard (`KeyboardLayout.unsplitX`), so either G is one key. There's no
+  setting: Apple's split follows its own Split Keyboard preference, which a keyboard
+  extension can't read, so Hex splits whenever the Duo is in that posture (the iOS
+  27.2 simulator has Apple's off until `KeyboardShouldSplitInDefaultContext` is set).
 - **Touch targets (full keyboard):** Every point of the key area types a key: gaps
   split down the middle, the outer keys reach the screen's edges, and row 1 also
   takes the 8 pt gap under the strip (on the Duo, the strip's bottom 4 pt below its
