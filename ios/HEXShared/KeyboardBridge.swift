@@ -268,6 +268,7 @@ struct KeyboardBridge {
         static let allowBluetoothMic = "settings.allowBluetoothMic"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
+        static let appMicrophoneAllowed = "app.microphoneAllowed"
     }
 
     private let defaults: UserDefaults?
@@ -364,6 +365,19 @@ struct KeyboardBridge {
             } else {
                 defaults?.removeObject(forKey: Key.fullAccessSeenAt)
             }
+        }
+    }
+
+    /// Whether Hex has the microphone, as the app last read it. Only the app sets this. A
+    /// keyboard process keeps the permission it read when it started (iOS doesn't update it
+    /// there), so a keyboard opened before Hex was allowed the microphone needs the app's word.
+    var appMicrophoneAllowed: Bool {
+        get {
+            defaults?.bool(forKey: Key.appMicrophoneAllowed) ?? false
+        }
+        nonmutating set {
+            guard newValue != appMicrophoneAllowed else { return }
+            defaults?.set(newValue, forKey: Key.appMicrophoneAllowed)
         }
     }
 

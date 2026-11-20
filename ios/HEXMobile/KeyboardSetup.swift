@@ -57,6 +57,7 @@ final class KeyboardSetupMonitor {
             keyboardAdded = fullAccessOn ? true : nil
         }
         microphone = AVAudioApplication.shared.recordPermission
+        bridge.appMicrophoneAllowed = microphone == .granted
     }
 
     func requestMicrophone(then done: (@MainActor () -> Void)? = nil) {
