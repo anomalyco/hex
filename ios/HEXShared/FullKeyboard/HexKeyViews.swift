@@ -162,6 +162,21 @@ final class HexKeyRecordingPanel: UIView {
     var sideKeyWidth: CGFloat = 50 { didSet { setNeedsLayout() } }
     var horizontalInset: CGFloat = 0 { didSet { setNeedsLayout() } }
     var metrics = KeyboardMetrics.portrait { didSet { setNeedsLayout() } }
+    /// Record typing logs is recording: the mark the strip shows, at the well's leading end.
+    var showsLoggingMark = false {
+        didSet {
+            guard showsLoggingMark != oldValue else { return }
+            if showsLoggingMark, loggingMark == nil {
+                let mark = TypingLogMarkView()
+                mark.textColor = palette.textMuted
+                addSubview(mark)
+                loggingMark = mark
+            }
+            loggingMark?.isHidden = !showsLoggingMark
+            setNeedsLayout()
+        }
+    }
+    private var loggingMark: TypingLogMarkView?
 
     init(loudness: @escaping () -> Float) {
         var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 5)
@@ -237,6 +252,7 @@ final class HexKeyRecordingPanel: UIView {
         cancelButton.palette = palette
         doneButton.palette = palette
         doneSpinner.color = palette.textBase
+        loggingMark?.textColor = palette.textMuted
     }
 
     override func layoutSubviews() {
@@ -257,7 +273,15 @@ final class HexKeyRecordingPanel: UIView {
         styleButton.isHidden = true
         let wellRight = cancelButton.frame.minX - 6
         well.frame = CGRect(x: x, y: rowY, width: max(24, wellRight - x), height: rowH)
-        scope.frame = well.bounds
+        if let loggingMark, showsLoggingMark {
+            // The scope starts after the mark, so its dots never run under the text.
+            let size = loggingMark.sizeThatFits(bounds.size)
+            loggingMark.frame = CGRect(x: well.frame.minX + 14, y: well.frame.midY - size.height / 2, width: size.width, height: size.height)
+            let lead = loggingMark.frame.maxX + 6 - well.frame.minX
+            scope.frame = CGRect(x: lead, y: 0, width: max(0, well.bounds.width - lead), height: well.bounds.height)
+        } else {
+            scope.frame = well.bounds
+        }
     }
 
     @objc private func done() { onDone?() }

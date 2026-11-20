@@ -195,13 +195,15 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 ),
                 now: now
             )
-        case "no-access":
+        case "no-access", "no-access-hint":
             model.configureFixture(snapshot: .offline, now: now, hasFullAccess: false)
         default:
             model.configureFixture(snapshot: warm, now: now)
         }
 
         DictationLanguageFixture.apply(to: model)
+        // `--typing-log-mark`: Record typing logs is recording this field.
+        model.isLoggingTyping = ProcessInfo.processInfo.arguments.contains("--typing-log-mark")
         let view = FullKeyboardView(model: model, target: context.coordinator.target)
         if state.hasPrefix("emoji") {
             view.emojiOverride = true
@@ -251,6 +253,9 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.emojiPanel?.debugJump(toSection: 3)
             case "emoji-probe":
                 EmojiFixture.probe(view)
+            case "no-access-hint":
+                // The Hex key tapped without Full Access.
+                view.showFullAccessHint()
             case "style":
                 view.debugShowStyleMenu()
             case "languages":

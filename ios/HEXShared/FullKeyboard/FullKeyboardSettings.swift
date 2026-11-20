@@ -2,12 +2,15 @@ import Foundation
 
 /// The full keyboard's switches in the shared App Group.
 ///
-/// Without Full Access the keyboard cannot read the App Group, so `isEnabled` reads
-/// `false` there and the keyboard keeps today's setup card.
+/// Without Full Access an iPhone may not let the keyboard read the App Group (the simulator
+/// does), so every switch's default must work there: the full keyboard, which types
+/// without Full Access.
 @MainActor
 struct FullKeyboardSettings {
     static let launchArgument = "--experiment-full-keyboard"
     static let emojiLaunchArgument = "--experiment-emoji"
+    /// Simulator scenes pass `--keyboard dictation-bar` (or `full`) to pick the keyboard.
+    static let keyboardLaunchArgument = "--keyboard"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
@@ -24,9 +27,14 @@ struct FullKeyboardSettings {
         self.defaults = defaults
     }
 
-    /// Experiment: Hex shows a full QWERTY keyboard instead of the dictation bar. Off by default.
+    /// Settings › Keyboard: Full (true) or Dictation bar (false). The full keyboard (letters,
+    /// numbers, symbols, autocorrect and the Hex key) by default; the dictation bar (space,
+    /// delete, return and Dictate) only once it was chosen. Stored as
+    /// `experiments.fullKeyboard`, from when the full keyboard was an experiment: unset or
+    /// true is the full keyboard and false the dictation bar, so testers who never touched
+    /// the experiment get the full keyboard and those who turned it off keep the bar.
     var isEnabled: Bool {
-        get { defaults?.bool(forKey: Key.fullKeyboard) ?? false }
+        get { defaults?.object(forKey: Key.fullKeyboard) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.fullKeyboard) }
     }
 
@@ -62,11 +70,18 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.emoji) }
     }
 
-    /// Simulator scenes pass `--experiment-full-keyboard` (and `--experiment-emoji`) to turn
-    /// the experiments on.
+    /// Simulator scenes pass `--experiment-full-keyboard` or `--keyboard full|dictation-bar`
+    /// to pick the keyboard, and `--experiment-emoji` to turn the emoji experiment on.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
+        }
+        if let index = arguments.firstIndex(of: Self.keyboardLaunchArgument), index + 1 < arguments.count {
+            switch arguments[index + 1] {
+            case "full": isEnabled = true
+            case "dictation-bar": isEnabled = false
+            default: break
+            }
         }
         if arguments.contains(Self.emojiLaunchArgument) {
             emoji = true

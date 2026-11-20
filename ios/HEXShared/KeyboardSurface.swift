@@ -66,6 +66,9 @@ final class KeyboardViewModel: ObservableObject {
     /// picks translated or as spoken for the next dictations.
     @Published var translationTarget: String?
     @Published var pastesTranslation = true
+    /// Record typing logs is recording this field: both keyboards show a small mark the
+    /// whole time, so logging is never hidden.
+    @Published var isLoggingTyping = false
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
     // so 25–30 Hz polling never invalidates SwiftUI views mid-spring.
@@ -491,6 +494,26 @@ extension View {
     }
 }
 
+/// Record typing logs is recording: a dot and "Logging", flat and small, in the dictation
+/// bar's top row (the full keyboard draws `TypingLogMarkView`).
+struct TypingLogMark: View {
+    let textColor: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Muted, not orange: an orange dot would read as iOS's microphone indicator.
+            Circle()
+                .fill(textColor)
+                .frame(width: 5, height: 5)
+            Text(TypingLogMarkView.text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(textColor)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(TypingLogMarkView.accessibilityText)
+    }
+}
+
 enum KeyboardSetupCopy {
     static let fullAccessPath = "Allow Full Access: Settings › Apps › Hex › Keyboards"
 }
@@ -655,6 +678,10 @@ struct KeyboardSurfaceView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open Hex")
+
+            if model.isLoggingTyping {
+                TypingLogMark(textColor: p.textMuted)
+            }
 
             leadingAccessory(palette: p)
 

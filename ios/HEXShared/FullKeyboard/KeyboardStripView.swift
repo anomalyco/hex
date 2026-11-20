@@ -20,6 +20,8 @@ final class KeyboardStripView: UIView {
     var onUndoDictation: (() -> Void)?
     var onPaste: (() -> Void)?
     var onNextKeyboard: (() -> Void)?
+    /// The Full Access hint's Open Hex was tapped (it opens Hex's setup).
+    var onOpenHexFromHint: (() -> Void)?
 
     private let statusLabel = UILabel()
     private let undoChip = UIButton(type: .custom)
@@ -28,6 +30,24 @@ final class KeyboardStripView: UIView {
     private var showsUndo = false
     private var statusText: String?
     private var clipboard: KeyboardClipboardOffer?
+    private var showsFullAccessHint = false
+    /// Built the first time the Hex key is tapped without Full Access.
+    private var fullAccessHintView: FullAccessHintView?
+    /// Record typing logs is recording: a small mark in the strip's leading corner.
+    var showsLoggingMark = false {
+        didSet {
+            guard showsLoggingMark != oldValue else { return }
+            if showsLoggingMark, loggingMark == nil {
+                let mark = TypingLogMarkView()
+                mark.textColor = palette.textMuted
+                addSubview(mark)
+                loggingMark = mark
+            }
+            loggingMark?.isHidden = !showsLoggingMark
+            setNeedsLayout()
+        }
+    }
+    private var loggingMark: TypingLogMarkView?
     /// A plain chip: `UIPasteControl` renders as an empty blue box inside a keyboard
     /// extension (TestFlight build 4), so this reads the clipboard on tap instead.
     private let pasteControl = UIButton(type: .custom)
@@ -100,25 +120,36 @@ final class KeyboardStripView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// `fullAccessHint`, while true, replaces everything else in the strip with what
+    /// dictation needs (`FullAccessHintView`).
     func update(
         suggestions: [KeyboardSuggestion],
         showsUndo: Bool,
         statusText: String?,
-        clipboard: KeyboardClipboardOffer? = nil
+        clipboard: KeyboardClipboardOffer? = nil,
+        fullAccessHint: Bool = false
     ) {
         let changed = suggestions != currentSuggestions || showsUndo != self.showsUndo
             || statusText != self.statusText || clipboard != self.clipboard
+            || fullAccessHint != showsFullAccessHint
         guard changed else { return }
         currentSuggestions = suggestions
         self.showsUndo = showsUndo
         self.statusText = statusText
         self.clipboard = clipboard
+        showsFullAccessHint = fullAccessHint
 
-        undoChip.isHidden = !showsUndo
+        if fullAccessHint {
+            (fullAccessHintView ?? makeFullAccessHintView()).isHidden = false
+        } else {
+            fullAccessHintView?.isHidden = true
+        }
+        let showsHint = fullAccessHint
+        undoChip.isHidden = !showsUndo || showsHint
         let showsClipboard = showsClipboard
         pasteControl.isHidden = !showsClipboard || clipboard == .code(canPaste: false)
         nextKeyboardChip.isHidden = !showsClipboard || clipboard == .paste
-        if showsUndo || showsClipboard {
+        if showsHint || showsUndo || showsClipboard {
             statusLabel.isHidden = true
             slotButtons.forEach { $0.isHidden = true }
         } else if let statusText, suggestions.isEmpty {
@@ -149,7 +180,7 @@ final class KeyboardStripView: UIView {
 
     /// Clipboard chips replace the empty strip; suggestions and status win.
     private var showsClipboard: Bool {
-        guard let clipboard, !showsUndo, statusText == nil else { return false }
+        guard let clipboard, !showsUndo, statusText == nil, !showsFullAccessHint else { return false }
         if case .code = clipboard { return true }
         return currentSuggestions.isEmpty
     }
@@ -160,6 +191,17 @@ final class KeyboardStripView: UIView {
 
     @objc private func handleNextKeyboard() {
         onNextKeyboard?()
+    }
+
+    private func makeFullAccessHintView() -> FullAccessHintView {
+        let hint = FullAccessHintView()
+        hint.onOpenHex = { [weak self] in self?.onOpenHexFromHint?() }
+        hint.isHidden = true
+        addSubview(hint)
+        fullAccessHintView = hint
+        applyPalette()
+        setNeedsLayout()
+        return hint
     }
 
     private func applyPalette() {
@@ -176,6 +218,8 @@ final class KeyboardStripView: UIView {
         chip?.baseForegroundColor = palette.textMuted
         chip?.background.backgroundColor = palette.chipFill
         undoChip.configuration = chip
+        fullAccessHintView?.palette = palette
+        loggingMark?.textColor = palette.textMuted
         for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
             slotButtons[slot].configure(with: currentSuggestions[item], palette: palette)
         }
@@ -212,6 +256,16 @@ final class KeyboardStripView: UIView {
             width: nextSize.width,
             height: chipH
         )
+        var hintFrame = bounds.insetBy(dx: 12, dy: 0)
+        if let loggingMark, showsLoggingMark {
+            // Above the first slot's text, and in from the keyboard's rounded top corner.
+            let size = loggingMark.sizeThatFits(bounds.size)
+            loggingMark.frame = CGRect(x: 18, y: 2, width: size.width, height: size.height)
+            bringSubviewToFront(loggingMark)
+            hintFrame = CGRect(x: loggingMark.frame.maxX + 8, y: 0, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: bounds.height)
+        }
+        fullAccessHintView?.frame = hintFrame
+        fullAccessHintView?.chipHeight = chipH
         let slotW = bounds.width / 3
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
@@ -220,7 +274,7 @@ final class KeyboardStripView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        guard !showsUndo, !showsClipboard, statusLabel.isHidden, bounds.width > 60 else { return }
+        guard !showsUndo, !showsClipboard, !showsFullAccessHint, statusLabel.isHidden, bounds.width > 60 else { return }
         // Hide the divider adjacent to a highlighted primary pill, matching Apple's strip.
         let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
         guard !primaryHighlighted else { return }
@@ -332,5 +386,128 @@ final class KeyboardStripView: UIView {
                 withAttributes: attributes
             )
         }
+    }
+}
+
+/// What the Hex key shows without Full Access: dictation needs Allow Full Access, where to
+/// turn it on, and an Open Hex chip, the only part that opens Hex.
+@MainActor
+final class FullAccessHintView: UIView {
+    static let title = "Allow Full Access to dictate"
+    static let path = "Settings › Apps › Hex › Keyboards"
+
+    var palette = FullKeyboardPalette(isDark: false) { didSet { applyPalette() } }
+    var chipHeight: CGFloat = 30 { didSet { setNeedsLayout() } }
+    var onOpenHex: (() -> Void)?
+
+    private let titleLabel = UILabel()
+    private let pathLabel = UILabel()
+    private let openButton = UIButton(type: .custom)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        titleLabel.text = Self.title
+        titleLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
+        pathLabel.text = Self.path
+        pathLabel.font = .systemFont(ofSize: 12)
+        pathLabel.accessibilityLabel = "Settings, Apps, Hex, Keyboards"
+        for label in [titleLabel, pathLabel] {
+            label.adjustsFontSizeToFitWidth = true
+            label.minimumScaleFactor = 0.8
+            label.lineBreakMode = .byTruncatingTail
+            addSubview(label)
+        }
+        var open = UIButton.Configuration.plain()
+        open.title = "Open Hex"
+        open.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
+        open.background.cornerRadius = 15
+        openButton.configuration = open
+        openButton.accessibilityHint = "Opens Hex's setup"
+        openButton.addTarget(self, action: #selector(handleOpen), for: .touchUpInside)
+        addSubview(openButton)
+        applyPalette()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func handleOpen() {
+        onOpenHex?()
+    }
+
+    private func applyPalette() {
+        titleLabel.textColor = palette.textBase
+        pathLabel.textColor = palette.textMuted
+        var open = openButton.configuration
+        open?.baseForegroundColor = palette.textBase
+        open?.background.backgroundColor = palette.chipFill
+        openButton.configuration = open
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let buttonWidth = openButton.sizeThatFits(CGSize(width: bounds.width, height: chipHeight)).width
+        openButton.frame = CGRect(
+            x: bounds.width - buttonWidth,
+            y: (bounds.height - chipHeight) / 2,
+            width: buttonWidth,
+            height: chipHeight
+        )
+        let textWidth = max(0, openButton.frame.minX - 10)
+        let lineHeight: CGFloat = 16
+        let top = (bounds.height - 2 * lineHeight - 1) / 2
+        titleLabel.frame = CGRect(x: 0, y: top, width: textWidth, height: lineHeight)
+        pathLabel.frame = CGRect(x: 0, y: top + lineHeight + 1, width: textWidth, height: lineHeight)
+    }
+}
+
+/// Record typing logs is recording this field: a dot and "Logging", flat and small, in the
+/// strip's corner and in the recording bar, so logging is never hidden.
+@MainActor
+final class TypingLogMarkView: UIView {
+    static let text = "Logging"
+    static let accessibilityText = "Typing logs are recording"
+
+    /// The dot and the word share the strip's muted ink: an orange dot would read as iOS's
+    /// microphone indicator.
+    var textColor: UIColor = .secondaryLabel {
+        didSet {
+            label.textColor = textColor
+            dot.backgroundColor = textColor
+        }
+    }
+
+    private let dot = UIView()
+    private let label = UILabel()
+    private static let dotSize: CGFloat = 5
+    private static let gap: CGFloat = 4
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = true
+        accessibilityLabel = Self.accessibilityText
+        dot.backgroundColor = textColor
+        dot.layer.cornerRadius = Self.dotSize / 2
+        label.text = Self.text
+        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.textColor = textColor
+        addSubview(dot)
+        addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let text = label.sizeThatFits(size)
+        return CGSize(width: Self.dotSize + Self.gap + ceil(text.width), height: max(Self.dotSize, ceil(text.height)))
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        dot.frame = CGRect(x: 0, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
+        label.frame = CGRect(x: Self.dotSize + Self.gap, y: 0, width: max(0, bounds.width - Self.dotSize - Self.gap), height: bounds.height)
     }
 }

@@ -45,6 +45,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private var dictatingFromHexKey = false
     private var lastDictation: String?
     private var undoHideWork: DispatchWorkItem?
+    /// The Hex key was tapped without Full Access: the strip says what dictation needs.
+    private(set) var showsFullAccessHint = false
+    private var fullAccessHintHideWork: DispatchWorkItem?
+    /// How long the Full Access hint stays unless a key or the strip is used first.
+    static let fullAccessHintDuration: TimeInterval = 8
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
@@ -100,6 +105,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
+        stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
         stripView.onNextKeyboard = { [weak self] in
             self?.typingLog?.ui("next_keyboard")
             self?.hostController?.advanceToNextInputMode()
@@ -113,6 +119,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         hexKey.onHoldRelease = { [weak self] in self?.hexKeyReleased() }
         hexKey.onMenuOpen = { [weak self] point in
             guard let self else { return }
+            // Styles and languages are for dictation, which needs Full Access.
+            guard self.model.hasFullAccess else {
+                self.showFullAccessHint()
+                return
+            }
             self.typingLog?.ui("hex_menu")
             self.showStyleMenu()
             self.forwardMenuPoint(point, release: false)
@@ -131,6 +142,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
                 return
             }
             self.hideUndo()
+            self.hideFullAccessHint()
             self.refreshReturnKey()
             self.refreshStrip()
             self.onTextEdit?()
@@ -505,6 +517,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             setRecording(recording)
         }
         refreshRecordingPanel()
+        stripView.showsLoggingMark = model.isLoggingTyping
+        recordingPanel?.showsLoggingMark = model.isLoggingTyping
         plane.spaceLabel = model.hasFullAccess ? model.languageSummary : nil
         // A language picked in the switch changes the layout at once when it follows dictation.
         syncLanguage()
@@ -524,9 +538,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     func refreshStrip() {
-        let status: String? = if !model.hasFullAccess {
-            "Allow Full Access to dictate with Hex"
-        } else if model.stagePhase == .failed {
+        // Without Full Access the strip suggests and corrects like any keyboard's; what
+        // dictation needs shows only once the Hex key is tapped (`showFullAccessHint`).
+        let status: String? = if model.hasFullAccess, model.stagePhase == .failed {
             model.statusMessage
         } else {
             nil
@@ -543,8 +557,42 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             suggestions: suggestions,
             showsUndo: lastDictation != nil,
             statusText: status,
-            clipboard: clipboardOffer
+            clipboard: clipboardOffer,
+            fullAccessHint: showsFullAccessHint && !model.hasFullAccess
         )
+    }
+
+    // MARK: - Without Full Access
+
+    /// The Hex key without Full Access: the keys keep typing, and the strip says, for a few
+    /// seconds, that dictation needs Allow Full Access and where to turn it on. Only its
+    /// Open Hex chip opens Hex; nothing opens it by itself.
+    func showFullAccessHint() {
+        dismissStyleMenu()
+        showsFullAccessHint = true
+        refreshStrip()
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: "\(FullAccessHintView.title). Settings, Apps, Hex, Keyboards."
+        )
+        fullAccessHintHideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.hideFullAccessHint() }
+        fullAccessHintHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullAccessHintDuration, execute: work)
+    }
+
+    private func hideFullAccessHint() {
+        fullAccessHintHideWork?.cancel()
+        fullAccessHintHideWork = nil
+        guard showsFullAccessHint else { return }
+        showsFullAccessHint = false
+        refreshStrip()
+    }
+
+    private func openSetupFromHint() {
+        keyFeedback()
+        hideFullAccessHint()
+        model.onOpenURL?(KeyboardLaunchRequest.setup.url)
     }
 
     private func pasteFromClipboard() {
@@ -722,6 +770,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             ])
             self.model.onStyleSelected?(self.model.style.next)
         }
+        panel.showsLoggingMark = model.isLoggingTyping
         insertSubview(panel, belowSubview: callout)
         recordingPanel = panel
         setNeedsLayout()
@@ -773,6 +822,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private func hexKeyHeld() {
         if allowsHaptics() { haptics.impactOccurred() }
         dismissStyleMenu()
+        guard model.hasFullAccess else {
+            // Dictation needs Full Access (the microphone and Hex's App Group): say so,
+            // instead of a dictation that can't start.
+            dictatingFromHexKey = false
+            showFullAccessHint()
+            return
+        }
         if hexKey.isWarm {
             typingLog?.ui("hex_key", [TypingLogField("dictation", .string("warm"))])
             dictatingFromHexKey = true

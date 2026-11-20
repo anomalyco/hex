@@ -597,19 +597,37 @@ final class KeyboardProbeLog: @unchecked Sendable {
         .containerURL(forSecurityApplicationGroupIdentifier: KeyboardBridge.appGroup)?
         .appendingPathComponent("keyboard-capture-probe.log")
 
+    /// Past this size the log keeps only its newest `trimmedBytes`, so it never grows
+    /// without limit in the App Group.
+    static let maximumBytes: UInt64 = 512 * 1024
+    static let trimmedBytes = 256 * 1024
+
     func write(_ message: String) {
         logger.notice("\(message, privacy: .public)")
         guard let url else { return }
         let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
         lock.withLock {
             if let handle = try? FileHandle(forWritingTo: url) {
-                handle.seekToEndOfFile()
+                let size = handle.seekToEndOfFile()
                 handle.write(Data(line.utf8))
                 try? handle.close()
+                if size + UInt64(line.utf8.count) > Self.maximumBytes {
+                    Self.trim(url)
+                }
             } else {
                 try? Data(line.utf8).write(to: url)
             }
         }
+    }
+
+    /// Keeps the newest `trimmedBytes`, from the first whole line in them.
+    static func trim(_ url: URL, keeping bytes: Int = trimmedBytes) {
+        guard let data = try? Data(contentsOf: url), data.count > bytes else { return }
+        var tail = data.suffix(bytes)
+        if let newline = tail.firstIndex(of: UInt8(ascii: "\n")) {
+            tail = tail[tail.index(after: newline)...]
+        }
+        try? Data(tail).write(to: url, options: .atomic)
     }
 
     static func memory() -> String {
