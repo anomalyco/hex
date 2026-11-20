@@ -214,6 +214,26 @@ struct ContentView: View {
                         SettingsLinkLabel(title: "Run setup again", icon: "arrow.counterclockwise")
                     }
                     .buttonStyle(.plain)
+                }
+
+                // The privacy policy link App Review 5.1.1(i) asks for, with support and the
+                // licence notices.
+                SettingsCard {
+                    Button {
+                        SafariSheet.present(HexLinks.privacyPolicy)
+                    } label: {
+                        SettingsLinkLabel(title: "Privacy policy", icon: "hand.raised", trailingIcon: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
+
+                    SettingsDivider(leading: 50)
+
+                    Button {
+                        SafariSheet.present(HexLinks.support)
+                    } label: {
+                        SettingsLinkLabel(title: "Support", icon: "questionmark.circle", trailingIcon: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
 
                     SettingsDivider(leading: 50)
 
