@@ -317,13 +317,18 @@ nonisolated struct TypingDecoder {
             for key in layout.keys {
                 guard let c = key.character, c.count == 1, let letter = c.first, letter.isLetter else { continue }
                 let shift = offsets[letter] ?? .zero
-                centres[letter] = CGPoint(x: key.frame.midX + shift.dx, y: key.frame.midY + shift.dy)
+                // A split layout's halves are pushed together, so a letter on both halves (G, V)
+                // has one centre, where the unsplit keyboard has it.
+                centres[letter] = CGPoint(x: layout.unsplitX(key.frame.midX) + shift.dx, y: key.frame.midY + shift.dy)
                 bottom = max(bottom, key.frame.midY)
             }
             let m = layout.metrics
             self.init(
                 centres: centres,
-                pitch: CGSize(width: layout.letterWidth + m.gap, height: m.keyHeight + m.rowGap),
+                pitch: CGSize(
+                    width: layout.isSplit ? SplitGeometry.pitch : layout.letterWidth + m.gap,
+                    height: m.keyHeight + m.rowGap
+                ),
                 bottomRowY: bottom
             )
         }

@@ -517,6 +517,49 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "but I miss here we more than on the built in apple keyboard which also sucks ")
     }
 
+    /// The Duo unfolded upright splits the keys (`SplitGeometry`): either G types g, both space
+    /// bars type a space, the middle between the halves types nothing, and accents and the
+    /// delete-word slide work on the right half.
+    func testTypesOnTheSplitLayout() throws {
+        engine.posture = .unfoldedWide
+        engine.windowInset = 75
+        engine.width = 801
+        let layout = engine.layout
+        let split = try XCTUnwrap(layout.split)
+        func at(_ label: String, right: Bool) -> CGPoint {
+            let key = layout.keys.first { $0.label == label && ($0.frame.midX > split.middle) == right }!
+            return CGPoint(x: key.frame.midX, y: key.frame.midY)
+        }
+        func tapAt(_ point: CGPoint) {
+            engine.touchBegan(id: 1, at: point)
+            engine.touchEnded(id: 1, at: point)
+            now += 0.5
+        }
+        for (label, right) in [("g", false), ("o", true), ("t", false), ("space", false), ("g", true), ("o", true)] {
+            tapAt(at(label, right: right))
+        }
+        tapAt(CGPoint(x: split.middle, y: at("q", right: false).y))
+        tapAt(at("space", right: true))
+        XCTAssertEqual(target.text, "got go ")
+
+        engine.touchBegan(id: 2, at: at("u", right: true))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 2))
+        let menu = try XCTUnwrap(engine.activeAccentMenu)
+        let cell = menu.cellFrames[1]
+        engine.touchMoved(id: 2, to: CGPoint(x: cell.midX, y: cell.midY))
+        engine.touchEnded(id: 2, at: CGPoint(x: cell.midX, y: cell.midY))
+        XCTAssertEqual(target.text, "got go " + menu.options[1])
+
+        let plane = KeyboardKeyPlaneView(engine: engine)
+        let delete = at("delete", right: true)
+        plane.began(id: 3, sample: TypingLogTouchSample(point: delete, timestamp: 0))
+        XCTAssertEqual(target.text, "got go ")
+        let slid = CGPoint(x: delete.x - layout.letterWidth * 1.2, y: delete.y)
+        plane.moved(id: 3, sample: TypingLogTouchSample(point: slid, timestamp: 0))
+        plane.ended(id: 3, sample: TypingLogTouchSample(point: slid, timestamp: 0))
+        XCTAssertEqual(target.text, "got ")
+    }
+
     func testEmailFieldShowsAtAndDot() {
         target.keyboardType = .emailAddress
         engine.configureForField()

@@ -153,6 +153,10 @@ final class FullKeyboardEngine {
     /// Experiments › Emoji, in fields that take emoji.
     var showsEmoji = false { didSet { if showsEmoji != oldValue { rebuildLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
+    /// An iPhone, or the iPhone Duo folded or unfolded (`KeyboardPosture`).
+    var posture: KeyboardPosture = .phone { didSet { if posture != oldValue { rebuildLayout() } } }
+    /// How far iOS set the keyboard in from each side of the screen (the Duo).
+    var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
     /// The letters, accents and spelling dictionary (Settings › Keyboard › Languages).
     var language: KeyboardLanguage = .english {
         didSet {
@@ -909,7 +913,8 @@ final class FullKeyboardEngine {
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
     private func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
         if text.count == 1, text.first?.isLetter == true {
-            tokenTaps.append(point)
+            // Spatial autocorrect reads taps as on the unsplit keyboard (`KeyboardLayout.unsplitX`).
+            tokenTaps.append(point.map { CGPoint(x: layout.unsplitX($0.x), y: $0.y) })
         } else {
             tokenTaps.removeAll()
         }
@@ -956,7 +961,9 @@ final class FullKeyboardEngine {
             showsGlobe: showsGlobe,
             showsEmoji: showsEmoji,
             horizontalInset: horizontalInset,
-            language: language
+            language: language,
+            posture: posture,
+            windowInset: windowInset
         )
         syncDecoderKeys()
         logState(cause)

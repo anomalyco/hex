@@ -221,23 +221,47 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation) + lift
+        KeyboardLayout.height(for: orientation, posture: engine.posture) + lift
     }
 
-    /// Room above the strip: the recording bar's, or the emoji search results'.
-    private var lift: CGFloat { max(recordingLift, emojiSearchLift) }
+    /// Room above the strip for the emoji search results. The strip itself keeps its height in
+    /// every state, the recording bar's included.
+    private var lift: CGFloat { emojiSearchLift }
 
-    /// While dictating, the keyboard grows this much taller so the recording bar has room;
-    /// the keys stay where they were on screen.
-    static let recordingLiftHeight: CGFloat = 16
-    private var recordingLift: CGFloat = 0
     /// Asks the host to apply `preferredHeight` now (the keyboard extension resizes itself).
     var onPreferredHeightChange: (() -> Void)?
 
     /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
     private var appliedLift: CGFloat {
-        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation)))
+        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture)))
     }
+
+    /// Reads which device and posture the keyboard is on, and how far iOS set it in from the
+    /// screen's sides, from its window. The Duo's unfolded screen has regular size classes either
+    /// way up, so the size classes alone can't tell its postures apart.
+    private func syncPosture() {
+        guard let screen = window?.windowScene?.screen ?? window?.screen else { return }
+        let size = screen.bounds.size
+        let posture = KeyboardPosture.current(screenSize: size, isFoldable: Self.isFoldable)
+        let inset = posture == .phone ? 0 : max(0, (size.width - bounds.width) / 2)
+        let heightChanges = posture != engine.posture
+        engine.posture = posture
+        engine.windowInset = inset
+        if heightChanges { onPreferredHeightChange?() }
+    }
+
+    /// The iPhone Duo (`KeyboardPosture.foldableModels`), read once per process.
+    static let isFoldable: Bool = {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            return KeyboardPosture.foldableModels.contains(simulated)
+        }
+        var system = utsname()
+        uname(&system)
+        let model = withUnsafeBytes(of: &system.machine) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        return KeyboardPosture.foldableModels.contains(model)
+    }()
 
     // MARK: - Host events
 
@@ -488,6 +512,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.orientation = orientation
         engine.horizontalInset = isLandscape ? max(safeAreaInsets.left, safeAreaInsets.right) : 0
         engine.width = bounds.width
+        syncPosture()
         engine.typingLog?.commitGeometry()
         let layout = engine.layout
 
@@ -693,15 +718,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         showsRecording = recording
         dismissStyleMenu()
         if recording { closeEmojiPanel() }
-        // The bar it shrinks back from is measured before the keyboard drops its lift.
         let closingFrames = recording ? nil : morphFrames()
-        let lift = recording ? Self.recordingLiftHeight : 0
-        if lift != recordingLift {
-            recordingLift = lift
-            onPreferredHeightChange?()
-            setNeedsLayout()
-            layoutIfNeeded()
-        }
         if recording {
             plane.cancelAllTouches()
             hideUndo()
@@ -735,10 +752,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
     }
 
-    /// Where the recording panel sits: the suggestion strip's full width, so the keys stay.
+    /// Where the recording panel sits: the suggestion strip, full width and its height, so
+    /// neither the keyboard nor the keys move.
     private var recordingPanelFrame: CGRect {
         let m = engine.layout.metrics
-        return CGRect(x: 0, y: m.stripTop, width: bounds.width, height: m.stripHeight + appliedLift)
+        return CGRect(x: 0, y: m.stripTop + appliedLift, width: bounds.width, height: m.stripHeight)
     }
 
     /// The Hex mark's frame in the strip and the full-width bar it grows into, or nil when
@@ -751,9 +769,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let mark = hex.frame.offsetBy(dx: 0, dy: lift)
         let bar = CGRect(
             x: layout.horizontalInset + m.side,
-            y: 6,
+            y: m.stripTop + lift + 4,
             width: bounds.width - 2 * (layout.horizontalInset + m.side),
-            height: m.stripHeight + lift - 12
+            height: m.stripHeight - 8
         )
         return (mark, bar)
     }
