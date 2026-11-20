@@ -211,6 +211,78 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertTrue(AutocorrectEngine.areAdjacentKeys("ñ", "l", language: .spanish))
     }
 
+    // MARK: - Split and punctuated guesses
+
+    /// A deterministic dictionary: `UITextChecker`'s answers vary between iOS versions.
+    private final class StubChecker: TextChecking {
+        var valid: Set<String> = []
+        var guessTable: [String: [String]] = [:]
+        var completionTable: [String: [String]] = [:]
+        func isWordValid(_ word: String) -> Bool { valid.contains(word.lowercased()) }
+        func guesses(for word: String) -> [String] { guessTable[word.lowercased()] ?? [] }
+        func completions(for prefix: String) -> [String] { completionTable[prefix.lowercased()] ?? [] }
+    }
+
+    private func stubbed(_ configure: (StubChecker) -> Void) -> AutocorrectEngine {
+        let checker = StubChecker()
+        configure(checker)
+        return AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
+    }
+
+    private func fix(_ engine: AutocorrectEngine, _ typed: String) -> String? {
+        engine.replacementOnSpace(beforeInput: typed, field: .text, autocorrectionType: .default)?.replacement
+    }
+
+    func testAMissedSpaceBecomesTwoWordsNeverAHyphen() {
+        let engine = stubbed {
+            $0.valid = ["up", "to", "a", "lot"]
+            // UITextChecker lists the hyphenated form first and the spaced one later.
+            $0.guessTable = ["upto": ["up-to", "updo", "unto", "up to"], "alot": ["a-lot", "lot", "a lot"]]
+        }
+        XCTAssertEqual(fix(engine, "upto"), "up to")
+        XCTAssertEqual(fix(engine, "Upto"), "Up to")
+        XCTAssertEqual(fix(engine, "alot"), "a lot", "English \"a\" is a word")
+        let slots = engine.suggestions(beforeInput: "upto", field: .text, autocorrectionType: .default)
+        XCTAssertEqual(slots.dropFirst().first?.replacement, "up to")
+        XCTAssertFalse(slots.contains { $0.replacement.contains("-") }, "never offers a hyphen you didn't type")
+    }
+
+    func testASplitNeedsTwoWordsYourLettersAndTheSpacedForm() {
+        let engine = stubbed {
+            $0.valid = ["ab", "cd", "e", "mail", "xy"]
+            $0.guessTable = [
+                // Only the hyphenated form: the checker doesn't offer the two words.
+                "abcd": ["ab-cd"],
+                // "zq" isn't a word.
+                "xyzq": ["xy-zq", "xy zq"],
+                // One letter that isn't "a" or "I" (UITextChecker accepts every letter).
+                "bmail": ["b-mail", "b mail"],
+                // Not a missed space: the letters changed.
+                "emial": ["e-mail", "e mail"],
+            ]
+        }
+        for typed in ["abcd", "xyzq", "bmail", "emial"] {
+            XCTAssertNil(fix(engine, typed), "\(typed) stays as typed")
+        }
+    }
+
+    func testAGuessNeverAddsPunctuationYouDidntType() {
+        let engine = stubbed {
+            $0.valid = ["ok"]
+            $0.guessTable = ["tbq": ["t.b.q", "tb-q", "tbq."], "wnot": ["w.not", "won't"]]
+        }
+        XCTAssertNil(fix(engine, "tbq"))
+        XCTAssertEqual(fix(engine, "wnot"), "won't", "a contraction's apostrophe is part of the word")
+        let slots = engine.suggestions(beforeInput: "tbq", field: .text, autocorrectionType: .default)
+        XCTAssertFalse(slots.contains { $0.replacement.contains(".") || $0.replacement.contains("-") })
+    }
+
+    func testTheSystemDictionarySplitsAMissedSpace() {
+        // iOS 27's UITextChecker guesses "never mind" and "never-mind" for this.
+        XCTAssertEqual(fix(engine.autocorrect, "nevermind"), "never mind")
+        XCTAssertNotEqual(fix(engine.autocorrect, "eachother")?.contains("-"), true)
+    }
+
     func testTurningAutocorrectSettingOffKeepsSuggestionsWithoutAutoReplacing() {
         engine.autocorrect.isEnabled = false
         typeWord("dont")

@@ -422,9 +422,9 @@ final class AutocorrectEngine {
 
         var bestGuess: String?
         var bestScore = Double.greatestFiniteMagnitude
-        for (rank, rawGuess) in checker.guesses(for: token).prefix(8).enumerated() {
-            // Skip multi-word splits (`alot` -> `a lot` is fine only if single space, keep v1 single-token + apostrophe).
-            guard !rawGuess.contains(" ") else { continue }
+        let guesses = checker.guesses(for: token)
+        for (rank, checkerGuess) in guesses.prefix(8).enumerated() {
+            guard let rawGuess = usableGuess(checkerGuess, typed: token, among: guesses) else { continue }
             let normalizedGuess = rawGuess.replacingOccurrences(of: "'", with: "").lowercased()
             guard let editCost = Self.singleEditKeyboardCost(from: lower, to: normalizedGuess, language: language) else { continue }
             let totalScore = editCost + Double(rank) * 0.08
@@ -437,10 +437,47 @@ final class AutocorrectEngine {
         return Self.matchCase(of: token, onto: bestGuess)
     }
 
+    /// A `UITextChecker` guess as autocorrect and the strip may use it, or nil. A guess adds
+    /// no character you didn't type but letters and a contraction's apostrophe (never "t.b."
+    /// for "tb"). One that splits what you typed into two words ("up-to" or "up to" for
+    /// "upto") is used only as two words with a space, never hyphenated, and only when its
+    /// letters are exactly yours (a missed space), both parts are words, and the checker
+    /// offers the spaced form itself.
+    private func usableGuess(_ guess: String, typed token: String, among guesses: [String]) -> String? {
+        let isSeparator: (Character) -> Bool = { $0 == " " || $0 == "-" }
+        guard guess.contains(where: isSeparator) else {
+            let typed = Set(token)
+            let addsOnlyLetters = guess.allSatisfy { $0.isLetter || $0 == "'" || typed.contains($0) }
+            return addsOnlyLetters ? guess : nil
+        }
+        let parts = guess.split(separator: " ", omittingEmptySubsequences: false)
+            .flatMap { $0.split(separator: "-", omittingEmptySubsequences: false) }
+            .map(String.init)
+        guard parts.count == 2,
+              parts.joined().lowercased() == token.lowercased(),
+              parts.allSatisfy({ isSplitWord($0) })
+        else { return nil }
+        let spaced = parts.joined(separator: " ")
+        guard guesses.contains(where: { $0.caseInsensitiveCompare(spaced) == .orderedSame }) else { return nil }
+        return spaced
+    }
+
+    /// One half of a split guess: a word of two or more letters the dictionary knows, or
+    /// English "a" and "I" (`UITextChecker` accepts every single letter as a word).
+    private func isSplitWord(_ part: String) -> Bool {
+        guard !part.isEmpty, part.allSatisfy(\.isLetter) else { return false }
+        if part.count == 1 {
+            return language.usesEnglishFixes && (part.lowercased() == "a" || part.lowercased() == "i")
+        }
+        return checker.isWordValid(part)
+    }
+
     private func rankedGuesses(for token: String) -> [String] {
         let lower = token.lowercased()
         let language = language
-        return checker.guesses(for: token)
+        let guesses = checker.guesses(for: token)
+        return guesses
+            .compactMap { usableGuess($0, typed: token, among: guesses) }
             .prefix(8)
             .enumerated()
             .sorted { a, b in
