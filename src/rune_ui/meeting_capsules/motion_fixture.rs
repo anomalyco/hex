@@ -340,8 +340,10 @@ fn stop_is_one_named_action_for_keyboard_and_accessibility() {
     }
 }
 
+// Every enabled row is a button under the pointer, the band drags with the
+// grab hand, and a row with nothing to do keeps the arrow.
 #[test]
-fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
+fn localized_action_rows_share_their_geometry_and_pointer_in_every_corner() {
     use crate::desktop::i18n;
     use MeetingIndicatorCorner::*;
     for &(code, _) in i18n::LANGUAGE_CHOICES.iter().filter(|(c, _)| c.is_some()) {
@@ -394,7 +396,7 @@ fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
                     rt.frame(1. / 60.);
                     assert_eq!(
                         rt.cursor(),
-                        Cursor::Default,
+                        Cursor::Pointer,
                         "{code:?} {corner:?} {key} {px}"
                     );
                     assert!(
@@ -407,6 +409,48 @@ fn localized_action_rows_share_their_geometry_and_arrow_in_every_corner() {
         }
     }
     i18n::apply(Some("en"));
+}
+
+#[test]
+fn the_meter_band_grabs_and_a_row_with_nothing_to_do_keeps_the_arrow() {
+    let (mut rt, _, _) = runtime(live_recording("cursors"), false, true, RECORDING);
+    rt.frame(0.);
+    // At rest the band is the whole pill, and dragging it moves the capsule.
+    let (x, y) = rt.find("pill").unwrap();
+    rt.pointer_move(x, y);
+    rt.frame(1. / 60.);
+    assert_eq!(rt.cursor(), Cursor::Grab);
+    open_recording(&mut rt);
+    let [x, y, w, h] = laid_out(&rt, "meta");
+    rt.pointer_move(x + w / 2., y + h / 2.);
+    rt.frame(1. / 60.);
+    assert_eq!(rt.cursor(), Cursor::Grab);
+    // Copy new has nothing new and Copy all no transcript: both keep the arrow.
+    for key in ["copy-new", "copy-all"] {
+        let (x, y) = rt.find(key).unwrap();
+        rt.pointer_move(x, y);
+        rt.frame(1. / 60.);
+        assert_eq!(rt.cursor(), Cursor::Default, "{key}");
+    }
+    // Copy agent prompt always works, and so does Stop.
+    for key in ["copy-prompt", "stop"] {
+        let (x, y) = rt.find(key).unwrap();
+        rt.pointer_move(x, y);
+        rt.frame(1. / 60.);
+        assert_eq!(rt.cursor(), Cursor::Pointer, "{key}");
+    }
+    // The finished meeting's ✕ is a button too, in the band that drags.
+    rt.update(|c, _| {
+        let Kind::Ready(m) = ready_transcript() else {
+            unreachable!()
+        };
+        c.published(m);
+    });
+    landed(&mut rt);
+    let (x, y) = rt.find("dismiss").unwrap();
+    rt.pointer_move(x, y);
+    rt.frame(1. / 60.);
+    assert_eq!(rt.cursor(), Cursor::Pointer, "dismiss");
 }
 
 #[test]
@@ -449,7 +493,21 @@ fn row_swipes_do_not_move_the_panel_or_fire_actions_but_small_clicks_work() {
                 let py = y + h / 2.;
                 rt.pointer_move(px, py);
                 rt.frame(0.);
-                assert_eq!(rt.cursor(), Cursor::Default);
+                // An enabled row is a button; a disabled one is not a target
+                // and falls through to the panel's arrow.
+                let focusable = rt
+                    .elements()
+                    .iter()
+                    .any(|e| e.key.as_deref() == Some(key) && e.focusable);
+                assert_eq!(
+                    rt.cursor(),
+                    if focusable {
+                        Cursor::Pointer
+                    } else {
+                        Cursor::Default
+                    },
+                    "{key} {phase}"
+                );
                 rt.pointer_down(px, py);
                 rt.pointer_move(px + 10., py);
                 rt.frame(0.);

@@ -103,16 +103,18 @@ pub(super) fn actions(
                 })
                 .build_push(p.k),
         };
-        face.key(key).on_press_tx(move |c: &mut Capsule, tx| {
-            if !c.presentation.inherits_offer_window()
-                && c.more_open == choosing
-                && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
-            {
-                press(c);
-                // The surface answers in the frame of the press.
-                c.stir(tx);
-            }
-        })
+        face.key(key)
+            .cursor(Cursor::Pointer)
+            .on_press_tx(move |c: &mut Capsule, tx| {
+                if !c.presentation.inherits_offer_window()
+                    && c.more_open == choosing
+                    && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
+                {
+                    press(c);
+                    // The surface answers in the frame of the press.
+                    c.stir(tx);
+                }
+            })
     };
     if choosing {
         let label = candidate

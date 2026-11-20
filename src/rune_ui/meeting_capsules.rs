@@ -1179,6 +1179,8 @@ fn button(
         })
         .build_push(p.k)
         .key(key)
+        // The capsule's body drags; its buttons are buttons.
+        .cursor(Cursor::Pointer)
         // The surface answers in the frame of the press.
         .on_press_tx(move |c: &mut Capsule, tx| {
             press(c);
@@ -1197,6 +1199,7 @@ fn dismiss_button(p: Paint) -> El {
         .label(tr("Close"))
         .build(p.k)
         .key("dismiss")
+        .cursor(Cursor::Pointer)
         .on_press_tx(|c: &mut Capsule, tx| {
             c.close();
             c.stir(tx);
@@ -1906,6 +1909,23 @@ mod tests {
             commands.try_recv(),
             Ok(ControllerCommand::DismissReminder(_))
         ));
+    }
+
+    #[test]
+    fn a_reminders_buttons_take_the_pointer_while_its_body_grabs() {
+        let (mut rt, _, _) = runtime(reminder(true, false), false, true, REMINDER);
+        landed(&mut rt);
+        for key in ["not-now", "join-record", "record"] {
+            let (x, y) = rt.find(key).unwrap();
+            rt.pointer_move(x, y);
+            rt.frame(1. / 60.);
+            assert_eq!(rt.cursor(), Cursor::Pointer, "{key}");
+        }
+        // The name and the time between the dot and the buttons drag it.
+        let (x, y) = rt.find("title").unwrap();
+        rt.pointer_move(x, y);
+        rt.frame(1. / 60.);
+        assert_eq!(rt.cursor(), Cursor::Grab);
     }
 
     #[test]

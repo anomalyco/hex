@@ -166,6 +166,23 @@ fn the_offer_keeps_its_corner_controls_and_clear_input_margin() {
 }
 
 #[test]
+fn the_offers_buttons_take_the_pointer_while_its_body_grabs() {
+    let (mut rt, _, _) = runtime(offer(slack_huddle()), false, true, PANEL);
+    landed(&mut rt);
+    for key in ["offer-more", "not-now", "record"] {
+        let (x, y) = rt.find(key).unwrap();
+        rt.pointer_move(x, y);
+        rt.frame(1. / 60.);
+        assert_eq!(rt.cursor(), Cursor::Pointer, "{key}");
+    }
+    // Between the name and its buttons the capsule itself drags.
+    let (x, y) = rt.find("title").unwrap();
+    rt.pointer_move(x, y);
+    rt.frame(1. / 60.);
+    assert_eq!(rt.cursor(), Cursor::Grab);
+}
+
+#[test]
 fn the_offer_has_no_default_key_and_names_each_focus_target() {
     let key = |rt: &mut Runtime<Capsule>, key| {
         rt.key(rune::KeyEvent {
