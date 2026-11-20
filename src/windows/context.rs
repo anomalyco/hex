@@ -14,6 +14,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use url::Url;
+use windows::Win32::UI::Accessibility::{IUIAutomation, IUIAutomationElement};
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
 
 use crate::dictation::browser_page::BrowserPages;
@@ -92,10 +93,10 @@ impl PendingContext {
     }
 }
 
-/// Meeting detection's page read waits longer than a dictation's single page:
-/// it walks every window of the browser, and the watcher has no transcription
-/// to hide the wait behind. A hung accessibility provider still costs one
-/// probe interval, never the watcher's thread.
+/// How long a meeting page read waits before falling back to the window
+/// titles. The watcher loop is already shielded: its `TabProbe` runs the
+/// query on a thread of its own, so this bounds that thread's wait for the
+/// accessibility provider, not the loop.
 const MEETING_READ_DEADLINE: Duration = Duration::from_secs(2);
 
 /// How many of the browser's windows one meeting probe reads. A browser with
@@ -104,12 +105,11 @@ const MEETING_READ_DEADLINE: Duration = Duration::from_secs(2);
 const MAX_MEETING_WINDOWS: usize = 6;
 
 /// The page a browser holding the microphone shows, for meeting detection:
-/// the addresses and tab titles of every visible window of its executable,
-/// since Chromium-family browsers behind another app expose a page only
-/// through their own windows' UI Automation Documents. A page or tab title
-/// naming a call (a Google Meet call, a Teams page) reports that call's site;
-/// a browser with no readable call page keeps the "Call in <browser>"
-/// fallback.
+/// the addresses and titles of every visible window of its executable, since
+/// Chromium-family browsers behind another app expose a page only through
+/// their own windows' UI Automation Documents. A page or window title naming
+/// a call (a Google Meet call, a Teams page) reports that call's site; a
+/// browser with no readable call page keeps the "Call in <browser>" fallback.
 pub(crate) fn capture_for_meeting(
     canonical_bundle_id: &str,
 ) -> color_eyre::Result<ContextSnapshot> {
@@ -124,7 +124,13 @@ pub(crate) fn capture_for_meeting(
     }
     let mut pages = BrowserPages::default();
     for &window in &windows {
-        pages.push_title(window_title(window));
+        // A window title is a whole window's, not one tab's: its browser
+        // name, Edge's profile and Edge's other-tab count are removed before
+        // detection reads it.
+        pages.push_title(
+            window_title(window)
+                .map(|title| crate::meeting::detection::normalize_window_title(&title)),
+        );
     }
     if let Some(receiver) = spawn_meeting_read(windows) {
         match receiver.recv_timeout(MEETING_READ_DEADLINE) {
@@ -307,92 +313,125 @@ fn spawn_meeting_read(windows: Vec<HWND>) -> Option<mpsc::Receiver<Vec<String>>>
 }
 
 /// Reads each window's page in order, stopping at the first address that
-/// names a call: the walk is bounded by the windows and the caller's
-/// deadline.
+/// names a call. One UI Automation instance serves every window, so a
+/// meeting probe pays for COM and the automation object once, not per
+/// window.
 fn read_pages(windows: Vec<isize>) -> Vec<String> {
-    let mut urls = Vec::new();
-    for window in windows {
-        let Some(url) = read_document_url(window) else {
-            continue;
-        };
-        let names_call =
-            browser_url(&url).is_some_and(|url| crate::meeting::detection::names_call(&url));
-        urls.push(url);
-        if names_call {
-            break;
+    let urls = with_documents(|automation| {
+        let mut urls = Vec::new();
+        for window in windows {
+            let Some(url) = document_url(automation, window) else {
+                continue;
+            };
+            let names_call =
+                browser_url(&url).is_some_and(|url| crate::meeting::detection::names_call(&url));
+            urls.push(url);
+            if names_call {
+                break;
+            }
         }
-    }
-    urls
+        urls
+    });
+    urls.unwrap_or_default()
 }
 
-/// The page URL of `window`'s web area, through UI Automation. The caller
-/// may be the foreground context read or a meeting probe of a background
-/// browser window, so COM is initialized (and released) here.
+/// The page URL of `window`'s web area, through UI Automation. The foreground
+/// context read of a dictation uses this too, so COM is initialized (and
+/// released) here.
 fn read_document_url(window: isize) -> Option<String> {
-    use windows::Win32::Foundation::HWND;
+    with_documents(|automation| document_url(automation, window))?
+}
+
+/// Runs `read` with one UI Automation instance on this helper thread,
+/// releasing COM afterwards; `None` when COM or the instance is unavailable.
+fn with_documents<T>(read: impl FnOnce(&IUIAutomation) -> T) -> Option<T> {
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
         CoUninitialize,
     };
-    use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_I4};
-    use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationValuePattern, TreeScope_Descendants,
-        UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_ValuePatternId,
-    };
+    use windows::Win32::UI::Accessibility::CUIAutomation;
 
+    // SAFETY: COM belongs to the calling helper thread, and the instance is
+    // created, used, and released before COM is uninitialized.
+    unsafe {
+        let com = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let automation: windows::core::Result<IUIAutomation> =
+            CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER);
+        let answer = match automation {
+            Ok(automation) => {
+                let answer = read(&automation);
+                drop(automation);
+                Some(answer)
+            }
+            Err(_) => None,
+        };
+        if com.is_ok() {
+            CoUninitialize();
+        }
+        answer
+    }
+}
+
+/// How many elements one window's walk reads at most: the browser's own
+/// chrome is a few dozen, and a page's content is never entered.
+const MAX_WINDOW_ELEMENTS: usize = 200;
+
+/// The web address of `window`'s first Document. The walk follows the
+/// browser's own chrome and stops at every Document, so a page's content,
+/// the costly part of a UI Automation read, is never walked; a docked
+/// DevTools document is a sibling and still answers if it is not the page.
+fn document_url(automation: &IUIAutomation, window: isize) -> Option<String> {
+    use std::collections::VecDeque;
+
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Accessibility::UIA_DocumentControlTypeId;
+
+    // SAFETY: read-only UI Automation queries; `window` came from
+    // EnumWindows and every element belongs to this thread's instance.
     unsafe {
         if window == 0 {
             return None;
         }
-        let com = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let url = (|| -> windows::core::Result<Option<String>> {
-            let automation: IUIAutomation =
-                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
-            let root = automation.ElementFromHandle(HWND(window as *mut _))?;
-            // An i32 VARIANT holding the Document control type; VT_I4 owns
-            // nothing, so the ManuallyDrop payload never needs dropping.
-            let document_type = VARIANT {
-                Anonymous: VARIANT_0 {
-                    Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
-                        vt: VT_I4,
-                        wReserved1: 0,
-                        wReserved2: 0,
-                        wReserved3: 0,
-                        Anonymous: VARIANT_0_0_0 {
-                            lVal: UIA_DocumentControlTypeId.0,
-                        },
-                    }),
-                },
-            };
-            let condition =
-                automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &document_type)?;
-            // A browser window can hold several documents (docked
-            // DevTools, sidebars); the page is the first with a web URL.
-            let documents = root.FindAll(TreeScope_Descendants, &condition)?;
-            for index in 0..documents.Length()? {
-                let Ok(document) = documents.GetElement(index) else {
-                    continue;
-                };
-                let Ok(pattern) =
-                    document.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
-                else {
-                    continue;
-                };
-                let Ok(value) = pattern.CurrentValue() else {
-                    continue;
-                };
-                let value = value.to_string();
-                if value.starts_with("https://") || value.starts_with("http://") {
-                    return Ok(Some(value));
-                }
+        let root = automation.ElementFromHandle(HWND(window as *mut _)).ok()?;
+        let walker = automation.ControlViewWalker().ok()?;
+        let mut pending = VecDeque::from([root]);
+        let mut read = 0;
+        while let Some(element) = pending.pop_front() {
+            read += 1;
+            if read > MAX_WINDOW_ELEMENTS {
+                break;
             }
-            Ok(None)
-        })();
-        if com.is_ok() {
-            CoUninitialize();
+            if element
+                .CurrentControlType()
+                .is_ok_and(|kind| kind == UIA_DocumentControlTypeId)
+            {
+                if let Some(url) = document_value(&element) {
+                    return Some(url);
+                }
+                continue;
+            }
+            let mut child = walker.GetFirstChildElement(&element).ok();
+            while let Some(element) = child {
+                pending.push_back(element.clone());
+                child = walker.GetNextSiblingElement(&element).ok();
+            }
         }
-        url.ok().flatten()
+        None
     }
+}
+
+/// A Document element's page address, when its value is a web address.
+fn document_value(element: &IUIAutomationElement) -> Option<String> {
+    use windows::Win32::UI::Accessibility::{IUIAutomationValuePattern, UIA_ValuePatternId};
+
+    // SAFETY: read-only queries on an element from this thread's instance.
+    let pattern = unsafe {
+        element
+            .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+            .ok()?
+    };
+    let value = unsafe { pattern.CurrentValue().ok()? }.to_string();
+    (value.starts_with("https://") || value.starts_with("http://")).then_some(value)
 }
 
 #[cfg(test)]

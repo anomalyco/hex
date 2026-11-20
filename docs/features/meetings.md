@@ -240,11 +240,14 @@ Browser calls -> a browser holding the microphone is a browser call after 20 s
     └── Windows -> the microphone-holding browser's visible windows are read
         through UI Automation, at most six, one read in flight and 2 s for
         the whole read (a hung provider leaves their titles): a page address
-        or tab title naming a call (Meet, a Teams page, ...) offers that
+        or window title naming a call (Meet, a Teams page, ...) offers that
         service with its site, and Always record follows it like any known
         call; a page that names no call stays "Call in <browser>"
         └── the browser executable's windows, not the microphone process's:
-            a Chromium audio utility process has none
+            a Chromium audio utility process has none; each window's own
+            chrome is walked but its page content is not, and the
+            whole-window title is reduced to the page's (Edge's profile name,
+            its other-tab count, and the zero-width space in its name removed)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -566,14 +569,19 @@ was not available, so the host rule is a guess at "any page".
 On Windows the page comes from the browser's own windows through UI Automation
 ([windows/context.rs](../../src/windows/context.rs)): every visible window of
 the browser's executable, since the audio utility process that holds a
-Chromium browser's microphone has none, at most six, one read at a time and at
-most 2 s. The titles are read first, so a hung accessibility provider still
-answers with them. [meeting/detection.rs](../../src/meeting/detection.rs)'s
-`call_page` judges the result by the macOS rule: a page address that names a
-call wins, and a call's tab title outranks another window's address. A window
-titled `Meet - …` names a Meet call when no address does; with neither, the
-call stays a plain "Call in <browser>". Not observed on a real Windows Meet or
-Teams call.
+Chromium browser's microphone has none, at most six, one read in flight and 2 s
+for the whole read. One automation instance and one COM initialization serve
+the windows, and each window's walk stops at its Document elements, so a page's
+own content is never walked. The titles are read first, so a hung provider
+still answers with them; a whole-window title is reduced to the page's (Edge's
+profile name, its count of the window's other tabs, and the zero-width space in
+its own name removed) before detection reads it.
+[meeting/detection.rs](../../src/meeting/detection.rs)'s `call_page` picks the
+page from what was read, by the same rule macOS uses for its Accessibility
+pages: a page address that names a call wins, and a call's tab title outranks
+another window's address. A window titled `Meet - …` names a Meet call when no
+address does; with neither, the call stays a plain "Call in <browser>". Not
+observed on a real Windows Meet or Teams call.
 
 On 2026-10-21 Brave opened the microphone for 3-6 s at a time on
 problems.kitlangton.com (board voice notes) and each burst got a "Browser call
@@ -628,6 +636,8 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
 `a_windows_chrome_on_a_meet_page_is_a_meet_call`,
+`a_windows_edge_on_a_meet_title_without_its_address_is_a_meet_call`,
+`windows_window_titles_lose_the_browser_profile_and_other_tabs`,
 `a_call_s_address_is_chosen_before_another_window_s_page`,
 `a_call_s_title_drops_another_window_s_address`,
 `a_browser_with_no_call_page_keeps_its_first_page`,

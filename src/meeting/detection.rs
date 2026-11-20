@@ -1317,13 +1317,13 @@ fn web_url(url: &str) -> Option<Url> {
 
 /// Whether a page address is a call this detection knows: a Google Meet
 /// call or another known call site.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn names_call(url: &Url) -> bool {
     is_google_meet_call(url) || url.host_str().and_then(call_site_source).is_some()
 }
 
 /// Whether a browser tab's title names a call (a Google Meet call's).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn title_names_call(title: &str) -> bool {
     is_google_meet_call_title(title)
 }
@@ -1436,6 +1436,56 @@ fn clean_title<'a>(title: &'a str, suffixes: &[&str]) -> &'a str {
         .find_map(|suffix| title.strip_suffix(suffix))
         .unwrap_or(title)
         .trim()
+}
+
+/// Characters browsers put in their window titles that no one sees: Edge's
+/// own name arrives as `Microsoft\u{200b} Edge`.
+const ZERO_WIDTH: [char; 7] = [
+    '\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2060}', '\u{feff}',
+];
+
+/// The page a browser window's title names. A Windows window title is not a
+/// tab's: the browser appends its name (Edge after its profile name and a
+/// zero-width space), and Edge counts the window's other tabs ("and 2 more
+/// pages"). Both are removed here, before detection reads the title; macOS
+/// and Linux titles are tab titles and need no cleaning.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn normalize_window_title(title: &str) -> String {
+    let title: String = title
+        .chars()
+        .filter(|character| !ZERO_WIDTH.contains(character))
+        .collect();
+    let title = title.trim();
+    let title = match title.strip_suffix(" - Microsoft Edge") {
+        Some(page) => strip_edge_profile(page),
+        None => clean_title(title, BROWSER_TITLE_SUFFIXES),
+    };
+    trim_more_pages(title).to_string()
+}
+
+/// Edge puts the profile's name between the page and the browser's own name,
+/// and leaves it out for a single-profile window. It is dropped only when a
+/// page title is still left, so `Meet - Design sync` keeps its name.
+fn strip_edge_profile(title: &str) -> &str {
+    title
+        .rsplit_once(" - ")
+        .filter(|(page, _)| page.contains(" - "))
+        .map_or(title, |(page, _)| page)
+}
+
+/// Leaves out a browser window's count of its other tabs ("and 2 more
+/// pages"), which Edge puts right after the page title.
+fn trim_more_pages(title: &str) -> &str {
+    let Some((page, count)) = title.rsplit_once(" and ") else {
+        return title;
+    };
+    let count = count
+        .strip_suffix(" more pages")
+        .or_else(|| count.strip_suffix(" more page"));
+    match count {
+        Some(count) if !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()) => page,
+        _ => title,
+    }
 }
 
 #[cfg(test)]
@@ -2296,7 +2346,7 @@ mod tests {
         let call = candidate_from_microphone(
             &chrome,
             &context(
-                "chrome",
+                "Google Chrome",
                 Some("https://meet.google.com/abc-defg-hij"),
                 "Meet - Design sync - Google Chrome",
             ),
@@ -2305,6 +2355,55 @@ mod tests {
         assert_eq!(call.source, MeetingSource::GoogleMeet);
         assert_eq!(call.site.as_deref(), Some("meet.google.com"));
         assert_eq!(call.recording_start().app.as_deref(), Some("Google Meet"));
+    }
+
+    #[test]
+    fn a_windows_edge_on_a_meet_title_without_its_address_is_a_meet_call() {
+        let edge = ActiveMicrophoneApplication {
+            pid: 1234,
+            bundle_id: "msedge.exe".into(),
+            name: "msedge".into(),
+        };
+        let title = normalize_window_title(
+            "Meet - abc-defg-hij and 2 more pages - Personal - Microsoft\u{200b} Edge",
+        );
+        let call =
+            candidate_from_microphone(&edge, &context("Microsoft Edge", None, &title)).unwrap();
+        assert_eq!(call.source, MeetingSource::GoogleMeet);
+        assert_eq!(call.site.as_deref(), Some("meet.google.com"));
+        assert_eq!(call.call.as_deref(), Some("abc-defg-hij"));
+    }
+
+    #[test]
+    fn windows_window_titles_lose_the_browser_profile_and_other_tabs() {
+        let edge = normalize_window_title(
+            "Meet - abc-defg-hij and 2 more pages - Personal - Microsoft\u{200b} Edge",
+        );
+        assert_eq!(edge, "Meet - abc-defg-hij");
+        assert_eq!(
+            google_meet_title_code(&edge).as_deref(),
+            Some("abc-defg-hij")
+        );
+        assert!(is_google_meet_call_title(&edge));
+
+        let chrome = normalize_window_title("Meet - abc-defg-hij - Google Chrome");
+        assert_eq!(chrome, "Meet - abc-defg-hij");
+        assert_eq!(
+            google_meet_title_code(&chrome).as_deref(),
+            Some("abc-defg-hij")
+        );
+
+        // A named meeting keeps its name, with or without a profile segment,
+        // and without the count of the window's other tabs.
+        let named = normalize_window_title(
+            "Meet - Design sync and 2 more pages - Personal - Microsoft\u{200b} Edge",
+        );
+        assert_eq!(named, "Meet - Design sync");
+        assert_eq!(clean_google_meet_title(&named), "Design sync");
+        assert_eq!(google_meet_title_code(&named), None);
+        let single_profile = normalize_window_title("Meet - Design sync - Microsoft Edge");
+        assert_eq!(single_profile, "Meet - Design sync");
+        assert_eq!(clean_google_meet_title(&single_profile), "Design sync");
     }
 
     #[test]
