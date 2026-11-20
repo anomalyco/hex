@@ -34,6 +34,11 @@ struct TypingJournalSettings {
         nonmutating set { defaults?.set(newValue.sorted(), forKey: Key.disabledDictationFixes) }
     }
 
+    /// The words autocorrect learned to leave alone (`LearnedWordsStore`).
+    func eraseLearnedWords() {
+        defaults?.removeObject(forKey: LearnedWordsStore.defaultsKey)
+    }
+
     /// When Delete what Hex learned last ran, so another process drops what it still holds.
     var erasedAt: TimeInterval {
         get { defaults?.double(forKey: Key.erasedAt) ?? 0 }
@@ -156,8 +161,9 @@ final class TypingJournal {
         return snapshot
     }
 
-    /// Erases everything Learn how I type gathered: the file, the switched-off fixes, and
-    /// (through `erasedAt`) whatever another process still holds in memory.
+    /// Erases everything Learn how I type gathered: the file, the switched-off fixes, the words
+    /// autocorrect learned to keep, and (through `erasedAt`) whatever another process still
+    /// holds in memory.
     static func delete(
         in directory: URL? = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: KeyboardBridge.appGroup
@@ -166,6 +172,7 @@ final class TypingJournal {
     ) {
         settings.erasedAt = Date().timeIntervalSince1970
         settings.disabledDictationFixes = []
+        settings.eraseLearnedWords()
         if let url = directory?.appendingPathComponent(fileName) {
             try? FileManager.default.removeItem(at: url)
         }
