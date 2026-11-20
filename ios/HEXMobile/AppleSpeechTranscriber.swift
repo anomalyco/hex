@@ -22,8 +22,8 @@ private actor AppleSpeechAssetReservations {
             case nil:
                 generation += 1
                 let currentGeneration = generation
-                let acquisition = Task {
-                    _ = try await AssetInventory.reserve(locale: locale)
+                let acquisition = Task<Void, Error> {
+                    await AppleSpeechAssets.reserve(locale)
                 }
                 states[key] = .acquiring(currentGeneration, acquisition, 1)
                 try await finishAcquisition(acquisition, generation: currentGeneration, key: key)
@@ -88,7 +88,7 @@ private actor AppleSpeechAssetReservations {
 
 @available(iOS 26.0, *)
 actor AppleSpeechTranscriber: LocalTranscribing {
-    enum TranscriberError: LocalizedError {
+    enum TranscriberError: HexDescribedError {
         case authorizationDenied
         case emptyTranscript
         case unavailable
@@ -107,7 +107,9 @@ actor AppleSpeechTranscriber: LocalTranscribing {
 
     nonisolated let displayName = "Apple Speech"
 
-    private let language: SpeechLanguage
+    /// The language it dictates; the same language on `DictationTranscriber` once
+    /// `SpeechTranscriber`'s model wouldn't install.
+    private var language: SpeechLanguage
 
     private var preparedAnalyzer: SpeechAnalyzer?
     private var preparedModule: AppleSpeechModule?
@@ -137,10 +139,16 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     }
 
     /// Whether Hex dictates this language with Apple Speech rather than Parakeet. English
-    /// without `SpeechTranscriber` (an iPhone that lacks it) stays on Parakeet, as before;
-    /// every other language `DictationTranscriber` has beats English-only Parakeet.
-    nonisolated static func shouldUse(_ language: SpeechLanguage) -> Bool {
-        language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier)
+    /// without `SpeechTranscriber` stays on Parakeet where it fits; every other language
+    /// `DictationTranscriber` has beats English-only Parakeet. The iPhones without
+    /// `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation) have 3–4 GB, where loading
+    /// Parakeet ended Hex at "50%" and again at every launch, so they dictate English with
+    /// `DictationTranscriber`.
+    nonisolated static func shouldUse(
+        _ language: SpeechLanguage,
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+    ) -> Bool {
+        language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier) || !parakeetFits
     }
 
     func prepare(
@@ -154,34 +162,20 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         }
         let locale = language.locale
 
-        try await AppleSpeechAssetReservations.shared.acquire(locale)
-        reservedLocale = locale
+        // Best effort: a reservation Hex can't get (over Apple's limit) doesn't stop the download.
+        if (try? await AppleSpeechAssetReservations.shared.acquire(locale)) != nil {
+            reservedLocale = locale
+        }
         do {
+            let detail = "Downloading Apple \(Self.displayName(for: locale)) speech"
+            // `SpeechTranscriber`'s model, else the same language's on `DictationTranscriber`;
+            // a download that stops moving ends instead of holding the progress bar forever.
+            language = try await AppleSpeechAssets.install(language, progress: { fraction in
+                progressHandler(
+                    ModelPreparationProgress(fractionCompleted: min(0.85, fraction * 0.85), detail: detail)
+                )
+            })
             let speech = AppleSpeechModule(language)
-            let status = await AssetInventory.status(forModules: [speech.module])
-
-            if status != .installed,
-               let request = try await AssetInventory.assetInstallationRequest(
-                   supporting: [speech.module]
-               ) {
-                let progress = request.progress
-                let monitor = Task {
-                    while !Task.isCancelled && !progress.isFinished {
-                        progressHandler(
-                            ModelPreparationProgress(
-                                fractionCompleted: min(0.85, progress.fractionCompleted * 0.85),
-                                detail: "Downloading Apple \(Self.displayName(for: locale)) speech"
-                            )
-                        )
-                        try? await Task.sleep(for: .milliseconds(100))
-                    }
-                }
-                defer { monitor.cancel() }
-                try await request.downloadAndInstall()
-            }
-            guard await AssetInventory.status(forModules: [speech.module]) == .installed else {
-                throw TranscriberError.unavailable
-            }
             progressHandler(
                 ModelPreparationProgress(
                     fractionCompleted: 0.9,

@@ -171,6 +171,18 @@ private struct FullKeyboardFixture: UIViewRepresentable {
             )
         case "cold":
             model.configureFixture(snapshot: .offline, now: now)
+        case "language-unavailable":
+            // In-keyboard dictation on an iPhone whose Apple Speech can't install Russian.
+            let unavailable = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
+            model.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .failed,
+                    heartbeat: now,
+                    expiresAt: now + 6,
+                    message: UserFacingError.message(for: unavailable, context: .transcription)
+                ),
+                now: now
+            )
         case "no-access":
             model.configureFixture(snapshot: .offline, now: now, hasFullAccess: false)
         default:

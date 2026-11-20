@@ -535,15 +535,13 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
 @available(iOS 26.0, *)
 private enum KeyboardSpeech {
-    enum Failure: LocalizedError, NoSpeechError {
+    enum Failure: HexDescribedError, NoSpeechError {
         case noLocale
-        case assetsMissing(String)
         case empty
 
         var errorDescription: String? {
             switch self {
             case .noLocale: "Apple Speech doesn't have your language on this iPhone."
-            case .assetsMissing: "Speech for your language is still downloading. Try again soon."
             case .empty: "No speech detected"
             }
         }
@@ -559,22 +557,16 @@ private enum KeyboardSpeech {
         let log = KeyboardProbeLog.shared
         // The same rule as the app's (Settings › Dictation language, else Automatic), so the
         // keyboard uses the assets Hex downloaded.
-        guard let language = await AppleSpeechLanguages.resolve() else { throw Failure.noLocale }
-        let locale = language.locale
-        let speech = AppleSpeechModule(language)
-        let status = await AssetInventory.status(forModules: [speech.module])
-        log.write("speech locale=\(locale.identifier) module=\(speech.name) assets=\(status) available=\(SpeechTranscriber.isAvailable)")
-        if status != .installed {
-            let started = Date()
-            _ = try? await AssetInventory.reserve(locale: locale)
-            if let request = try await AssetInventory.assetInstallationRequest(supporting: [speech.module]) {
-                log.write("downloading speech assets")
-                try await request.downloadAndInstall()
-            }
-            let after = await AssetInventory.status(forModules: [speech.module])
-            log.write("speech assets \(after) after \(String(format: "%.1f", Date().timeIntervalSince(started))) s \(KeyboardProbeLog.memory())")
-            guard after == .installed else { throw Failure.assetsMissing("\(after)") }
+        guard let picked = await AppleSpeechLanguages.resolve() else { throw Failure.noLocale }
+        log.write("speech locale=\(picked.identifier) module=\(picked.module.rawValue) available=\(SpeechTranscriber.isAvailable)")
+        // The model the app uses, else the same language on `DictationTranscriber`; when neither
+        // installs, `SpeechModelUnavailable` says so in a sentence (never Apple's asset error).
+        let started = Date()
+        let language = try await AppleSpeechAssets.install(picked, log: { log.write($0) })
+        if language != picked || Date().timeIntervalSince(started) > 0.5 {
+            log.write("speech assets ready (\(language.module.rawValue) \(language.identifier)) after \(String(format: "%.1f", Date().timeIntervalSince(started))) s \(KeyboardProbeLog.memory())")
         }
+        let speech = AppleSpeechModule(language)
 
         let analyzer = SpeechAnalyzer(
             modules: [speech.module],

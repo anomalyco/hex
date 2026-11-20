@@ -727,10 +727,13 @@ struct KeyboardSurfaceView: View {
                         if model.stagePhase == .failed {
                             HexStatusDot(color: HexTheme.danger, size: 6)
                         }
+                        // A failure gets two smaller lines: it has to be read in full.
+                        let failed = model.stagePhase == .failed
                         Text(message)
-                            .font(.system(size: 13, weight: .regular))
+                            .font(.system(size: failed ? 11 : 13, weight: .regular))
                             .foregroundStyle(p.textMuted)
-                            .lineLimit(1)
+                            .lineLimit(failed ? 2 : 1)
+                            .minimumScaleFactor(0.85)
                     }
                 } else {
                     HStack(spacing: 5) {

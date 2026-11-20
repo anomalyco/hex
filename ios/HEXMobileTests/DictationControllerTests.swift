@@ -136,6 +136,25 @@ private actor ControlledTranscriber: LocalTranscribing {
     }
 }
 
+/// A transcriber whose model can't be got ready, such as a language Apple Speech can't install.
+private actor UnpreparableTranscriber: LocalTranscribing {
+    nonisolated let displayName = "Apple Speech"
+    let languageName = "Russian"
+    let error: Error
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func prepare(progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void) async throws {
+        throw error
+    }
+
+    func transcribe(_ audioURL: URL) async throws -> String {
+        throw error
+    }
+}
+
 @MainActor
 private final class RecordingCleaner: TranscriptCleaning {
     var isAvailable = true
@@ -908,6 +927,130 @@ final class DictationControllerTests: XCTestCase {
             XCTAssertFalse(message.contains("OSStatus"))
             XCTAssertFalse(message.contains("PlainFailure"))
         }
+
+        // Apple's own sentences are for logs: a TestFlight keyboard showed this one (iOS 26.2).
+        let asset = NSError(
+            domain: "SFSpeechErrorDomain",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "transcription.ru asset not found after attempted download."]
+        )
+        XCTAssertEqual(UserFacingError.message(for: asset, context: .transcription), UserFacingError.Context.transcription.fallback)
+        XCTAssertEqual(UserFacingError.message(for: asset, context: .model), UserFacingError.Context.model.fallback)
+        let offline = NSError(
+            domain: "SFSpeechErrorDomain",
+            code: 1,
+            userInfo: [NSUnderlyingErrorKey: URLError(.notConnectedToInternet) as NSError]
+        )
+        XCTAssertEqual(UserFacingError.message(for: offline, context: .model), UserFacingError.offline)
+        XCTAssertEqual(
+            UserFacingError.message(for: ParakeetTranscriber.TranscriberError.downloadFailed, context: .model),
+            "Parakeet V2 didn't download. Check your connection and try again."
+        )
+
+        // Hex's own language messages, short enough for the keyboard's strip.
+        let messages = [
+            SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US"),
+            SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US", automatic: false),
+            SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone),
+            SpeechModelUnavailable(language: "ru-RU", reason: .downloadFailed),
+        ].map { UserFacingError.message(for: $0, context: .transcription) }
+        XCTAssertEqual(messages, [
+            "Russian isn't available on this iPhone yet. Using English.",
+            "Russian isn't available on this iPhone yet. Try English.",
+            "Russian isn't available for dictation on this iPhone yet.",
+            "Russian speech didn't download. Check your connection.",
+        ])
+        XCTAssertTrue(messages.allSatisfy { $0.count <= 60 }, "fits the full keyboard's strip")
+    }
+
+    func testAutomaticMovesOnFromALanguageThisIPhoneCantDictate() async throws {
+        let languages = LanguageSettings(defaults: defaults)
+        let english = ControlledTranscriber()
+        let russian = UnpreparableTranscriber(
+            error: SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
+        )
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: english,
+            transcriberFactory: {
+                made += 1
+                return made == 1 ? russian : english
+            },
+            autoPrepareOnInit: false,
+            languageSettings: languages
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(made, 2, "prepared again in the language Automatic picks now")
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertEqual(controller.languageNotice, "Russian isn't available on this iPhone yet. Using English.")
+        XCTAssertNil(controller.languageOffer)
+    }
+
+    func testAnExplicitLanguageThisIPhoneCantDictateOffersEnglish() async throws {
+        let languages = LanguageSettings(defaults: defaults)
+        let english = ControlledTranscriber()
+        let russian = UnpreparableTranscriber(
+            error: SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US", automatic: false)
+        )
+        var made = 0
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: bridge,
+            transcriber: english,
+            transcriberFactory: {
+                made += 1
+                return made == 1 ? russian : english
+            },
+            autoPrepareOnInit: false,
+            languageSettings: languages
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(made, 1, "never switched behind a choice made by hand")
+        XCTAssertEqual(controller.phase, .failed("Russian isn't available on this iPhone yet. Try English."))
+        XCTAssertEqual(bridge.snapshot().message, "Russian isn't available on this iPhone yet. Try English.")
+        XCTAssertEqual(controller.languageOffer, "en-US")
+
+        controller.useOfferedLanguage()
+        try await settle()
+        XCTAssertEqual(languages.dictationLanguage, "en-US")
+        XCTAssertEqual(made, 2)
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertNil(controller.languageOffer)
+        XCTAssertNil(controller.languageNotice)
+    }
+
+    func testIPhonesWithoutRoomForParakeetDictateEnglishWithApple() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech needs iOS 26") }
+        let dictation = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .dictation)
+        XCTAssertFalse(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: true), "Parakeet where it fits, as before")
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: false), "an iPhone 11 has 4 GB")
+        let speech = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .speech)
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(speech, parakeetFits: true))
+    }
+
+    func testAParakeetLoadThatEndedHexIsNotRepeatedAtLaunch() {
+        let loads = ParakeetLoadGuard(defaults: defaults)
+        loads.noteLaunch()
+        XCTAssertFalse(loads.lastLoadWasInterrupted)
+
+        loads.begin()
+        // iOS ends Hex while Core ML compiles; the next launch finds the load still marked.
+        let nextLaunch = ParakeetLoadGuard(defaults: defaults)
+        nextLaunch.noteLaunch()
+        XCTAssertTrue(nextLaunch.lastLoadWasInterrupted)
+
+        nextLaunch.begin()
+        nextLaunch.end(loaded: false)
+        nextLaunch.noteLaunch()
+        XCTAssertTrue(nextLaunch.lastLoadWasInterrupted, "a failed load keeps it")
+        nextLaunch.begin()
+        nextLaunch.end(loaded: true)
+        XCTAssertFalse(nextLaunch.lastLoadWasInterrupted, "a load that worked clears it")
     }
 
     func testWarmSessionAudioErrorReachesAppAndKeyboardAsASentence() async throws {
@@ -1009,12 +1152,18 @@ final class SpeechLanguagePickerTests: XCTestCase {
         }
     }
 
-    private func pick(explicit: String? = nil, preferred: [String], current: String = "en_US") async -> SpeechLanguage? {
+    private func pick(
+        explicit: String? = nil,
+        preferred: [String],
+        current: String = "en_US",
+        setAside: Set<String> = []
+    ) async -> SpeechLanguage? {
         await SpeechLanguagePicker.pick(
             explicit: explicit,
             candidates: SpeechLanguagePicker.automaticCandidates(preferred: preferred, current: current),
             speech: lookup(speechLocales),
-            dictation: lookup(dictationLocales)
+            dictation: lookup(dictationLocales),
+            skip: { setAside.contains($0.identifier(.bcp47)) }
         )
     }
 
@@ -1060,6 +1209,30 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(klingon?.identifier, "nb-NO", "an unsupported choice falls back to Automatic")
     }
 
+    func testAutomaticPassesOverALanguageSetAsideButAChoiceStillTriesIt() async {
+        // A Norwegian iPhone whose Norwegian model wouldn't install: English next.
+        let automatic = await pick(preferred: ["nb-NO", "en-US"], current: "nb_NO", setAside: ["nb-NO"])
+        XCTAssertEqual(automatic?.identifier, "en-US")
+        let chosen = await pick(explicit: "nb-NO", preferred: ["nb-NO", "en-US"], setAside: ["nb-NO"])
+        XCTAssertEqual(chosen?.identifier, "nb-NO", "an explicit choice is tried and says why it fails")
+    }
+
+    func testSetAsideLanguagesComeBackAfterThreeDays() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        let marked = Date(timeIntervalSince1970: 1_000_000)
+        settings.markUnavailable("ru-RU", at: marked)
+        settings.markSpeechModuleFailed("ru_RU", at: marked)
+        XCTAssertTrue(settings.isUnavailable("ru-RU", now: marked.addingTimeInterval(3_600)))
+        XCTAssertTrue(settings.speechModuleFailed("ru-RU", now: marked.addingTimeInterval(3_600)), "BCP 47 either way")
+        XCTAssertFalse(settings.isUnavailable("uk-UA", now: marked))
+        XCTAssertFalse(settings.isUnavailable("ru-RU", now: marked.addingTimeInterval(LanguageSettings.setAsideDuration + 1)))
+        settings.clearUnavailable("ru-RU")
+        XCTAssertFalse(settings.isUnavailable("ru-RU", now: marked))
+    }
+
     func testUSEnglishIsTheLastResort() async {
         let picked = await pick(preferred: ["xx-XX"], current: "xx_XX")
         XCTAssertEqual(picked?.identifier, "en-US")
@@ -1078,6 +1251,206 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertTrue(SpeechLanguagePicker.isEnglish("en-GB"))
         XCTAssertFalse(SpeechLanguagePicker.isEnglish("nb-NO"))
         XCTAssertFalse(SpeechLanguagePicker.isEnglish("he-IL"))
+    }
+}
+
+/// Getting a language's speech model: `SpeechTranscriber`'s, then `DictationTranscriber`'s, then
+/// a plain message. The Apple Speech calls are fakes; the simulator has no speech models.
+final class SpeechModelInstallTests: XCTestCase {
+    private var suite = ""
+    private var settings = LanguageSettings(defaults: nil)
+
+    override func setUp() {
+        suite = "hex.tests.\(UUID().uuidString)"
+        settings = LanguageSettings(defaults: UserDefaults(suiteName: suite))
+    }
+
+    override func tearDown() {
+        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+    }
+
+    private let russian = SpeechLanguage(locale: Locale(identifier: "ru-RU"), module: .speech)
+
+    /// Each module's status before and after its download; a download either throws, hangs
+    /// without progress, or installs.
+    private final class FakeAssets: @unchecked Sendable {
+        enum Download { case installs, fails, hangs }
+        let lock = NSLock()
+        var status: [SpeechModuleKind: SpeechModelInstall.Availability] = [.speech: .downloadable, .dictation: .downloadable]
+        var downloads: [SpeechModuleKind: Download] = [:]
+        var dictationHas = true
+        var online = true
+        var downloaded: [SpeechModuleKind] = []
+
+        var steps: SpeechModelInstall.Steps {
+            SpeechModelInstall.Steps(
+                dictationEquivalent: { [self] locale in dictationHas ? locale : nil },
+                status: { [self] language in lock.withLock { status[language.module] ?? .unsupported } },
+                download: { [self] language, progress in
+                    let outcome = lock.withLock {
+                        downloaded.append(language.module)
+                        return downloads[language.module] ?? .installs
+                    }
+                    switch outcome {
+                    case .installs:
+                        progress(0.5)
+                        lock.withLock { status[language.module] = .installed }
+                    case .fails:
+                        throw NSError(
+                            domain: "SFSpeechErrorDomain",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "transcription.ru asset not found after attempted download."]
+                        )
+                    case .hangs:
+                        progress(0.5)
+                        try await Task.sleep(for: .seconds(60))
+                    }
+                },
+                isOnline: { [self] in online }
+            )
+        }
+    }
+
+    private func run(_ assets: FakeAssets) async throws -> SpeechLanguage {
+        try await SpeechModelInstall.run(russian, steps: assets.steps, settings: settings, stallLimit: .milliseconds(300))
+    }
+
+    func testAnInstalledModelIsUsedAsItIs() async throws {
+        let assets = FakeAssets()
+        assets.status[.speech] = .installed
+        let installed = try await run(assets)
+        XCTAssertEqual(installed, russian)
+        XCTAssertTrue(assets.downloaded.isEmpty)
+    }
+
+    func testASpeechTranscriberAssetThatNeverArrivesFallsBackToDictationTranscriber() async throws {
+        let assets = FakeAssets()
+        assets.downloads[.speech] = .fails
+        let installed = try await run(assets)
+        XCTAssertEqual(installed.module, .dictation)
+        XCTAssertEqual(installed.identifier, "ru-RU")
+        XCTAssertEqual(assets.downloaded, [.speech, .dictation])
+        XCTAssertTrue(settings.speechModuleFailed("ru-RU"), "the next dictation goes straight to DictationTranscriber")
+        XCTAssertFalse(settings.isUnavailable("ru-RU"))
+    }
+
+    func testNeitherModelOnlineSetsTheLanguageAside() async {
+        let assets = FakeAssets()
+        assets.downloads = [.speech: .fails, .dictation: .fails]
+        do {
+            _ = try await run(assets)
+            XCTFail("nothing installed")
+        } catch {
+            XCTAssertEqual(error as? SpeechModelUnavailable, SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone))
+            XCTAssertEqual(UserFacingError.message(for: error, context: .transcription), "Russian isn't available for dictation on this iPhone yet.")
+        }
+        XCTAssertTrue(settings.isUnavailable("ru-RU"))
+    }
+
+    func testUnsupportedEverywhereIsNotAvailableWithoutDownloading() async {
+        let assets = FakeAssets()
+        assets.status = [.speech: .unsupported, .dictation: .unsupported]
+        do {
+            _ = try await run(assets)
+            XCTFail("nothing installed")
+        } catch {
+            XCTAssertEqual((error as? SpeechModelUnavailable)?.reason, .notOnThisIPhone)
+        }
+        XCTAssertTrue(assets.downloaded.isEmpty)
+    }
+
+    func testOfflineIsADownloadFailureNotAMissingLanguage() async {
+        let assets = FakeAssets()
+        assets.downloads = [.speech: .fails, .dictation: .fails]
+        assets.online = false
+        do {
+            _ = try await run(assets)
+            XCTFail("nothing installed")
+        } catch {
+            XCTAssertEqual((error as? SpeechModelUnavailable)?.reason, .downloadFailed)
+            XCTAssertEqual(
+                UserFacingError.message(for: error, context: .transcription),
+                "Russian speech didn't download. Check your connection."
+            )
+        }
+        XCTAssertFalse(settings.isUnavailable("ru-RU"), "tried again next time")
+    }
+
+    func testAStalledDownloadEndsInsteadOfHanging() async {
+        let assets = FakeAssets()
+        assets.downloads = [.speech: .hangs, .dictation: .hangs]
+        let started = Date()
+        do {
+            _ = try await run(assets)
+            XCTFail("nothing installed")
+        } catch {
+            XCTAssertEqual((error as? SpeechModelUnavailable)?.reason, .downloadFailed)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "two 0.3 s stalls, not two 60 s downloads")
+        XCTAssertEqual(assets.downloaded, [.speech, .dictation])
+    }
+
+    func testAStalledSpeechTranscriberDownloadStillTriesDictationTranscriber() async throws {
+        let assets = FakeAssets()
+        assets.downloads = [.speech: .hangs]
+        let installed = try await run(assets)
+        XCTAssertEqual(installed.module, .dictation)
+    }
+}
+
+final class StallWatchTests: XCTestCase {
+    func testAMovingOperationFinishes() async throws {
+        let fraction = ProgressReading()
+        let value = try await StallWatch.run(limit: .milliseconds(200), poll: .milliseconds(20), progress: { fraction.value }) {
+            for step in 1...10 {
+                try await Task.sleep(for: .milliseconds(50))
+                fraction.value = Double(step) / 10
+            }
+            return "done"
+        }
+        XCTAssertEqual(value, "done")
+    }
+
+    func testAnOperationThatStopsMovingIsCancelled() async {
+        let cancelled = ProgressReading()
+        let started = Date()
+        do {
+            _ = try await StallWatch.run(limit: .milliseconds(200), poll: .milliseconds(20), progress: { 0.5 }) {
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    cancelled.value = 1
+                    throw error
+                }
+            }
+            XCTFail("stalled")
+        } catch {
+            XCTAssertTrue(error is StallWatch.Stalled)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(cancelled.value, 1, "the operation was told to stop")
+    }
+
+    func testANilReadingPausesTheWatch() async throws {
+        // Core ML's compile reports nothing for longer than the limit; it isn't a stall.
+        let value = try await StallWatch.run(limit: .milliseconds(100), poll: .milliseconds(20), progress: { nil }) {
+            try await Task.sleep(for: .milliseconds(400))
+            return 7
+        }
+        XCTAssertEqual(value, 7)
+    }
+
+    func testCancellingTheCallerEndsTheWait() async {
+        let task = Task {
+            try await StallWatch.run(limit: .seconds(30), progress: { nil }) {
+                try await Task.sleep(for: .seconds(30))
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        let result = await task.result
+        if case .success = result { XCTFail("cancelled") }
     }
 }
 
