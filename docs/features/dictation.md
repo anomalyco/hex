@@ -778,7 +778,7 @@ the audio owner, run Silero and Parakeet, then press the type menu and search
 in the real Rune window rendered offscreen. It uses neither a microphone nor
 a pasteboard. This is not a native event-tap or receiving-app replay.
 
-Rows are ordered by completion time for this experiment; a paste does not
+Rows are ordered by completion time for this picker; a paste does not
 promote its item. Secure Input and invocations without usable release or
 overlay support take the immediate path. If Hex can't identify the original
 external field, it refuses. Multiline text in a target requiring simulated
