@@ -2182,6 +2182,18 @@ pause cannot trim the silence. Check:
 transcription/engine.rs. Not measured on a real Windows or Linux model or
 microphone.
 
+**Fixed November 20, 2026 (issue 2072):** Parakeet models (v2 and v3, Orukeet,
+Fluid Speech Pro, and Unified English's whole-clip path) fed the encoder the
+trailing center-pad mel frame NeMo does not count, so whenever
+`floor(samples / 160)` was a multiple of 8 that frame became an extra encoder
+frame and leaked into every real one through attention: whole-clip recordings
+of those lengths came back empty or truncated. The transcribe.cpp fork (branch
+`hex/nemo-padding-frame`) drops the padding frame before the encoder. Parakeet
+Ultra already masks it in-graph. Live streams never had the bug: buffered
+streaming already limits attention to the valid frames. Check: transcribe.cpp's
+`transcribe_mel_unit` (`tests/mel_unit.cpp`), not run against a real model or
+recording here.
+
 ```ts
 Listening idle                            // dictate.model-memory
 ├── Keep the selected model weights warm // avoids loading on each dictation
