@@ -199,6 +199,26 @@ fn scrawl_running(p: Paint, view: &ScrawlView) -> El {
 
 fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
     let enabled = ui.settings.capture.enabled;
+    // Without a shortcuts portal nothing registers the key: the row says
+    // which command to bind in the desktop's own keyboard settings.
+    if !ui.records_shortcuts() {
+        return vec![
+            note(
+                "no-portal",
+                tr(
+                    "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
+                ),
+                p.muted(),
+            ),
+            super::settings::command_row(
+                p,
+                "capture-command",
+                tr("Annotate"),
+                tr("Start and stop an annotation"),
+                &["hex annotate toggle"],
+            ),
+        ];
+    }
     let purpose = if enabled {
         tr("Tap to start and stop; hold while recording to draw")
     } else {

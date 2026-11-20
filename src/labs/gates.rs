@@ -289,6 +289,14 @@ pub fn gnome_annotate() -> bool {
     on(GNOME_ANNOTATE) && Feature::GnomeAnnotate.on_this_os()
 }
 
+/// On Wayland, a screen capture asks the desktop for the monitor under the
+/// pointer, and each monitor keeps its own ScreenCast choice (Linux; read as
+/// each screen capture starts).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn annotate_pointer_screen() -> bool {
+    on(ANNOTATE_POINTER_SCREEN) && Feature::AnnotatePointerScreen.on_this_os()
+}
+
 /// The screenshot shortcut takes an area or a window (macOS; read by the
 /// session tap on each key press, so nothing runs while it is off).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

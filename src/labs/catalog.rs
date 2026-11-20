@@ -64,6 +64,7 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::GnomeMeetingCapsules
+            | Self::AnnotatePointerScreen
             | Self::Screenshots
             | Self::AnnotateReplay
             | Self::MeetingImport
@@ -167,7 +168,7 @@ impl Feature {
             Self::ModesEditor => 20261118,
             Self::CalendarSelectAll => 20261118,
             Self::PasteLastPicker => 20261119,
-            Self::NeutralVoice => 20261120,
+            Self::NeutralVoice | Self::AnnotatePointerScreen => 20261120,
         }
     }
 
@@ -256,6 +257,7 @@ impl Feature {
             | Self::TypedText
             | Self::GnomeMeetingCapsules
             | Self::GnomeAnnotate
+            | Self::AnnotatePointerScreen
             | Self::LiveTyping => LINUX,
             Self::StandaloneSpecialKeys | Self::SkipPauses | Self::TerminalPasteShortcut => {
                 WINDOWS_LINUX
@@ -383,6 +385,7 @@ impl Feature {
             Self::NotchIndicator => "notch-indicator",
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
             Self::GnomeAnnotate => "gnome-annotate",
+            Self::AnnotatePointerScreen => "annotate-pointer-screen",
             Self::Screenshots => "screenshots",
             Self::AnnotateReplay => "annotate-replay",
             Self::MeetingImport => "meeting-import",
@@ -469,6 +472,7 @@ impl Feature {
             Self::NotchIndicator => "labs.notch_indicator",
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
             Self::GnomeAnnotate => "labs.gnome_annotate",
+            Self::AnnotatePointerScreen => "labs.annotate_pointer_screen",
             Self::Screenshots => "labs.screenshots",
             Self::AnnotateReplay => "labs.annotate_replay",
             Self::MeetingImport => "labs.meeting_import",

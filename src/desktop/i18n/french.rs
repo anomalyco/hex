@@ -100,6 +100,14 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Microphone key alone", "Touche micro seule"),
     ("Use the mic key in F5's spot on Mac laptops as a shortcut; once set, only Hex gets it", "Utiliser la touche micro à la place de F5 sur les portables Mac comme raccourci ; seul Hex la reçoit ensuite"),
     ("Annotate on GNOME", "Annotate sous GNOME"),
+    (
+        "Record the screen under the pointer",
+        "Enregistrer l'écran sous le pointeur",
+    ),
+    (
+        "On Wayland, a capture records the monitor you point at, and each monitor remembers its own screen",
+        "Sous Wayland, une capture enregistre le moniteur que vous pointez, et chaque moniteur retient son propre écran",
+    ),
     ("Restore clipboard on GNOME", "Restaurer le presse-papiers sous GNOME"),
     ("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running", "Remet ce que vous aviez copié avant une dictée, via XWayland. Fonctionne seulement si XWayland est déjà lancé"),
     ("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.", "Ce bureau ne permet pas à Hex de remettre votre presse-papiers après un collage. Activez Labs › Restaurer le presse-papiers sous GNOME pour essayer."),
@@ -382,6 +390,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Not granted", "Non accordé"),
     ("Your desktop did not grant every shortcut. Record another one, or free it in your desktop's keyboard settings.", "Votre bureau n'a pas accordé tous les raccourcis. Enregistrez-en un autre ou libérez-le dans les paramètres clavier de votre bureau."),
     ("Your desktop has no shortcuts portal. Bind these commands in its keyboard settings.", "Votre bureau n'a pas de portail de raccourcis. Associez ces commandes dans ses paramètres clavier."),
+    (
+        "Your desktop has no shortcuts portal. Bind this command in its keyboard settings.",
+        "Votre bureau n'a pas de portail de raccourcis. Associez cette commande dans ses paramètres clavier.",
+    ),
     ("Hold to dictate", "Maintenir pour dicter"),
     ("Bind start to the key press and stop to its release", "Associez start à l'appui sur la touche et stop à son relâchement"),
     ("Toggle dictation", "Basculer la dictée"),
@@ -685,6 +697,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Press shortcut", "Appuyez sur le raccourci"),
     ("Press to start dictating, press again to transcribe", "Appuyez pour commencer à dicter, appuyez à nouveau pour transcrire"),
     ("Re-paste the most recent dictation", "Recoller la dictée la plus récente"),
+    (
+        "Start and stop an annotation",
+        "Démarrer et arrêter une annotation",
+    ),
     ("Refresh", "Actualiser"),
     ("Replacement (e.g. OpenCode)", "Remplacement (ex. : OpenCode)"),
     ("Switch to {channel} {version}", "Passer à {channel} {version}"),

@@ -7,13 +7,16 @@ use super::{Audience, Feature, Os};
 
 impl Feature {
     /// Whether Hex's website lists it: every public build has it. Dev
-    /// features are left out, and so are the ones only builds with the
-    /// capture build option show.
+    /// features are left out, and so are the labs that only matter once
+    /// Annotate is on.
     const fn on_the_web(self) -> bool {
         matches!(self.audience(), Audience::Everyone)
             && !matches!(
                 self,
-                Self::Screenshots | Self::AnnotateReplay | Self::CopyCaptureZip
+                Self::Screenshots
+                    | Self::AnnotateReplay
+                    | Self::AnnotatePointerScreen
+                    | Self::CopyCaptureZip
             )
     }
 
@@ -117,6 +120,7 @@ mod tests {
             Feature::VoiceFilter,
             Feature::Screenshots,
             Feature::AnnotateReplay,
+            Feature::AnnotatePointerScreen,
             Feature::CopyCaptureZip,
         ] {
             assert!(!feature.on_the_web(), "{}", feature.name());

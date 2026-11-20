@@ -676,6 +676,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
         rows.push(row(Feature::TypedText, Some(&KEYBOARD)));
         rows.push(row(Feature::GnomeMeetingCapsules, None));
         rows.push(row(Feature::GnomeAnnotate, None));
+        // Wayland's ScreenCast keeps one remembered screen; this one asks for
+        // the monitor under the pointer at each screen capture.
+        rows.push(row(Feature::AnnotatePointerScreen, None));
     }
     // Linux's and Windows' engines transcribe a whole clip on the CPU.
     if caps.os != super::platform::Os::Macos {
@@ -942,6 +945,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::NotchIndicator => "lab-notch-indicator",
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::GnomeAnnotate => "lab-gnome-annotate",
+        Feature::AnnotatePointerScreen => "lab-annotate-pointer-screen",
         Feature::Screenshots => "lab-screenshots",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::CopyCaptureZip => "lab-copy-capture-zip",

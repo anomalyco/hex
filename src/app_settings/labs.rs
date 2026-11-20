@@ -185,6 +185,9 @@ pub struct LabsSettings {
     pub gnome_meeting_capsules: bool,
     /// Annotate's capsule and ink float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux).
     pub gnome_annotate: bool,
+    /// On Wayland, a screen capture asks the desktop for the monitor under the
+    /// pointer, and each monitor keeps its own ScreenCast choice (Linux).
+    pub annotate_pointer_screen: bool,
     /// The screenshot shortcut takes an area or a window (macOS); its
     /// shortcut and folder are `screenshots.*`.
     pub screenshots: bool,
@@ -448,6 +451,7 @@ impl Default for LabsSettings {
             modes_editor: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
+            annotate_pointer_screen: false,
             screenshots: false,
             copy_capture_zip: false,
             meeting_import: false,

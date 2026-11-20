@@ -430,6 +430,18 @@ fn scrawl_engine(
 /// people, so its movie keeps every pixel; an Annotate capture's stays sized
 /// for agents.
 fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool) -> Start {
+    // Only a screen goes through the portal's remembered output; a window is
+    // picked each time and an iPhone never asks.
+    let screen = match &target {
+        Target::ActiveDisplay => true,
+        Target::Screen(info) => info.mode != scrawl_capture::model::CaptureMode::Window,
+        Target::Phone { .. } => false,
+    };
+    let portal_token = if screen {
+        portal_token()
+    } else {
+        scrawl_capture::capture::PortalToken::None
+    };
     Start {
         t0_boot_ns: t0.as_nanos(),
         target,
@@ -442,7 +454,49 @@ fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool
         } else {
             MovieQuality::Compact
         },
+        portal_token,
     }
+}
+
+/// Where a screen capture's ScreenCast restore token goes, read at each
+/// start: the one file, or, with Labs › Record the screen under the pointer
+/// on Wayland, the file for the output under the pointer.
+#[cfg(target_os = "linux")]
+fn portal_token() -> scrawl_capture::capture::PortalToken {
+    use scrawl_capture::capture::{OutputBounds, PortalToken};
+    let Ok(support) = crate::app_paths::support_dir() else {
+        return PortalToken::None;
+    };
+    let single = support.join("screencast-token");
+    // X11 reads the screen itself and a window goes through the portal's
+    // picker each time: only a Wayland screen has a remembered output.
+    if !crate::labs::annotate_pointer_screen() || std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return PortalToken::File(single);
+    }
+    let Some(pointer) = crate::linux::pointer_output::under_pointer() else {
+        tracing::info!(
+            "the pointer's output is unknown; the screen-cast portal keeps its one remembered screen"
+        );
+        return PortalToken::File(single);
+    };
+    let outputs = crate::linux::output::list()
+        .into_iter()
+        .map(|output| OutputBounds {
+            name: output.name,
+            position: output.position,
+            size: output.size,
+        })
+        .collect();
+    PortalToken::PerOutput {
+        dir: support,
+        pointer,
+        outputs,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn portal_token() -> scrawl_capture::capture::PortalToken {
+    scrawl_capture::capture::PortalToken::None
 }
 
 /// Forwards events to a bounded channel (the `capture-events` thread logs
@@ -702,11 +756,6 @@ fn shared_engine(
     let mut engine = ENGINE.lock().unwrap_or_else(|error| error.into_inner());
     if let Some(engine) = &*engine {
         return Ok(engine.clone());
-    }
-    // The portal remembers the screen Hex was given; the token is Hex's.
-    #[cfg(target_os = "linux")]
-    if let Ok(support) = crate::app_paths::support_dir() {
-        scrawl_capture::linux::set_token_path(support.join("screencast-token"));
     }
     let (events, received) = mpsc::sync_channel(EVENT_CAPACITY);
     thread::Builder::new()

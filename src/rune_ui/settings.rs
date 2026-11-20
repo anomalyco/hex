@@ -893,6 +893,18 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             &["hex dictation toggle --raw"],
         ),
     ];
+    // Annotate's shortcut goes through the same portal, so it needs a command
+    // here too while the feature is on.
+    #[cfg(hex_capture)]
+    if ui.platform.scrawl.is_some() && ui.settings.capture.enabled {
+        rows.push(command_row(
+            p,
+            "annotate",
+            tr("Annotate"),
+            tr("Start and stop an annotation"),
+            &["hex annotate toggle"],
+        ));
+    }
     // GNOME without a shortcuts portal (GNOME 46 and older, #781): Hex writes
     // the commands into GNOME's own custom shortcuts.
     if on_gnome() {
@@ -935,7 +947,13 @@ fn gnome_shortcuts_row(ui: &Ui, p: Paint) -> El {
     )
 }
 
-fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[&str]) -> El {
+pub(super) fn command_row(
+    p: Paint,
+    key: &str,
+    title: &str,
+    description: &str,
+    commands: &[&str],
+) -> El {
     let lines = col()
         .key("commands")
         .gap(2.0)

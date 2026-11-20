@@ -151,6 +151,9 @@ impl Feature {
             Self::GnomeMeetingCapsules => {
                 "On GNOME, float the recording offer and the small recording indicator over your call, through XWayland while XWayland is running"
             }
+            Self::AnnotatePointerScreen => {
+                "On Wayland, a screen capture records the monitor the pointer is on, and each monitor keeps its own ScreenCast choice (Linux)"
+            }
             Self::GnomeAnnotate => {
                 "On GNOME, show Annotate's recording controls and drawing over your screen, through XWayland while XWayland is running; Esc can't stop drawing there, so use the pen button or let go of a held Annotate key"
             }
