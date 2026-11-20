@@ -115,6 +115,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         globeButton.isAccessibilityElement = true
         globeButton.addTarget(self, action: #selector(globeTapped), for: .touchUpInside)
 
+        hexKey.onPress = { [weak self] at in self?.model.onHexKeyPress?(at) }
         hexKey.onHold = { [weak self] in self?.hexKeyHeld() }
         hexKey.onHoldRelease = { [weak self] in self?.hexKeyReleased() }
         hexKey.onMenuOpen = { [weak self] point in

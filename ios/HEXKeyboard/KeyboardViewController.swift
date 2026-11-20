@@ -30,6 +30,9 @@ final class KeyboardViewController: UIInputViewController {
     private var isShown = false
     /// The dictation bar's key haptic; the full keyboard has its own generator.
     private lazy var barHaptics = UIImpactFeedbackGenerator(style: .light)
+    /// The Hex key's last touch-down (wall clock), where a start's probe timeline begins.
+    private var hexKeyPressedAt: TimeInterval?
+    private var warmStartTimeline: WarmStartTimeline?
 
     /// Haptics need Full Access, and Settings › Keyboard › Haptics covers both keyboards.
     private var allowsKeyHaptics: Bool {
@@ -318,6 +321,7 @@ final class KeyboardViewController: UIInputViewController {
             TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
         }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
+        viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressedAt = at }
         viewModel.onKeyFeedback = { [weak self] in
             guard let self, self.allowsKeyHaptics else { return }
             self.barHaptics.impactOccurred(intensity: 0.65)
@@ -531,6 +535,7 @@ final class KeyboardViewController: UIInputViewController {
 
         let localSnapshot = localDictation.snapshot(now: now)
         let snap = localSnapshot ?? bridge.snapshot()
+        if let timeline = warmStartTimeline, timeline.observe(snap, now: now) { warmStartTimeline = nil }
         var insertedResult = false
 
         if snap.hasDeliverableResult(at: now),
@@ -619,7 +624,11 @@ final class KeyboardViewController: UIInputViewController {
         localDictationAvailable = available
         viewModel.onLocalDictateTap = available ? { [weak self] in
             guard let self else { return }
-            self.localDictation.start(in: self.view, allowBluetoothMic: self.bridge.allowBluetoothMic)
+            self.localDictation.start(
+                in: self.view,
+                allowBluetoothMic: self.bridge.allowBluetoothMic,
+                pressedAt: self.takeHexKeyPress()
+            )
         } : nil
     }
 
@@ -736,10 +745,18 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// The touch-down that led to this start, if it was the Hex key's in the last 2 s.
+    private func takeHexKeyPress() -> TimeInterval? {
+        defer { hexKeyPressedAt = nil }
+        guard let at = hexKeyPressedAt, Date().timeIntervalSince1970 - at < 2 else { return nil }
+        return at
+    }
+
     private func startWarmDictation() {
         let now = Date().timeIntervalSince1970
         guard viewModel.hasFullAccess, viewModel.currentSnapshot.isAvailable(at: now) else { return }
         let jobID = UUID().uuidString
+        warmStartTimeline = WarmStartTimeline(jobID: jobID, pressedAt: takeHexKeyPress() ?? now, sentAt: now)
         viewModel.setPendingCommand(
             KeyboardViewModel.PendingCommand(kind: .start, jobID: jobID, sentAt: now),
             now: now,

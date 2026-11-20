@@ -14,6 +14,8 @@ final class HexKeyControl: UIControl {
     /// The drawn keycap inside the control's (larger) touch target.
     var keycapFrame: CGRect = .zero { didSet { if keycapFrame != oldValue { setNeedsDisplay() } } }
 
+    /// The finger landed on the key, with when (wall clock, from the touch's own timestamp).
+    var onPress: ((TimeInterval) -> Void)?
     /// A tap or still hold: dictate, or open Hex.
     var onHold: (() -> Void)?
     /// The finger lifted after a still hold: push to talk's finish.
@@ -67,6 +69,7 @@ final class HexKeyControl: UIControl {
         let work = DispatchWorkItem { [weak self] in self?.holdElapsed() }
         holdWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + HexKeyGesture.holdDuration, execute: work)
+        onPress?(Date().timeIntervalSince1970 - max(0, ProcessInfo.processInfo.systemUptime - touch.timestamp))
         return true
     }
 

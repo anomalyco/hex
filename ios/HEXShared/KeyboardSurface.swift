@@ -80,6 +80,9 @@ final class KeyboardViewModel: ObservableObject {
 
     var onDictateTap: (() -> Void)?
     var onLocalDictateTap: (() -> Void)?
+    /// The finger landed on the full keyboard's Hex key (wall clock), before it is a tap,
+    /// a hold or a slide.
+    var onHexKeyPress: ((TimeInterval) -> Void)?
     var onStopTap: (() -> Void)?
     var onCancelTap: (() -> Void)?
     var onStyleSelected: ((DictationStyle) -> Void)?

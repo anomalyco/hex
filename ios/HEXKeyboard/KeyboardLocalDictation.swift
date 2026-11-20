@@ -23,6 +23,8 @@ final class KeyboardLocalDictation {
     private var pcmFile: KeyboardPCMFile?
     private var loudness: Float = -62
     private var transcription: Task<Void, Never>?
+    /// The current start's steps, logged once its first audio arrives.
+    private var timeline: CaptureTimeline?
     /// Learn how I type's dictation fixes, read when a dictation starts; empty while off.
     var corrections: () -> [DictationCorrection] = { [] }
     private var activeCorrections: [DictationCorrection] = []
@@ -105,7 +107,8 @@ final class KeyboardLocalDictation {
     /// With Always use iPhone microphone (the app's default), capture uses the iPhone's own
     /// microphone and mixes with other audio, so a car or headset keeps playing music
     /// instead of switching to call audio, which pauses it and stalls the start.
-    func start(in host: UIView, allowBluetoothMic: Bool) {
+    /// `pressedAt` is the Hex key's touch-down (wall clock), where the start's timeline begins.
+    func start(in host: UIView, allowBluetoothMic: Bool, pressedAt: TimeInterval? = nil) {
         guard !isActive else { return }
         let log = KeyboardProbeLog.shared
         let appAllowed = KeyboardBridge().appMicrophoneAllowed
@@ -122,6 +125,10 @@ final class KeyboardLocalDictation {
         activeCorrections = corrections()
         loudness = -62
         phase = .recording(jobID: jobID, startedAt: requestedAt.timeIntervalSince1970)
+        timeline = CaptureTimeline(
+            pressedAt: min(pressedAt ?? requestedAt.timeIntervalSince1970, requestedAt.timeIntervalSince1970),
+            requestedAt: requestedAt.timeIntervalSince1970
+        )
         let capture = capture ?? KeyboardWebCapture(host: host)
         self.capture = capture
         capture.onEvent = { [weak self] event in
@@ -157,8 +164,11 @@ final class KeyboardLocalDictation {
     private func handle(_ event: KeyboardWebCapture.Event, jobID: String, requestedAt: Date) {
         let log = KeyboardProbeLog.shared
         switch event {
-        case .started(let sampleRate, let device):
+        case .started(let sampleRate, let device, let steps):
             log.write("web capture started in \(Int(Date().timeIntervalSince(requestedAt) * 1000)) ms at \(Int(sampleRate)) Hz from \(device) \(KeyboardProbeLog.memory())")
+            if let capture {
+                timeline?.noteStarted(capture: capture, steps: steps, sampleRate: sampleRate)
+            }
             guard case .recording(let current, _) = phase, current == jobID else {
                 // Done came before the microphone did: nothing to record.
                 capture?.stop()
@@ -172,6 +182,10 @@ final class KeyboardLocalDictation {
                 fail(UserFacingError.Context.microphone.fallback, detail: "Could not create audio file: \(Self.describe(error))")
             }
         case .samples(let data, let peak):
+            if let line = timeline?.firstBuffer(at: Date().timeIntervalSince1970) {
+                log.write("\(line) \(KeyboardProbeLog.memory())")
+                timeline = nil
+            }
             pcmFile?.append(data)
             loudness = peak > 0 ? max(-62, 20 * log10(peak)) : -62
         case .stopped:
@@ -197,6 +211,7 @@ final class KeyboardLocalDictation {
     func cancel() {
         transcription?.cancel()
         transcription = nil
+        timeline = nil
         capture?.onEvent = nil
         capture?.stop()
         if let url = pcmFile?.url { try? FileManager.default.removeItem(at: url) }
@@ -327,6 +342,78 @@ final class KeyboardLocalDictation {
     }
 }
 
+/// What the page timed while starting (wall clock): the device list, the first
+/// getUserMedia, the stream kept (after a second one for the built-in microphone) and the
+/// audio context running.
+struct CaptureSteps {
+    var listedAt: TimeInterval?
+    var openedAt: TimeInterval?
+    var microphoneAt: TimeInterval?
+    var audioAt: TimeInterval?
+}
+
+/// One in-keyboard start, from the Hex key's touch-down (or the start call without one) to
+/// the first audio, as one probe log line. Times are wall clock, so a web view or page made
+/// before the touch reads negative.
+@MainActor
+private struct CaptureTimeline {
+    let pressedAt: TimeInterval
+    let requestedAt: TimeInterval
+    private var stages: [(String, TimeInterval?)] = []
+    private var bufferSeconds: TimeInterval = 4096.0 / 48_000
+
+    init(pressedAt: TimeInterval, requestedAt: TimeInterval) {
+        self.pressedAt = pressedAt
+        self.requestedAt = requestedAt
+    }
+
+    mutating func noteStarted(capture: KeyboardWebCapture, steps: CaptureSteps, sampleRate: Double) {
+        bufferSeconds = 4096 / max(8_000, sampleRate)
+        stages = [
+            ("start", requestedAt),
+            ("web view", capture.createdAt),
+            ("page", capture.loadedAt),
+            ("script", capture.scriptAt),
+            ("devices", steps.listedAt),
+            ("getUserMedia", steps.openedAt),
+            ("microphone", steps.microphoneAt),
+            ("audio", steps.audioAt),
+            ("started", Date().timeIntervalSince1970),
+        ]
+    }
+
+    /// The line for the first buffer, which holds the 4,096 samples before it.
+    func firstBuffer(at time: TimeInterval) -> String {
+        func ms(_ t: TimeInterval?) -> String {
+            guard let t else { return "-" }
+            let value = Int(((t - pressedAt) * 1000).rounded())
+            return value >= 0 ? "+\(value)" : "\(value)"
+        }
+        let steps = (stages + [("first buffer", time)]).map { "\($0.0) \(ms($0.1))" }.joined(separator: ", ")
+        return "first audio \(ms(time - bufferSeconds)) ms after touch-down (\(steps))"
+    }
+}
+
+/// A Hex-key start through a warm Hex session (Keep mic warm): from touch-down to Hex's
+/// recorder running, logged once the keyboard sees it.
+struct WarmStartTimeline {
+    let jobID: String
+    let pressedAt: TimeInterval
+    let sentAt: TimeInterval
+
+    /// Logs and returns true once the snapshot shows this job recording, or gives up after 10 s.
+    func observe(_ snapshot: KeyboardSnapshot, now: TimeInterval) -> Bool {
+        if snapshot.state == .recording, snapshot.jobID == jobID {
+            func ms(_ t: TimeInterval?) -> String { t.map { "+\(Int((($0 - pressedAt) * 1000).rounded()))" } ?? "-" }
+            KeyboardProbeLog.shared.write(
+                "warm start: recorder running \(ms(snapshot.recordingStartedAt)) ms after touch-down (sent \(ms(sentAt)), seen \(ms(now)))"
+            )
+            return true
+        }
+        return now - sentAt > 10
+    }
+}
+
 /// 16-bit mono PCM chunks from the page, written as a WAV file.
 @MainActor
 private final class KeyboardPCMFile {
@@ -367,7 +454,7 @@ private final class KeyboardPCMFile {
 @MainActor
 private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     enum Event {
-        case started(sampleRate: Double, device: String)
+        case started(sampleRate: Double, device: String, steps: CaptureSteps)
         case samples(Data, peak: Float)
         case stopped
         case failed(String)
@@ -378,6 +465,10 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
     private let webView: WKWebView
     private var isLoaded = false
     private var startWhenLoaded = false
+    /// When the web view was made, its page loaded and the page last asked to start (wall clock).
+    let createdAt = Date().timeIntervalSince1970
+    private(set) var loadedAt: TimeInterval?
+    private(set) var scriptAt: TimeInterval?
 
     init(host: UIView) {
         let configuration = WKWebViewConfiguration()
@@ -402,6 +493,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
             startWhenLoaded = true
             return
         }
+        scriptAt = Date().timeIntervalSince1970
         webView.evaluateJavaScript("hexStart(\(preferBuiltIn))")
     }
 
@@ -424,6 +516,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoaded = true
+        loadedAt = Date().timeIntervalSince1970
         if startWhenLoaded {
             startWhenLoaded = false
             start(preferBuiltIn: preferBuiltIn)
@@ -449,7 +542,16 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         switch type {
         case "started":
-            onEvent?(.started(sampleRate: (body["rate"] as? Double) ?? 48_000, device: (body["device"] as? String) ?? "unknown"))
+            onEvent?(.started(
+                sampleRate: (body["rate"] as? Double) ?? 48_000,
+                device: (body["device"] as? String) ?? "unknown",
+                steps: CaptureSteps(
+                    listedAt: (body["listed"] as? Double).map { $0 / 1000 },
+                    openedAt: (body["opened"] as? Double).map { $0 / 1000 },
+                    microphoneAt: (body["mic"] as? Double).map { $0 / 1000 },
+                    audioAt: (body["audio"] as? Double).map { $0 / 1000 }
+                )
+            ))
         case "pcm":
             guard let encoded = body["data"] as? String, let data = Data(base64Encoded: encoded) else { return }
             onEvent?(.samples(data, peak: Float((body["peak"] as? Double) ?? 0)))
@@ -477,7 +579,9 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
       running = true;
       try {
         let id = preferBuiltIn ? await builtInMicrophone() : null;
+        const listed = Date.now();
         stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base });
+        const opened = Date.now();
         if (preferBuiltIn && !id) {
           id = await builtInMicrophone();
           if (id && stream.getAudioTracks()[0].getSettings().deviceId !== id) {
@@ -485,6 +589,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
             stream = await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: id } } });
           }
         }
+        const mic = Date.now();
         ctx = new AudioContext();
         await ctx.resume();
         source = ctx.createMediaStreamSource(stream);
@@ -506,7 +611,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         };
         source.connect(node);
         node.connect(ctx.destination);
-        post({ type: "started", rate: ctx.sampleRate, device: stream.getAudioTracks()[0].label });
+        post({ type: "started", rate: ctx.sampleRate, device: stream.getAudioTracks()[0].label, listed, opened, mic, audio: Date.now() });
       } catch (error) {
         running = false;
         post({ type: "error", message: (error && (error.name + ": " + error.message)) || String(error) });
