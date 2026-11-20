@@ -152,6 +152,11 @@ final class DictationController {
     private(set) var dictationLanguage: String?
     /// A language change made while busy, applied once the dictation in flight is done.
     private var pendingLanguagePreparation = false
+    /// Said once Automatic moved on from a language this iPhone can't dictate yet
+    /// ("Russian isn't available on this iPhone yet. Hex switched to English.").
+    private(set) var languageNotice: String?
+    /// The language to offer (BCP 47) when the one chosen can't be dictated here yet.
+    private(set) var languageOffer: String?
     private let languageSettings: LanguageSettings
     private(set) var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,
@@ -303,8 +308,16 @@ final class DictationController {
         applyDictationLanguage(stored)
     }
 
+    /// Takes the language offered after the chosen one couldn't be dictated here.
+    func useOfferedLanguage() {
+        guard let languageOffer else { return }
+        setDictationLanguage(languageOffer)
+    }
+
     private func applyDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
+        languageNotice = nil
+        languageOffer = nil
         switch phase {
         case .recording, .transcribing, .requestingPermission:
             pendingLanguagePreparation = true
@@ -622,7 +635,9 @@ final class DictationController {
 
     // MARK: - Model Preparation
 
-    func prepareModel() {
+    /// `fallbacksLeft` bounds how often Automatic moves on to another language after one
+    /// whose model won't install here; each move sets a language aside, so it can't loop.
+    func prepareModel(fallbacksLeft: Int = 2) {
         modelPrepGeneration &+= 1
         let prepGen = modelPrepGeneration
         phase = .preparingModel
@@ -644,6 +659,7 @@ final class DictationController {
                     }
                 }
                 guard self.modelPrepGeneration == prepGen else { return }
+                self.languageOffer = nil
                 self.transcriber = candidate
                 self.transcriptionLanguage = await candidate.languageName
                 self.transcriptionLanguageID = await candidate.languageIdentifier
@@ -656,6 +672,14 @@ final class DictationController {
                 }
             } catch {
                 guard self.modelPrepGeneration == prepGen else { return }
+                let unavailable = error as? SpeechModelUnavailable
+                if let unavailable, unavailable.switchedAutomatically, fallbacksLeft > 0 {
+                    // Automatic set the language aside: prepare the one it picks now.
+                    self.languageNotice = UserFacingError.message(for: unavailable, context: .model)
+                    self.prepareModel(fallbacksLeft: fallbacksLeft - 1)
+                    return
+                }
+                self.languageOffer = unavailable.flatMap { $0.automatic ? nil : $0.fallback }
                 self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
                 self.pendingHandoff = nil
                 self.phase = .failed(UserFacingError.message(for: error, context: .model))
@@ -1324,6 +1348,25 @@ final class DictationController {
             controller.phase = .ready
             controller.warmDuration = .fifteenMinutes
             controller.keyboardSessionEnabled = false
+
+        case "language-unavailable":
+            // Russian picked by hand on an iPhone whose Apple Speech can't install it.
+            let unavailable = SpeechModelUnavailable(
+                language: "ru-RU",
+                reason: .notOnThisIPhone,
+                fallback: "en-US",
+                automatic: false
+            )
+            controller.isModelReady = false
+            controller.engineName = "Apple Speech"
+            controller.phase = .failed(UserFacingError.message(for: unavailable, context: .model))
+            controller.languageOffer = "en-US"
+
+        case "language-switched":
+            // Automatic moved on from Russian to English.
+            let unavailable = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
+            controller.phase = .ready
+            controller.languageNotice = UserFacingError.message(for: unavailable, context: .model)
 
         case "ready":
             controller.phase = .ready

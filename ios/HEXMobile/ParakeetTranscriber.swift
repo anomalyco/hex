@@ -31,7 +31,7 @@ extension LocalTranscribing {
 }
 
 actor ParakeetTranscriber: LocalTranscribing {
-    enum TranscriberError: LocalizedError {
+    enum TranscriberError: HexDescribedError {
         case notPrepared
         case emptyTranscript
 

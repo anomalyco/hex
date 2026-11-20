@@ -10,7 +10,7 @@ nonisolated enum AppleSpeechLanguages {
     /// the result in the App Group for the keyboard layout and translation.
     static func resolve(settings: LanguageSettings = LanguageSettings()) async -> SpeechLanguage? {
         let explicit = settings.dictationLanguage
-        let picked = await pick(explicit: explicit)
+        let picked = await pick(explicit: explicit, settings: settings)
         if let picked, settings.resolvedDictationLanguage != picked.identifier {
             settings.resolvedDictationLanguage = picked.identifier
         }
@@ -23,14 +23,14 @@ nonisolated enum AppleSpeechLanguages {
     /// What Automatic picks on this iPhone, whatever the setting says. Records it for the
     /// keyboard's language switch.
     static func automatic(settings: LanguageSettings = LanguageSettings()) async -> SpeechLanguage? {
-        let picked = await pick(explicit: nil)
+        let picked = await pick(explicit: nil, settings: settings)
         if let picked, settings.automaticDictationLanguage != picked.identifier {
             settings.automaticDictationLanguage = picked.identifier
         }
         return picked
     }
 
-    private static func pick(explicit: String?) async -> SpeechLanguage? {
+    private static func pick(explicit: String?, settings: LanguageSettings) async -> SpeechLanguage? {
         await SpeechLanguagePicker.pick(
             explicit: explicit,
             candidates: SpeechLanguagePicker.automaticCandidates(
@@ -38,12 +38,16 @@ nonisolated enum AppleSpeechLanguages {
                 current: Locale.current.identifier
             ),
             speech: { locale in
-                guard SpeechTranscriber.isAvailable else { return nil }
-                return await SpeechTranscriber.supportedLocale(equivalentTo: locale)
+                guard SpeechTranscriber.isAvailable,
+                      let found = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
+                // Its model wouldn't install lately: `DictationTranscriber`'s, if it has one.
+                guard !settings.speechModuleFailed(found.identifier(.bcp47)) else { return nil }
+                return found
             },
             dictation: { locale in
                 await DictationTranscriber.supportedLocale(equivalentTo: locale)
-            }
+            },
+            skip: { settings.isUnavailable($0.identifier(.bcp47)) }
         )
     }
 
@@ -68,6 +72,91 @@ nonisolated enum AppleSpeechLanguages {
         return identifiers
             .map { SpeechLanguageOption(id: $0, name: SpeechLanguagePicker.displayName(for: $0, in: display)) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// Apple Speech's model downloads, for the app and in-keyboard dictation alike.
+@available(iOS 26.0, *)
+nonisolated enum AppleSpeechAssets {
+    /// Installs `language`'s model (`SpeechModelInstall`: `SpeechTranscriber`, then
+    /// `DictationTranscriber`) and returns the language it installed. When neither installs,
+    /// the error names what Automatic picks instead, to offer or to say it switched.
+    static func install(
+        _ language: SpeechLanguage,
+        settings: LanguageSettings = LanguageSettings(),
+        log: @escaping @Sendable (String) -> Void = { _ in },
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> SpeechLanguage {
+        do {
+            let installed = try await SpeechModelInstall.run(
+                language,
+                steps: steps,
+                settings: settings,
+                stallLimit: .seconds(60),
+                log: log,
+                progress: progress
+            )
+            settings.clearUnavailable(language.identifier)
+            return installed
+        } catch var unavailable as SpeechModelUnavailable {
+            unavailable.automatic = settings.dictationLanguage == nil
+            if unavailable.reason == .notOnThisIPhone,
+               let next = await AppleSpeechLanguages.automatic(settings: settings),
+               next.languageCode != language.languageCode {
+                unavailable.fallback = next.identifier
+            }
+            throw unavailable
+        }
+    }
+
+    static let steps = SpeechModelInstall.Steps(
+        dictationEquivalent: { locale in
+            await DictationTranscriber.supportedLocale(equivalentTo: locale)
+        },
+        status: { language in
+            switch await AssetInventory.status(forModules: [AppleSpeechModule(language).module]) {
+            case .installed: .installed
+            case .unsupported: .unsupported
+            default: .downloadable
+            }
+        },
+        download: { language, progress in
+            let module = AppleSpeechModule(language)
+            await reserve(language.locale)
+            guard let request = try await AssetInventory.assetInstallationRequest(supporting: [module.module]) else {
+                return
+            }
+            let watched = request.progress
+            let monitor = Task {
+                while !Task.isCancelled {
+                    progress(watched.fractionCompleted)
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+            defer { monitor.cancel() }
+            try await withTaskCancellationHandler {
+                try await request.downloadAndInstall()
+            } onCancel: {
+                watched.cancel()
+            }
+        },
+        isOnline: { await SpeechModelInstall.isOnline() }
+    )
+
+    /// Reserves `locale`'s assets, first releasing others when Hex already holds
+    /// `AssetInventory.maximumReservedLocales` (each language picked in the keyboard reserves
+    /// one, and the limit shrinks with free storage). Best effort: without a reservation the
+    /// download still runs, or fails with its own reason.
+    static func reserve(_ locale: Locale) async {
+        let key = locale.identifier(.bcp47)
+        var reserved = await AssetInventory.reservedLocales
+        guard !reserved.contains(where: { $0.identifier(.bcp47) == key }) else { return }
+        let limit = AssetInventory.maximumReservedLocales
+        while reserved.count >= max(1, limit), let oldest = reserved.first {
+            reserved.removeFirst()
+            _ = await AssetInventory.release(reservedLocale: oldest)
+        }
+        _ = try? await AssetInventory.reserve(locale: locale)
     }
 }
 

@@ -156,7 +156,10 @@ struct ContentView: View {
                 }
 
                 if case .failed(let message) = dictation.phase {
-                    errorBanner(message)
+                    errorBanner(message, offer: dictation.languageOffer)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else if let notice = dictation.languageNotice {
+                    noticeBanner(notice)
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
@@ -806,7 +809,8 @@ struct ContentView: View {
         )
     }
 
-    private func errorBanner(_ message: String) -> some View {
+    /// `offer`: a language (BCP 47) that works here, when the one chosen doesn't yet.
+    private func errorBanner(_ message: String, offer: String? = nil) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 15))
@@ -815,10 +819,39 @@ struct ContentView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(HexTheme.textBase)
             Spacer(minLength: 0)
+            if let offer {
+                Button("Use \(SpeechModelUnavailable.englishName(offer))") {
+                    dictation.useOfferedLanguage()
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HexTheme.textBase)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Color.white.opacity(0.09), in: Capsule())
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
         }
         .padding(14)
         .background(
             HexTheme.dangerSurface,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+
+    private func noticeBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(HexTheme.textMuted)
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(HexTheme.textBase)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            Color.white.opacity(0.055),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
     }

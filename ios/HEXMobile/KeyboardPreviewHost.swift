@@ -133,6 +133,20 @@ struct KeyboardSnapshotStage: View {
                 activeTray: .style
             )
 
+        case "keyboard-language-unavailable":
+            // In-keyboard dictation on an iPhone whose Apple Speech can't install Russian.
+            let unavailable = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .failed,
+                    heartbeat: now,
+                    expiresAt: now + 6,
+                    message: UserFacingError.message(for: unavailable, context: .transcription)
+                ),
+                now: now,
+                style: .polished
+            )
+
         case "keyboard-language":
             viewModel.configureFixture(
                 snapshot: KeyboardSnapshot(

@@ -223,6 +223,20 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   resolved (`settings.dictationLanguage.resolved`). Picking a language prepares
   (and if needed downloads) its model at once, or after the dictation in flight.
   An iPhone without `SpeechTranscriber` keeps English on Parakeet, as before.
+  **When a model won't install**
+  (`SpeechModelInstall`, shared by the app and in-keyboard dictation): Apple lists
+  some languages whose `SpeechTranscriber` asset never arrives ("transcription.ru
+  asset not found after attempted download"), so Hex then installs the same
+  language on `DictationTranscriber` and goes straight to it for three days. A
+  download whose progress doesn't move for 60 s is given up on. When neither
+  module installs while the iPhone is online, Automatic sets the language aside
+  for three days and dictates the next one ("Russian isn't available on this
+  iPhone yet. Using English."); a language picked by hand says so and offers that
+  one ("Try English", with **Use English** in the app). Offline or stalled, it
+  says the download failed and tries again next time. Reservations make room
+  under `AssetInventory.maximumReservedLocales` by releasing others first. Only
+  Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
+  and other packages' descriptions go to logs, however readable.
   The setup card's Speech model row names the language ("Norwegian Bokmål ·
   Apple"). Steps that only know English follow the language: Clean up what I
   say (an English tagger) uses word rules in Spanish, German and Norwegian and
@@ -363,6 +377,14 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   and Hebrew without punctuation under every preset (the short-form presets
   returned nothing), so Polished only capitalizes and ends the sentence.
   Unverified on a physical iPhone.
+- **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
+  the fallback, set-aside, offline, and stall rules against fakes of Apple
+  Speech's calls (the simulator has no speech models), and `--snap-state
+  full-keyboard-language-unavailable`, `keyboard-language-unavailable`,
+  `language-unavailable` and `language-switched` render the messages. Which
+  module fails for which language on iOS 26.x, whether a stalled Apple download
+  ever moves again, and the reservation limit on a full iPhone are unverified on
+  hardware.
 - **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
   widths, hit frames (tiling the key area with no gaps or overlaps), balloons
   and accent menus at 320–440 pt and in landscape; `AutocorrectEngineTests` and

@@ -10,9 +10,14 @@ nonisolated struct LanguageSettings {
         static let recent = "settings.dictationLanguage.recent"
         static let supported = "settings.dictationLanguage.supported"
         static let keyboardLayout = "settings.keyboardLayout"
+        static let speechModuleFailed = "settings.dictationLanguage.speechModuleFailed"
+        static let unavailable = "settings.dictationLanguage.unavailable"
     }
 
     static let maxRecent = 5
+    /// How long a language whose speech model wouldn't install stays set aside before Hex
+    /// tries it again: Apple's downloads that fail tend to keep failing for days.
+    static let setAsideDuration: TimeInterval = 3 * 24 * 60 * 60
 
     private let defaults: UserDefaults?
 
@@ -62,6 +67,47 @@ nonisolated struct LanguageSettings {
     /// else the last one it ran in.
     var effectiveDictationLanguage: String? {
         dictationLanguage ?? automaticDictationLanguage ?? resolvedDictationLanguage
+    }
+
+    /// `SpeechTranscriber`'s model for this language (BCP 47) wouldn't install, so dictation
+    /// uses `DictationTranscriber`'s for a while.
+    func markSpeechModuleFailed(_ identifier: String, at now: Date = Date()) {
+        mark(identifier, key: Key.speechModuleFailed, at: now)
+    }
+
+    func speechModuleFailed(_ identifier: String, now: Date = Date()) -> Bool {
+        isMarked(identifier, key: Key.speechModuleFailed, now: now)
+    }
+
+    /// Neither module's model for this language (BCP 47) would install while online, so
+    /// Automatic passes over it for a while. An explicit choice still tries it.
+    func markUnavailable(_ identifier: String, at now: Date = Date()) {
+        mark(identifier, key: Key.unavailable, at: now)
+    }
+
+    func isUnavailable(_ identifier: String, now: Date = Date()) -> Bool {
+        isMarked(identifier, key: Key.unavailable, now: now)
+    }
+
+    /// A language that installed after all.
+    func clearUnavailable(_ identifier: String) {
+        let key = Locale(identifier: identifier).identifier(.bcp47)
+        guard var marks = defaults?.dictionary(forKey: Key.unavailable) as? [String: Double],
+              marks.removeValue(forKey: key) != nil else { return }
+        defaults?.set(marks, forKey: Key.unavailable)
+    }
+
+    private func mark(_ identifier: String, key: String, at now: Date) {
+        var marks = (defaults?.dictionary(forKey: key) as? [String: Double]) ?? [:]
+        marks = marks.filter { now.timeIntervalSince1970 - $0.value < Self.setAsideDuration }
+        marks[Locale(identifier: identifier).identifier(.bcp47)] = now.timeIntervalSince1970
+        defaults?.set(marks, forKey: key)
+    }
+
+    private func isMarked(_ identifier: String, key: String, now: Date) -> Bool {
+        guard let marks = defaults?.dictionary(forKey: key) as? [String: Double],
+              let at = marks[Locale(identifier: identifier).identifier(.bcp47)] else { return false }
+        return now.timeIntervalSince1970 - at < Self.setAsideDuration
     }
 
     /// A choice made in Hex or the keyboard: the setting, and the front of the recents.
@@ -122,12 +168,15 @@ nonisolated enum SpeechLanguagePicker {
     /// `DictationTranscriber`. Automatic takes the first candidate either module has,
     /// preferring `SpeechTranscriber` for the same language, so a Norwegian iPhone gets
     /// Norwegian from `DictationTranscriber` rather than English from `SpeechTranscriber`.
-    /// `speech` and `dictation` return each module's equivalent locale, or nil.
+    /// `speech` and `dictation` return each module's equivalent locale, or nil. Automatic
+    /// passes over a language `skip` names (one whose model wouldn't install here), so it
+    /// lands on the next working one; an explicit choice is tried as it is.
     static func pick(
         explicit: String?,
         candidates: [String],
         speech: (Locale) async -> Locale?,
-        dictation: (Locale) async -> Locale?
+        dictation: (Locale) async -> Locale?,
+        skip: (Locale) -> Bool = { _ in false }
     ) async -> SpeechLanguage? {
         if let explicit, !explicit.isEmpty {
             let wanted = Locale(identifier: explicit)
@@ -141,9 +190,10 @@ nonisolated enum SpeechLanguagePicker {
         for identifier in candidates {
             let candidate = Locale(identifier: identifier)
             if let found = await speech(candidate) {
+                if skip(found) { continue }
                 return SpeechLanguage(locale: found, module: .speech)
             }
-            if let found = await dictation(candidate) {
+            if let found = await dictation(candidate), !skip(found) {
                 return SpeechLanguage(locale: found, module: .dictation)
             }
         }
