@@ -227,15 +227,28 @@ Call detection                                    // meetings.detect
     by process image name
     └── executables map to the macOS keys (zoom -> us.zoom.xos, chrome ->
         com.google.Chrome, ms-teams.exe -> com.microsoft.teams2, ...)
-Browser calls -> offered as "Call in <browser>": no site is read yet, so a
-    call on any website (Teams on the web, a Teams web app/PWA, Meet, ...) is
-    a browser call after 20 s, never the Microsoft Teams (or other service's)
-    choice; Always record can't be set for it from an offer
-    └── browsers: chrome, chromium, brave, helium (helium-browser), firefox,
-        zen (zen, zen-bin; the Flatpak or tarball build, content processes
-        included), msedge, vivaldi (vivaldi-bin, vivaldi-stable,
-        vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's process);
-        others are not detected (#1105)
+Browser calls -> a browser holding the microphone is a browser call after 20 s
+    ├── browsers: chrome, chromium, brave, helium (helium-browser), firefox,
+    │   zen (zen, zen-bin; the Flatpak or tarball build, content processes
+    │   included), msedge, vivaldi (vivaldi-bin, vivaldi-stable,
+    │   vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's process);
+    │   others are not detected (#1105)
+    ├── Linux -> offered as "Call in <browser>": no site is read yet, so a
+    │   call on any website (Teams on the web, a Teams web app/PWA, Meet, ...)
+    │   is a browser call, never the Microsoft Teams (or other service's)
+    │   choice; Always record can't be set for it from an offer
+    └── Windows -> the microphone-holding browser's visible windows are read
+        through UI Automation, at most six, one read in flight and 2 s for
+        the whole read (a hung provider leaves their titles): a page address
+        or window title naming a call (Meet, a Teams page, ...) offers that
+        service with its site, and Always record follows it like any known
+        call; a page that names no call stays "Call in <browser>"
+        └── the browser executable's windows, not the microphone process's:
+            a Chromium audio utility process has none; each window's search
+            stops at its first Document, so a page's content is not
+            searched, and the whole-window title is reduced to the page's
+            (Edge's profile name, its other-tab count, and the zero-width
+            space in its name removed)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -285,9 +298,10 @@ error showed. Check: `pane_requests_reach_the_window_s_own_meetings` in
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs); a Recycle Bin delete on
 a real Windows PC has not been observed.
 
-Not on Linux and Windows yet: the Option-Control-V meeting paste shortcut,
-Copy section from the tray, the `hex meetings` and `hex mcp` commands
-(shared-control), and website names for browser calls. Dragging a capsule to
+Not on Linux yet: website names for browser calls (Windows reads its
+browsers' windows, macOS their tabs). Not on Linux and Windows yet: the
+Option-Control-V meeting paste shortcut, Copy section from the tray, and the
+`hex meetings` and `hex mcp` commands (shared-control). Dragging a capsule to
 another corner works on Windows, on X11 desktops, and on a capsule floated on
 XWayland (GNOME with Labs › Call recording controls on GNOME), though none of
 that has been tried by hand on a real Windows PC or X11 desktop; only a native
@@ -553,6 +567,24 @@ new tab query against a live Brave with a Banshee call (the script compiles, and
 the thread and memory are unit-tested with fake queries); the Banshee URL shape
 was not available, so the host rule is a guess at "any page".
 
+On Windows the page comes from the browser's own windows through UI Automation
+([windows/context.rs](../../src/windows/context.rs)): every visible window of
+the browser's executable, since the audio utility process that holds a
+Chromium browser's microphone has none, at most six, one read in flight and 2 s
+for the whole read. One automation instance and one COM initialization serve
+the windows, and each window's search stops at its first Document, so a page's
+own content is never searched (UI Automation searches in pre-order, so many
+tabs or bookmarks do not defeat it). The titles are read first, so a hung
+provider still answers with them; a whole-window title is reduced to the page's
+(Edge's profile name, its count of the window's other tabs, and the zero-width
+space in its own name removed) before detection reads it.
+[meeting/detection.rs](../../src/meeting/detection.rs)'s `call_page` picks the
+page from what was read, by the same rule macOS uses for its Accessibility
+pages: a page address that names a call wins, and a call's tab title outranks
+another window's address. A window titled `Meet - …` names a Meet call when no
+address does; with neither, the call stays a plain "Call in <browser>". Not
+observed on a real Windows Meet or Teams call.
+
 On 2026-10-21 Brave opened the microphone for 3-6 s at a time on
 problems.kitlangton.com (board voice notes) and each burst got a "Browser call
 call detected" offer; that is what the 20 s browser threshold prevents.
@@ -605,6 +637,12 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `the_call_coming_back_withdraws_a_pending_absence_stop_once` and
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
+`a_windows_chrome_on_a_meet_page_is_a_meet_call`,
+`a_windows_edge_on_a_meet_title_without_its_address_is_a_meet_call`,
+`windows_window_titles_lose_the_browser_profile_and_other_tabs`,
+`a_call_s_address_is_chosen_before_another_window_s_page`,
+`a_call_s_title_drops_another_window_s_address`,
+`a_browser_with_no_call_page_keeps_its_first_page`,
 `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
 `offer_titles_name_the_service_site_or_browser_without_repeating_call`,
 `choices_apply_to_the_site_when_known_and_the_app_otherwise`,

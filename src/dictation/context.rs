@@ -362,21 +362,9 @@ impl ContextSnapshot {
             // the app in front.
             if let Some(pid) = pid {
                 let pages = crate::accessibility::browser_pages(pid);
-                let (url, title) = crate::dictation::browser_page::choose(
-                    &pages,
-                    |url| {
-                        web_url(url).is_some_and(|url| crate::meeting::detection::names_call(&url))
-                    },
-                    crate::meeting::detection::title_names_call,
-                );
-                // A call's tab title outranks another tab's address.
-                let title_names_call = title
-                    .as_deref()
-                    .is_some_and(crate::meeting::detection::title_names_call);
-                let url = url
-                    .as_deref()
-                    .and_then(web_url)
-                    .filter(|url| crate::meeting::detection::names_call(url) || !title_names_call);
+                // A call's tab title outranks another tab's address; the
+                // rule is shared with Windows (`detection::call_page`).
+                let (url, title) = crate::meeting::detection::call_page(&pages);
                 return Ok(Self {
                     application: Some(browser.name.into()),
                     browser_url: url,
@@ -400,7 +388,12 @@ impl ContextSnapshot {
         Ok(snapshot_of(&front, page))
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    pub fn capture_for_meeting(canonical_bundle_id: &str) -> Result<Self> {
+        crate::windows::context::capture_for_meeting(canonical_bundle_id)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     pub fn capture_for_meeting(_canonical_bundle_id: &str) -> Result<Self> {
         Ok(Self::default())
     }

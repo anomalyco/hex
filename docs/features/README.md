@@ -1570,7 +1570,9 @@ script transformation (it receives the address)
 (`dictation::config::reads_browser` on macOS, `ModeRuntime::reads_page` on
 Windows and Linux; a dictation without processing never reads it). On macOS,
 dictation's page reads then never prompt (Meetings and media pause still ask
-browsers when on). Windows starts no UI Automation walk of the browser, and
+browsers when on). Windows starts no UI Automation walk of the browser for a
+dictation without processing (meeting detection reads a microphone-holding
+browser's windows itself, see [Meetings](meetings.md)), and
 Linux asks AT-SPI only for the process of a window the display server names no
 other way. Check: `the_page_is_read_only_when_processing_uses_it` in
 [dictation/modes.rs](../../src/dictation/modes.rs); not run against a live
