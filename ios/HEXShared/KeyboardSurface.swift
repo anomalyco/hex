@@ -29,6 +29,7 @@ final class KeyboardViewModel: ObservableObject {
         case none
         case style
         case returnApp
+        case language
     }
 
     enum StagePhase: Equatable {
@@ -59,6 +60,11 @@ final class KeyboardViewModel: ObservableObject {
     @Published var returnAppID: String?
     @Published var quickReturnApps: [HostApp] = HostAppCatalog.quickChips
     @Published var activeTray: PickerTray = .none
+    /// Settings › Dictation language (nil for Automatic), what Automatic resolves to, and the
+    /// languages the keyboard's quick switch offers. Empty choices hide the switch.
+    @Published var dictationLanguage: String?
+    @Published var automaticLanguage: String?
+    @Published var languageChoices: [String] = []
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
     // so 25–30 Hz polling never invalidates SwiftUI views mid-spring.
@@ -74,6 +80,8 @@ final class KeyboardViewModel: ObservableObject {
     var onCancelTap: (() -> Void)?
     var onStyleSelected: ((DictationStyle) -> Void)?
     var onReturnAppSelected: ((String?) -> Void)?
+    /// A language picked in the keyboard's switch; nil is Automatic.
+    var onLanguageSelected: ((String?) -> Void)?
     var onSpace: (() -> Void)?
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
@@ -82,6 +90,20 @@ final class KeyboardViewModel: ObservableObject {
 
     var selectedReturnApp: HostApp? {
         HostAppCatalog.app(for: returnAppID)
+    }
+
+    /// The language dictation uses now, when known.
+    var effectiveLanguage: String? {
+        dictationLanguage ?? automaticLanguage
+    }
+
+    /// Its own short name ("Norsk", "English"), for the switch and the space bar.
+    var languageLabel: String? {
+        effectiveLanguage.map(DictationLanguageSwitch.nativeName(for:))
+    }
+
+    var showsLanguageSwitch: Bool {
+        hasFullAccess && !languageChoices.isEmpty
     }
 
     var dotScopePhase: DotScopePhase {
@@ -593,6 +615,9 @@ struct KeyboardSurfaceView: View {
 
             returnAppTrayBar(palette: p)
                 .hexTrayReveal(model.activeTray == .returnApp, reduceMotion: reduceMotion, offsetY: 3.5)
+
+            languageTrayBar(palette: p)
+                .hexTrayReveal(model.activeTray == .language, reduceMotion: reduceMotion, offsetY: 3.5)
         }
         .frame(height: 26)
     }
@@ -620,6 +645,10 @@ struct KeyboardSurfaceView: View {
             leadingAccessory(palette: p)
 
             Spacer(minLength: 4)
+
+            if model.showsLanguageSwitch {
+                languageTrigger(palette: p)
+            }
 
             styleTrigger(palette: p)
                 .hexTrayReveal(model.hasFullAccess, reduceMotion: reduceMotion, offsetY: 0)
@@ -759,6 +788,66 @@ struct KeyboardSurfaceView: View {
         }
         .buttonStyle(TopBarTriggerButtonStyle(palette: p))
         .accessibilityLabel("Style: \(model.style.label)")
+    }
+
+    private func languageTrigger(palette p: KeyboardChromePalette) -> some View {
+        let label = model.languageLabel ?? "Automatic"
+        return Button {
+            model.setActiveTray(.language, reduceMotion: reduceMotion)
+        } label: {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(p.textMuted)
+            }
+            .foregroundStyle(p.textMuted)
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(TopBarTriggerButtonStyle(palette: p))
+        .accessibilityLabel("Dictation language: \(label)")
+    }
+
+    private func languageTrayBar(palette p: KeyboardChromePalette) -> some View {
+        let names = DictationLanguageSwitch.nativeNames(for: model.languageChoices)
+        return HStack(spacing: 4) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    languageChip(id: nil, label: "Auto", palette: p)
+                    ForEach(model.languageChoices, id: \.self) { id in
+                        languageChip(id: id, label: names[id] ?? id, palette: p)
+                    }
+                }
+                .padding(.leading, 2)
+                .padding(.trailing, 10)
+            }
+            .hexScrollEdgeEffectHidden()
+            .hexHorizontalEdgeFade(leading: 4, trailing: 14)
+
+            closeTrayButton(palette: p)
+        }
+        .frame(height: 26)
+    }
+
+    private func languageChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {
+        let active = model.dictationLanguage == id
+        return Button {
+            model.onLanguageSelected?(id)
+            model.setActiveTray(.none, reduceMotion: reduceMotion)
+        } label: {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(active ? p.textBase : p.textMuted)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(id == nil ? "Automatic language" : label)
     }
 
     private func returnChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {

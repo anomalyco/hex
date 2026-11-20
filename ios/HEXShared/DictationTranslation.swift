@@ -31,15 +31,17 @@ struct DictationTranslationSettings {
 
 enum DictationTranslator {
     /// The translated text, or nil when the experiment is off, the speech is already in
-    /// the target language, or the pack isn't downloaded.
+    /// the target language, or the pack isn't downloaded. `source` is the dictation
+    /// language; without one the text's language is guessed.
     @MainActor
     static func translateIfEnabled(
         _ text: String,
+        source: Locale.Language? = nil,
         settings: DictationTranslationSettings = DictationTranslationSettings()
     ) async -> String? {
         guard settings.isEnabled, #available(iOS 26.0, *) else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let source = detectedLanguage(of: trimmed) else { return nil }
+        guard !trimmed.isEmpty, let source = source ?? detectedLanguage(of: trimmed) else { return nil }
         let target = Locale.Language(identifier: settings.targetLanguage)
         guard source.languageCode != target.languageCode else { return nil }
         guard await LanguageAvailability().status(from: source, to: target) == .installed else { return nil }

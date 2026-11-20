@@ -122,6 +122,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
         engine.autocorrect.isEnabled = FullKeyboardSettings().autocorrect
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
+        refreshLanguageSignals()
+        syncLanguage()
         engine.configureForField()
         applyAppearance()
         refreshFromModel()
@@ -183,7 +185,38 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.refreshSuggestions()
     }
 
+    // MARK: - Language
+
+    /// Fixtures pin the layout; otherwise Settings › Keyboard layout, else Automatic, which
+    /// follows the dictation language.
+    var languageOverride: KeyboardLanguage? {
+        didSet { syncLanguage() }
+    }
+
+    /// The iPhone's keyboards and preferred languages, read when the keyboard appears, for
+    /// Automatic before any dictation language is known.
+    private var inputModeLanguages: [String] = []
+    private var preferredLanguages: [String] = []
+
+    private func refreshLanguageSignals() {
+        inputModeLanguages = UITextInputMode.activeInputModes.compactMap(\.primaryLanguage)
+        preferredLanguages = Locale.preferredLanguages
+    }
+
+    private func syncLanguage() {
+        let settings = LanguageSettings()
+        let next = languageOverride ?? settings.keyboardLayout ?? KeyboardLanguage.automatic(
+            dictationLanguage: settings.effectiveDictationLanguage,
+            inputModes: inputModeLanguages,
+            preferredLanguages: preferredLanguages
+        )
+        guard engine.language != next else { return }
+        engine.language = next
+        setNeedsLayout()
+    }
+
     func syncSettings() {
+        syncLanguage()
         let journal = TypingJournal.sharedIfEnabled()
         if engine.journal !== journal {
             engine.journal = journal
@@ -214,6 +247,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// The keyboard came on screen for a (possibly new) field.
     func prepareForField() {
+        refreshLanguageSignals()
         syncSettings()
         plane.cancelAllTouches()
         engine.configureForField()
@@ -253,6 +287,16 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     func debugPress(_ character: String) {
         guard let key = engine.layout.key(.character(character)) else { return }
         engine.touchBegan(id: -1, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+    }
+
+    /// Fixtures: show a key's accent callout with `option` selected.
+    func debugHoldAccent(_ character: String, selecting option: String) {
+        debugHoldAccent(character)
+        guard let menu = engine.activeAccentMenu,
+              let index = menu.options.firstIndex(of: option),
+              let key = engine.layout.key(.character(character)) else { return }
+        let cell = menu.cellFrames[index]
+        engine.touchMoved(id: -2, to: CGPoint(x: cell.midX, y: key.frame.midY))
     }
 
     /// Fixtures: show a key's long-press accent callout.
@@ -374,12 +418,22 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             setRecording(recording)
         }
         refreshRecordingPanel()
+        plane.spaceLabel = model.hasFullAccess ? model.languageLabel : nil
+        // A language picked in the switch changes the layout at once when it follows dictation.
+        syncLanguage()
         if let menu = styleMenu {
             menu.style = model.style
             menu.returnAppID = model.returnAppID
             menu.quickReturnApps = model.quickReturnApps
+            applyLanguages(to: menu)
         }
         refreshStrip()
+    }
+
+    private func applyLanguages(to menu: HexStyleMenuView) {
+        menu.dictationLanguage = model.dictationLanguage
+        menu.automaticLanguage = model.automaticLanguage
+        menu.languageChoices = model.showsLanguageSwitch ? model.languageChoices : []
     }
 
     private func refreshStrip() {
@@ -643,7 +697,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.style = model.style
         menu.returnAppID = model.returnAppID
         menu.quickReturnApps = model.quickReturnApps
+        applyLanguages(to: menu)
         menu.onHoverChanged = { [weak self] in self?.selectionFeedback() }
+        menu.onLanguage = { [weak self] language in
+            self?.typingLog?.ui("dictation_language", [TypingLogField("language", .string(language ?? "automatic"))])
+            self?.model.onLanguageSelected?(language)
+            self?.dismissStyleMenu()
+        }
         menu.onStyle = { [weak self] style in
             self?.typingLog?.ui("style", [
                 TypingLogField("style", .string(style.rawValue)),
@@ -669,9 +729,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         styleMenu = nil
     }
 
-    /// Fixtures: open the menu without a long press.
-    func debugShowStyleMenu() {
+    /// Fixtures: open the menu without a long press, optionally on another page.
+    func debugShowStyleMenu(page: HexStyleMenuView.Page = .styles) {
         showStyleMenu()
+        styleMenu?.show(page: page)
     }
 
     private func undoDictation() {

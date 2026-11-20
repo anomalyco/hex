@@ -191,19 +191,25 @@ final class KeyboardLocalDictation {
         transcription = Task { [weak self] in
             let started = Date()
             do {
-                let (heard, locale) = try await KeyboardSpeech.transcribe(url, hints: hints)
+                let (heard, language) = try await KeyboardSpeech.transcribe(url, hints: hints)
                 try? FileManager.default.removeItem(at: url)
+                let locale = language.identifier
                 let corrected = DictationCorrections.apply(fixes, to: heard)
                 let style = KeyboardBridge().style
-                let cleaned = await CleanupTagger.cleanIfEnabled(corrected, style: style)
-                let translated = await DictationTranslator.translateIfEnabled(cleaned)
+                let cleaned = await CleanupTagger.cleanIfEnabled(corrected, style: style, language: locale)
+                let translated = await DictationTranslator.translateIfEnabled(
+                    cleaned,
+                    source: language.locale.language
+                )
                 let text = translated ?? cleaned
                 KeyboardProbeLog.shared.write("transcribed in \(String(format: "%.2f", Date().timeIntervalSince(started))) s: \(text.count) chars \(KeyboardProbeLog.memory())")
                 guard let self, !Task.isCancelled else { return }
                 // Record typing logs keeps every step; nothing is kept while it is off.
                 let stages: DictationStages? = TypingLogSettings().isEnabled
                     ? DictationStages(
-                        engine: "Apple Speech (keyboard)",
+                        engine: language.module == .dictation
+                            ? "Apple Speech (keyboard, DictationTranscriber)"
+                            : "Apple Speech (keyboard)",
                         locale: locale,
                         style: style.rawValue,
                         recordedMS: Int((seconds * 1000).rounded()),
@@ -473,36 +479,30 @@ private enum KeyboardSpeech {
         }
     }
 
-    /// The transcript and the speech locale's identifier.
-    static func transcribe(_ url: URL, hints: [String]) async throws -> (String, String) {
+    /// The transcript and the language it was transcribed in.
+    static func transcribe(_ url: URL, hints: [String]) async throws -> (String, SpeechLanguage) {
         let log = KeyboardProbeLog.shared
-        // Same order as the app's AppleSpeechTranscriber.preferredLocale(), so the
+        // The same rule as the app's (Settings › Dictation language, else Automatic), so the
         // keyboard uses the assets Hex downloaded.
-        var locale: Locale?
-        for identifier in Locale.preferredLanguages + [Locale.current.identifier, "en-US"] {
-            if let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) {
-                locale = supported
-                break
-            }
-        }
-        guard let locale else { throw Failure.noLocale }
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
-        let status = await AssetInventory.status(forModules: [transcriber])
-        log.write("speech locale=\(locale.identifier) assets=\(status) available=\(SpeechTranscriber.isAvailable)")
+        guard let language = await AppleSpeechLanguages.resolve() else { throw Failure.noLocale }
+        let locale = language.locale
+        let speech = AppleSpeechModule(language)
+        let status = await AssetInventory.status(forModules: [speech.module])
+        log.write("speech locale=\(locale.identifier) module=\(speech.name) assets=\(status) available=\(SpeechTranscriber.isAvailable)")
         if status != .installed {
             let started = Date()
             _ = try? await AssetInventory.reserve(locale: locale)
-            if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+            if let request = try await AssetInventory.assetInstallationRequest(supporting: [speech.module]) {
                 log.write("downloading speech assets")
                 try await request.downloadAndInstall()
             }
-            let after = await AssetInventory.status(forModules: [transcriber])
+            let after = await AssetInventory.status(forModules: [speech.module])
             log.write("speech assets \(after) after \(String(format: "%.1f", Date().timeIntervalSince(started))) s \(KeyboardProbeLog.memory())")
             guard after == .installed else { throw Failure.assetsMissing("\(after)") }
         }
 
         let analyzer = SpeechAnalyzer(
-            modules: [transcriber],
+            modules: [speech.module],
             options: SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .whileInUse)
         )
         let file = try AVAudioFile(forReading: url)
@@ -515,13 +515,9 @@ private enum KeyboardSpeech {
         try await analyzer.start(inputAudioFile: file, finishAfterFile: true)
         log.write("analyzer started \(KeyboardProbeLog.memory())")
 
-        var transcript = AttributedString()
-        for try await result in transcriber.results where result.isFinal {
-            transcript += result.text
-        }
-        let text = String(transcript.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = try await speech.finalText()
         guard !text.isEmpty else { throw Failure.empty }
-        return (text, locale.identifier)
+        return (text, language)
     }
 }
 

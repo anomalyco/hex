@@ -241,6 +241,47 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(view.hasAllocatedRecordingPanel, "Metal scope torn down once recording ends")
     }
 
+    func testSpaceBarNamesTheDictationLanguage() {
+        let model = KeyboardViewModel()
+        let view = FullKeyboardView(model: model, target: target)
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+        view.layoutIfNeeded()
+        XCTAssertNil(view.plane.spaceLabel, "no label until the language is known")
+
+        model.automaticLanguage = "en-US"
+        model.languageChoices = ["nb-NO", "en-US"]
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+
+        model.dictationLanguage = "nb-NO"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(view.plane.spaceLabel, "Norsk")
+
+        model.hasFullAccess = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertNil(view.plane.spaceLabel, "without Full Access the keyboard can't dictate")
+    }
+
+    func testTypesOnTheNorwegianLayout() {
+        engine.language = .norwegian
+        XCTAssertNotNil(engine.layout.key(.character("å")))
+        XCTAssertEqual(engine.autocorrect.language, .norwegian)
+        tap(.shift)
+        tap(.character("ø"))
+        tap(.character("l"))
+        XCTAssertEqual(target.text, "Øl")
+
+        let o = engine.layout.key(.character("ø"))!
+        engine.touchBegan(id: 7, at: CGPoint(x: o.frame.midX, y: o.frame.midY))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        XCTAssertEqual(Set(engine.activeAccentMenu?.options ?? []), ["ø", "ö"])
+        engine.touchCancelled(id: 7)
+
+        engine.language = .german
+        XCTAssertNil(engine.layout.key(.character("å")))
+        XCTAssertNotNil(engine.layout.key(.character("ü")))
+    }
+
     func testEmailFieldShowsAtAndDot() {
         target.keyboardType = .emailAddress
         engine.configureForField()

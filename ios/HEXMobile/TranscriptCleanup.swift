@@ -163,6 +163,12 @@ nonisolated enum TranscriptCleanupGuard {
 protocol TranscriptCleaning: AnyObject {
     var isAvailable: Bool { get }
     func clean(_ text: String) async -> String?
+    /// Whether it can clean a dictation in this language (BCP 47).
+    func supports(language: String) -> Bool
+}
+
+extension TranscriptCleaning {
+    func supports(language: String) -> Bool { true }
 }
 
 /// One conservative on-device pass over a raw transcript.
@@ -183,6 +189,17 @@ final class AppleIntelligenceCleaner: TranscriptCleaning {
 
     var isAvailable: Bool {
         AppleIntelligenceCleanupAvailability.current.isAvailable
+    }
+
+    /// The on-device model cleans only languages it speaks; a Norwegian dictation on an
+    /// iPhone whose Apple Intelligence lacks Norwegian is left as heard.
+    func supports(language: String) -> Bool {
+        #if canImport(FoundationModels)
+        guard #available(iOS 26.0, *) else { return false }
+        return SystemLanguageModel.default.supportsLocale(Locale(identifier: language))
+        #else
+        return false
+        #endif
     }
 
     func clean(_ text: String) async -> String? {

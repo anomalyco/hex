@@ -238,6 +238,8 @@ final class TypingLogTests: XCTestCase {
         let defaults = UserDefaults(suiteName: "TypingLogTests-\(UUID().uuidString)")!
         let autocorrect = AutocorrectEngine(checker: Checker(), learnedWords: LearnedWordsStore(defaults: defaults))
         let view = FullKeyboardView(model: KeyboardViewModel(), target: target, autocorrect: autocorrect)
+        // English, whatever dictation language the simulator's App Group holds.
+        view.languageOverride = .english
         view.engine.autocorrect.isEnabled = true
         view.engine.clock = { [unowned self] in self.clock }
         view.orientationOverride = .portrait

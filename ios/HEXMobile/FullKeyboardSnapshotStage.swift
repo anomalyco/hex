@@ -4,8 +4,30 @@ import UIKit
 /// Renders the experimental `FullKeyboardView` under a composer when
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
+/// The layout follows `--dictation-language` (Automatic, English, without it), or
+/// `--keyboard-layout nb|es|de|en` pins it; drafts are in the layout's language.
+/// `--accent-key ø` picks the key the `accents` state holds.
 struct FullKeyboardSnapshotStage: View {
     let scene: String
+
+    static var layout: KeyboardLanguage {
+        argument(after: "--keyboard-layout").flatMap(KeyboardLanguage.init(rawValue:))
+            ?? KeyboardLanguage.automatic(
+                dictationLanguage: DictationLanguageFixture.explicit ?? "en-US",
+                inputModes: [],
+                preferredLanguages: []
+            )
+    }
+
+    static var accentKey: String {
+        argument(after: "--accent-key") ?? "e"
+    }
+
+    private static func argument(after flag: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
+        return args[idx + 1]
+    }
 
     static var requestedScene: String? {
         let args = ProcessInfo.processInfo.arguments
@@ -33,7 +55,38 @@ struct FullKeyboardSnapshotStage: View {
     }
 
     private var draft: String {
-        switch state {
+        switch Self.layout {
+        case .norwegian:
+            return switch state {
+            case "inserted": "Kommer ti min for sent, er hjemme 19.30. Begynn uten meg."
+            case "numbers": "Kommer ti min for sent, hjemme 19.3"
+            case "shift": "Kommer ti min for sent. "
+            case "typing": "Kommer ti min for sen"
+            case "accents": Self.accentKey == "e" ? "Kaf" : "Bl"
+            default: "Kommer ti min for sent, "
+            }
+        case .spanish:
+            return switch state {
+            case "inserted": "Llego diez minutos tarde, estaré en casa a las 7:30."
+            case "numbers": "Llego diez minutos tarde, en casa a las 7:3"
+            case "shift": "Llego diez minutos tarde. "
+            case "typing": "Llego diez minutos tard"
+            case "accents": "Caf"
+            default: "Llego diez minutos tarde, "
+            }
+        case .german:
+            return switch state {
+            case "inserted": "Bin zehn Minuten zu spät, um 7:30 zu Hause. Fangt ohne mich an."
+            case "numbers": "Bin zehn Minuten zu spät, um 7:3"
+            case "shift": "Bin zehn Minuten zu spät. "
+            case "typing": "Bin zehn Minuten zu spä"
+            case "accents": Self.accentKey == "s" ? "Stra" : "Caf"
+            default: "Bin zehn Minuten zu spät, "
+            }
+        case .english:
+            break
+        }
+        return switch state {
         case "inserted": "Running 10 min late, should be home by 7:30. Start without me."
         case "numbers": "Running 10 min late, home by 7:3"
         case "shift": "Running 10 min late. "
@@ -123,7 +176,9 @@ private struct FullKeyboardFixture: UIViewRepresentable {
             model.configureFixture(snapshot: warm, now: now)
         }
 
+        DictationLanguageFixture.apply(to: model)
         let view = FullKeyboardView(model: model, target: context.coordinator.target)
+        view.languageOverride = FullKeyboardSnapshotStage.layout
         view.appearanceOverride = darkKeyboard
         view.orientationOverride = .portrait
         view.drawsBackdrop = true
@@ -135,7 +190,9 @@ private struct FullKeyboardFixture: UIViewRepresentable {
             case "pressed":
                 view.debugPress("g")
             case "accents":
-                view.debugHoldAccent("e", selectIndex: 2)
+                let key = FullKeyboardSnapshotStage.accentKey
+                let pick = ["e": "é", "s": "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú"][key]
+                view.debugHoldAccent(key, selecting: pick ?? key)
             case "numbers":
                 view.engine.touchBegan(id: 900, at: center(of: .layerSwitch(.numbers), in: view))
                 view.engine.touchEnded(id: 900, at: center(of: .layerSwitch(.numbers), in: view))
@@ -154,6 +211,8 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.didInsertDictation("should be home by 7:30. Start without me.")
             case "style":
                 view.debugShowStyleMenu()
+            case "languages":
+                view.debugShowStyleMenu(page: .languages)
             case "morph":
                 // Loops idle → recording → idle so the strip morph can be screen-recorded.
                 func cycle(_ start: TimeInterval) {

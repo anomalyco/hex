@@ -228,6 +228,27 @@ final class CleanupTaggerTests: XCTestCase {
         XCTAssertEqual(result, "I mean what I say.", "a sentence with nothing to remove comes back as said")
     }
 
+    func testTheEnglishTaggerLeavesOtherLanguagesAsHeard() async throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CleanupTaggerSettings(defaults: defaults)
+        settings.isEnabled = true
+        let tagger = CleanupTagger()
+        let norwegian = "Vi sender den tirsdag, nei vent, torsdag."
+
+        CleanupTagger.prepareIfEnabled(style: .polished, language: "nb-NO", settings: settings, tagger: tagger)
+        XCTAssertFalse(tagger.isLoaded, "a Norwegian dictation loads nothing")
+        let result = await CleanupTagger.cleanIfEnabled(norwegian, style: .polished, language: "nb-NO", settings: settings, tagger: tagger)
+        XCTAssertEqual(result, norwegian)
+        XCTAssertFalse(tagger.isLoaded)
+
+        let english = await CleanupTagger.cleanIfEnabled(
+            "Let's ship it Tuesday, no wait, Thursday.", style: .polished, language: "en-GB", settings: settings, tagger: tagger
+        )
+        XCTAssertEqual(english, "Let's ship it Thursday.")
+    }
+
     func testDictationStartPreparesOnlyWhenOnAndNotForVerbatim() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

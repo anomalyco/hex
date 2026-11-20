@@ -27,15 +27,25 @@ protocol TextChecking: AnyObject {
     func isWordValid(_ word: String) -> Bool
     func guesses(for word: String) -> [String]
     func completions(for prefix: String) -> [String]
+    /// Switches the dictionary (a `UITextChecker` language code such as `nb`).
+    func useLanguage(_ code: String)
+}
+
+extension TextChecking {
+    func useLanguage(_ code: String) {}
 }
 
 @MainActor
 final class SystemTextChecker: TextChecking {
     private var checker: UITextChecker?
-    private let language: String
+    private var language: String
 
     init(language: String = "en_US") {
         self.language = language
+    }
+
+    func useLanguage(_ code: String) {
+        language = code
     }
 
     /// Warms `UITextChecker` after the keyboard's first frame commits so cold open stays < 12 ms.
@@ -165,6 +175,12 @@ final class AutocorrectEngine {
     let checker: TextChecking
     let learnedWords: LearnedWordsStore
     var isEnabled = true
+    /// The keyboard layout's language: its dictionary, and whether English fixes apply.
+    private(set) var language: KeyboardLanguage = .english
+    /// False when the iPhone has no spelling dictionary for `language`: then nothing is
+    /// suggested or corrected but your own text replacements, rather than "correcting"
+    /// the language into another.
+    private(set) var hasDictionary = true
     private var lexiconShortcuts: [String: String] = [:]
     private var lexiconTerms: [String] = []
     private var suppressedInSession: Set<String> = []
@@ -214,6 +230,18 @@ final class AutocorrectEngine {
         return lastCorrection
     }
 
+    /// Follows the keyboard layout. `available` is `UITextChecker.availableLanguages`.
+    func setLanguage(_ language: KeyboardLanguage, available: [String] = UITextChecker.availableLanguages) {
+        self.language = language
+        let code = language.spellCheckLanguage(available: available)
+        hasDictionary = code != nil
+        if let code {
+            checker.useLanguage(code)
+        }
+        suppressedInSession.removeAll()
+        lastCorrection = nil
+    }
+
     func applyLearning(_ learning: TypingLearning) {
         if self.learning != learning { self.learning = learning }
     }
@@ -260,7 +288,7 @@ final class AutocorrectEngine {
         field: KeyboardFieldKind,
         autocorrectionType: UITextAutocorrectionType?
     ) -> [KeyboardSuggestion] {
-        guard field == .text, autocorrectionType != .no else { return [] }
+        guard field == .text, autocorrectionType != .no, hasDictionary else { return [] }
         guard let token = Self.currentToken(in: beforeInput) else { return [] }
 
         let lower = token.lowercased()
@@ -278,7 +306,7 @@ final class AutocorrectEngine {
         } else if let learned = learning.typos[lower] {
             // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
             pool.append(Self.matchCase(of: token, onto: learned))
-        } else if let suggested = Self.suggestOnlyContractions[lower] {
+        } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
             pool.append(Self.matchCase(of: token, onto: suggested))
         }
 
@@ -354,6 +382,9 @@ final class AutocorrectEngine {
               !learning.rejected.contains(lower),
               !learnedWords.contains(lower),
               !Self.shorthandAllowlist.contains(lower) else { return nil }
+        guard hasDictionary else {
+            return lexiconShortcuts[lower].map { (token, $0) }
+        }
         guard let fix = cautiousReplacement(for: token) else { return nil }
         return (token, fix)
     }
@@ -376,8 +407,9 @@ final class AutocorrectEngine {
         let hasInternalCaps = token.dropFirst().contains(where: \.isUppercase) && !isAllCaps
         if hasInternalCaps { return nil }
 
-        // 2. Deterministic contractions and common QWERTY transpositions.
-        if let fixed = Self.unambiguousFixes[lower] {
+        // 2. Deterministic contractions and common QWERTY transpositions (English only:
+        // Norwegian "i" means "in" and must not become "I").
+        if language.usesEnglishFixes, let fixed = Self.unambiguousFixes[lower] {
             if isAllCaps && token.count < 3 { return nil }
             return Self.matchCase(of: token, onto: fixed)
         }
@@ -394,7 +426,7 @@ final class AutocorrectEngine {
             // Skip multi-word splits (`alot` -> `a lot` is fine only if single space, keep v1 single-token + apostrophe).
             guard !rawGuess.contains(" ") else { continue }
             let normalizedGuess = rawGuess.replacingOccurrences(of: "'", with: "").lowercased()
-            guard let editCost = Self.singleEditKeyboardCost(from: lower, to: normalizedGuess) else { continue }
+            guard let editCost = Self.singleEditKeyboardCost(from: lower, to: normalizedGuess, language: language) else { continue }
             let totalScore = editCost + Double(rank) * 0.08
             if totalScore < bestScore {
                 bestScore = totalScore
@@ -407,17 +439,20 @@ final class AutocorrectEngine {
 
     private func rankedGuesses(for token: String) -> [String] {
         let lower = token.lowercased()
+        let language = language
         return checker.guesses(for: token)
             .prefix(8)
             .enumerated()
             .sorted { a, b in
                 let costA = Self.singleEditKeyboardCost(
                     from: lower,
-                    to: a.element.replacingOccurrences(of: "'", with: "").lowercased()
+                    to: a.element.replacingOccurrences(of: "'", with: "").lowercased(),
+                    language: language
                 ) ?? (2.0 + Double(abs(a.element.count - token.count)) * 0.3)
                 let costB = Self.singleEditKeyboardCost(
                     from: lower,
-                    to: b.element.replacingOccurrences(of: "'", with: "").lowercased()
+                    to: b.element.replacingOccurrences(of: "'", with: "").lowercased(),
+                    language: language
                 ) ?? (2.0 + Double(abs(b.element.count - token.count)) * 0.3)
                 return (costA + Double(a.offset) * 0.08) < (costB + Double(b.offset) * 0.08)
             }
@@ -445,7 +480,11 @@ final class AutocorrectEngine {
     }
 
     /// Returns a weighted cost if `source` and `target` are within 1 Damerau-Levenshtein edit; `nil` otherwise.
-    static func singleEditKeyboardCost(from source: String, to target: String) -> Double? {
+    static func singleEditKeyboardCost(
+        from source: String,
+        to target: String,
+        language: KeyboardLanguage = .english
+    ) -> Double? {
         if source == target { return 0 }
         let s = Array(source)
         let t = Array(target)
@@ -460,7 +499,7 @@ final class AutocorrectEngine {
             }
             if diffs.count == 1 {
                 let i = diffs[0]
-                return areAdjacentKeys(s[i], t[i]) ? 0.65 : 1.15
+                return areAdjacentKeys(s[i], t[i], language: language) ? 0.65 : 1.15
             }
             if diffs.count == 2, diffs[1] == diffs[0] + 1,
                s[diffs[0]] == t[diffs[1]], s[diffs[1]] == t[diffs[0]] {
@@ -487,21 +526,17 @@ final class AutocorrectEngine {
         }
         let extraIdx = skippedIndex ?? (longer.count - 1)
         let extraChar = longer[extraIdx]
-        let leftAdj = extraIdx > 0 && areAdjacentKeys(extraChar, longer[extraIdx - 1])
-        let rightAdj = extraIdx + 1 < longer.count && areAdjacentKeys(extraChar, longer[extraIdx + 1])
+        let leftAdj = extraIdx > 0 && areAdjacentKeys(extraChar, longer[extraIdx - 1], language: language)
+        let rightAdj = extraIdx + 1 < longer.count && areAdjacentKeys(extraChar, longer[extraIdx + 1], language: language)
         return (leftAdj || rightAdj) ? 0.70 : 0.90
     }
 
-    private static let keyCoordinates: [Character: (Double, Double)] = {
-        var map: [Character: (Double, Double)] = [:]
-        for (col, ch) in "qwertyuiop".enumerated() { map[ch] = (0, Double(col)) }
-        for (col, ch) in "asdfghjkl".enumerated() { map[ch] = (1, Double(col) + 0.5) }
-        for (col, ch) in "zxcvbnm".enumerated() { map[ch] = (2, Double(col) + 1.5) }
-        return map
-    }()
+    private static let keyCoordinates: [KeyboardLanguage: [Character: (Double, Double)]] = Dictionary(
+        uniqueKeysWithValues: KeyboardLanguage.allCases.map { ($0, $0.keyCoordinates) }
+    )
 
-    static func areAdjacentKeys(_ a: Character, _ b: Character) -> Bool {
-        guard let pa = keyCoordinates[a], let pb = keyCoordinates[b] else { return false }
+    static func areAdjacentKeys(_ a: Character, _ b: Character, language: KeyboardLanguage = .english) -> Bool {
+        guard let keys = keyCoordinates[language], let pa = keys[a], let pb = keys[b] else { return false }
         let dx = pa.1 - pb.1
         let dy = pa.0 - pb.0
         return (dx * dx + dy * dy).squareRoot() <= 1.6

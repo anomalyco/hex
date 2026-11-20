@@ -57,6 +57,8 @@ final class DictationController {
         /// Whether the keyboard gets the raw transcript to learn from.
         let sharesHeard: Bool
         let copyToPasteboard: Bool
+        /// The transcriber's language (BCP 47) when the capture started.
+        let language: String
     }
 
     private struct PendingKeyboardHandoff {
@@ -144,6 +146,13 @@ final class DictationController {
     private(set) var handoffNotice: String?
     private(set) var engineName = "Local speech"
     private(set) var transcriptionLanguage = "English"
+    /// The BCP 47 identifier of `transcriptionLanguage`, for the steps that depend on it.
+    private(set) var transcriptionLanguageID = "en-US"
+    /// Settings › Dictation language: a BCP 47 identifier, or nil for Automatic.
+    private(set) var dictationLanguage: String?
+    /// A language change made while busy, applied once the dictation in flight is done.
+    private var pendingLanguagePreparation = false
+    private let languageSettings: LanguageSettings
     private(set) var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,
         detail: "Checking model files"
@@ -162,7 +171,8 @@ final class DictationController {
         cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings(),
         customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
-        learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil
+        learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
+        languageSettings: LanguageSettings = LanguageSettings()
     ) {
         let resolvedBridge = keyboardBridge ?? KeyboardBridge()
         let resolvedAudio = audio ?? SystemAudioManager()
@@ -181,6 +191,8 @@ final class DictationController {
         }
         self.fileManager = fileManager
         self.now = now
+        self.languageSettings = languageSettings
+        self.dictationLanguage = languageSettings.dictationLanguage
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.returnAppID = resolvedBridge.returnAppID
@@ -205,10 +217,11 @@ final class DictationController {
             if hasCachedModel {
                 engineName = "Parakeet V2"
                 prepareModel()
-            } else if #available(iOS 26.0, *), AppleSpeechTranscriber.isAvailable {
+            } else if #available(iOS 26.0, *) {
                 Task { [weak self] in
                     guard let self else { return }
-                    if await AppleSpeechTranscriber.preferredLocale() != nil {
+                    if let language = await AppleSpeechTranscriber.preferredLanguage(),
+                       AppleSpeechTranscriber.shouldUse(language) {
                         self.engineName = "Apple Speech"
                         self.prepareModel()
                     } else {
@@ -293,6 +306,44 @@ final class DictationController {
         }
     }
 
+    /// Settings › Dictation language. Prepares the new language's model now, or once the
+    /// dictation in flight is done.
+    func setDictationLanguage(_ identifier: String?) {
+        let normalized = (identifier?.isEmpty == true) ? nil : identifier
+        guard normalized != dictationLanguage else { return }
+        languageSettings.chooseDictationLanguage(normalized)
+        applyDictationLanguage(normalized)
+    }
+
+    /// Picks up a language the keyboard switched to in the App Group.
+    func followDictationLanguageSetting() {
+        let stored = languageSettings.dictationLanguage
+        guard stored != dictationLanguage else { return }
+        applyDictationLanguage(stored)
+    }
+
+    private func applyDictationLanguage(_ identifier: String?) {
+        dictationLanguage = identifier
+        switch phase {
+        case .recording, .transcribing, .requestingPermission:
+            pendingLanguagePreparation = true
+        case .modelRequired, .preparingModel, .ready, .failed:
+            prepareModel()
+        }
+    }
+
+    /// Runs a language change that waited for the dictation in flight.
+    private func prepareDeferredLanguageIfNeeded() {
+        guard pendingLanguagePreparation else { return }
+        switch phase {
+        case .ready, .failed, .modelRequired:
+            pendingLanguagePreparation = false
+            prepareModel()
+        case .recording, .transcribing, .requestingPermission, .preparingModel:
+            break
+        }
+    }
+
     func setAllowBluetoothMic(_ allow: Bool) {
         guard allowBluetoothMic != allow else { return }
         allowBluetoothMic = allow
@@ -342,6 +393,7 @@ final class DictationController {
         }
         restoreAudioAfterCapture()
         publishKeyboardSnapshot()
+        prepareDeferredLanguageIfNeeded()
     }
 
     func clearTranscript() {
@@ -418,6 +470,8 @@ final class DictationController {
         if case .setup = request {
             return
         }
+        // A language picked in the keyboard: prepare it before the handoff records.
+        followDictationLanguageSetting()
         if let customOpener = urlOpener {
             defaultURLOpener = customOpener
         }
@@ -677,6 +731,7 @@ final class DictationController {
                 guard self.modelPrepGeneration == prepGen else { return }
                 self.transcriber = candidate
                 self.transcriptionLanguage = await candidate.languageName
+                self.transcriptionLanguageID = await candidate.languageIdentifier
                 self.keyboardBridge.setModelInstalled(true)
                 self.isModelReady = true
                 self.phase = .ready
@@ -696,9 +751,9 @@ final class DictationController {
 
     private static func defaultTranscriber() async -> any LocalTranscribing {
         if #available(iOS 26.0, *),
-           AppleSpeechTranscriber.isAvailable,
-           let locale = await AppleSpeechTranscriber.preferredLocale() {
-            return AppleSpeechTranscriber(locale: locale)
+           let language = await AppleSpeechTranscriber.preferredLanguage(),
+           AppleSpeechTranscriber.shouldUse(language) {
+            return AppleSpeechTranscriber(language: language)
         }
         return ParakeetTranscriber()
     }
@@ -728,7 +783,8 @@ final class DictationController {
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
-        CleanupTagger.prepareIfEnabled(style: effectiveStyle)
+        let language = transcriptionLanguageID
+        CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
         let vocabularyTerms = customVocabularySettings.activeTerms
         let personalCorrections = learnedDictationCorrections()
         let recognitionHints = DictationCorrections.recognitionHints(
@@ -780,7 +836,8 @@ final class DictationController {
                     personalCorrections: personalCorrections,
                     recognitionHints: recognitionHints,
                     sharesHeard: sharesHeard,
-                    copyToPasteboard: copyToPasteboard
+                    copyToPasteboard: copyToPasteboard,
+                    language: language
                 )
                 refreshWarmExpiry()
                 audioLevel = 0
@@ -828,6 +885,7 @@ final class DictationController {
             liveActivity.endImmediately()
             restoreAudioAfterCapture()
             publishKeyboardSnapshot()
+            prepareDeferredLanguageIfNeeded()
             return
         }
 
@@ -859,16 +917,23 @@ final class DictationController {
                 // sentence start ("iPhone" -> "IPhone"); learned capitals get the same.
                 let corrected = DictationCorrections.apply(session.personalCorrections, to: rawText)
                 let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: corrected)
-                let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: session.style)
+                let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: session.style, language: session.language)
                 let cleaned = await self.cleanedTranscriptIfEnabled(tagged, session: session)
-                let translated = await DictationTranslator.translateIfEnabled(cleaned)
+                let translated = await DictationTranslator.translateIfEnabled(
+                    cleaned,
+                    source: Locale(identifier: session.language).language
+                )
                 let text = translated ?? cleaned
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
+                // A translation is formatted in the language it is now in.
+                let formatLanguage = translated == nil
+                    ? session.language
+                    : DictationTranslationSettings().targetLanguage
                 let formatted = VocabularySpelling.apply(
                     session.vocabularyTerms + DictationCorrections.spellings(session.personalCorrections),
-                    to: TranscriptFormatter.format(text, style: session.style)
+                    to: TranscriptFormatter.format(text, style: session.style, language: formatLanguage)
                 )
                 self.recordingDuration = 0
                 self.transcript = formatted
@@ -908,6 +973,7 @@ final class DictationController {
                 self.refreshWarmExpiry()
                 self.phase = .ready
                 self.publishKeyboardSnapshot()
+                self.prepareDeferredLanguageIfNeeded()
             } catch {
                 guard !Task.isCancelled, let self, self.jobGeneration == captureGeneration else {
                     return
@@ -918,6 +984,7 @@ final class DictationController {
                 self.keyboardMessage = keyboardJobID == nil ? nil : error.localizedDescription
                 self.phase = .failed(error.localizedDescription)
                 self.publishKeyboardSnapshot()
+                self.prepareDeferredLanguageIfNeeded()
             }
         }
     }
@@ -931,7 +998,8 @@ final class DictationController {
               session.style != .verbatim,
               !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let cleaner,
-              cleaner.isAvailable else {
+              cleaner.isAvailable,
+              cleaner.supports(language: session.language) else {
             return rawText
         }
         return await cleaner.clean(rawText) ?? rawText
@@ -1013,6 +1081,8 @@ final class DictationController {
 
                 // Never expire an in-flight recording or accepted transcription mid-work.
                 if self.phase != .recording && self.phase != .transcribing {
+                    // The keyboard's language switch writes the App Group; follow it.
+                    self.followDictationLanguageSetting()
                     let remaining = self.keyboardSessionExpiresAt - self.now()
                     if remaining <= 0 {
                         self.endWarmSession()
@@ -1264,8 +1334,11 @@ final class DictationController {
                 }
                 return transcript
             }
+            followDictationLanguageSetting()
             if phase == .modelRequired || isFailedPhase {
                 prepareModel()
+            }
+            if phase == .preparingModel {
                 try? await waitUntilReady(timeoutSeconds: 10)
             }
             guard phase == .ready else { return nil }
@@ -1318,6 +1391,7 @@ final class DictationController {
         let scene = args[flagIndex + 1]
         controller.engineName = "Apple Speech"
         controller.transcriptionLanguage = "English"
+        controller.transcriptionLanguageID = "en-US"
         controller.keyboardBridge.setModelInstalled(true)
         controller.isModelReady = true
 

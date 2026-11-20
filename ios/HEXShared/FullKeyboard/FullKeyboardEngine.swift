@@ -103,6 +103,16 @@ final class FullKeyboardEngine {
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { rebuildLayout() } } }
     var showsGlobe = false { didSet { if showsGlobe != oldValue { rebuildLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
+    /// The letters, accents and spelling dictionary (Settings › Keyboard layout).
+    var language: KeyboardLanguage = .english {
+        didSet {
+            guard language != oldValue else { return }
+            cancelAllTouches()
+            autocorrect.setLanguage(language)
+            rebuildLayout(cause: "language")
+            refreshSuggestions()
+        }
+    }
     private(set) var layout = KeyboardLayout(width: 375)
 
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
@@ -308,7 +318,7 @@ final class FullKeyboardEngine {
         let dx = touch.point.x - touch.startPoint.x
         let dy = touch.point.y - touch.startPoint.y
         guard (dx * dx + dy * dy).squareRoot() <= Self.accentSlop else { return false }
-        guard let options = AccentCatalog.options(for: base, uppercase: isUppercase),
+        guard let options = AccentCatalog.options(for: base, uppercase: isUppercase, language: language),
               options.count > 1 else { return false }
         activeAccentMenu = AccentMenu.build(
             for: touch.key.frame,
@@ -687,7 +697,8 @@ final class FullKeyboardEngine {
             layer: layerState.layer,
             field: field,
             showsGlobe: showsGlobe,
-            horizontalInset: horizontalInset
+            horizontalInset: horizontalInset,
+            language: language
         )
         logState(cause)
     }

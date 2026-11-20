@@ -9,6 +9,8 @@ struct ModelPreparationProgress: Sendable {
 protocol LocalTranscribing: Actor {
     nonisolated var displayName: String { get }
     var languageName: String { get }
+    /// The BCP 47 identifier of the language it transcribes.
+    var languageIdentifier: String { get }
 
     func prepare(
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
@@ -19,6 +21,9 @@ protocol LocalTranscribing: Actor {
 }
 
 extension LocalTranscribing {
+    /// English unless the engine says otherwise.
+    var languageIdentifier: String { "en-US" }
+
     /// Engines without a recognition hint ignore the list and transcribe exactly as before.
     nonisolated func transcribe(_ audioURL: URL, vocabulary: [String]) async throws -> String {
         try await transcribe(audioURL)

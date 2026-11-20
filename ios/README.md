@@ -3,9 +3,10 @@
 **Status:** Internal TestFlight app (`HEXMobile`), custom keyboard extension
 (`HEXKeyboard`), and Live Activity + Control Center widget extension
 (`HEXWidgets`). The containing app records a generation-scoped temporary WAV,
-transcribes on-device with Apple Speech (`SpeechTranscriber` on iOS 26+) or
-FluidAudio Parakeet V2 (iOS 18+), and removes each capture's file after
-inference, cancellation, or failure. During a warm session the keyboard
+transcribes on-device with Apple Speech on iOS 26+ (`SpeechTranscriber`, or
+`DictationTranscriber` for the languages it lacks, such as Norwegian, Danish,
+Swedish and Hebrew) or FluidAudio Parakeet V2 (iOS 18+, English), and removes
+each capture's file after inference, cancellation, or failure. During a warm session the keyboard
 extension sends commands and inserts completed text over the shared App Group
 (`group.anomaly.hex.mobile`). Otherwise it dictates by itself (in-keyboard
 dictation, iOS 26+): iOS refuses to record from a keyboard extension
@@ -183,6 +184,60 @@ it on-device with Apple Speech, downloading the speech assets on first use
     line and nothing else. Events are buffered on the main thread and encoded and
     appended on a utility queue every 2 s. Nothing is sent. The schema is in
     [`docs/typing-logs.md`](docs/typing-logs.md).
+- **Dictation language (Settings › Dictation language, iOS 26+):** Automatic by
+  default: the first of the iPhone's preferred languages (then its region's
+  locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
+  dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
+  Apple has. The menu also lists every locale `SpeechTranscriber` or
+  `DictationTranscriber` supports, by name. `SpeechTranscriber` is used wherever
+  it has the language (as before); `DictationTranscriber` (preset
+  `longDictation`) covers the rest (`SpeechLanguagePicker`,
+  `AppleSpeechLanguages`, `AppleSpeechModule`). The setting lives in the App Group
+  (`settings.dictationLanguage`, nil for Automatic) so in-keyboard dictation uses
+  the same rule and the same downloaded assets; both record the language they
+  resolved (`settings.dictationLanguage.resolved`). Picking a language prepares
+  (and if needed downloads) its model at once, or after the dictation in flight.
+  An iPhone without `SpeechTranscriber` keeps English on Parakeet, as before.
+  The setup card's Speech model row names the language ("Norwegian Bokmål ·
+  Apple"). Steps that only know English follow the language: Clean up what I
+  say (an English tagger) skips other languages; Clean up with Apple
+  Intelligence runs only when the on-device model supports the language; the
+  styles trim English fillers (um, uh, er, ah) only in English, Nordic ones (eh,
+  ehm, øh, hm) in Norwegian, Danish and Swedish, and none elsewhere (Norwegian
+  "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
+  language rather than a guess. Custom vocabulary works in any language.
+- **Switching the dictation language in the keyboard (iOS 26+, Full Access):**
+  the dictation bar shows the language beside the style ("Norsk ⌄") and opens a
+  tray of chips; the full keyboard's Hex key menu has a Language row with its
+  own page, and the space bar names the language faintly ("English", "Norsk").
+  Both offer Automatic plus up to five languages: the one set, the ones picked
+  lately (`settings.dictationLanguage.recent`), then the iPhone's preferred
+  languages, each matched to one Apple Speech has (`DictationLanguageSwitch`;
+  the keyboard lists Apple's languages once per process and caches them in
+  `settings.dictationLanguage.supported`). Names are each language's own
+  ("Español", "Deutsch", "עברית"), with a region code only where two share a
+  language. A pick writes the same App Group setting as Hex's menu, so
+  in-keyboard dictation uses it at once; a warm Hex session follows it within
+  100 ms and prepares the language between dictations, and a handoff or the
+  Action Button picks it up before recording.
+- **Keyboard layouts (Experiments › Full keyboard › Keyboard layout):** English,
+  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2) and
+  Deutsch (QWERTZ with `ü`, `ö ä`), as Apple's iOS keyboards lay them out
+  (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
+  Automatic follows the dictation language (Hebrew and other languages without a
+  layout get English); before any dictation language is known, the first iPhone
+  keyboard, then preferred language, that has a layout. Rows of 11 keys narrow
+  only the letters: shift, delete and the bottom row keep their English sizes,
+  and row 3's letters sit centred between shift and delete. Long-press accents
+  drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
+  Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º), and
+  German keeps ß on a held S. Autocorrect and suggestions use the layout's
+  `UITextChecker` dictionary (`nb`, `es`, `de`); where the iPhone has none
+  they stay off except your own text replacements, and the English contractions
+  and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
+  the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
+  The 123 and #+= pages are English's in every language, and the accent lists
+  come from Apple's layouts as remembered, not checked against a device.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -240,8 +295,28 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   that condition through `ActiveAudioCapture`.
 - **Apple Speech hint:** Custom vocabulary's contextual strings are best effort
   and unverified on a physical iPhone. Apple documents contextual strings only
-  for `DictationTranscriber`, Hex sets them on `SpeechTranscriber`, and
-  Parakeet's batch path gets no hint.
+  for `DictationTranscriber`; Hex sets them on both modules, and Parakeet's
+  batch path gets no hint.
+- **Dictation languages:** `SpeechLanguagePickerTests` cover the picking rule
+  and `DictationControllerTests` a language change during a dictation. The
+  simulator can't transcribe: `SpeechTranscriber.isAvailable` is false there
+  and `DictationTranscriber` fails with "Model not available", so
+  `AppleSpeechClipTests` (skipped unless `HEX_SPEECH_CLIPS` names a folder of
+  `<language>.wav` clips) reports that. The same code (`AppleSpeechTranscriber`,
+  `AppleSpeechModule`, the picker) built for macOS 26 transcribed `say` clips
+  word for word: German and Spanish through `SpeechTranscriber`, Norwegian
+  (`Nora`) and Hebrew (`Carmit`) through `DictationTranscriber`, which
+  downloaded each model in 11–16 s. `DictationTranscriber` returned Norwegian
+  and Hebrew without punctuation under every preset (the short-form presets
+  returned nothing), so Polished only capitalizes and ends the sentence.
+  Unverified on a physical iPhone.
+- **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
+  widths, hit frames (tiling the key area with no gaps or overlaps), balloons
+  and accent menus at 320–440 pt and in landscape; `AutocorrectEngineTests` and
+  `FullKeyboardEngineTests` check typing, dictionaries and English-only fixes.
+  Whether the simulator or an iPhone has a `UITextChecker` dictionary for
+  `nb` decides Norwegian autocorrect; how good those corrections are is
+  unmeasured.
 - **Learn how I type:** Dictation edit inference (span location, word diff,
   outcomes, the learning threshold, and applying fixes) is covered by unit
   tests only. How much `documentContextBeforeInput` and

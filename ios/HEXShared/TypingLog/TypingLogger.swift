@@ -215,6 +215,7 @@ final class TypingLogger {
             TypingLogField("horizontalInset", .pt(layout.horizontalInset)),
             TypingLogField("globe", .bool(layout.showsGlobe)),
             TypingLogField("hexPlacement", .string(HexKeyPlacement.current.rawValue)),
+            TypingLogField("language", .string(layout.language.rawValue)),
         ]
         if current.shiftHeld {
             fields.insert(TypingLogField("shiftHeld", .bool(true)), at: 4)

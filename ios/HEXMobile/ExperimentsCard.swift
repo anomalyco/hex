@@ -103,6 +103,8 @@ struct ExperimentsCard: View {
                     .onChange(of: haptics) { _, enabled in
                         FullKeyboardSettings().haptics = enabled
                     }
+
+                    KeyboardLayoutRow()
                 }
 
                 Divider()

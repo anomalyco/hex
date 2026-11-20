@@ -17,6 +17,13 @@ final class KeyboardLayoutTests: XCTestCase {
                     }
                 }
             }
+            // Only the letters differ between languages.
+            for language in KeyboardLanguage.allCases where language != .english {
+                for globe in [false, true] {
+                    layouts.append(KeyboardLayout(width: width, showsGlobe: globe, language: language))
+                }
+                layouts.append(KeyboardLayout(width: width, field: .email, language: language))
+            }
         }
         return layouts
     }
@@ -189,6 +196,134 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
     }
 
+    // MARK: - Languages
+
+    func testLetterRowsMatchApplesLayouts() {
+        let rows: [KeyboardLanguage: [String]] = [
+            .english: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
+            .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"],
+            .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"],
+            .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"],
+        ]
+        for (language, expected) in rows {
+            let layout = KeyboardLayout(width: 402, language: language)
+            for row in 0..<3 {
+                XCTAssertEqual(letters(layout, row: row).joined(), expected[row], "\(language) row \(row + 1)")
+            }
+        }
+    }
+
+    func testElevenKeyRowsFitEveryIPhoneWidthAndLandscape() {
+        let cases: [(CGFloat, KeyboardOrientation, CGFloat)] = [
+            (375, .portrait, 0), (402, .portrait, 0), (440, .portrait, 0),
+            (667, .landscape, 0), (874, .landscape, 0), (956, .landscape, 60),
+        ]
+        for language in [KeyboardLanguage.norwegian, .german] {
+            for (width, orientation, inset) in cases {
+                let layout = KeyboardLayout(width: width, orientation: orientation, horizontalInset: inset, language: language)
+                let english = KeyboardLayout(width: width, orientation: orientation, horizontalInset: inset)
+                let m = layout.metrics
+                let label = "\(language) \(width)pt \(orientation)"
+                let inner = width - 2 * inset
+                XCTAssertEqual(layout.characterWidth, (inner - 2 * m.side - 10 * m.gap) / 11, accuracy: 0.001, label)
+                XCTAssertGreaterThan(layout.characterWidth, 26, label)
+                for row in 0..<2 {
+                    let keys = layout.keys.filter { $0.row == row }.sorted { $0.frame.minX < $1.frame.minX }
+                    XCTAssertEqual(keys.count, 11, label)
+                    // Rows 1 and 2 run edge to edge, like English row 1.
+                    XCTAssertEqual(keys.first!.frame.minX, inset + m.side, accuracy: 0.001, label)
+                    XCTAssertEqual(keys.last!.frame.maxX, width - inset - m.side, accuracy: 0.001, label)
+                }
+                // Row 3's letters are as wide as the others and centred between shift and delete,
+                // which keep their English size, as does the whole bottom row.
+                let row3 = layout.keys.filter { $0.row == 2 && $0.character != nil }.sorted { $0.frame.minX < $1.frame.minX }
+                XCTAssertEqual(row3.first!.frame.width, layout.characterWidth, accuracy: 0.001, label)
+                XCTAssertEqual(row3.first!.frame.minX - inset, width - inset - row3.last!.frame.maxX, accuracy: 0.001, label)
+                XCTAssertEqual(layout.key(.shift)!.frame, english.key(.shift)!.frame, label)
+                XCTAssertEqual(layout.key(.delete)!.frame, english.key(.delete)!.frame, label)
+                XCTAssertLessThan(layout.key(.shift)!.frame.maxX, row3.first!.frame.minX, label)
+                XCTAssertEqual(
+                    layout.keys.filter { $0.row == 3 }.map(\.frame),
+                    english.keys.filter { $0.row == 3 }.map(\.frame),
+                    label
+                )
+            }
+        }
+    }
+
+    func testSpanishKeepsTenKeysWithNOnRowTwo() {
+        for width: CGFloat in [375, 402, 440] {
+            let layout = KeyboardLayout(width: width, language: .spanish)
+            XCTAssertEqual(layout.characterWidth, layout.letterWidth, accuracy: 0.001)
+            let n = layout.key(.character("ñ"))!
+            XCTAssertEqual(n.frame.maxX, width - layout.metrics.side, accuracy: 0.001)
+            XCTAssertEqual(n.hitFrame.maxX, width)
+            XCTAssertEqual(layout.key(.character("a"))!.frame.minX, layout.metrics.side, accuracy: 0.001)
+        }
+    }
+
+    func testAccentsMatchEachLanguage() {
+        XCTAssertEqual(AccentCatalog.options(for: "ø", uppercase: false, language: .norwegian), ["ø", "ö"])
+        XCTAssertEqual(AccentCatalog.options(for: "æ", uppercase: true, language: .norwegian), ["Æ", "Ä"])
+        XCTAssertNil(AccentCatalog.options(for: "å", uppercase: false, language: .norwegian))
+        let norwegianA = AccentCatalog.options(for: "a", uppercase: false, language: .norwegian)!
+        XCTAssertFalse(norwegianA.contains("å") || norwegianA.contains("æ"), "they have their own keys")
+        XCTAssertTrue(AccentCatalog.options(for: "s", uppercase: false, language: .german)!.contains("ß"))
+        XCTAssertFalse(AccentCatalog.options(for: "u", uppercase: false, language: .german)!.contains("ü"))
+        XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .spanish)?.dropFirst().first, "é")
+        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: true, language: .spanish), ["N", "Ñ", "Ń"])
+        XCTAssertEqual(
+            AccentCatalog.options(for: "a", uppercase: false),
+            AccentCatalog.options(for: "a", uppercase: false, language: .english),
+            "English is unchanged"
+        )
+    }
+
+    func testAccentMenusOnTheNewKeysStayInside() {
+        let keys: [KeyboardLanguage: [String]] = [
+            .norwegian: ["å", "ø", "æ", "a", "o"],
+            .spanish: ["ñ", "a", "o", "n"],
+            .german: ["ü", "ö", "ä", "s", "a", "u"],
+        ]
+        for width in portraitWidths {
+            for (language, characters) in keys {
+                let layout = KeyboardLayout(width: width, language: language)
+                let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
+                for ch in characters {
+                    let key = layout.key(.character(ch))!
+                    guard let options = AccentCatalog.options(for: ch, uppercase: false, language: language) else { continue }
+                    let menu = AccentMenu.build(for: key.frame, rawOptions: options, in: layout.width)
+                    XCTAssertTrue(
+                        bounds.insetBy(dx: -0.01, dy: -0.01).contains(menu.bubbleFrame),
+                        "\(language) \(width) \(ch): \(menu.bubbleFrame)"
+                    )
+                    XCTAssertEqual(menu.selectedOption, ch)
+                }
+            }
+        }
+    }
+
+    func testTheLayoutFollowsTheDictationLanguage() {
+        func automatic(_ dictation: String?, modes: [String] = [], preferred: [String] = []) -> KeyboardLanguage {
+            KeyboardLanguage.automatic(dictationLanguage: dictation, inputModes: modes, preferredLanguages: preferred)
+        }
+        XCTAssertEqual(automatic("nb-NO"), .norwegian)
+        XCTAssertEqual(automatic("es-MX"), .spanish)
+        XCTAssertEqual(automatic("de-AT"), .german)
+        XCTAssertEqual(automatic("en-GB", modes: ["nb-NO"]), .english, "the dictation language wins")
+        XCTAssertEqual(automatic("he-IL", preferred: ["he-IL", "de-DE"]), .english, "Hebrew has no layout yet")
+        // Before Hex knows the dictation language: the first keyboard, then language, with a layout.
+        XCTAssertEqual(automatic(nil, modes: ["emoji", "nb-NO", "en-US"]), .norwegian)
+        XCTAssertEqual(automatic(nil, preferred: ["nn-NO"]), .norwegian)
+        XCTAssertEqual(automatic(nil, preferred: ["fr-FR"]), .english)
+    }
+
+    func testSpellCheckUsesTheLayoutsLanguageOrNone() {
+        XCTAssertEqual(KeyboardLanguage.norwegian.spellCheckLanguage(available: ["en_US", "nb"]), "nb")
+        XCTAssertNil(KeyboardLanguage.norwegian.spellCheckLanguage(available: ["en_US", "da"]))
+        XCTAssertEqual(KeyboardLanguage.german.spellCheckLanguage(available: ["de"]), "de")
+    }
+
     // MARK: - Helpers
 
     private func landscapeLayouts() -> [KeyboardLayout] {
@@ -196,7 +331,18 @@ final class KeyboardLayoutTests: XCTestCase {
             KeyboardLayout(width: 667, orientation: .landscape),
             KeyboardLayout(width: 852, orientation: .landscape, layer: .numbers),
             KeyboardLayout(width: 956, orientation: .landscape, field: .email, horizontalInset: 60),
-        ]
+        ] + KeyboardLanguage.allCases.flatMap { language in
+            [
+                KeyboardLayout(width: 667, orientation: .landscape, language: language),
+                KeyboardLayout(width: 956, orientation: .landscape, showsGlobe: true, horizontalInset: 60, language: language),
+            ]
+        }
+    }
+
+    private func letters(_ layout: KeyboardLayout, row: Int) -> [String] {
+        layout.keys.filter { $0.row == row && $0.character != nil }
+            .sorted { $0.frame.minX < $1.frame.minX }
+            .compactMap(\.character)
     }
 
     private func bottomRow(_ layout: KeyboardLayout) -> [KeyKind] {
@@ -204,7 +350,7 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     private func describe(_ layout: KeyboardLayout) -> String {
-        "\(layout.width)pt \(layout.orientation) \(layout.layer) \(layout.field) globe=\(layout.showsGlobe)"
+        "\(layout.width)pt \(layout.orientation) \(layout.layer) \(layout.field) globe=\(layout.showsGlobe) \(layout.language)"
     }
 }
 

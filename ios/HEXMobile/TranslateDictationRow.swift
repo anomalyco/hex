@@ -10,7 +10,11 @@ struct TranslateDictationRow: View {
     @State private var status: LanguageAvailability.Status?
     @State private var download: TranslationSession.Configuration?
 
-    private var source: Locale.Language { Locale.current.language }
+    /// What you dictate in: Settings › Dictation language, or the language it last resolved.
+    private var source: Locale.Language {
+        LanguageSettings().effectiveDictationLanguage.map { Locale(identifier: $0).language }
+            ?? Locale.current.language
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
