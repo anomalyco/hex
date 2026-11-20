@@ -1282,10 +1282,6 @@ impl Parakeet {
         let mut parakeet = Self::load_from(&path, true, Some(selection))?;
         parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
-        let architecture = match definition.runtime {
-            crate::transcription::models::ModelRuntime::Gguf(artifact) => artifact.architecture,
-            crate::transcription::models::ModelRuntime::AppleSpeech => "",
-        };
         parakeet.session.probe_stream(&stream_run, &path);
         Ok(parakeet)
     }
