@@ -108,8 +108,12 @@ final class KeyboardLocalDictation {
     func start(in host: UIView, allowBluetoothMic: Bool) {
         guard !isActive else { return }
         let log = KeyboardProbeLog.shared
-        log.write("start(web): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) speech=\(Self.describe(SFSpeechRecognizer.authorizationStatus())) \(KeyboardProbeLog.memory())")
-        guard AVAudioApplication.shared.recordPermission == .granted else {
+        let appAllowed = KeyboardBridge().appMicrophoneAllowed
+        log.write("start(web): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) app=\(appAllowed ? "granted" : "no") speech=\(Self.describe(SFSpeechRecognizer.authorizationStatus())) \(KeyboardProbeLog.memory())")
+        // This process keeps the permission it read when it started, so a keyboard opened
+        // before Hex was allowed the microphone (onboarding's practice field) still reads it as
+        // not allowed: Hex's own reading counts too. WebKit still checks (NotAllowedError).
+        guard AVAudioApplication.shared.recordPermission == .granted || appAllowed else {
             fail("Allow the microphone in Hex first")
             return
         }
