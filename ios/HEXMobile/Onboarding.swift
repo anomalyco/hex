@@ -131,21 +131,9 @@ private struct OnboardingWelcomePage: View {
                             .padding(.bottom, 36)
 
                         VStack(alignment: .leading, spacing: 22) {
-                            point(
-                                icon: "keyboard",
-                                title: "Dictate right in the keyboard",
-                                detail: "Tap the Hex key and talk, without leaving your app."
-                            )
-                            point(
-                                icon: "lock",
-                                title: "Free and private",
-                                detail: "Speech turns into text on this iPhone. Your voice never leaves it."
-                            )
-                            point(
-                                icon: "music.note",
-                                title: "Your music keeps playing",
-                                detail: "Hex listens through the iPhone microphone, so audio doesn't pause."
-                            )
+                            point(icon: "keyboard", title: "Dictate right in the keyboard")
+                            point(icon: "lock", title: "Free and private, on this iPhone")
+                            point(icon: "music.note", title: "Your music keeps playing")
                         }
                         .frame(maxWidth: 360, alignment: .leading)
                     }
@@ -161,24 +149,17 @@ private struct OnboardingWelcomePage: View {
         }
     }
 
-    private func point(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+    private func point(icon: String, title: String) -> some View {
+        HStack(alignment: .center, spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(HexTheme.textBase)
                 .frame(width: 38, height: 38)
                 .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(HexTheme.textBase)
-                Text(detail)
-                    .font(.system(size: 13))
-                    .foregroundStyle(HexTheme.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 1)
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(HexTheme.textBase)
         }
         .accessibilityElement(children: .combine)
     }
@@ -194,15 +175,8 @@ private struct OnboardingAllowPage: View {
     let onBack: () -> Void
     let onContinue: () -> Void
 
-    private static let settingsSteps = [
-        "Tap Keyboards",
-        "Turn on Hex Keyboard",
-        "Turn on Allow Full Access",
-        "Tap Allow",
-        "Come back to Hex",
-    ]
-
-    /// Full Access can't be verified from the app; the next page checks it.
+    /// Full Access can't be verified from the app; the next page checks it. The speech model
+    /// keeps downloading in the background and never holds up Continue.
     private var canContinue: Bool {
         monitor.keyboardAdded != false && monitor.microphone == .granted
     }
@@ -212,172 +186,48 @@ private struct OnboardingAllowPage: View {
             OnboardingHeader(page: .allow, onBack: onBack)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    OnboardingTitle(
-                        title: "Set up Hex",
-                        detail: "Turn on the keyboard and allow the microphone. Each step checks off as you go."
-                    )
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Set up Hex")
+                        .font(.system(size: 28, weight: .semibold))
+                        .tracking(-0.4)
+                        .foregroundStyle(HexTheme.textBase)
 
-                    checklist
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        OnboardingSecondaryButton(title: "Open Settings", icon: "gearshape.fill") {
-                            openSettings(openURL)
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(Array(Self.settingsSteps.enumerated()), id: \.offset) { index, step in
-                                HStack(spacing: 10) {
-                                    Text("\(index + 1)")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .monospacedDigit()
-                                        .foregroundStyle(HexTheme.textMuted)
-                                        .frame(width: 22, height: 22)
-                                        .background(Color.white.opacity(0.07), in: Circle())
-                                    Text(step)
-                                        .font(.system(size: 15))
-                                        .foregroundStyle(HexTheme.textBase)
-                                }
-                                .accessibilityElement(children: .combine)
+                    VStack(spacing: 0) {
+                        OnboardingCheckRow(title: "Keyboard", done: monitor.keyboardAdded == true) {
+                            if !monitor.fullAccessOn {
+                                OnboardingSmallButton(title: "Open Settings") { openSettings(openURL) }
                             }
                         }
-                        .padding(.horizontal, 2)
+                        Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
+                        OnboardingCheckRow(title: "Microphone", done: monitor.microphone == .granted) {
+                            switch monitor.microphone {
+                            case .undetermined:
+                                OnboardingSmallButton(title: "Allow") { monitor.requestMicrophone() }
+                            case .denied:
+                                OnboardingSmallButton(title: "Open Settings") { openSettings(openURL) }
+                            default:
+                                EmptyView()
+                            }
+                        }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
                     .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
+
+                    Text("Keyboards  ›  Hex Keyboard  ›  Allow Full Access")
+                        .font(.system(size: 13))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .padding(.horizontal, 4)
                 }
                 .padding(.top, 8)
                 .padding(.bottom, 16)
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            VStack(spacing: 10) {
-                if let hint = continueHint {
-                    Text(hint)
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textFaint)
-                        .multilineTextAlignment(.center)
-                        .transition(.opacity)
-                }
-                OnboardingPrimaryButton(title: "Continue", enabled: canContinue, action: onContinue)
-            }
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-            .animation(HexMotion.reducedFade, value: continueHint)
+            OnboardingPrimaryButton(title: "Continue", enabled: canContinue, action: onContinue)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
         }
-    }
-
-    private var continueHint: String? {
-        if monitor.keyboardAdded == false {
-            return "Turn on Hex Keyboard in Settings to continue."
-        }
-        if monitor.microphone != .granted {
-            return "Allow the microphone to continue."
-        }
-        return nil
-    }
-
-    private var checklist: some View {
-        VStack(spacing: 0) {
-            OnboardingCheckRow(
-                title: "Hex Keyboard",
-                status: keyboardStatus,
-                done: monitor.keyboardAdded == true
-            )
-            divider
-            OnboardingCheckRow(
-                title: "Allow Full Access",
-                status: monitor.fullAccessOn ? "On" : monitor.keyboardAdded == false ? "Off" : "Not checked",
-                done: monitor.fullAccessOn,
-                caption: monitor.fullAccessOn ? nil : "Checked on the next step"
-            )
-            divider
-            OnboardingCheckRow(
-                title: "Microphone",
-                status: microphoneStatus,
-                done: monitor.microphone == .granted,
-                caption: monitor.microphone == .denied ? "Turn on Microphone in Settings" : nil
-            ) {
-                switch monitor.microphone {
-                case .undetermined:
-                    OnboardingSmallButton(title: "Allow") { monitor.requestMicrophone() }
-                case .denied:
-                    OnboardingSmallButton(title: "Open Settings") { openSettings(openURL) }
-                default:
-                    EmptyView()
-                }
-            }
-            divider
-            modelRow
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
-        .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
-    }
-
-    /// The model downloads in the background; it never holds up Continue.
-    @ViewBuilder
-    private var modelRow: some View {
-        let fixtureProgress = fixtureModelProgress
-        let ready = fixtureProgress == nil && dictation.isModelReady
-        let progress: Double? = fixtureProgress ?? (dictation.phase == .preparingModel && !dictation.isModelReady
-            ? dictation.modelPreparation.fractionCompleted
-            : nil)
-
-        OnboardingCheckRow(
-            title: "Speech model",
-            status: modelStatus(ready: ready, progress: progress),
-            done: ready,
-            caption: ready ? nil : "You can continue while it downloads",
-            progress: progress
-        ) {
-            if !ready && progress == nil {
-                switch dictation.phase {
-                case .modelRequired:
-                    OnboardingSmallButton(title: "Download") { dictation.prepareModel() }
-                case .failed:
-                    OnboardingSmallButton(title: "Try again") { dictation.prepareModel() }
-                default:
-                    EmptyView()
-                }
-            }
-        }
-    }
-
-    private func modelStatus(ready: Bool, progress: Double?) -> String {
-        if ready {
-            return dictation.engineName
-        }
-        if let progress {
-            return "\(Int(progress * 100))%"
-        }
-        switch dictation.phase {
-        case .failed: return "Failed"
-        case .modelRequired: return ""
-        default: return "Preparing"
-        }
-    }
-
-    private var keyboardStatus: String {
-        switch monitor.keyboardAdded {
-        case true?: "Added"
-        case false?: "Not added"
-        case nil: "Not verified"
-        }
-    }
-
-    private var microphoneStatus: String {
-        switch monitor.microphone {
-        case .granted: "Allowed"
-        case .denied: "Off"
-        default: ""
-        }
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(HexTheme.borderWeak)
-            .frame(height: 0.5)
     }
 }
 
@@ -433,9 +283,9 @@ private struct OnboardingTryPage: View {
 
                     Group {
                         if complete {
-                            Text("Tap the Hex key in any app to dictate.")
+                            Text("Tap the Hex key in any app to talk.")
                         } else {
-                            Text("Tap \(Image(systemName: "globe")) to switch to Hex, then tap the Hex key and talk.")
+                            Text("Switch to Hex with \(Image(systemName: "globe")), then tap the Hex key.")
                         }
                     }
                     .font(.system(size: 15))
@@ -455,9 +305,6 @@ private struct OnboardingTryPage: View {
                     if fullAccessLooksOff && !monitor.fullAccessOn {
                         fullAccessNote
                             .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                    } else {
-                        statusLine
-                            .transition(.opacity)
                     }
                 }
                 .padding(.top, 8)
@@ -527,27 +374,6 @@ private struct OnboardingTryPage: View {
         keyboardActivity += 1
     }
 
-    private var statusLine: some View {
-        let (icon, color, message): (String, Color, String) = if complete {
-            ("checkmark.circle.fill", HexTheme.success, "Full Access is on and the keyboard works.")
-        } else if monitor.fullAccessOn {
-            ("checkmark.circle.fill", HexTheme.success, "Full Access is on. Now tap the Hex key and talk.")
-        } else {
-            ("circle.dotted", HexTheme.textFaint, "Waiting for the Hex keyboard")
-        }
-        return HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(color)
-            Text(message)
-                .font(.system(size: 13))
-                .foregroundStyle(HexTheme.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 4)
-        .accessibilityElement(children: .combine)
-    }
-
     private var fullAccessNote: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
@@ -555,15 +381,9 @@ private struct OnboardingTryPage: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(HexTheme.warmMic)
                     .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Full Access looks off")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(HexTheme.textBase)
-                    Text("Hex can't dictate without it. In Settings, tap Keyboards, then turn on Allow Full Access.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text("Turn on Allow Full Access")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(HexTheme.textBase)
             }
             .accessibilityElement(children: .combine)
 
@@ -612,74 +432,25 @@ private struct OnboardingHeader: View {
     }
 }
 
-private struct OnboardingTitle: View {
-    let title: String
-    let detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 28, weight: .semibold))
-                .tracking(-0.4)
-                .foregroundStyle(HexTheme.textBase)
-            Text(detail)
-                .font(.system(size: 15))
-                .foregroundStyle(HexTheme.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
 private struct OnboardingCheckRow<Trailing: View>: View {
     let title: String
-    let status: String
     let done: Bool
-    var caption: String?
-    var progress: Double?
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(done ? HexTheme.success : HexTheme.textFaint)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 15))
-                        .foregroundStyle(HexTheme.textBase)
-                    Spacer(minLength: 8)
-                    if !status.isEmpty {
-                        Text(status)
-                            .font(.system(size: 13))
-                            .monospacedDigit()
-                            .foregroundStyle(HexTheme.textMuted)
-                            .lineLimit(1)
-                    }
-                }
-                if let caption {
-                    Text(caption)
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textFaint)
-                }
-                if let progress {
-                    ProgressView(value: progress)
-                        .tint(HexTheme.textBase)
-                        .padding(.top, 5)
-                }
-            }
-
+                .contentTransition(.symbolEffect(.replace))
+            Text(title)
+                .font(.system(size: 16))
+                .foregroundStyle(HexTheme.textBase)
+            Spacer(minLength: 8)
             trailing
         }
-        .padding(.vertical, 11)
+        .frame(minHeight: 52)
         .accessibilityElement(children: .contain)
-    }
-}
-
-extension OnboardingCheckRow where Trailing == EmptyView {
-    init(title: String, status: String, done: Bool, caption: String? = nil, progress: Double? = nil) {
-        self.init(title: title, status: status, done: done, caption: caption, progress: progress) { EmptyView() }
     }
 }
 
