@@ -2,7 +2,8 @@ import UIKit
 
 /// The Hex key right of space. Warm session: an orange core, and a hold records here.
 /// Otherwise the mark is faded with ↗, and a hold leaves for Hex to start one.
-/// A tap or hold dictates; sliding opens the style menu (`HexKeyGesture`).
+/// A tap dictates, a hold dictates until released (push to talk), and sliding opens the
+/// style menu (`HexKeyGesture`).
 @MainActor
 final class HexKeyControl: UIControl {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { setNeedsDisplay() } } }
@@ -13,8 +14,10 @@ final class HexKeyControl: UIControl {
     /// The drawn keycap inside the control's (larger) touch target.
     var keycapFrame: CGRect = .zero { didSet { if keycapFrame != oldValue { setNeedsDisplay() } } }
 
-    /// A still hold: dictate, or open Hex.
+    /// A tap or still hold: dictate, or open Hex.
     var onHold: (() -> Void)?
+    /// The finger lifted after a still hold: push to talk's finish.
+    var onHoldRelease: (() -> Void)?
     /// Points are in this control's coordinates.
     var onMenuOpen: ((CGPoint) -> Void)?
     var onMenuDrag: ((CGPoint) -> Void)?
@@ -49,7 +52,7 @@ final class HexKeyControl: UIControl {
 
     private func updateAccessibility() {
         accessibilityLabel = isWarm ? "Dictate with Hex" : "Open Hex to dictate"
-        accessibilityHint = "Tap to dictate, slide for styles"
+        accessibilityHint = "Tap to dictate, hold to talk, slide for styles"
     }
 
     override func accessibilityActivate() -> Bool {
@@ -90,6 +93,8 @@ final class HexKeyControl: UIControl {
             if let touch { onMenuRelease?(touch.location(in: self)) }
         case .tap:
             onHold?()
+        case .release:
+            onHoldRelease?()
         default:
             break
         }

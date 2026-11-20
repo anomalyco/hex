@@ -107,3 +107,7 @@ actor ParakeetTranscriber: LocalTranscribing {
         return text
     }
 }
+
+extension ParakeetTranscriber.TranscriberError: NoSpeechError {
+    var meansNoSpeech: Bool { self == .emptyTranscript }
+}

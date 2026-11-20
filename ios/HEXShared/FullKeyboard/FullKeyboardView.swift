@@ -41,6 +41,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private var didApplyPalette = false
     private var subscriptions: Set<AnyCancellable> = []
     private var showsRecording = false
+    /// The Hex key's last tap or hold started a dictation here (not by opening Hex).
+    private var dictatingFromHexKey = false
     private var lastDictation: String?
     private var undoHideWork: DispatchWorkItem?
     private let haptics = UIImpactFeedbackGenerator(style: .light)
@@ -85,6 +87,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         globeButton.addTarget(self, action: #selector(globeTapped), for: .touchUpInside)
 
         hexKey.onHold = { [weak self] in self?.hexKeyHeld() }
+        hexKey.onHoldRelease = { [weak self] in self?.hexKeyReleased() }
         hexKey.onMenuOpen = { [weak self] point in
             guard let self else { return }
             self.typingLog?.ui("hex_menu")
@@ -583,7 +586,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             shown.forEach { $0.alpha = 1 }
             hidden.forEach { $0.alpha = 0 }
         } completion: { _ in
-            for view in hidden where view.alpha == 0 {
+            // A Hex key still held for push to talk stays in the window (at alpha 0), so its
+            // touch keeps arriving and lifting the finger finishes the dictation.
+            for view in hidden where view.alpha == 0 && (view as? UIControl)?.isTracking != true {
                 view.isHidden = true
             }
             if globeHidden { self.globeButton.isHidden = true }
@@ -664,14 +669,26 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         dismissStyleMenu()
         if hexKey.isWarm {
             typingLog?.ui("hex_key", [TypingLogField("dictation", .string("warm"))])
+            dictatingFromHexKey = true
             model.onDictateTap?()
         } else if let local = model.onLocalDictateTap {
             typingLog?.ui("hex_key", [TypingLogField("dictation", .string("keyboard"))])
+            dictatingFromHexKey = true
             local()
         } else {
             typingLog?.ui("hex_key", [TypingLogField("dictation", .string("open_hex"))])
+            dictatingFromHexKey = false
             model.onOpenURL?(model.coldStartURL)
         }
+    }
+
+    /// Push to talk: lifting the finger after a hold finishes the dictation the hold started,
+    /// as Done does. A hold that opened Hex has nothing to finish here.
+    private func hexKeyReleased() {
+        guard dictatingFromHexKey else { return }
+        dictatingFromHexKey = false
+        typingLog?.ui("dictation_stop", [TypingLogField("from", .string("hex_key_release"))])
+        model.onStopTap?()
     }
 
     /// Hold and slide: light the row under the finger, and pick it on release.

@@ -286,3 +286,8 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             ?? locale.identifier
     }
 }
+
+@available(iOS 26.0, *)
+extension AppleSpeechTranscriber.TranscriberError: NoSpeechError {
+    var meansNoSpeech: Bool { self == .emptyTranscript }
+}

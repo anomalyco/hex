@@ -136,12 +136,17 @@ final class KeyboardLocalDictation {
         switch event {
         case .started(let sampleRate, let device):
             log.write("web capture started in \(Int(Date().timeIntervalSince(requestedAt) * 1000)) ms at \(Int(sampleRate)) Hz from \(device) \(KeyboardProbeLog.memory())")
+            guard case .recording(let current, _) = phase, current == jobID else {
+                // Done came before the microphone did: nothing to record.
+                capture?.stop()
+                return
+            }
             do {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("keyboard-\(jobID).wav")
                 pcmFile = try KeyboardPCMFile(url: url, sampleRate: sampleRate)
             } catch {
                 capture?.stop()
-                fail("Could not create audio file: \(Self.describe(error))")
+                fail(UserFacingError.Context.microphone.fallback, detail: "Could not create audio file: \(Self.describe(error))")
             }
         case .samples(let data, let peak):
             pcmFile?.append(data)
@@ -151,11 +156,14 @@ final class KeyboardLocalDictation {
         case .failed(let message):
             capture?.stop()
             pcmFile = nil
-            fail("Web capture: \(message)")
+            fail(
+                message.hasPrefix("NotAllowedError") ? "Allow the microphone in Hex first" : UserFacingError.Context.microphone.fallback,
+                detail: "Web capture: \(message)"
+            )
         case .processTerminated:
             pcmFile = nil
             capture = nil
-            fail("WebKit capture process ended")
+            fail(UserFacingError.Context.microphone.fallback, detail: "WebKit capture process ended")
         }
     }
 
@@ -177,12 +185,21 @@ final class KeyboardLocalDictation {
     }
 
     private func finishRecording(jobID: String) {
-        guard case .recording(_, let startedAt) = phase, let file = pcmFile else { return }
+        guard case .recording(_, let startedAt) = phase else { return }
+        guard let file = pcmFile else {
+            endQuietly("stopped before the microphone started")
+            return
+        }
         pcmFile = nil
         Self.releaseAudioSession()
         let seconds = Date().timeIntervalSince1970 - startedAt
         let frames = file.close()
         KeyboardProbeLog.shared.write("stopped after \(String(format: "%.1f", seconds)) s, frames=\(frames) \(KeyboardProbeLog.memory())")
+        guard !EmptyCapture.isTooShort(frames: frames, sampleRate: file.sampleRate) else {
+            try? FileManager.default.removeItem(at: file.url)
+            endQuietly("too short to hold a word")
+            return
+        }
         guard #available(iOS 26.0, *) else { return }
         phase = .transcribing(jobID: jobID)
         let url = file.url
@@ -230,16 +247,32 @@ final class KeyboardLocalDictation {
                 )
             } catch {
                 try? FileManager.default.removeItem(at: url)
-                guard let self, !Task.isCancelled else { return }
-                self.fail("Transcription failed: \(Self.describe(error))")
+                guard let self, !Task.isCancelled,
+                      case .transcribing(let current) = self.phase, current == jobID else { return }
+                if EmptyCapture.endsQuietly(error) {
+                    self.endQuietly("no speech")
+                } else {
+                    self.fail(
+                        UserFacingError.message(for: error, context: .transcription),
+                        detail: "Transcription failed: \(Self.describe(error))"
+                    )
+                }
             }
         }
     }
 
-    private func fail(_ message: String) {
+    /// `message` is what the keyboard shows; `detail`, for the log only, may carry codes.
+    private func fail(_ message: String, detail: String? = nil) {
         Self.releaseAudioSession()
-        KeyboardProbeLog.shared.write("FAILED: \(message) \(KeyboardProbeLog.memory())")
+        KeyboardProbeLog.shared.write("FAILED: \(detail ?? message) \(KeyboardProbeLog.memory())")
         phase = .failed(message: message, until: Date().timeIntervalSince1970 + 6)
+    }
+
+    /// Nothing to insert and nothing wrong: back to idle without a message.
+    private func endQuietly(_ reason: String) {
+        Self.releaseAudioSession()
+        KeyboardProbeLog.shared.write("ended quietly: \(reason)")
+        phase = .idle
     }
 
     private static func describe(_ error: Error) -> String {
@@ -295,6 +328,8 @@ private final class KeyboardPCMFile {
         try? file?.write(from: buffer)
         frames += AVAudioFramePosition(count)
     }
+
+    var sampleRate: Double { format.sampleRate }
 
     func close() -> AVAudioFramePosition {
         file = nil
@@ -465,17 +500,22 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
 @available(iOS 26.0, *)
 private enum KeyboardSpeech {
-    enum Failure: LocalizedError {
+    enum Failure: LocalizedError, NoSpeechError {
         case noLocale
         case assetsMissing(String)
         case empty
 
         var errorDescription: String? {
             switch self {
-            case .noLocale: "No Apple Speech locale"
-            case .assetsMissing(let status): "Apple Speech assets not installed (\(status))"
+            case .noLocale: "Apple Speech doesn't have your language on this iPhone."
+            case .assetsMissing: "Speech for your language is still downloading. Try again soon."
             case .empty: "No speech detected"
             }
+        }
+
+        var meansNoSpeech: Bool {
+            if case .empty = self { return true }
+            return false
         }
     }
 

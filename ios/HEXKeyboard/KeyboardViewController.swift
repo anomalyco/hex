@@ -27,6 +27,13 @@ final class KeyboardViewController: UIInputViewController {
     private let logDictationEdits = DictationEditTracker()
     private var pendingHostContext: DispatchWorkItem?
     private var isShown = false
+    /// The dictation bar's key haptic; the full keyboard has its own generator.
+    private lazy var barHaptics = UIImpactFeedbackGenerator(style: .light)
+
+    /// Haptics need Full Access, and Experiments › Haptics covers both keyboards.
+    private var allowsKeyHaptics: Bool {
+        hasFullAccess && FullKeyboardSettings().haptics
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -296,6 +303,11 @@ final class KeyboardViewController: UIInputViewController {
             TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
         }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
+        viewModel.onKeyFeedback = { [weak self] in
+            guard let self, self.allowsKeyHaptics else { return }
+            self.barHaptics.impactOccurred(intensity: 0.65)
+            self.barHaptics.prepare()
+        }
         viewModel.onStopTap = { [weak self] in
             guard let self else { return }
             if self.localDictation.isActive {
@@ -410,7 +422,7 @@ final class KeyboardViewController: UIInputViewController {
             )
             keyboard.hostController = self
             keyboard.allowsHaptics = { [weak self] in
-                (self?.hasFullAccess ?? false) && FullKeyboardSettings().haptics
+                self?.allowsKeyHaptics ?? false
             }
             keyboard.onTextEdit = { [weak self] in self?.observeDictationEdits(fromKeys: true) }
             keyboard.onUndoDictation = { [weak self] in
@@ -511,7 +523,8 @@ final class KeyboardViewController: UIInputViewController {
             let insertion = TranscriptFormatter.insertionText(
                 for: rawTranscript,
                 beforeContext: context.before,
-                afterContext: context.after
+                afterContext: context.after,
+                isWord: dictationWordCheck()
             )
             if learnsFromDictation {
                 dictationEdits.willInsert(heard: snap.heard, inserted: insertion, context: context)
@@ -564,6 +577,23 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     // MARK: - Dictation language
+
+    /// The dictation language's dictionary, for lowercasing a dictation that continues a
+    /// sentence; nil (case kept) when the iPhone has no dictionary for it.
+    private func dictationWordCheck() -> ((String) -> Bool)? {
+        let settings = LanguageSettings()
+        let language = settings.resolvedDictationLanguage
+            ?? settings.effectiveDictationLanguage
+            ?? Locale.preferredLanguages.first
+            ?? "en-US"
+        guard TranscriptFormatter.lowercasesContinuations(in: language),
+              let code = KeyboardLanguage.spellCheckLanguage(
+            forDictation: language,
+            available: UITextChecker.availableLanguages
+        ) else { return nil }
+        let checker = SystemTextChecker(language: code)
+        return { checker.isWordValid($0) }
+    }
 
     /// What `syncLanguageState` last read, so the 25 Hz poll only works out the choices on a change.
     private var languageSignature: String?

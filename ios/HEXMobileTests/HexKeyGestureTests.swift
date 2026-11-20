@@ -12,11 +12,12 @@ final class HexKeyGestureTests: XCTestCase {
         XCTAssertEqual(gesture.state, .idle)
     }
 
-    func testStillHoldFiresOnce() {
+    func testStillHoldFiresOnceAndReleaseFinishes() {
         var gesture = HexKeyGesture()
         gesture.touchDown(at: .zero)
         XCTAssertEqual(gesture.holdElapsed(), .hold)
         XCTAssertEqual(gesture.holdElapsed(), .ignored)
+        XCTAssertEqual(gesture.touchUp(), .release, "push to talk: lifting finishes")
         XCTAssertEqual(gesture.touchUp(), .ignored)
     }
 
@@ -34,8 +35,8 @@ final class HexKeyGestureTests: XCTestCase {
         var gesture = HexKeyGesture()
         gesture.touchDown(at: .zero)
         XCTAssertEqual(gesture.holdElapsed(), .hold)
-        XCTAssertEqual(gesture.touchMoved(to: CGPoint(x: 0, y: -80)), .ignored)
-        XCTAssertEqual(gesture.touchUp(), .ignored)
+        XCTAssertEqual(gesture.touchMoved(to: CGPoint(x: 0, y: -80)), .ignored, "no menu once dictating")
+        XCTAssertEqual(gesture.touchUp(), .release)
     }
 
     func testCancelResets() {

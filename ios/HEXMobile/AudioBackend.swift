@@ -206,7 +206,20 @@ final class SystemAudioManager: AudioManaging {
             )
         }
         try session.setPreferredSampleRate(16_000)
-        try session.setActive(true)
+        do {
+            try session.setActive(true)
+        } catch where UserFacingError.audioSessionCode(of: error) == .cannotInterruptOthers {
+            // '!int': a non-mixable session can't go active from the background while another
+            // app plays or records. Record alongside that audio instead, once.
+            try session.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: allowBluetooth
+                    ? [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
+                    : [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
+            )
+            try session.setActive(true)
+        }
         if !allowBluetooth, let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try? session.setPreferredInput(builtIn)
         }

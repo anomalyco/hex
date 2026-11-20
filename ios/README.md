@@ -87,12 +87,27 @@ it on-device with Apple Speech, downloading the speech assets on first use
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
     insertion spacing and repeating backspace.
+  - **Mid-sentence dictation:** when the text before the cursor doesn't end a
+    sentence (`.` `!` `?` `…` or a line break), the keyboard lowercases the
+    dictation's first word, except "I" and its contractions, acronyms, words
+    with inner capitals, and words the dictation language's `UITextChecker`
+    dictionary doesn't know in lowercase (likely names). German keeps the case,
+    since its dictionary takes nouns in lowercase; so does a language with no
+    dictionary on the iPhone (`TranscriptFormatter.insertionText`).
   - **Full keyboard Hex key (Experiments › Full keyboard):** A tap, or a
     still hold of 0.35 s, starts dictation: in a warm session, else inside
     the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex. Moving
     more than 10 pt first opens the style and **Return to** menu; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
+  - **Push to talk:** Holding still for 0.35 s on the full keyboard's Hex key
+    or the dictation bar's **Dictate** starts dictation at once with a light
+    haptic (Experiments › Haptics), and lifting the finger finishes it as
+    **Done** does; a quick tap still starts it and **Done** finishes it. On
+    the Hex key, sliding more than 10 pt before the hold fires opens the menu
+    instead, and once dictation has started, moving the finger changes
+    nothing. Push to talk needs dictation in the keyboard (a warm session or
+    in-keyboard dictation); a hold that opens Hex is only a tap.
   - **Apple Intelligence cleanup (Experiments › Clean up with Apple
     Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly
@@ -257,6 +272,12 @@ it on-device with Apple Speech, downloading the speech assets on first use
     `HexDictationControl` (`ControlWidget`) start recording on first press with
     a Dynamic Island / Lock Screen Live Activity (`Stop` and `Cancel` buttons)
     and transcribe + copy to the clipboard on second press.
+  - Only these dictations get a Live Activity; the keyboard and the app show
+    their own recording UI. It shows Copied for 2 s, and a cancel, failure, or
+    empty capture ends it at once, under a background task so a suspending app
+    can't leave it behind (`LiveActivityCoordinator`). Every end also ends any
+    other Hex activity, and launch, returning to Hex, and ending the warm
+    session (Keep mic warm › Off) end any no dictation owns.
 
 ## Build & Test
 
