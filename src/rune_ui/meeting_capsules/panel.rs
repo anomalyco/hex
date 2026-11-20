@@ -145,7 +145,13 @@ fn panel_row(
         .center_y()
         .radius(ROW_RADIUS)
         .role("button")
-        .cursor(Cursor::Default)
+        // An enabled row is a button; a disabled one only says what it would
+        // do, and keeps the arrow.
+        .cursor(if enabled {
+            Cursor::Pointer
+        } else {
+            Cursor::Default
+        })
         .focus_ring(2., -2., p.k.c.border_focus)
         // The surface steps each row's presence; nothing eases it twice.
         .transition(Transition::none())
@@ -554,7 +560,8 @@ fn title_label(p: Paint, c: &Capsule, title: &str) -> El {
         .child(label)
 }
 
-// Only the meter band owns the window drag, never an ancestor of an action row.
+/// Only the meter band owns the window drag, never an ancestor of an action
+/// row, so the grab hand stops where the rows' pointer begins.
 fn meter_band() -> El {
     row()
         .key("meta")
@@ -562,7 +569,7 @@ fn meter_band() -> El {
         .px(REST_PX)
         .center_y()
         .transition(Transition::none())
-        .cursor(Cursor::Default)
+        .cursor(Cursor::Grab)
         .on_drag(|c: &mut Capsule, d, tx| c.drag(d, tx))
 }
 
