@@ -29,6 +29,7 @@ private final class FakeAudioManager: AudioManaging {
     var isKeepaliveRunning = false
     var permissionGranted = true
     var keepaliveShouldThrow = false
+    var keepaliveError: Error = CocoaError(.coderInvalidValue)
     var nextCaptureDuration: TimeInterval = 1.4
     var nextCaptureIsRecording = true
     var deactivateCount = 0
@@ -44,7 +45,7 @@ private final class FakeAudioManager: AudioManaging {
     func startKeepalive(allowBluetooth: Bool) throws {
         if keepaliveShouldThrow {
             isKeepaliveRunning = false
-            throw CocoaError(.coderInvalidValue)
+            throw keepaliveError
         }
         isKeepaliveRunning = true
     }
@@ -859,6 +860,67 @@ final class DictationControllerTests: XCTestCase {
         try await settle()
         XCTAssertEqual(preparations, 5, "no change, no preparation")
         XCTAssertEqual(languages.recentDictationLanguages, ["de-DE", "nb-NO"], "picks in Hex are recents")
+    }
+
+    func testErrorsShowShortMessagesNeverCodesOrTypeNames() {
+        // 560557684 is '!int', AVAudioSession's cannotInterruptOthers.
+        let cannotInterrupt = NSError(domain: NSOSStatusErrorDomain, code: 560_557_684)
+        XCTAssertEqual(
+            UserFacingError.message(for: cannotInterrupt, context: .microphone),
+            "Another app is using audio. Try again."
+        )
+        XCTAssertEqual(UserFacingError.audioSessionCode(of: cannotInterrupt), .cannotInterruptOthers)
+        XCTAssertEqual(
+            UserFacingError.message(for: NSError(domain: NSOSStatusErrorDomain, code: 561_017_449), context: .microphone),
+            "Another app is using the microphone. Try again."
+        )
+
+        // Unknown codes and non-audio errors fall back to the context's sentence.
+        XCTAssertEqual(
+            UserFacingError.message(for: NSError(domain: NSOSStatusErrorDomain, code: -10_875), context: .microphone),
+            UserFacingError.Context.microphone.fallback
+        )
+        XCTAssertEqual(
+            UserFacingError.message(for: CocoaError(.coderInvalidValue), context: .microphone),
+            UserFacingError.Context.microphone.fallback
+        )
+        enum PlainFailure: Error { case broke }
+        let plain = UserFacingError.message(for: PlainFailure.broke, context: .transcription)
+        XCTAssertEqual(plain, UserFacingError.Context.transcription.fallback)
+
+        // A described error keeps its sentence.
+        XCTAssertEqual(
+            UserFacingError.message(for: ParakeetTranscriber.TranscriberError.notPrepared, context: .transcription),
+            "Parakeet V2 is not ready."
+        )
+        for message in [plain, UserFacingError.message(for: cannotInterrupt, context: .transcription)] {
+            XCTAssertFalse(message.contains("OSStatus"))
+            XCTAssertFalse(message.contains("PlainFailure"))
+        }
+    }
+
+    func testWarmSessionAudioErrorReachesAppAndKeyboardAsASentence() async throws {
+        let audio = FakeAudioManager()
+        audio.keepaliveShouldThrow = true
+        audio.keepaliveError = NSError(domain: NSOSStatusErrorDomain, code: 560_557_684)
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 30_000 },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+
+        controller.selectWarmDuration(.fifteenMinutes)
+        try await settle()
+
+        XCTAssertEqual(controller.phase, .failed("Another app is using audio. Try again."))
+        XCTAssertEqual(bridge.snapshot().message, "Another app is using audio. Try again.")
     }
 
     private func settle() async throws {

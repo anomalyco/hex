@@ -651,7 +651,7 @@ final class DictationController {
                 maybeAutoReturnAfterActivation(allowed: handoff?.attemptAutoReturn ?? false)
             } catch {
                 audio.deactivateSession()
-                phase = .failed(error.localizedDescription)
+                phase = .failed(UserFacingError.message(for: error, context: .microphone))
                 publishKeyboardSnapshot()
             }
         }
@@ -743,7 +743,7 @@ final class DictationController {
                 guard self.modelPrepGeneration == prepGen else { return }
                 self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
                 self.pendingHandoff = nil
-                self.phase = .failed(error.localizedDescription)
+                self.phase = .failed(UserFacingError.message(for: error, context: .model))
                 self.publishKeyboardSnapshot()
             }
         }
@@ -854,8 +854,9 @@ final class DictationController {
             } catch {
                 try? fileManager.removeItem(at: captureURL)
                 activeKeyboardJobID = nil
-                keyboardMessage = keyboardJobID == nil ? nil : error.localizedDescription
-                phase = .failed(error.localizedDescription)
+                let message = UserFacingError.message(for: error, context: .microphone)
+                keyboardMessage = keyboardJobID == nil ? nil : message
+                phase = .failed(message)
                 restoreAudioAfterCapture()
                 publishKeyboardSnapshot()
             }
@@ -981,8 +982,9 @@ final class DictationController {
                 self.recordingDuration = 0
                 self.activeKeyboardJobID = nil
                 self.liveActivity.endImmediately()
-                self.keyboardMessage = keyboardJobID == nil ? nil : error.localizedDescription
-                self.phase = .failed(error.localizedDescription)
+                let message = UserFacingError.message(for: error, context: .transcription)
+                self.keyboardMessage = keyboardJobID == nil ? nil : message
+                self.phase = .failed(message)
                 self.publishKeyboardSnapshot()
                 self.prepareDeferredLanguageIfNeeded()
             }
@@ -1021,7 +1023,7 @@ final class DictationController {
                 keyboardSessionEnabled = false
                 keyboardSessionRemaining = 0
                 keyboardSessionExpiresAt = 0
-                keyboardMessage = error.localizedDescription
+                keyboardMessage = UserFacingError.message(for: error, context: .microphone)
                 audio.deactivateSession()
             }
         } else {
