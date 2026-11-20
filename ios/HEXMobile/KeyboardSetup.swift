@@ -33,7 +33,7 @@ final class KeyboardSetupMonitor {
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .granted
-            case "onboarding-welcome", "onboarding-allow":
+            case "onboarding-welcome", "onboarding-allow", "setup-sheet-microphone":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .undetermined
@@ -197,8 +197,10 @@ struct SetupSheet: View {
                     status: microphoneStatus,
                     icon: monitor.microphone == .granted ? .done : .todo
                 ) {
+                    // iOS asks right after this tap, so Hex's own button says Continue, never
+                    // Allow (App Review 5.1.1(iv)), as onboarding's Set up Hex page does.
                     if monitor.microphone == .undetermined {
-                        smallButton("Allow") { monitor.requestMicrophone() }
+                        smallButton("Continue") { monitor.requestMicrophone() }
                     }
                 }
                 SettingsDivider(leading: 42)
@@ -269,7 +271,7 @@ struct SetupSheet: View {
         switch monitor.microphone {
         case .granted: "Allowed"
         case .denied: "Off"
-        default: "Required"
+        default: "For dictation"
         }
     }
 

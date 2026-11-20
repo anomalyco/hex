@@ -50,7 +50,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     setup** button (`hex-dictation://keyboard/setup`), which opens the app's
     setup sheet. Home's status line counts the setup steps left ("Finish
     setup · 1 step ›", else "Ready") and opens the same sheet: live status for
-    the keyboard, Full Access, the microphone, and the speech model, a field to
+    the keyboard, Full Access, the microphone ("For dictation" with
+    **Continue**, which iOS's prompt follows, until it's asked; never a button
+    that says Allow, per App Review 5.1.1(iv)), and the speech model, a field to
     switch to Hex in while Full Access is unconfirmed, and **Open Settings**
     (Hex's page in Settings) while the keyboard isn't ready. Full Access shows
     as on once the keyboard has run with it (`keyboard.fullAccessSeenAt`): iOS
@@ -252,7 +254,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     with Apple Intelligence.
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
-  added, Full Access not confirmed yet), `setup-sheet`, and
+  added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
+  (before iOS has asked for the microphone), and
   `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
   its page's switches to the App Group: off by default, on with `-on`.
   `-end` starts the page scrolled to the bottom.
