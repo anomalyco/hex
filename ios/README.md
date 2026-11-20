@@ -54,7 +54,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     full keyboard types without Full Access or network: letters, shift and caps
     lock, numbers and symbols, accents, delete, return, the globe key, and
     suggestions and autocorrect (`UITextChecker`, the supplementary lexicon,
-    and Spatial autocorrect's bundled model when that experiment is on). Words
+    and, in English and Spanish, Spatial autocorrect's bundled model). Words
     it learns may last only while the keyboard runs, as an iPhone may not let
     it write the App Group; haptics, Paste and dictation need Full Access. Without Full
     Access the keyboard always mounts the full keyboard, whichever keyboard is
@@ -232,8 +232,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
-  - **Spatial autocorrect (Settings › Experiments › Spatial autocorrect):**
-    Off by default; it needs the full keyboard with Autocorrect on. A noisy-channel decoder
+  - **Spatial autocorrect (Settings › Keyboard › Spatial autocorrect):**
+    On by default, shown under Autocorrect while it's on (it needs the full keyboard
+    with Autocorrect on). Stored as `experiments.spatialAutocorrect` from when it was an
+    experiment off by default: unset or true is on, false off, so testers who turned it
+    off keep it off. A noisy-channel decoder
     (`TypingDecoder`) replaces `UITextChecker`'s one-edit guesses on space and in the
     strip for English and Spanish: each tap is scored against every letter with a 2D
     Gaussian around the key (shifted by Learn how I type's tap offsets when it has 20
@@ -303,8 +306,8 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
     the dictation bar, so testers who turned that experiment off keep the bar),
-    then Keyboard layout, Autocorrect and Key
-    pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
+    then Keyboard layout, Autocorrect (with Spatial autocorrect below it while it's
+    on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
     learned below the switch), and under **Advanced**, Record typing logs (off
@@ -450,7 +453,7 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   meant key, and Apple's row borders sit within about 2 pt of the gaps' middles
   when nothing is typed. While autocorrect is on in a text field that allows it,
   the English and Spanish word lists (Spatial autocorrect's models, whether or not
-  that experiment is on) let the likelier next letter claim up to 5 pt of a
+  it is on) let the likelier next letter claim up to 5 pt of a
   neighbouring letter's target, 1.25 pt for each e-fold it is likelier
   (`FullKeyboardEngine.letterOdds`): after "th" a tap just inside d types e, as
   Apple's does (there e reaches about 10 pt into d). A finger that rolls within
@@ -664,7 +667,7 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   real hosted field (`--snap-state hosted-keyboard`) and Full Access off: a
   fresh install mounts the full keyboard and offers no in-keyboard dictation;
   keys typed through the engine autocorrect ("thw" became "the", "tk" "to",
-  and with Spatial autocorrect on, "ofthw" "of the"); the Hex key shows the
+  and with Spatial autocorrect, on by default, "ofthw" "of the"); the Hex key shows the
   hint. Scenes: `full-keyboard-no-access[-hint][-dark]`; `--keyboard
   full|dictation-bar` picks the keyboard and `--typing-log-mark` shows the
   Logging mark in the keyboard scenes. The simulator's keyboard reads the App
