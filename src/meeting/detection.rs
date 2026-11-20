@@ -1338,7 +1338,7 @@ fn is_google_meet_call(url: &Url) -> bool {
 
 const GOOGLE_MEET_SITE: &str = "meet.google.com";
 
-const BROWSER_TITLE_SUFFIXES: &[&str] = &[
+pub(crate) const BROWSER_TITLE_SUFFIXES: &[&str] = &[
     " - Audio playing - Brave",
     " - Brave",
     " - Brave Browser",
@@ -1430,7 +1430,7 @@ fn is_google_meet_code(value: &str) -> bool {
             .all(|part| part.bytes().all(|byte| byte.is_ascii_lowercase()))
 }
 
-fn clean_title<'a>(title: &'a str, suffixes: &[&str]) -> &'a str {
+pub(crate) fn clean_title<'a>(title: &'a str, suffixes: &[&str]) -> &'a str {
     suffixes
         .iter()
         .find_map(|suffix| title.strip_suffix(suffix))
@@ -1438,59 +1438,10 @@ fn clean_title<'a>(title: &'a str, suffixes: &[&str]) -> &'a str {
         .trim()
 }
 
-/// Characters browsers put in their window titles that no one sees: Edge's
-/// own name arrives as `Microsoft\u{200b} Edge`.
-const ZERO_WIDTH: [char; 7] = [
-    '\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{2060}', '\u{feff}',
-];
-
-/// The page a browser window's title names. A Windows window title is not a
-/// tab's: the browser appends its name (Edge after its profile name and a
-/// zero-width space), and Edge counts the window's other tabs ("and 2 more
-/// pages"). Both are removed here, before detection reads the title; macOS
-/// and Linux titles are tab titles and need no cleaning.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub fn normalize_window_title(title: &str) -> String {
-    let title: String = title
-        .chars()
-        .filter(|character| !ZERO_WIDTH.contains(character))
-        .collect();
-    let title = title.trim();
-    let title = match title.strip_suffix(" - Microsoft Edge") {
-        Some(page) => strip_edge_profile(page),
-        None => clean_title(title, BROWSER_TITLE_SUFFIXES),
-    };
-    trim_more_pages(title).to_string()
-}
-
-/// Edge puts the profile's name between the page and the browser's own name,
-/// and leaves it out for a single-profile window. It is dropped only when a
-/// page title is still left, so `Meet - Design sync` keeps its name.
-fn strip_edge_profile(title: &str) -> &str {
-    title
-        .rsplit_once(" - ")
-        .filter(|(page, _)| page.contains(" - "))
-        .map_or(title, |(page, _)| page)
-}
-
-/// Leaves out a browser window's count of its other tabs ("and 2 more
-/// pages"), which Edge puts right after the page title.
-fn trim_more_pages(title: &str) -> &str {
-    let Some((page, count)) = title.rsplit_once(" and ") else {
-        return title;
-    };
-    let count = count
-        .strip_suffix(" more pages")
-        .or_else(|| count.strip_suffix(" more page"));
-    match count {
-        Some(count) if !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()) => page,
-        _ => title,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::meeting::window_title::normalize_window_title;
 
     fn context(application: &str, url: Option<&str>, title: &str) -> ContextSnapshot {
         ContextSnapshot {
@@ -2390,6 +2341,13 @@ mod tests {
         assert_eq!(chrome, "Meet - abc-defg-hij");
         assert_eq!(
             google_meet_title_code(&chrome).as_deref(),
+            Some("abc-defg-hij")
+        );
+        let chrome_profile =
+            normalize_window_title("Meet - abc-defg-hij - Google Chrome - Personal");
+        assert_eq!(chrome_profile, "Meet - abc-defg-hij");
+        assert_eq!(
+            google_meet_title_code(&chrome_profile).as_deref(),
             Some("abc-defg-hij")
         );
 

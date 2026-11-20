@@ -244,10 +244,11 @@ Browser calls -> a browser holding the microphone is a browser call after 20 s
         service with its site, and Always record follows it like any known
         call; a page that names no call stays "Call in <browser>"
         └── the browser executable's windows, not the microphone process's:
-            a Chromium audio utility process has none; each window's own
-            chrome is walked but its page content is not, and the
-            whole-window title is reduced to the page's (Edge's profile name,
-            its other-tab count, and the zero-width space in its name removed)
+            a Chromium audio utility process has none; each window's search
+            stops at its first Document, so a page's content is not
+            searched, and the whole-window title is reduced to the page's
+            (Edge's profile name, its other-tab count, and the zero-width
+            space in its name removed)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -571,11 +572,12 @@ On Windows the page comes from the browser's own windows through UI Automation
 the browser's executable, since the audio utility process that holds a
 Chromium browser's microphone has none, at most six, one read in flight and 2 s
 for the whole read. One automation instance and one COM initialization serve
-the windows, and each window's walk stops at its Document elements, so a page's
-own content is never walked. The titles are read first, so a hung provider
-still answers with them; a whole-window title is reduced to the page's (Edge's
-profile name, its count of the window's other tabs, and the zero-width space in
-its own name removed) before detection reads it.
+the windows, and each window's search stops at its first Document, so a page's
+own content is never searched (UI Automation searches in pre-order, so many
+tabs or bookmarks do not defeat it). The titles are read first, so a hung
+provider still answers with them; a whole-window title is reduced to the page's
+(Edge's profile name, its count of the window's other tabs, and the zero-width
+space in its own name removed) before detection reads it.
 [meeting/detection.rs](../../src/meeting/detection.rs)'s `call_page` picks the
 page from what was read, by the same rule macOS uses for its Accessibility
 pages: a page address that names a call wins, and a call's tab title outranks
