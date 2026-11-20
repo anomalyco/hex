@@ -83,6 +83,9 @@ final class FullKeyboardEngine {
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
     private var lastSpaceAt: TimeInterval?
+    /// The text before the cursor just after a suggestion typed its word and a space. A space
+    /// typed next, while the text is still that, is swallowed, as on Apple's keyboard.
+    private var suggestionSpaceBefore: String?
 
     /// Where each letter of the word being typed was tapped (nil for one that came another
     /// way, such as an accent), for Spatial autocorrect.
@@ -209,6 +212,7 @@ final class FullKeyboardEngine {
         }
         shift.reset()
         lastSpaceAt = nil
+        suggestionSpaceBefore = nil
         tokenTaps.removeAll()
         autocorrect.clearPendingUndo()
         cancelAllTouches()
@@ -220,6 +224,10 @@ final class FullKeyboardEngine {
     /// Call after the text or the cursor changed outside these keys.
     func textDidChange() {
         lastSpaceAt = nil
+        // Hosts that report the keys' own edits leave the text as the suggestion left it.
+        if target.documentContextBeforeInput != suggestionSpaceBefore {
+            suggestionSpaceBefore = nil
+        }
         tokenTaps.removeAll()
         autocorrect.clearPendingUndo()
         refreshAutoCapitalization()
@@ -290,6 +298,7 @@ final class FullKeyboardEngine {
         }
         autocorrect.clearPendingUndo()
         insert(suggestion.replacement + " ", source: nil)
+        suggestionSpaceBefore = target.documentContextBeforeInput
         typingLog?.context("suggestion")
     }
 
@@ -485,6 +494,7 @@ final class FullKeyboardEngine {
                     touches[id] = touch
                     typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
                     tokenTaps.removeAll()
+                    suggestionSpaceBefore = nil
                     target.adjustTextPosition(byCharacterOffset: rawSteps)
                     onSelectionStep?()
                     refreshAutoCapitalization()
@@ -736,6 +746,20 @@ final class FullKeyboardEngine {
 
     private func typeSpace() {
         let now = clock()
+        if let before = suggestionSpaceBefore {
+            suggestionSpaceBefore = nil
+            if before.last == " ", before == target.documentContextBeforeInput {
+                // The suggestion typed this space already. It still counts as one, so a quick
+                // second press types ". ".
+                typingLog?.edit("space_swallowed", [TypingLogField("after", .string("suggestion"))])
+                lastSpaceAt = now
+                tokenTaps.removeAll()
+                layerState.didInsert(" ")
+                rebuildLayoutIfNeeded()
+                onChange?()
+                return
+            }
+        }
         if DoubleSpacePeriod.shouldReplace(before: target.documentContextBeforeInput, lastSpaceAt: lastSpaceAt, now: now) {
             autocorrect.clearPendingUndo()
             typingLog?.edit("double_space_period", [
@@ -814,6 +838,7 @@ final class FullKeyboardEngine {
     }
 
     private func didEdit() {
+        suggestionSpaceBefore = nil
         refreshAutoCapitalization()
         refreshSuggestions()
         onEdit?()

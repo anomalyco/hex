@@ -177,6 +177,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 | `autocorrect_undo` | `deleted` (the correction and its space), `inserted` (what was typed): one backspace right after a correction undid it. |
 | `suggestion` | `slot` (0 left, 1 centre, 2 right), `text` (as shown), `deleted` (the word being typed), `inserted` (the replacement + space), `candidates` (as in `candidates`) |
 | `double_space_period` | `deleted`: `" "`, `inserted`: `". "` |
+| `space_swallowed` | `after`: `suggestion`. A space right after a suggestion typed its own changed nothing. |
 | `return` | `inserted`: `"\n"`, `returnKeyType`, `send` (the key said Send); `ignored: true` and no `inserted` when the key was disabled (empty field) |
 | `paste` | `inserted`: the strip's Paste chip |
 | `undo_dictation` | `deleted` (the dictation), or `deletedCount` when the host showed only its end |

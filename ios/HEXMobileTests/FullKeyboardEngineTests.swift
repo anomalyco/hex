@@ -421,6 +421,75 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.layout.layer, .numbers)
     }
 
+    // MARK: - One space per space press
+
+    private func suggestion(_ text: String, _ kind: KeyboardSuggestion.Kind = .secondary) -> KeyboardSuggestion {
+        KeyboardSuggestion(displayText: kind == .keepLiteral ? "“\(text)”" : text, replacement: text, kind: kind)
+    }
+
+    /// A suggestion types its word and a space, so a space pressed right after it (a pick,
+    /// then space out of habit) is swallowed, as on Apple's keyboard. Record typing logs
+    /// showed every double space came from this: a word, what was typed, or an emoji picked,
+    /// then space.
+    func testASpaceRightAfterASuggestionIsSwallowed() {
+        type("prett")
+        engine.acceptSuggestion(suggestion("pretty"))
+        XCTAssertEqual(target.text, "pretty ")
+        now += 0.15
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty ", "one space, not two")
+        type("good")
+        XCTAssertEqual(target.text, "pretty good")
+
+        type(" is th")
+        engine.acceptSuggestion(suggestion("th", .keepLiteral))
+        now += 0.15
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty good is th ", "what you typed, kept from the left slot")
+
+        engine.acceptSuggestion(suggestion("😡", .emoji))
+        now += 0.7
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty good is th 😡 ", "an emoji for the word before")
+        now += 0.7
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty good is th 😡  ", "a second press is a space you asked for")
+    }
+
+    func testTheSwallowedSpaceStillCountsTowardsAPeriod() {
+        type("prett")
+        engine.acceptSuggestion(suggestion("pretty"))
+        now += 0.1
+        tap(.space)
+        now += 0.2
+        tap(.space)
+        XCTAssertEqual(target.text, "pretty. ")
+    }
+
+    func testASpaceAfterTheCursorMovedIsTyped() {
+        type("prett")
+        engine.acceptSuggestion(suggestion("pretty"))
+        target.adjustTextPosition(byCharacterOffset: -7)
+        engine.textDidChange()
+        tap(.space)
+        XCTAssertEqual(target.text, " pretty ")
+
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let keys = FullKeyboardEngine(target: field, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        keys.width = 393
+        keys.configureForField()
+        let p = keys.layout.key(.character("p"))!.frame
+        keys.touchBegan(id: 1, at: CGPoint(x: p.midX, y: p.midY))
+        keys.touchEnded(id: 1, at: CGPoint(x: p.midX, y: p.midY))
+        keys.acceptSuggestion(suggestion("pretty"))
+        keys.textDidChange()
+        let space = keys.layout.key(.space)!.frame
+        keys.touchBegan(id: 2, at: CGPoint(x: space.midX, y: space.midY))
+        keys.touchEnded(id: 2, at: CGPoint(x: space.midX, y: space.midY))
+        XCTAssertEqual(field.text, "pretty ", "a host that reports the keys' own edit leaves it swallowed")
+    }
+
     // MARK: - Haptics in every layout
 
     /// Key haptics come from the same calls whatever the layout (a TestFlight tester felt
