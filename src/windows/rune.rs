@@ -214,8 +214,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
-    // The capture capsule, picker, and ink.
-    let _capture_overlays =
+    // The capture capsule, picker, and ink; the runtime thread keeps them to
+    // follow Show in screen recordings.
+    let capture_overlays =
         crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
     let meetings = crate::meeting::runtime::Meetings::install(&mut app, shutdown)
         .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
@@ -283,6 +284,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 &runtime_shared,
                 shutdown,
                 hud,
+                capture_overlays,
                 runtime_tray.as_deref(),
                 dictations,
                 processing,
@@ -369,6 +371,7 @@ fn run_runtime(
     shared: &Shared,
     shutdown: &AtomicBool,
     indicator: crate::rune_hud::HudSender,
+    mut capture_overlays: crate::rune_ui::capture_capsule::feed::CaptureOverlays,
     tray: Option<&rune::Tray>,
     dictations: crate::dictation::service::DictationQueue,
     processing: crate::dictation::modes::ProcessingState,
@@ -402,6 +405,9 @@ fn run_runtime(
             break;
         }
         host.refresh();
+        // Rune makes each overlay window per show from the options it kept at
+        // install, so follow the setting here, as macOS's pump does.
+        capture_overlays.follow_recordings();
         let published = Arc::new(host.publish());
         let changed = {
             let mut current = lock(&shared.published);

@@ -759,7 +759,10 @@ Hex's own windows                        // capture.own-windows
 │   │   still never in the window log or the target. Rune's
 │   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
 │   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded) and
-│   │   the recording's (capture-core's Recording::set_exclusions)
+│   │   the recording's (capture-core's Recording::set_exclusions). macOS's
+│   │   pump and Windows' runtime thread follow the setting while Hex runs
+│   │   (CaptureOverlays::follow_recordings), so it applies live on both, not
+│   │   only to windows made after it changed
 │   └── Rune's presence tests check ordering and sharing together, including
 │       stale fade completions and setting changes. Its native `spaces_probe`
 │       checks this process's WindowServer ordering. A native Hex smoke on

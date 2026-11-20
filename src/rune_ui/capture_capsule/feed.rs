@@ -344,7 +344,7 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
     })
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 /// The capsule, its picker, and the ink, installed together.
 pub(crate) struct CaptureOverlays {
     capsule: CaptureCapsule,
@@ -379,7 +379,7 @@ impl CaptureOverlays {
         }
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     /// Follows `capture.show_overlays_in_recordings` on windows already
     /// made.
     pub(crate) fn follow_recordings(&mut self) {
