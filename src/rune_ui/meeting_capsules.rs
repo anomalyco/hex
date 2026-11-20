@@ -119,7 +119,7 @@ const ROW_PX: f32 = 9.0;
 const ROW_GAP: f32 = 2.0;
 /// "Microphone is silent" or "Started automatically" under the header.
 const NOTICE_HEIGHT: f32 = 20.0;
-/// The ready panel's summary: Apple Intelligence's two sentences.
+/// The ready panel's summary: the notes writer's two sentences.
 const SUMMARY_LINES: usize = 3;
 const TITLE_LINES: usize = 3;
 const TITLE_INSET: f32 = (REST_HEIGHT - 20.) / 2.;

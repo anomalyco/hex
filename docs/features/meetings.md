@@ -1727,7 +1727,8 @@ Final publication                                   // meetings.output
 Finished meeting panel (15 s, kept open while the pointer is over it; it
     closes when the pointer leaves after that) -> title · length, the
     summary while notes are on (or "Writing a title and summary with Apple
-    Intelligence…", or "Markdown not saved: …"), then the recording's copies
+    Intelligence…" when it writes, "…with OpenCode…" otherwise, or
+    "Markdown not saved: …"), then the recording's copies
     ├── Dark in either appearance, at the recording pill’s last outer corner
     │   (the saved corner if there was no pill for this meeting)
     ├── × (Close) -> hide immediately, even under the pointer. Late notes do not
