@@ -19,8 +19,9 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
     private let base: UnsafeRawPointer
     private let offsetsAt: Int
     private let unigramAt: Int
-    private let bigramKeysAt: Int
-    private let bigramCostsAt: Int
+    private let pairRowsAt: Int
+    private let pairWordsAt: Int
+    private let pairCostsAt: Int
     private let blobAt: Int
 
     init?(url: URL) {
@@ -34,7 +35,7 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         let base = UnsafeRawPointer(mapped)
         func u32(_ at: Int) -> Int { Int(base.loadUnaligned(fromByteOffset: at, as: UInt32.self)) }
         let magic = base.loadUnaligned(as: UInt32.self)
-        guard magic == 0x4D54_5848, u32(4) == 2 else { munmap(mapped, size); return nil }  // "HXTM" v2
+        guard magic == 0x4D54_5848, u32(4) == 3 else { munmap(mapped, size); return nil }  // "HXTM" v3
         let words = u32(8), bigrams = u32(12), blob = u32(16), letters = u32(20)
         guard letters < 255, 28 + 8 * letters <= size else { munmap(mapped, size); return nil }
         let languageBytes = (0..<4).map { base.load(fromByteOffset: 24 + $0, as: UInt8.self) }.filter { $0 != 0 }
@@ -53,10 +54,11 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         }
         let offsetsAt = 28 + 8 * letters
         let unigramAt = offsetsAt + 4 * (words + 1)
-        var keysAt = unigramAt + words
-        keysAt += (8 - keysAt % 8) % 8
-        let costsAt = keysAt + 8 * bigrams
-        let blobAt = costsAt + bigrams
+        var rowsAt = unigramAt + words
+        rowsAt += (4 - rowsAt % 4) % 4
+        let pairWordsAt = rowsAt + 4 * (words + 1)
+        let pairCostsAt = pairWordsAt + 4 * bigrams
+        let blobAt = pairCostsAt + bigrams
         guard blobAt + blob == size else { munmap(mapped, size); return nil }
         self.base = base
         self.byteCount = size
@@ -69,8 +71,9 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         self.bigramCount = bigrams
         self.offsetsAt = offsetsAt
         self.unigramAt = unigramAt
-        self.bigramKeysAt = keysAt
-        self.bigramCostsAt = costsAt
+        self.pairRowsAt = rowsAt
+        self.pairWordsAt = pairWordsAt
+        self.pairCostsAt = pairCostsAt
         self.blobAt = blobAt
     }
 
@@ -113,16 +116,18 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
 
     /// -ln P(b | a), in nats, when the pair is in the model.
     func bigramCost(_ a: Int, _ b: Int) -> Double? {
-        let key = UInt64(a) << 32 | UInt64(b)
-        var lo = 0, hi = bigramCount
+        guard a >= 0, a < wordCount else { return nil }
+        var lo = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * a, as: UInt32.self))
+        let end = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * (a + 1), as: UInt32.self))
+        guard lo <= end, end <= bigramCount else { return nil }
+        var hi = end
+        let target = UInt32(b)
         while lo < hi {
             let mid = (lo + hi) / 2
-            let value = base.loadUnaligned(fromByteOffset: bigramKeysAt + 8 * mid, as: UInt64.self)
-            if value < key { lo = mid + 1 } else { hi = mid }
+            if base.loadUnaligned(fromByteOffset: pairWordsAt + 4 * mid, as: UInt32.self) < target { lo = mid + 1 } else { hi = mid }
         }
-        guard lo < bigramCount,
-              base.loadUnaligned(fromByteOffset: bigramKeysAt + 8 * lo, as: UInt64.self) == key else { return nil }
-        return Double(base.load(fromByteOffset: bigramCostsAt + lo, as: UInt8.self)) / 8
+        guard lo < end, base.loadUnaligned(fromByteOffset: pairWordsAt + 4 * lo, as: UInt32.self) == target else { return nil }
+        return Double(base.load(fromByteOffset: pairCostsAt + lo, as: UInt8.self)) / 8
     }
 
     func index(of word: String) -> Int? {
@@ -139,7 +144,7 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return length(lo) == bytes.count ? lo : nil
     }
 
-    /// The words in `lo..<hi` (which share their first `depth` bytes) whose next byte is `byte`.
+    /// The words in `lo..<hi` (which share their first `depth` codes) whose next code is `byte`.
     func narrow(_ lo: Int, _ hi: Int, depth: Int, byte target: Int) -> (Int, Int) {
         var a = lo, b = hi
         while a < b {
@@ -207,6 +212,17 @@ nonisolated struct TypingDecoder {
         var accentCost = 1.0
         /// A one-letter word stands alone in a split only when commoner than this (-ln p).
         var oneLetterWordCost = 7.0
+        /// The margin when the best reading only adds or moves accents on what you typed
+        /// ("esta" -> "está"); ñ for n isn't one ("ano", "año").
+        var accentMargin = 2.0
+
+        /// The settings tuned for a language's model on the benchmark's dev sentences: English
+        /// leans more on the word before (Google Books' English pairs are richer).
+        static func tuned(for language: String) -> Parameters {
+            var p = Parameters()
+            if language == "en" { p.lmWeight = 1.5 }
+            return p
+        }
     }
 
     struct Keys: Equatable, Sendable {
@@ -273,9 +289,9 @@ nonisolated struct TypingDecoder {
         return out
     }
 
-    init(model: TypingDecoderModel, parameters: Parameters = Parameters()) {
+    init(model: TypingDecoderModel, parameters: Parameters? = nil) {
         self.model = model
-        self.parameters = parameters
+        self.parameters = parameters ?? Parameters.tuned(for: model.language)
     }
 
     /// `typed` is the lowercase letters the keys resolved, one per tap. Nil when the model
@@ -311,10 +327,22 @@ nonisolated struct TypingDecoder {
 
         var replacement: String?
         if let best = readings.first {
-            let margin = (literalIndex != nil || literalIsValid) ? parameters.validMargin : parameters.autoMargin
+            var margin = (literalIndex != nil || literalIsValid) ? parameters.validMargin : parameters.autoMargin
+            if Self.withoutAccents(best.text.lowercased()) == Self.withoutAccents(typed) {
+                margin = min(margin, parameters.accentMargin)
+            }
             if literalCost - best.cost >= margin { replacement = best.text }
         }
         return Decision(replacement: replacement, readings: Array(readings.prefix(3)), literalCost: literalCost)
+    }
+
+    /// The text with acute, grave, circumflex and diaeresis marks removed (é -> e, ü -> u),
+    /// keeping ñ.
+    static func withoutAccents(_ text: String) -> String {
+        let marks: ClosedRange<UInt32> = 0x300...0x308
+        let scalars = text.decomposedStringWithCanonicalMapping.unicodeScalars
+            .filter { !(marks.contains($0.value) && $0.value != 0x303) }
+        return String(String.UnicodeScalarView(scalars)).precomposedStringWithCanonicalMapping
     }
 
     /// -ln P(word | previous) with stupid backoff (0.4) to the unigram.
@@ -333,9 +361,9 @@ nonisolated struct TypingDecoder {
         return out
     }
 
-    /// Each letter code's cost for one tap, in nats above the likeliest letter's. A letter
-    /// without its own key (é on an English or Spanish layout) costs its base letter's plus
-    /// `accentCost`; one with neither is impossible (infinity).
+    /// Each letter code's cost for one tap, in nats above the likeliest letter's. An accented
+    /// letter costs at most its base letter's plus `accentCost` (é on an English or Spanish
+    /// layout, ñ typed with n); one with neither key is impossible (infinity).
     private func tapCosts(_ p: CGPoint, centres: [CGPoint?], keys: Keys) -> [Double] {
         let sx = Double(keys.pitch.width) * parameters.sigmaX
         let sy = Double(keys.pitch.height) * parameters.sigmaY
@@ -345,9 +373,12 @@ nonisolated struct TypingDecoder {
             let dy = (Double(p.y) - Double(c.y)) / sy
             return 0.5 * (dx * dx + dy * dy)
         }
-        for code in out.indices where !out[code].isFinite && code > 0 {
+        // Also from its base key even when it has its own (ñ from n on the Spanish layout):
+        // whichever is cheaper.
+        let raw = out
+        for code in out.indices where code > 0 {
             let base = Int(model.baseCodes[code])
-            if base != code, out[base].isFinite { out[code] = out[base] + parameters.accentCost }
+            if base != code, raw[base].isFinite { out[code] = min(raw[code], raw[base] + parameters.accentCost) }
         }
         let best = out.filter(\.isFinite).min() ?? 0
         for i in out.indices { out[i] -= best }

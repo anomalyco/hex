@@ -42,6 +42,7 @@ struct ContentView: View {
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var onboardingPage = OnboardingProgress.launchPage
     @State private var settingsPath = SettingsSnapshotFixture.initialPath
+    @State private var showAcknowledgements = false
 
     private static let stageWellHeight: CGFloat = 48
     private static let stageControlHeight: CGFloat = 36
@@ -213,6 +214,18 @@ struct ContentView: View {
                         SettingsLinkLabel(title: "Run setup again", icon: "arrow.counterclockwise")
                     }
                     .buttonStyle(.plain)
+
+                    SettingsDivider(leading: 50)
+
+                    Button {
+                        showAcknowledgements = true
+                    } label: {
+                        SettingsLinkLabel(title: "Acknowledgements", icon: "doc.text")
+                    }
+                    .buttonStyle(.plain)
+                    .sheet(isPresented: $showAcknowledgements) {
+                        AcknowledgementsView()
+                    }
                 }
             }
             .frame(maxWidth: 500)
