@@ -99,6 +99,13 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return String((s..<start(i + 1)).map { characters[Int(base.load(fromByteOffset: blobAt + $0, as: UInt8.self))] })
     }
 
+    /// The word's letter codes, read in place from the mapped file (Swipe typing reads
+    /// thousands a swipe).
+    @inline(__always) func withCodes<R>(_ i: Int, _ body: (UnsafeRawBufferPointer) -> R) -> R {
+        let s = start(i)
+        return body(UnsafeRawBufferPointer(start: base.advanced(by: blobAt + s), count: start(i + 1) - s))
+    }
+
     /// The word's letter codes, or nil when it has a letter the model doesn't.
     func encode(_ word: String) -> [UInt8]? {
         var out: [UInt8] = []

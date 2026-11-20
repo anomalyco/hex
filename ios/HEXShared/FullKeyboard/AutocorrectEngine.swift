@@ -733,6 +733,12 @@ final class AutocorrectEngine {
         return capitalised
     }
 
+    /// The English contractions Hex corrects to or offers ("I'm", "don't", "we'll"), which
+    /// Swipe typing reads as common words.
+    static let englishContractions: [String] = Set(
+        unambiguousFixes.values.filter { $0.contains("'") } + suggestOnlyContractions.values
+    ).sorted()
+
     /// Gives the decoder your own words: Contacts names and other `UILexicon` terms, the
     /// one-word outputs of text replacements, words you kept twice, and typo fixes Hex
     /// learned. Rebuilt only when one of them, or the model, changed.
