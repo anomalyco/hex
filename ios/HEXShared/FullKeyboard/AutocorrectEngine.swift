@@ -102,28 +102,37 @@ final class SystemTextChecker: TextChecking {
 }
 
 /// Persists words the user explicitly kept twice, bounded to 2,000 words / 64 KB in the App Group.
+/// Delete what Hex learned removes them, and a keyboard that loaded them earlier drops its copy.
 @MainActor
 final class LearnedWordsStore {
-    static let defaultsKey = "keyboard.learnedWords"
+    nonisolated static let defaultsKey = "keyboard.learnedWords"
     static let maxWords = 2_000
     static let maxBytes = 64 * 1024
 
     private let defaults: UserDefaults?
-    private(set) var words: [String] = []
+    private var storage: [String] = []
     private var wordSet: Set<String> = []
     private var sessionKeepCounts: [String: Int] = [:]
+    private var loadedAt = Date().timeIntervalSince1970
 
     init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
         self.defaults = defaults
         load()
     }
 
+    var words: [String] {
+        dropIfErased()
+        return storage
+    }
+
     func contains(_ word: String) -> Bool {
-        wordSet.contains(word.lowercased())
+        dropIfErased()
+        return wordSet.contains(word.lowercased())
     }
 
     /// Records an explicit keep (via `"quoted"` chip or Backspace-revert). Two keeps persist the word.
     func recordExplicitKeep(_ raw: String) {
+        dropIfErased()
         let key = raw.lowercased()
         guard key.count >= 2, key.count <= 40 else { return }
         let count = (sessionKeepCounts[key] ?? 0) + 1
@@ -134,33 +143,43 @@ final class LearnedWordsStore {
     }
 
     func learn(_ raw: String) {
+        dropIfErased()
         let key = raw.lowercased()
         guard !key.isEmpty, !wordSet.contains(key) else { return }
-        words.append(key)
+        storage.append(key)
         wordSet.insert(key)
-        while words.count > Self.maxWords {
-            let evicted = words.removeFirst()
+        while storage.count > Self.maxWords {
+            let evicted = storage.removeFirst()
             wordSet.remove(evicted)
         }
         save()
+    }
+
+    private func dropIfErased() {
+        let erasedAt = TypingJournalSettings(defaults: defaults).erasedAt
+        guard erasedAt > loadedAt else { return }
+        storage = []
+        wordSet = []
+        sessionKeepCounts = [:]
+        loadedAt = erasedAt
     }
 
     private func load() {
         guard let data = defaults?.data(forKey: Self.defaultsKey),
               data.count <= Self.maxBytes,
               let decoded = try? JSONDecoder().decode([String].self, from: data) else { return }
-        words = Array(decoded.suffix(Self.maxWords))
-        wordSet = Set(words)
+        storage = Array(decoded.suffix(Self.maxWords))
+        wordSet = Set(storage)
     }
 
     private func save() {
         guard let defaults else { return }
-        while !words.isEmpty {
-            if let data = try? JSONEncoder().encode(words), data.count <= Self.maxBytes {
+        while !storage.isEmpty {
+            if let data = try? JSONEncoder().encode(storage), data.count <= Self.maxBytes {
                 defaults.set(data, forKey: Self.defaultsKey)
                 return
             }
-            let evicted = words.removeFirst()
+            let evicted = storage.removeFirst()
             wordSet.remove(evicted)
         }
     }

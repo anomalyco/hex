@@ -171,6 +171,18 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertTrue(LearnedWordsStore(defaults: defaults).contains("teh"))
     }
 
+    func testDeleteWhatHexLearnedForgetsLearnedWords() {
+        let store = LearnedWordsStore(defaults: defaults)
+        store.learn("teh")
+        XCTAssertTrue(store.contains("teh"))
+
+        TypingJournal.delete(in: nil, settings: TypingJournalSettings(defaults: defaults))
+
+        XCTAssertFalse(store.contains("teh"), "a keyboard that loaded the word drops it")
+        XCTAssertNil(defaults.data(forKey: LearnedWordsStore.defaultsKey))
+        XCTAssertFalse(LearnedWordsStore(defaults: defaults).contains("teh"))
+    }
+
     func testQwertyAdjacencyPrefersPhysicalNeighbor() {
         let near = AutocorrectEngine.singleEditKeyboardCost(from: "tge", to: "the")!
         let far = AutocorrectEngine.singleEditKeyboardCost(from: "tpe", to: "the")!
