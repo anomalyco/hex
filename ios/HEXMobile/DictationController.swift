@@ -33,6 +33,12 @@ final class DictationController {
                 false
             }
         }
+
+        /// Recording and transcribing keep the screen on, so the iPhone doesn't dim and lock
+        /// while you talk or wait for the text.
+        var keepsScreenAwake: Bool {
+            self == .recording || self == .transcribing
+        }
     }
 
     private struct ActiveCaptureSession {
@@ -94,7 +100,14 @@ final class DictationController {
     private var keyboardSessionExpiresAt: TimeInterval = 0
     private var suspendedWarmSessionOnInterruption = false
 
-    private(set) var phase = Phase.modelRequired
+    private(set) var phase = Phase.modelRequired {
+        didSet {
+            guard phase.keepsScreenAwake != oldValue.keepsScreenAwake else { return }
+            // Only applies while Hex is in front; nothing else in Hex sets it, so ending a
+            // dictation hands the screen back to Auto-Lock.
+            UIApplication.shared.isIdleTimerDisabled = phase.keepsScreenAwake
+        }
+    }
     private(set) var isModelReady = false
     private(set) var transcript = ""
     @ObservationIgnored private(set) var audioLevel: Float = 0

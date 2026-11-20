@@ -251,6 +251,12 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
+- **Screen stays on while dictating in Hex:** recording and transcribing set
+  `isIdleTimerDisabled`, and every way out (done, cancel, failure) hands the
+  screen back to Auto-Lock. iOS honors it only while Hex is in front: the
+  handoff screen and in-app recording, not a warm session or in-keyboard
+  dictation, where another app is in front and a keyboard extension has no
+  public way to keep the screen on.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
