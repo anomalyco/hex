@@ -1949,16 +1949,6 @@
         }
       }
     },
-    "Speech Recognition access is required to use Apple Speech." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要语音识别权限才能使用 Apple 语音识别。"
-          }
-        }
-      }
-    },
     "Spell names and terms your way" : {
       "localizations" : {
         "zh-Hans" : {

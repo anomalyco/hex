@@ -89,14 +89,11 @@ private actor AppleSpeechAssetReservations {
 @available(iOS 26.0, *)
 actor AppleSpeechTranscriber: LocalTranscribing {
     enum TranscriberError: HexDescribedError {
-        case authorizationDenied
         case emptyTranscript
         case unavailable
 
         var errorDescription: String? {
             switch self {
-            case .authorizationDenied:
-                String(localized: "Speech Recognition access is required to use Apple Speech.")
             case .emptyTranscript:
                 String(localized: "Apple Speech did not detect any speech.")
             case .unavailable:
@@ -124,13 +121,12 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         language.identifier
     }
 
-    /// `requestsAuthorization` is false only in tests, which can't answer the Speech
-    /// Recognition prompt; `SpeechAnalyzer` itself runs without it, as in-keyboard dictation does.
-    private let requestsAuthorization: Bool
-
-    init(language: SpeechLanguage, requestsAuthorization: Bool = true) {
+    /// Never asks for Speech Recognition access: that permission is for `SFSpeechRecognizer`,
+    /// which Hex doesn't use. `SpeechAnalyzer` runs on the iPhone without it, in the app as
+    /// in the keyboard, for `SpeechTranscriber` and `DictationTranscriber` alike, so a
+    /// person who turned it off still dictates (TestFlight build 51, iOS 27.0.1).
+    init(language: SpeechLanguage) {
         self.language = language
-        self.requestsAuthorization = requestsAuthorization
     }
 
     /// Settings › Dictation language, else the first preferred language either module has.
@@ -155,11 +151,6 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
     ) async throws {
         guard !isPrepared else { return }
-        if requestsAuthorization {
-            guard await Self.requestAuthorization() == .authorized else {
-                throw TranscriberError.authorizationDenied
-            }
-        }
         let locale = language.locale
 
         // Best effort: a reservation Hex can't get (over Apple's limit) doesn't stop the download.
@@ -262,16 +253,6 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         guard let reservedLocale else { return }
         self.reservedLocale = nil
         await AppleSpeechAssetReservations.shared.release(reservedLocale)
-    }
-
-    private static func requestAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
-        let status = SFSpeechRecognizer.authorizationStatus()
-        guard status == .notDetermined else { return status }
-        return await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
     }
 
     nonisolated private static func displayName(for locale: Locale) -> String {

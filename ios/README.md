@@ -22,7 +22,10 @@ nothing transcribed (its orange dot shows for that moment). iOS ends a keyboard 
 its memory limit (about 60–90 MB depending on the model), so while less is left
 than starting needs (`os_proc_available_memory`: 32 MB for the first
 dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key
-open Hex instead, as before iOS 26. Audio never leaves the iPhone.
+open Hex instead, as before iOS 26. Audio never leaves the iPhone. Hex never asks
+for Speech Recognition access: that permission covers `SFSpeechRecognizer`, which Hex
+doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard alike
+(a TestFlight tester who turned it off dictated, iOS 27.0.1, build 51).
 
 ## Capabilities
 
