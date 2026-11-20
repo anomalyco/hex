@@ -205,10 +205,11 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     strip for English and Spanish: each tap is scored against every letter with a 2D
     Gaussian around the key (shifted by Learn how I type's tap offsets when it has 20
     or more taps on a letter), words are found with a beam search over a memory-mapped
-    word list, a word-pair language model weighs them by the word before, a missed space
-    is tried by splitting the taps, accented letters read from their base key (é from e),
-    and what you typed is replaced only when the best reading beats it by a margin (more
-    when what you typed is a word).
+    word list and over your own words (Contacts names and other `UILexicon` terms,
+    one-word text replacements, words you kept, fixes Hex learned), a word-pair language
+    model weighs them by the word before, a missed space is tried by splitting the taps,
+    accented letters read from their base key (é from e), and what you typed is replaced
+    only when the best reading beats it by a margin (more when what you typed is a word).
     Shortcuts, learned fixes, contractions, and words you kept still come first. The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see

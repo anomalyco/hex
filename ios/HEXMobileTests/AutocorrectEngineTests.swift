@@ -397,6 +397,14 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "esta aquí mañana ", "\"esta\" is a word too, so it stays")
     }
 
+    func testSpatialAutocorrectKnowsYourOwnWords() throws {
+        try useDecoder()
+        engine.autocorrect.loadLexiconEntries([("Zorbix", "Zorbix")])
+        typeTaps("zorbiz")
+        typeTaps("zorbix")
+        XCTAssertEqual(target.text, "Zorbix zorbix ", "a slip in a name from Contacts, and the name typed right")
+    }
+
     func testTurningAutocorrectSettingOffKeepsSuggestionsWithoutAutoReplacing() {
         engine.autocorrect.isEnabled = false
         typeWord("dont")

@@ -144,6 +144,17 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return length(lo) == bytes.count ? lo : nil
     }
 
+}
+
+/// A word list sorted by letter codes, searchable letter by letter: the model's, or yours.
+nonisolated protocol TypingDecoderWords {
+    var wordCount: Int { get }
+    func length(_ i: Int) -> Int
+    /// The word's letter code at `depth`, or -1 past its end.
+    func byte(_ i: Int, _ depth: Int) -> Int
+}
+
+extension TypingDecoderWords {
     /// The words in `lo..<hi` (which share their first `depth` codes) whose next code is `byte`.
     func narrow(_ lo: Int, _ hi: Int, depth: Int, byte target: Int) -> (Int, Int) {
         var a = lo, b = hi
@@ -157,6 +168,39 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
             if byte(mid, depth) <= target { c = mid + 1 } else { d = mid }
         }
         return (a, c)
+    }
+}
+
+extension TypingDecoderModel: TypingDecoderWords {}
+
+extension TypingDecoder {
+    /// Your own words for the decoder (Contacts names and other `UILexicon` terms, text
+    /// replacements, words you kept, fixes Hex learned), as you spell them, each scored as a
+    /// moderately common word. Words with a letter the model lacks are left out.
+    struct UserWords: TypingDecoderWords, Sendable {
+        private(set) var codes: [[UInt8]] = []
+        private(set) var texts: [String] = []
+        private var lookup: [[UInt8]: Int] = [:]
+
+        init() {}
+
+        init(_ words: [String], model: TypingDecoderModel) {
+            var byCodes: [[UInt8]: String] = [:]
+            for word in words {
+                guard word.count >= 2, word.allSatisfy({ $0.isLetter || $0 == "'" }),
+                      let encoded = model.encode(word.lowercased()) else { continue }
+                if byCodes[encoded] == nil { byCodes[encoded] = word }
+            }
+            codes = byCodes.keys.sorted { $0.lexicographicallyPrecedes($1) }
+            texts = codes.map { byCodes[$0]! }
+            for (i, c) in codes.enumerated() { lookup[c] = i }
+        }
+
+        var wordCount: Int { codes.count }
+        var isEmpty: Bool { codes.isEmpty }
+        func length(_ i: Int) -> Int { codes[i].count }
+        func byte(_ i: Int, _ depth: Int) -> Int { depth < codes[i].count ? Int(codes[i][depth]) : -1 }
+        func index(of encoded: [UInt8]) -> Int? { lookup[encoded] }
     }
 }
 
@@ -212,6 +256,9 @@ nonisolated struct TypingDecoder {
         var accentCost = 1.0
         /// A one-letter word stands alone in a split only when commoner than this (-ln p).
         var oneLetterWordCost = 7.0
+        /// Language-model cost of one of your own words the model lacks (-ln p, about a word
+        /// ranked 10,000th).
+        var userWordCost = 11.0
         /// The margin when the best reading only adds or moves accents on what you typed
         /// ("esta" -> "está"); ñ for n isn't one ("ano", "año").
         var accentMargin = 2.0
@@ -274,6 +321,8 @@ nonisolated struct TypingDecoder {
 
     let model: TypingDecoderModel
     var parameters = Parameters()
+    /// Your own words, searched beside the model's.
+    var userWords = UserWords()
 
     /// Learn how I type's average tap offsets (in keycap widths and heights) as points, for
     /// letters with 20 taps or more, shrunk toward the centre while there are few.
@@ -310,24 +359,34 @@ nonisolated struct TypingDecoder {
             literalCost += c
         }
         let literalIndex = model.index(ofCodes: letters)
-        let literalLM = literalIndex.map { lmCost($0, after: prev) }
+        let literalIsYours = userWords.index(of: letters) != nil
+        var literalLM = literalIndex.map { lmCost($0, after: prev) }
             ?? (literalIsValid ? parameters.unknownValidCost : parameters.unknownCost)
+        if literalIsYours { literalLM = min(literalLM, parameters.userWordCost) }
         literalCost += parameters.lmWeight * literalLM
 
         var readings: [Reading] = []
-        for (word, spatial) in search(costs, range: 0..<costs.count, limit: 5, maxEdits: parameters.maxEdits) where word != literalIndex {
+        for (word, spatial) in search(model, costs, range: 0..<costs.count, limit: 5, maxEdits: parameters.maxEdits) where word != literalIndex {
             readings.append(Reading(text: model.word(word), cost: spatial + parameters.lmWeight * lmCost(word, after: prev)))
+        }
+        if !userWords.isEmpty {
+            for (word, spatial) in search(userWords, costs, range: 0..<costs.count, limit: 3, maxEdits: parameters.maxEdits)
+            where userWords.codes[word] != letters {
+                readings.append(Reading(text: userWords.texts[word], cost: spatial + parameters.lmWeight * parameters.userWordCost))
+            }
         }
         if parameters.splits, letters.count >= 3 {
             readings += splitReadings(costs, taps: taps, keys: keys, prev: prev)
         }
         readings.sort { $0.cost < $1.cost }
         var seen = Set<String>()
-        readings = readings.filter { $0.text != typed && $0.cost < literalCost && seen.insert($0.text).inserted }
+        readings = readings.filter {
+            $0.text.lowercased() != typed && $0.cost < literalCost && seen.insert($0.text.lowercased()).inserted
+        }
 
         var replacement: String?
         if let best = readings.first {
-            var margin = (literalIndex != nil || literalIsValid) ? parameters.validMargin : parameters.autoMargin
+            var margin = (literalIndex != nil || literalIsValid || literalIsYours) ? parameters.validMargin : parameters.autoMargin
             if Self.withoutAccents(best.text.lowercased()) == Self.withoutAccents(typed) {
                 margin = min(margin, parameters.accentMargin)
             }
@@ -393,12 +452,14 @@ nonisolated struct TypingDecoder {
         var cost: Float
     }
 
-    /// The best words for `costs[range]`, as (word index, spatial cost incl. edits).
-    private func search(_ costs: [[Double]], range: Range<Int>, limit: Int, maxEdits: Int) -> [(Int, Double)] {
+    /// The best words of `words` for `costs[range]`, as (word index, spatial cost incl. edits).
+    private func search<Words: TypingDecoderWords>(
+        _ words: Words, _ costs: [[Double]], range: Range<Int>, limit: Int, maxEdits: Int
+    ) -> [(Int, Double)] {
         let n = range.count
         let maxDepth = n + maxEdits + 2
         var layers = [[State]](repeating: [], count: maxDepth + 2)
-        layers[0] = [State(lo: 0, hi: Int32(model.wordCount), tap: 0, edits: 0, cost: 0)]
+        layers[0] = [State(lo: 0, hi: Int32(words.wordCount), tap: 0, edits: 0, cost: 0)]
         var found: [Int: Double] = [:]
         let letterChoices: [[(Int, Double)]] = range.map { i in
             costs[i].enumerated().filter { $0.offset > 0 && $0.element <= parameters.maxTapCost }
@@ -417,13 +478,13 @@ nonisolated struct TypingDecoder {
                 let s = layer[k]
                 k += 1
                 let lo = Int(s.lo), hi = Int(s.hi), tap = Int(s.tap)
-                if tap == n, model.length(lo) == depth {
+                if tap == n, words.length(lo) == depth {
                     let c = Double(s.cost)
                     if c < found[lo] ?? .infinity { found[lo] = c }
                 }
                 guard depth < maxDepth else { continue }
                 func push(_ code: Int, tap nextTap: Int, edits: Int8, cost: Double) {
-                    let (a, b) = model.narrow(lo, hi, depth: depth, byte: code)
+                    let (a, b) = words.narrow(lo, hi, depth: depth, byte: code)
                     guard a < b else { return }
                     layers[depth + 1].append(State(lo: Int32(a), hi: Int32(b), tap: Int16(nextTap), edits: edits, cost: Float(cost)))
                 }
@@ -448,10 +509,10 @@ nonisolated struct TypingDecoder {
                 // Two letters typed in the wrong order.
                 if tap + 1 < n, depth + 2 <= maxDepth {
                     for (a, ca) in letterChoices[tap + 1].prefix(3) {
-                        let (lo2, hi2) = model.narrow(lo, hi, depth: depth, byte: a)
+                        let (lo2, hi2) = words.narrow(lo, hi, depth: depth, byte: a)
                         guard lo2 < hi2 else { continue }
                         for (b, cb) in letterChoices[tap].prefix(3) where b != a {
-                            let (lo3, hi3) = model.narrow(lo2, hi2, depth: depth + 1, byte: b)
+                            let (lo3, hi3) = words.narrow(lo2, hi2, depth: depth + 1, byte: b)
                             guard lo3 < hi3 else { continue }
                             layers[depth + 2].append(State(
                                 lo: Int32(lo3), hi: Int32(hi3), tap: Int16(tap + 2), edits: e,
@@ -472,9 +533,9 @@ nonisolated struct TypingDecoder {
         var out: [Reading] = []
         func pair(left: Range<Int>, right: Range<Int>, extra: Double) {
             guard !left.isEmpty, !right.isEmpty else { return }
-            let lefts = search(costs, range: left, limit: 3, maxEdits: 0).filter { canStandAlone($0.0) }
+            let lefts = search(model, costs, range: left, limit: 3, maxEdits: 0).filter { canStandAlone($0.0) }
             guard !lefts.isEmpty else { return }
-            let rights = search(costs, range: right, limit: 3, maxEdits: 0).filter { canStandAlone($0.0) }
+            let rights = search(model, costs, range: right, limit: 3, maxEdits: 0).filter { canStandAlone($0.0) }
             for (l, ls) in lefts {
                 let lcost = ls + parameters.lmWeight * lmCost(l, after: prev)
                 for (r, rs) in rights {

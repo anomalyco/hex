@@ -193,13 +193,18 @@ final class AutocorrectEngine {
     /// Experiment (Spatial autocorrect): reads the word's taps with a language model in place
     /// of `UITextChecker`'s one-edit guesses, for the language its model was built for. Nil
     /// while off or without a model.
-    var decoder: TypingDecoder?
+    var decoder: TypingDecoder? {
+        didSet { if oldValue?.model !== decoder?.model { userWordsBuilt = nil } }
+    }
     /// The letter keys for `decoder`, from the current layout.
     var decoderKeys: TypingDecoder.Keys?
     /// Where each letter of the word being typed was tapped, one point per letter; nil when
     /// the keys don't know (the cursor moved, the text came from elsewhere).
     var decoderTaps: [CGPoint]?
     private var beforeInput: String?
+    /// Bumped whenever a source of your own words changes, so the decoder's copy is rebuilt.
+    private var userWordsRevision = 0
+    private var userWordsBuilt: (revision: Int, model: ObjectIdentifier)?
     private var decoderCache: (before: String, taps: [CGPoint], decision: TypingDecoder.Decision?)?
 
     init(
@@ -229,6 +234,7 @@ final class AutocorrectEngine {
         }
         lexiconShortcuts = shortcuts
         lexiconTerms = terms
+        userWordsRevision += 1
     }
 
     func clearPendingUndo() {
@@ -257,12 +263,16 @@ final class AutocorrectEngine {
     }
 
     func applyLearning(_ learning: TypingLearning) {
-        if self.learning != learning { self.learning = learning }
+        if self.learning != learning {
+            self.learning = learning
+            userWordsRevision += 1
+        }
     }
 
     func suppressAndKeep(_ word: String) {
         suppressedInSession.insert(word.lowercased())
         learnedWords.recordExplicitKeep(word)
+        userWordsRevision += 1
     }
 
     // MARK: - Token inspection
@@ -479,6 +489,7 @@ final class AutocorrectEngine {
     /// another language's model, an apostrophe or one letter typed, a letter the model lacks,
     /// or taps that don't match the word.
     private func decoderDecision(for token: String) -> TypingDecoder.Decision? {
+        syncUserWords()
         guard let decoder, let keys = decoderKeys, let taps = decoderTaps, decoder.model.language == language.rawValue,
               token.count >= 2, taps.count == token.count, !token.contains("'") else { return nil }
         let before = beforeInput ?? ""
@@ -492,6 +503,19 @@ final class AutocorrectEngine {
         )
         decoderCache = (before, taps, decision)
         return decision
+    }
+
+    /// Gives the decoder your own words: Contacts names and other `UILexicon` terms, the
+    /// one-word outputs of text replacements, words you kept twice, and typo fixes Hex
+    /// learned. Rebuilt only when one of them, or the model, changed.
+    private func syncUserWords() {
+        guard let model = decoder?.model else { return }
+        let id = ObjectIdentifier(model)
+        if let built = userWordsBuilt, built.revision == userWordsRevision, built.model == id { return }
+        let words = lexiconTerms + Array(lexiconShortcuts.values) + learnedWords.words + Array(learning.typos.values)
+        decoder?.userWords = TypingDecoder.UserWords(words, model: model)
+        userWordsBuilt = (userWordsRevision, id)
+        decoderCache = nil
     }
 
     /// The word before `token` in `before`, lowercased, when only spaces separate them
