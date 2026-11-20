@@ -103,7 +103,7 @@ impl Feature {
                 "Show your words next to the small recording indicator (Dictation HUD) as you speak, before the text is pasted"
             }
             Self::FasterLiveText => {
-                "Show live words sooner while you speak, with a shorter lookahead and a little more GPU work"
+                "Show live words sooner, and paste text from the same shorter lookahead, at a little more GPU work"
             }
             Self::FailureNotices => {
                 "When a dictation fails, show the reason next to the small recording indicator (Dictation HUD)"

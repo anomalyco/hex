@@ -158,7 +158,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Live text", "Текст в реальном времени"),
     ("Faster live text", "Более быстрый текст в реальном времени"),
     ("Failure notices", "Уведомления об ошибках"),
-    ("Show live words sooner while you speak, with a shorter lookahead and a little more GPU work", "Показывайте слова в реальном времени раньше во время речи: короче упреждение и немного больше работы GPU"),
+    ("Show live words sooner, and paste text from the same shorter lookahead, at a little more GPU work", "Показывайте слова в реальном времени раньше и вставляйте текст с тем же коротким упреждением, при немного большей работе GPU"),
     ("Live typing", "Ввод в реальном времени"),
     ("Live chapters", "Главы в реальном времени"),
     ("Open apps and press keys by voice", "Открывайте приложения и нажимайте клавиши голосом"),

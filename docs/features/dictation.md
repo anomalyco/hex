@@ -1747,9 +1747,9 @@ Model advertises streaming, GPU device             // dictate.streaming
        ├── Labs + labs.faster_live_text -> the largest chunk from 2 to 7 frames and the
        │             largest right up to 7; Unified English 70/7/7 is 0.56/0.56 s (1.12 s)
        ├── HEX_STREAM_CHUNK_MS + HEX_STREAM_RIGHT_MS -> those milliseconds for benchmarks
-       │   ├── Right alone defaults to the chunk, as a chunk alone always has
+       │   ├── A chunk alone also sets right; a right alone keeps the model's default chunk
        │   └── The model's menu rejects them -> warn, then stream with the default geometry
-       └── Any change re-probes at the next capture, with no restart
+       └── A change re-probes on the next idle tick or after the current stream, with no restart
   Shortcut capture passes the hold threshold (Toggle on Windows and Linux: on press)
     -> Open one live stream; feed the 16 kHz backlog, then every 160 ms
        // same audio as the final clip, pre-roll included; never blocks capture
@@ -1865,11 +1865,14 @@ off by default) asks for a shorter tuple chosen from the model's own GGUF menu
 (`stt.parakeet.encoder.att_chunk_{chunk,right}_choices`, in 80 ms frames): the
 largest chunk from 2 to 7 frames and the largest right up to 7, which for
 Unified English is 70/7/7 (0.56 s chunk and right, 1.12 s of lookahead instead
-of 2.08 s) at about 1.6 times the encoder work. `HEX_STREAM_CHUNK_MS` and
+of 2.08 s) at about 1.6 times the encoder work. The pasted text comes from that
+same stream, so it uses the same shorter lookahead. `HEX_STREAM_CHUNK_MS` and
 `HEX_STREAM_RIGHT_MS` override both for benchmarks, ahead of the lab; a chunk
-alone still sets the right context, as it always has. A geometry the model's
-menu rejects warns and falls back to the default tuple instead of turning
-streaming off, and `HEX_STREAMING=1` streams on any device, including a CPU
+alone also sets the right context, while a right alone keeps the model's
+default chunk. A geometry the model's menu rejects warns and falls back to the
+default tuple instead of turning streaming off, and a change is adopted while
+nothing records (an idle tick, or just after a stream) rather than at the next
+capture's start. `HEX_STREAMING=1` streams on any device, including a CPU
 (diagnostics and the Linux CI fixture). Each dictation logs
 `source=stream|offline|fallback` and `finish_ms`. The macOS "Transcribe during
 pauses" setting no longer affects dictation.

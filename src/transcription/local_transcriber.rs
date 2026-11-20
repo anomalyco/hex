@@ -413,7 +413,7 @@ impl LocalTranscriber {
         );
         transcriber
             .session
-            .probe_stream(&transcriber.options, &architecture, &path);
+            .probe_stream(&transcriber.options, &path);
         // Warm now, so this times the device rather than its first run's
         // shader compiles.
         let started = Instant::now();

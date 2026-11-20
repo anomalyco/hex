@@ -1173,6 +1173,10 @@ impl Worker {
             if let Some(model) = self.model.as_ref() {
                 publish_out_of_memory(model);
             }
+            // Now that nothing records (a stream has just ended, or an
+            // offline run has), adopt a Labs › Faster live text change so
+            // a later capture streams with it.
+            self.refresh_stream();
             self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();
@@ -1188,7 +1192,12 @@ impl Worker {
                 // Settings may turn it on meanwhile.
                 match commands.recv_timeout(IDLE_RECHECK) {
                     Ok(command) => return Some(command),
-                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Timeout) => {
+                        // An idle tick, so a toggle change while nothing
+                        // records reaches the model before a capture opens.
+                        self.refresh_stream();
+                        continue;
+                    }
                     Err(RecvTimeoutError::Disconnected) => return None,
                 }
             };
@@ -1200,6 +1209,7 @@ impl Worker {
                 Ok(command) => return Some(command),
                 Err(RecvTimeoutError::Disconnected) => return None,
                 Err(RecvTimeoutError::Timeout) => {
+                    self.refresh_stream();
                     if self.idle_since.elapsed() >= after && !recording() {
                         self.park();
                     }
@@ -1222,6 +1232,16 @@ impl Worker {
         self.model = None;
         tracing::info!(model = ?selection.model, "unloaded the idle speech model");
         self.parked = Some(selection);
+    }
+
+    /// Adopts a changed Labs › Faster live text or env geometry while
+    /// nothing records. A loaded model re-probes; an unloaded one takes the
+    /// change when it next loads, and one the gated probe never cleared
+    /// stays off.
+    fn refresh_stream(&mut self) {
+        if let Some(model) = self.model.as_mut() {
+            model.refresh_stream();
+        }
     }
 
     /// The model, reloading an unloaded one first. Audio sent meanwhile waits
@@ -1306,13 +1326,9 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let options = self.model().and_then(|model| {
-            // Labs › Faster live text and the env overrides may have
-            // changed since this model loaded; a load already probed with
-            // the current tuning, so this costs a comparison until then.
-            model.refresh_stream();
-            model.stream_options().cloned()
-        });
+        let options = self
+            .model()
+            .and_then(|model| model.stream_options().cloned());
         let Some(options) = options else {
             let loaded = self.model.is_some();
             let model_streams = self
@@ -1430,16 +1446,15 @@ impl Worker {
         commands: &Receiver<Command>,
         next: &mut VecDeque<Command>,
     ) {
-        let options = self.model().and_then(|model| {
-            model.refresh_stream();
-            model.stream_options().cloned()
-        });
-        let Some(options) = options else {
-            return;
-        };
         if cancel.is_cancelled() {
             return;
         }
+        let options = self
+            .model()
+            .and_then(|model| model.stream_options().cloned());
+        let Some(options) = options else {
+            return;
+        };
         self.running.enter(cancel);
         let Some(model) = self.model.as_mut() else {
             return;

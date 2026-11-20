@@ -17,6 +17,19 @@ const MAX_STRING: u64 = 1 << 24;
 const MAX_ARRAY: u64 = 1 << 26;
 /// The longest int32 array kept, such as a Parakeet model's chunk menus.
 const MAX_MENU: u64 = 4_096;
+/// The Parakeet keys a buffered stream's frame size comes from. Only these
+/// scalars are kept: the header of a speech model is mostly tokenizer data.
+const STREAM_SCALARS: [&str; 3] = [
+    "stt.parakeet.encoder.subsampling_factor",
+    "stt.frontend.hop_length",
+    "stt.frontend.sample_rate",
+];
+/// The Parakeet keys its chunk menus come from, and the only int32 arrays
+/// kept.
+const STREAM_MENUS: [&str; 2] = [
+    "stt.parakeet.encoder.att_chunk_chunk_choices",
+    "stt.parakeet.encoder.att_chunk_right_choices",
+];
 const MAX_DIMS: u32 = 8;
 const DEFAULT_ALIGNMENT: u64 = 32;
 
@@ -80,11 +93,11 @@ pub(crate) struct GgufHeader {
     pub(crate) strings: BTreeMap<String, String>,
     pub(crate) bools: BTreeMap<String, bool>,
     pub(crate) string_arrays: BTreeMap<String, Vec<String>>,
-    /// The unsigned 32-bit values, which include a streaming model's encoder
-    /// frame size and its chunk menus' keys.
+    /// The Parakeet scalars a buffered stream's frame size comes from
+    /// (`STREAM_SCALARS`); empty for a model without them.
     pub(crate) u32s: BTreeMap<String, u32>,
-    /// The int32 arrays, which include a streaming model's chunked-attention
-    /// menus (`stt.parakeet.encoder.att_chunk_*_choices`).
+    /// The Parakeet chunk menus (`STREAM_MENUS`), in encoder frames; empty
+    /// for a model without them, such as a cache-aware one.
     pub(crate) int32_arrays: BTreeMap<String, Vec<i32>>,
     /// Tensor count per ggml type id.
     pub(crate) tensor_types: BTreeMap<u32, usize>,
@@ -185,7 +198,9 @@ impl<R: Read + Seek> Reader<R> {
                     if key == "general.alignment" {
                         alignment = u64::from(value);
                     }
-                    header.u32s.insert(key, value);
+                    if STREAM_SCALARS.contains(&key.as_str()) {
+                        header.u32s.insert(key, value);
+                    }
                 }
                 9 => {
                     let item = self.u32()?;
@@ -199,7 +214,8 @@ impl<R: Read + Seek> Reader<R> {
                             values.push(self.string()?);
                         }
                         header.string_arrays.insert(key, values);
-                    } else if item == 5 && count <= MAX_MENU {
+                    } else if item == 5 && count <= MAX_MENU && STREAM_MENUS.contains(&key.as_str())
+                    {
                         // A streaming model's chunk menus are a handful of
                         // frames; anything longer is not one, so it is
                         // skipped rather than held in memory.

@@ -34,7 +34,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Show live words sooner while you speak, with a shorter lookahead and a little more GPU work",
+      "summary": "Show live words sooner, and paste text from the same shorter lookahead, at a little more GPU work",
       "title": "Faster live text"
     },
     {

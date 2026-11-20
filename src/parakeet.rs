@@ -1286,9 +1286,7 @@ impl Parakeet {
             crate::transcription::models::ModelRuntime::Gguf(artifact) => artifact.architecture,
             crate::transcription::models::ModelRuntime::AppleSpeech => "",
         };
-        parakeet
-            .session
-            .probe_stream(&stream_run, architecture, &path);
+        parakeet.session.probe_stream(&stream_run, &path);
         Ok(parakeet)
     }
 
@@ -1309,9 +1307,11 @@ impl Parakeet {
     }
 
     /// Re-probes the live stream when Labs › Faster live text or an env
-    /// override changed, so the next capture streams with it.
+    /// override changed, so a later capture streams with it. Streams decode
+    /// with [`Self::stream_run_options`], as the load-time probe does.
     pub(crate) fn refresh_stream(&mut self) {
-        self.session.refresh_stream(&self.options);
+        let options = self.stream_run_options();
+        self.session.refresh_stream(&options);
     }
 
     pub(crate) fn with_stream<R>(
@@ -1977,7 +1977,7 @@ mod tests {
         let mut model = Parakeet::load_from(&path, false, Some(&selection)).unwrap();
         model
             .session
-            .probe_stream(&model.stream_run_options(), "parakeet", &path);
+            .probe_stream(&model.stream_run_options(), &path);
         assert!(model.stream_options().is_some(), "Metal must stream");
         let engine = TranscriptionEngine::start(WarmTranscriber::serving(Transcriber::Gguf(
             Box::new(model),

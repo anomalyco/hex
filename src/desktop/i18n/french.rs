@@ -161,7 +161,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Live text", "Texte en direct"),
     ("Faster live text", "Texte en direct plus rapide"),
     ("Failure notices", "Notifications d'échec"),
-    ("Show live words sooner while you speak, with a shorter lookahead and a little more GPU work", "Affiche les mots en direct plus tôt pendant que vous parlez, avec moins d'anticipation et un peu plus de travail du GPU"),
+    ("Show live words sooner, and paste text from the same shorter lookahead, at a little more GPU work", "Affiche les mots en direct plus tôt et colle le texte avec la même anticipation plus courte, pour un peu plus de travail GPU"),
     ("Live typing", "Saisie en direct"),
     ("Live chapters", "Chapitres en direct"),
     ("Open apps and press keys by voice", "Ouvrez des apps et appuyez sur des touches à la voix"),
