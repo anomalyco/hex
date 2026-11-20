@@ -26,21 +26,21 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// The return key is about to type its line break.
     var onReturnKey: (() -> Void)?
 
-    private let stripView = KeyboardStripView()
+    let stripView = KeyboardStripView()
     /// The keys' touch surface; tests feed it touch samples.
     let plane: KeyboardKeyPlaneView
-    private let callout = KeyCalloutView()
-    private let accentCallout = AccentCalloutView()
-    private let hexKey = HexKeyControl()
-    private let globeButton = UIButton(type: .custom)
+    let callout = KeyCalloutView()
+    let accentCallout = AccentCalloutView()
+    let hexKey = HexKeyControl()
+    let globeButton = UIButton(type: .custom)
     /// The capsule that grows from the Hex mark across the strip into the recording bar.
     private let morph = UIView()
     private var recordingPanel: HexKeyRecordingPanel?
     private var styleMenu: HexStyleMenuView?
-    private var palette = FullKeyboardPalette(isDark: false)
+    private(set) var palette = FullKeyboardPalette(isDark: false)
     private var didApplyPalette = false
     private var subscriptions: Set<AnyCancellable> = []
-    private var showsRecording = false
+    private(set) var showsRecording = false
     /// The Hex key's last tap or hold started a dictation here (not by opening Hex).
     private var dictatingFromHexKey = false
     private var lastDictation: String?
@@ -49,12 +49,32 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
 
+    // MARK: Emoji (Experiments › Emoji; FullKeyboardView+Emoji.swift)
+
+    /// The keys' target: the field, or the emoji search while you search.
+    let routedTarget: EmojiRoutedTarget
+    /// Fixtures turn the emoji experiment on or off; otherwise the App Group's switch.
+    var emojiOverride: Bool? { didSet { refreshEmojiKey() } }
+    /// Where emoji use is kept; fixtures give a seeded store.
+    var makeEmojiUsage: () -> EmojiUsageStore = { EmojiUsageStore() }
+    var emojiLibrary: EmojiLibrary?
+    var emojiPanel: EmojiPanelView?
+    var emojiSearchField: EmojiSearchField?
+    var emojiResults: EmojiRowView?
+    var emojiResultEntries: [Int] = []
+    var emojiSearchLift: CGFloat = 0
+    /// Record typing logs, held back while you type a search.
+    var suspendedTypingLog: TypingLogger?
+    /// From the emoji key to the panel's suggestions laid out, for probes.
+    var lastEmojiPanelLatency: TimeInterval?
+
     /// Exposed so unit tests can verify lazy allocation and teardown of the Metal recording panel.
     var hasAllocatedRecordingPanel: Bool { recordingPanel != nil }
 
     init(model: KeyboardViewModel, target: KeyboardTextTarget, autocorrect: AutocorrectEngine? = nil) {
         self.model = model
-        engine = FullKeyboardEngine(target: target, autocorrect: autocorrect)
+        routedTarget = EmojiRoutedTarget(document: target)
+        engine = FullKeyboardEngine(target: routedTarget, autocorrect: autocorrect)
         plane = KeyboardKeyPlaneView(engine: engine)
         super.init(frame: .zero)
         backgroundColor = .clear
@@ -73,6 +93,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         stripView.onSelectSuggestion = { [weak self] suggestion in
             guard let self else { return }
             self.keyFeedback()
+            if suggestion.kind == .emoji {
+                self.recordEmojiUse(suggestion.replacement)
+            }
             self.engine.acceptSuggestion(suggestion)
         }
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
@@ -102,12 +125,22 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.onSelectionStep = { [weak self] in self?.selectionFeedback() }
         engine.onChange = { [weak self] in self?.engineChanged() }
         engine.onEdit = { [weak self] in
-            self?.hideUndo()
-            self?.refreshReturnKey()
-            self?.refreshStrip()
-            self?.onTextEdit?()
+            guard let self else { return }
+            if self.routedTarget.isSearching {
+                self.refreshEmojiSearch()
+                return
+            }
+            self.hideUndo()
+            self.refreshReturnKey()
+            self.refreshStrip()
+            self.onTextEdit?()
         }
-        engine.onReturn = { [weak self] in self?.onReturnKey?() }
+        engine.onReturn = { [weak self] in
+            guard self?.routedTarget.isSearching == false else { return }
+            self?.onReturnKey?()
+        }
+        engine.onEmojiKey = { [weak self] in self?.emojiKeyTapped() }
+        routedTarget.onSearchReturn = { [weak self] in self?.endEmojiSearch() }
 
         model.objectWillChange
             .receive(on: RunLoop.main)
@@ -121,6 +154,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
         engine.autocorrect.isEnabled = FullKeyboardSettings().autocorrect
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
+        refreshEmojiKey()
         refreshLanguageSignals()
         syncLanguage()
         engine.configureForField()
@@ -136,8 +170,14 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// Record typing logs (Experiments): set by the keyboard while a session may be logged,
     /// nil otherwise. The app's fixtures never set it.
     var typingLog: TypingLogger? {
-        get { engine.typingLog }
-        set { engine.typingLog = newValue }
+        get { routedTarget.isSearching ? suspendedTypingLog : engine.typingLog }
+        set {
+            if routedTarget.isSearching {
+                suspendedTypingLog = newValue
+            } else {
+                engine.typingLog = newValue
+            }
+        }
     }
 
     /// A typing log session began: write the layout, shift, and suggestions as they are now.
@@ -164,8 +204,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation) + recordingLift
+        KeyboardLayout.height(for: orientation) + lift
     }
+
+    /// Room above the strip: the recording bar's, or the emoji search results'.
+    private var lift: CGFloat { max(recordingLift, emojiSearchLift) }
 
     /// While dictating, the keyboard grows this much taller so the recording bar has room;
     /// the keys stay where they were on screen.
@@ -176,7 +219,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
     private var appliedLift: CGFloat {
-        max(0, min(recordingLift, bounds.height - KeyboardLayout.height(for: orientation)))
+        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation)))
     }
 
     // MARK: - Host events
@@ -233,6 +276,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             engine.journal = journal
         }
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
+        refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
             engine.autocorrect.isEnabled = wantsAutocorrect
@@ -246,9 +290,15 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let field = engine.field
         let route = KeyboardFieldRouting.route(for: engine.target.keyboardType)
         let routeField: KeyboardFieldKind = if case .keys(let kind, _) = route { kind } else { .text }
+        // While you search emoji the keys still type the query, whatever the host changed.
+        if routedTarget.isSearching {
+            refreshReturnKey()
+            return
+        }
         if routeField != field {
             plane.cancelAllTouches()
             engine.configureForField()
+            refreshEmojiKey()
         } else {
             engine.textDidChange()
         }
@@ -258,6 +308,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// The keyboard came on screen for a (possibly new) field.
     func prepareForField() {
+        closeEmojiPanel()
         refreshLanguageSignals()
         syncSettings()
         plane.cancelAllTouches()
@@ -275,6 +326,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// Frees non-essential UI and Metal drawables when the extension approaches its memory ceiling.
     func handleMemoryWarning() {
         dismissStyleMenu()
+        if emojiPanel == nil {
+            emojiLibrary = nil
+        }
         if !showsRecording, let panel = recordingPanel {
             panel.tearDown()
             panel.removeFromSuperview()
@@ -349,12 +403,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             hexKey.frame = hex.hitFrame.offsetBy(dx: 0, dy: lift)
             hexKey.keycapFrame = hex.frame.offsetBy(dx: -hex.hitFrame.minX, dy: -hex.hitFrame.minY)
         }
-        if let globe = layout.key(.globe) {
+        if let globe = layout.key(.globe), emojiPanel == nil || routedTarget.isSearching {
             globeButton.isHidden = false
             globeButton.frame = globe.hitFrame.offsetBy(dx: 0, dy: lift)
         } else {
             globeButton.isHidden = true
         }
+        layoutEmoji(content: content, lift: lift)
 
         if let panel = recordingPanel {
             panel.frame = recordingPanelFrame
@@ -389,9 +444,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         hexKey.palette = next
         recordingPanel?.palette = next
         styleMenu?.palette = next
+        emojiPanel?.palette = next
+        emojiSearchField?.palette = next
+        emojiResults?.palette = next
     }
 
-    private func refreshReturnKey() {
+    func refreshReturnKey() {
         let type = engine.target.returnKeyType ?? .default
         plane.returnLabel = switch type {
         case .go: "go"
@@ -449,7 +507,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.pastesTranslation = model.pastesTranslation
     }
 
-    private func refreshStrip() {
+    func refreshStrip() {
         let status: String? = if !model.hasFullAccess {
             "Allow Full Access to dictate with Hex"
         } else if model.stagePhase == .failed {
@@ -457,14 +515,19 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         } else {
             nil
         }
+        let clipboardOffer = clipboard.offer(
+            textContentType: engine.target.textContentType,
+            hasFullAccess: model.hasFullAccess
+        )
+        var suggestions = engine.suggestions
+        if suggestions.isEmpty, lastDictation == nil, status == nil, clipboardOffer == nil {
+            suggestions = emojiForFinishedWord()
+        }
         stripView.update(
-            suggestions: engine.suggestions,
+            suggestions: suggestions,
             showsUndo: lastDictation != nil,
             statusText: status,
-            clipboard: clipboard.offer(
-                textContentType: engine.target.textContentType,
-                hasFullAccess: model.hasFullAccess
-            )
+            clipboard: clipboardOffer
         )
     }
 
@@ -492,6 +555,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private func setRecording(_ recording: Bool) {
         showsRecording = recording
         dismissStyleMenu()
+        if recording { closeEmojiPanel() }
         // The bar it shrinks back from is measured before the keyboard drops its lift.
         let closingFrames = recording ? nil : morphFrames()
         let lift = recording ? Self.recordingLiftHeight : 0
@@ -674,7 +738,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     // MARK: - Actions
 
-    private func keyFeedback() {
+    func keyFeedback() {
         UIDevice.current.playInputClick()
         if allowsHaptics() {
             haptics.impactOccurred(intensity: 0.65)
@@ -682,7 +746,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
     }
 
-    private func selectionFeedback() {
+    func selectionFeedback() {
         if allowsHaptics() {
             selectionHaptics.selectionChanged()
             selectionHaptics.prepare()

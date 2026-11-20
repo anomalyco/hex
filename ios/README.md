@@ -300,6 +300,29 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   the layout (on QWERTZ, Z sits beside T). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
+- **Emoji (Experiments › Full keyboard › Emoji):** Off by default. An emoji key
+  right of 123 (after the globe) in plain text fields, not web address, email or
+  ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
+  emoji for the text before the cursor, then a grid that scrolls sideways through
+  Frequently used and the eight categories, with ABC, the categories and delete
+  below. The row reads the last eight words (the newest counts most), their plurals
+  and endings, letters held down ("lmaooo"), phrases ("new year") and the word still
+  being typed, matched against Unicode's CLDR names and keywords for the layout's
+  language and English and against Hex's own chat words ("congrats", "bday"), one
+  emoji per family ("woman running", "man running"); your emoji break ties and fill
+  the rest (`EmojiSuggester`). Search (the magnifier) types with the letter keys into
+  a field in the strip, results above it, by name first. Holding an emoji with skin
+  tones offers five; the one you pick is typed and kept for that emoji. After a space,
+  an empty strip offers the finished word's own emoji ("pizza " → 🍕), never in place
+  of word suggestions. The App Group keeps a use count per emoji that halves every 10
+  days and each emoji's skin tone, no words (`EmojiUsageStore`); Clear emoji history
+  empties it. The index is `HEXShared/FullKeyboard/Emoji/emoji-index-<lang>.txt`,
+  built by `scripts/build-emoji-data.py` from Unicode's emoji-test.txt 18.0 and CLDR
+  49 (Unicode License v3, `LICENSE-Unicode.txt` beside it, which permits commercial
+  use with the notice) and `scripts/emoji-aliases-en.txt`; the keyboard maps it and
+  binary-searches it in place (about 0.7 MB on the heap), loading it on the first
+  emoji key press or finished word. Emoji newer than 15.1 are listed only where the
+  emoji font draws them. Nothing leaves the iPhone.
 - **Screen stays on while dictating in Hex:** recording and transcribing set
   `isIdleTimerDisabled`, and every way out (done, cancel, failure) hands the
   screen back to Auto-Lock. iOS honors it only while Hex is in front: the
@@ -342,6 +365,10 @@ scripts/fetch-cleanup-model.sh   # the cleanup tagger's Core ML model, kept out 
 xcodegen generate
 xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>"
 ```
+
+The emoji index files are generated and committed: after changing
+`scripts/emoji-aliases-en.txt` or the sources, run `scripts/build-emoji-data.py`
+(it downloads the pinned Unicode and CLDR files, or reads them from `--sources`).
 
 The cleanup tagger's model (`HEXKeyboard/CleanupTagger/HexCleanupTagger.mlpackage`,
 25 MB) is a GitHub release asset (`ios-model-cleanup-tagger-1`), not a git file.
@@ -437,6 +464,25 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   opening on Hex's page are unverified on a physical iPhone. Before iOS 26
   without a warm session, dictating on page 3 takes the cold-start path, whose
   handoff screen replaces the page.
+- **Emoji:** `EmojiSuggesterTests` cover the index, ranking, search, the strip and
+  the history, and score 100 sentences
+  (`HEXMobileTests/Fixtures/emoji-context-sentences.json`) for a sensible emoji in
+  the top five: 30 hand-written to tune (30/30, top-1 27), 30 hand-written and held
+  out (30/30, top-1 27; written by the same hand as the chat words, so optimistic),
+  and 40 written by a separate agent that saw no code or word lists (37/40, top-1 28
+  before any change; 38/40, top-1 29, now). CLDR's words alone scored 26, 22 and 30.
+  Apple's on-device word embedding (`EmojiSemanticIndex`, app and tests only) changed
+  none of these, cost 5.3 MB that stayed after release and 100–120 ms to build, so the
+  keyboard doesn't use it; Apple's sentence embedding scored 18/40. In the keyboard
+  extension (Release, iPhone 17 simulator, iOS 27.2, no GPU memory, no headroom
+  reading) the footprint was 19.0 MB with the emoji key, 28.7 MB with the panel open,
+  22.7 MB after picking suggestions and closing it, 41.6 MB (peak 48.4) after
+  scrolling every section and 36.5 MB once closed: about 350 emoji glyph images the
+  system's text rendering caches process-wide (18.7 MB), which no public API frees
+  and neither a smaller size nor a font instance of the panel's own changed. Whether
+  iOS purges them under memory pressure, and so whether browsing everything leaves
+  in-keyboard dictation short of its 32 MB, is unverified on an iPhone. The panel
+  opened in 22–26 ms the first time and 12–14 ms after (about 21 ms until on screen).
 - **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
   compiles or tests the iOS targets, so these checks run only in a local
   `xcodebuild test`.

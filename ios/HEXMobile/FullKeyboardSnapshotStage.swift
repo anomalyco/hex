@@ -6,7 +6,10 @@ import UIKit
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
 /// `--keyboard-layout nb|es|de|en` pins it; drafts are in the layout's language.
-/// `--accent-key ø` picks the key the `accents` state holds.
+/// `--accent-key ø` picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
+/// Experiments › Emoji on with a seeded history; `emoji-probe` prints the panel's
+/// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
 struct FullKeyboardSnapshotStage: View {
     let scene: String
 
@@ -21,6 +24,11 @@ struct FullKeyboardSnapshotStage: View {
 
     static var accentKey: String {
         argument(after: "--accent-key") ?? "e"
+    }
+
+    /// What the `emoji-search` state types (`--emoji-query kiss`).
+    static var emojiQuery: String {
+        argument(after: "--emoji-query") ?? "heart"
     }
 
     private static func argument(after flag: String) -> String? {
@@ -86,6 +94,9 @@ struct FullKeyboardSnapshotStage: View {
         case .english:
             break
         }
+        if state.hasPrefix("emoji") {
+            return state == "emoji-strip" ? "Happy birthday " : "Congrats on the launch, pizza tonight? "
+        }
         return switch state {
         case "inserted": "Running 10 min late, should be home by 7:30. Start without me."
         case "numbers": "Running 10 min late, home by 7:3"
@@ -118,7 +129,8 @@ struct FullKeyboardSnapshotStage: View {
                 .padding(.bottom, 10)
             FullKeyboardFixture(state: state, draft: draft, darkKeyboard: darkApp || darkField)
                 .frame(height: KeyboardLayout.height(for: .portrait)
-                    + (["recording", "transcribing", "morph"].contains(state) ? FullKeyboardView.recordingLiftHeight : 0))
+                    + (["recording", "transcribing", "morph"].contains(state) ? FullKeyboardView.recordingLiftHeight : 0)
+                    + (state == "emoji-search" ? KeyboardMetrics.portrait.stripHeight : 0))
                 .background(Color(uiColor: backdrop).ignoresSafeArea(edges: .bottom))
         }
         .background(canvas.ignoresSafeArea())
@@ -191,6 +203,11 @@ private struct FullKeyboardFixture: UIViewRepresentable {
 
         DictationLanguageFixture.apply(to: model)
         let view = FullKeyboardView(model: model, target: context.coordinator.target)
+        if state.hasPrefix("emoji") {
+            view.emojiOverride = true
+            let usage = EmojiFixture.usage()
+            view.makeEmojiUsage = { usage }
+        }
         view.languageOverride = FullKeyboardSnapshotStage.layout
         view.appearanceOverride = darkKeyboard
         view.orientationOverride = .portrait
@@ -222,6 +239,18 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.engine.touchEnded(id: 903, at: center(of: .shift, in: view))
             case "inserted":
                 view.didInsertDictation("should be home by 7:30. Start without me.")
+            case "emoji":
+                view.debugOpenEmoji()
+            case "emoji-search":
+                view.debugOpenEmoji(search: FullKeyboardSnapshotStage.emojiQuery)
+            case "emoji-tones":
+                view.debugOpenEmoji()
+                view.emojiPanel?.debugShowTones(for: "👍", selecting: 3)
+            case "emoji-food":
+                view.debugOpenEmoji()
+                view.emojiPanel?.debugJump(toSection: 3)
+            case "emoji-probe":
+                EmojiFixture.probe(view)
             case "style":
                 view.debugShowStyleMenu()
             case "languages":
@@ -257,6 +286,85 @@ private struct FullKeyboardFixture: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: FullKeyboardView, context: Context) {}
+}
+
+/// A seeded emoji history for the scenes, and the probe that measures the panel.
+@MainActor
+enum EmojiFixture {
+    static func usage() -> EmojiUsageStore {
+        let defaults = UserDefaults(suiteName: "anomaly.hex.fixture.emoji")
+        defaults?.removePersistentDomain(forName: "anomaly.hex.fixture.emoji")
+        let store = EmojiUsageStore(defaults: defaults)
+        for (emoji, times) in [("😂", 6), ("❤️", 5), ("👍", 4), ("🙏", 3), ("🔥", 3), ("😭", 2), ("🥹", 2), ("☕", 1)] {
+            for _ in 0..<times { store.record(emoji) }
+        }
+        store.setTone(3, for: "👍")
+        store.setTone(3, for: "🙏")
+        return store
+    }
+
+    private static func footprint() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
+    }
+
+    private static func log(_ message: String) {
+        print("EMOJI_PROBE \(message) footprint=\(String(format: "%.2f", footprint()))MB")
+    }
+
+    /// Opens the panel, pages through every section, searches, closes, and repeats the open
+    /// ten times, printing footprints and the open latencies.
+    static func probe(_ view: FullKeyboardView) {
+        log("keyboard")
+        var steps: [(TimeInterval, () -> Void)] = []
+        var latencies: [Double] = []
+        steps.append((1.0, { view.debugOpenEmoji(); latencies.append(view.lastEmojiPanelLatency ?? -1) }))
+        steps.append((1.0, { log("panel open, first time, latency=\(String(format: "%.1f", latencies[0] * 1000))ms") }))
+        for section in 1...8 {
+            steps.append((0.3, { view.emojiPanel?.debugJump(toSection: section) }))
+        }
+        steps.append((0.5, { log("panel open, every section drawn") }))
+        steps.append((0.2, {
+            view.beginEmojiSearch()
+            for character in "pizza" { view.routedTarget.insertText(String(character)) }
+            view.refreshEmojiSearch()
+        }))
+        steps.append((0.5, { log("searching") }))
+        steps.append((0.2, { view.closeEmojiPanel() }))
+        steps.append((1.0, { log("panel closed") }))
+        for _ in 0..<10 {
+            steps.append((0.3, { view.openEmojiPanel(); latencies.append(view.lastEmojiPanelLatency ?? -1) }))
+            steps.append((0.3, { view.closeEmojiPanel() }))
+        }
+        steps.append((1.0, {
+            let warm = latencies.dropFirst().map { $0 * 1000 }.sorted()
+            log("panel closed after 11 opens, warm open latency median=\(String(format: "%.1f", warm[warm.count / 2]))ms max=\(String(format: "%.1f", warm.last ?? 0))ms")
+            let before = footprint()
+            let start = CACurrentMediaTime()
+            let library = EmojiLibrary.load(language: "en", bundle: Bundle(for: FullKeyboardView.self))
+            let semantic = library.flatMap { EmojiSemanticIndex(language: "en", vocabulary: $0.vocabulary) }
+            let built = CACurrentMediaTime() - start
+            log("semantic index built=\(semantic != nil) in \(String(format: "%.0f", built * 1000))ms, +\(String(format: "%.2f", footprint() - before))MB")
+            _ = semantic?.neighbors(of: "congrats")
+        }))
+        func run(_ index: Int) {
+            guard index < steps.count else {
+                log("done")
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + steps[index].0) {
+                steps[index].1()
+                run(index + 1)
+            }
+        }
+        run(0)
+    }
 }
 
 @MainActor

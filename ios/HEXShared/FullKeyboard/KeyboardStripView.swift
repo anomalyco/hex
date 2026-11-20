@@ -127,9 +127,10 @@ final class KeyboardStripView: UIView {
             slotButtons.forEach { $0.isHidden = true }
         } else {
             statusLabel.isHidden = true
+            let slots = Self.slots(for: suggestions)
             for (idx, button) in slotButtons.enumerated() {
-                if idx < suggestions.count {
-                    button.configure(with: suggestions[idx], palette: palette)
+                if let item = slots.firstIndex(of: idx) {
+                    button.configure(with: suggestions[item], palette: palette)
                     button.isHidden = false
                 } else {
                     button.isHidden = true
@@ -138,6 +139,12 @@ final class KeyboardStripView: UIView {
         }
         setNeedsLayout()
         setNeedsDisplay()
+    }
+
+    /// Which slot shows each suggestion: in order, except a lone emoji, which takes the centre.
+    static func slots(for suggestions: [KeyboardSuggestion]) -> [Int] {
+        if suggestions.count == 1, suggestions[0].kind == .emoji { return [1] }
+        return Array(suggestions.indices.prefix(3))
     }
 
     /// Clipboard chips replace the empty strip; suggestions and status win.
@@ -169,8 +176,8 @@ final class KeyboardStripView: UIView {
         chip?.baseForegroundColor = palette.textMuted
         chip?.background.backgroundColor = palette.chipFill
         undoChip.configuration = chip
-        for (idx, button) in slotButtons.enumerated() where idx < currentSuggestions.count {
-            button.configure(with: currentSuggestions[idx], palette: palette)
+        for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
+            slotButtons[slot].configure(with: currentSuggestions[item], palette: palette)
         }
         setNeedsDisplay()
     }
@@ -234,8 +241,8 @@ final class KeyboardStripView: UIView {
     }
 
     @objc private func handleSlotTap(_ sender: SlotButton) {
-        guard sender.tag < currentSuggestions.count else { return }
-        onSelectSuggestion?(currentSuggestions[sender.tag])
+        guard let item = Self.slots(for: currentSuggestions).firstIndex(of: sender.tag) else { return }
+        onSelectSuggestion?(currentSuggestions[item])
     }
 
     private final class SlotButton: UIControl {
@@ -288,7 +295,7 @@ final class KeyboardStripView: UIView {
 
             let isLiteral = suggestion.kind == .keepLiteral
             let font = UIFont.systemFont(
-                ofSize: 17,
+                ofSize: suggestion.kind == .emoji ? 24 : 17,
                 weight: suggestion.willAutoReplace ? .medium : .regular
             )
             let ink = isLiteral && !suggestion.willAutoReplace ? palette.textBase.withAlphaComponent(0.88) : palette.textBase

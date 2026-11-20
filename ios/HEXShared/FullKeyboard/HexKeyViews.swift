@@ -273,6 +273,9 @@ final class PanelKeyButton: UIControl {
     var symbol: String? { didSet { setNeedsDisplay() } }
     var isPrimary = false { didSet { setNeedsDisplay() } }
     var cornerRadius: CGFloat = FullKeyboardPalette.cornerRadius { didSet { setNeedsDisplay() } }
+    /// Draws its title and symbol as the letter keys' 123 and delete do (the emoji panel's
+    /// ABC and delete), not the recording panel's bolder ones.
+    var drawsLikeKeys = false { didSet { setNeedsDisplay() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -298,14 +301,19 @@ final class PanelKeyButton: UIControl {
         context.fillKeycap(bounds, fill: fill, radius: cornerRadius)
         let ink = isEnabled ? palette.textBase : palette.textMuted
         if let symbol {
-            let config = UIImage.SymbolConfiguration(pointSize: 16.5, weight: .medium)
+            let config = drawsLikeKeys
+                ? UIImage.SymbolConfiguration(pointSize: bounds.height < 34 ? 16 : 18, weight: .regular)
+                : UIImage.SymbolConfiguration(pointSize: 16.5, weight: .medium)
             if let image = UIImage(systemName: symbol, withConfiguration: config)?
                 .withTintColor(ink, renderingMode: .alwaysOriginal) {
                 image.draw(at: CGPoint(x: bounds.midX - image.size.width / 2, y: bounds.midY - image.size.height / 2))
             }
         } else if let title {
+            let font: UIFont = drawsLikeKeys
+                ? .systemFont(ofSize: bounds.height < 34 ? 14.5 : 15.5)
+                : .systemFont(ofSize: 16.5, weight: .semibold)
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 16.5, weight: .semibold),
+                .font: font,
                 .foregroundColor: ink,
             ]
             let size = (title as NSString).size(withAttributes: attributes)
