@@ -593,7 +593,11 @@ background download, practice outcomes, one-relaunch guard), fed by
 [rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); what the person sees
 is the story in [rune_ui/onboarding_kit](../../src/rune_ui/onboarding_kit.rs),
 opened at launch by `Ui::new` and replayed by Run setup again. The guide
-beside System Settings is [permission_guide.m](../../native/permission_guide.m).
+beside System Settings is [permission_guide.m](../../native/permission_guide.m):
+it reads the Screen Recording grant from TCC, because the CoreGraphics
+preflight keeps the answer it read at launch, closes that guide once the
+watched read says granted or needs a restart, and stays out of the way while
+another app is in front of System Settings.
 On Windows the Microphone row shows only while the microphone switch in
 Settings › Privacy & security is off (device, user, or desktop apps;
 `CapabilityAccessManager\ConsentStore\microphone` says `Deny`); setup
