@@ -1,0 +1,13 @@
+<resources>
+    <bool name="light_bars">true</bool>
+    <color name="page">#FAFBFC</color>
+    <color name="sheet">#F0F2F5</color>
+    <color name="ink">#191C20</color>
+    <color name="quiet">#575E68</color>
+    <color name="rule">#D9DDE2</color>
+    <color name="keyboard">#E5E8EC</color>
+    <color name="key">#FFFFFF</color>
+    <color name="modifier">#CED3DA</color>
+    <color name="pressed">#B7BDC6</color>
+    <color name="launcher_background">#191C20</color>
+</resources>

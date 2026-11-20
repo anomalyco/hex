@@ -1,0 +1,33 @@
+Whisper model weights by OpenAI; Q5_1 conversion distributed by Georgi Gerganov. MIT.
+whisper.cpp and ggml by Georgi Gerganov and contributors. MIT.
+Kotlin and AndroidX: Apache License 2.0. LLVM libc++: Apache 2.0 with LLVM exceptions.
+Inter by Rasmus Andersson and the Inter Project Authors. SIL Open Font License 1.1.
+Unmodified InterVariable.ttf from https://github.com/rsms/inter/releases/tag/v4.1
+
+English, Spanish and German keyboard language models (.hextm): derived from Google Books Ngram
+Viewer, version 3 (2020-02-17), by Google and the Google Books Ngram contributors.
+https://storage.googleapis.com/books/ngrams/books/datasetsv3.html
+Creative Commons Attribution 3.0 Unported: https://creativecommons.org/licenses/by/3.0/
+Changes: lowercased and summed word and word-pair counts for 1980–2019, filtered
+spellings, selected informative pairs, and quantized probabilities into HXTM v3.
+
+German uses the German corpus's alphabetic spellings; no external German dictionary.
+English literal validity also uses SCOWL words, proper names, uppercase forms and abbreviations
+outside the frequency model, lowercased and sorted; these spellings carry no word probabilities.
+English spellings: SCOWL 2020.12.07, sizes through 70; Kevin Atkinson and contributors.
+Permission and individual source notices: scowl.txt. https://wordlist.aspell.net/
+Spanish spellings: RLA-ES Hunspell dictionaries (es_ES and es_MX), coordinated by Santiago Bosio,
+used under Mozilla Public License 1.1. The frequency model filters by these spellings;
+the original dictionaries are unmodified. See mpl-1.1.txt, rla-LICENSE.md and rla-README_hunspell_es.txt.
+Source files: https://github.com/LibreOffice/dictionaries/tree/762abe74008b94b2ff06db6f4024b59a8254c467/es
+
+Norwegian Bokmål keyboard language model: N-grammer fra Nasjonalbiblioteket 2026,
+National Library of Norway (Nasjonalbiblioteket). Book unigrams and bigrams ("digibok"),
+language nob, 1980–2019. CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+https://data.norge.no/nb/datasets/f2eebe8b-bd83-34e4-bcf3-c0c5e37a77f8/n-grammer-fra-nasjonalbiblioteket-2026
+Spelling filter: Norsk ordbank – bokmål 2005, 1 February 2022, University of Bergen
+(Universitetet i Bergen) and the Language Council of Norway (Språkrådet), distributed by
+Nasjonalbiblioteket. CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+https://data.norge.no/en/datasets/f0db926d-a154-3a12-82b8-6573b57f6dbb/norsk-ordbank-norwegian-bokmal-2005
+Changes: normalized and lowercased word forms, filtered the book counts to attested
+Bokmål spellings, selected informative pairs and quantized probabilities into HXTM v3.

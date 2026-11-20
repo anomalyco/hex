@@ -1,0 +1,241 @@
+engine	id	lang	snr_db	words	errors	wall_ms	cpu_ms	load_ms	hwm_kib	ready_to_result_ms	stop_to_result_ms	hypothesis	status
+tiny	01	en	clean	8	0	371.8	1333.5	43.2	139056			please bring the green notebook to the meeting.	ok
+tiny	02	en	8	8	1	358.5	1297.9	43.2	141024			Please bring the green note to the meeting.	ok
+tiny	03	en	clean	5	0	366.2	1335.2	43.2	141024			The coffee is still warm.	ok
+tiny	04	en	14	7	0	355.2	1282.8	43.2	142152			Move the afternoon call to Friday morning.	ok
+tiny	05	en	clean	10	0	390.0	1375.9	43.2	142152			I left the small brass key beside the kitchen door.	ok
+tiny	06	en	clean	7	0	412.2	1450.0	43.2	142152			Please send the revised invoice before lunch.	ok
+tiny	07	en	8	9	0	386.9	1388.6	43.2	142152			Save a seat near the back of the bus.	ok
+tiny	08	en	clean	8	0	370.3	1335.2	43.2	142152			We should meet at the station after work.	ok
+tiny	09	en	14	7	2	384.9	1370.4	43.2	142152			The last train leaves just off to midnight.	ok
+tiny	10	en	clean	9	0	384.0	1374.9	43.2	142152			Can you find the receipt for the yellow jacket?	ok
+tiny	11	en	clean	6	1	424.1	1507.7	43.2	142152			I left the door open.	ok
+tiny	12	en	8	9	0	449.0	1569.7	43.2	142152			Bring the blue folder, I mean the green folder.	ok
+tiny	13	en	clean	6	0	475.1	1615.7	43.2	142152			Meet me on Tuesday. Sorry, Wednesday.	ok
+tiny	14	en	14	9	0	463.9	1600.6	43.2	142152			My brother plays the cello in a small orchestra.	ok
+tiny	15	en	clean	8	0	410.4	1471.7	43.2	142152			Check the spelling before you send the message.	ok
+tiny	16	en	clean	7	0	476.0	1647.5	43.2	142152			Let's take a walk along the river.	ok
+tiny	17	en	8	8	0	393.7	1420.7	43.2	142152			Keep the windows open until the paint dries.	ok
+tiny	18	en	clean	8	0	391.2	1411.5	43.2	142152			The dentist moved my appointment to next month.	ok
+tiny	19	en	14	8	0	389.3	1396.9	43.2	142152			I usually leave the keys near the entrance.	ok
+tiny	20	en	clean	6	0	385.4	1384.5	43.2	142152			Nobody ordered another cup of tea.	ok
+tiny	21	en	clean	10	0	395.7	1407.0	43.2	142152			We need fresh bread and a bottle of olive oil.	ok
+tiny	22	en	8	7	0	391.9	1414.5	43.2	142152			The central library opens early on Saturday.	ok
+tiny	23	en	clean	8	0	388.2	1387.6	43.2	142152			I didn't agree to change the delivery address.	ok
+tiny	24	en	14	8	0	384.5	1386.6	43.2	142152			Please read the instructions before connecting the cable.	ok
+tiny	25	es	clean	5	3	408.6	1433.9	43.2	142152			El cafito de avía está caliente.	ok
+tiny	26	es	8	7	0	401.8	1421.5	43.2	142152			trae el cuaderno verde a la reunión.	ok
+tiny	27	es	clean	6	0	371.0	1344.5	43.2	142152			Nos vemos mañana en la estación.	ok
+tiny	28	es	clean	6	0	364.5	1317.3	43.2	142152			te digo que no puedo ir.	ok
+tiny	29	es	14	6	3	427.8	1484.1	43.2	142152			La tienda cierta temprano a los domigos.	ok
+tiny	30	es	clean	7	2	412.4	1438.2	43.2	142152			deje y las llaves junto a la puerta.	ok
+tiny	31	de	clean	5	0	325.7	1184.7	43.2	142152			Der Kaffee ist noch warm.	ok
+tiny	32	de	8	7	8	604.3	1803.1	43.2	160944			mit dem Präden-Krüller-Ref-Tour-Besch-Drechen.	ok
+tiny	33	de	clean	6	0	345.4	1242.8	43.2	160944			Wir treffen uns morgen am Bahnhof.	ok
+tiny	34	de	14	8	1	404.8	1414.5	43.2	160944			Ich habe den Schlüssel auf den Tisch gelebt.	ok
+tiny	35	de	clean	7	0	384.9	1361.4	43.2	160944			Die Bibliothek schließt heute früher als sonst.	ok
+tiny	36	no	clean	4	3	493.4	1637.0	43.2	160944			Kaffin her sultratt varm.	ok
+tiny	37	no	8	7	9	577.6	1841.8	43.2	161156			Da med en gir en nye bort galt i møretta.	ok
+tiny	38	no	clean	6	4	332.8	1193.4	43.2	161156			Vi med ette spostasjon i mon.	ok
+tiny	39	no	14	7	7	327.0	1157.1	43.2	161156			I er lang å kunde ved øre i moris.	ok
+tiny	40	no	clean	5	6	330.9	1170.9	43.2	161156			Biblo-thek istenget til i Polerdog.	ok
+base	01	en	clean	8	0	836.0	3091.8	47.3	188884			Please bring the green notebook to the meeting.	ok
+base	02	en	8	8	0	843.3	3132.5	47.3	190844			Please bring the green notebook to the meeting.	ok
+base	03	en	clean	5	0	819.9	3080.8	47.3	190844			The coffee is still warm.	ok
+base	04	en	14	7	0	874.6	3247.5	47.3	191876			Move the afternoon call to Friday morning.	ok
+base	05	en	clean	10	0	739.3	2763.2	47.3	191876			I left the small brass key beside the kitchen door.	ok
+base	06	en	clean	7	0	697.8	2614.6	47.3	191876			Please send the revised invoice before lunch.	ok
+base	07	en	8	9	0	699.8	2598.8	47.3	191876			Save a seat near the back of the bus.	ok
+base	08	en	clean	8	0	657.5	2479.5	47.3	191876			we should meet at the station after work.	ok
+base	09	en	14	7	0	660.7	2506.1	47.3	191876			The last train leaves just after midnight.	ok
+base	10	en	clean	9	0	665.0	2512.3	47.3	191876			Can you find the receipt for the yellow jacket?	ok
+base	11	en	clean	6	0	665.7	2512.5	47.3	191876			Um, I left the door open.	ok
+base	12	en	8	9	0	672.4	2514.7	47.3	191876			Bring the blue folder, I mean the green folder.	ok
+base	13	en	clean	6	0	656.2	2478.2	47.3	191876			Meet me on Tuesday, sorry, Wednesday.	ok
+base	14	en	14	9	0	666.3	2507.4	47.3	191876			My brother plays the cello in a small orchestra.	ok
+base	15	en	clean	8	0	683.7	2570.5	47.3	191876			Check the spelling before you send the message.	ok
+base	16	en	clean	7	0	652.5	2474.0	47.3	191876			Let's take a walk along the river.	ok
+base	17	en	8	8	0	651.1	2469.5	47.3	191876			Keep the windows open until the paint dries.	ok
+base	18	en	clean	8	1	655.7	2464.9	47.3	191876			The gentest moved my appointment to next month.	ok
+base	19	en	14	8	0	651.7	2467.4	47.3	191876			I usually leave the keys near the entrance.	ok
+base	20	en	clean	6	0	658.1	2485.4	47.3	191876			Nobody ordered another cup of tea.	ok
+base	21	en	clean	10	0	665.9	2502.1	47.3	191876			We need fresh bread and a bottle of olive oil.	ok
+base	22	en	8	7	0	658.8	2487.6	47.3	191876			The central library opens early on Saturday.	ok
+base	23	en	clean	8	0	702.8	2614.8	47.3	191876			I didn't agree to change the delivery address.	ok
+base	24	en	14	8	0	656.9	2484.4	47.3	191876			Please read the instructions before connecting the cable.	ok
+base	25	es	clean	5	0	650.7	2482.2	47.3	191876			El café todavía está caliente.	ok
+base	26	es	8	7	0	681.1	2553.6	47.3	191876			Trae el cuaderno verde a la reunión.	ok
+base	27	es	clean	6	0	675.4	2522.8	47.3	191876			Nos vemos mañana en la estación.	ok
+base	28	es	clean	6	0	682.2	2579.1	47.3	191876			Te digo que no puedo ir.	ok
+base	29	es	14	6	1	693.8	2585.8	47.3	191876			La tienda cierra temprano los domigos.	ok
+base	30	es	clean	7	0	663.7	2513.6	47.3	191876			Dejé las llaves junto a la puerta.	ok
+base	31	de	clean	5	0	685.4	2576.3	47.3	191876			Der Kaffee ist noch warm.	ok
+base	32	de	8	7	7	1796.2	4869.5	47.3	229476			Die Repräsentatz-Klue, die Rews-Worpuch-Präsum.	ok
+base	33	de	clean	6	0	778.7	2929.6	47.3	229476			Wir treffen uns morgen am Bahnhof.	ok
+base	34	de	14	8	1	858.1	3181.3	47.3	229476			Ich habe den Schlüssel auf den Tisch gelebt.	ok
+base	35	de	clean	7	0	834.2	3104.0	47.3	229476			Die Bibliothek schließt heute früher als sonst.	ok
+base	36	no	clean	4	4	714.7	2684.1	47.3	229476			Koffen i fortjaltvarmen.	ok
+base	37	no	8	7	5	880.7	3069.0	47.3	229568			Ta med den virkeligere nevbult kalt i møtte.	ok
+base	38	no	clean	6	4	727.7	2679.1	47.3	229568			Vi møte spostasjon i mån.	ok
+base	39	no	14	7	4	683.8	2561.5	47.3	229568			Ja, langtene ved døra i moris.	ok
+base	40	no	clean	5	3	684.4	2564.6	47.3	229568			Bibliotekis tinget i på lørdag.	ok
+small	01	en	clean	8	0	2505.7	9675.1	92.7	387572			Please bring the green notebook to the meeting.	ok
+small	02	en	8	8	0	2444.7	9483.4	92.7	389532			Please bring the green notebook to the meeting.	ok
+small	03	en	clean	5	0	2410.1	9390.4	92.7	389532			The coffee is still warm.	ok
+small	04	en	14	7	0	2435.7	9447.6	92.7	390728			Move the afternoon call to Friday morning.	ok
+small	05	en	clean	10	0	2465.3	9513.9	92.7	390728			I left the small brass key beside the kitchen door.	ok
+small	06	en	clean	7	0	2426.9	9424.2	92.7	390728			Please send the revised invoice before lunch.	ok
+small	07	en	8	9	0	2434.0	9436.0	92.7	390728			Save a seat near the back of the bus.	ok
+small	08	en	clean	8	0	2446.6	9467.4	92.7	390728			We should meet at the station after work.	ok
+small	09	en	14	7	0	2704.8	10398.7	92.7	390728			The last train leaves just after midnight.	ok
+small	10	en	clean	9	0	3110.1	11849.8	92.7	390728			Can you find the receipt for the yellow jacket?	ok
+small	11	en	clean	6	0	3039.4	11628.2	92.7	390728			Um, I left the door open.	ok
+small	12	en	8	9	0	2595.1	10000.6	92.7	390728			Bring the blue folder, I mean the green folder.	ok
+small	13	en	clean	6	0	2776.0	10725.9	92.7	390728			Meet me on Tuesday. Sorry, Wednesday.	ok
+small	14	en	14	9	0	2639.4	10180.0	92.7	390728			My brother plays the cello in a small orchestra.	ok
+small	15	en	clean	8	0	2672.1	10096.6	92.7	390728			Check the spelling before you send the message.	ok
+small	16	en	clean	7	0	2482.4	9592.9	92.7	390728			Let's take a walk along the river.	ok
+small	17	en	8	8	0	2642.8	10204.6	92.7	390728			Keep the windows open until the paint dries.	ok
+small	18	en	clean	8	0	2503.4	9704.1	92.7	390728			The dentist moved my appointment to next month.	ok
+small	19	en	14	8	0	2618.2	10096.1	92.7	390728			I usually leave the keys near the entrance.	ok
+small	20	en	clean	6	0	2497.1	9695.9	92.7	390728			Nobody ordered another cup of tea.	ok
+small	21	en	clean	10	0	2685.7	10349.8	92.7	390728			We need fresh bread and a bottle of olive oil.	ok
+small	22	en	8	7	0	2565.7	9925.0	92.7	390728			The central library opens early on Saturday.	ok
+small	23	en	clean	8	0	2508.3	9676.0	92.7	390728			I didn't agree to change the delivery address.	ok
+small	24	en	14	8	0	2967.8	10727.9	92.7	390728			Please read the instructions before connecting the cable.	ok
+small	25	es	clean	5	0	2713.8	10457.7	92.7	390728			El café todavía está caliente.	ok
+small	26	es	8	7	0	2573.5	9803.3	92.7	390728			Trae el cuaderno verde a la reunión.	ok
+small	27	es	clean	6	0	2467.2	9550.3	92.7	390728			Nos vemos mañana en la estación.	ok
+small	28	es	clean	6	0	2423.3	9446.0	92.7	390728			Te digo que no puedo ir.	ok
+small	29	es	14	6	1	2502.3	9659.5	92.7	390728			La tienda cierra temprano los domigos.	ok
+small	30	es	clean	7	0	2534.2	9717.1	92.7	390728			Dejé las llaves junto a la puerta.	ok
+small	31	de	clean	5	0	2771.9	10662.6	92.7	390728			Der Kaffee ist noch warm.	ok
+small	32	de	8	7	5	2816.3	10737.7	92.7	390728			Bitte bring das grüne Räft so auf die Strecke.	ok
+small	33	de	clean	6	0	3629.0	12427.9	92.7	390728			Wir treffen uns morgen am Bahnhof.	ok
+small	34	de	14	8	0	2661.4	10227.7	92.7	390728			Ich habe den Schlüssel auf den Tisch gelegt.	ok
+small	35	de	clean	7	0	2726.0	10375.9	92.7	390728			Die Bibliothek schließt heute früher als sonst.	ok
+small	36	no	clean	4	1	2904.3	11175.2	92.7	390728			Kaffene er fortsatt varm.	ok
+small	37	no	8	7	3	2647.7	10144.0	92.7	390728			Ta med den grønne boket i møte.	ok
+small	38	no	clean	6	3	2454.5	9520.3	92.7	390728			Vi møtes på station imorn.	ok
+small	39	no	14	7	3	2510.7	9658.5	92.7	390728			I er la nøklene ved døra i moris.	ok
+small	40	no	clean	5	1	2490.4	9613.4	92.7	390728			Biblioteket stenger tydelig på lørdag.	ok
+small-short	01	en	clean	8	0	932.7	3467.8	114.5	348516			Please bring the green notebook to the meeting.	ok
+small-short	02	en	8	8	0	858.8	3264.4	114.5	350492			Please bring the green notebook to the meeting.	ok
+small-short	03	en	clean	5	0	807.3	3070.6	114.5	350600			The coffee is still warm.	ok
+small-short	04	en	14	7	0	817.4	3086.8	114.5	351828			Move the afternoon call to Friday morning.	ok
+small-short	05	en	clean	10	0	886.9	3250.0	114.5	351828			I left the small brass key beside the kitchen door.	ok
+small-short	06	en	clean	7	0	849.4	3199.2	114.5	351828			Please send the revised invoice before lunch.	ok
+small-short	07	en	8	9	0	792.7	2951.7	114.5	351828			Save a seat near the back of the bus.	ok
+small-short	08	en	clean	8	0	782.3	2923.1	114.5	351828			We should meet at the station after work.	ok
+small-short	09	en	14	7	0	726.6	2748.2	114.5	351828			The last train leaves just after midnight.	ok
+small-short	10	en	clean	9	0	769.9	2879.2	114.5	351828			Can you find the receipt for the yellow jacket?	ok
+small-short	11	en	clean	6	0	729.1	2777.1	114.5	351828			Um, I left the door open.	ok
+small-short	12	en	8	9	0	1018.9	3578.2	114.5	351828			Bring the blue folder, I mean the green folder.	ok
+small-short	13	en	clean	6	0	844.1	3170.2	114.5	351828			Meet me on Tuesday, sorry, Wednesday.	ok
+small-short	14	en	14	9	0	813.8	3025.2	114.5	351828			My brother plays the cello in a small orchestra.	ok
+small-short	15	en	clean	8	0	767.2	2887.5	114.5	351828			Check the spelling before you send the message.	ok
+small-short	16	en	clean	7	0	722.8	2745.1	114.5	351828			Let's take a walk along the river.	ok
+small-short	17	en	8	8	0	773.9	2860.6	114.5	351828			Keep the windows open until the paint dries.	ok
+small-short	18	en	clean	8	0	725.6	2729.8	114.5	351828			The dentist moved my appointment to next month.	ok
+small-short	19	en	14	8	0	731.1	2767.9	114.5	351828			I usually leave the keys near the entrance.	ok
+small-short	20	en	clean	6	0	717.8	2733.4	114.5	351828			Nobody ordered another cup of tea.	ok
+small-short	21	en	clean	10	0	795.9	2977.0	114.5	351828			We need fresh bread and a bottle of olive oil.	ok
+small-short	22	en	8	7	0	897.0	3362.4	114.5	351828			The central library opens early on Saturday.	ok
+small-short	23	en	clean	8	0	896.0	3317.2	114.5	351828			I didn't agree to change the delivery address.	ok
+small-short	24	en	14	8	0	762.8	2869.7	114.5	351828			Please read the instructions before connecting the cable.	ok
+small-short	25	es	clean	5	0	739.3	2812.1	114.5	351828			El café todavía está caliente.	ok
+small-short	26	es	8	7	0	774.9	2884.0	114.5	351828			Trae el cuaderno verde a la reunión.	ok
+small-short	27	es	clean	6	0	745.0	2809.9	114.5	351828			Nos vemos mañana en la estación.	ok
+small-short	28	es	clean	6	0	733.4	2774.0	114.5	351828			Te digo que no puedo ir.	ok
+small-short	29	es	14	6	1	739.5	2787.3	114.5	351828			La tienda cierra temprano los domigos.	ok
+small-short	30	es	clean	7	0	723.9	2738.9	114.5	351828			Dejé las llaves junto a la puerta.	ok
+small-short	31	de	clean	5	0	716.6	2709.2	114.5	351828			Der Kaffee ist noch warm.	ok
+small-short	32	de	8	7	2	723.3	2736.0	114.5	351828			Bitte bring das grüne Räft zur Bestrechung.	ok
+small-short	33	de	clean	6	0	714.3	2710.2	114.5	351828			Wir treffen uns morgen am Bahnhof.	ok
+small-short	34	de	14	8	1	724.7	2718.2	114.5	351828			Ich habe den Schlüssel auf den Tisch genäht.	ok
+small-short	35	de	clean	7	0	731.1	2740.9	114.5	351828			Die Bibliothek schließt heute früher als sonst.	ok
+small-short	36	no	clean	4	1	705.0	2691.9	114.5	351828			Kaffene er fortsatt varm.	ok
+small-short	37	no	8	7	3	728.7	2742.2	114.5	351828			Ta med den grønne bokat i møte.	ok
+small-short	38	no	clean	6	3	707.1	2687.9	114.5	351828			Vi møtes på station imon.	ok
+small-short	39	no	14	7	3	732.1	2756.6	114.5	351828			I er la nøklene ved døra i moris.	ok
+small-short	40	no	clean	5	1	734.6	2728.7	114.5	351828			Biblioteket stenger tydelig på lørdag.	ok
+parakeet	01	en	clean	8	0	102.6	379.2	2451.3	1420588			Please bring the green notebook to the meeting.	ok
+parakeet	02	en	8	8	0	97.2	371.4	2451.3	1420588			Please bring the green notebook to the meeting.	ok
+parakeet	03	en	clean	5	0	92.9	324.5	2451.3	1420588			The coffee is still warm.	ok
+parakeet	04	en	14	7	0	126.5	445.9	2451.3	1420588			Move the afternoon call to Friday morning.	ok
+parakeet	05	en	clean	10	0	167.2	499.8	2451.3	1420588			I left the small brass key beside the kitchen door.	ok
+parakeet	06	en	clean	7	0	128.4	496.0	2451.3	1420588			Please send the revised invoice before lunch.	ok
+parakeet	07	en	8	9	0	101.2	385.9	2451.3	1420588			Save a seat near the back of the bus.	ok
+parakeet	08	en	clean	8	0	111.8	428.7	2451.3	1420588			We should meet at the station after work.	ok
+parakeet	09	en	14	7	0	95.3	367.8	2451.3	1420588			The last train leaves just after midnight.	ok
+parakeet	10	en	clean	9	0	118.8	458.9	2451.3	1420588			Can you find the receipt for the yellow jacket?	ok
+parakeet	11	en	clean	6	0	103.8	399.8	2451.3	1420588			Um, I left the door open.	ok
+parakeet	12	en	8	9	0	124.7	478.8	2451.3	1420588			Bring the blue folder, I mean the green folder.	ok
+parakeet	13	en	clean	6	0	138.9	519.3	2451.3	1420588			Meet me on Tuesday. Sorry, Wednesday.	ok
+parakeet	14	en	14	9	0	143.3	542.1	2451.3	1420588			My brother plays the cello in a small orchestra.	ok
+parakeet	15	en	clean	8	0	127.1	485.4	2451.3	1420588			Check the spelling before you send the message.	ok
+parakeet	16	en	clean	7	0	118.5	445.3	2451.3	1420588			Let's take a walk along the river.	ok
+parakeet	17	en	8	8	0	123.0	472.0	2451.3	1420588			Keep the windows open until the paint dries.	ok
+parakeet	18	en	clean	8	0	143.9	553.2	2451.3	1420588			The dentist moved my appointment to next month.	ok
+parakeet	19	en	14	8	0	140.1	539.0	2451.3	1420588			I usually leave the keys near the entrance.	ok
+parakeet	20	en	clean	6	0	113.4	419.5	2451.3	1420588			Nobody ordered another cup of tea.	ok
+parakeet	21	en	clean	10	0	131.6	503.8	2451.3	1420588			We need fresh bread and a bottle of olive oil.	ok
+parakeet	22	en	8	7	1	115.5	447.4	2451.3	1420588			The Central Librar opens early on Saturday.	ok
+parakeet	23	en	clean	8	0	123.0	477.7	2451.3	1420588			I didn't agree to change the delivery address.	ok
+parakeet	24	en	14	8	0	120.3	463.6	2451.3	1420588			Please read the instructions before connecting the cable.	ok
+parakeet	25	es	clean	5	0	95.2	370.2	2451.3	1420588			El café todavía está caliente.	ok
+parakeet	26	es	8	7	0	97.0	371.8	2451.3	1420588			Trae el cuaderno verde a la reunión.	ok
+parakeet	27	es	clean	6	0	86.3	322.8	2451.3	1420588			Nos vemos mañana en la estación.	ok
+parakeet	28	es	clean	6	0	83.2	320.6	2451.3	1420588			Te digo que no puedo ir.	ok
+parakeet	29	es	14	6	0	91.7	347.9	2451.3	1420588			La tienda cierra temprano los domingos.	ok
+parakeet	30	es	clean	7	0	96.7	377.2	2451.3	1420588			Dejé las llaves junto a la puerta.	ok
+parakeet	31	de	clean	5	0	89.9	342.3	2451.3	1420588			Der Kaffee ist noch warm.	ok
+parakeet	32	de	8	7	7	119.7	461.3	2451.3	1420588			Metal Play the Scroll of Zwap.	ok
+parakeet	33	de	clean	6	0	108.9	422.4	2451.3	1420588			Wir treffen uns morgen am Bahnhof.	ok
+parakeet	34	de	14	8	0	114.9	448.1	2451.3	1420588			Ich habe den Schlüssel auf den Tisch gelegt.	ok
+parakeet	35	de	clean	7	0	111.3	425.1	2451.3	1420588			Die Bibliothek schließt heute früher als sonst.	ok
+parakeet	36	no	clean	4	5	83.8	329.3	2451.3	1420588			Cough and I forchat one.	ok
+parakeet	37	no	8	7	4	107.8	408.7	2451.3	1420588			Ta med den gröne bokar till möte.	ok
+parakeet	38	no	clean	6	6	108.0	415.7	2451.3	1420588			We mut as pusto mimon.	ok
+parakeet	39	no	14	7	7	108.0	419.7	2451.3	1420588			Y along a knais.	ok
+parakeet	40	no	clean	5	3	116.4	441.2	2451.3	1420588			Biblioteket stänger till på Lördag.	ok
+android	01	en	clean	8	0	40				3681	3	Please bring the green notebook to the meeting	ok
+android	02	en	8	8	0	38				3397	6	Please bring the green notebook to the meeting	ok
+android	03	en	clean	5	0	45				2843	7	The coffee is still warm	ok
+android	04	en	14	7	0	62				3799	27	Move the afternoon call to Friday morning	ok
+android	05	en	clean	10	0	38				4078	7	I left the small brass key beside the kitchen door	ok
+android	06	en	clean	7	0	56				3737	27	Please send the revised invoice before lunch	ok
+android	07	en	8	9	0	34				3413	4	Save a seat near the back of the bus	ok
+android	08	en	clean	8	0	74				3864	36	We should meet at the station after work	ok
+android	09	en	14	7	7								error 7
+android	10	en	clean	9	0	37				3535	3	Can you find the receipt for the yellow jacket	ok
+android	11	en	clean	6	1	46				3334	10	I left the door open	ok
+android	12	en	8	9	0	34				3882	7	Bring the blue folder I mean the green folder	ok
+android	13	en	clean	6	0	49				4250	18	Meet me on Tuesday sorry Wednesday	ok
+android	14	en	14	9	0	40				3977	4	My brother plays the cello in a small Orchestra	ok
+android	15	en	clean	8	0	32				3571	4	Check the spelling before you send the message	ok
+android	16	en	clean	7	0	54				3157	21	Let's take a walk along the river	ok
+android	17	en	8	8	0	57				3831	23	Keep the windows open until the paint dries	ok
+android	18	en	clean	8	3	0				3849		The dentist moved my appointment	ok
+android	19	en	14	8	0	42				3928	7	I usually leave the keys near the entrance	ok
+android	20	en	clean	6	0	37				3450	4	Nobody ordered another cup of tea	ok
+android	21	en	clean	10	0	33				3540	3	We need fresh bread and a bottle of olive oil	ok
+android	22	en	8	7	7								error 7
+android	23	en	clean	8	0	32				4029	4	I didn't agree to change the delivery address	ok
+android	24	en	14	8	0	40				4330	10	Please read the instructions before connecting the cable	ok
+android	25	es	clean	5	0	49				3062	3	el café todavía está caliente	ok
+android	26	es	8	7	0	41				3688	4	trae el cuaderno verde a la reunión	ok
+android	27	es	clean	6	0	65				3147	32	nos vemos mañana en la estación	ok
+android	28	es	clean	6	0	41				2895	3	te digo que no puedo ir	ok
+android	29	es	14	6	0	45				3290	4	la tienda cierra temprano los domingos	ok
+android	30	es	clean	7	0	44				3617	5	dejé las llaves junto a la puerta	ok
+android	31	de	clean	5	0	42				2917	7	der Kaffee ist noch warm	ok
+android	32	de	8	7	2	49				4200	8	bitte bring das grüne rechts wo Besprechung	ok
+android	33	de	clean	6	0	51				3593	8	wir treffen uns morgen am Bahnhof	ok
+android	34	de	14	8	0	48				4204	5	ich habe den Schlüssel auf den Tisch gelegt	ok
+android	35	de	clean	7	1	40				4195	3	Bibi Bibliothek schliesst heute früher als sonst	ok
+android	36	no	clean	4	4								error 12
+android	37	no	8	7	7								error 12
+android	38	no	clean	6	6								error 12
+android	39	no	14	7	7								error 12
+android	40	no	clean	5	5								error 12

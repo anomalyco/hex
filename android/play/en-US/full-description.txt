@@ -1,0 +1,7 @@
+Hold the Hex key, speak, then release to put your words in the app you’re using. For hands-free dictation, tap the key to start and tap the checkmark when you’re done.
+
+Type in English, Spanish, German or Norwegian Bokmål. Tap a suggestion to finish a word, or press space to let Hex fix a typo. If you prefer your original spelling, press backspace once. Hold the space bar to switch languages.
+
+Choose how your dictation comes out: polished sentences, casual messages, notes or the words as spoken. You can also turn on Spanish-to-English dictation. Recognition, cleanup and translation all run on your phone.
+
+Hex includes a small offline speech model. Setup downloads a more accurate 190 MB model once. There’s no account, no advertising and no typing or dictation history. In password fields, Hex types without suggestions or dictation.
