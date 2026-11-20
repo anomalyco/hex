@@ -172,6 +172,8 @@ struct KeyboardLanguagesPage: View {
                         next.move(fromOffsets: from, toOffset: to)
                         choose(next)
                     }
+                    // A row added in edit mode gets no drag handle until its rows are rebuilt.
+                    .id(chosen.map(\.rawValue).joined(separator: ","))
                 } footer: {
                     if chosen.count > 1 {
                         Text("Swipe the space bar to switch. Hold it, then slide, to move the cursor.")
@@ -237,7 +239,7 @@ struct KeyboardLanguagesPage: View {
 
     private func languageRow(_ language: KeyboardLanguage) -> some View {
         // The language's own name, and under it its name in the iPhone's language when that differs.
-        let local = Locale.current.localizedString(forIdentifier: language.rawValue)
+        let local = Locale.current.localizedString(forIdentifier: language == .french ? "fr-FR" : language.rawValue)
         return LanguageChoiceRow(
             title: language.displayName,
             detail: local.flatMap { $0.caseInsensitiveCompare(language.displayName) == .orderedSame ? nil : $0 },
