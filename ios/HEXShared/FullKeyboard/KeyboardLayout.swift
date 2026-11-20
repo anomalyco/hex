@@ -211,6 +211,16 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         CGRect(x: 0, y: metrics.stripArea, width: width, height: metrics.keysArea)
     }
 
+    /// The strip's bottom points, below its pills and chips, that belong to row 1's keys: a
+    /// tap just above a keycap types it rather than picking a suggestion. Apple's keys reach
+    /// about 8 pt above their keycaps, to the predictive bar.
+    static let stripTouchBand: CGFloat = 4
+
+    /// Where touches go to the keys: the key area plus `stripTouchBand`. Hit frames tile it.
+    var touchAreaFrame: CGRect {
+        CGRect(x: 0, y: metrics.stripArea - Self.stripTouchBand, width: width, height: metrics.keysArea + Self.stripTouchBand)
+    }
+
     /// A letter key's width on a 10-key row. Shift, delete and the bottom row are sized
     /// from it in every language, as Apple's are.
     var letterWidth: CGFloat {
@@ -412,8 +422,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             x += w + m.gap
         }
 
-        // Touch targets: split every gap down the middle; outer keys reach the edges.
-        let top = m.stripArea
+        // Touch targets: split every gap down the middle; outer keys reach the edges, and row 1
+        // the strip's bottom band.
+        let top = m.stripArea - stripTouchBand
         let bottom = m.totalHeight
         var keys: [KeyboardKey] = []
         for row in 0..<4 {
@@ -438,7 +449,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             let width: CGFloat = 44
             let x = placement == .stripLeading ? left : right - width
             let frame = CGRect(x: x, y: m.stripTop + 4, width: width, height: height)
-            keys.append(KeyboardKey(kind: .hex, row: -1, frame: frame, hitFrame: frame.insetBy(dx: -4, dy: -4), label: "hex"))
+            let target = frame.insetBy(dx: -4, dy: -4)
+            let hitFrame = CGRect(x: target.minX, y: target.minY, width: target.width, height: top - target.minY)
+            keys.append(KeyboardKey(kind: .hex, row: -1, frame: frame, hitFrame: hitFrame, label: "hex"))
         }
         return keys
     }

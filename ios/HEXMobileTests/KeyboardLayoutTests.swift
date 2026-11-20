@@ -50,7 +50,17 @@ final class KeyboardLayoutTests: XCTestCase {
     func testHitTargetsTileTheKeyAreaWithNoDeadZonesOrOverlaps() {
         var generator = SystemRandomNumberGenerator()
         for layout in everyPortraitLayout() + landscapeLayouts() {
-            let area = layout.keysAreaFrame
+            let area = layout.touchAreaFrame
+            // Row 1 also takes the strip's bottom band, under its pills, as Apple's keys reach
+            // above their keycaps; the Hex key in the strip stops where it starts.
+            XCTAssertEqual(area.minY, layout.keysAreaFrame.minY - KeyboardLayout.stripTouchBand, describe(layout))
+            if let hex = layout.key(.hex), hex.row < 0 {
+                XCTAssertLessThanOrEqual(hex.hitFrame.maxY, area.minY, describe(layout))
+            }
+            for key in layout.keys where key.row == 0 {
+                let justAbove = CGPoint(x: key.frame.midX, y: key.frame.minY - 2)
+                XCTAssertEqual(layout.hitTest(justAbove)?.kind, key.kind, "\(describe(layout)) \(key.label)")
+            }
             var rowTop = area.minY
             for row in 0..<4 {
                 let targets = layout.keys.filter { $0.row == row }.map(\.hitFrame).sorted { $0.minX < $1.minX }

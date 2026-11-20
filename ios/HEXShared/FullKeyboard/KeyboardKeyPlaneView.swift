@@ -41,7 +41,7 @@ final class KeyboardKeyPlaneView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        engine.layout.keysAreaFrame.contains(point)
+        engine.layout.touchAreaFrame.contains(point)
     }
 
     // MARK: - Drawing
