@@ -30,6 +30,8 @@ nonisolated enum KeyKind: Equatable, Hashable, Sendable {
     case returnKey
     case hex
     case globe
+    /// Opens the emoji panel (Experiments › Emoji).
+    case emoji
 }
 
 nonisolated struct KeyboardKey: Equatable, Sendable {
@@ -150,6 +152,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     let layer: KeyboardLayer
     let field: KeyboardFieldKind
     let showsGlobe: Bool
+    let showsEmoji: Bool
     let horizontalInset: CGFloat
     let language: KeyboardLanguage
     let metrics: KeyboardMetrics
@@ -161,6 +164,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         layer: KeyboardLayer = .letters,
         field: KeyboardFieldKind = .text,
         showsGlobe: Bool = false,
+        showsEmoji: Bool = false,
         horizontalInset: CGFloat = 0,
         language: KeyboardLanguage = .english
     ) {
@@ -169,6 +173,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.layer = layer
         self.field = field
         self.showsGlobe = showsGlobe
+        self.showsEmoji = showsEmoji
         self.horizontalInset = max(0, horizontalInset)
         self.language = language
         let innerWidth = width - 2 * self.horizontalInset
@@ -180,6 +185,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             layer: layer,
             field: field,
             showsGlobe: showsGlobe,
+            showsEmoji: showsEmoji,
             inset: self.horizontalInset,
             language: language
         )
@@ -287,6 +293,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         layer: KeyboardLayer,
         field: KeyboardFieldKind,
         showsGlobe: Bool,
+        showsEmoji: Bool,
         inset: CGFloat,
         language: KeyboardLanguage
     ) -> [KeyboardKey] {
@@ -350,8 +357,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         }
         add(.delete, row: 2, x: right - modW, w: modW, label: "delete")
 
-        // Row 4: 123/ABC, globe?, space, field extras (@ . / . /), Hex, return.
-        let isCompactBottomRow = showsGlobe || field != .text
+        // Row 4: 123/ABC, globe?, emoji?, space, field extras (@ . / . /), Hex, return.
+        let isCompactBottomRow = showsGlobe || showsEmoji || field != .text
         let switchW = isCompactBottomRow ? modW : referenceW * bottomSwitchWidthRatio
         let returnW = isCompactBottomRow ? (referenceW * compactReturnWidthRatio) : (referenceW * returnWidthRatio + m.gap)
         var leading: [(KeyKind, CGFloat, String)] = [
@@ -361,6 +368,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         ]
         if showsGlobe {
             leading.append((.globe, modW, "globe"))
+        }
+        if showsEmoji {
+            leading.append((.emoji, modW, "emoji"))
         }
         let placement = HexKeyPlacement.current
         if placement == .leftOfSpace {

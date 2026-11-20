@@ -347,6 +347,8 @@ final class TypingLogger {
                 fields.append(TypingLogField("auto", .bool(auto)))
             case .secondary:
                 fields.append(TypingLogField("kind", .string("secondary")))
+            case .emoji:
+                fields.append(TypingLogField("kind", .string("emoji")))
             }
             return .object(fields)
         })
@@ -460,6 +462,7 @@ final class TypingLogger {
         case .returnKey: "return"
         case .hex: "hex"
         case .globe: "globe"
+        case .emoji: "emoji"
         }
     }
 

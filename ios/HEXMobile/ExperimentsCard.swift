@@ -11,6 +11,8 @@ struct ExperimentsCard: View {
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var haptics = FullKeyboardSettings().haptics
+    @State private var emoji = FullKeyboardSettings().emoji
+    @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
     @State private var learnTyping = TypingJournalSettings().isEnabled
     @State private var typingLogs = TypingLogSettings().isEnabled
     @State private var showTypingLogs = false
@@ -84,6 +86,46 @@ struct ExperimentsCard: View {
                     }
 
                     KeyboardLayoutRow()
+
+                    Divider()
+                        .overlay(HexTheme.borderWeak)
+                        .padding(.leading, 16)
+
+                    Toggle(isOn: $emoji) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Emoji")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(HexTheme.textBase)
+                            Text("An emoji key that suggests emoji for what you type, from the ones you use, on this iPhone")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HexTheme.textMuted)
+                        }
+                    }
+                    .tint(HexTheme.success)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .onChange(of: emoji) { _, enabled in
+                        FullKeyboardSettings().emoji = enabled
+                    }
+
+                    if emoji {
+                        Button {
+                            EmojiUsageStore().clear()
+                            emojiHistoryEmpty = true
+                        } label: {
+                            HStack {
+                                Text("Clear emoji history")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(emojiHistoryEmpty ? HexTheme.textMuted : HexTheme.textBase)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(emojiHistoryEmpty)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                    }
                 }
 
                 Divider()
@@ -288,6 +330,8 @@ struct ExperimentsCard: View {
             autocorrect = FullKeyboardSettings().autocorrect
             keyPopups = FullKeyboardSettings().keyPopups
             haptics = FullKeyboardSettings().haptics
+            emoji = FullKeyboardSettings().emoji
+            emojiHistoryEmpty = EmojiUsageStore().isEmpty
             learnTyping = TypingJournalSettings().isEnabled
             typingLogs = TypingLogSettings().isEnabled
         }

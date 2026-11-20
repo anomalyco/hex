@@ -7,12 +7,14 @@ import Foundation
 @MainActor
 struct FullKeyboardSettings {
     static let launchArgument = "--experiment-full-keyboard"
+    static let emojiLaunchArgument = "--experiment-emoji"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
         static let autocorrect = "settings.keyboardAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
+        static let emoji = "experiments.emoji"
     }
 
     private let defaults: UserDefaults?
@@ -45,10 +47,21 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.haptics) }
     }
 
-    /// Simulator scenes pass `--experiment-full-keyboard` to turn the experiment on.
+    /// Experiment: an emoji key whose panel suggests emoji for what you just typed, from
+    /// what the words mean and what you use. Off by default.
+    var emoji: Bool {
+        get { defaults?.bool(forKey: Key.emoji) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.emoji) }
+    }
+
+    /// Simulator scenes pass `--experiment-full-keyboard` (and `--experiment-emoji`) to turn
+    /// the experiments on.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
+        }
+        if arguments.contains(Self.emojiLaunchArgument) {
+            emoji = true
         }
     }
 }

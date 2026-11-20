@@ -9,6 +9,9 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
         case primary(autoReplace: Bool)
         /// Right slot: runner-up completion or spelling guess.
         case secondary
+        /// An emoji for the word just finished (Experiments › Emoji), offered after a space,
+        /// when the strip has no words to show.
+        case emoji
     }
 
     let displayText: String

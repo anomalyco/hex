@@ -102,6 +102,8 @@ final class FullKeyboardEngine {
     var width: CGFloat = 375 { didSet { if width != oldValue { rebuildLayout() } } }
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { rebuildLayout() } } }
     var showsGlobe = false { didSet { if showsGlobe != oldValue { rebuildLayout() } } }
+    /// Experiments › Emoji, in fields that take emoji.
+    var showsEmoji = false { didSet { if showsEmoji != oldValue { rebuildLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
     /// The letters, accents and spelling dictionary (Settings › Keyboard layout).
     var language: KeyboardLanguage = .english {
@@ -124,6 +126,8 @@ final class FullKeyboardEngine {
     var onSelectionStep: (() -> Void)?
     /// Called just before the return key types its line break, so a send can be noticed.
     var onReturn: (() -> Void)?
+    /// Called when the emoji key is let go.
+    var onEmojiKey: (() -> Void)?
 
     init(target: KeyboardTextTarget, autocorrect: AutocorrectEngine? = nil) {
         self.target = target
@@ -255,6 +259,13 @@ final class FullKeyboardEngine {
         typingLog?.context("suggestion")
     }
 
+    /// Types an emoji from the emoji panel: no spacing or autocorrect around it.
+    func insertEmoji(_ text: String, source: String) {
+        autocorrect.clearPendingUndo()
+        learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
+        insert(text, source: source)
+    }
+
     // MARK: - Touches
 
     func touchBegan(id: Int, at point: CGPoint) {
@@ -301,7 +312,7 @@ final class FullKeyboardEngine {
             if next == .letters { shift.reset() }
             rebuildLayout(cause: "layer_key")
             if next == .letters { refreshAutoCapitalization() }
-        case .character, .space, .returnKey, .hex, .globe:
+        case .character, .space, .returnKey, .hex, .globe, .emoji:
             break
         }
         touches[id] = touch
@@ -467,6 +478,8 @@ final class FullKeyboardEngine {
                 rebuildLayout(cause: "layer_slide")
                 refreshAutoCapitalization()
             }
+        case .emoji:
+            onEmojiKey?()
         case .delete, .hex, .globe:
             break
         }
@@ -697,6 +710,7 @@ final class FullKeyboardEngine {
             layer: layerState.layer,
             field: field,
             showsGlobe: showsGlobe,
+            showsEmoji: showsEmoji,
             horizontalInset: horizontalInset,
             language: language
         )

@@ -145,6 +145,11 @@ final class KeyboardKeyPlaneView: UIView {
                 context.fillKeycap(key.frame, fill: lit ? palette.keyPressedFill : palette.keyFill, radius: radius)
                 guard !hideGlyphs else { continue }
                 drawSymbol("globe", in: key.frame, color: palette.textBase, pointSize: isLandscape ? 16 : 18)
+            case .emoji:
+                let lit = pressed.contains(.emoji)
+                context.fillKeycap(key.frame, fill: lit ? palette.keyPressedFill : palette.keyFill, radius: radius)
+                guard !hideGlyphs else { continue }
+                drawSymbol("face.smiling", in: key.frame, color: palette.textBase, pointSize: isLandscape ? 16 : 18)
             }
         }
     }
