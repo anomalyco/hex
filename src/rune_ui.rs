@@ -49,6 +49,7 @@ mod model_details;
 mod model_import;
 mod models;
 mod modes;
+mod notes_writer;
 mod onboarding;
 mod onboarding_kit;
 mod output;

@@ -5,6 +5,7 @@
 use rune::{Cursor, El, Icon, SpringPair, TextStyle, Transition, Tx, col, el, icon, row, text};
 use rune_theme_opencode::icons;
 
+use super::super::notes_writer::NotesWriter;
 use super::*;
 
 /// What a recording says beside its meter, in place of its title.
@@ -42,14 +43,29 @@ pub(super) fn recording_notice(shown: &Recording) -> Option<Notice> {
     }
 }
 
+/// Whether Apple Intelligence writes meeting notes on this computer, which
+/// the Meetings pane reads from its platform host.
+fn apple_intelligence_here() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        crate::apple_intelligence::availability().is_available()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 /// The ready panel's line under its title, and its colour: the summary, the
-/// summary still being written, or why the Markdown wasn't saved.
+/// summary still being written by whichever writer the Meetings pane names,
+/// or why the Markdown wasn't saved.
 pub(super) fn ready_summary(manifest: &MeetingManifest) -> Option<(String, bool)> {
     if meeting::notes_in_progress(&manifest.id) {
-        return Some((
-            tr("Writing a title and summary with Apple Intelligence…").to_owned(),
-            false,
-        ));
+        let writer = NotesWriter::for_choice(
+            crate::app_settings::meeting_summaries(),
+            apple_intelligence_here(),
+        );
+        return Some((writer.running_label().to_owned(), false));
     }
     if let Some(summary) = manifest
         .notes
