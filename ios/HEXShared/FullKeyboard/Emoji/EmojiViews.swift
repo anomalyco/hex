@@ -1,5 +1,19 @@
 import UIKit
 
+extension UIScrollView {
+    /// iOS 26 softens and blurs a scroll view's edges where it meets the keyboard's glass.
+    /// On a real keyboard the top and bottom effects blurred every emoji in the 44 pt rows,
+    /// and on the grid the section names and the columns at either side (TestFlight build
+    /// 32); the app's snapshot scenes, outside a keyboard, never showed it. Nothing sits over
+    /// these scroll views, so they need no edge effect.
+    func hideEdgeEffects() {
+        guard #available(iOS 26.0, *) else { return }
+        for edge in [topEdgeEffect, bottomEdgeEffect, leftEdgeEffect, rightEdgeEffect] {
+            edge.isHidden = true
+        }
+    }
+}
+
 /// One emoji in the grid or a row, drawn as text, with a pressed fill.
 @MainActor
 final class EmojiCell: UICollectionViewCell {
@@ -111,6 +125,7 @@ final class EmojiRowView: UIView, UICollectionViewDataSource, UICollectionViewDe
         collection.delaysContentTouches = false
         collection.isPrefetchingEnabled = false
         collection.alwaysBounceHorizontal = false
+        collection.hideEdgeEffects()
         collection.dataSource = self
         collection.delegate = self
         collection.register(EmojiCell.self, forCellWithReuseIdentifier: EmojiCell.reuseID)
