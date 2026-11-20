@@ -272,6 +272,7 @@ impl CapturesPane {
                 std::thread::yield_now();
             }
             pane.thumbs.borrow_mut().insert(id, image);
+            #[cfg(all(target_os = "macos", hex_capture))]
             pane.pictures
                 .borrow_mut()
                 .insert(id, cache.rgba(720, 450, fixture_thumbnail(720, 450, hue)));
