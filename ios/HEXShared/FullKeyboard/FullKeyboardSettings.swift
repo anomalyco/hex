@@ -45,10 +45,13 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.autocorrect) }
     }
 
-    /// Experiment: autocorrect reads your taps with a language model (`TypingDecoder`) instead
-    /// of `UITextChecker`'s one-edit guesses, in English and Spanish. Off by default.
+    /// Settings › Keyboard › Spatial autocorrect: autocorrect reads your taps with a language
+    /// model (`TypingDecoder`) instead of `UITextChecker`'s one-edit guesses, in English and
+    /// Spanish. On by default. Stored as `experiments.spatialAutocorrect`, from when it was an
+    /// experiment (off by default) that only its switch ever wrote: unset or true is on and
+    /// false off, so testers who never touched it get it and those who turned it off keep it off.
     var spatialAutocorrect: Bool {
-        get { defaults?.bool(forKey: Key.spatialAutocorrect) ?? false }
+        get { defaults?.object(forKey: Key.spatialAutocorrect) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.spatialAutocorrect) }
     }
 

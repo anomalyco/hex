@@ -307,8 +307,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         syncSpatialAutocorrect()
     }
 
-    /// Experiments › Full keyboard › Spatial autocorrect: maps the layout language's bundled
-    /// model the first time it is on (English and Spanish today; others keep `UITextChecker`),
+    /// Settings › Keyboard › Spatial autocorrect (on by default): maps the layout language's
+    /// bundled model when the keyboard opens (English and Spanish today; others keep `UITextChecker`),
     /// and moves the keys' centres to where Learn how I type saw you tap. The same word list
     /// lets the likely next letter claim a few points of its neighbour's touch target whether
     /// or not the experiment is on (`FullKeyboardEngine.letterOdds`; only while autocorrecting).

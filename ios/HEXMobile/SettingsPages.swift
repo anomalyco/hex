@@ -124,12 +124,14 @@ private enum KeyboardChoice: CaseIterable {
 }
 
 /// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
-/// chosen; Suggest swear words off by default, as Apple's keyboard never offers them), and
-/// haptics, which the dictation bar uses too.
+/// chosen; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
+/// default, as Apple's keyboard never offers them), and haptics, which the dictation bar uses
+/// too.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
     @State private var autocorrect = FullKeyboardSettings().autocorrect
+    @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
     @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
     @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var haptics = FullKeyboardSettings().haptics
@@ -163,6 +165,16 @@ struct KeyboardSettingsPage: View {
                         detail: String(localized: "Fixes typos when you press space"),
                         isOn: $autocorrect
                     )
+
+                    if autocorrect {
+                        SettingsDivider()
+
+                        SettingsToggleRow(
+                            title: String(localized: "Spatial autocorrect"),
+                            detail: String(localized: "Uses where you tap, in English and Spanish"),
+                            isOn: $spatialAutocorrect
+                        )
+                    }
 
                     SettingsDivider()
 
@@ -202,11 +214,15 @@ struct KeyboardSettingsPage: View {
                 )
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: fullKeyboard)
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: autocorrect)
         .onChange(of: fullKeyboard) { _, enabled in
             FullKeyboardSettings().isEnabled = enabled
         }
         .onChange(of: autocorrect) { _, enabled in
             FullKeyboardSettings().autocorrect = enabled
+        }
+        .onChange(of: spatialAutocorrect) { _, enabled in
+            FullKeyboardSettings().spatialAutocorrect = enabled
         }
         .onChange(of: suggestSwearWords) { _, enabled in
             FullKeyboardSettings().suggestSwearWords = enabled
@@ -220,6 +236,7 @@ struct KeyboardSettingsPage: View {
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autocorrect = FullKeyboardSettings().autocorrect
+            spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
             suggestSwearWords = FullKeyboardSettings().suggestSwearWords
             keyPopups = FullKeyboardSettings().keyPopups
             haptics = FullKeyboardSettings().haptics
@@ -329,7 +346,6 @@ struct ExperimentsSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
-    @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
 
@@ -337,16 +353,6 @@ struct ExperimentsSettingsPage: View {
         SettingsPageScaffold(title: "Experiments") {
             SettingsCard {
                 EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
-
-                SettingsDivider()
-
-                SettingsToggleRow(
-                    title: String(localized: "Spatial autocorrect"),
-                    detail: FullKeyboardSettings().isEnabled && FullKeyboardSettings().autocorrect
-                        ? String(localized: "Reads where your taps land to fix typos, in English and Spanish")
-                        : String(localized: "Needs the full keyboard with Autocorrect on"),
-                    isOn: $spatialAutocorrect
-                )
 
                 SettingsDivider()
 
@@ -362,13 +368,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: appleIntelligenceCleanup) { _, enabled in
             AppleIntelligenceCleanupSettings().isEnabled = enabled
         }
-        .onChange(of: spatialAutocorrect) { _, enabled in
-            FullKeyboardSettings().spatialAutocorrect = enabled
-        }
         .onAppear {
             emoji = FullKeyboardSettings().emoji
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
-            spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         }

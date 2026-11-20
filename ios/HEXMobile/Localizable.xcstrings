@@ -1366,16 +1366,6 @@
         }
       }
     },
-    "Needs the full keyboard with Autocorrect on" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要使用全键盘并打开自动改正"
-          }
-        }
-      }
-    },
     "Nice — send the time once it's ready." : {
       "shouldTranslate" : false
     },
@@ -1635,16 +1625,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隐私政策"
-          }
-        }
-      }
-    },
-    "Reads where your taps land to fix typos, in English and Spanish" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "根据你轻点的位置修正拼写错误，支持英语和西班牙语"
           }
         }
       }
@@ -2228,6 +2208,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用%@"
+          }
+        }
+      }
+    },
+    "Uses where you tap, in English and Spanish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按轻点位置改正，适用于英语和西班牙语"
           }
         }
       }
