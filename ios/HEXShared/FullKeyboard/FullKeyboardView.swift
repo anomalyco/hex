@@ -689,8 +689,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             hasFullAccess: model.hasFullAccess
         )
         var suggestions = engine.suggestions
-        if suggestions.isEmpty, lastDictation == nil, status == nil, clipboardOffer == nil {
-            suggestions = emojiForFinishedWord()
+        if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
+            if lastDictation != nil || status != nil || clipboardOffer != nil {
+                suggestions = []
+            } else {
+                let emoji = emojiForFinishedWord()
+                if !emoji.isEmpty { suggestions = emoji }
+            }
         }
         stripView.update(
             suggestions: suggestions,

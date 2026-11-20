@@ -326,7 +326,8 @@ final class FullKeyboardEngine {
             next = autocorrect.suggestions(
                 beforeInput: target.documentContextBeforeInput,
                 field: field,
-                autocorrectionType: target.autocorrectionType
+                autocorrectionType: target.autocorrectionType,
+                predictionModel: letterOdds
             )
         }
         if next != suggestions {
@@ -337,6 +338,9 @@ final class FullKeyboardEngine {
     }
 
     func acceptSuggestion(_ suggestion: KeyboardSuggestion) {
+        // A queued tap on a prediction must not replace a word started in the meantime.
+        if suggestion.kind == .nextWord,
+           target.documentContextBeforeInput?.last != " " || !suggestions.contains(suggestion) { return }
         // The strip shows a swipe's readings: mid-swipe they're only shown, after it one
         // takes the swiped word's place.
         if isSwiping { return }

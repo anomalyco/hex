@@ -142,6 +142,30 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return index(ofCodes: bytes)
     }
 
+    /// The three most probable allowed continuations of a completed word. Scan just its
+    /// mapped bigram row and keep three entries, even for a word with thousands of followers.
+    func nextWords(after previous: String, allowing: (String) -> Bool) -> [String] {
+        guard let a = index(of: previous) else { return [] }
+        let start = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * a, as: UInt32.self))
+        let end = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * (a + 1), as: UInt32.self))
+        guard start <= end, end <= bigramCount else { return [] }
+        var best: [(rank: Int, text: String)] = []
+        for i in start..<end {
+            let cost = Int(base.load(fromByteOffset: pairCostsAt + i, as: UInt8.self))
+            let b = Int(base.loadUnaligned(fromByteOffset: pairWordsAt + 4 * i, as: UInt32.self))
+            guard b < wordCount else { continue }
+            // Prefer the commoner word when two pair probabilities quantize to the same byte.
+            let rank = cost * 256 + Int(base.load(fromByteOffset: unigramAt + b, as: UInt8.self))
+            if best.count == 3, rank >= best[2].rank { continue }
+            let text = word(b)
+            guard allowing(text) else { continue }
+            let at = best.firstIndex { rank < $0.rank } ?? best.count
+            best.insert((rank, text), at: at)
+            if best.count > 3 { best.removeLast() }
+        }
+        return best.map(\.text)
+    }
+
     /// How much of the word list's frequency continues `prefix` with each letter, by letter
     /// code. Nil when no word starts with `prefix`, or one ends there and none goes on.
     func continuations(after prefix: [UInt8]) -> [Double]? {

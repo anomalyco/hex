@@ -9,6 +9,8 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
         case primary(autoReplace: Bool)
         /// Right slot: runner-up completion or spelling guess.
         case secondary
+        /// A word that can follow the one just finished. Only an explicit pick inserts it.
+        case nextWord
         /// An emoji for the word just finished (Experiments › Emoji), offered after a space,
         /// when the strip has no words to show.
         case emoji
@@ -424,9 +426,18 @@ final class AutocorrectEngine {
     func suggestions(
         beforeInput: String?,
         field: KeyboardFieldKind,
-        autocorrectionType: UITextAutocorrectionType?
+        autocorrectionType: UITextAutocorrectionType?,
+        predictionModel: TypingDecoderModel? = nil
     ) -> [KeyboardSuggestion] {
         guard field == .text, autocorrectionType != .no, hasDictionary else { return [] }
+        if let beforeInput, beforeInput.last == " " {
+            guard let model = predictionModel, model.language == language.rawValue,
+                  let finished = Self.currentToken(in: String(beforeInput.dropLast())) else { return [] }
+            let previous = finished.lowercased()
+            return model.nextWords(after: previous, allowing: { mayOffer($0, after: previous) }).map {
+                KeyboardSuggestion(displayText: $0, replacement: $0, kind: .nextWord)
+            }
+        }
         guard let token = Self.currentToken(in: beforeInput) else { return [] }
         self.beforeInput = beforeInput
 
