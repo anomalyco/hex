@@ -703,6 +703,52 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.transcript, "iPhone 17 broke.")
     }
 
+    func testLearnedDictationFixesApplyHintAndReachTheKeyboard() async throws {
+        let now = 90_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("ask cloud about open code")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let journalSettings = TypingJournalSettings(defaults: defaults)
+        journalSettings.isEnabled = true
+        let learned = [
+            DictationCorrection(heard: "cloud", meant: "Claude"),
+            DictationCorrection(heard: "open code", meant: "OpenCode"),
+        ]
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            customVocabularySettings: CustomVocabularySettings(defaults: defaults),
+            typingJournalSettings: journalSettings,
+            learnedDictationCorrections: { learned }
+        )
+        controller.prepareModel()
+        try await settle()
+
+        controller.startRecording(keyboardJobID: "learned-on", styleOverride: .polished)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "Ask Claude about OpenCode.")
+        let arguments = await transcriber.vocabularyArguments
+        XCTAssertEqual(arguments, [["Claude", "OpenCode"]], "meant words go to Apple Speech as hints")
+        XCTAssertEqual(bridge.snapshot().transcript, "Ask Claude about OpenCode.")
+        XCTAssertEqual(bridge.snapshot().heard, "ask cloud about open code", "the keyboard learns from the raw words")
+
+        // With Learn how I type off, the keyboard gets no raw transcript.
+        journalSettings.isEnabled = false
+        controller.clearTranscript()
+        controller.startRecording(keyboardJobID: "learned-off", styleOverride: .polished)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertNil(bridge.snapshot().heard)
+    }
+
     private func settle() async throws {
         for _ in 0..<8 {
             try await Task.sleep(for: .milliseconds(25))

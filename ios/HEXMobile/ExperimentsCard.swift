@@ -56,33 +56,35 @@ struct ExperimentsCard: View {
                     .onChange(of: autocorrect) { _, enabled in
                         FullKeyboardSettings().autocorrect = enabled
                     }
+                }
 
-                    Divider()
-                        .overlay(HexTheme.borderWeak)
-                        .padding(.leading, 16)
+                Divider()
+                    .overlay(HexTheme.borderWeak)
+                    .padding(.leading, 16)
 
-                    Toggle(isOn: $learnTyping) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Learn how I type")
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(HexTheme.textBase)
-                            Text("Keeps where you tap and the words you fix on this iPhone, never what you write")
-                                .font(.system(size: 12))
-                                .foregroundStyle(HexTheme.textMuted)
-                        }
+                // Not only for the full keyboard: it also learns from dictations the
+                // dictation bar inserts.
+                Toggle(isOn: $learnTyping) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Learn how I type")
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(HexTheme.textBase)
+                        Text("Keeps where you tap and the words you fix, typed or dictated, on this iPhone, never what you write")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
                     }
-                    .tint(HexTheme.success)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .onChange(of: learnTyping) { _, enabled in
-                        TypingJournalSettings().isEnabled = enabled
-                    }
+                }
+                .tint(HexTheme.success)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .onChange(of: learnTyping) { _, enabled in
+                    TypingJournalSettings().isEnabled = enabled
+                }
 
-                    if learnTyping {
-                        TypingInsightsView()
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 12)
-                    }
+                if learnTyping {
+                    TypingInsightsView()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
                 }
             }
             .background(

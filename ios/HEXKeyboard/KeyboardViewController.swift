@@ -16,6 +16,9 @@ final class KeyboardViewController: UIInputViewController {
     private var pollInterval: TimeInterval = 0
     private var didHandOffCurrentField = false
     private var didWarmLexicon = false
+    /// Learn how I type: what becomes of each dictation Hex inserts.
+    private let dictationEdits = DictationEditTracker()
+    private lazy var documentTarget = DocumentProxyTextTarget { [weak self] in self?.textDocumentProxy }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -27,6 +30,8 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
         coldStartJobID = UUID().uuidString
         didHandOffCurrentField = false
+        // The keyboard may come back for another field: settle on where the dictation was last seen.
+        dictationEdits.finish(nil)
         mountSurface()
         fullKeyboard?.prepareForField()
         handOffNumericPadIfNeeded()
@@ -41,7 +46,8 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        fullKeyboard?.engine.journal?.save()
+        if dictationEdits.isTracking { dictationEdits.finish(editContext) }
+        TypingJournal.sharedIfEnabled()?.save()
         pollTimer?.invalidate()
         pollTimer = nil
     }
@@ -70,7 +76,38 @@ final class KeyboardViewController: UIInputViewController {
         super.textDidChange(textInput)
         updateKeyboardTraits()
         fullKeyboard?.textDidChange()
+        observeDictationEdits(fromKeys: false)
         handOffNumericPadIfNeeded()
+    }
+
+    // MARK: - Learn how I type
+
+    /// Dictations are followed only while Learn how I type is on, in plain text fields
+    /// that allow autocorrect.
+    private var learnsFromDictation: Bool {
+        guard TypingJournalSettings().isEnabled,
+              case .keys(let kind, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType)
+        else { return false }
+        return TypingJournal.allows(field: kind, target: documentTarget)
+    }
+
+    private var editContext: DictationEditTracker.Context {
+        DictationEditTracker.Context(
+            before: textDocumentProxy.documentContextBeforeInput,
+            after: textDocumentProxy.documentContextAfterInput,
+            hasText: textDocumentProxy.hasText
+        )
+    }
+
+    private func observeDictationEdits(fromKeys: Bool) {
+        guard dictationEdits.isTracking else { return }
+        dictationEdits.observe(editContext, fromKeys: fromKeys)
+    }
+
+    /// A return key labelled Send ends the dictation's edit window: what is there is sent.
+    private func returnKeyWillInsert() {
+        guard dictationEdits.isTracking, textDocumentProxy.returnKeyType == .send else { return }
+        dictationEdits.finish(editContext)
     }
 
     private func handOffNumericPadIfNeeded() {
@@ -105,6 +142,12 @@ final class KeyboardViewController: UIInputViewController {
         view.backgroundColor = .clear
 
         viewModel.inputViewController = self
+        dictationEdits.onResult = { result in
+            TypingJournal.sharedIfEnabled()?.recordDictation(result)
+        }
+        localDictation.corrections = {
+            TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
+        }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
         viewModel.onStopTap = { [weak self] in
             guard let self else { return }
@@ -136,9 +179,19 @@ final class KeyboardViewController: UIInputViewController {
             }
             self.refreshColdStartURL(now: Date().timeIntervalSince1970, force: true)
         }
-        viewModel.onSpace = { [weak self] in self?.textDocumentProxy.insertText(" ") }
-        viewModel.onDelete = { [weak self] in self?.textDocumentProxy.deleteBackward() }
-        viewModel.onReturn = { [weak self] in self?.textDocumentProxy.insertText("\n") }
+        viewModel.onSpace = { [weak self] in
+            self?.textDocumentProxy.insertText(" ")
+            self?.observeDictationEdits(fromKeys: true)
+        }
+        viewModel.onDelete = { [weak self] in
+            self?.textDocumentProxy.deleteBackward()
+            self?.observeDictationEdits(fromKeys: true)
+        }
+        viewModel.onReturn = { [weak self] in
+            self?.returnKeyWillInsert()
+            self?.textDocumentProxy.insertText("\n")
+            self?.observeDictationEdits(fromKeys: true)
+        }
         viewModel.onOpenURL = { [weak self] url in
             guard let self else { return }
             ContainingAppOpener.open(url, from: self)
@@ -174,6 +227,9 @@ final class KeyboardViewController: UIInputViewController {
             )
             keyboard.hostController = self
             keyboard.allowsHaptics = { [weak self] in self?.hasFullAccess ?? false }
+            keyboard.onTextEdit = { [weak self] in self?.observeDictationEdits(fromKeys: true) }
+            keyboard.onUndoDictation = { [weak self] in self?.dictationEdits.didUndo() }
+            keyboard.onReturnKey = { [weak self] in self?.returnKeyWillInsert() }
             fullKeyboard = keyboard
             mounted = keyboard
             heightConstraint?.constant = keyboard.preferredHeight
@@ -246,6 +302,10 @@ final class KeyboardViewController: UIInputViewController {
             bridge.fullAccessSeenAt = now
         }
 
+        if dictationEdits.isTracking {
+            dictationEdits.tick { editContext }
+        }
+
         let snap = localDictation.snapshot(now: now) ?? bridge.snapshot()
         var insertedResult = false
 
@@ -253,13 +313,20 @@ final class KeyboardViewController: UIInputViewController {
            let resultID = snap.resultID,
            let rawTranscript = snap.transcript,
            bridge.lastInsertedResultID != resultID {
+            let context = editContext
             let insertion = TranscriptFormatter.insertionText(
                 for: rawTranscript,
-                beforeContext: textDocumentProxy.documentContextBeforeInput,
-                afterContext: textDocumentProxy.documentContextAfterInput
+                beforeContext: context.before,
+                afterContext: context.after
             )
+            if learnsFromDictation {
+                dictationEdits.willInsert(heard: snap.heard, inserted: insertion, context: context)
+            } else {
+                dictationEdits.finish(context)
+            }
             textDocumentProxy.insertText(insertion)
             fullKeyboard?.didInsertDictation(insertion)
+            observeDictationEdits(fromKeys: true)
             bridge.lastInsertedResultID = resultID
             localDictation.markDelivered(resultID: resultID)
             insertedResult = true

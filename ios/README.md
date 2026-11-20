@@ -88,6 +88,43 @@ it on-device with Apple Speech, downloading the speech assets on first use
     "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
     the list is also sent as a best-effort recognition hint; Parakeet's batch
     path gets no hint.
+  - **Learn how I type (Experiments › Learn how I type):** Off by default, and
+    shown whether or not the full keyboard is on. A private journal in the App
+    Group (`typing-journal.json`) that never stores what you write: per-key tap
+    offsets, and word-level pairs with counts and at most one word of context on
+    each side. Only plain text fields that allow autocorrect count
+    (`TypingJournal.allows`). Nothing leaves the iPhone.
+    - **Typing:** words you erase and retype, autocorrect fixes you undo with one
+      backspace, suggestions you pick, and autocorrections you turn down by
+      tapping what you typed. A typo you fixed the same way twice (never a
+      completion, never fixed two ways) becomes a fix on space, only a suggestion
+      when what you typed is a real word; an autocorrection you turned down twice
+      never applies again (`TypingLearning`, read by `AutocorrectEngine`).
+    - **Dictation:** from the full keyboard and the dictation bar alike, the
+      keyboard remembers each dictation by the text around it
+      (`DictationEditTracker`), finds it again after edits through Hex's keys and
+      on `textDidChange`, and diffs it word by word against what Hex inserted and
+      the raw transcript the app or in-keyboard dictation sends with it
+      (`DictationEditInference.swift`). It settles after 60 s, when the keyboard
+      goes away or the field changes, on a Send return key, or when the host
+      clears the field (a send). Each dictation gets an outcome (kept, edited,
+      rewritten when more than half changed, undone, deleted, or redictated when
+      deleted and dictated again within 20 s) and its pairs: substitutions,
+      insertions, deletions, words cleanup dropped that you added back, and
+      fillers Hex left that you deleted, each as heard, inserted, and final words.
+      New writing before or after a dictation, changes that aren't plausibly the
+      same words, edges the host's cut-short context can't show, and translated
+      dictations teach nothing.
+    - **Applied:** a substitution seen twice and never contradicted (you kept the
+      heard words in a dictation you corrected, changed the fix back, or fixed
+      the same words another way) is applied right after transcription, in
+      in-keyboard dictation and in the app before custom vocabulary and cleanup,
+      whole words only (never inside a longer, hyphenated, dotted, or slashed
+      word) and following the original's case unless the fix has capitals. Its
+      meant words join the Apple Speech hints after custom vocabulary's.
+      Typing insights lists these fixes with a switch each and the share of
+      dictations kept and edited; Delete what Hex learned erases everything,
+      including what a running keyboard still holds.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -139,6 +176,13 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   and unverified on a physical iPhone. Apple documents contextual strings only
   for `DictationTranscriber`, Hex sets them on `SpeechTranscriber`, and
   Parakeet's batch path gets no hint.
+- **Learn how I type:** Dictation edit inference (span location, word diff,
+  outcomes, the learning threshold, and applying fixes) is covered by unit
+  tests only. How much `documentContextBeforeInput` and
+  `documentContextAfterInput` each host app shows, and whether it calls
+  `textDidChange` after the keyboard's own edits, varies by app and is
+  unverified on a physical iPhone; when the context is cut short or missing,
+  the dictation is settled on where it was last seen or not learned from.
 - **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
   compiles or tests the iOS targets, so these checks run only in a local
   `xcodebuild test`.

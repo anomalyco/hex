@@ -19,6 +19,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     var allowsHaptics: () -> Bool = { false }
     /// Draws a stand-in backdrop where there is no system keyboard behind the view.
     var drawsBackdrop = false { didSet { applyAppearance() } }
+    /// The keys typed, deleted, or pasted something (Learn how I type follows dictations).
+    var onTextEdit: (() -> Void)?
+    /// Undo dictation took the last dictation back.
+    var onUndoDictation: (() -> Void)?
+    /// The return key is about to type its line break.
+    var onReturnKey: (() -> Void)?
 
     private let stripView = KeyboardStripView()
     private let plane: KeyboardKeyPlaneView
@@ -90,7 +96,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self?.hideUndo()
             self?.refreshReturnKey()
             self?.refreshStrip()
+            self?.onTextEdit?()
         }
+        engine.onReturn = { [weak self] in self?.onReturnKey?() }
 
         model.objectWillChange
             .receive(on: RunLoop.main)
@@ -147,11 +155,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     func syncSettings() {
-        if TypingJournalSettings().isEnabled {
-            if engine.journal == nil { engine.journal = TypingJournal() }
-        } else {
-            engine.journal?.save()
-            engine.journal = nil
+        let journal = TypingJournal.sharedIfEnabled()
+        if engine.journal !== journal {
+            engine.journal = journal
         }
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
@@ -371,6 +377,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.target.insertText(text)
         engine.textDidChange()
         refreshStrip()
+        onTextEdit?()
     }
 
     private func refreshRecordingPanel() {
@@ -623,6 +630,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             for _ in 0..<text.count {
                 engine.target.deleteBackward()
             }
+            onUndoDictation?()
         }
         hideUndo()
         engine.textDidChange()

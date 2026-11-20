@@ -86,7 +86,9 @@ final class FullKeyboardEngine {
     let target: KeyboardTextTarget
     let autocorrect: AutocorrectEngine
     /// Learn how I type (Experiments); nil while off.
-    var journal: TypingJournal?
+    var journal: TypingJournal? {
+        didSet { syncLearning() }
+    }
 
     private var learning: TypingJournal? {
         guard let journal, TypingJournal.allows(field: field, target: target) else { return nil }
@@ -105,6 +107,8 @@ final class FullKeyboardEngine {
     var onEdit: (() -> Void)?
     /// Called when an accent cell or spacebar trackpad step ticks, for selection haptics.
     var onSelectionStep: (() -> Void)?
+    /// Called just before the return key types its line break, so a send can be noticed.
+    var onReturn: (() -> Void)?
 
     init(target: KeyboardTextTarget, autocorrect: AutocorrectEngine? = nil) {
         self.target = target
@@ -180,6 +184,7 @@ final class FullKeyboardEngine {
     }
 
     func refreshSuggestions() {
+        syncLearning()
         let next = autocorrect.suggestions(
             beforeInput: target.documentContextBeforeInput,
             field: field,
@@ -198,6 +203,11 @@ final class FullKeyboardEngine {
                 journal.record(.picked, typed: token, final: suggestion.replacement)
             } else {
                 journal.didFinish(word: token)
+                // Tapping what you typed over the autocorrection space would apply turns it down.
+                if suggestion.kind == .keepLiteral, let token,
+                   let autoFix = suggestions.first(where: \.willAutoReplace) {
+                    journal.record(.keptTyped, typed: autoFix.replacement, final: token)
+                }
             }
         }
         if let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) {
@@ -373,6 +383,7 @@ final class FullKeyboardEngine {
             }
             learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
             autocorrect.clearPendingUndo()
+            onReturn?()
             insert("\n")
         case .layerSwitch:
             // Hold 123, slide to a key, let go: type it and go back.
@@ -515,6 +526,7 @@ final class FullKeyboardEngine {
             return
         }
         learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
+        syncLearning()
         if let (original, replacement) = autocorrect.replacementOnSpace(
             beforeInput: target.documentContextBeforeInput,
             field: field,
@@ -544,6 +556,12 @@ final class FullKeyboardEngine {
         layerState.didInsert(text)
         rebuildLayoutIfNeeded()
         didEdit()
+    }
+
+    /// Hands what the journal learned (typos, rejected corrections) to autocorrect;
+    /// nothing while Learn how I type is off.
+    private func syncLearning() {
+        autocorrect.applyLearning(journal?.typingLearning ?? TypingLearning())
     }
 
     private func didEdit() {

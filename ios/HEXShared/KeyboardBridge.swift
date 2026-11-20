@@ -231,6 +231,10 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     let resultExpiresAt: TimeInterval?
     let transcript: String?
     let message: String?
+    /// The raw transcript behind `transcript`, before cleanup and formatting, sent only while
+    /// Learn how I type is on so the keyboard can tell misheard words from formatting.
+    /// Nil when it can't be learned from (translated) or the experiment is off.
+    let heard: String?
 
     init(
         state: KeyboardDictationState,
@@ -243,7 +247,8 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         resultID: String? = nil,
         resultExpiresAt: TimeInterval? = nil,
         transcript: String? = nil,
-        message: String? = nil
+        message: String? = nil,
+        heard: String? = nil
     ) {
         self.state = state
         self.heartbeat = heartbeat
@@ -256,6 +261,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         self.resultExpiresAt = resultExpiresAt
         self.transcript = transcript
         self.message = message
+        self.heard = heard
     }
 
     var effectiveLoudnessDB: Float {
