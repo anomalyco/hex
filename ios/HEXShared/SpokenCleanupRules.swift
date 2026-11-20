@@ -235,6 +235,178 @@ nonisolated enum SpokenCleanupRules {
         word.first.map(openingMarks.contains) ?? false
     }
 
+    // MARK: Spoken symbols
+
+    /// English `text` with "@" for its spoken names, or `text` itself. "at the rate" (what
+    /// India calls @) becomes "@" only before an address's domain ("gmail dot com",
+    /// "gmail.com"), never in "at the rate of 5%" or "at the rate we're going"; "at sign"
+    /// always does. Before a domain, the word before (with any "dot"-joined parts) and the
+    /// domain join it as one lowercase address: "John at the rate Gmail dot com." becomes
+    /// "john@gmail.com.", "dot" becoming "." only there. Elsewhere "at sign" is a lone "@"
+    /// ("the @ key"). Words around it keep their spacing.
+    static func spokenSymbols(in text: String, language: String?) -> String {
+        guard SpeechLanguagePicker.isEnglish(language), text.range(of: "at", options: .caseInsensitive) != nil else {
+            return text
+        }
+        let tokens = splittingGluedDomains(symbolTokens(in: text), in: text)
+        var edits: [(range: Range<String.Index>, text: String)] = []
+        var index = 0
+        while index < tokens.count {
+            guard let marker = symbolMarker(tokens, at: index) else {
+                index += 1
+                continue
+            }
+            let next = marker.end + 1
+            if marker.ambiguous, next < tokens.count, bare(tokens[next].word) == "of" {
+                index = next
+                continue
+            }
+            if let domain = addressDomain(tokens, from: next) {
+                var start = index
+                var local: [String] = []
+                if let last = tokens[safe: index - 1], let part = localPart(last.word) {
+                    local = [part]
+                    start = index - 1
+                    // "john dot smith at the rate…": the parts before join with dots too.
+                    while start >= 2, tokens[start - 1].word.lowercased() == "dot",
+                          let part = localPart(tokens[start - 2].word) {
+                        local.insert(part, at: 0)
+                        start -= 2
+                    }
+                }
+                let address = (local.joined(separator: ".") + "@" + domain.labels.joined(separator: ".")).lowercased()
+                edits.append((tokens[start].range.lowerBound..<tokens[domain.end].range.upperBound, address + domain.trailing))
+                index = domain.end + 1
+            } else if !marker.ambiguous, bare(tokens[safe: next]?.word ?? "") != "language" {
+                // "good at sign language" is no symbol.
+                let last = tokens[marker.end].word
+                let trailing = String(last.reversed().prefix { closingMarks.contains($0) }.reversed())
+                edits.append((tokens[index].range.lowerBound..<tokens[marker.end].range.upperBound, "@" + trailing))
+                index = marker.end + 1
+            } else {
+                index = marker.end + 1
+            }
+        }
+        guard !edits.isEmpty else { return text }
+        var result = ""
+        var cursor = text.startIndex
+        for edit in edits {
+            result += text[cursor..<edit.range.lowerBound] + edit.text
+            cursor = edit.range.upperBound
+        }
+        return result + text[cursor...]
+    }
+
+    private struct SymbolToken {
+        let word: String
+        let range: Range<String.Index>
+    }
+
+    private static func symbolTokens(in text: String) -> [SymbolToken] {
+        var tokens: [SymbolToken] = []
+        var start: String.Index?
+        for index in text.indices {
+            if text[index].isWhitespace {
+                if let begin = start {
+                    tokens.append(SymbolToken(word: String(text[begin..<index]), range: begin..<index))
+                    start = nil
+                }
+            } else if start == nil {
+                start = index
+            }
+        }
+        if let begin = start {
+            tokens.append(SymbolToken(word: String(text[begin...]), range: begin..<text.endIndex))
+        }
+        return tokens
+    }
+
+    /// Apple's `SpeechTranscriber` glues a spoken domain to the word before it ("John at the
+    /// rategmail.com.", "Priya at signyahoo.com."): this splits "rate" or "sign" off again.
+    private static func splittingGluedDomains(_ tokens: [SymbolToken], in text: String) -> [SymbolToken] {
+        var result: [SymbolToken] = []
+        for (index, token) in tokens.enumerated() {
+            let lower = token.word.lowercased()
+            let before = tokens[safe: index - 1]?.word.lowercased()
+            let prefix: String? = if before == "the", tokens[safe: index - 2]?.word.lowercased() == "at",
+                                     lower.hasPrefix("rate") {
+                "rate"
+            } else if before == "at", lower.hasPrefix("sign") {
+                "sign"
+            } else {
+                nil
+            }
+            guard let prefix, isDomain(String(token.word.dropFirst(prefix.count))) else {
+                result.append(token)
+                continue
+            }
+            let cut = text.index(token.range.lowerBound, offsetBy: prefix.count)
+            result.append(SymbolToken(word: String(token.word.prefix(prefix.count)), range: token.range.lowerBound..<cut))
+            result.append(SymbolToken(word: String(token.word.dropFirst(prefix.count)), range: cut..<token.range.upperBound))
+        }
+        return result
+    }
+
+    /// A written domain, maybe with punctuation after it: "gmail.com.", "co.in".
+    private static func isDomain(_ word: String) -> Bool {
+        let core = String(word.reversed().drop { closingMarks.contains($0) }.reversed())
+        let labels = core.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard labels.count >= 2, let top = labels.last, top.count >= 2, top.allSatisfy(\.isLetter) else { return false }
+        return labels.allSatisfy(isDomainLabel)
+    }
+
+    /// "at the rate" (ambiguous: also plain English) or "at sign" / "at-sign" at `index`; the
+    /// words inside may not carry punctuation, the last may ("at sign.").
+    private static func symbolMarker(_ tokens: [SymbolToken], at index: Int) -> (end: Int, ambiguous: Bool)? {
+        func word(_ offset: Int) -> String? { tokens[safe: index + offset]?.word.lowercased() }
+        if bare(tokens[index].word) == "at-sign" { return (index, false) }
+        guard word(0) == "at" else { return nil }
+        if let sign = word(1), bare(sign) == "sign" { return (index + 1, false) }
+        if word(1) == "the", let rate = word(2), bare(rate) == "rate" { return (index + 2, true) }
+        return nil
+    }
+
+    /// A domain spoken from `index`: labels joined by "dot" or already by ".", at least two,
+    /// ending in a top-level domain of letters ("com", "co dot in"). Punctuation after the
+    /// last label (a sentence's full stop) is kept apart.
+    private static func addressDomain(
+        _ tokens: [SymbolToken],
+        from index: Int
+    ) -> (labels: [String], end: Int, trailing: String)? {
+        var labels: [String] = []
+        var position = index
+        var trailing = ""
+        while let token = tokens[safe: position] {
+            let core = String(token.word.reversed().drop { closingMarks.contains($0) }.reversed())
+            let parts = core.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            guard !core.isEmpty, parts.allSatisfy(isDomainLabel) else { return nil }
+            labels += parts
+            trailing = String(token.word.dropFirst(core.count))
+            guard trailing.isEmpty,
+                  tokens[safe: position + 1]?.word.lowercased() == "dot",
+                  let following = tokens[safe: position + 2],
+                  isDomainLabel(String(following.word.reversed().drop { closingMarks.contains($0) }.reversed())
+                      .split(separator: ".").first.map(String.init) ?? "") else { break }
+            position += 2
+        }
+        guard labels.count >= 2, let top = labels.last, top.count >= 2, top.allSatisfy(\.isLetter) else { return nil }
+        return (labels, position, trailing)
+    }
+
+    private static func isDomainLabel(_ label: String) -> Bool {
+        !label.isEmpty && label.count <= 63 && label.first != "-" && label.last != "-"
+            && label.allSatisfy { ($0.isLetter || $0.isNumber || $0 == "-") && $0.isASCII }
+    }
+
+    /// The word before "@" when it can start an address: letters, digits, "." "_" "-" "+",
+    /// with no punctuation after it.
+    private static func localPart(_ word: String) -> String? {
+        guard !word.isEmpty, let last = word.last, last.isLetter || last.isNumber,
+              word.first.map({ $0.isLetter || $0.isNumber }) == true,
+              word.allSatisfy({ ($0.isLetter || $0.isNumber || "._-+".contains($0)) && $0.isASCII }) else { return nil }
+        return word
+    }
+
     // MARK: Languages
 
     private static let spanish = Rules(
@@ -281,4 +453,10 @@ nonisolated enum SpokenCleanupRules {
         noComma: ["og", "eller", "men", "at", "jeg", "du", "han", "hun", "vi", "en", "et", "den", "det",
                   "på", "i", "til", "med", "for", "som"]
     )
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
 }

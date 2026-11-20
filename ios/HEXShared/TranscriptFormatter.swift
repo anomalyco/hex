@@ -179,10 +179,22 @@ nonisolated enum TranscriptFormatter {
         guard !text.isEmpty else { return "" }
         var normalized = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
         normalized = capitalizeSentenceStarts(in: normalized)
-        if let last = normalized.last, !".!?…\"”)]".contains(last) {
+        // A lone address ("john@gmail.com") is no sentence to end.
+        let loneAddress = normalized.contains("@") && !normalized.contains(where: \.isWhitespace)
+        if let last = normalized.last, !".!?…\"”)]".contains(last), !loneAddress {
             normalized.append(".")
         }
         return normalized
+    }
+
+    /// Whether the word at `index` is an address ("john@gmail.com"), whose case stays.
+    private static func isAddress(_ chars: [Character], at index: Int) -> Bool {
+        var end = index
+        while end < chars.count, !chars[end].isWhitespace {
+            if chars[end] == "@" { return true }
+            end += 1
+        }
+        return false
     }
 
     private static func formatNotes(_ text: String) -> String {
@@ -234,28 +246,47 @@ nonisolated enum TranscriptFormatter {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Capitalizes the first letter of each sentence: at the start, after a line break, or
+    /// after ".", "!" or "?" and a space. A full stop inside a word ("gmail.com", "e.g.")
+    /// starts nothing, and an address keeps its case.
     private static func capitalizeSentenceStarts(in text: String) -> String {
         var chars = Array(text)
         var capitalizeNext = true
+        var endedSentence = false
         for index in chars.indices {
             let ch = chars[index]
             if capitalizeNext && ch.isLetter {
-                for upper in String(ch).uppercased() {
-                    chars[index] = upper
-                    break
+                if !isAddress(chars, at: index) {
+                    for upper in String(ch).uppercased() {
+                        chars[index] = upper
+                        break
+                    }
                 }
                 capitalizeNext = false
-            } else if ".!?".contains(ch) || ch == "\n" {
+            } else if ch == "\n" {
                 capitalizeNext = true
-            } else if !ch.isWhitespace && !"\"“(¿¡".contains(ch) {
+                endedSentence = false
+            } else if ".!?".contains(ch) {
+                endedSentence = true
                 capitalizeNext = false
+            } else if ch.isWhitespace {
+                if endedSentence {
+                    capitalizeNext = true
+                    endedSentence = false
+                }
+            } else if "\"”’')]".contains(ch), endedSentence {
+                continue
+            } else if !"\"“(¿¡".contains(ch) {
+                capitalizeNext = false
+                endedSentence = false
             }
         }
         return String(chars)
     }
 
     private static func capitalizeFirstLetter(_ text: String) -> String {
-        guard let index = text.firstIndex(where: \.isLetter) else { return text }
+        guard let index = text.firstIndex(where: \.isLetter),
+              !isAddress(Array(text), at: text.distance(from: text.startIndex, to: index)) else { return text }
         var result = text
         let upper = String(result[index]).uppercased()
         result.replaceSubrange(index...index, with: upper)

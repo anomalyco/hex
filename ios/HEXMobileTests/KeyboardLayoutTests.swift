@@ -204,6 +204,9 @@ final class KeyboardLayoutTests: XCTestCase {
             .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"],
             .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"],
             .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"],
+            .italian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
+            .french: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
+            .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
         ]
         for (language, expected) in rows {
             let layout = KeyboardLayout(width: 402, language: language)
@@ -277,6 +280,16 @@ final class KeyboardLayoutTests: XCTestCase {
             AccentCatalog.options(for: "a", uppercase: false, language: .english),
             "English is unchanged"
         )
+        // Italian's accents come first on each vowel: à è ì ò ù, and é right after è.
+        let italian = ["a", "e", "i", "o", "u"].map {
+            AccentCatalog.options(for: $0, uppercase: false, language: .italian)!.dropFirst().first
+        }
+        XCTAssertEqual(italian, ["à", "è", "ì", "ò", "ù"])
+        XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .italian)?.dropFirst(2).first, "é")
+        XCTAssertEqual(AccentCatalog.options(for: "o", uppercase: true, language: .italian)?.prefix(2), ["O", "Ò"])
+        XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .french)?.dropFirst().first, "é")
+        XCTAssertEqual(AccentCatalog.options(for: "c", uppercase: false, language: .french)?.dropFirst().first, "ç")
+        XCTAssertEqual(AccentCatalog.options(for: "a", uppercase: false, language: .portuguese)?.prefix(3), ["a", "á", "ã"])
     }
 
     func testAccentMenusOnTheNewKeysStayInside() {
@@ -312,16 +325,29 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic("de-AT"), .german)
         XCTAssertEqual(automatic("en-GB", modes: ["nb-NO"]), .english, "the dictation language wins")
         XCTAssertEqual(automatic("he-IL", preferred: ["he-IL", "de-DE"]), .english, "Hebrew has no layout yet")
+        // Italian, French and Portuguese type in their own language, never English.
+        XCTAssertEqual(automatic("it-IT", modes: ["it-IT", "en-US"]), .italian)
+        XCTAssertEqual(automatic("it-CH"), .italian)
+        XCTAssertEqual(automatic("fr-CA"), .french)
+        XCTAssertEqual(automatic("pt-BR"), .portuguese)
+        XCTAssertEqual(automatic("en-US", modes: ["it-IT"]), .english, "the dictation language still wins")
         // Before Hex knows the dictation language: the first keyboard, then language, with a layout.
         XCTAssertEqual(automatic(nil, modes: ["emoji", "nb-NO", "en-US"]), .norwegian)
         XCTAssertEqual(automatic(nil, preferred: ["nn-NO"]), .norwegian)
-        XCTAssertEqual(automatic(nil, preferred: ["fr-FR"]), .english)
+        XCTAssertEqual(automatic(nil, modes: ["emoji", "it-IT"], preferred: ["en-US"]), .italian)
+        XCTAssertEqual(automatic(nil, preferred: ["it-IT", "en-US"]), .italian)
+        XCTAssertEqual(automatic(nil, preferred: ["fr-FR"]), .french)
+        XCTAssertEqual(automatic(nil, preferred: ["ru-RU"]), .english)
     }
 
     func testSpellCheckUsesTheLayoutsLanguageOrNone() {
         XCTAssertEqual(KeyboardLanguage.norwegian.spellCheckLanguage(available: ["en_US", "nb"]), "nb")
         XCTAssertNil(KeyboardLanguage.norwegian.spellCheckLanguage(available: ["en_US", "da"]))
         XCTAssertEqual(KeyboardLanguage.german.spellCheckLanguage(available: ["de"]), "de")
+        XCTAssertEqual(KeyboardLanguage.italian.spellCheckLanguage(available: ["en_US", "it_IT"]), "it_IT")
+        XCTAssertEqual(KeyboardLanguage.french.spellCheckLanguage(available: ["en_US", "fr_FR"]), "fr_FR")
+        XCTAssertEqual(KeyboardLanguage.portuguese.spellCheckLanguage(available: ["pt_PT", "pt_BR"]), "pt_BR")
+        XCTAssertNil(KeyboardLanguage.italian.spellCheckLanguage(available: ["en_US", "es"]), "never English")
     }
 
     // MARK: - Helpers

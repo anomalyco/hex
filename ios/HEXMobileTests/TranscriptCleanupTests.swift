@@ -162,6 +162,77 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(SpokenCleanupRules.clean("A las 3, digo, a las 4.", language: "pt-BR"), "A las 3, digo, a las 4.")
     }
 
+    /// "at the rate" is how India says "@": an address joins into one, "dot" becoming "."
+    /// only inside it. "at sign" is "@" anywhere.
+    func testSpokenAtSignsBecomeAddresses() {
+        for (spoken, written) in [
+            ("john at the rate gmail dot com", "john@gmail.com"),
+            ("Mail it to John at the rate Gmail dot com.", "Mail it to john@gmail.com."),
+            ("My email is priya dot sharma at the rate company dot co dot in, call me too",
+             "My email is priya.sharma@company.co.in, call me too"),
+            ("Write to support at the rate hex.app today", "Write to support@hex.app today"),
+            ("rahul123 at sign yahoo dot com", "rahul123@yahoo.com"),
+            ("At the rate gmail dot com addresses work", "@gmail.com addresses work"),
+            ("Type the at sign, then your name", "Type the @, then your name"),
+            ("Press at sign.", "Press @."),
+            ("ravi at the rate, gmail dot com", "ravi@gmail.com"),
+            // What Apple's on-device models wrote for an Indian English voice: SpeechTranscriber
+            // glues the domain to "rate" or "sign"; DictationTranscriber keeps them apart.
+            ("My email is John at the rategmail.com.", "My email is john@gmail.com."),
+            ("Send it to Priya at signyahoo.com.", "Send it to priya@yahoo.com."),
+            ("My email is John at the rate gmail.com", "My email is john@gmail.com"),
+        ] {
+            XCTAssertEqual(SpokenCleanupRules.spokenSymbols(in: spoken, language: "en-IN"), written, spoken)
+        }
+    }
+
+    func testAtInItsOwnMeaningStays() {
+        for spoken in [
+            "Prices are growing at the rate of 5% a year.",
+            "At the rate of knots, we'll be there soon.",
+            "We are spending at the rate we planned.",
+            "At the rate you're going, you'll finish early.",
+            "Meet me at the office at 5.",
+            "Look at that dot on the map.",
+            "I'm good at sign language.",
+            "john at the rate gmail",
+            "Send it at the rate",
+            "Wait at the gate dot com",
+            // Apple's own output that must stay: "@" already there, "at" alone, "at the rate of".
+            "Send it to priya@yahoo.com",
+            "My email is john at gmail.com.",
+            "Prices Are growing at the rate of5% a year",
+            "Rates went up at the ratepayers' meeting.",
+        ] {
+            XCTAssertEqual(SpokenCleanupRules.spokenSymbols(in: spoken, language: "en-IN"), spoken)
+        }
+        // English only: other languages say it their own way, and keep their words.
+        XCTAssertEqual(
+            SpokenCleanupRules.spokenSymbols(in: "john at the rate gmail dot com", language: "es-ES"),
+            "john at the rate gmail dot com"
+        )
+    }
+
+    /// Every style but Verbatim keeps the address whole: no capital after its dots, none on
+    /// it at a sentence start, and no full stop after an address said alone.
+    func testStylesKeepAnAddressWhole() {
+        XCTAssertEqual(TranscriptFormatter.format("john@gmail.com", style: .polished), "john@gmail.com")
+        XCTAssertEqual(
+            TranscriptFormatter.format("send it to john@gmail.com", style: .polished),
+            "Send it to john@gmail.com."
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("john@gmail.com is mine. call me", style: .polished),
+            "john@gmail.com is mine. Call me."
+        )
+        XCTAssertEqual(TranscriptFormatter.format("Mail john@gmail.com", style: .casual), "mail john@gmail.com")
+        XCTAssertEqual(
+            TranscriptFormatter.format("bullet john@gmail.com bullet call Ravi", style: .notes),
+            "- john@gmail.com\n- Call Ravi"
+        )
+        XCTAssertEqual(TranscriptFormatter.format("Hello. world! ok? yes", style: .polished), "Hello. World! Ok? Yes.")
+    }
+
     /// The styles trim each language's own hesitation sounds, never a word ("e" is "and" in
     /// Spanish, "eh" is "anyway" in German).
     func testStylesTrimSpanishAndGermanHesitations() {

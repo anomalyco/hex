@@ -280,6 +280,23 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNotNil(engine.layout.key(.character("ü")))
     }
 
+    /// Spatial autocorrect has English and Spanish models only: Italian falls back to the
+    /// dictionary engine in Italian, never to the English model.
+    func testSpatialAutocorrectNeverUsesAnotherLanguagesModel() {
+        let settings = FullKeyboardSettings()
+        let wasOn = settings.spatialAutocorrect
+        settings.spatialAutocorrect = true
+        defer { settings.spatialAutocorrect = wasOn }
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.languageOverride = .spanish
+        XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "es")
+        view.languageOverride = .italian
+        XCTAssertEqual(view.engine.autocorrect.language, .italian)
+        XCTAssertNil(view.engine.autocorrect.decoder)
+        view.languageOverride = .english
+        XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "en")
+    }
+
     func testEmailFieldShowsAtAndDot() {
         target.keyboardType = .emailAddress
         engine.configureForField()

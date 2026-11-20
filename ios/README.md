@@ -104,6 +104,18 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
     insertion spacing and repeating backspace.
+  - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
+    name for @) and "at sign" become "@", and an address said around it joins
+    up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning
+    into "." only inside the address (`SpokenCleanupRules.spokenSymbols`, run by
+    `CleanupTagger.cleanIfEnabled` with Clean up what I say on or off, in the app
+    and in-keyboard dictation). "at the rate" needs a domain after it, so "at the
+    rate of 5%" and "at the rate we planned" stay; "at" alone is never touched.
+    Apple's `SpeechTranscriber` glues the domain to the word before ("at the
+    rategmail.com"), which is split again; `DictationTranscriber` already writes
+    "@" for "at sign" and for "john at gmail dot com". Polished leaves an address's
+    case alone, starts no sentence at a full stop inside a word ("gmail.com"),
+    and ends no lone address with a full stop.
   - **Mid-sentence dictation:** when the text before the cursor doesn't end a
     sentence (`.` `!` `?` `…` or a line break), the keyboard lowercases the
     dictation's first word, except "I" and its contractions, acronyms, words
@@ -224,7 +236,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     model weighs them by the word before, a missed space is tried by splitting the taps,
     accented letters read from their base key (é from e), and what you typed is replaced
     only when the best reading beats it by a margin (more when what you typed is a word).
-    Shortcuts, learned fixes, contractions, and words you kept still come first. The
+    Shortcuts, learned fixes, contractions, and words you kept still come first. Other
+    layouts (Norsk, Deutsch, Italiano, Français, Português) keep the dictionary engine in
+    their own language, never the English model. The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
@@ -358,26 +372,31 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   switch, so in-keyboard dictation, a warm session, and the Action Button
   all follow it.
 - **Keyboard layouts (Settings › Keyboard › Keyboard layout, with Full chosen):** English,
-  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2) and
-  Deutsch (QWERTZ with `ü`, `ö ä`), as Apple's iOS keyboards lay them out
+  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
+  Deutsch (QWERTZ with `ü`, `ö ä`), and Italiano, Français and Português on the
+  English letters (Apple's Italian and Portuguese keyboards are QWERTY; French is
+  QWERTY until Hex has AZERTY), as Apple's iOS keyboards lay them out
   (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
   Automatic follows the dictation language (Hebrew and other languages without a
   layout get English); before any dictation language is known, the first iPhone
-  keyboard, then preferred language, that has a layout. Rows of 11 keys narrow
+  keyboard, then preferred language, that has a layout. It never follows Hex's own
+  input mode, whose `primaryLanguage` is always the Info.plist's en-US. Rows of 11 keys narrow
   only the letters: shift, delete and the bottom row keep their English sizes,
   and row 3's letters sit centred between shift and delete. Long-press accents
   drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
-  Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º), and
+  Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º; Italian
+  à, è, ì, ò, ù; French é, à, î, ô, ù; Portuguese á, ã, é, ó, õ, ú), and
   German keeps ß on a held S. Autocorrect and suggestions use the layout's
-  `UITextChecker` dictionary (`nb`, `es`, `de`); where the iPhone has none
+  `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
+  `pt_PT`); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
   the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
   is the cheapest fix of all ("aqui" → "aquí", "manana" → "mañana"; a word the
   dictionary knows, such as "esta", is never changed). A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
-  ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English
-  and Spanish only). Auto-capitalization is unchanged.
+  ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
+  Spanish and Italian only). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
 - **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key

@@ -2,12 +2,18 @@ import Foundation
 
 /// The full keyboard's letters. Each language is its letter rows, its long-press accents,
 /// and the spelling dictionary its autocorrect uses, matching Apple's keyboard for it;
-/// another language is a new case with those filled in.
+/// another language is a new case with those filled in. Italian, French and Portuguese
+/// type on the English letters (Apple's Italian and Portuguese keyboards are QWERTY; Hex
+/// has no AZERTY yet, so French is QWERTY too, as on Apple's Canadian French keyboard)
+/// with their own accents and dictionary.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
     case norwegian = "nb"
     case spanish = "es"
     case german = "de"
+    case italian = "it"
+    case french = "fr"
+    case portuguese = "pt"
 
     /// Its own name, as Apple's keyboard list shows it.
     var displayName: String {
@@ -16,6 +22,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .norwegian: "Norsk"
         case .spanish: "Español"
         case .german: "Deutsch"
+        case .italian: "Italiano"
+        case .french: "Français"
+        case .portuguese: "Português"
         }
     }
 
@@ -23,7 +32,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// German layouts); row 3 sits between shift and delete.
     var letterRows: [[String]] {
         let rows = switch self {
-        case .english: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        case .english, .italian, .french, .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
         case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
         case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
@@ -63,6 +72,29 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "o": ["o", "ô", "ò", "ó", "œ", "ø", "ō", "õ"],
                 "u": ["u", "û", "ù", "ú", "ū"],
             ]
+        case .italian:
+            // Grave accents first, as Italian writes them (però, più); the shared table
+            // already leads with à, è (then é, for perché) and ì.
+            [
+                "o": ["o", "ò", "ó", "ô", "ö", "õ", "œ", "ø", "ō"],
+                "u": ["u", "ù", "ú", "û", "ü", "ū"],
+            ]
+        case .french:
+            [
+                "e": ["e", "é", "è", "ê", "ë", "ę", "ė", "ē"],
+                "a": ["a", "à", "â", "æ", "á", "ä", "ã", "å", "ā"],
+                "i": ["i", "î", "ï", "ì", "í", "į", "ī"],
+                "o": ["o", "ô", "œ", "ö", "ò", "ó", "õ", "ø", "ō"],
+                "u": ["u", "ù", "û", "ü", "ú", "ū"],
+            ]
+        case .portuguese:
+            [
+                "a": ["a", "á", "ã", "â", "à", "ä", "å", "æ", "ā", "ª"],
+                "e": ["e", "é", "ê", "è", "ë", "ę", "ė", "ē"],
+                "i": ["i", "í", "ì", "î", "ï", "į", "ī"],
+                "o": ["o", "ó", "õ", "ô", "ò", "ö", "œ", "ø", "ō", "º"],
+                "u": ["u", "ú", "ü", "ù", "û", "ū"],
+            ]
         }
     }
 
@@ -73,6 +105,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .norwegian: ["nb", "nb_NO", "no", "no_NO"]
         case .spanish: ["es", "es_ES", "es_MX"]
         case .german: ["de", "de_DE"]
+        case .italian: ["it", "it_IT"]
+        case .french: ["fr", "fr_FR", "fr_CA"]
+        // Brazil's spelling first, Portugal's where only it is installed.
+        case .portuguese: ["pt_BR", "pt", "pt_PT"]
         }
     }
 
@@ -108,7 +144,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .spanish:
             ["de", "la", "el", "en", "no", "se", "lo", "es", "un", "su", "me", "te", "ya", "mi",
              "tu", "yo", "le", "si", "al", "ha", "ni"]
-        case .norwegian, .german:
+        case .italian:
+            ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
+             "ti", "se", "ne", "no", "io", "tu", "su", "al"]
+        case .norwegian, .german, .french, .portuguese:
             []
         }
     }
@@ -137,13 +176,17 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "en": return .english
         case "es": return .spanish
         case "de": return .german
+        case "it": return .italian
+        case "fr": return .french
+        case "pt": return .portuguese
         default: return nil
         }
     }
 
     /// Automatic follows the dictation language: its layout, or English for a language
-    /// without one (Hebrew, French). Before any dictation language is known, the first
-    /// iPhone keyboard, then preferred language, that has a layout.
+    /// without one (Hebrew, Russian). Before any dictation language is known, the first
+    /// iPhone keyboard, then preferred language, that has a layout. Hex's own input mode
+    /// says nothing here: its `primaryLanguage` is the Info.plist's en-US, whatever you type.
     static func automatic(
         dictationLanguage: String?,
         inputModes: [String],
