@@ -26,11 +26,13 @@ const MAX_ETC_BYTES: u64 = 1024 * 1024;
 /// older Windows 10 name, tried when `\\wsl.localhost` isn't reachable.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const WSL_PREFIXES: [&str; 2] = [r"\\wsl.localhost", r"\\wsl$"];
-/// Settings and availability checks have no deadline of their own. A cold
-/// WSL boot can take a few seconds; after this they see "OpenCode isn't
-/// running" and a later try finds a distribution that has finished starting.
+/// Settings and availability checks have no deadline of their own, and a
+/// Windows service that already answered wants only a short wait for a WSL
+/// one to beat it. A cold WSL boot can take a few seconds; after this they
+/// see "OpenCode isn't running" and a later try finds a distribution that
+/// has finished starting.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-const WSL_LOOKUP_CAP: Duration = Duration::from_secs(3);
+pub(super) const WSL_LOOKUP_CAP: Duration = Duration::from_secs(3);
 /// A lookup that ran into its cap without finding a service makes new
 /// lookups wait this long, so rewrites during a hung WSL stop paying the
 /// wait over and over.

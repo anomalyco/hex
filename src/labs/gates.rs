@@ -429,9 +429,9 @@ pub fn caps_lock_slow_blink() -> bool {
     on(CAPS_LOCK_SLOW_BLINK) && Feature::CapsLockDictation.on_this_os()
 }
 
-/// An OpenCode service running in the default WSL distribution is used when
-/// no Windows registration answers (Windows; read as each service search
-/// starts).
+/// A service running in the default WSL distribution is used ahead of a
+/// Windows one when it answers; the Windows registration is the fallback when
+/// WSL answers nothing (Windows; read as each service search starts).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn opencode_in_wsl() -> bool {
     on(OPENCODE_IN_WSL) && Feature::OpenCodeInWsl.on_this_os()

@@ -1,7 +1,7 @@
 //! OpenCode in WSL for Annotate's sends: with Labs › OpenCode in WSL on,
-//! the router asks the host's service discovery, so a capture goes to a
-//! service whose registration Windows can't read itself. A native Windows
-//! service, or a discovery that found none, answers `None`, leaving the
+//! the router asks the host's service discovery, so a capture goes to a WSL
+//! service that answers, ahead of a Windows one. When WSL answers nothing, a
+//! native Windows service or no service at all answers `None`, leaving the
 //! router's own path exactly as it was.
 
 #[cfg(target_os = "windows")]
