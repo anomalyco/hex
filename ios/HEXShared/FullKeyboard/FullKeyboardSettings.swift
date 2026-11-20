@@ -9,6 +9,7 @@ import Foundation
 struct FullKeyboardSettings {
     static let launchArgument = "--experiment-full-keyboard"
     static let emojiLaunchArgument = "--experiment-emoji"
+    static let swipeLaunchArgument = "--experiment-swipe"
     /// Simulator scenes pass `--keyboard dictation-bar` (or `full`) to pick the keyboard.
     static let keyboardLaunchArgument = "--keyboard"
 
@@ -20,6 +21,7 @@ struct FullKeyboardSettings {
         static let haptics = "settings.keyboardHaptics"
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
+        static let swipeTyping = "experiments.swipeTyping"
     }
 
     private let defaults: UserDefaults?
@@ -81,8 +83,16 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.emoji) }
     }
 
+    /// Experiment: slide through a word's letters to type it, on the English and Spanish
+    /// layouts (`SwipeTyping`). Off by default.
+    var swipeTyping: Bool {
+        get { defaults?.bool(forKey: Key.swipeTyping) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.swipeTyping) }
+    }
+
     /// Simulator scenes pass `--experiment-full-keyboard` or `--keyboard full|dictation-bar`
-    /// to pick the keyboard, and `--experiment-emoji` to turn the emoji experiment on.
+    /// to pick the keyboard, `--experiment-emoji` to turn the emoji experiment on, and
+    /// `--experiment-swipe` for Swipe typing.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -96,6 +106,9 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.emojiLaunchArgument) {
             emoji = true
+        }
+        if arguments.contains(Self.swipeLaunchArgument) {
+            swipeTyping = true
         }
     }
 }

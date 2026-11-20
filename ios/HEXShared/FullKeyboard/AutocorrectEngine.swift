@@ -12,6 +12,9 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
         /// An emoji for the word just finished (Experiments › Emoji), offered after a space,
         /// when the strip has no words to show.
         case emoji
+        /// Another reading of the word just swiped (Experiments › Swipe typing): tapping it
+        /// puts it in that word's place.
+        case swiped
     }
 
     let displayText: String
@@ -236,6 +239,9 @@ final class AutocorrectEngine {
     /// Bumped whenever a source of your own words changes, so the decoder's copy is rebuilt.
     private var userWordsRevision = 0
     private var userWordsBuilt: (revision: Int, model: ObjectIdentifier)?
+    /// Bumped whenever your own words, the language or Suggest swear words change (Swipe
+    /// typing rebuilds its lists then).
+    var ownWordsRevision: Int { userWordsRevision }
     /// Words never suggested or corrected to in `language` (`OffensiveWords`).
     private(set) var offensiveWords: OffensiveWords
     /// Settings › Keyboard › Suggest swear words: swear words may be suggested and corrected
@@ -731,6 +737,12 @@ final class AutocorrectEngine {
         let capitalised = first.uppercased() + token.dropFirst()
         guard checker.isWordValid(capitalised), !checker.isWordValid(token) else { return nil }
         return capitalised
+    }
+
+    /// Your own words for Swipe typing: Contacts names and other `UILexicon` terms, one-word
+    /// text replacements, and words you kept twice that may be offered.
+    var ownWords: [String] {
+        lexiconTerms + lexiconShortcuts.values.filter { !$0.contains(" ") } + learnedWords.words.filter { mayOffer($0) }
     }
 
     /// The English contractions Hex corrects to or offers ("I'm", "don't", "we'll"), which

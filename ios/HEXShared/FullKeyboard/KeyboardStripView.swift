@@ -172,9 +172,10 @@ final class KeyboardStripView: UIView {
         setNeedsDisplay()
     }
 
-    /// Which slot shows each suggestion: in order, except a lone emoji, which takes the centre.
+    /// Which slot shows each suggestion: in order, except a lone emoji, swiped word or reading
+    /// of one, which takes the centre.
     static func slots(for suggestions: [KeyboardSuggestion]) -> [Int] {
-        if suggestions.count == 1, suggestions[0].kind == .emoji { return [1] }
+        if suggestions.count == 1, suggestions[0].kind != .keepLiteral, suggestions[0].kind != .secondary { return [1] }
         return Array(suggestions.indices.prefix(3))
     }
 

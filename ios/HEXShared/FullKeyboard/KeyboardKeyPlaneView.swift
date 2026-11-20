@@ -6,7 +6,13 @@ import UIKit
 @MainActor
 final class KeyboardKeyPlaneView: UIView {
     let engine: FullKeyboardEngine
-    var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { setNeedsDisplay() } } }
+    var palette = FullKeyboardPalette(isDark: false) {
+        didSet {
+            guard palette != oldValue else { return }
+            swipe?.trail.palette = palette
+            setNeedsDisplay()
+        }
+    }
     var returnLabel = "return" { didSet { if returnLabel != oldValue { setNeedsDisplay() } } }
     var returnSymbol: String? = "return" { didSet { if returnSymbol != oldValue { setNeedsDisplay() } } }
     var returnIsAction = false { didSet { if returnIsAction != oldValue { setNeedsDisplay() } } }
@@ -28,6 +34,20 @@ final class KeyboardKeyPlaneView: UIView {
     private(set) var deleteSwipe: DeleteWordSwipe?
     /// Each held key's pending hold: a letter's accents, or the space bar's trackpad.
     private var accentHoldWork: [Int: DispatchWorkItem] = [:]
+    /// Experiments › Swipe typing, while it's on for the layout's language; its trail draws
+    /// above the keys.
+    var swipe: SwipeTyping? {
+        didSet {
+            guard swipe !== oldValue else { return }
+            oldValue?.cancelAll()
+            oldValue?.trail.removeFromSuperview()
+            guard let swipe else { return }
+            swipe.trail.frame = bounds
+            swipe.trail.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            swipe.trail.palette = palette
+            addSubview(swipe.trail)
+        }
+    }
 
     init(engine: FullKeyboardEngine) {
         self.engine = engine
@@ -233,6 +253,8 @@ final class KeyboardKeyPlaneView: UIView {
     // and after a move, so the line names the key the finger slid onto.
 
     func began(id: Int, sample: TypingLogTouchSample) {
+        // A swipe still under way types its word before this key's letter.
+        swipe?.touchWillBegin()
         if let log = typingLog {
             log.touch(.began, id: id, sample: sample, key: engine.key(at: sample.point), under: engine.layout.hitTest(sample.point))
         }
@@ -247,9 +269,16 @@ final class KeyboardKeyPlaneView: UIView {
             if case .character = kind { armAccentTimer(for: id) }
             if kind == .space { armTrackpadHold(for: id) }
         }
+        swipe?.began(id: id, at: sample.point)
     }
 
     func moved(id: Int, sample: TypingLogTouchSample) {
+        // A letter touch that went a key's pitch is a swipe: it moves the trail, not the keys.
+        if let swipe, swipe.moved(id: id, to: sample.point) {
+            cancelAccentTimer(for: id)
+            typingLog?.touch(.moved, id: id, sample: sample, key: nil, under: engine.layout.hitTest(sample.point))
+            return
+        }
         let previousKey = engine.touches[id]?.key.kind
         engine.touchMoved(id: id, to: sample.point)
         let current = engine.touches[id]?.key
@@ -267,6 +296,12 @@ final class KeyboardKeyPlaneView: UIView {
 
     func ended(id: Int, sample: TypingLogTouchSample) {
         cancelAccentTimer(for: id)
+        if let swipe, swipe.owns(id) {
+            typingLog?.touch(.ended, id: id, sample: sample, key: nil, under: engine.layout.hitTest(sample.point))
+            swipe.ended(id: id, at: sample.point)
+            return
+        }
+        swipe?.forget(id)
         if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
         finishDeleteSwipe(for: id)
         typingLog?.touch(.ended, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
@@ -275,6 +310,12 @@ final class KeyboardKeyPlaneView: UIView {
 
     func cancelled(id: Int, sample: TypingLogTouchSample) {
         cancelAccentTimer(for: id)
+        if let swipe, swipe.owns(id) {
+            typingLog?.touch(.cancelled, id: id, sample: sample, key: nil, under: engine.layout.hitTest(sample.point))
+            swipe.cancelled(id: id)
+            return
+        }
+        swipe?.forget(id)
         if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
         finishDeleteSwipe(for: id)
         typingLog?.touch(.cancelled, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
@@ -293,6 +334,7 @@ final class KeyboardKeyPlaneView: UIView {
         stopDeleteRepeat()
         deleteSwipe?.finish()
         deleteSwipe = nil
+        swipe?.cancelAll()
         engine.cancelAllTouches()
     }
 
