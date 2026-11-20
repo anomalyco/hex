@@ -59,10 +59,11 @@ final class KeyboardSetupMonitor {
         microphone = AVAudioApplication.shared.recordPermission
     }
 
-    func requestMicrophone() {
+    func requestMicrophone(then done: (@MainActor () -> Void)? = nil) {
         AVAudioApplication.requestRecordPermission { _ in
             Task { @MainActor [weak self] in
                 self?.refresh()
+                done?()
             }
         }
     }
