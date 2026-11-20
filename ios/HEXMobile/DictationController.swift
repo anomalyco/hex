@@ -726,6 +726,7 @@ final class DictationController {
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
+        CleanupTagger.prepareIfEnabled(style: effectiveStyle)
         let vocabularyTerms = customVocabularySettings.activeTerms
         let personalCorrections = learnedDictationCorrections()
         let recognitionHints = DictationCorrections.recognitionHints(
@@ -855,7 +856,8 @@ final class DictationController {
                 // sentence start ("iPhone" -> "IPhone"); learned capitals get the same.
                 let corrected = DictationCorrections.apply(session.personalCorrections, to: rawText)
                 let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: corrected)
-                let cleaned = await self.cleanedTranscriptIfEnabled(spelled, session: session)
+                let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: session.style)
+                let cleaned = await self.cleanedTranscriptIfEnabled(tagged, session: session)
                 let translated = await DictationTranslator.translateIfEnabled(cleaned)
                 let text = translated ?? cleaned
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {

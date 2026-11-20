@@ -4,6 +4,7 @@ import SwiftUI
 /// keyboard reads them too.
 struct ExperimentsCard: View {
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
+    @State private var cleanupTagger = CleanupTaggerSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
@@ -95,6 +96,27 @@ struct ExperimentsCard: View {
                 FullKeyboardSettings().isEnabled = enabled
             }
 
+            Toggle(isOn: $cleanupTagger) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Clean up what I say")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(HexTheme.textBase)
+                    Text("Removes ums, repeats and things you corrected (3pm, actually 4pm), on this iPhone")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                }
+            }
+            .tint(HexTheme.success)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                HexTheme.bgBase,
+                in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
+            )
+            .onChange(of: cleanupTagger) { _, enabled in
+                CleanupTaggerSettings().isEnabled = enabled
+            }
+
             Toggle(isOn: $appleIntelligenceCleanup) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Clean up with Apple Intelligence")
@@ -165,6 +187,7 @@ struct ExperimentsCard: View {
         }
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
+            cleanupTagger = CleanupTaggerSettings().isEnabled
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current

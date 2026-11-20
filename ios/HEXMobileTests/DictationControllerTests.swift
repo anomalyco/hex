@@ -749,6 +749,60 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(bridge.snapshot().heard)
     }
 
+    /// Clean up what I say reads its switch from the App Group at the call site, so this
+    /// sets the real switch and puts it back.
+    func testCleanupTaggerRunsAfterLearnedFixesAndSkipsVerbatim() async throws {
+        let tagger = CleanupTaggerSettings()
+        let wasEnabled = tagger.isEnabled
+        defer { tagger.isEnabled = wasEnabled }
+        CleanupTagger.shared.unload()
+        XCTAssertFalse(CleanupTagger.shared.isLoaded)
+
+        let now = 95_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("Let's ship it Tuesday, no wait, Thursday.")
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            cleanupSettings: AppleIntelligenceCleanupSettings(defaults: defaults),
+            customVocabularySettings: CustomVocabularySettings(defaults: defaults),
+            typingJournalSettings: TypingJournalSettings(defaults: defaults),
+            learnedDictationCorrections: { [DictationCorrection(heard: "ship", meant: "send")] }
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Off first: recording start must not load the model.
+        for (style, enabled, spoken) in [
+            (DictationStyle.polished, false, "Let's send it Tuesday, no wait, Thursday."),
+            (.polished, true, "Let's send it Thursday."),
+            (.verbatim, true, "Let's send it Tuesday, no wait, Thursday."),
+        ] {
+            tagger.isEnabled = enabled
+            controller.clearTranscript()
+            controller.startRecording(keyboardJobID: "tagger-\(style)-\(enabled)", styleOverride: style)
+            if enabled, style == .polished {
+                XCTAssertTrue(CleanupTagger.shared.isLoaded, "recording start loads the model")
+            }
+            try await settle()
+            controller.finishRecording()
+            try await settle()
+            XCTAssertEqual(
+                controller.transcript,
+                TranscriptFormatter.format(spoken, style: style),
+                "\(style), experiment \(enabled ? "on" : "off")"
+            )
+            if !enabled {
+                XCTAssertFalse(CleanupTagger.shared.isLoaded, "nothing loads while the experiment is off")
+            }
+        }
+    }
+
     private func settle() async throws {
         for _ in 0..<8 {
             try await Task.sleep(for: .milliseconds(25))
