@@ -153,6 +153,10 @@ final class FullKeyboardEngine {
     /// Experiments › Emoji, in fields that take emoji.
     var showsEmoji = false { didSet { if showsEmoji != oldValue { rebuildLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
+    /// An iPhone, or the iPhone Duo folded or unfolded (`KeyboardPosture`).
+    var posture: KeyboardPosture = .phone { didSet { if posture != oldValue { rebuildLayout() } } }
+    /// How far iOS set the keyboard in from each side of the screen (the Duo).
+    var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
     /// The letters, accents and spelling dictionary (Settings › Keyboard › Languages).
     var language: KeyboardLanguage = .english {
         didSet {
@@ -956,7 +960,9 @@ final class FullKeyboardEngine {
             showsGlobe: showsGlobe,
             showsEmoji: showsEmoji,
             horizontalInset: horizontalInset,
-            language: language
+            language: language,
+            posture: posture,
+            windowInset: windowInset
         )
         syncDecoderKeys()
         logState(cause)

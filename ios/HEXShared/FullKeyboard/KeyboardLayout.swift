@@ -64,6 +64,44 @@ nonisolated struct KeyBalloon: Equatable, Sendable {
     var bounds: CGRect { bubble.union(keyFrame) }
 }
 
+/// Where the keyboard is shown. Every iPhone is `.phone`; the iPhone Duo (a foldable) sets
+/// third-party keyboards in an inset platter, with iOS's own band above them, and Apple sizes
+/// its keys there for each screen.
+nonisolated enum KeyboardPosture: Equatable, Sendable {
+    case phone
+    /// The Duo folded: its 466 × 678 pt cover screen, either way up.
+    case cover
+    /// The Duo unfolded and held upright: the inner screen is wider than tall (951 × 669 pt).
+    case unfoldedWide
+    /// The Duo unfolded and turned: the inner screen is taller than wide (669 × 951 pt).
+    case unfoldedTall
+
+    /// The Duo's model identifier (the simulator's too).
+    static let foldableModels: Set<String> = ["iPhone19,4"]
+
+    /// The posture for a screen of `screenSize` points (as it is turned now), on a foldable or not.
+    static func current(screenSize: CGSize, isFoldable: Bool) -> KeyboardPosture {
+        guard isFoldable else { return .phone }
+        guard min(screenSize.width, screenSize.height) >= 600 else { return .cover }
+        return screenSize.width > screenSize.height ? .unfoldedWide : .unfoldedTall
+    }
+
+    /// iOS draws a band of its own above a third-party keyboard here, so the strip needs no gap
+    /// under it to sit as far above the keys as Apple's predictive bar does.
+    var hasSystemBand: Bool { self != .phone }
+
+    /// How far in from the screen's side Apple's keycaps start on the Duo; nil on an iPhone,
+    /// where the keyboard has the whole width. Measured in the iOS 27.2 simulator.
+    var appleKeyInset: CGFloat? {
+        switch self {
+        case .phone: nil
+        case .cover: 7.7
+        case .unfoldedWide: 86
+        case .unfoldedTall: 19
+        }
+    }
+}
+
 nonisolated struct KeyboardMetrics: Equatable, Sendable {
     let side: CGFloat
     let gap: CGFloat
@@ -76,46 +114,85 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     let keysBottom: CGFloat
     let cornerRadius: CGFloat
 
-    /// iOS 26 key geometry with a 44 pt suggestion strip: 44 pt + 218 pt of keys
-    /// (4 × 45 pt + 3 × 11 pt + 5 pt) = 262 pt. The 35 pt strip assumed iOS 26's +17 pt
-    /// Liquid Glass crown above the extension; iOS 27 adds none, which left suggestions
-    /// cramped against the keyboard's top edge (TestFlight build 4).
+    /// The suggestion strip is Apple's predictive bar in every orientation and on every iPhone:
+    /// 44 pt, then an 8 pt gap, so row 1's keycaps start 52 pt below the keyboard's top edge, as
+    /// Apple's do (53 pt measured on the iPhone 17, 17 Pro Max and SE, iOS 27.2). Everything the
+    /// strip shows (suggestions, Undo dictation, the Full Access hint, the recording bar, the
+    /// emoji panel's top row, the Logging mark) lives in those 44 pt.
+    static let stripBarHeight: CGFloat = 44
+    static let stripGap: CGFloat = 8
+
+    /// iOS 26 key geometry under the pinned strip: 52 pt + 218 pt of keys
+    /// (4 × 45 pt + 3 × 11 pt + 5 pt) = 270 pt.
     static let portrait = KeyboardMetrics(
         side: 6.5, gap: 6, rowGap: 11, keyHeight: 45,
-        stripTop: 0, stripHeight: 44, stripBottom: 0,
+        stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
         keysTop: 0, keysBottom: 5, cornerRadius: 8.5
     )
 
-    /// Matches iOS 26 landscape keyboard geometry inside the system's +10 pt Liquid Glass crown:
-    /// 39 pt strip area + 137 pt of keys (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 176 pt extension height.
+    /// iOS 26 landscape key geometry under the same strip: 52 pt + 137 pt of keys
+    /// (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 189 pt.
     static let landscape = KeyboardMetrics(
         side: 4, gap: 6, rowGap: 8, keyHeight: 27.5,
-        stripTop: 0, stripHeight: 39, stripBottom: 0,
+        stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
         keysTop: 0, keysBottom: 3, cornerRadius: 7.5
     )
 
-    static func `for`(_ orientation: KeyboardOrientation, innerWidth: CGFloat? = nil) -> KeyboardMetrics {
-        guard orientation == .portrait else { return .landscape }
-        guard let innerWidth else { return .portrait }
-        let side: CGFloat = if innerWidth >= 390 {
-            6.5
-        } else if innerWidth >= 370 {
-            4.5
+    /// `windowInset` is how far iOS set the keyboard in from each side of the screen (the Duo).
+    static func `for`(
+        _ orientation: KeyboardOrientation,
+        innerWidth: CGFloat? = nil,
+        posture: KeyboardPosture = .phone,
+        windowInset: CGFloat = 0
+    ) -> KeyboardMetrics {
+        let base: KeyboardMetrics
+        if orientation == .landscape {
+            base = .landscape
+        } else if let innerWidth, posture == .phone {
+            let side: CGFloat = if innerWidth >= 390 {
+                6.5
+            } else if innerWidth >= 370 {
+                4.5
+            } else {
+                3.0
+            }
+            base = side == KeyboardMetrics.portrait.side ? .portrait : KeyboardMetrics.portrait.with(side: side)
         } else {
-            3.0
+            base = .portrait
         }
-        if side == KeyboardMetrics.portrait.side { return .portrait }
+        guard posture != .phone else { return base }
+
+        // The Duo: Apple's row pitch for each screen (56 pt folded, 59.7 pt unfolded and turned,
+        // 51.7 pt unfolded upright), keycaps starting where Apple's do, and no gap under the strip.
+        var keyHeight = base.keyHeight
+        var rowGap = base.rowGap
+        if orientation == .portrait {
+            switch posture {
+            case .unfoldedTall:
+                keyHeight = 46
+                rowGap = 13.7
+            case .unfoldedWide:
+                keyHeight = 39
+                rowGap = 12.7
+            case .cover, .phone:
+                break
+            }
+        }
+        let side = orientation == .portrait
+            ? max(1, (posture.appleKeyInset ?? base.side) - windowInset)
+            : base.side
         return KeyboardMetrics(
-            side: side,
-            gap: KeyboardMetrics.portrait.gap,
-            rowGap: KeyboardMetrics.portrait.rowGap,
-            keyHeight: KeyboardMetrics.portrait.keyHeight,
-            stripTop: KeyboardMetrics.portrait.stripTop,
-            stripHeight: KeyboardMetrics.portrait.stripHeight,
-            stripBottom: KeyboardMetrics.portrait.stripBottom,
-            keysTop: KeyboardMetrics.portrait.keysTop,
-            keysBottom: KeyboardMetrics.portrait.keysBottom,
-            cornerRadius: KeyboardMetrics.portrait.cornerRadius
+            side: side, gap: base.gap, rowGap: rowGap, keyHeight: keyHeight,
+            stripTop: base.stripTop, stripHeight: base.stripHeight, stripBottom: 0,
+            keysTop: base.keysTop, keysBottom: base.keysBottom, cornerRadius: base.cornerRadius
+        )
+    }
+
+    private func with(side: CGFloat) -> KeyboardMetrics {
+        KeyboardMetrics(
+            side: side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
+            stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
+            keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius
         )
     }
 
@@ -155,6 +232,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     let showsEmoji: Bool
     let horizontalInset: CGFloat
     let language: KeyboardLanguage
+    let posture: KeyboardPosture
     let metrics: KeyboardMetrics
     let keys: [KeyboardKey]
 
@@ -166,7 +244,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         showsGlobe: Bool = false,
         showsEmoji: Bool = false,
         horizontalInset: CGFloat = 0,
-        language: KeyboardLanguage = .english
+        language: KeyboardLanguage = .english,
+        posture: KeyboardPosture = .phone,
+        windowInset: CGFloat = 0
     ) {
         self.width = width
         self.orientation = orientation
@@ -176,8 +256,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.showsEmoji = showsEmoji
         self.horizontalInset = max(0, horizontalInset)
         self.language = language
+        self.posture = posture
         let innerWidth = width - 2 * self.horizontalInset
-        let metrics = KeyboardMetrics.for(orientation, innerWidth: innerWidth)
+        let metrics = KeyboardMetrics.for(orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset)
         self.metrics = metrics
         self.keys = Self.buildKeys(
             width: width,
@@ -191,8 +272,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         )
     }
 
-    static func height(for orientation: KeyboardOrientation) -> CGFloat {
-        KeyboardMetrics.for(orientation).totalHeight
+    static func height(for orientation: KeyboardOrientation, posture: KeyboardPosture = .phone) -> CGFloat {
+        KeyboardMetrics.for(orientation, posture: posture).totalHeight
     }
 
     var totalHeight: CGFloat { metrics.totalHeight }
@@ -211,14 +292,18 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         CGRect(x: 0, y: metrics.stripArea, width: width, height: metrics.keysArea)
     }
 
-    /// The strip's bottom points, below its pills and chips, that belong to row 1's keys: a
-    /// tap just above a keycap types it rather than picking a suggestion. Apple's keys reach
-    /// about 8 pt above their keycaps, to the predictive bar.
+    /// Where the strip sits right on the keys (the Duo), its bottom points, below its pills and
+    /// chips, belong to row 1's keys: a tap just above a keycap types it rather than picking a
+    /// suggestion.
     static let stripTouchBand: CGFloat = 4
 
-    /// Where touches go to the keys: the key area plus `stripTouchBand`. Hit frames tile it.
+    /// How far above its keycaps row 1 takes touches: the gap under the strip, as Apple's keys
+    /// reach about 8 pt above their keycaps to the predictive bar, or `stripTouchBand`.
+    var rowOneReach: CGFloat { max(metrics.stripBottom, Self.stripTouchBand) }
+
+    /// Where touches go to the keys: the key area plus `rowOneReach`. Hit frames tile it.
     var touchAreaFrame: CGRect {
-        CGRect(x: 0, y: metrics.stripArea - Self.stripTouchBand, width: width, height: metrics.keysArea + Self.stripTouchBand)
+        CGRect(x: 0, y: metrics.stripArea - rowOneReach, width: width, height: metrics.keysArea + rowOneReach)
     }
 
     /// A letter key's width on a 10-key row. Shift, delete and the bottom row are sized
@@ -423,8 +508,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         }
 
         // Touch targets: split every gap down the middle; outer keys reach the edges, and row 1
-        // the strip's bottom band.
-        let top = m.stripArea - stripTouchBand
+        // the gap under the strip (or the strip's bottom band).
+        let top = m.stripArea - max(m.stripBottom, stripTouchBand)
         let bottom = m.totalHeight
         var keys: [KeyboardKey] = []
         for row in 0..<4 {

@@ -28,12 +28,64 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs262PointsAndLandscapeIs176Points() {
+    func testPortraitIs270PointsAndLandscapeIs189Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 262, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 270, "width \(width)")
         }
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 262)
-        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 176)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 270)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 189)
+    }
+
+    /// The strip is Apple's 44 pt predictive bar on every iPhone, either way up, and on the Duo;
+    /// row 1 starts 52 pt down (Apple's keycaps start 53 pt down), or right under the strip on
+    /// the Duo, where iOS draws its own band above the keyboard.
+    func testStripIsPinnedInEveryOrientationAndPosture() {
+        let postures: [KeyboardPosture] = [.phone, .cover, .unfoldedWide, .unfoldedTall]
+        for posture in postures {
+            for orientation in [KeyboardOrientation.portrait, .landscape] {
+                let m = KeyboardMetrics.for(orientation, posture: posture)
+                XCTAssertEqual(m.stripTop, 0, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripHeight, 44, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripArea, posture == .phone ? 52 : 44, "\(posture) \(orientation)")
+            }
+        }
+        for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
+            XCTAssertEqual(layout.stripFrame.height, 44, describe(layout))
+            let rowOneTop = layout.keys.filter { $0.row == 0 }.map(\.frame.minY).min()
+            XCTAssertEqual(rowOneTop ?? -1, layout.metrics.stripArea, accuracy: 0.001, describe(layout))
+        }
+    }
+
+    /// The iPhone Duo (iOS 27.2 simulator): Apple's row pitch for each screen, keycaps starting
+    /// as far in from the screen's side as Apple's, and keys filling the width.
+    func testDuoKeysMatchApplesRowsAndEdges() {
+        let cases: [(KeyboardLayout, windowInset: CGFloat, pitch: CGFloat, appleEdge: CGFloat)] = [
+            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 8),
+            (KeyboardLayout(width: 655, posture: .unfoldedTall, windowInset: 7), 7, 59.7, 19),
+            (KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75), 75, 51.7, 86),
+        ]
+        for (layout, windowInset, pitch, appleEdge) in cases {
+            let q = layout.key(.character("q"))!.frame
+            let a = layout.key(.character("a"))!.frame
+            let p = layout.key(.character("p"))!.frame
+            XCTAssertEqual(a.minY - q.minY, pitch, accuracy: 0.001, describe(layout))
+            XCTAssertEqual(windowInset + q.minX, appleEdge, accuracy: 0.5, describe(layout))
+            XCTAssertEqual(p.maxX, layout.width - layout.metrics.side, accuracy: 0.001, describe(layout))
+            XCTAssertEqual(layout.totalHeight, KeyboardLayout.height(for: .portrait, posture: layout.posture), describe(layout))
+        }
+        // Folded in landscape the Duo keeps the iPhone's landscape keys.
+        let land = KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75)
+        XCTAssertEqual(land.metrics.keyHeight, KeyboardMetrics.landscape.keyHeight)
+        XCTAssertEqual(land.totalHeight, 181)
+    }
+
+    func testPostureFollowsTheScreen() {
+        XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 402, height: 874), isFoldable: false), .phone)
+        XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 874, height: 402), isFoldable: false), .phone)
+        XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 466, height: 678), isFoldable: true), .cover)
+        XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 678, height: 466), isFoldable: true), .cover)
+        XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 951, height: 669), isFoldable: true), .unfoldedWide)
+        XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 669, height: 951), isFoldable: true), .unfoldedTall)
     }
 
     func testPortraitMetricsMatchAppleIOS26() {
@@ -41,7 +93,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
-        XCTAssertEqual(q.frame.minY, 44, accuracy: 0.001)
+        XCTAssertEqual(q.frame.minY, 52, accuracy: 0.001)
         XCTAssertEqual(q.frame.height, 45)
         let shift = proMax.key(.shift)!
         XCTAssertEqual(shift.frame.width, proMax.letterWidth * 1.34, accuracy: 0.001)
@@ -49,11 +101,13 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testHitTargetsTileTheKeyAreaWithNoDeadZonesOrOverlaps() {
         var generator = SystemRandomNumberGenerator()
-        for layout in everyPortraitLayout() + landscapeLayouts() {
+        for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
             let area = layout.touchAreaFrame
-            // Row 1 also takes the strip's bottom band, under its pills, as Apple's keys reach
-            // above their keycaps; the Hex key in the strip stops where it starts.
-            XCTAssertEqual(area.minY, layout.keysAreaFrame.minY - KeyboardLayout.stripTouchBand, describe(layout))
+            // Row 1 also takes the gap under the strip (or, on the Duo, the strip's bottom band,
+            // under its pills), as Apple's keys reach above their keycaps; the Hex key in the
+            // strip stops where it starts.
+            XCTAssertEqual(area.minY, layout.keysAreaFrame.minY - layout.rowOneReach, describe(layout))
+            XCTAssertGreaterThanOrEqual(area.minY, layout.stripFrame.maxY - KeyboardLayout.stripTouchBand, describe(layout))
             if let hex = layout.key(.hex), hex.row < 0 {
                 XCTAssertLessThanOrEqual(hex.hitFrame.maxY, area.minY, describe(layout))
             }
@@ -89,7 +143,7 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     func testKeycapsSitInsideTheirTargetsAndNeverOverlap() {
-        for layout in everyPortraitLayout() + landscapeLayouts() {
+        for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
             let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
             for key in layout.keys {
                 XCTAssertTrue(key.hitFrame.contains(key.frame), "\(describe(layout)) \(key.label)")
@@ -104,7 +158,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    func testBalloonsStayInsideThe262PointKeyboard() {
+    func testBalloonsStayInsideTheKeyboard() {
         for layout in everyPortraitLayout() {
             let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
             for key in layout.keys where key.character != nil {
@@ -201,7 +255,7 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testLandscapeKeepsInsetsAndHeight() {
         let layout = KeyboardLayout(width: 932, orientation: .landscape, horizontalInset: 60)
-        XCTAssertEqual(layout.totalHeight, 176)
+        XCTAssertEqual(layout.totalHeight, 189)
         XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 64, accuracy: 0.001)
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
     }
@@ -595,6 +649,26 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    /// The iPhone Duo's keyboard views (iOS 27.2 simulator): 452 pt of the 466 pt cover screen
+    /// folded, 655 of 669 pt unfolded and turned, 801 of 951 pt unfolded upright, and 528 of
+    /// 678 pt folded in landscape.
+    private func duoLayouts() -> [KeyboardLayout] {
+        var layouts: [KeyboardLayout] = []
+        for (width, posture, inset) in [(452.0, KeyboardPosture.cover, 7.0), (655, .unfoldedTall, 7), (801, .unfoldedWide, 75)] {
+            for layer in layers {
+                for field in fields {
+                    layouts.append(KeyboardLayout(width: width, layer: layer, field: field, showsGlobe: true, posture: posture, windowInset: inset))
+                }
+            }
+            for language in KeyboardLanguage.allCases {
+                layouts.append(KeyboardLayout(width: width, language: language, posture: posture, windowInset: inset))
+            }
+        }
+        layouts.append(KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75))
+        layouts.append(KeyboardLayout(width: 528, orientation: .landscape, showsGlobe: true, posture: .cover, windowInset: 75))
+        return layouts
+    }
+
     private func letters(_ layout: KeyboardLayout, row: Int) -> [String] {
         layout.keys.filter { $0.row == row && $0.character != nil }
             .sorted { $0.frame.minX < $1.frame.minX }
@@ -606,7 +680,7 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     private func describe(_ layout: KeyboardLayout) -> String {
-        "\(layout.width)pt \(layout.orientation) \(layout.layer) \(layout.field) globe=\(layout.showsGlobe) \(layout.language)"
+        "\(layout.width)pt \(layout.orientation) \(layout.layer) \(layout.field) globe=\(layout.showsGlobe) \(layout.language) \(layout.posture)"
     }
 }
 

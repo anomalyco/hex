@@ -174,7 +174,6 @@ struct FullKeyboardSnapshotStage: View {
                 .padding(.bottom, 10)
             FullKeyboardFixture(state: state, draft: draft, darkKeyboard: darkApp || darkField)
                 .frame(height: KeyboardLayout.height(for: .portrait)
-                    + (["recording", "transcribing", "morph"].contains(state) ? FullKeyboardView.recordingLiftHeight : 0)
                     + (state == "emoji-search" ? KeyboardMetrics.portrait.stripHeight : 0))
                 .background(Color(uiColor: backdrop).ignoresSafeArea(edges: .bottom))
         }

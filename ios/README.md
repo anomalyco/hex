@@ -491,11 +491,23 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
   Spanish and Italian only). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language, and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
+- **Size (full keyboard):** The suggestion strip is Apple's 44 pt predictive bar in
+  every state (suggestions, Undo dictation, the Full Access hint, the recording bar,
+  the emoji panel's top row, the Logging mark) and both orientations, with 8 pt under
+  it, so row 1's keycaps start 52 pt down, as Apple's do (53 pt on the iPhone 17 Pro,
+  17 Pro Max and SE, iOS 27.2 simulator): 270 pt in portrait, 189 pt in landscape.
+  Dictating no longer grows the keyboard. On the iPhone Duo (`KeyboardPosture`,
+  model `iPhone19,4`) iOS sets third-party keyboards in an inset platter with a band
+  of its own above them, so the strip has no gap there, and the keys follow Apple's
+  for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
+  upright, starting as far in from the screen's side as Apple's. Measured in the
+  simulator; unverified on a Duo.
 - **Touch targets (full keyboard):** Every point of the key area types a key: gaps
   split down the middle, the outer keys reach the screen's edges, and row 1 also
-  takes the strip's bottom 4 pt below its pills (`KeyboardLayout.stripTouchBand`),
-  so a tap just above a keycap types it rather than picking a suggestion (Apple's
-  keys reach about 8 pt above theirs, measured in the simulator). While you type (a
+  takes the 8 pt gap under the strip (on the Duo, the strip's bottom 4 pt below its
+  pills, `KeyboardLayout.stripTouchBand`), so a tap just above a keycap types it
+  rather than picking a suggestion (Apple's keys reach about 8 pt above theirs,
+  measured in the simulator). While you type (a
   key is down, or one went down or came up in the last 0.25 s) the strip's whole
   lower half goes to the row-1 key below the finger
   (`FullKeyboardEngine.takesStripTouch`): Record typing logs showed every strip
@@ -690,7 +702,7 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
 - **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
   widths, hit frames (tiling the key area and row 1's band above it with no gaps
   or overlaps), balloons
-  and accent menus at 320–440 pt and in landscape; `AutocorrectEngineTests` and
+  and accent menus at 320–440 pt, in landscape and in the iPhone Duo's postures; `AutocorrectEngineTests` and
   `FullKeyboardEngineTests` check typing, dictionaries and English-only fixes.
   Whether the simulator or an iPhone has a `UITextChecker` dictionary for
   `nb` decides Norwegian autocorrect; how good those corrections are is

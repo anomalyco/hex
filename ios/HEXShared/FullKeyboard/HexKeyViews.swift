@@ -267,7 +267,8 @@ final class HexKeyRecordingPanel: UIView {
         super.layoutSubviews()
         let innerLeft = horizontalInset + metrics.side
         let innerRight = bounds.width - horizontalInset - metrics.side
-        let rowH = max(28, bounds.height - 12)
+        // The strip's 44 pt with 4 pt above and below, as the strip's chips sit.
+        let rowH = max(28, bounds.height - 8)
         let rowY = (bounds.height - rowH) / 2
         let x = innerLeft
 
