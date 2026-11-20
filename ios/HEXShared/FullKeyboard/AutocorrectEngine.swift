@@ -461,7 +461,12 @@ final class AutocorrectEngine {
 
         // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
         if let decision = decoderDecision(for: token) {
-            return decision.replacement.map { Self.matchCase(of: token, onto: $0) }
+            if let replacement = decision.replacement {
+                return Self.matchCase(of: token, onto: replacement)
+            }
+            // A name, day or place its lowercase word list lacks, typed in lowercase, is
+            // capitalised as the dictionary path does ("mary" -> "Mary").
+            return properNoun(for: token)
         }
 
         // 3. A two-letter non-word one neighbouring key from a very common two-letter word
@@ -516,12 +521,22 @@ final class AutocorrectEngine {
         let lower = token.lowercased()
         let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower)
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
+            || properNoun(for: token) != nil
         let decision = decoder.decide(
             taps: taps, typed: lower, previous: Self.previousWord(before, token: token),
             literalIsValid: valid, keys: keys
         )
         decoderCache = (before, taps, decision)
         return decision
+    }
+
+    /// `token` capitalised when it is all lowercase and the dictionary knows it only that way
+    /// (a name, day or place: "mary" -> "Mary", "monday" -> "Monday"), else nil.
+    private func properNoun(for token: String) -> String? {
+        guard token.count >= 2, token == token.lowercased(), let first = token.first else { return nil }
+        let capitalised = first.uppercased() + token.dropFirst()
+        guard checker.isWordValid(capitalised), !checker.isWordValid(token) else { return nil }
+        return capitalised
     }
 
     /// Gives the decoder your own words: Contacts names and other `UILexicon` terms, the

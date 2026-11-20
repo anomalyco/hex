@@ -428,6 +428,14 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "come and miss the quiz ")
     }
 
+    /// The models' word lists are lowercase: a name or day typed in lowercase is still a
+    /// word, capitalised as the dictionary path does, never "may" or "money".
+    func testSpatialAutocorrectCapitalisesANameTypedInLowercase() throws {
+        try useDecoder()
+        for word in ["see", "mary", "on", "monday", "in", "boston"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "see Mary on Monday in Boston ")
+    }
+
     func testSpatialAutocorrectAddsSpanishAccents() throws {
         try useDecoder(.spanish)
         for word in ["esta", "aqui", "manana"] { typeTaps(word) }

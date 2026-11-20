@@ -242,7 +242,9 @@ open Hex instead, as before iOS 26. Audio never leaves the iPhone.
     one-word text replacements, words you kept, fixes Hex learned), a word-pair language
     model weighs them by the word before, a missed space is tried by splitting the taps,
     accented letters read from their base key (é from e), and what you typed is replaced
-    only when the best reading beats it by a margin (more when what you typed is a word).
+    only when the best reading beats it by a margin (more when what you typed is a word,
+    including a name, day or place typed in lowercase that the dictionary knows only
+    capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
     layouts (Norsk, Deutsch, Italiano, Français, Português, Русский) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
