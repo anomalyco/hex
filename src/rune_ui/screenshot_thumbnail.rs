@@ -14,15 +14,25 @@
 //!
 //! The cards closed last are kept, so the menu bar's Restore Last Capture
 //! brings the newest of them back ([`Thumbnail::restore`]).
+//!
+//! A shot never fades in: its card starts as the shot itself, exactly where
+//! and as large as it was taken, flat and square, and flies into the
+//! corner, growing its corner and shadow as it lifts off ([`flight`]). A
+//! click flies it on into the editor, which flies it back on close.
 
 mod card;
 pub(crate) mod editor;
+mod flight;
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use rune::{OverlayHandle, OverlaySpec, ScreenEdge, Spring, Tx};
+
+use self::flight::Flight;
 
 /// The overlay, before a shot gives it its display's size: a laptop's.
 pub(crate) const NOMINAL: (f32, f32) = (1440.0, 900.0);
@@ -43,20 +53,12 @@ const RADIUS: f32 = SCREEN_RADIUS - INSET;
 const CLOSE_INSET: f32 = 6.0;
 const CLOSE_RADIUS: f32 = RADIUS - CLOSE_INSET;
 const FADE: Spring = Spring::new(0.22, 0.0);
-/// In on the HUD family's spring, a little bounce; out shorter, none. The
-/// older cards make room on it too.
-const ENTER: Spring = super::capture_capsule::tuning::spring(crate::rune_hud::spring::MORPH);
+/// Out past the display's edge: short, no bounce.
 const LEAVE: Spring = Spring::new(0.24, 0.0);
 const REDUCED: Spring =
     super::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE);
-/// How far it leans back as it travels, about its bottom-right corner.
+/// How far it leans back as it leaves, about its bottom-right corner.
 const TRAVEL_SCALE: f32 = 0.94;
-/// The shot growing in from the rectangle it was taken from: one spring,
-/// and no bounce, so its size never overshoots.
-const ZOOM: Spring = Spring::new(0.34, 0.0);
-/// Once in this long, a card that grew in from its rectangle leaves past
-/// the display's edge instead, as any other card does.
-const SETTLE_S: f64 = 1.0;
 /// How long leaving takes, before the empty overlay hides.
 const LEAVE_S: f64 = 0.4;
 /// How long a note such as "Copied" shows on its card.
@@ -71,6 +73,26 @@ const RECENT: usize = 10;
 static HOVERED: AtomicBool = AtomicBool::new(false);
 /// Whether a closed card can come back, for the menu bar.
 static RESTORABLE: AtomicBool = AtomicBool::new(false);
+/// The cards' overlay, for the editor to hand a card back to.
+static CARDS: OnceLock<OverlayHandle<Cards>> = OnceLock::new();
+/// The card open in the editor and where it rests now, for the editor to
+/// fly back to; none once it's gone.
+#[cfg(not(test))]
+static HOME: Mutex<Option<(u64, [f32; 4])>> = Mutex::new(None);
+#[cfg(test)]
+thread_local! {
+    // Each test's cards and editor run on its own thread.
+    static HOME: Mutex<Option<(u64, [f32; 4])>> = const { Mutex::new(None) };
+}
+
+/// [`HOME`], locked.
+fn with_home<R>(f: impl FnOnce(&mut Option<(u64, [f32; 4])>) -> R) -> R {
+    let lock = |home: &Mutex<_>| f(&mut home.lock().unwrap_or_else(|e| e.into_inner()));
+    #[cfg(not(test))]
+    return lock(&HOME);
+    #[cfg(test)]
+    return HOME.with(lock);
+}
 
 /// Whether Restore Last Capture has a card to bring back. Safe from any
 /// thread.
@@ -108,13 +130,46 @@ pub(crate) struct Recording {
 struct Entry {
     id: u64,
     shot: Shot,
-    /// Where it was taken from on the display, in points, when it was an
-    /// area or a window: it grows in from there.
-    capture: Option<[f32; 4]>,
-    /// Animation seconds it first drew; none until then.
-    born: Option<f64>,
+    /// Where it is on the display, heading for its slot: from where it was
+    /// taken, or in past the display's edge.
+    flight: Flight,
+    /// The shot as sharp as it was taken, while the card is still larger
+    /// than its own picture; dropped once it lands.
+    sharp: Option<rune::Image>,
     /// A short note on it and the animation seconds it appeared.
     note: Option<(String, f64)>,
+    lent: Lent,
+}
+
+/// A card open in the editor: the editor draws its shot from where the
+/// card is, and the card waits, unseen, in its slot for the shot to fly
+/// back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Lent {
+    #[default]
+    No,
+    /// Asked for; the card shows until the editor draws it.
+    Lending,
+    /// The editor draws it.
+    Away,
+}
+
+/// A shot or recording just taken, for its card.
+pub(crate) struct Taken {
+    /// The PNG, or a recording's movie.
+    pub(crate) path: PathBuf,
+    /// Its picture, already small, `width` × `height` pixels.
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) rgba: Vec<u8>,
+    /// The same picture larger, for the card's first frames, when it was
+    /// taken larger than the small one.
+    pub(crate) sharp: Option<(u32, u32, Vec<u8>)>,
+    /// The display's size in points.
+    pub(crate) screen: (f32, f32),
+    /// Where on that display it was taken from, in points: the card starts
+    /// there.
+    pub(crate) capture: Option<[f32; 4]>,
 }
 
 /// What a key or the menu does to a card.
@@ -151,6 +206,10 @@ pub(crate) struct Cards {
     /// gone.
     leaving: Option<f64>,
     now: f64,
+    /// When the cards' flights last stepped.
+    stepped: Option<f64>,
+    /// Whether Reduce Motion is on, as the view last saw it.
+    reduced: Cell<bool>,
     overlay: Option<OverlayHandle<Cards>>,
 }
 
@@ -164,11 +223,9 @@ impl Cards {
             ..Self::default()
         };
         for shot in shots {
-            cards.push(shot, None);
+            cards.push(shot, None, None);
         }
-        for card in &mut cards.cards {
-            card.born = Some(0.0);
-        }
+        cards.land();
         cards.hovered = hovered.and_then(|i| cards.cards.get(i)).map(|card| card.id);
         cards
     }
@@ -179,17 +236,19 @@ impl Cards {
         Self::still(vec![shot], PREVIEW, hovered.then_some(0))
     }
 
-    /// Adds `shot` nearest the corner. The oldest cards that no longer fit
-    /// on the display close.
-    fn push(&mut self, shot: Shot, capture: Option<[f32; 4]>) -> u64 {
+    /// Adds `shot` nearest the corner, flying in from `capture`, where it
+    /// was taken on the display, or else past the display's edge. The
+    /// oldest cards that no longer fit on the display close.
+    fn push(&mut self, shot: Shot, capture: Option<[f32; 4]>, sharp: Option<rune::Image>) -> u64 {
         self.next += 1;
         let id = self.next;
         self.cards.push(Entry {
             id,
             shot,
-            capture,
-            born: None,
+            flight: Flight::at([0.0; 4], 1.0),
+            sharp,
             note: None,
+            lent: Lent::No,
         });
         self.leaving = None;
         let room = self.screen.1 - 2.0 * INSET;
@@ -197,7 +256,26 @@ impl Cards {
             let oldest = self.cards[0].id;
             self.retire(oldest);
         }
+        if let Some((_, slot)) = self.slots().into_iter().find(|(at, _)| *at == id)
+            && let Some(card) = self.cards.iter_mut().find(|card| card.id == id)
+        {
+            let [x, y, w, h] = slot;
+            card.flight = match capture {
+                // As the shot itself, flat on the display it was part of.
+                Some(rect) => Flight::at(rect, 0.0),
+                None => Flight::at([x + w + INSET, y, w, h], 1.0),
+            };
+        }
         id
+    }
+
+    /// Every card in its slot at once, as a still shows them.
+    fn land(&mut self) {
+        let slots = self.slots();
+        for (card, (_, slot)) in self.cards.iter_mut().zip(slots) {
+            card.flight.jump(slot, 1.0);
+            card.sharp = None;
+        }
     }
 
     /// Brings the card closed last back, nearest the corner, unless its
@@ -205,7 +283,7 @@ impl Cards {
     fn restore(&mut self) -> bool {
         while let Some(card) = self.closed.pop() {
             if card.shot.path.exists() {
-                self.push(card.shot, None);
+                self.push(card.shot, None, None);
                 self.restorable();
                 return true;
             }
@@ -222,8 +300,8 @@ impl Cards {
     fn retire(&mut self, id: u64) {
         if let Some(mut card) = self.remove(id) {
             card.note = None;
-            card.capture = None;
-            card.born = None;
+            card.sharp = None;
+            card.lent = Lent::No;
             self.closed.push(card);
             if self.closed.len() > RECENT {
                 self.closed.remove(0);
@@ -268,6 +346,11 @@ impl Cards {
         if self.hovered == Some(id) {
             self.hover(None);
         }
+        with_home(|home| {
+            if home.is_some_and(|(lent, _)| lent == id) {
+                *home = None;
+            }
+        });
         Some(self.cards.remove(at))
     }
 
@@ -305,7 +388,7 @@ impl Cards {
 
     /// What `key` does to card `id`.
     fn act(&mut self, id: u64, key: CardKey, tx: &mut Tx) {
-        let Some(card) = self.get(id) else {
+        let Some(card) = self.get(id).filter(|card| card.lent == Lent::No) else {
             return;
         };
         let path = card.shot.path.clone();
@@ -322,19 +405,93 @@ impl Cards {
         }
     }
 
-    /// Opens card `id` in the editor; the card closes.
+    /// Opens card `id` in the editor, which flies its shot up from the
+    /// card; the card waits, unseen, for it to fly back.
     fn open(&mut self, id: u64, tx: &mut Tx) {
+        let Some(from) = self.lend_out(id) else {
+            return;
+        };
         let Some(card) = self.get(id) else {
             return;
         };
+        let path = card.shot.path.clone();
         match &card.shot.recording {
             Some(recording) => {
-                editor::open_recording(card.shot.path.clone(), recording.words.clone())
+                editor::open_recording_from(path, recording.words.clone(), Some(from));
             }
-            None => editor::open(card.shot.path.clone()),
+            None => editor::open_from(path, String::new(), Some(from)),
         }
-        self.close(id, tx);
+        tx.wake_after(Duration::ZERO);
     }
+
+    /// Card `id` lent to the editor, still showing until the editor draws
+    /// it: where it is now, for the editor's shot to start from.
+    fn lend_out(&mut self, id: u64) -> Option<editor::From> {
+        let reduced = self.reduced.get();
+        let card = self
+            .cards
+            .iter_mut()
+            .find(|card| card.id == id && card.lent == Lent::No)?;
+        card.lent = Lent::Lending;
+        let from = editor::From {
+            card: id,
+            rect: card.flight.rect(),
+            reduced,
+        };
+        let target = card.flight.target();
+        with_home(|home| *home = Some((id, target)));
+        if self.hovered == Some(id) {
+            self.hover(None);
+        }
+        Some(from)
+    }
+
+    /// The editor draws card `id` now, or hands it back.
+    fn lend(&mut self, id: u64, lent: Lent, tx: &mut Tx) {
+        if let Some(card) = self.cards.iter_mut().find(|card| card.id == id) {
+            card.lent = lent;
+            if lent == Lent::No {
+                with_home(|home| {
+                    if home.is_some_and(|(at, _)| at == id) {
+                        *home = None;
+                    }
+                });
+            }
+            if self.reduced.get() {
+                tx.animated();
+            }
+            tx.wake_after(Duration::ZERO);
+        }
+    }
+
+    /// Where the card open in the editor rests now, for the editor.
+    fn publish_home(&self) {
+        with_home(|home| {
+            if let Some((id, _)) = *home {
+                *home = self
+                    .cards
+                    .iter()
+                    .zip(self.slots())
+                    .find(|(card, _)| card.id == id && card.lent != Lent::No)
+                    .map(|(_, slot)| slot);
+            }
+        });
+    }
+}
+
+/// The editor draws card `id`'s shot now, or hands it back to the stack.
+/// Safe from any thread.
+fn lend(id: u64, lent: Lent) {
+    if let Some(cards) = CARDS.get() {
+        cards.update(move |s, tx| s.lend(id, lent, tx));
+    }
+    #[cfg(test)]
+    tests::LENT.with(|lent_now| lent_now.borrow_mut().push((id, lent)));
+}
+
+/// Where card `id`, open in the editor, rests now; none once it's gone.
+fn home(id: u64) -> Option<[f32; 4]> {
+    with_home(|home| home.filter(|(at, _)| *at == id).map(|(_, rect)| rect))
 }
 
 /// A card's size: its shot fitted into [`CARD_MAX`].
@@ -347,14 +504,31 @@ fn card_size(shot: &Shot) -> (f32, f32) {
 
 fn poll(s: &mut Cards, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
+    let dt = flight::tick(&mut s.stepped, now);
     let mut changed = false;
     let mut next: Option<f64> = None;
     let mut soonest = |at: f64| next = Some(next.map_or(at, |n: f64| n.min(at)));
-    for card in &mut s.cards {
-        let born = *card.born.get_or_insert(now);
-        if card.capture.is_some() && now - born < SETTLE_S {
-            soonest(born + SETTLE_S);
-        } else if card.capture.take().is_some() {
+    let reduced = s.reduced.get();
+    let mut flying = false;
+    let slots = s.slots();
+    for (card, (_, slot)) in s.cards.iter_mut().zip(slots) {
+        // A card the editor draws holds still in its slot for the shot to
+        // fly back to.
+        if reduced || card.lent == Lent::Away {
+            if card.flight.rect() != slot || card.flight.lift() < 1.0 {
+                card.flight.jump(slot, 1.0);
+                changed = true;
+            }
+        } else if card.lent == Lent::No {
+            if card.flight.step(slot, 1.0, dt) {
+                soonest(now);
+                flying = true;
+                changed = true;
+            } else if card.flight.rect() != slot {
+                changed = true;
+            }
+        }
+        if card.flight.resting() && card.sharp.take().is_some() {
             changed = true;
         }
         if let Some((_, at)) = &card.note {
@@ -377,6 +551,12 @@ fn poll(s: &mut Cards, now: f64, tx: &mut Tx) -> bool {
         }
         soonest(at + LEAVE_S);
     }
+    // A flight that starts later starts from its first frame, not from
+    // this one.
+    if !flying {
+        s.stepped = None;
+    }
+    s.publish_home();
     if let Some(at) = next {
         tx.wake_after(Duration::from_secs_f64((at - now).max(0.0)));
     }
@@ -410,44 +590,25 @@ impl Thumbnail {
             input: rune::OverlayInput::Regions,
             ..Default::default()
         })
-        .animate_reveal()
         .poll(poll);
         let overlay = app.overlay(spec, Cards::default());
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
+        let _ = CARDS.set(overlay.clone());
         Self { overlay }
     }
 
-    /// Shows the shot at `path`, from `rgba` (`width` × `height` pixels,
-    /// already small), on the display `screen` points across, nearest the
-    /// corner, above any before it. `capture` is the rectangle it was taken
-    /// from on that display, in points, when it was an area or a window.
-    /// Safe from any thread; waits for the decode.
-    pub(crate) fn show(
-        &self,
-        path: PathBuf,
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-        screen: (f32, f32),
-        capture: Option<[f32; 4]>,
-    ) {
-        self.present(path, None, width, height, rgba, screen, capture);
+    /// Shows the shot `taken` nearest the corner of its display, above any
+    /// before it, flying in from where it was taken. Safe from any thread;
+    /// waits for the decode.
+    pub(crate) fn show(&self, taken: Taken) {
+        self.present(taken, None);
     }
 
-    /// Shows the recording saved at `movie`, from its first frame, as
-    /// [`Self::show`] does a shot. Nothing talks over it: it already has its
-    /// words.
-    pub(crate) fn show_recording(
-        &self,
-        movie: PathBuf,
-        recording: Recording,
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-        screen: (f32, f32),
-    ) {
-        self.present(movie, Some(recording), width, height, rgba, screen, None);
+    /// Shows the recording `taken`, from its first frame, as [`Self::show`]
+    /// does a shot. Nothing talks over it: it already has its words.
+    pub(crate) fn show_recording(&self, taken: Taken, recording: Recording) {
+        self.present(taken, Some(recording));
     }
 
     /// Brings back the card closed last, nearest the corner of the display
@@ -473,22 +634,23 @@ impl Thumbnail {
         });
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn present(
-        &self,
-        path: PathBuf,
-        recording: Option<Recording>,
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-        screen: (f32, f32),
-        capture: Option<[f32; 4]>,
-    ) {
+    fn present(&self, taken: Taken, recording: Option<Recording>) {
+        let Taken {
+            path,
+            width,
+            height,
+            rgba,
+            sharp,
+            screen,
+            capture,
+        } = taken;
         let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
         let image = images.rgba(width, height, rgba);
+        let sharp = sharp.map(|(w, h, rgba)| images.rgba(w, h, rgba));
         if image.wait().is_err() {
             return;
         }
+        let sharp = sharp.filter(|sharp| sharp.wait().is_ok());
         // The overlay is the whole display, so a card can start wherever
         // its shot was taken; the stack follows the newest to its display.
         self.overlay.resize(screen);
@@ -501,7 +663,7 @@ impl Thumbnail {
                 size: [width, height],
                 recording,
             };
-            s.push(shot, capture);
+            s.push(shot, capture, sharp);
             handle.show();
             tx.animated();
             tx.wake_after(Duration::ZERO);

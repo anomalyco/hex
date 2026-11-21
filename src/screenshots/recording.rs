@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::history::captures::{CaptureKind, CaptureWord};
-use crate::rune_ui::screenshot_thumbnail::Recording;
 use crate::rune_ui::screenshot_thumbnail::editor::clip;
+use crate::rune_ui::screenshot_thumbnail::{Recording, Taken};
 
 /// The capture host's hook for each written recording, on its finishing
 /// thread: the movie is saved and the card read on a thread of its own.
@@ -48,10 +48,13 @@ fn show(bundle: &Path) -> anyhow::Result<()> {
     };
     let probe = helper::probe(&movie)?;
     let duration_ms = probe.duration_ms;
-    let frame = helper::frames(&movie, FrameTimes::At(&[0]), super::THUMB_PX)?
+    let frame = helper::frames(&movie, FrameTimes::At(&[0]), super::SHARP_PX)?
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("the recording has no frames"))?;
+    let sharp = super::sharp(frame.width, frame.height, &frame.rgba);
+    let (width, height, small) =
+        super::shrink(frame.width, frame.height, &frame.rgba, super::THUMB_PX);
     let timed = words
         .iter()
         .map(|word| CaptureWord {
@@ -68,20 +71,56 @@ fn show(bundle: &Path) -> anyhow::Result<()> {
             duration_ms,
             timed,
         },
-        (frame.width, frame.height, &frame.rgba),
+        (width, height, &small),
     );
     if let Some(overlays) = super::OVERLAYS.get() {
-        let screen = super::screen_under_pointer();
+        let (screen, capture) = recorded_area(bundle);
         overlays.thumbnail.show_recording(
-            movie,
+            Taken {
+                path: movie,
+                width,
+                height,
+                rgba: small,
+                sharp,
+                screen,
+                capture,
+            },
             Recording { duration_ms, words },
-            frame.width,
-            frame.height,
-            frame.rgba,
-            screen,
         );
     }
     Ok(())
+}
+
+/// The display a recording was made on, in points, and the area it
+/// recorded there, from its bundle's manifest: where its card flies in
+/// from. The display under the pointer, and no area, when the manifest
+/// doesn't say.
+fn recorded_area(bundle: &Path) -> ((f32, f32), Option<[f32; 4]>) {
+    use scrawl_capture::screens;
+    let frame = capture_core::Manifest::read(bundle)
+        .ok()
+        .and_then(|manifest| {
+            manifest
+                .sources
+                .iter()
+                .find(|source| source.error.is_none())
+                .map(|source| source.frame)
+        });
+    let displays = screens::displays();
+    let placed = frame.and_then(|frame| {
+        let centre = [frame.x + frame.width * 0.5, frame.y + frame.height * 0.5];
+        let display = &displays[screens::index_at(&displays, centre)?];
+        let [x, y] = screens::to_local(display.frame, [frame.x, frame.y]);
+        let screen = (display.frame[2] as f32, display.frame[3] as f32);
+        Some((
+            screen,
+            [x as f32, y as f32, frame.width as f32, frame.height as f32],
+        ))
+    });
+    match placed {
+        Some((screen, area)) => (screen, Some(area)),
+        None => (super::screen_under_pointer(), None),
+    }
 }
 
 /// An audio file the bundle kept beside the movie, and where its time zero

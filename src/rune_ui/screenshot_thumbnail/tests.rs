@@ -4,6 +4,12 @@ use rune::Tx;
 
 use super::*;
 
+thread_local! {
+    /// What the editor lent or gave back, for a test standing in for the
+    /// stack's overlay.
+    pub(super) static LENT: std::cell::RefCell<Vec<(u64, Lent)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn shot(size: [u32; 2]) -> Shot {
     let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
     let image = images.rgba(
@@ -197,7 +203,11 @@ fn thumbnail_frames() {
         150,
         |index, rt| match index {
             12 => rt.update(|s: &mut Cards, tx| {
-                s.push(desktop([1440, 900], 0), Some([120.0, 90.0, 260.0, 170.0]));
+                s.push(
+                    desktop([1440, 900], 0),
+                    Some([120.0, 90.0, 260.0, 170.0]),
+                    None,
+                );
                 tx.animated();
             }),
             110 => rt.update(|s: &mut Cards, tx| {
@@ -214,15 +224,23 @@ fn thumbnail_frames() {
         240,
         |index, rt| match index {
             10 => rt.update(|s: &mut Cards, tx| {
-                s.push(desktop([1200, 900], 1), Some([40.0, 60.0, 200.0, 150.0]));
+                s.push(
+                    desktop([1200, 900], 1),
+                    Some([40.0, 60.0, 200.0, 150.0]),
+                    None,
+                );
                 tx.animated();
             }),
             60 => rt.update(|s: &mut Cards, tx| {
-                s.push(recording(desktop([1440, 900], 2)), None);
+                s.push(recording(desktop([1440, 900], 2)), None, None);
                 tx.animated();
             }),
             110 => rt.update(|s: &mut Cards, tx| {
-                s.push(desktop([1440, 900], 0), Some([60.0, 200.0, 300.0, 190.0]));
+                s.push(
+                    desktop([1440, 900], 0),
+                    Some([60.0, 200.0, 300.0, 190.0]),
+                    None,
+                );
                 tx.animated();
             }),
             190 => rt.update(|s: &mut Cards, tx| {
@@ -298,8 +316,8 @@ fn a_card_stays_until_its_closed() {
 #[test]
 fn the_newest_rests_in_the_corner_and_the_older_ones_above_it() {
     let mut cards = Cards::still(Vec::new(), (800.0, 600.0), None);
-    let old = cards.push(shot([1440, 900]), None);
-    let new = cards.push(shot([1440, 900]), None);
+    let old = cards.push(shot([1440, 900]), None, None);
+    let new = cards.push(shot([1440, 900]), None, None);
     let slots = cards.slots();
     let [x, y, w, h] = slots[1].1;
     assert_eq!(slots[1].0, new);
@@ -330,7 +348,7 @@ fn cards_of_any_shape_share_the_corners_right_edge() {
 fn the_oldest_cards_close_once_the_stack_reaches_the_top() {
     let mut cards = Cards::still(Vec::new(), (800.0, 400.0), None);
     let ids: Vec<u64> = (0..4)
-        .map(|_| cards.push(shot([1440, 900]), None))
+        .map(|_| cards.push(shot([1440, 900]), None, None))
         .collect();
     let kept: Vec<u64> = cards.cards.iter().map(|card| card.id).collect();
     assert_eq!(kept, ids[2..]);

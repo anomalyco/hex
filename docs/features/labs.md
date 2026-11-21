@@ -2758,11 +2758,13 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
                   └── a card bottom right, 16 pt in, its corner concentric with the display's
                       (30 pt, a design constant), staying until it's closed (no timer):
-                      an area or window shot grows in from exactly the rectangle captured, at that
-                      size and place, and springs into its corner slot on one spring that never
-                      overshoots its size; a whole-display shot or a recording slides in from past
-                      the right edge on the HUD's spring; any card leaves past the right edge
-                      (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
+                      every shot starts as exactly the rectangle captured (the area, the window, the
+                      whole display; a recording, the area it recorded), flat and square with no
+                      fade, and flies into its corner slot on critically damped springs: place and
+                      size together, its corner rounding and its shadow coming in as it lifts; a
+                      new shot mid-flight retargets it with its velocity kept; any card leaves past
+                      the right edge (Reduce Motion: a fade either way); ✕ shows inside its
+                      top-left corner on hover
                       a dictation while cards show -> pastes as usual, being no shot's talk-over
                       a failure -> the error tone and, for a failed save, the folder and why
                                    on Labs › Screenshots' card; there is no success sound
@@ -2822,7 +2824,8 @@ cards
 │                     HUD's spring (Reduce Motion: they move at once); once the stack would pass
 │                     the display's top, the oldest close. The stack follows the newest capture
 │                     to its display
-├── click          -> the editor; that card closes
+├── click          -> the card itself grows into the editor (see below); closing flies it
+│                     back into its slot, wherever the stack has moved it
 ├── drag           -> the file, into any app
 ├── ✕              -> closes that card; the ones above it move down into its place
 ├── right-click    -> Open in Editor, Copy, Show in Finder, Move to Trash, Close
@@ -2904,7 +2907,14 @@ outside the card, so the card can start anywhere a shot was taken from.
 A click on the thumbnail opens the editor
 ([screenshot_thumbnail/editor.rs](../../src/rune_ui/screenshot_thumbnail/editor.rs)), a panel
 centred on the display under the pointer, the capsule's corners and
-shadow, growing in on the HUD's spring (Reduce Motion: a fade). Its tools,
+shadow. The card's own picture grows from the card into its place in the
+panel, losing the card's corner and shadow as it goes, and the panel
+fades in around it once it has nearly landed; the card waits unseen
+meanwhile, so the shot never shows twice. Closing reverses it: the panel
+fades, the shot flies back into its card and dissolves into it, and a
+close mid-zoom turns straight back with its velocity kept. A shot whose
+card has gone shrinks a little and fades where it is (Reduce Motion: a
+cross-fade). Its tools,
 ✕ and microphone are the kit's icon buttons (a picked tool filled, as a
 capsule's expanded one is) and Copy, Save and Send to… are the kit's
 buttons, so it reads as the rest of Hex. The shot
@@ -3214,6 +3224,13 @@ list's search, and both exports
 (`an_export_draws_the_marks_over_the_shot` renders on a GPU, skipping
 without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
+the flights in [screenshot_thumbnail/flight.rs](../../src/rune_ui/screenshot_thumbnail/flight.rs)
+(no overshoot, the same flight at 60 and 120 Hz, retargeting keeps its
+velocity) and the handoffs between card and editor in
+[screenshot_thumbnail/editor/zoom/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/zoom/tests.rs)
+(`the_shot_never_jumps_between_the_card_and_the_editor`, a close mid-zoom,
+a gone card, a new shot mid-zoom; `zoom_frames` renders the clips with
+`HEX_SCREENSHOT_MOTION=<dir>` and does nothing without it);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
 the index's order, reopen, owner-only modes, search, window, caps, forgetting,
 words, and a malformed file in [history/captures.rs](../../src/history/captures.rs);

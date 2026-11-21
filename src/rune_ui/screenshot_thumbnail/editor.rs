@@ -16,6 +16,7 @@ mod export;
 pub(crate) mod marks;
 mod narration;
 mod view;
+mod zoom;
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -35,6 +36,7 @@ pub(crate) use narration::Narration;
 use narration::{GENERATION, OPEN};
 #[cfg(target_os = "macos")]
 pub(crate) use narration::{can_claim, heard, listen, narration};
+pub(crate) use zoom::From;
 
 /// Around the shot and the toolbar, inside the panel.
 const PAD: f32 = 8.0;
@@ -166,6 +168,8 @@ pub(crate) struct Editor {
     failed: Option<Out>,
     on: bool,
     leaving: Option<f64>,
+    /// The shot flying from its card and back, when a card opened it.
+    zoom: Option<zoom::Zoom>,
     now: f64,
     overlay: Option<OverlayHandle<Editor>>,
 }
@@ -219,6 +223,7 @@ impl Editor {
     }
 
     fn load(&mut self, shot: Shot, screen: [f32; 2]) {
+        self.give_back();
         *self = Self {
             shot: Some(shot),
             screen,
@@ -231,6 +236,7 @@ impl Editor {
     }
 
     fn load_clip(&mut self, clip: Clip, screen: [f32; 2]) {
+        self.give_back();
         *self = Self {
             clip: Some(clip),
             export_size: crate::app_settings::screenshot_settings().export_size,
@@ -310,9 +316,13 @@ impl Editor {
             self.on = false;
             self.send = None;
             self.waiting = None;
-            self.leaving = Some(self.now);
             tx.animated();
-            tx.wake_after(Duration::from_secs_f64(LEAVE_S));
+            if self.zoom_out() {
+                tx.wake_after(Duration::ZERO);
+            } else {
+                self.leaving = Some(self.now);
+                tx.wake_after(Duration::from_secs_f64(LEAVE_S));
+            }
         }
     }
 
@@ -773,11 +783,14 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
 
 fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
-    let mut moved = false;
+    let mut moved = s.step_zoom(now, tx);
+    if s.zooming_out() {
+        return moved;
+    }
     if let Some(clip) = &mut s.clip
         && clip.playing
     {
-        moved = clip.tick(now);
+        moved |= clip.tick(now);
         tx.wake_after(PLAY_STEP);
     }
     if let Some(at) = s.leaving {
@@ -841,7 +854,6 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
             keys: KeyPolicy::OnDemand,
             ..Default::default()
         })
-        .animate_reveal()
         .release_gpu_when_hidden()
         .on_key(on_key)
         .poll(poll);
@@ -851,18 +863,19 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
     let _ = EDITOR.set(overlay);
 }
 
-/// Opens the shot at `path` in the editor, in place of any open. Safe from
-/// any thread; reads the file on its own.
-pub(crate) fn open(path: PathBuf) {
-    open_with(path, String::new());
-}
-
 /// Opens the Screenshots recording `movie`, with the `words` said over it,
 /// to trim, in place of anything open. Safe from any thread; reads its
 /// frames on its own.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
+    open_recording_from(movie, words, None);
+}
+
+/// [`open_recording`] from card `from`, whose picture flies up into the
+/// editor.
+pub(crate) fn open_recording_from(movie: PathBuf, words: Vec<clip::Word>, from: Option<From>) {
     let Some(overlay) = EDITOR.get().cloned() else {
+        zoom::unopened(from);
         return;
     };
     let spawned = std::thread::Builder::new()
@@ -872,6 +885,7 @@ pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
                 Ok(clip) => clip,
                 Err(error) => {
                     tracing::warn!(%error, movie = %movie.display(), "could not open the recording");
+                    zoom::unopened(from);
                     return;
                 }
             };
@@ -881,6 +895,7 @@ pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
                 // Dictation stays dictation: nothing talks over a recording.
                 *OPEN.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 s.load_clip(clip, screen);
+                s.zoom = from.map(zoom::Zoom::new);
                 if let Some(clip) = &mut s.clip {
                     let player = rune::Player::file(clip.movie.clone());
                     player.set_muted(false);
@@ -894,13 +909,22 @@ pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
         });
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not open the recording editor");
+        zoom::unopened(from);
     }
 }
 
-/// [`open`] with `words` already said over the shot.
+/// Opens the shot at `path` in the editor with `words` already said over
+/// it, in place of anything open. Safe from any thread; reads the file on
+/// its own.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn open_with(path: PathBuf, words: String) {
+    open_from(path, words, None);
+}
+
+/// [`open_with`] from card `from`, whose shot flies up into the editor.
+pub(crate) fn open_from(path: PathBuf, words: String, from: Option<From>) {
     let Some(overlay) = EDITOR.get().cloned() else {
+        zoom::unopened(from);
         return;
     };
     let spawned = std::thread::Builder::new()
@@ -910,6 +934,7 @@ pub(crate) fn open_with(path: PathBuf, words: String) {
                 Ok(shot) => shot,
                 Err(error) => {
                     tracing::warn!(%error, path = %path.display(), "could not open the screenshot");
+                    zoom::unopened(from);
                     return;
                 }
             };
@@ -917,6 +942,7 @@ pub(crate) fn open_with(path: PathBuf, words: String) {
             let handle = overlay.clone();
             overlay.update(move |s, tx| {
                 s.load(shot, screen);
+                s.zoom = from.map(zoom::Zoom::new);
                 s.file = Some(path);
                 s.words = words;
                 s.listen = Listen::Idle;
@@ -931,6 +957,7 @@ pub(crate) fn open_with(path: PathBuf, words: String) {
         });
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not open the screenshot editor");
+        zoom::unopened(from);
     }
 }
 

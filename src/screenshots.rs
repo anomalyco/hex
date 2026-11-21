@@ -332,14 +332,17 @@ fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
         (width, height, &small),
     );
     if let Some(overlays) = OVERLAYS.get() {
-        overlays.thumbnail.show(
-            path.clone(),
-            width,
-            height,
-            small,
-            shot.screen,
-            shot.capture,
-        );
+        overlays
+            .thumbnail
+            .show(crate::rune_ui::screenshot_thumbnail::Taken {
+                path: path.clone(),
+                width,
+                height,
+                rgba: small,
+                sharp: sharp(image.width, image.height, &image.rgba),
+                screen: shot.screen,
+                capture: shot.capture,
+            });
     }
     Ok(path)
 }
@@ -424,6 +427,16 @@ fn screen_under_pointer() -> (f32, f32) {
 
 /// The thumbnail's long edge, in pixels.
 const THUMB_PX: u32 = 480;
+/// The long edge of the copy a card shows while it's still large, flying
+/// in from where it was taken.
+const SHARP_PX: u32 = 2560;
+
+/// A copy of a shot `width` × `height` pixels for the first frames of its
+/// card, at most [`SHARP_PX`] on its long edge; none when the thumbnail
+/// is already the whole shot.
+fn sharp(width: u32, height: u32, rgba: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    (width.max(height) > THUMB_PX).then(|| shrink(width, height, rgba, SHARP_PX))
+}
 
 /// What ScreenCaptureKit shoots for `target`: its source, its width in
 /// points, the display it lands on, and where on that display it was taken
@@ -444,6 +457,10 @@ fn source(target: CaptureTarget) -> anyhow::Result<Shot> {
             .ok_or_else(|| anyhow::anyhow!("no display there"))
     };
     let screen = |display: &screens::Screen| (display.frame[2] as f32, display.frame[3] as f32);
+    let whole = |display: &screens::Screen| {
+        let (w, h) = screen(display);
+        [0.0, 0.0, w, h]
+    };
     Ok(match target {
         CaptureTarget::Window { id } => {
             let bounds = scrawl_capture::windows::raw_windows()
@@ -468,7 +485,7 @@ fn source(target: CaptureTarget) -> anyhow::Result<Shot> {
                 source: capture_core::Source::Display(display.id),
                 points_wide: display.frame[2],
                 screen: screen(display),
-                capture: None,
+                capture: Some(whole(display)),
             }
         }
         CaptureTarget::Phone => anyhow::bail!("a screenshot is never of an iPhone"),
@@ -478,7 +495,7 @@ fn source(target: CaptureTarget) -> anyhow::Result<Shot> {
                 source: capture_core::Source::Display(display.id),
                 points_wide: display.frame[2],
                 screen: screen(display),
-                capture: None,
+                capture: Some(whole(display)),
             }
         }
         CaptureTarget::Area { rect: [x, y, w, h] } => {

@@ -1,11 +1,14 @@
-//! How the stack draws: each card in its slot, the newest in the corner.
+//! How the stack draws: each card where its flight has it, heading for
+//! its slot, the newest in the corner. Its flight places it every frame,
+//! so the layout's own springs stay out of the way.
 
 use rune::{Anim, Cursor, Cx, El, PopupItem, PopupMenu, Spring, SpringPair, Transition, Tx, el};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
+use super::flight::{lifted, mix};
 use super::{
-    CLOSE_INSET, CLOSE_RADIUS, CardKey, Cards, ENTER, Entry, FADE, INSET, LEAVE, PILL_H, RADIUS,
-    REDUCED, TRAVEL_SCALE, ZOOM,
+    CLOSE_INSET, CLOSE_RADIUS, CardKey, Cards, Entry, FADE, INSET, LEAVE, Lent, PILL_H, RADIUS,
+    REDUCED, TRAVEL_SCALE,
 };
 use crate::desktop::i18n::tr;
 use crate::rune_ui::controls::Paint;
@@ -16,31 +19,63 @@ pub(crate) fn view(s: &Cards, cx: &mut Cx<Cards>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let (sw, sh) = s.screen;
     let reduced = cx.is_reduced_motion();
+    s.reduced.set(reduced);
     let mut root = el()
         .key("screenshot-thumbnail")
         .size(sw, sh)
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
-    for (card, (id, rect)) in s.cards.iter().zip(s.slots()) {
-        debug_assert_eq!(card.id, id);
-        root = root.child(entry(p, card, rect, s.hovered == Some(id), reduced));
+    for card in &s.cards {
+        root = root.child(entry(p, card, s.hovered == Some(card.id), reduced));
     }
     root
 }
 
-/// One card at `rect`.
-fn entry(p: Paint, card: &Entry, rect: [f32; 4], hovered: bool, reduced: bool) -> El {
+/// One card where its flight has it: flat and square as the shot it was
+/// on the display, a card with its corner and shadow once it has lifted
+/// off. A card the editor draws stays in its slot, unseen and out of the
+/// pointer's way.
+fn entry(p: Paint, card: &Entry, hovered: bool, reduced: bool) -> El {
     let k = p.k;
     let id = card.id;
+    let rect = card.flight.rect();
     let [x, y, w, h] = rect;
+    let lift = card.flight.lift();
+    let away = card.lent == Lent::Away;
     let mut shell = el()
         .key(format!("card-{id}"))
         .absolute(x, y)
         .size(w, h)
-        .radius(RADIUS)
-        .fill(k.c.bg_base);
+        .radius(mix(0.0, RADIUS, lift))
+        .fill(k.c.bg_base)
+        .opacity(if away { 0.0 } else { 1.0 })
+        .opacity_motion(if reduced {
+            Anim::from(REDUCED)
+        } else {
+            Anim::INSTANT
+        });
     for shadow in &k.elevation.floating {
-        shell = shell.box_shadow(*shadow);
+        shell = shell.box_shadow(lifted(*shadow, lift));
     }
+    let image = card.sharp.as_ref().unwrap_or(&card.shot.image);
+    let shell = shell
+        .pixels_fit(image.pixels(), rune::SurfaceFit::Fit)
+        .child(
+            el().absolute(0.0, 0.0)
+                .size(w, h)
+                .radius(mix(0.0, RADIUS, lift))
+                .border(p.hair, k.c.border_weak)
+                .opacity(lift),
+        )
+        // Its flight places it each frame; Reduce Motion fades it.
+        .motion(Spring::NONE)
+        .transition(travel(rect, reduced));
+    if away {
+        return shell;
+    }
+    // Its labels come in as it arrives: none while it's still twice its
+    // card's width.
+    let tw = card.flight.target()[2].max(1.0);
+    let arrived = (2.0 - w / tw).clamp(0.0, 1.0);
     let close = IconButton::new(CLOSE)
         .variant(IconButtonVariant::Ghost)
         .control_size(ControlSize::Small)
@@ -63,9 +98,9 @@ fn entry(p: Paint, card: &Entry, rect: [f32; 4], hovered: bool, reduced: bool) -
     .map(|pill| {
         pill.key("pill")
             .absolute(CLOSE_INSET, h - CLOSE_INSET - PILL_H)
+            .opacity(arrived)
     });
     let shell = shell
-        .pixels_fit(card.shot.image.pixels(), rune::SurfaceFit::Fit)
         .cursor(Cursor::Pointer)
         .on_press_tx(move |s: &mut Cards, tx| s.open(id, tx))
         .on_secondary_press(move |_: &mut Cards, press, tx| menu(id, press, tx))
@@ -73,12 +108,6 @@ fn entry(p: Paint, card: &Entry, rect: [f32; 4], hovered: bool, reduced: bool) -
             s.get(id)
                 .map(|card| rune::DragItem::new().file(card.shot.path.clone()))
         })
-        .child(
-            el().absolute(0.0, 0.0)
-                .size(w, h)
-                .radius(RADIUS)
-                .border(p.hair, k.c.border_weak),
-        )
         .hit()
         .on_hover_change(move |s: &mut Cards, on, tx| {
             if on {
@@ -88,10 +117,6 @@ fn entry(p: Paint, card: &Entry, rect: [f32; 4], hovered: bool, reduced: bool) -
             }
             tx.animated();
         })
-        // The older cards make room on the HUD's spring; Reduce Motion
-        // moves them at once.
-        .motion(if reduced { Spring::NONE } else { ENTER })
-        .transition(travel(card, rect, reduced))
         .child(close);
     match pill {
         Some(pill) => shell.child(pill),
@@ -99,26 +124,19 @@ fn entry(p: Paint, card: &Entry, rect: [f32; 4], hovered: bool, reduced: bool) -
     }
 }
 
-/// How a card comes and goes. A shot grows in from the rectangle it was
-/// taken from, at that rectangle's size and place, and shrinks into its
-/// slot; without one (a whole display, a recording, or once it has been in
-/// a moment) it comes and goes past the display's right edge, leaning back
-/// about the corner it rests in. Reduce Motion only fades.
-fn travel(card: &Entry, [x, y, w, _]: [f32; 4], reduced: bool) -> Transition {
+/// How a card comes and goes. It comes as its flight brings it, so it
+/// shows whole from its first frame; it goes past the display's right
+/// edge, leaning back about the corner it rests in. Reduce Motion only
+/// fades.
+fn travel([_, _, w, _]: [f32; 4], reduced: bool) -> Transition {
     if reduced {
         Transition::opacity().springs(SpringPair::new(REDUCED, REDUCED))
-    } else if let Some([cx0, cy0, cw, _]) = card.capture {
-        let scale = (cw / w).max(0.02);
-        Transition::offset(cx0 - x, cy0 - y)
-            .combined(Transition::scale_anchor(scale, rune::Vec2::new(0.0, 0.0)))
-            .springs(SpringPair::new(ZOOM, LEAVE))
     } else {
-        Transition::offset(w + INSET, 0.0)
-            .combined(Transition::scale_anchor(
-                TRAVEL_SCALE,
-                rune::Vec2::new(1.0, 1.0),
-            ))
-            .springs(SpringPair::new(ENTER, LEAVE))
+        let leave = Transition::offset(w + INSET, 0.0).combined(Transition::scale_anchor(
+            TRAVEL_SCALE,
+            rune::Vec2::new(1.0, 1.0),
+        ));
+        Transition::asymmetric(Transition::identity(), leave).springs(SpringPair::new(FADE, LEAVE))
     }
 }
 
