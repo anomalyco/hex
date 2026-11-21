@@ -76,7 +76,6 @@ final class KeyboardKeyPlaneView: UIView {
         let isLandscape = layout.orientation == .landscape
         let radius = layout.metrics.cornerRadius
         let pressed = engine.pressedKinds
-        let preview = layout.showsBalloons && engine.showsKeyPopups ? engine.previewKey?.kind : nil
         // Like Apple's spacebar trackpad, key glyphs blank out while sliding the cursor.
         let hideGlyphs = engine.isTrackpadActive
 
@@ -92,22 +91,23 @@ final class KeyboardKeyPlaneView: UIView {
             case .hex:
                 continue
             case .character:
-                // The pressed key is drawn by its balloon in portrait.
-                if key.kind == preview { continue }
-                let fill = pressed.contains(key.kind) ? palette.keyPressedFill : palette.keyFill
+                // The pressed key stays in place, grey, under iOS 27's floating pop-up.
+                let fill = pressed.contains(key.kind) ? palette.keyHeldFill : palette.keyFill
                 context.fillKeycap(frame, fill: fill, radius: radius)
                 guard !hideGlyphs else { continue }
                 var label = Self.keycapLabel(engine.displayLabel(for: key))
                 let isUpperLetter = layout.layer == .letters && engine.isUppercase && label.first?.isUppercase == true
                 let style = isLandscape
-                    ? LabelStyle(size: isUpperLetter ? 18 : 19, yOffset: isUpperLetter ? 0 : -0.5)
+                    ? (isUpperLetter ? Self.landscapeCapital
+                        : label.first?.isLetter == true ? Self.landscapeLowercase
+                        : Self.landscapeSymbolOverrides[label] ?? Self.landscapeSymbol)
                     : isUpperLetter ? LabelStyle.capital
                     : label.first?.isLetter == true ? LabelStyle.lowercase
                     : LabelStyle.symbolOverrides[label] ?? LabelStyle.symbol
-                if !isLandscape, let shown = style.shows { label = shown }
+                if let shown = style.shows { label = shown }
                 drawText(label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
             case .space:
-                let fill = pressed.contains(.space) ? palette.keyPressedFill : palette.keyFill
+                let fill = pressed.contains(.space) ? palette.spaceHeldFill : palette.keyFill
                 context.fillKeycap(frame, fill: fill, radius: radius)
                 guard !hideGlyphs, let spaceLabel else { continue }
                 drawText(
@@ -121,7 +121,7 @@ final class KeyboardKeyPlaneView: UIView {
                 let activeAction = returnIsAction && returnIsEnabled && !hideGlyphs
                 let fill: UIColor = activeAction
                     ? (isPressed ? palette.actionPressedFill : palette.actionFill)
-                    : (isPressed ? palette.keyPressedFill : palette.keyFill)
+                    : (isPressed ? palette.functionHeldFill : palette.keyFill)
                 let ink: UIColor = if !returnIsEnabled {
                     palette.textMuted
                 } else if activeAction {
@@ -136,9 +136,9 @@ final class KeyboardKeyPlaneView: UIView {
                         symbol,
                         in: labelFrame,
                         color: ink,
-                        pointSize: isLandscape ? 15.5 : 19,
+                        pointSize: isLandscape ? 18 : 19,
                         weight: activeAction ? .medium : .regular,
-                        yOffset: isLandscape ? 0 : -0.33
+                        yOffset: isLandscape ? -0.5 : -0.33
                     )
                 } else {
                     drawText(returnLabel, in: labelFrame, font: .systemFont(ofSize: isLandscape ? 14.5 : 15.5), color: ink)
@@ -146,40 +146,44 @@ final class KeyboardKeyPlaneView: UIView {
             case .shift:
                 let state = engine.shift.state
                 let isPressed = pressed.contains(.shift)
-                context.fillKeycap(frame, fill: isPressed ? palette.keyPressedFill : palette.keyFill, radius: radius)
+                context.fillKeycap(frame, fill: isPressed ? palette.functionHeldFill : palette.keyFill, radius: radius)
                 guard !hideGlyphs else { continue }
                 let symbol = switch state {
                 case .off: engine.shift.isHeld ? "shift.fill" : "shift"
                 case .on: "shift.fill"
                 case .locked: "capslock.fill"
                 }
-                drawSymbol(symbol, in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : 0.67)
+                drawSymbol(symbol, in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 18 : 19, yOffset: isLandscape ? -0.16 : 0.67)
             case .delete:
                 let lit = pressed.contains(.delete)
-                context.fillKeycap(frame, fill: lit ? palette.keyPressedFill : palette.keyFill, radius: radius)
+                context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
                 guard !hideGlyphs else { continue }
-                drawSymbol(lit ? "delete.left.fill" : "delete.left", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : 0.33)
+                drawSymbol(lit ? "delete.left.fill" : "delete.left", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 18.5 : 19, yOffset: isLandscape ? -0.16 : 0.33)
             case .layerSwitch:
                 let lit = pressed.contains(key.kind)
-                context.fillKeycap(frame, fill: lit ? palette.keyPressedFill : palette.keyFill, radius: radius)
+                context.fillKeycap(frame, fill: lit ? palette.keyHeldFill : palette.keyFill, radius: radius)
                 guard !hideGlyphs else { continue }
-                let style = isLandscape ? LabelStyle(size: 14.5, yOffset: 0)
+                let style = isLandscape
+                    ? (key.label == "123" && key.row == 3 ? LabelStyle(size: 15.5, weight: UIFont.Weight(rawValue: -0.05), yOffset: 0)
+                        : key.row == 3 ? LabelStyle(size: 17.75, weight: UIFont.Weight(rawValue: 0.08), yOffset: -0.83)
+                        : key.label == "#+=" ? LabelStyle(size: 12.25, weight: UIFont.Weight(rawValue: 0.2), yOffset: -1.33)
+                        : LabelStyle(size: 15.5, weight: UIFont.Weight(rawValue: -0.05), yOffset: 0))
                     : key.row == 3 ? LabelStyle.pageKey
                     : key.label == "#+=" ? LabelStyle.symbolsPageKey
                     : LabelStyle(size: 15.5, yOffset: 0)
                 drawText(key.label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
             case .globe:
                 let lit = pressed.contains(.globe)
-                context.fillKeycap(frame, fill: lit ? palette.keyPressedFill : palette.keyFill, radius: radius)
+                context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
                 guard !hideGlyphs else { continue }
                 drawSymbol("globe", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : -1)
             case .emoji:
                 let lit = pressed.contains(.emoji)
-                context.fillKeycap(frame, fill: lit ? palette.keyPressedFill : palette.keyFill, radius: radius)
+                context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
                 guard !hideGlyphs else { continue }
                 drawSymbol(
                     "face.smiling", in: labelFrame, color: palette.textBase,
-                    pointSize: isLandscape ? 16 : 18.5, weight: isLandscape ? .regular : .semibold, yOffset: isLandscape ? 0 : -0.67
+                    pointSize: isLandscape ? 17.5 : 18.5, weight: .semibold, yOffset: -0.67
                 )
             }
         }
@@ -286,6 +290,33 @@ final class KeyboardKeyPlaneView: UIView {
         /// #+= on row 3: small, 12.25 pt and heavier.
         static let symbolsPageKey = LabelStyle(size: 12.25, weight: UIFont.Weight(rawValue: 0.2), yOffset: -0.33)
     }
+
+    /// Turned, Apple's labels are about 0.875 of their portrait sizes (fitted the same way on
+    /// the 17 Pro, 17e and SE), with their own exceptions.
+    static let landscapeLowercase = LabelStyle(size: 21.5, weight: UIFont.Weight(rawValue: -0.05), yOffset: -2.17)
+    static let landscapeCapital = LabelStyle(size: 18.75, weight: UIFont.Weight(rawValue: 0.08), yOffset: -0.17)
+    static let landscapeSymbol = LabelStyle(size: 18.75, weight: UIFont.Weight(rawValue: 0.08), yOffset: -0.17, caseSensitive: true)
+    static let landscapeSymbolOverrides: [String: LabelStyle] = [
+            "-": LabelStyle(size: 19.5, weight: UIFont.Weight(rawValue: 0), yOffset: -0.5, caseSensitive: true),
+            "/": LabelStyle(size: 16.5, weight: UIFont.Weight(rawValue: 0.2), yOffset: -0.5, caseSensitive: true),
+            ":": LabelStyle(size: 21.75, weight: UIFont.Weight(rawValue: 0.04), yOffset: 2.17, caseSensitive: true),
+            ";": LabelStyle(size: 16.75, weight: UIFont.Weight(rawValue: 0.2), yOffset: 0.17, caseSensitive: true),
+            "@": LabelStyle(size: 19, weight: UIFont.Weight(rawValue: -0.05), yOffset: 0.5, caseSensitive: true),
+            "\u{201D}": LabelStyle(size: 17.5, weight: UIFont.Weight(rawValue: 0.12), yOffset: -1, caseSensitive: true),
+            ".": LabelStyle(size: 19.75, weight: UIFont.Weight(rawValue: 0.16), yOffset: 2.5, caseSensitive: true),
+            ",": LabelStyle(size: 19.5, weight: UIFont.Weight(rawValue: 0.23), yOffset: 2.16, caseSensitive: true),
+            "\u{2019}": LabelStyle(size: 16.75, weight: UIFont.Weight(rawValue: 0.23), yOffset: -1, caseSensitive: true),
+            "#": LabelStyle(size: 26, weight: UIFont.Weight(rawValue: -0.2), yOffset: -0.66, caseSensitive: true),
+            "*": LabelStyle(size: 16.75, weight: UIFont.Weight(rawValue: 0.08), yOffset: -0.5, caseSensitive: true),
+            "+": LabelStyle(size: 19.25, weight: UIFont.Weight(rawValue: -0.12), yOffset: -0.5, caseSensitive: true),
+            "=": LabelStyle(size: 15.75, weight: UIFont.Weight(rawValue: 0.16), yOffset: -0.67, caseSensitive: true),
+            "_": LabelStyle(size: 17.75, weight: UIFont.Weight(rawValue: 0.12), yOffset: 3.5, caseSensitive: true),
+            "\\": LabelStyle(size: 16.5, weight: UIFont.Weight(rawValue: 0.2), yOffset: -0.5, caseSensitive: true),
+            "|": LabelStyle(size: 17, weight: UIFont.Weight(rawValue: 0.16), yOffset: -0.17, caseSensitive: true),
+            "~": LabelStyle(size: 19.25, weight: UIFont.Weight(rawValue: 0.23), yOffset: -1.67, caseSensitive: true),
+            "^": LabelStyle(size: 15.75, weight: UIFont.Weight(rawValue: 0.16), yOffset: -1, caseSensitive: true),
+            "\u{2022}": LabelStyle(size: 29, weight: UIFont.Weight(rawValue: 0.23), yOffset: -0.5, caseSensitive: true),
+    ]
 
     /// What a character key shows: Apple's numbers page labels its quote keys with curly marks
     /// (” and ’); the keys still type straight ones.
