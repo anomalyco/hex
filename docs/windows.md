@@ -17,9 +17,9 @@ In **Hold** mode, hold Alt while speaking and release it to transcribe and
 paste. In **Toggle** mode, press Alt to start and again to finish, or press
 the **Cancel** shortcut (Escape by default) to throw the recording away; Hex
 takes that key only while a recording runs. Hold mode has no cancel (every
-dictation finishes and pastes). Hex holds Alt as the shortcut only while it is
-held alone: another key joining it makes an ordinary chord for the app in
-front (Alt-tab, Alt+F4), which cancels the press before anything records, and
+dictation finishes and pastes). Alt is the shortcut only while it is held
+alone: another key joining it makes an ordinary chord for the app in front
+(Alt-tab, Alt+F4), which discards the press before the hold threshold, and
 AltGr keeps typing on the layouts that use it. Windows opens its menus on an
 Alt tap, so Hex swallows Alt's release when nothing joined it, the way macOS
 keeps Option from opening its menus. Rebind the shortcut in Settings if you
