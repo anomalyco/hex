@@ -29,83 +29,6 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
     }
 }
 
-/// Narrow seam over `UITextChecker` so unit tests can run deterministically or against UIKit's dictionary.
-@MainActor
-protocol TextChecking: AnyObject {
-    func isWordValid(_ word: String) -> Bool
-    func guesses(for word: String) -> [String]
-    func completions(for prefix: String) -> [String]
-    /// Switches the dictionary (a `UITextChecker` language code such as `nb`).
-    func useLanguage(_ code: String)
-}
-
-extension TextChecking {
-    func useLanguage(_ code: String) {}
-}
-
-@MainActor
-final class SystemTextChecker: TextChecking {
-    private var checker: UITextChecker?
-    private var language: String
-
-    init(language: String = "en_US") {
-        self.language = language
-    }
-
-    func useLanguage(_ code: String) {
-        language = code
-    }
-
-    /// Warms `UITextChecker` after the keyboard's first frame commits so cold open stays < 12 ms.
-    func warmUp() {
-        guard checker == nil else { return }
-        let instance = UITextChecker()
-        _ = instance.rangeOfMisspelledWord(
-            in: "hello",
-            range: NSRange(location: 0, length: 5),
-            startingAt: 0,
-            wrap: false,
-            language: language
-        )
-        checker = instance
-    }
-
-    private var activeChecker: UITextChecker {
-        if let checker { return checker }
-        let instance = UITextChecker()
-        checker = instance
-        return instance
-    }
-
-    func isWordValid(_ word: String) -> Bool {
-        let ns = word as NSString
-        let range = NSRange(location: 0, length: ns.length)
-        guard range.length > 0 else { return true }
-        let misspelled = activeChecker.rangeOfMisspelledWord(
-            in: word,
-            range: range,
-            startingAt: 0,
-            wrap: false,
-            language: language
-        )
-        return misspelled.location == NSNotFound
-    }
-
-    func guesses(for word: String) -> [String] {
-        let ns = word as NSString
-        let range = NSRange(location: 0, length: ns.length)
-        guard range.length > 0 else { return [] }
-        return activeChecker.guesses(forWordRange: range, in: word, language: language) ?? []
-    }
-
-    func completions(for prefix: String) -> [String] {
-        let ns = prefix as NSString
-        let range = NSRange(location: 0, length: ns.length)
-        guard range.length > 0 else { return [] }
-        return activeChecker.completions(forPartialWordRange: range, in: prefix, language: language) ?? []
-    }
-}
-
 /// Persists words the user explicitly kept twice, bounded to 2,000 words / 64 KB in the App Group.
 /// Delete what Hex learned removes them, and a keyboard that loaded them earlier drops its copy.
 @MainActor
@@ -270,6 +193,17 @@ final class AutocorrectEngine {
     /// the keys don't know (the cursor moved, the text came from elsewhere).
     var decoderTaps: [CGPoint]? {
         didSet { partner?.decoderTaps = decoderTaps }
+    }
+    /// German nouns' shares of capitalised uses (`de.capitals`, beside the German model): read
+    /// from the keyboard's bundle the first time a German word needs one, never for another
+    /// language. Tests set their own list.
+    var germanCapitals: GermanCapitals? {
+        didSet { germanCapitalsRead = true }
+    }
+    private var germanCapitalsRead = false
+    private var germanNouns: GermanCapitals? {
+        if !germanCapitalsRead { germanCapitals = GermanCapitals.bundled() }
+        return germanCapitals
     }
     private var beforeInput: String?
     /// Bumped whenever a source of your own words changes, so the decoder's copy is rebuilt.
@@ -868,18 +802,19 @@ final class AutocorrectEngine {
                 }
                 // German spells every noun with a capital, and the German model is lowercase
                 // throughout like the English one: a corrected word the dictionary knows only
-                // capitalised is a noun ("hsus" -> "haus" -> "Haus"), as the no-replacement
-                // path does below. One word only: a split reading keeps its second word as read.
+                // capitalised, or `de.capitals` calls a noun, takes its capital ("hsus" -> "haus"
+                // -> "Haus"), as the no-replacement path does below. One word only: a split
+                // reading keeps its second word as read.
                 if addsCapitals, !cased.contains(" "), decoder?.model.language == KeyboardLanguage.german.rawValue {
-                    cased = properNoun(for: cased) ?? cased
+                    cased = nounCapitalised(for: cased, typed: token) ?? cased
                 }
                 return withoutAddedCapitals(cased, typed: token)
             }
             // A word the model knows lowercase that the dictionary knows only capitalised
-            // (a name, day or place; a German noun), typed in lowercase, is capitalised as
-            // the dictionary path does ("mary" -> "Mary", "haus" -> "Haus"), unless
-            // Auto-capitalization is off.
-            return addsCapitals ? properNoun(for: token) : nil
+            // (a name, day or place), or that German's `de.capitals` calls a noun, typed in
+            // lowercase, is capitalised as the dictionary path does ("mary" -> "Mary",
+            // "haus" -> "Haus"), unless Auto-capitalization is off.
+            return addsCapitals ? nounCapitalised(for: token, typed: token) : nil
         }
 
         // 3. A two-letter non-word one neighbouring key from a very common two-letter word
@@ -949,6 +884,10 @@ final class AutocorrectEngine {
         let before = beforeInput ?? ""
         if let cache = decoderCache, cache.before == before, cache.taps == taps { return cache.decision }
         let lower = token.lowercased()
+        // Whether what you typed is a word at all, which `properNoun` already answers for a noun
+        // the dictionary knows only capitalised. German's list only decides the capital its
+        // callers apply to the reading; it never makes a word the dictionary lacks untouchable
+        // here.
         let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower)
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
             || properNoun(for: token) != nil
@@ -982,6 +921,20 @@ final class AutocorrectEngine {
         let capitalised = first.uppercased() + token.dropFirst()
         guard checker.isWordValid(capitalised), !checker.isWordValid(token) else { return nil }
         return capitalised
+    }
+
+    /// `properNoun`, with German's noun list in front of the dictionary: a word the books write
+    /// with a capital almost always takes one anywhere ("haus" -> "Haus"), and one they write
+    /// that way half the time takes one after an article or determiner ("das leben" -> "das
+    /// Leben"; "zu leben" stays). `typed` is what you typed, which finds the word before it
+    /// when a correction changed `word`. Words the list doesn't know, and every other
+    /// language, keep the dictionary's rule.
+    private func nounCapitalised(for word: String, typed token: String) -> String? {
+        guard language == .german, let capitals = germanNouns,
+              let capitalise = capitals.capitalises(word, after: Self.previousWord(beforeInput ?? "", token: token))
+        else { return properNoun(for: word) }
+        guard capitalise, let first = word.first else { return nil }
+        return first.uppercased() + word.dropFirst()
     }
 
     // MARK: - Words the context decides
