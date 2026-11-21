@@ -1020,6 +1020,36 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(strip(engine, "so Bel"), ["Bel", "Belt", "Bell"])
     }
 
+    /// TestFlight (build 56, iPhone 17 Pro): "Getting random words capitalized", with
+    /// "Testing how this World" swiped and "Works" in the strip. Your own words that are also
+    /// common words (a Contacts name or a text replacement whose phrase is its shortcut, a fix
+    /// learned at a sentence's start) stay lowercase mid-sentence with Auto-capitalization off
+    /// too, while a name the dictionary knows only capitalised, a text replacement's phrase and
+    /// a word in your vocabulary keep the capitals you gave them (#2205).
+    func testYourCommonWordsStayLowercaseAndYourVocabularyKeepsItsCapitals() {
+        let engine = stubbed {
+            $0.valid = ["world", "works", "will", "swift", "thanks"]
+            $0.capitalised = ["Kate"]
+        }
+        engine.loadLexiconEntries([("World", "World"), ("Will", "Will"), ("Kate", "Kate"), ("thx", "Thanks")])
+        engine.applyLearning(TypingLearning(typos: ["wrks": "Works"], rejected: []))
+        engine.setVocabulary(["Swift"])
+        for addsCapitals in [true, false] {
+            engine.addsCapitals = addsCapitals
+            let mode = addsCapitals ? "on" : "off"
+            XCTAssertFalse(engine.isOwnSpelling("World"), "a common word, \(mode)")
+            XCTAssertFalse(engine.isOwnSpelling("Works"), "a fix learned capitalised, \(mode)")
+            XCTAssertTrue(engine.isOwnSpelling("Kate"), "a name, \(mode)")
+            XCTAssertTrue(engine.isOwnSpelling("Thanks"), "a text replacement's phrase, \(mode)")
+            XCTAssertTrue(engine.isOwnSpelling("Swift"), "your vocabulary's spelling, \(mode)")
+            XCTAssertEqual(engine.withoutStrayCapital("Swift", typed: ""), "Swift", mode)
+            XCTAssertEqual(strip(engine, "so wor"), ["wor", "world"], mode)
+            XCTAssertEqual(strip(engine, "so thx"), ["thx", "Thanks"], mode)
+            XCTAssertEqual(fix(engine, "so wrks"), "works", mode)
+            XCTAssertEqual(fix(engine, "so swift"), "Swift", mode)
+        }
+    }
+
     func testNamesComeLastUnlessYouTypedACapital() {
         let engine = stubbed {
             $0.valid = ["qu"]

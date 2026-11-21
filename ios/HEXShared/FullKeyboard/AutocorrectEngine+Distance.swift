@@ -32,12 +32,12 @@ extension AutocorrectEngine {
     /// starts in lowercase and the dictionary knows the word in lowercase, it is written in
     /// lowercase, as Apple's keyboard writes "bell" mid-sentence beside a contact Kate Bell
     /// (black box, iOS 27.2). Names the dictionary knows only capitalised ("Taylor"), "I" and
-    /// its contractions, words with more capitals ("iPhone") and German, whose nouns take
-    /// capitals, keep theirs.
+    /// its contractions, words with more capitals ("iPhone"), a word in your vocabulary spelled
+    /// as you added it ("Swift") and German, whose nouns take capitals, keep theirs.
     func withoutStrayCapital(_ word: String, typed: String) -> String {
         guard language != .german, hasDictionary, typed.first?.isUppercase != true, word.count >= 2,
               let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
-              !word.contains(" ") else { return word }
+              !word.contains(" "), !isVocabularySpelling(word) else { return word }
         let lower = first.lowercased() + word.dropFirst()
         if language.usesEnglishFixes, lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}") { return word }
         return checker.isWordValid(lower) ? lower : word

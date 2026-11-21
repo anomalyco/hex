@@ -1164,10 +1164,13 @@ final class AutocorrectEngine {
 
     /// Whether `word`, capitals and all, is one of your own spellings: a Contacts name or
     /// other `UILexicon` term, a text replacement's output, a word you kept twice, or a fix
-    /// Hex learned from you. Auto-capitalization off leaves their capitals alone.
+    /// Hex learned from you. Auto-capitalization off leaves their capitals alone, except a
+    /// capital that `withoutStrayCapital` drops: a Contacts name or learned fix that is also a
+    /// common word ("Will", "World") stays lowercase mid-sentence either way.
     func isOwnSpelling(_ word: String) -> Bool {
-        lexiconTerms.contains(word) || lexiconShortcuts.values.contains(word)
-            || learning.typos.values.contains(word) || learnedWords.words.contains(word)
+        lexiconShortcuts.values.contains(word)
+            || ((lexiconTerms.contains(word) || learning.typos.values.contains(word) || learnedWords.words.contains(word))
+                && withoutStrayCapital(word, typed: "") == word)
     }
 
     /// The very common two-letter word (the language's `commonTwoLetterWords`, commonest
