@@ -6,10 +6,11 @@ import Speech
 /// dictation so both pick the same language and the same downloaded model.
 @available(iOS 26.0, *)
 nonisolated enum AppleSpeechLanguages {
-    /// The language dictation uses: Settings › Dictation language, else Automatic. Records
-    /// the result in the App Group for the keyboard layout and translation.
+    /// The language dictation uses: Settings › Dictation language, else the keyboard's
+    /// language Automatic follows (`LanguageSettings.keyboardDictationLanguage`), else
+    /// Automatic. Records the result in the App Group for the keyboard layout and translation.
     static func resolve(settings: LanguageSettings = LanguageSettings()) async -> SpeechLanguage? {
-        let explicit = settings.dictationLanguage
+        let explicit = settings.dictationLanguage ?? settings.keyboardDictationLanguage()
         let picked = await pick(explicit: explicit, settings: settings)
         if let picked, settings.resolvedDictationLanguage != picked.identifier {
             settings.resolvedDictationLanguage = picked.identifier
@@ -114,7 +115,7 @@ nonisolated enum AppleSpeechAssets {
             settings.clearUnavailable(language.identifier)
             return installed
         } catch var unavailable as SpeechModelUnavailable {
-            unavailable.automatic = settings.dictationLanguage == nil
+            unavailable.automatic = settings.dictationLanguage == nil && settings.keyboardDictationLanguage() == nil
             if unavailable.reason == .notOnThisIPhone,
                let next = await AppleSpeechLanguages.automatic(settings: settings),
                next.languageCode != language.languageCode {

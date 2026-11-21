@@ -493,7 +493,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
   dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
-  Apple has. The menu also lists every locale `SpeechTranscriber` or
+  Apple has. While the keyboard switches between two or more languages, Automatic follows
+  the one it shows (Keyboard languages, below). The menu also lists every locale
+  `SpeechTranscriber` or
   `DictationTranscriber` supports, by name. `SpeechTranscriber` is used wherever
   it has the language (as before); `DictationTranscriber` (preset
   `longDictation`) covers the rest (`SpeechLanguagePicker`,
@@ -505,7 +507,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   An iPhone without `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation, all
   3–4 GB) dictates English with `DictationTranscriber` on iOS 26+: loading
   Parakeet there sat at 50% (Core ML's compile) until iOS ended Hex, at every
-  launch. Parakeet stays where it fits (6 GB) and before iOS 26. After Hex ended
+  launch. Parakeet stays where it fits (6 GB) and before iOS 26, for English only: when
+  Apple Speech doesn't answer, any other language stays on Apple Speech, which says it can't
+  dictate it, rather than going to Parakeet as English
+  (`DictationController.appleSpeechLanguage`). After Hex ended
   while loading Parakeet, the next launch waits for Set up instead of loading it
   again (`ParakeetLoadGuard`), and a Parakeet download that sits at one fraction
   for 90 s ends with a message. **When a model won't install**
@@ -585,18 +590,35 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   it, and unticking the last goes back to Automatic. With two or more, the space bar names
   the current one ("Français", with the region only beside another French layout) and a
   quick swipe along it switches (left the next, right the one before): letters, accents
-  and autocorrect. Apple and Gboard switch with a long press on the globe, but a Face ID
+  and autocorrect. English and Español chosen together are Apple's bilingual "English &
+  Spanish" keyboard (`KeyboardLanguageList.layout`): both type on the first one's keys and
+  long presses, so English first is QWERTY with ñ on a held n in both, Español first keeps
+  its ñ key in both, and the swipe switches the language they autocorrect and dictate in
+  (black box, iOS 27.2 simulator: Spanish added to Apple's English keyboard has no ñ key and
+  English's long presses; English added to its Spanish keyboard keeps the ñ key and
+  Spanish's). Apple and Gboard switch with a long press on the globe, but a Face ID
   iPhone shows no globe in a third-party keyboard and Hex's space-bar slide is its cursor
   trackpad, so this follows SwiftKey: with two or more languages the cursor slides once the
   space bar was held still for 0.4 s (the hold that starts Apple's trackpad, below), a slide
   before that is a swipe, and one shorter than 24 pt types a space
   (`FullKeyboardEngine.trackpadHoldDelay`, `languageSwipeDistance`).
-  The globe key is unchanged. The keyboard comes back in the language it was left in
-  (`settings.keyboardLanguages.current`; without Full Access an iPhone may keep it only
-  while the keyboard runs). **Switch dictation too** (off by default, shown with two or more
-  on iOS 26+) sets the dictation language to the keyboard's on each switch, in the
-  iPhone's region where Apple Speech has it (`KeyboardLanguage.dictationLanguage`; none for
-  Srpski). **Bilingual autocorrect:** the first other chosen language with Latin letters and
+  The globe key is unchanged. The keyboard comes back in the language it was left in, in
+  every app and field, as Apple's keyboards do (black box: a switch in Messages held in
+  Safari and back; `settings.keyboardLanguages.current`; without Full Access an iPhone may
+  keep it only while the keyboard runs). A field gives a third-party keyboard nothing to go
+  on: `documentInputMode` is nil in Messages and Hex's own en-US in a field that asks for
+  English. **Dictation follows the keyboard:** with two or more languages and Dictation
+  language on Automatic, dictation is in the language the space bar shows, in the iPhone's
+  region where Apple Speech has it (`LanguageSettings.keyboardDictationLanguage`,
+  `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
+  which prepares the new language between dictations (TestFlight build 56: with the
+  keyboard on Español, dictation stayed English and Spanish came out "incomprehensible").
+  It doesn't where the iPhone's own language has no layout (Hebrew), as dictating is how
+  that language gets written. **Switch dictation too** (off by default, shown with two or
+  more on iOS 26+) follows there too, and puts a dictation language picked by hand back on
+  Automatic at each switch (it used to write the keyboard's language as a pick, which
+  stayed after Spanish was unticked or the switch turned off). **Bilingual autocorrect:**
+  the first other chosen language with Latin letters and
   an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
   English; none for Русский, Українська, Srpski, or two French layouts) is checked on the same keys,
   with its Spatial model where it has one, as Apple's "Français et English" keyboard does: a
@@ -607,7 +629,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
   80 English words; with both chosen, none.
 - **Keyboard layouts (each language's letters):** English,
-  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
+  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2; beside English, the
+  first of the two's keys, above),
   Deutsch (QWERTZ with `ü`, `ö ä`), Italiano and Português on the English letters
   (Apple's keyboards for them are QWERTY), Français (France) on Apple's AZERTY (rows of
   10, 10 and 6 letters, W to N under E to I with a gap beside shift and delete, as on
@@ -907,7 +930,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   for `DictationTranscriber`; Hex sets them on both modules, and Parakeet's
   batch path gets no hint.
 - **Dictation languages:** `SpeechLanguagePickerTests` cover the picking rule
-  and `DictationControllerTests` a language change during a dictation. The
+  and `DictationControllerTests` a language change during a dictation, Automatic
+  following the keyboard's language, and Spanish never reaching Parakeet. The
   simulator can't transcribe: `SpeechTranscriber.isAvailable` is false there
   and `DictationTranscriber` fails with "Model not available", so
   `AppleSpeechClipTests` (skipped unless `HEX_SPEECH_CLIPS` names a folder of
@@ -935,8 +959,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   ever moves again, the reservation limit on a full iPhone, and Parakeet's
   memory on 4 GB iPhones are unverified on hardware.
 - **Keyboard languages:** `KeyboardLayoutTests` cover the list (resolution, switching,
-  space-bar label, pairing, migration, the dictation pick), `FullKeyboardEngineTests` the
-  swipe against the hold-then-slide trackpad and switching in a `FullKeyboardView`, and
+  space-bar label, pairing, migration, the dictation pick, English & Spanish's keys,
+  dictation following the keyboard), `FullKeyboardEngineTests` the swipe against the
+  hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too), and
   `AutocorrectEngineTests` bilingual autocorrect on stub dictionaries and iOS's own
   (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro

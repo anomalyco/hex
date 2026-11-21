@@ -172,6 +172,10 @@ final class DictationController {
     var transcriptionLanguageID = "en-US"
     /// Settings › Dictation language: a BCP 47 identifier, or nil for Automatic.
     private(set) var dictationLanguage: String?
+    /// The keyboard's language Automatic followed when the model was last asked for
+    /// (`LanguageSettings.keyboardDictationLanguage`), so a switch on the space bar prepares
+    /// the new one.
+    private var followedKeyboardLanguage: String?
     /// A language change made while busy, applied once the dictation in flight is done.
     private var pendingLanguagePreparation = false
     /// Said once Automatic moved on from a language this iPhone can't dictate yet
@@ -227,6 +231,7 @@ final class DictationController {
         self.now = now
         self.languageSettings = languageSettings
         self.dictationLanguage = languageSettings.dictationLanguage
+        self.followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
@@ -258,8 +263,7 @@ final class DictationController {
             } else if #available(iOS 26.0, *) {
                 Task { [weak self] in
                     guard let self else { return }
-                    if let language = await AppleSpeechTranscriber.preferredLanguage(),
-                       AppleSpeechTranscriber.shouldUse(language) {
+                    if await Self.appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) != nil {
                         self.engineName = "Apple Speech"
                         self.prepareModel()
                     } else {
@@ -342,10 +346,12 @@ final class DictationController {
         applyDictationLanguage(normalized)
     }
 
-    /// Picks up a language the keyboard switched to in the App Group.
+    /// Picks up a language the keyboard switched to in the App Group: a pick in its language
+    /// switch, or, on Automatic, the keyboard's own language switched on the space bar.
     func followDictationLanguageSetting() {
         let stored = languageSettings.dictationLanguage
-        guard stored != dictationLanguage else { return }
+        let following = languageSettings.keyboardDictationLanguage()
+        guard stored != dictationLanguage || following != followedKeyboardLanguage else { return }
         applyDictationLanguage(stored)
     }
 
@@ -357,6 +363,7 @@ final class DictationController {
 
     private func applyDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
+        followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         languageNotice = nil
         languageOffer = nil
         switch phase {
@@ -738,11 +745,31 @@ final class DictationController {
 
     private static func defaultTranscriber() async -> any LocalTranscribing {
         if #available(iOS 26.0, *),
-           let language = await AppleSpeechTranscriber.preferredLanguage(),
-           AppleSpeechTranscriber.shouldUse(language) {
+           let language = await appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) {
             return AppleSpeechTranscriber(language: language)
         }
         return ParakeetTranscriber()
+    }
+
+    /// The language Apple Speech dictates in, or nil for Parakeet V2, which knows only
+    /// English: Apple Speech's pick, unless it is English that Parakeet takes
+    /// (`AppleSpeechTranscriber.shouldUse`). With no pick (Speech not answering), English goes
+    /// to Parakeet and any other language (`wanted`: the one set, else the keyboard's
+    /// Automatic follows, else the iPhone's) stays on Apple Speech, which says it can't
+    /// dictate it rather than Parakeet hearing Spanish as English words.
+    @available(iOS 26.0, *)
+    nonisolated static func appleSpeechLanguage(
+        picked: SpeechLanguage?,
+        wanted: String? = LanguageSettings().dictationLanguage
+            ?? LanguageSettings().keyboardDictationLanguage()
+            ?? Locale.preferredLanguages.first,
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+    ) -> SpeechLanguage? {
+        if let picked {
+            return AppleSpeechTranscriber.shouldUse(picked, parakeetFits: parakeetFits) ? picked : nil
+        }
+        guard let wanted, !SpeechLanguagePicker.isEnglish(wanted) else { return nil }
+        return SpeechLanguage(locale: Locale(identifier: wanted), module: .dictation)
     }
 
     // MARK: - Capture & Generation-Scoped Transcription

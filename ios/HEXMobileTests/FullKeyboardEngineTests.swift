@@ -385,7 +385,8 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.engine.language, .polish)
         XCTAssertEqual(view.plane.spaceLabel, "Polski")
         XCTAssertNil(view.engine.autocorrect.decoder, "no Polish typing model: the dictionary engine")
-        XCTAssertEqual(picked, ["pl-PL"])
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "pl-PL")
+        XCTAssertEqual(picked, [], "Automatic already follows")
         var id = 400
         func press(_ character: String) {
             let key = view.engine.layout.key(.character(character))!
@@ -447,7 +448,8 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.spaceLabel, "Українська")
         XCTAssertNil(view.engine.partnerLanguage)
         XCTAssertNil(view.engine.autocorrect.decoder, "no Ukrainian typing model: the dictionary engine")
-        XCTAssertEqual(picked, ["uk-UA"])
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "uk-UA")
+        XCTAssertEqual(picked, [], "Automatic already follows")
         var id = 300
         func press(_ character: String) {
             let key = view.engine.layout.key(.character(character))!
@@ -479,7 +481,8 @@ final class FullKeyboardEngineTests: XCTestCase {
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
-    /// in the language it was left in. Switch dictation too picks the dictation language.
+    /// in the language it was left in. Dictation follows on Automatic; Switch dictation too
+    /// puts a language picked by hand back on Automatic.
     func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .french, .russian]
@@ -505,16 +508,23 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.spaceLabel, "Français")
         XCTAssertEqual(settings.currentKeyboardLanguage, .french)
 
-        settings.dictationFollowsKeyboard = true
         settings.supportedDictationLanguages = ["en-US", "fr-FR", "ru-RU"]
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "Automatic follows the keyboard")
+        settings.dictationLanguage = "de-DE"
         var picked: [String?] = []
         model.onLanguageSelected = { picked.append($0) }
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(picked, [], "a language picked by hand stays")
+        view.switchLanguage(by: -1)
+        settings.dictationFollowsKeyboard = true
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .russian)
         XCTAssertEqual(firstLetter(), "й")
         XCTAssertNil(view.engine.partnerLanguage, "Cyrillic has no bilingual partner")
         XCTAssertEqual(view.plane.spaceLabel, "Русский")
-        XCTAssertEqual(picked, ["ru-RU"])
+        XCTAssertEqual(picked, [nil], "Switch dictation too: back to Automatic, which follows")
+        settings.dictationLanguage = nil
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "ru-RU")
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .english, "round the list")
         view.switchLanguage(by: -1)
@@ -528,6 +538,57 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(again.engine.language, .german)
         XCTAssertFalse(again.engine.switchesLanguage)
         XCTAssertNil(again.plane.spaceLabel, "one language: the space bar names dictation's, unknown here")
+    }
+
+    /// English and Spanish chosen together type on the first one's keys, as Apple's bilingual
+    /// English & Spanish keyboard does: English first, QWERTY without the ñ key (ñ on a held n)
+    /// in both, the space bar still switching the language it names, autocorrects and
+    /// dictates in; Spanish first, its ñ key in both; Spanish alone, its own.
+    func testEnglishAndSpanishShareTheFirstLanguagesKeys() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .spanish]
+        settings.supportedDictationLanguages = ["en-US", "es-ES"]
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        func row2() -> [String] {
+            view.engine.layout.keys.filter { $0.row == 1 && $0.character != nil }
+                .sorted { $0.frame.minX < $1.frame.minX }.compactMap(\.character)
+        }
+        func heldN() -> [String]? {
+            guard let key = view.engine.layout.key(.character("n")) else { return nil }
+            view.engine.touchBegan(id: 90, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            defer { view.engine.touchCancelled(id: 90) }
+            return view.engine.openAccentMenuIfEligible(forTouch: 90) ? view.engine.activeAccentMenu?.options : nil
+        }
+        XCTAssertEqual(row2(), ["a", "s", "d", "f", "g", "h", "j", "k", "l"])
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertEqual(view.plane.spaceLabel, "Español")
+        XCTAssertEqual(view.engine.autocorrect.language, .spanish)
+        XCTAssertEqual(view.engine.partnerLanguage, .english)
+        XCTAssertEqual(row2(), ["a", "s", "d", "f", "g", "h", "j", "k", "l"], "no ñ key beside English")
+        XCTAssertEqual(Set(heldN() ?? []), ["n", "ñ", "ń", "ņ", "ň"], "ñ on a held n, as English's")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "es-ES")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english, "and back")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "en-US")
+
+        settings.keyboardLanguages = [.spanish, .english]
+        view.syncSettings()
+        XCTAssertEqual(view.engine.language, .english, "kept while still chosen")
+        XCTAssertEqual(row2().last, "ñ", "Spanish leads: its ñ key for English too")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertEqual(row2().last, "ñ")
+
+        settings.keyboardLanguages = [.spanish]
+        view.syncSettings()
+        XCTAssertEqual(row2().last, "ñ", "Spanish alone")
+        XCTAssertFalse(view.engine.switchesLanguage)
     }
 
     func testEnablesReturnKeyAutomaticallyBlocksEmptyField() {

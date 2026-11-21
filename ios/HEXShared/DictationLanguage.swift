@@ -95,10 +95,31 @@ nonisolated struct LanguageSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.dictationFollowsKeyboard) }
     }
 
-    /// The language dictation uses, when known: the one set, else what Automatic picks,
-    /// else the last one it ran in.
+    /// What Automatic dictates in while the keyboard switches between two or more languages:
+    /// the one the space bar shows now, in the iPhone's region where Apple Speech has it
+    /// (`KeyboardLanguage.dictationLanguage`), as the iPhone's own keyboards take dictation
+    /// with them, so Spanish speech is never transcribed as English, nor English as Spanish.
+    /// Nil with a dictation language picked by hand, with one keyboard language, and while
+    /// the iPhone's own language (what Automatic picks otherwise) has no layout to type it
+    /// (Hebrew), where dictating is how that language gets written, unless Switch dictation
+    /// too asks for it.
+    func keyboardDictationLanguage(preferred: [String] = Locale.preferredLanguages) -> String? {
+        guard dictationLanguage == nil else { return nil }
+        let chosen = keyboardLanguages
+        guard chosen.count > 1 else { return nil }
+        if !dictationFollowsKeyboard,
+           let own = automaticDictationLanguage ?? preferred.first,
+           KeyboardLanguage.matching(own) == nil {
+            return nil
+        }
+        let list = KeyboardLanguageList.resolve(chosen: chosen, stored: currentKeyboardLanguage, automatic: .english)
+        return list.current.dictationLanguage(supported: supportedDictationLanguages, preferred: preferred)
+    }
+
+    /// The language dictation uses, when known: the one set, else the keyboard's it follows
+    /// (`keyboardDictationLanguage`), else what Automatic picks, else the last one it ran in.
     var effectiveDictationLanguage: String? {
-        dictationLanguage ?? automaticDictationLanguage ?? resolvedDictationLanguage
+        dictationLanguage ?? keyboardDictationLanguage() ?? automaticDictationLanguage ?? resolvedDictationLanguage
     }
 
     /// `SpeechTranscriber`'s model for this language (BCP 47) wouldn't install, so dictation
