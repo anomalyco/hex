@@ -51,6 +51,8 @@ struct FullKeyboardPalette: Equatable {
     /// (63 at its top, lightening downward).
     var bubbleFill: UIColor { isDark ? Self.rgb(0x3F3F41) : .white }
     var bubbleShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.3 : 0.1) }
+    /// The accent callout's selected option: a grey square behind it (227, 227, 230; 87 in dark).
+    var accentSelectFill: UIColor { isDark ? Self.rgb(0x57575A) : Self.rgb(0xE3E3E6) }
     var popupBorder: UIColor { isDark ? UIColor(white: 1, alpha: 0.14) : UIColor(white: 0, alpha: 0.08) }
     var popupShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.42 : 0.18) }
 

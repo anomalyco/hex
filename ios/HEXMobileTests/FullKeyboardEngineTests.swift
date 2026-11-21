@@ -283,9 +283,10 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 1))
         let menu = try! XCTUnwrap(engine.activeAccentMenu)
         XCTAssertNil(engine.previewKey, "single-key balloon hides while accent picker is open")
-        XCTAssertEqual(menu.options.first, "E")
-        // Slide to index 2 ("É").
-        let cell = menu.cellFrames[2]
+        // Apple's order, capitals while shift is on, opening on the key's own letter.
+        XCTAssertEqual(menu.options, ["Ë", "É", "E", "È", "Ê", "Ě", "Ẽ", "Ē", "Ė", "Ę"])
+        XCTAssertEqual(menu.selectedOption, "E")
+        let cell = menu.cellFrames[menu.options.firstIndex(of: "É")!]
         engine.touchMoved(id: 1, to: CGPoint(x: cell.midX, y: cell.midY))
         engine.touchEnded(id: 1, at: CGPoint(x: cell.midX, y: cell.midY))
         XCTAssertNil(engine.activeAccentMenu)
@@ -642,7 +643,7 @@ final class FullKeyboardEngineTests: XCTestCase {
 
         engine.touchBegan(id: 7, at: CGPoint(x: y.frame.midX, y: y.frame.midY))
         XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
-        XCTAssertEqual(engine.activeAccentMenu?.options.first, "y")
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "y", "the key's own, where Apple's callout puts it")
         XCTAssertEqual(Set(engine.activeAccentMenu?.options ?? []), ["y", "ý", "ŷ", "ÿ"], "English's holds")
         engine.touchCancelled(id: 7)
 

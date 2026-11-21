@@ -85,7 +85,11 @@ final class FullKeyboardEngine {
         var downPoint: CGPoint = .zero
     }
 
-    static let accentHoldDelay: TimeInterval = 0.40
+    /// Apple's callout replaces the key's pop-up about 382 ms after it appeared (iOS 27.2, 60 fps
+    /// recordings); Hex's took 420 at 0.4 s, a frame later to show.
+    static let accentHoldDelay: TimeInterval = 0.36
+    /// How far below the held key's middle a finger lets go to close the callout untyped.
+    static let accentCancelDrop: CGFloat = 57.5
     static let accentSlop: CGFloat = 10
     static let trackpadActivationDistance: CGFloat = 10
     static let trackpadPointsPerCharacter: CGFloat = 7.5
@@ -615,12 +619,21 @@ final class FullKeyboardEngine {
         guard (dx * dx + dy * dy).squareRoot() <= Self.accentSlop else { return false }
         guard let options = AccentCatalog.options(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters),
               options.count > 1 else { return false }
-        activeAccentMenu = AccentMenu.build(
-            for: touch.key.frame,
-            rawOptions: options,
-            in: layout.width,
-            horizontalInset: layout.horizontalInset
-        )
+        if let arrangement = AccentCatalog.arrangement(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters) {
+            activeAccentMenu = AccentMenu.build(
+                for: touch.key.frame,
+                arrangement: arrangement,
+                in: layout.width,
+                horizontalInset: layout.horizontalInset
+            )
+        } else {
+            activeAccentMenu = AccentMenu.build(
+                for: touch.key.frame,
+                rawOptions: options,
+                in: layout.width,
+                horizontalInset: layout.horizontalInset
+            )
+        }
         activeAccentTouchID = id
         typingLog?.ui("accent_open", [
             TypingLogField("id", .int(id)),
@@ -637,7 +650,7 @@ final class FullKeyboardEngine {
 
         // 1. Active long-press accent picker: horizontal drag selects the alternate character.
         if activeAccentTouchID == id, var menu = activeAccentMenu {
-            let nextIndex = menu.index(for: point.x)
+            let nextIndex = menu.index(for: point)
             touches[id] = touch
             if nextIndex != menu.selectedIndex {
                 menu.selectedIndex = nextIndex
@@ -748,10 +761,17 @@ final class FullKeyboardEngine {
         touch.point = point
 
         if activeAccentTouchID == id, let menu = activeAccentMenu {
-            let index = menu.index(for: point.x)
+            let index = menu.index(for: point)
             let chosen = menu.options[index]
             activeAccentMenu = nil
             activeAccentTouchID = nil
+            // Let go well below the held key, the callout closes with nothing typed, as Apple's
+            // does (iOS 27.2: 55 pt down types, 60 pt cancels; any distance up types).
+            if point.y - menu.keyFrame.midY > Self.accentCancelDrop {
+                typingLog?.ui("accent_cancel", [TypingLogField("id", .int(id))])
+                onChange?()
+                return
+            }
             if !touch.committed {
                 typingLog?.ui("accent_pick", [
                     TypingLogField("id", .int(id)),
