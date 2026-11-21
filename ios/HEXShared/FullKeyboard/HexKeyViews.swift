@@ -147,7 +147,7 @@ final class HexKeyControl: UIControl {
             UIBezierPath(roundedRect: cap, cornerRadius: cap.height / 2).fill()
         }
         // In the strip the mark sits on the suggestions' line, as tall as fits around it there
-        // (16 pt on a phone held upright, where the line is 8 pt below iOS's band), else 19 pt.
+        // (19 pt, or less where the line leaves less room).
         let markMidY = inStrip ? (markCenterY ?? cap.midY) : cap.midY
         let room = inStrip ? 2 * min(markMidY - cap.minY, cap.maxY - markMidY) : cap.height
         let markSize: CGFloat = inStrip ? min(19, room) : min(19, cap.height * 0.56)
