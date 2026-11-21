@@ -14,6 +14,16 @@ The same 2,000 held-out English and Spanish sentences, typed by today's iOS engi
 | Words the context decides, the word before revised, a space tapped as a letter | 818 (5.90%) | 1,342 (10.09%) | 774 (5.71%) | 654 (5.24%) |
 | Names kept as typed, and capitals from the books | 770 (5.55%) | 1,133 (8.52%) | 774 (5.71%) | 654 (5.24%) |
 
+The replay also counts what the suggestion strip offers, as iOS's harness does: the intended word among the slots once its last letter is typed, after its first two letters (words of three letters or more), and among the next-word predictions after the space before it.
+
+| Strip hits | English | Spanish | German | Bokmål |
+|---|---:|---:|---:|---:|
+| iOS today: word / next / after two letters | 13,253 / 2,287 / 3,235 | 12,364 / 2,073 / 2,901 | — | — |
+| Android before the strip work | 12,070 / 2,338 / 3,789 | 11,603 / 2,116 / 2,606 | 12,204 / 1,679 / 5,026 | 11,172 / 2,160 / 4,380 |
+| Android with `strip()` and the new predictions | 13,180 / 2,349 / 4,390 | 12,407 / 2,110 / 3,236 | 12,918 / 1,680 / 5,624 | 11,988 / 2,159 / 4,875 |
+
+Out of 13,870 / 11,639 / 10,874 (English), 13,301 / 11,058 / 9,383 (Spanish), 13,550 / 11,326 / 12,413 (German) and 12,492 / 10,297 / 9,789 (Bokmål).
+
 ## Same-model results
 
 Each language has 2,000 held-out synthetic Tatoeba sentences. English has 13,870 reference words; Spanish has 13,301. Errors are word insertions, deletions and substitutions, ignoring case and terminal punctuation. A missing space can change the word count. No user-specific offsets are applied.

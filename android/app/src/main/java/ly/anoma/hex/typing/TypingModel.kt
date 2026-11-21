@@ -109,7 +109,9 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
     }
     val neverSuggest = NeverSuggest(this, list)
     fun context(spelling: String) = neverSuggest.context(spelling, index(spelling))
-    fun nextWords(previous: Int, swears: Boolean): List<String> {
+    /** The three likeliest allowed words after `previous`; [fill] tops a short list up with the
+     * commonest words. */
+    fun nextWords(previous: Int, swears: Boolean, fill: Boolean = true): List<String> {
         if (previous < 0) return completions("", swears, previous).map { text(it) }
         val best = ArrayList<Int>(4)
         for (at in int(rows + 4 * previous) until int(rows + 4 * (previous + 1))) {
@@ -120,8 +122,45 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
             if (best.size > 3) best.removeAt(3)
         }
         val result = best.mapTo(ArrayList()) { text(int(seconds + 4 * it)) }
-        if (result.size < 3) for (i in completions("", swears, previous)) { val w = text(i); if (w !in result) result.add(w); if (result.size == 3) break }
+        if (fill && result.size < 3) for (i in completions("", swears, previous)) { val w = text(i); if (w !in result) result.add(w); if (result.size == 3) break }
         return result
+    }
+    /** The two likeliest words that complete a 1–3 letter `prefix` after `previous` (a word index, or
+     * -1), by the word pairs with the unigram backoff, at most 8 letters longer (iOS
+     * TypingDecoderModel.completions(of:after:), #2125). Walks only the prefix's range and the previous
+     * word's pair row, which share their sort order. */
+    fun completionsAfter(prefix: String, previous: Int, swears: Boolean): IntArray {
+        if (prefix.length !in 1..3) return IntArray(0)
+        val r = range(prefix)
+        if (r == 0L) return IntArray(0)
+        val lo = (r ushr 32).toInt(); val hi = r.toInt()
+        var link = 0; var end = 0
+        if (previous >= 0) {
+            link = int(rows + 4 * previous); end = int(rows + 4 * (previous + 1))
+            var upper = end
+            while (link < upper) {
+                val mid = (link + upper) ushr 1
+                if (int(seconds + 4 * mid) < lo) link = mid + 1 else upper = mid
+            }
+        }
+        val context = neverSuggest.restrictedContext(previous)
+        val best = IntArray(2) { -1 }; val ranks = IntArray(2) { Int.MAX_VALUE }
+        var next = if (link < end) int(seconds + 4 * link) else hi
+        for (i in lo until hi) {
+            val unigram = u8(uni + i)
+            var cost = unigram + 7 // 0.92 nats of unigram backoff, in eighths of a nat.
+            if (i == next) {
+                cost = minOf(cost, u8(bi + link))
+                link++
+                next = if (link < end) int(seconds + 4 * link) else hi
+            }
+            val rank = cost * 256 + unigram
+            if (length(i) <= prefix.length || length(i) > prefix.length + 8 || rank >= ranks[1]) continue
+            if (neverSuggest.blocks(i, swears, context)) continue
+            if (rank < ranks[0]) { best[1] = best[0]; ranks[1] = ranks[0]; best[0] = i; ranks[0] = rank }
+            else { best[1] = i; ranks[1] = rank }
+        }
+        return best.filter { it >= 0 }.toIntArray()
     }
     private fun range(prefix: String): Long {
         var a = 0; var b = words

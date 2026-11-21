@@ -328,4 +328,60 @@ class NeverSuggestTest {
         assertEquals("Ruhe", fix("lass mich in ", "ruhe"))
         assertEquals("Stadt", fix("die ", "stadt"))
     }
+
+    // iOS testSentenceStartersAndNextWordsFillAllThreeSlots and
+    // testNextWordPredictionsUseTheActiveLanguageAndRespectBoundaries.
+    @Test fun sentenceStartersAndNextWordsFillAllThreeSlots() {
+        val w = word()
+        for (context in listOf("Done. ", "Really? ", "Wow! ", "Hi\n", "")) assertEquals(context, listOf("I", "The", "I'm"), w.predictions(context))
+        assertEquals(listOf("I", "the", "I'm"), w.predictions("Done. ", capitalize = false))
+        assertEquals("an unknown word: the commonest words", listOf("the", "to", "and"), w.predictions("zzqx "))
+        assertEquals("after a comma, words that start a clause", listOf("I", "but", "and"), w.predictions("Running late, "))
+        assertEquals("not after a number", emptyList<String>(), w.predictions("at 7 "))
+        assertEquals("no space after the period yet", emptyList<String>(), w.predictions("Done."))
+        val hi = w.predictions("say hi ")
+        assertEquals(3, hi.size)
+        assertTrue(hi.toString(), hi.all { it.first().isLowerCase() || it == "I" || it.startsWith("I'") })
+        val es = word("es")
+        assertEquals(3, es.predictions("por ").size)
+        for (context in listOf("@por ", "todo/por ", "por  ")) assertEquals(context, emptyList<String>(), es.predictions(context))
+        for (context in listOf("por. ", "hola\n")) assertEquals(context, listOf("Yo", "El", "La"), es.predictions(context))
+        assertEquals(listOf("yo", "el", "la"), es.predictions("por. ", capitalize = false))
+    }
+
+    // iOS testShortCompletionsFollowThePhraseAndKeepTheTypedCase, testTheStripNeverRepeatsWhatYouTyped
+    // and testAmbiguousContractionsSuggestWithoutAutoReplacing: the strip shows what space will do.
+    @Test fun theStripShowsWhatSpaceWillDo() {
+        fun strip(language: String, before: String, typed: String, spatial: Boolean = false) = word(language, spatial).run {
+            reset(before); explicitOrTapped(this, typed, spatial, language); strip()
+        }
+        fun first(s: List<Suggestion>) = s.first { it.kind != Suggestion.Kind.Typed }.text
+        val like = strip("en", "I would ", "li")
+        assertEquals("like", first(like))
+        assertTrue(like.toString(), like.none { it.kind == Suggestion.Kind.Fix })
+        assertEquals("Like", first(strip("en", "I would ", "Li")))
+        assertEquals("gracias", first(strip("es", "muchas ", "gr")))
+        // A word space leaves alone shows itself first; an unfinished one gets three candidates.
+        val well = strip("en", "", "well")
+        assertEquals(Suggestion("well", Suggestion.Kind.Typed), well[0])
+        assertEquals(Suggestion("we'll", Suggestion.Kind.Word), well[1])
+        val beca = strip("en", "", "beca")
+        assertEquals(beca.toString(), 3, beca.size)
+        assertTrue(beca.toString(), beca.none { it.kind == Suggestion.Kind.Typed || it.text.equals("beca", ignoreCase = true) })
+        // A fix space will apply sits after what was typed.
+        val teh = strip("en", "", "teh", spatial = true)
+        assertEquals(listOf(Suggestion("teh", Suggestion.Kind.Typed), Suggestion("the", Suggestion.Kind.Fix)), teh.take(2))
+        assertTrue(teh.toString(), teh.drop(1).none { it.text == "teh" })
+        // Nothing to offer: only what was typed.
+        assertEquals(listOf(Suggestion("kqzx", Suggestion.Kind.Typed)), strip("en", "", "kqzx"))
+        // Autocorrect off: completions, never a fix.
+        val off = word(spatial = true).run { reset(""); explicitOrTapped(this, "teh", true, "en"); strip(autocorrect = false) }
+        assertTrue(off.toString(), off.none { it.kind == Suggestion.Kind.Fix })
+    }
+
+    private fun explicitOrTapped(w: TypingWord, text: String, spatial: Boolean, language: String) {
+        if (!spatial) { w.explicit(text); return }
+        val g = layout(language)
+        for (c in text) { val p = g.centres.getValue(c.lowercaseChar()); w.letter(c.toString(), p.x, p.y, g) }
+    }
 }

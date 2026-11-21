@@ -21,6 +21,7 @@ def export(source, result, lang):
                     not all(type(v) in (int, float) and math.isfinite(v) for v in t) for t in r["taps"])):
             raise ValueError("Invalid synthetic key geometry")
         out = {f: r[f] for f in ("id", "intended", "typed", "taps")}
+        out.update({f: r[f] for f in ("want", "ends") if f in r})
         out["ios_shared"] = outputs[r["id"]]
         print(json.dumps(out, separators=(",", ":")))
 

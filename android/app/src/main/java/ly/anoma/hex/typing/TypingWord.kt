@@ -5,6 +5,13 @@ package ly.anoma.hex.typing
  * word before too ("well se" ... "well see" -> "we'll see"). */
 internal data class Correction(val original: String, val replacement: String)
 
+/** One slot of the suggestion strip. [Kind.Typed] keeps what was typed as typed; [Kind.Fix] is what
+ * space will put in its place (shown highlighted); [Kind.Word] a completion or another reading;
+ * [Kind.Next] a word that may follow, offered after a space. */
+internal data class Suggestion(val text: String, val kind: Kind) {
+    enum class Kind { Typed, Fix, Word, Next }
+}
+
 /** The current word, and the one a space just finished while the next is typed. Both the keyboard
  * and replay feed the real tap at each letter. */
 internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
@@ -44,7 +51,82 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         pending = null
     }
     fun restored(text: String, before: String) { reset(before); explicit(text) } // No taps: space keeps the undone spelling.
-    fun predictions(before: String) = model.nextWords(model.context(previousWord(before)), suggestSwearWords)
+    /** Up to three words for the strip between words (iOS #2125): at a sentence's start three common
+     * first words, after a comma or other mid-sentence mark words that start a clause, after a word
+     * the likeliest next words from the word pairs with the language's commonest words filling the
+     * rest; nothing after a handle, path, number or a second space, or before a space is typed.
+     * `before` is the text before the cursor; a bare word counts as one just finished. Capitalised
+     * as shift would be, by default at a sentence's start. */
+    fun predictions(before: String, capitalize: Boolean? = null): List<String> {
+        val text = if (before.lastOrNull()?.let { it.isLetter() || it == '\'' } == true) "$before " else before
+        val words = when {
+            startsSentence(text) -> sentenceStarters[model.language]
+            !text.last().isWhitespace() -> return emptyList()
+            text.dropLast(1).lastOrNull()?.let { it in midSentenceMarks } == true -> clauseStarters[model.language]
+            else -> {
+                val finished = currentToken(text.dropLast(1)) ?: return emptyList()
+                val previous = finished.lowercase()
+                val index = model.context(previous)
+                val next = if (index >= 0) model.nextWords(index, suggestSwearWords, fill = false) else emptyList()
+                (next + commonWords[model.language].orEmpty()).filter {
+                    it.lowercase() != previous && !model.neverSuggest.blocks(it.lowercase(), suggestSwearWords, index)
+                }
+            }
+        }.orEmpty()
+        val upper = capitalize ?: startsSentence(text)
+        val out = ArrayList<String>(3)
+        for (w in words) {
+            val shown = if (upper) w.replaceFirstChar { it.uppercase() } else displayed(w)
+            if (out.none { it.equals(shown, ignoreCase = true) }) out.add(shown)
+            if (out.size == 3) break
+        }
+        return out
+    }
+
+    // A model word as the strip shows it: English "i" and its contractions with their capital, and
+    // a name the books nearly always capitalise ("monday" -> "Monday").
+    private fun displayed(word: String): String {
+        if (model.language == "en" && (word == "i" || word.startsWith("i'"))) return "I" + word.drop(1)
+        return capitalisedName(word) ?: word
+    }
+
+    /** The strip while a word is typed (iOS AutocorrectEngine.suggestions): what was typed
+     * ([Suggestion.Kind.Typed]), then what space will put in ([Suggestion.Kind.Fix]) or the likeliest
+     * candidate, then the runner-up. An unfinished word that space leaves alone (no word yet, "th")
+     * gets three candidates instead. Candidates: a suggest-only English contraction ("ill" ->
+     * "I'll"), the likeliest completions of a 1–3 letter word after the word before, then, for a
+     * word of three letters or more, the decoder's other readings of the taps before completions by
+     * frequency (after two letters the word is usually unfinished: completions first). Never what was
+     * typed again. [autocorrect] off: no fix and no readings, completions only. */
+    fun strip(autocorrect: Boolean = true): List<Suggestion> {
+        if (token.length !in 1..MAX_LENGTH) return emptyList()
+        val typed = Suggestion(token, Suggestion.Kind.Typed)
+        val fix = if (autocorrect) replacement() else null
+        val pool = ArrayList<String>(4)
+        val lower = token.lowercase()
+        val showTyped = fix != null || blocked(token) || model.index(lower) >= 0 || model.known(lower)
+        val size = if (showTyped) 2 else 3
+        fun add(s: String) {
+            if (pool.size < size && !s.equals(token, ignoreCase = true) && pool.none { it.equals(s, ignoreCase = true) } &&
+                !blocked(s)) pool.add(s)
+        }
+        fix?.let { pool.add(it) }
+        if (autocorrect && fix == null && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
+        val short = if (token.length <= 3) model.completionsAfter(lower, previous, suggestSwearWords).map { shown(model.text(it)) } else emptyList()
+        if (fix == null) short.firstOrNull { s -> pool.none { it.equals(s, ignoreCase = true) } }?.let(::add)
+        val readings = autocorrect && spatial && token.length >= 2 && !protected()
+        if (readings && token.length >= 3) for (r in decision().readings) add(shown(r.text))
+        for (s in short) add(s)
+        for (w in model.completions(lower, suggestSwearWords, previous)) add(shown(model.text(w)))
+        if (readings && token.length < 3) for (r in decision().readings) add(shown(r.text))
+        if (pool.isEmpty()) return listOf(typed)
+        val first = if (fix != null) Suggestion(fix, Suggestion.Kind.Fix) else Suggestion(pool[0], Suggestion.Kind.Word)
+        val words = listOf(first) + pool.drop(1).map { Suggestion(it, Suggestion.Kind.Word) }
+        return if (showTyped) listOf(typed) + words else words
+    }
+
+    // A candidate cased as the word was typed, with the capital the strip shows for names.
+    private fun shown(word: String) = matchCase(token, if (token.firstOrNull()?.isUpperCase() == true) word else displayed(word))
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid) {
         token += text; decision = null
         if (spatial && !literalOnly && taps.size < MAX_LENGTH) taps.add(decoder.score(grid, x, y))
@@ -87,6 +169,12 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (model.language == "en" && ' ' in fix) return fix.split(' ').joinToString(" ") { if (it == "i") "I" else it }
         // German's model is lowercase: a noun it corrects to takes its capital ("hsus" -> "Haus").
         return if (model.language == "de" && ' ' !in fix) capitalised(fix) ?: fix else fix
+    }
+
+    private fun capitalisedName(word: String): String? {
+        if (word.length < 2 || word != word.lowercase() || (model.capitals?.percent(word) ?: -1) < 95) return null
+        val first = word.first().uppercase()
+        return if (first.length == 1) first + word.drop(1) else null
     }
 
     // `word` with its capital when it is all lowercase and the books nearly always write it with one
@@ -165,6 +253,30 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     }
     companion object {
         const val MAX_LENGTH = 32
+        // Words the strip offers in place of these, but space never puts in: each is a word too.
+        private val suggestOnly = mapOf("ill" to "I'll", "id" to "I'd", "were" to "we're", "wed" to "we'd",
+            "well" to "we'll", "its" to "it's", "lets" to "let's", "hell" to "he'll", "shell" to "she'll")
+        // Hex's own short lists, as iOS: a sentence's common first words, a clause's after a comma, and
+        // the commonest words for next-word slots the model can't fill.
+        private val sentenceStarters = mapOf("en" to listOf("I", "the", "I'm"), "es" to listOf("yo", "el", "la"),
+            "de" to listOf("ich", "das", "die"), "nb" to listOf("jeg", "det", "vi"))
+        private val clauseStarters = mapOf("en" to listOf("I", "but", "and"), "es" to listOf("que", "pero", "y"),
+            "de" to listOf("und", "aber", "ich"), "nb" to listOf("og", "men", "jeg"))
+        private val commonWords = mapOf("en" to listOf("the", "to", "and", "a", "I", "of"),
+            "es" to listOf("de", "que", "y", "la", "el", "en"), "de" to listOf("und", "die", "der", "ich", "ist", "das"),
+            "nb" to listOf("og", "i", "det", "er", "på", "som"))
+        private val midSentenceMarks = ",;:)\"'\u201D\u2019\u2014"
+        /** The word right before the cursor, or null inside a handle, path, address or number. */
+        fun currentToken(before: CharSequence): String? {
+            var start = before.length
+            while (start > 0) {
+                val c = before[start - 1]
+                if (c.isLetter() || (c == '\'' && start < before.length && start >= 2 && before[start - 2].isLetter())) start-- else break
+            }
+            if (start == before.length) return null
+            if (start > 0 && before[start - 1].let { it in "@/.#_-:" || it.isDigit() }) return null
+            return before.substring(start).takeIf { it.first().isLetter() }
+        }
         /** Marks that close a word and correct it as space does. */
         fun endsWord(c: Char) = c in ",.!?;:)\""
         // A period after these makes an abbreviation ("approx.", "etc."), never a typo.

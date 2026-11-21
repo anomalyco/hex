@@ -7,7 +7,7 @@ qwertyuiopå / asdfghjkløæ / zxcvbnm) on a 402 pt layout with 11 keys a row (3
 English rows' heights and space bar. Letters without a key are typed as their base key (é with e);
 German sentences with ß are left out (it has no key; it is held on s).
 
-Writes OUTDIR/{de,nb}.jsonl (id, intended, typed, taps, ios_shared="") and {de,nb}-dev.jsonl.
+Writes OUTDIR/{de,nb}.jsonl (id, intended, typed, taps, want, ends, ios_shared="") and {de,nb}-dev.jsonl.
 TATOEBA holds deu.tsv and nob.tsv from https://downloads.tatoeba.org/exports/per_language/.
 Usage: python3 synthetic_de_nb.py INPUT.json TATOEBA OUTDIR"""
 import json, os, random, re, sys, unicodedata
@@ -104,16 +104,17 @@ for lang in ("de", "nb"):
         path = os.path.join(out_dir, lang + (".jsonl" if name == "test" else "-dev.jsonl"))
         with open(path, "w") as f:
             for j, ws in enumerate(part):
-                taps, typed = [], []
+                taps, typed, want, ends = [], [], [], []
                 for i, w in enumerate(ws):
                     for ch in w:
                         x, y, k = sample_letter(rng, keys, lang, fold(lang, ch))
-                        taps.append([round(x, 2), round(y, 2)]); typed.append(" " if k == "space" else k)
+                        taps.append([round(x, 2), round(y, 2)]); typed.append(" " if k == "space" else k); want.append(ch)
+                    ends.append(len(taps))
                     last = i == len(ws) - 1
                     if not last and rng.random() < SPACE_OMIT:
                         continue
                     x, y, k = sample_space(rng, keys, lang, last)
-                    taps.append([round(x, 2), round(y, 2)]); typed.append(" " if k == "space" else k)
+                    taps.append([round(x, 2), round(y, 2)]); typed.append(" " if k == "space" else k); want.append(" ")
                 f.write(json.dumps({"id": f"{lang}-{name}-{j}", "intended": " ".join(ws), "typed": "".join(typed),
-                                    "taps": taps, "ios_shared": ""}, ensure_ascii=False, separators=(",", ":")) + "\n")
+                                    "taps": taps, "want": "".join(want), "ends": ends, "ios_shared": ""}, ensure_ascii=False, separators=(",", ":")) + "\n")
     print(lang, len(rows), "sentences")
