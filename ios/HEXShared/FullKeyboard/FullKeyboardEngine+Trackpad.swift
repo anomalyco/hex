@@ -1,27 +1,26 @@
 import UIKit
 
-/// The space bar's trackpad, as Apple's moves it (`TrackpadCursor`): held, or with one language
-/// slid, it moves the cursor through the text in two dimensions, faster the faster the finger.
+/// The space bar's trackpad, as Apple's moves it (`TrackpadCursor`): held, it moves the cursor
+/// through the text in two dimensions, faster the faster the finger.
 @MainActor
 extension FullKeyboardEngine {
     /// The space bar held `trackpadHoldDelay` without sliding: the trackpad starts where the
     /// finger is, as Apple's does, so letting go types no space (a press held to move the
     /// cursor used to type one beside the space already there).
     func holdSpace(forTouch id: Int) {
-        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad, !touch.isLanguageSwipe else { return }
+        guard var touch = touches[id], touch.key.kind == .space, !touch.committed, !touch.isTrackpad, !touch.isLanguageSwipe else { return }
         startTrackpad(&touch, id: id, hold: true, time: nil)
     }
 
     /// A space bar touch moved to `point`: true once it's the keys' to keep (a language swipe,
-    /// or the trackpad starting or moving the cursor), false while it may still be a tap.
+    /// or the trackpad moving the cursor), false while it may still be a tap. Only the hold
+    /// starts the trackpad, as on Apple's: a quick tap that drifted 10 pt or more used to start
+    /// it with one language and type no space (TestFlight build 56, iPhone Duo), where Apple's
+    /// types one (iOS 27.2: taps of 60 to 150 ms sliding 8 to 24 pt, slides of 40 pt in 150 ms).
     func moveSpaceBar(_ touch: inout ActiveTouch, id: Int, to point: CGPoint, time: TimeInterval?) -> Bool {
         if touch.isLanguageSwipe { return true }
-        if !touch.isTrackpad, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
-            if switchesLanguage {
-                touch.isLanguageSwipe = true
-            } else {
-                startTrackpad(&touch, id: id, hold: false, time: time)
-            }
+        if !touch.isTrackpad, !touch.committed, switchesLanguage, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
+            touch.isLanguageSwipe = true
             return true
         }
         guard touch.isTrackpad else { return false }

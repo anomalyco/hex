@@ -11,7 +11,7 @@ extension FullKeyboardEngine {
         var key: KeyboardKey
         var startPoint: CGPoint
         var point: CGPoint
-        /// A character that already went in because another key went down after it.
+        /// A character (or space) that already went in because another key went down after it.
         var committed: Bool
         /// The page a 123/ABC press came from; releasing over a character returns there.
         var returnLayer: KeyboardLayer?
@@ -21,7 +21,7 @@ extension FullKeyboardEngine {
         /// True once such a press slid onto a character key, so letting go back on the page
         /// key is a slide taken back rather than a tap.
         var hasSlid = false
-        /// True once a spacebar press crosses `trackpadActivationDistance`.
+        /// True once a spacebar press is held `trackpadHoldDelay` (`holdSpace`).
         var isTrackpad = false
         /// True once a spacebar press slides before its hold (`holdSpace`) while it switches
         /// language: letting go far enough along switches instead of typing a space.

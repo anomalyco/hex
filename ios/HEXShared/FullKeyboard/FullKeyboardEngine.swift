@@ -69,8 +69,8 @@ final class FullKeyboardEngine {
     /// The dictation bar's space bar moves the cursor a character per this many points.
     static let trackpadPointsPerCharacter: CGFloat = 7.5
     /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
-    /// letting go then types no space. With two or more languages a slide moves the cursor
-    /// only after it; a slide before it is a language swipe.
+    /// letting go then types no space. A slide moves the cursor only after it; before it, a
+    /// slide is still a tap, or with two or more languages a language swipe.
     /// Apple's space bar turns into the trackpad 330 to 365 ms after touch-down (iOS 27.2, the
     /// cursor's first move after holds of 250 to 550 ms), and travel before then doesn't count.
     static let trackpadHoldDelay: TimeInterval = 0.35
@@ -211,7 +211,7 @@ final class FullKeyboardEngine {
     }
     /// Settings › Keyboard › Languages has two or more: a quick swipe along the space bar
     /// switches language (`onLanguageSwipe`) and the cursor slides once the space bar is held
-    /// (`trackpadHoldDelay`), as on SwiftKey. With one, any slide moves the cursor at once.
+    /// (`trackpadHoldDelay`), as on SwiftKey. With one, a slide before the hold is still a tap.
     var switchesLanguage = false
     private(set) var layout = KeyboardLayout(width: 375)
 
@@ -549,10 +549,14 @@ final class FullKeyboardEngine {
         let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
         lastKeyTouchAt = clock()
-        // Rollover: a new key going down commits any character or accent picker still held.
+        // Rollover: a new key going down commits any character, space or accent picker still held.
         for other in touchOrder {
-            guard var touch = touches[other], touch.key.character != nil, !touch.committed else { continue }
-            if activeAccentTouchID == other, let menu = activeAccentMenu {
+            guard var touch = touches[other], !touch.committed else { continue }
+            if touch.key.kind == .space, !touch.isLanguageSwipe {
+                typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
+            } else if touch.key.character == nil {
+                continue
+            } else if activeAccentTouchID == other, let menu = activeAccentMenu {
                 typingLog?.ui("accent_pick", [
                     TypingLogField("id", .int(other)),
                     TypingLogField("index", .int(menu.selectedIndex)),
@@ -675,8 +679,8 @@ final class FullKeyboardEngine {
             return
         }
 
-        // 2. Spacebar cursor trackpad (`moveSpaceBar`): a slide of 10 pt starts it, or with two
-        // or more languages is a language swipe, and once held it moves the cursor.
+        // 2. Spacebar cursor trackpad (`moveSpaceBar`): with two or more languages a slide of
+        // 10 pt is a language swipe, and once held it moves the cursor.
         if touch.key.kind == .space, moveSpaceBar(&touch, id: id, to: point, time: time) {
             touches[id] = touch
             return
@@ -791,7 +795,7 @@ final class FullKeyboardEngine {
                     TypingLogField("step", .int(step)),
                 ])
                 onLanguageSwipe?(step)
-            } else {
+            } else if !touch.committed {
                 typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
             }
         case .returnKey:
