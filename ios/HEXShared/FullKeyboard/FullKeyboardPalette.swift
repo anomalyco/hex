@@ -50,12 +50,13 @@ struct FullKeyboardPalette: Equatable {
 
     /// Apple's predictive bar, measured on its platter (dark (34,34,35), light (226,227,232),
     /// iOS 27.2): words (163,163,164) / (74,74,76), dividers (50,50,53) / (211,212,217), and the
-    /// pending autocorrection's capsule (115,115,115) under white words.
+    /// pending autocorrection's capsule (115,115,115) under white words / (235,237,240) under
+    /// (44,46,49).
     var stripText: UIColor { isDark ? UIColor(white: 1, alpha: 0.58) : UIColor(white: 0, alpha: 0.67) }
     var stripDivider: UIColor { isDark ? UIColor(white: 1, alpha: 0.075) : UIColor(white: 0, alpha: 0.066) }
-    var stripPillFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.37) : .white }
+    var stripPillFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.37) : UIColor(white: 1, alpha: 0.33) }
     var stripPillPressedFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.24) : UIColor(white: 0, alpha: 0.08) }
-    var stripPillText: UIColor { textBase }
+    var stripPillText: UIColor { isDark ? .white : UIColor(white: 0, alpha: 0.81) }
 
     /// Apple system keyboard action blue (`#007AFF`).
     var actionFill: UIColor { Self.rgb(0x007AFF) }
