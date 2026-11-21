@@ -344,9 +344,10 @@ final class AutocorrectEngineTests: XCTestCase {
     /// A deterministic dictionary: `UITextChecker`'s answers vary between iOS versions.
     private final class StubChecker: TextChecking {
         var valid: Set<String> = []
+        var acceptsEverything = false
         var guessTable: [String: [String]] = [:]
         var completionTable: [String: [String]] = [:]
-        func isWordValid(_ word: String) -> Bool { valid.contains(word.lowercased()) }
+        func isWordValid(_ word: String) -> Bool { acceptsEverything || valid.contains(word.lowercased()) }
         func guesses(for word: String) -> [String] { guessTable[word.lowercased()] ?? [] }
         func completions(for prefix: String) -> [String] { completionTable[prefix.lowercased()] ?? [] }
     }
@@ -456,6 +457,33 @@ final class AutocorrectEngineTests: XCTestCase {
         french.setPartner(.english, available: available, checker: english)
         french.setLanguage(.serbianLatin, available: available)
         XCTAssertNil(french.partner)
+    }
+
+    /// A partner whose dictionary takes any letters for a word (the iOS 27.2 simulator's pl_PL
+    /// has no word data) is left out: English beside it still fixes "teh", where it kept every
+    /// typo as "a Polish word"; a partner whose dictionary works still keeps its words.
+    func testAPartnerDictionaryThatTakesEveryWordIsIgnored() {
+        let available = ["en_US", "pl_PL"]
+        let english = stubbed {
+            $0.valid = ["the", "and", "just"]
+            $0.guessTable = ["tge": ["the"], "jest": ["just"]]
+        }
+        english.setLanguage(.english, available: available)
+        let empty = StubChecker()
+        empty.acceptsEverything = true
+        english.setPartner(.polish, available: available, checker: empty)
+        XCTAssertEqual(english.partner?.language, .polish)
+        XCTAssertEqual(fix(english, before: "teh"), "the")
+        XCTAssertEqual(fix(english, before: "tge"), "the")
+        XCTAssertTrue(strip(english, "tge").contains("the"))
+        XCTAssertEqual(fix(english, before: "jest"), "just", "no working Polish dictionary to keep it")
+
+        english.setPartner(nil, available: available)
+        let polish = StubChecker()
+        polish.valid = ["jest", "tak"]
+        english.setPartner(.polish, available: available, checker: polish)
+        XCTAssertNil(fix(english, before: "jest"), "a Polish word stays beside a working Polish dictionary")
+        XCTAssertEqual(fix(english, before: "teh"), "the")
     }
 
     /// How often one language's keyboard changes the other's words, against iOS's own

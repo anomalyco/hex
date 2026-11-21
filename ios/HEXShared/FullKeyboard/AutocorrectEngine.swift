@@ -213,6 +213,18 @@ final class AutocorrectEngine {
     /// typos are fixed in either language and a word of either is never "corrected" into the
     /// other, as Apple's "Français et English" keyboard does. Nil with one language.
     private(set) var partner: AutocorrectEngine?
+    /// The partner, unless its dictionary takes any letters for a word: iOS can list a
+    /// language whose word data isn't there (the iOS 27.2 simulator's `pl_PL`), and such a
+    /// partner would keep every typo as "a word in the other language". Checked once per
+    /// language, on first use.
+    private var workingPartner: AutocorrectEngine? {
+        guard let partner else { return nil }
+        if partner.acceptsAnyLetters == nil {
+            partner.acceptsAnyLetters = partner.checker.isWordValid("qzxjvkq")
+        }
+        return partner.acceptsAnyLetters == true ? nil : partner
+    }
+    private var acceptsAnyLetters: Bool?
     /// The keys you type on, whose neighbours price a slip: `language`'s layout, or a
     /// partner's primary's.
     private(set) var layoutLanguage: KeyboardLanguage = .english
@@ -327,6 +339,7 @@ final class AutocorrectEngine {
     func setLanguage(_ language: KeyboardLanguage, available: [String] = UITextChecker.availableLanguages) {
         self.language = language
         layoutLanguage = language
+        acceptsAnyLetters = nil
         if partner?.language == language {
             partner = nil
         } else {
@@ -551,7 +564,7 @@ final class AutocorrectEngine {
         let autoFix = allowAuto ? cautiousReplacement(for: token) : nil
         var pool: [String] = autoFix.map { [$0] } ?? []
 
-        if let partner {
+        if let partner = workingPartner {
             // Both languages' candidates, those of the language the words before are in
             // first; spelling guesses only for a word neither knows.
             let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2, model: predictionModel)
@@ -705,7 +718,7 @@ final class AutocorrectEngine {
     /// fix in the language of the words before it, else the cheaper slip on these keys, else
     /// the keyboard's own language's.
     private func cautiousReplacement(for token: String) -> String? {
-        guard let partner else { return ownReplacement(for: token) }
+        guard let partner = workingPartner else { return ownReplacement(for: token) }
         if let shortcut = lexiconShortcuts[token.lowercased()] {
             return shortcut
         }
