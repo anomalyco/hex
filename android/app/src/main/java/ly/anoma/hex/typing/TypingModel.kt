@@ -163,6 +163,32 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         }
         return best.filter { it >= 0 }.toIntArray()
     }
+    // exp(-cost) for each stored unigram cost byte (cost = byte / 8 nats).
+    private val frequency = DoubleArray(256) { kotlin.math.exp(-it / 8.0) }
+    private var wordStart: DoubleArray? = null
+    private var lastContinuation: Pair<String, DoubleArray?>? = null
+    /** How much of the word list's frequency goes on from `prefix` with each letter, by letter code
+     * (iOS TypingDecoderModel.continuations): null when no word starts with it, or every one ends
+     * there. The word start's, the costliest (every word), and the last prefix's are kept. */
+    fun continuations(prefix: String): DoubleArray? {
+        if (prefix.isEmpty()) wordStart?.let { return it }
+        lastContinuation?.let { if (it.first == prefix) return it.second }
+        val r = range(prefix)
+        val mass = if (r == 0L) null else {
+            val depth = prefix.length
+            val out = DoubleArray(alphabet + 1)
+            var any = false
+            for (i in (r ushr 32).toInt() until r.toInt()) {
+                val code = byte(i, depth)
+                if (code <= 0 || code == apostrophe) continue
+                out[code] += frequency[u8(uni + i)]
+                any = true
+            }
+            out.takeIf { any }
+        }
+        if (prefix.isEmpty()) wordStart = mass else lastContinuation = prefix to mass
+        return mass
+    }
     private fun range(prefix: String): Long {
         var a = 0; var b = words
         for (i in prefix.indices) {

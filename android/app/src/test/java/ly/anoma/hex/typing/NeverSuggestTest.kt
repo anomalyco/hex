@@ -436,4 +436,16 @@ class NeverSuggestTest {
         val plain = word()
         assertEquals("zorbiz github ", plain.typed(g, "zorbiz github "))
     }
+
+    // iOS FullKeyboardEngineTests.testTheLikelyNextLetterClaimsAFewPointsOfItsNeighbour: within 5 dp of
+    // its touch area, the letter likelier to come next takes a touch on the border.
+    @Test fun theLikelyNextLetterClaimsAFewPointsOfItsNeighbour() {
+        val keys = layout("en").centres.keys
+        val w = word()
+        assertEquals("the", 'e', w.likelierKey("th", 'd', mapOf('e' to 2.0), keys))
+        assertEquals("past reach", 'd', w.likelierKey("th", 'd', mapOf('e' to 6.0), keys))
+        assertEquals("and", 'd', w.likelierKey("the an", 'e', mapOf('d' to 2.0), keys))
+        assertEquals('E', w.likelierKey("TH", 'D', mapOf('e' to 2.0), keys))
+        assertEquals("inside a number", 'd', w.likelierKey("th3", 'd', mapOf('e' to 2.0), keys))
+    }
 }

@@ -68,6 +68,27 @@ public final class Replay {
         for (String s : slots) if (s.toLowerCase(Locale.ROOT).replace('\u2019', '\'').equals(word)) return true;
         return false;
     }
+    // The replay geometry's touch areas tile each row: a key's centre ± half its pitch. A neighbouring
+    // letter within reach of the touch, by its distance to that area, in points (iOS's dp).
+    static Map<Character,Double> near(KeyGrid grid, char hit, double x, double y) {
+        Map<Character,Double> out = new HashMap<>();
+        for (Map.Entry<Character,KeyPoint> e : grid.getCentres().entrySet()) {
+            if (e.getKey() == hit) continue;
+            KeyPoint c = e.getValue();
+            double dx = Math.max(0, Math.abs(x - c.getX()) - grid.getPitchX() / 2), dy = Math.max(0, Math.abs(y - c.getY()) - grid.getPitchY() / 2);
+            double d = Math.sqrt(dx * dx + dy * dy);
+            if (d < TypingWord.REACH) out.put(e.getKey(), d);
+        }
+        return out;
+    }
+    static boolean letterOdds = true;
+    static char likelierKey(TypingWord state, String before, char hit, double x, double y, KeyGrid grid) throws Exception {
+        if (!letterOdds) return hit;
+        try {
+            java.lang.reflect.Method m = TypingWord.class.getMethod("likelierKey", String.class, char.class, Map.class, Collection.class);
+            return (Character) m.invoke(state, before, hit, near(grid, hit, x, y), grid.getCentres().keySet());
+        } catch (NoSuchMethodException old) { return hit; }
+    }
     public static void main(String[] args) throws Exception {
         String lang=args[2], group=lang.equals("en") ? "test-" : lang+"-test-";
         PrintWriter outputs=args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
@@ -109,6 +130,7 @@ public final class Replay {
                         }
                         out.append(' '); String before=out.toString(); state.reset(before); shown=predictions(state,before);
                     } else {
+                        key=likelierKey(state,out.toString(),key,x,y,grid);
                         state.letter(String.valueOf(key),x,y,grid); out.append(key); shown=strip(state);
                     }
                     (key==' '?spaces:letters).add(System.nanoTime()-start);
